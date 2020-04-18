@@ -1,6 +1,6 @@
 {
   "name": "aurora-production",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Aurora Production Recap",
   "repository": "https://github.com/rubybrowncoat/yarda-bot",
   "main": "./dist/main/index.js",
