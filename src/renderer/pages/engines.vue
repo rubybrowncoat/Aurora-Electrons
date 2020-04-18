@@ -55,7 +55,7 @@
 
     <section class="section">
       <div class="columns is-multiline">
-        <div class="column is-full-desktop is-half-widescreen">
+        <div class="column is-full is-full-desktop is-half-widescreen">
           <h1 class="title">Engine Stats</h1>
           
           <b-field grouped group-multiline>
@@ -88,7 +88,7 @@
             </div>
           </b-field>
         </div>
-        <div class="column is-full-desktop is-half-widescreen">
+        <div class="column is-full is-full-desktop is-half-widescreen">
           <h1 class="title">Fuel Stats</h1>
 
           <b-field grouped group-multiline>
@@ -133,7 +133,7 @@
             </div>
           </b-field>
         </div>
-        <div class="column is-full-desktop is-half-widescreen">
+        <div class="column is-full is-full-desktop is-half-widescreen">
           <h1 class="title">Hull Stats</h1>
           
           <b-field grouped group-multiline>

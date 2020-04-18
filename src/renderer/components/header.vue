@@ -5,7 +5,7 @@
         Production Recap
       </b-navbar-item>
       <b-navbar-item tag="nuxt-link" to="/engines" exact>
-        Engine Designer
+        Engine Planner
       </b-navbar-item>
     </template>
   </b-navbar>
