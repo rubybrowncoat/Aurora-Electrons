@@ -43,9 +43,9 @@ const macOS = {
 
 module.exports = {
   asar: false,
-  productName: 'Aurora Production Recap',
-  appId: 'net.nerdship.auroraproduction',
-  artifactName: 'aurora-production-recap-${version}.${ext}',
+  productName: 'Aurora Electrons',
+  appId: 'net.nerdship.aurora.electrons',
+  artifactName: 'aurora-electrons-${version}.${ext}',
   directories: {
     output: 'build'
   },

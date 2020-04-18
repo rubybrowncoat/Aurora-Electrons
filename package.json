@@ -1,7 +1,7 @@
 {
-  "name": "aurora-production",
+  "name": "aurora-electrons",
   "version": "0.0.3",
-  "description": "Aurora Production Recap",
+  "description": "Aurora Electrons",
   "repository": "https://github.com/rubybrowncoat/yarda-bot",
   "main": "./dist/main/index.js",
   "scripts": {
