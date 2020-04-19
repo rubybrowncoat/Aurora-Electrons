@@ -4,44 +4,17 @@
 
     <div v-if="!this.game">Select a game from the left-side menu.</div>
 
-    <b-collapse
-      animation="slide"
-      aria-id="researchPanel"
-      class="panel"
-      v-show="research.length"
-    >
-      <div
-        slot="trigger"
-        class="panel-heading"
-        role="button"
-        aria-controls="researchPanel"
-      >
+    <b-collapse animation="slide" aria-id="researchPanel" class="panel" v-show="research.length">
+      <div slot="trigger" class="panel-heading" role="button" aria-controls="researchPanel">
         <strong>Research</strong>
       </div>
 
       <b-table :data="research" bordered striped narrowed hoverable>
         <template slot-scope="props">
-          <b-table-column field="PopName" label="Population" width="150">{{
-            props.row.PopName
-          }}</b-table-column>
-          <b-table-column field="Name" label="Technology">{{
-            props.row.Name
-          }}</b-table-column>
-          <b-table-column
-            field="Facilities"
-            label="Assigned Facilities"
-            numeric
-            >{{ props.row.Facilities }}</b-table-column
-          >
-          <b-table-column
-            field="ResearchPointsRequired"
-            label="Remaining Research"
-            width="200"
-            >{{
-              props.row.ResearchPointsRequired.toFixed(2)
-            }}
-            RP</b-table-column
-          >
+          <b-table-column field="PopName" label="Population" width="150">{{ props.row.PopName }}</b-table-column>
+          <b-table-column field="Name" label="Technology">{{ props.row.Name }}</b-table-column>
+          <b-table-column field="Facilities" label="Assigned Facilities" numeric>{{ props.row.Facilities }}</b-table-column>
+          <b-table-column field="ResearchPointsRequired" label="Remaining Research" width="200">{{ props.row.ResearchPointsRequired.toFixed(2) }} RP <span v-if="props.row.Queue"><em>Queued</em></span></b-table-column>
         </template>
       </b-table>
     </b-collapse>
@@ -155,11 +128,19 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopName, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired, FCT_TechSystem.Name from FCT_Population join FCT_ResearchProject on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID and FCT_Population.GameID = FCT_ResearchProject.GameID join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID and FCT_Race.GameID = FCT_ResearchProject.GameID and FCT_Race.NPR = 0 join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID where FCT_Population.GameID = ${this.game} order by FCT_ResearchProject.ResearchPointsRequired asc`).then(([ items ]) => {
+        const queue = await this.database.query(`select FCT_Population.PopName, FCT_ResearchProject.Facilities, FCT_TechSystem.DevelopCost as ResearchPointsRequired, FCT_TechSystem.Name, 1 as Queue from FCT_ResearchQueue join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID and FCT_Race.GameID = FCT_ResearchProject.GameID and FCT_Race.NPR = 0 left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchQueue.PopulationID left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID where FCT_Population.GameID = ${this.game} order by FCT_ResearchQueue.ResearchOrder asc`).then(([ items ]) => {
+          console.log('Research queue', items)
+
+          return items
+        })
+
+        const projects = await this.database.query(`select FCT_Population.PopName, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired, FCT_TechSystem.Name, 0 as Queue from FCT_Population join FCT_ResearchProject on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID and FCT_Population.GameID = FCT_ResearchProject.GameID join FCT_Race on FCT_Race.RaceID = FCT_ResearchProject.RaceID and FCT_Race.GameID = FCT_ResearchProject.GameID and FCT_Race.NPR = 0 join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID where FCT_Population.GameID = ${this.game} order by FCT_ResearchProject.ResearchPointsRequired asc`).then(([ items ]) => {
           console.log('Research projects', items)
 
           return items
         })
+      
+        return [...projects, ...queue]
       },
       default: [],
     },
