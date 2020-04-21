@@ -23,6 +23,25 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class Race extends Model {}
+  Race.init({
+    RaceID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    GameID: Sequelize.INTEGER,
+    RaceTitle: Sequelize.STRING,
+    NPR: Sequelize.BOOLEAN,
+  }, {
+    sequelize,
+    modelName: 'race',
+    tableName: 'FCT_Race',
+    timestamps: false,
+  })
+
+  Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID', as: 'Races' })
+  // Race.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID', as: 'Game' })
+
   class TechSystem extends Model {}
   TechSystem.init({
     TechSystemID: {

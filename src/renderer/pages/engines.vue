@@ -42,7 +42,16 @@
         </div>
         <div class="column">
           <b-field label="Desired Range" message="Billions of Kilometers">
-            <b-input v-model.number="range" type="number" placeholder="10.0" step="0.001" :min="minimumRange"></b-input>
+            <b-input v-model.number="range" placeholder="10.0" step="0.001" :min="minimumRange" 
+              @keyup.native.prevent.alt.up.exact="modifyRange(0.001)"
+              @keyup.native.prevent.up.exact="modifyRange(0.1)"
+              @keyup.native.prevent.shift.up.exact="modifyRange(1)"
+              @keyup.native.prevent.ctrl.up.exact="modifyRange(10)"
+
+              @keyup.native.prevent.alt.down.exact="modifyRange(-0.001)"
+              @keyup.native.prevent.down.exact="modifyRange(-0.1)"
+              @keyup.native.prevent.shift.down.exact="modifyRange(-1)"
+              @keyup.native.prevent.ctrl.down.exact="modifyRange(-10)"></b-input>
           </b-field>
         </div>
         <div class="column">
@@ -251,11 +260,18 @@ export default {
       engines: null,
     }
   },
-  methods: {},
+  methods: {
+    modifyRange(amount) {
+      const newRange = Number.parseFloat((this.range + amount).toFixed(3))
+
+      this.range = newRange < this.minimumRange ? this.minimumRange : newRange
+    },
+  },
   computed: {
     ...mapGetters([
-      'database', 
-      'game',
+      'database',
+
+      'GameID',
     ]),
     
     powerType() {
@@ -398,11 +414,11 @@ export default {
   asyncComputed: {
     researchedTech: {
       async get() {
-        if (!this.database || !this.game) {
+        if (!this.database || !this.GameID) {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceTech.TechID, FCT_Race.RaceID, FCT_Race.RaceTitle from FCT_RaceTech join FCT_Race on FCT_Race.GameID = FCT_RaceTech.GameID and FCT_Race.NPR = 0 and FCT_RaceTech.RaceID = FCT_Race.RaceID where FCT_RaceTech.GameID = ${this.game}`).then(([ items ]) => {
+        return await this.database.query(`select FCT_RaceTech.TechID, FCT_Race.RaceID, FCT_Race.RaceTitle from FCT_RaceTech join FCT_Race on FCT_Race.GameID = FCT_RaceTech.GameID and FCT_Race.NPR = 0 and FCT_RaceTech.RaceID = FCT_Race.RaceID where FCT_RaceTech.GameID = ${this.GameID}`).then(([ items ]) => {
           console.log('Researched Technologies', items)
 
           return items

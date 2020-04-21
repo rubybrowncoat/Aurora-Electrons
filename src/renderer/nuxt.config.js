@@ -8,7 +8,7 @@
 module.exports = {
   mode: 'spa', // or 'universal'
   head: {
-    title: 'aurora-production'
+    title: 'Aurora Electrons'
   },
   loading: false,
   router: {
@@ -22,7 +22,7 @@ module.exports = {
     { ssr: false, src: '@/plugins/database.js' },
   ],
   buildModules: [
-    
+    '@nuxtjs/vuetify',
   ],
   modules: [
     

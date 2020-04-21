@@ -1,8 +1,8 @@
 {
   "name": "aurora-electrons",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "Aurora Electrons",
-  "repository": "https://github.com/rubybrowncoat/yarda-bot",
+  "repository": "https://github.com/rubybrowncoat/Aurora-Electrons",
   "main": "./dist/main/index.js",
   "scripts": {
     "dev": "node .electron-nuxt/check-engines.js && cross-env-shell NODE_ENV=development node .electron-nuxt/index.js",
@@ -22,7 +22,7 @@
     "@types/node": "12.12.6"
   },
   "devDependencies": {
-    "@mdi/font": "5.0.45",
+    "@nuxtjs/vuetify": "^1.11.0",
     "@xpda-dev/core": "^0.1.5",
     "@xpda-dev/electron-builder": "^0.1.1",
     "@xpda-dev/electron-launcher": "^0.1.1",
@@ -34,9 +34,11 @@
     "electron": "8.1.1",
     "electron-builder": "22.4.1",
     "electron-debug": "3.0.1",
+    "material-design-icons-iconfont": "^5.0.1",
     "node-sass": "4.13.1",
     "nuxt": "2.12.2",
     "sass-loader": "8.0.2",
+    "typeface-roboto": "^0.0.75",
     "vue-async-computed": "^3.8.2",
     "vue-devtools": "5.1.3",
     "vuex": "^3.1.3",

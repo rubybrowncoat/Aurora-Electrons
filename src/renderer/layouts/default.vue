@@ -1,28 +1,75 @@
 <template>
-  <div>
-    <app-header />
-    
-    <div class="columns">
-      <div class="column is-one-fifth">
-        <b-menu class="games-menu">
-          <b-menu-list label="Games">
-            <b-menu-item
-              v-for="game in games"
-              :key="game.GameID"
-              :label="game.GameName"
-              @click="changeGame({ gameId: game.GameID })"
-            ></b-menu-item>
-          </b-menu-list>
-        </b-menu>
-      </div>
+  <v-app>
+    <v-navigation-drawer v-model="drawer" :mini-variant.sync="mini" app permanent>
+      <v-list-item class="px-2">
+        <!-- <v-list-item-avatar>
+          <v-img src="https://randomuser.me/api/portraits/men/85.jpg"></v-img>
+        </v-list-item-avatar> -->
 
-      <div class="column">
-        <div class="corpus">
-          <nuxt />
-        </div>
-      </div>
-    </div>
-  </div>
+        <v-list-item-icon>
+          <v-icon large>my_location</v-icon>
+        </v-list-item-icon>
+
+        <v-list-item-title>Games</v-list-item-title>
+
+        <v-btn icon @click.stop="mini = !mini">
+          <v-icon>mdi-chevron-left</v-icon>
+        </v-btn>
+      </v-list-item>
+      <v-divider></v-divider>
+
+      <v-list>
+        <template v-for="game in games">
+          <v-tooltip :key="game.GameID" right>
+            <template #activator="{ on }">
+              <v-list-group prepend-icon="domain" :value="game.GameID == GameID" :title="game.GameName" v-if="game.Races.length > 1" v-on="on">
+                <template #activator>
+                  <v-list-item-title>{{ game.GameName }}</v-list-item-title>
+                </template>
+                <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID == RaceID" @click="changeGame({ game, race })">
+                  <v-list-item-icon><v-icon>people</v-icon></v-list-item-icon>
+                  <v-list-item-title>
+                    {{ race.RaceTitle }}
+                  </v-list-item-title>
+                </v-list-item>
+              </v-list-group>
+              <v-list-item :input-value="game.GameID == GameID" @click="changeGame({ game })" v-else v-on="on">
+                <v-list-item-icon><v-icon>domain</v-icon></v-list-item-icon>
+                <v-list-item-title>
+                  {{ game.GameName }}
+                </v-list-item-title>
+              </v-list-item>
+            </template>
+            <span>{{ game.GameName }}</span>
+          </v-tooltip>
+        </template>
+      </v-list>
+    </v-navigation-drawer>
+
+    <v-app-bar color="pink" dark app>
+      <v-toolbar-title color="white">{{ title }}</v-toolbar-title>
+      <template #extension>
+        <v-tabs>
+          <v-tab to="/" @change="title = 'Production Recap'">Production</v-tab>
+          <v-tab to="/minerals" @change="title = 'Mineral Breakdown'">Minerals</v-tab>
+          <!-- <v-tab to="/engines" @change="title = 'Engine Helper'">Engine</v-tab> -->
+        </v-tabs>
+      </template>
+    </v-app-bar>
+
+    <!-- Sizes your content based upon application components -->
+    <v-content>
+
+      <!-- Provides the application the proper gutter -->
+      <v-container fluid>
+        <nuxt />
+      </v-container>
+    </v-content>
+
+    <v-footer app>
+      <!-- -->
+    </v-footer>
+  </v-app>
 </template>
 
 <style lang="scss" scoped>
@@ -47,6 +94,14 @@ import appHeader from '@/components/header'
 import { mapActions, mapGetters } from 'vuex'
 
 export default {
+  data() {
+    return {
+      drawer: true,
+      mini: false,
+
+      title: 'Production Recap',
+    }
+  },
   components: { appHeader },
   methods: {
     ...mapActions([
@@ -56,6 +111,9 @@ export default {
   computed: {
     ...mapGetters([
       'database',
+
+      'GameID',
+      'RaceID',
     ]),
   },
   asyncComputed: {
@@ -65,7 +123,15 @@ export default {
           return []
         }
 
-        return await this.database.models.game.findAll()
+        const games = await this.database.models.game.findAll({ 
+          where: {
+            '$Races.NPR$': 0,
+          }, include: [ 
+            'Races',
+          ]
+        })
+
+        return games
       }, 
       default: [],
     },
