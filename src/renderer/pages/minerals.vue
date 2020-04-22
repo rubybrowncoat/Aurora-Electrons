@@ -32,8 +32,8 @@
         <template v-for="material in materials" v-slot:[`item.${material}`]="{ item }">
           <span :class="{
             'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
-            'orange--text text--accent-3': item[material].Accessibility < 0.4,
-            'red--text text--darken-3 font-weight-bold': item[material].Accessibility < 0.2,
+            'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
+            'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
           }" :key="material" v-if="item[material]">{{ item[material].Amount.toFixed(0) }} ({{ item[material].Accessibility }})</span>
         </template>
       </v-data-table>

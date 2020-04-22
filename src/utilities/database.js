@@ -51,6 +51,7 @@ export const resetDatabase = (storagePath) => {
     Name: Sequelize.STRING,
     ComponentName: Sequelize.STRING,
     AdditionalInfo: Sequelize.FLOAT,
+    AdditionalInfo2: Sequelize.FLOAT,
   }, {
     sequelize,
     modelName: 'techSystem',

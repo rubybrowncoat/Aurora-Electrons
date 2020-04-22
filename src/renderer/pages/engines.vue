@@ -2,13 +2,75 @@
   <div>
     <section class="section short-top">
       <h1 class="title">Parameters</h1>
-      <div class="columns">
+
+      <v-container fluid>
+        <v-row justify="start">
+          <v-col cols="12" md="6">
+            <v-select v-model="selectedEngine" :items="selectResearches(splitEngines)" item-text="Name" item-value="AdditionalInfo" :hint="`Engine Technology ${selectedEngine ? `- ${selectedEngine} EP/HS` : ''}`" solo persistent-hint dense></v-select>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-select v-model="selectedFuelConsumtion" :items="selectResearches(splitFuelConsumptions)" item-text="Name" item-value="AdditionalInfo" :hint="`Fuel Efficiency Factor ${selectedFuelConsumtion ? `- ${selectedFuelConsumtion} L/EPH` : ''}`" solo persistent-hint dense></v-select>
+          </v-col>
+          <v-col cols="12" md="6" lg="8">
+            <v-range-slider v-model="selectedThrustModifierRange" :min="0.1" :max="3" :step="0.05" thumb-size="48" :hint="`Engine Power Multplier Range ${selectedThrustModifierRange.length ? `- Between ${selectedThrustModifierRange[0]} and ${selectedThrustModifierRange[1]}` : ''}`" persistent-hint dense>
+              <template #thumb-label="{ value }">
+                <div class="font-weight-bold" :class="[ value <= edgeThrustModifiers[1] && value >= edgeThrustModifiers[0] ? 'light-green--text text--lighten-3' : 'orange--text text--lighten-1' ]">{{ value }}</div>
+              </template>
+            </v-range-slider>
+            <!-- <b-slider v-model="selectedPower" :custom-formatter="val => `${(val * 100).toFixed(0)}%`" :min="0.1" :max="2.5" :step="0.05" :tooltip-type="powerType" ticks></b-slider> -->
+          </v-col>
+          <v-col cols="12" md="6" lg="4">
+            <v-select v-model="selectedEngineSize" :items="selectResearches(splitEngineSizes)" item-text="Name" item-value="AdditionalInfo" solo dense></v-select>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field type="number" min="100" v-model.number="selectedTonnage" placeholder="15000" hint="Rough Tonnage (Tons)" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field type="number" min="10" v-model.number="selectedSpeed" placeholder="2000" hint="Itended Speed (km/s)" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+          </v-col>
+          <v-col cols="12" md="4">
+            <v-text-field type="number" min="0" v-model.number="selectedRange" placeholder="100" hint="Itended Range (B km)" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+          </v-col>
+          <v-col cols="12" md="6" lg="3">
+            <v-select v-model="selectedJump" :items="jumps" hint="Jump Drive Type" solo persistent-hint dense></v-select>
+          </v-col>
+          <v-col cols="12" md="6" lg="3">
+            <v-select v-model="selectedJumpEfficiency" :items="selectResearches(splitJumpEfficiencies)" item-text="Name" item-value="AdditionalInfo" :hint="selectedJump ? `${(selectedSquadronSize * selectedSqudronRadius).toFixed(2)} Total Coefficient` : 'No Jump Drive'" :disabled="!selectedJump" solo persistent-hint dense></v-select>
+          </v-col>
+          <v-col cols="12" md="6" lg="3">
+            <v-select v-model="selectedSquadronSize" :items="selectResearches(splitSquadronSizes)" item-text="Name" item-value="AdditionalInfo2" :hint="`Squadron Size ${selectedSquadronSize ? `- ${selectedSquadronSize}x Coefficient` : ''}`" :disabled="!selectedJump" solo persistent-hint dense>
+              <template #item="{ item }">
+                {{ item.Name.split(' - ')[1] }}
+              </template>
+              <template #selection="{ item }">
+                {{ item.Name.split(' - ')[1] }}
+              </template></v-select>
+          </v-col>
+          <v-col cols="12" md="6" lg="3">
+            <v-select v-model="selectedSqudronRadius" :items="selectResearches(splitSquadronRadiuses)" item-text="Name" item-value="AdditionalInfo2" :hint="`Jump Radius ${selectedSqudronRadius ? `- ${selectedSqudronRadius}x Coefficient` : ''}`" :disabled="!selectedJump" solo persistent-hint dense>
+              <template #item="{ item }">
+                {{ item.Name.split(' - ')[1] }}
+              </template>
+              <template #selection="{ item }">
+                {{ item.Name.split(' - ')[1] }}
+              </template>
+            </v-select>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-select v-model="selectedArmor" :items="selectResearches(splitArmors)" item-text="Name" item-value="AdditionalInfo" :hint="`Armor Technology ${selectedArmor ? `- ${selectedArmor} A/HS` : ''}`" solo persistent-hint dense></v-select>
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-text-field type="number" min="0" v-model.number="selectedLayers" placeholder="1" hint="Armor Layers" solo persistent-hint clearable dense></v-text-field>
+          </v-col>
+        </v-row>
+      </v-container>
+      <!-- <div class="columns">
         <div class="column">
           <b-field :label="`Engine Technology (${selectedEngine} EP/HS)`">
             <b-select v-model="selectedEngine" placeholder="Select a Tier">
               <optgroup v-for="(split, index) of splitEngines" :key="index" :label="index ? 'Unresearched' : 'Researched'">
                 <option v-for="engine of split" :key="engine.TechSystemID" :value="engine.AdditionalInfo">
-                  {{ engine.ComponentName }} <!-- ({{ engine.AdditionalInfo }} EP/HS) -->
+                  {{ engine.ComponentName }}
                 </option>
               </optgroup>
             </b-select>
@@ -19,7 +81,7 @@
             <b-select v-model="selectedConsumption" placeholder="Select a Level">
               <optgroup v-for="(split, index) of splitConsumptions" :key="index" :label="index ? 'Unresearched' : 'Researched'">
                 <option v-for="consumption of split" :key="consumption.TechSystemID" :value="consumption.AdditionalInfo">
-                  {{ (consumption.AdditionalInfo * 100).toFixed(2) }} % <!-- ({{ engine.AdditionalInfo }} EP/HS) -->
+                  {{ (consumption.AdditionalInfo * 100).toFixed(2) }} %
                 </option>
               </optgroup>
             </b-select>
@@ -223,7 +285,7 @@
             </div>
           </b-field>
         </div>
-      </div>
+      </div> -->
     </section>
   </div>
 </template>
@@ -243,7 +305,42 @@ export default {
   components: {},
   data() {
     return {
+      jumps: [{
+        text: 'None',
+        value: 0,
+      }, {
+        text: 'Military',
+        value: 1,
+      }, {
+        text: 'Commercial',
+        value: 7.5,
+      }],
+
+      selectedFuelConsumtion: 1,
       selectedEngine: 1,
+      selectedEngineSize: 25,
+
+      selectedTonnage: 15000,
+      selectedSpeed: 2000,
+      selectedRange: 100,
+
+      selectedThrustModifierRange: [0.5, 1],
+
+      selectedJump: 1,
+      selectedJumpEfficiency: 4,
+      selectedSquadronSize: 1,
+      selectedSqudronRadius: 1,
+
+      selectedArmor: 1,
+      selectedLayers: 1,
+
+      rules: {
+        required: value => !!value || 'Required.',
+        positive: value => value > 0 || 'Must be positive.',
+      },
+
+      //
+
       selectedPower: 1,
       selectedConsumption: 1,
 
@@ -261,6 +358,25 @@ export default {
     }
   },
   methods: {
+    selectResearches(split) {
+      const [researched, unresearched] = split
+
+      return [
+        ...(researched.length ? [{ header: 'Researched' }, ...researched] : []),
+        ...(unresearched.length ? [{ header: 'Unresearched' }, ...unresearched] : []),
+      ]
+    },
+    
+    splitResearched(techs = [], researchedTechIds = []) {
+      return techs.reduce(([researched, unresearched], tech) => {
+        const split = researchedTechIds.includes(tech.TechSystemID) ? researched : unresearched
+
+        split.push(tech)
+
+        return [researched, unresearched]
+      }, [[], []])
+    },
+
     modifyRange(amount) {
       const newRange = Number.parseFloat((this.range + amount).toFixed(3))
 
@@ -272,7 +388,42 @@ export default {
       'database',
 
       'GameID',
+      'RaceID',
     ]),
+
+    researchedTechIds() {
+      return this.researchedTechs.map(tech => tech.TechID)
+    },
+
+    splitArmors() {
+      return this.splitResearched(this.armors, this.researchedTechIds)
+    },
+    splitEngineSizes() {
+      return this.splitResearched(this.enginesSizes, this.researchedTechIds)
+    },
+    splitEngines() {
+      return this.splitResearched(this.engines, this.researchedTechIds)
+    },
+    splitThrustModifiers() {
+      return this.splitResearched(this.thrustModifiers, this.researchedTechIds)
+    },
+    edgeThrustModifiers() {
+      const [researchedThrustModifiers] = this.splitThrustModifiers
+
+      return researchedThrustModifiers.length ? [researchedThrustModifiers[0].AdditionalInfo, researchedThrustModifiers[researchedThrustModifiers.length - 1].AdditionalInfo] : [0.5, 1]
+    },
+    splitFuelConsumptions() {
+      return this.splitResearched(this.fuelConsumptions, this.researchedTechIds)
+    },
+    splitJumpEfficiencies() {
+      return this.splitResearched(this.jumpEfficiencies, this.researchedTechIds)
+    },
+    splitSquadronSizes() {
+      return this.splitResearched(this.squadronSizes, this.researchedTechIds)
+    },
+    splitSquadronRadiuses() {
+      return this.splitResearched(this.squadronRadiuses, this.researchedTechIds)
+    },
     
     powerType() {
       if (this.selectedPower >= this.edgePowers[0] && this.selectedPower <= this.edgePowers[1]) {
@@ -289,130 +440,74 @@ export default {
       return 'is-warning'
     },
 
-    researchedPowerMultipliers() {
-      if (!this.techLines.powers) {
-        return []
-      }
-
-      return this.techLines.powers.reduce((multipliers, power) => {
-        if (this.researchedTechIds.includes(power.TechSystemID)) {
-          multipliers.push(power.AdditionalInfo)
-        }
-
-        return multipliers
-      }, [])
-    },
-    edgePowers() {
-      if (!this.researchedPowerMultipliers.length) {
-        return [0.5, 1]
-      }
-
-      return [this.researchedPowerMultipliers[0], this.researchedPowerMultipliers[this.researchedPowerMultipliers.length - 1]]
-    },
-
-    splitConsumptions() {
-      if (!this.techLines.consumption) {
-        return [[], []]
-      }
-
-      return this.techLines.consumption.reduce(([researched, unresearched], consumption) => {
-        if (this.researchedTechIds.includes(consumption.TechSystemID)) {
-          researched.push(consumption)
-        } else {
-          unresearched.push(consumption)
-        }
-        
-        return [researched, unresearched]
-      }, [[], []])
-    },
-    splitEngines() {
-      if (!this.techLines.engines) {
-        return [[], []]
-      }
-
-      return this.techLines.engines.reduce(([researched, unresearched], engine) => {
-        if (this.researchedTechIds.includes(engine.TechSystemID)) {
-          researched.push(engine)
-        } else {
-          unresearched.push(engine)
-        }
-        
-        return [researched, unresearched]
-      }, [[], []])
-    },
-
-    researchedTechIds() {
-      return this.researchedTech.map(tech => tech.TechID)
-    },
-
     // Computed Values
-    totalPower() {
-      if (!this.classSize || !this.speed || this.classSize < this.minimumClassSize || this.speed < this.minimumSpeed) {
-        return 0
-      }
+    // totalPower() {
+    //   if (!this.classSize || !this.speed || this.classSize < this.minimumClassSize || this.speed < this.minimumSpeed) {
+    //     return 0
+    //   }
 
-      return this.classSize * this.speed / 50000
-    },
-    hullSizePower() {
-      return this.selectedEngine * this.selectedPower
-    },
-    fuelUsePercentage() {
-      return Math.sqrt(10 / this.engineSize) * Math.pow(this.selectedPower, 2.5) * this.selectedConsumption
-    },
-    requiredEndurance() {
-      if (!this.speed || !this.range || this.speed < this.minimumSpeed || this.range < this.minimumRange) {
-        return 0
-      }
+    //   return this.classSize * this.speed / 50000
+    // },
+    // hullSizePower() {
+    //   return this.selectedEngine * this.selectedPower
+    // },
+    // fuelUsePercentage() {
+    //   return Math.sqrt(10 / this.engineSize) * Math.pow(this.selectedPower, 2.5) * this.selectedConsumption
+    // },
+    // requiredEndurance() {
+    //   if (!this.speed || !this.range || this.speed < this.minimumSpeed || this.range < this.minimumRange) {
+    //     return 0
+    //   }
 
-      return 1 / (this.speed * 60 * 60) * this.range * Math.pow(10, 9)
-    },
-    requiredFuel() {
-      return this.fuelBurn * this.requiredEndurance
-    },
-    fuelBurn() {
-      return this.totalPower * this.fuelUsePercentage
-    },
-    hullSize() {
-      if (!this.classSize || this.classSize < this.minimumClassSize) {
-        return 0
-      }
+    //   return 1 / (this.speed * 60 * 60) * this.range * Math.pow(10, 9)
+    // },
+    // requiredFuel() {
+    //   return this.fuelBurn * this.requiredEndurance
+    // },
+    // fuelBurn() {
+    //   return this.totalPower * this.fuelUsePercentage
+    // },
+    // hullSize() {
+    //   if (!this.classSize || this.classSize < this.minimumClassSize) {
+    //     return 0
+    //   }
 
-      return this.classSize / 50
-    },
-    engineSize() {
-      if (!this.engines || this.engines < this.minimumEngines) {
-        return 0
-      }
+    //   return this.classSize / 50
+    // },
+    // engineSize() {
+    //   if (!this.engines || this.engines < this.minimumEngines) {
+    //     return 0
+    //   }
 
-      return this.totalPower / this.hullSizePower / this.engines
-    },
-    engineSizePercentage() {
-      if (!this.engines || !this.classSize || this.engines < this.minimumEngines || this.classSize < this.minimumClassSize) {
-        return 0
-      }
+    //   return this.totalPower / this.hullSizePower / this.engines
+    // },
+    // engineSizePercentage() {
+    //   if (!this.engines || !this.classSize || this.engines < this.minimumEngines || this.classSize < this.minimumClassSize) {
+    //     return 0
+    //   }
 
-      return (this.engineSize * 50) * this.engines / this.classSize
-    },
-    fuelSize() {
-      return this.requiredFuel / 50000
-    },
-    fuelSizePercentage() {
-      if (!this.classSize || this.classSize < this.minimumClassSize) {
-        return 0
-      }
+    //   return (this.engineSize * 50) * this.engines / this.classSize
+    // },
+    // fuelSize() {
+    //   return this.requiredFuel / 50000
+    // },
+    // fuelSizePercentage() {
+    //   if (!this.classSize || this.classSize < this.minimumClassSize) {
+    //     return 0
+    //   }
 
-      return (this.fuelSize * 50) / this.classSize
-    },
-    remainingSize() {
-      if (!this.engines || this.engines < this.minimumEngines) {
-        return 0
-      }
+    //   return (this.fuelSize * 50) / this.classSize
+    // },
+    // remainingSize() {
+    //   if (!this.engines || this.engines < this.minimumEngines) {
+    //     return 0
+    //   }
 
-      return this.hullSize - (this.engineSize * this.engines) - this.fuelSize
-    },
+    //   return this.hullSize - (this.engineSize * this.engines) - this.fuelSize
+    // },
   },
   asyncComputed: {
-    researchedTech: {
+    researchedTechs: {
       async get() {
         if (!this.database || !this.GameID) {
           return []
@@ -426,46 +521,144 @@ export default {
       },
       default: [],
     },
-    techLines: {
+
+    armors: {
       async get() {
         if (!this.database || !this.database.models.techSystem) {
           return []
         }
 
-        return {
-          engines: await this.database.models.techSystem.findAll({
-            where: {
-              TechTypeID: 40,
-            },
-            order: [
-              ['AdditionalInfo', 'asc'],
-            ],
-          }),
-          powers: await this.database.models.techSystem.findAll({
-            where: {
-              TechTypeID: {
-                [Op.in]: [130, 198],
-              },
-            },
-            order: [
-              ['AdditionalInfo', 'asc'],
-            ],
-          }),
-          consumption: await this.database.models.techSystem.findAll({
-            where: {
-              TechTypeID: 65,
-            },
-            order: [
-              ['AdditionalInfo', 'desc'],
-            ],
-          }),
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 84,
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    enginesSizes: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
         }
-      },
-      default: () => ({
-        engines: [],
-        powers: [],
-        consumption: [],
-      }),
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 214,
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    engines: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 40,
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    thrustModifiers: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: {
+              [Op.in]: [130, 198],
+            },
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    fuelConsumptions: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 65,
+          },
+          order: [
+            ['AdditionalInfo', 'desc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    jumpEfficiencies: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 8,
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    squadronSizes: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 7,
+          },
+          order: [
+            ['AdditionalInfo', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
+    },
+    squadronRadiuses: {
+      async get() {
+        if (!this.database || !this.database.models.techSystem) {
+          return []
+        }
+
+        return await this.database.models.techSystem.findAll({
+          where: {
+            TechTypeID: 6,
+          },
+          order: [
+            ['AdditionalInfo2', 'asc'],
+          ],
+        })
+      }, 
+      default: [],
     },
   },
 }

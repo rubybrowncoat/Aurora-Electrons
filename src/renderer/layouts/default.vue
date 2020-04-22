@@ -52,7 +52,7 @@
         <v-tabs>
           <v-tab to="/" @change="title = 'Production Recap'">Production</v-tab>
           <v-tab to="/minerals" @change="title = 'Mineral Breakdown'">Minerals</v-tab>
-          <!-- <v-tab to="/engines" @change="title = 'Engine Helper'">Engine</v-tab> -->
+          <v-tab to="/engines" @change="title = 'Ship Engines'">Engine</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
