@@ -1,9 +1,18 @@
 <template>
   <div>
     <section class="section short-top">
-      <v-expansion-panels hover :value="0">
+      
+      <v-container fluid>
+        <v-row justify="start">
+          <v-col cols="12">
+            <v-btn outlined large block :loading="isCalculating" :disabled="!selectedTonnage || !selectedSpeed || !selectedRange || !selectedUsableWeight || !selectedMinimumEngine" color="indigo" @click="doCalculate">Calculate</v-btn>
+          </v-col>
+        </v-row>
+      </v-container>
+
+      <v-expansion-panels hover multiple v-model="panels">
         <v-expansion-panel>
-          <v-expansion-panel-header class="font-weight-bold">Calculation Parameters</v-expansion-panel-header>
+          <v-expansion-panel-header class="font-weight-bold">Global Calculation Parameters</v-expansion-panel-header>
 
           <v-expansion-panel-content>
             <v-container fluid>
@@ -12,7 +21,7 @@
                   <v-select v-model="selectedEngine" :items="selectResearches(splitEngines)" item-text="Name" item-value="AdditionalInfo" :hint="`Engine Technology ${selectedEngine ? `- ${selectedEngine} EP/HS` : ''}`" solo persistent-hint dense></v-select>
                 </v-col>
                 <v-col cols="12" md="6">
-                  <v-select v-model="selectedFuelConsumtion" :items="selectResearches(splitFuelConsumptions)" item-text="Name" item-value="AdditionalInfo" :hint="`Fuel Efficiency Factor ${selectedFuelConsumtion ? `- ${selectedFuelConsumtion} L/EPH` : ''}`" solo persistent-hint dense></v-select>
+                  <v-select v-model="selectedFuelConsumption" :items="selectResearches(splitFuelConsumptions)" item-text="Name" item-value="AdditionalInfo" :hint="`Fuel Efficiency Factor ${selectedFuelConsumption ? `- ${selectedFuelConsumption} L/EPH` : ''}`" solo persistent-hint dense></v-select>
                 </v-col>
                 <v-col cols="12" md="6" lg="8">
                   <v-range-slider v-model="selectedThrustModifierRange" :min="0.1" :max="3" :step="0.05" thumb-size="48" :hint="`Engine Power Multplier Range ${selectedThrustModifierRange.length ? `- Between ${selectedThrustModifierRange[0]} and ${selectedThrustModifierRange[1]}` : ''}`" persistent-hint dense>
@@ -69,232 +78,128 @@
             </v-container>
           </v-expansion-panel-content>
         </v-expansion-panel>
+
+        <v-expansion-panel>
+          <v-expansion-panel-header class="font-weight-bold">Optimization Parameters</v-expansion-panel-header>
+
+          <v-expansion-panel-content>
+            <v-container fluid>
+              <v-row justify="start">
+                <v-col cols="12" md="4">
+                  <v-select v-model="selectedHardTonnage" :items="hardTonnage" hint="Allow Overshooting Rough Tonnage" solo persistent-hint dense></v-select>
+                </v-col>
+                <v-col cols="12" md="4">
+                  <v-text-field type="number" min="1" max="100" v-model.number="selectedUsableWeight" placeholder="65" :hint="`Usable Weight Percentage ${selectedUsableWeight ? `- ${remainingUsableWeight}% Remaining` : ''}`" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+                </v-col>
+                <v-col cols="12" md="4">
+                  <v-text-field type="number" min="1" v-model.number="selectedMinimumEngine" placeholder="2" hint="Minimum Engines" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+                </v-col>
+              </v-row>
+            </v-container>
+          </v-expansion-panel-content>
+        </v-expansion-panel>
+
+        <v-expansion-panel :disabled="!optimizationCombinations.length || !actualOptimizationCombination">
+          <v-expansion-panel-header class="font-weight-bold">{{ actualOptimizationCombination ? 'Optimization Result' : 'No Results' }}</v-expansion-panel-header>
+
+          <v-expansion-panel-content>
+            <v-container fluid>
+              <v-row justify="start">
+                <v-col cols="12">
+                  <v-btn-toggle v-model="selectedOptimization" mandatory>
+                    <v-btn v-for="optimization in optimizations" :key="optimization.value">
+                      {{ optimization.text }}
+                    </v-btn>
+                  </v-btn-toggle>
+                </v-col>
+                <v-col cols="12" v-if="selectedOptimization === 1">
+                  <v-select v-model="selectedOptimizationEngine" :items="usableOptimizationEngineSizes" hint="Intended Engine Size (HS)" solo persistent-hint dense></v-select>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-list two-line dense v-if="actualOptimizationCombination">
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.isCommercial ? 'Commercial' : 'Military' }}</v-list-item-title>
+                        <v-list-item-subtitle>Engine Type</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.engineSize }}</v-list-item-title>
+                        <v-list-item-subtitle>Optimal Engine Size (HS)</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.thrustModifier }}</v-list-item-title>
+                        <v-list-item-subtitle>Optimal Engine Power Multiplier</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ separatedNumber(actualOptimizationCombination.roundedRecommendedSize) }} HS ({{ separatedNumber(actualOptimizationCombination.roundedRecommendedTonnage) }} Tons)</v-list-item-title>
+                        <v-list-item-subtitle>Recommended Size</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.engineNumber }}</v-list-item-title>
+                        <v-list-item-subtitle>Recommended Engine Number</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ separatedNumber(actualOptimizationCombination.recommendedFuel) }} Liters</v-list-item-title>
+                        <v-list-item-subtitle>Recommended Fuel</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                  </v-list>
+                </v-col>
+                <v-col cols="12" md=6>
+                  <v-list two-line dense v-if="actualOptimizationCombination">
+                    <v-list-item link v-if="selectedArmor">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ selectedLayers }} Layers / {{ actualOptimizationCombination.armorColumns }} Columns</v-list-item-title>
+                        <v-list-item-subtitle>Armor</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link v-if="selectedArmor">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.armorSize }} HS</v-list-item-title>
+                        <v-list-item-subtitle>Armor Size</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link v-if="selectedJump">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.jumpDriveSize }} HS</v-list-item-title>
+                        <v-list-item-subtitle>Jump Drive Size</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link v-if="selectedJump">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ separatedNumber(actualOptimizationCombination.jumpDriveCapacity) }} Tons</v-list-item-title>
+                        <v-list-item-subtitle>Jump Drive Capacity</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.roundedUsableSizeAfterJumpDrive }} HS ({{ separatedNumber(actualOptimizationCombination.roundedUsableSizeAfterJumpDriveTons) }} Tons)</v-list-item-title>
+                        <v-list-item-subtitle>Usable Size</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item link v-if="selectedJump">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ actualOptimizationCombination.roundedUsableSizeAfterArmor }} HS ({{ separatedNumber(actualOptimizationCombination.roundedUsableSizeAfterArmorTons) }} Tons)</v-list-item-title>
+                        <v-list-item-subtitle>Usable Size Without Jump Drive</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+                  </v-list>
+                </v-col>
+              </v-row>
+            </v-container>
+          </v-expansion-panel-content>
+        </v-expansion-panel>
       </v-expansion-panels>
-
-      {{ combinations }}
-
-      <!-- <div class="columns">
-        <div class="column">
-          <b-field :label="`Engine Technology (${selectedEngine} EP/HS)`">
-            <b-select v-model="selectedEngine" placeholder="Select a Tier">
-              <optgroup v-for="(split, index) of splitEngines" :key="index" :label="index ? 'Unresearched' : 'Researched'">
-                <option v-for="engine of split" :key="engine.TechSystemID" :value="engine.AdditionalInfo">
-                  {{ engine.ComponentName }}
-                </option>
-              </optgroup>
-            </b-select>
-          </b-field>
-        </div>
-        <div class="column">
-          <b-field :label="`Engine Fuel Consumption (${selectedConsumption} L/EPH)`">
-            <b-select v-model="selectedConsumption" placeholder="Select a Level">
-              <optgroup v-for="(split, index) of splitConsumptions" :key="index" :label="index ? 'Unresearched' : 'Researched'">
-                <option v-for="consumption of split" :key="consumption.TechSystemID" :value="consumption.AdditionalInfo">
-                  {{ (consumption.AdditionalInfo * 100).toFixed(2) }} %
-                </option>
-              </optgroup>
-            </b-select>
-          </b-field>
-        </div>
-      </div>
-      <b-field :label="`Engine Power Multiplier (${selectedPower})`">
-        <b-slider v-model="selectedPower" :custom-formatter="val => `${(val * 100).toFixed(0)}%`" :min="0.1" :max="2.5" :step="0.05" :tooltip-type="powerType" ticks></b-slider>
-      </b-field>
-      <div class="columns">
-        <div class="column">
-          <b-field label="Desired Class Size" message="Tons">
-            <b-input v-model.number="classSize" type="number" placeholder="2500" :min="minimumClassSize"></b-input>
-          </b-field>
-        </div>
-        <div class="column">
-          <b-field label="Desired Speed" message="Kilometers per Second">
-            <b-input v-model.number="speed" type="number" placeholder="1000" :min="minimumSpeed"></b-input>
-          </b-field>
-        </div>
-        <div class="column">
-          <b-field label="Desired Range" message="Billions of Kilometers">
-            <b-input v-model.number="range" placeholder="10.0" step="0.001" :min="minimumRange" 
-              @keyup.native.prevent.alt.up.exact="modifyRange(0.001)"
-              @keyup.native.prevent.up.exact="modifyRange(0.1)"
-              @keyup.native.prevent.shift.up.exact="modifyRange(1)"
-              @keyup.native.prevent.ctrl.up.exact="modifyRange(10)"
-
-              @keyup.native.prevent.alt.down.exact="modifyRange(-0.001)"
-              @keyup.native.prevent.down.exact="modifyRange(-0.1)"
-              @keyup.native.prevent.shift.down.exact="modifyRange(-1)"
-              @keyup.native.prevent.ctrl.down.exact="modifyRange(-10)"></b-input>
-          </b-field>
-        </div>
-        <div class="column">
-          <b-field label="Number of Engines">
-            <b-input v-model.number="engines" type="number" placeholder="2" :min="minimumEngines"></b-input>
-          </b-field>
-        </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="columns is-multiline">
-        <div class="column is-full is-full-desktop is-half-widescreen">
-          <h1 class="title">Engine Stats</h1>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Engine Power</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ totalPower.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">EP</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ hullSizePower.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">EP / HS</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Fuel Use</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (fuelUsePercentage * 100).toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">%</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-        </div>
-        <div class="column is-full is-full-desktop is-half-widescreen">
-          <h1 class="title">Fuel Stats</h1>
-
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Required Endurance</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ requiredEndurance.toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Hours</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (requiredEndurance / 24).toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Days</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Required Fuel</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ requiredFuel.toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Liters</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Max Fuel Burn</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ fuelBurn.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Liters per Hour</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-        </div>
-        <div class="column is-full is-full-desktop is-half-widescreen">
-          <h1 class="title">Hull Stats</h1>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Hull Size</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ hullSize.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">HS</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Hull Space for Engines</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ engineSize.toFixed(1) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">HS</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (engineSize * 50).toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Tons</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (engineSizePercentage * 100).toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">% of Hull</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Hull Space for Fuel</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ fuelSize.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">HS</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (fuelSize * 50).toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Tons</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (fuelSizePercentage * 100).toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">% of Hull</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-          
-          <b-field grouped group-multiline>
-            <div class="control">
-              <b-tag type="is-dark" size="is-medium">Hull Space Left for Payload</b-tag>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ remainingSize.toFixed(2) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">HS</b-tag>
-              </b-taglist>
-            </div>
-            <div class="control">
-              <b-taglist attached>
-                <b-tag type="is-primary" size="is-medium">{{ (remainingSize * 50).toFixed(0) }}</b-tag>
-                <b-tag type="is-black" size="is-medium">Tons</b-tag>
-              </b-taglist>
-            </div>
-          </b-field>
-        </div>
-      </div> -->
     </section>
   </div>
 </template>
@@ -310,10 +215,14 @@ import { Op } from 'sequelize'
 
 import { mapGetters } from 'vuex'
 
+import { roundToDecimal, separatedNumber, ceilToDecimal } from '../../utilities/math'
+
 export default {
   components: {},
   data() {
     return {
+      panels: [0, 1],
+
       jumps: [{
         text: 'None',
         value: 0,
@@ -324,10 +233,31 @@ export default {
         text: 'Commercial',
         value: 7.5,
       }],
+      
+      hardTonnage: [{
+        text: 'Yes',
+        value: 0,
+      }, {
+        text: 'No',
+        value: 0.5,
+      }],
 
-      selectedFuelConsumtion: 1,
+      optimizations: [{
+        text: 'Optimize for Available Tonnage',
+        value: 0,
+      }, {
+        text: 'Optimize by Engine Size',
+        value: 1,
+      }],
+
+      selectedOptimization: 0,
+      selectedOptimizationLine: 0,
+      selectedOptimizationEngine: 25,
+
+      selectedFuelConsumption: 1,
       selectedEngine: 1,
       selectedEngineSize: 25,
+      selectedMinimumEngine: 2,
 
       selectedTonnage: 15000,
       selectedSpeed: 2000,
@@ -342,6 +272,15 @@ export default {
 
       selectedArmor: 1,
       selectedLayers: 1,
+
+      selectedHardTonnage: 0.5,
+      selectedUsableWeight: 65,
+
+      isCalculating: false,
+      tonnageCombinations: [],
+      engineSizeCombinations: [],
+
+      //
 
       rules: {
         required: value => !!value || 'Required.',
@@ -367,6 +306,29 @@ export default {
     }
   },
   methods: {
+    separatedNumber(number) {
+      return separatedNumber(number)
+    },
+
+    doCalculate() {
+      if (this.calculateCombinations()) {
+        this.closePanels(0, 1)
+        this.openPanels(2)
+      } else {
+        this.closePanels(2)
+      }
+    },
+
+    closePanels(...closingPanels) {
+      this.panels = this.panels.filter(panel => !closingPanels.includes(panel))
+    
+      return true
+    },
+
+    openPanels(...openingPanels) {
+      this.panels.push(...openingPanels)
+    },
+
     selectResearches(split) {
       const [researched, unresearched] = split
 
@@ -391,6 +353,185 @@ export default {
 
       this.range = newRange < this.minimumRange ? this.minimumRange : newRange
     },
+
+    calculateCombinations() {
+      this.isCalculating = true
+
+      let [tonnageCombinations, engineSizeCombinations] = this.usableThrustModifiers.reduce(([tonnageAggregate, engineSizeAggregate], thrustModifier) => {
+        this.usableEngineSizes.forEach(engineSize => {
+          const enginePower = this.selectedEngine * engineSize * thrustModifier
+          const shipSizePerEngine = (enginePower / this.selectedSpeed) * 1000
+
+          if (engineSize > shipSizePerEngine) {
+            return [tonnageAggregate, engineSizeAggregate]
+          }
+
+          const shipSizePerEngineTons = shipSizePerEngine * 50
+
+          if (shipSizePerEngineTons <= (this.selectedTonnage / this.selectedMinimumEngine)) {
+
+            const fuelConsumptionPerEngine = this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5)
+            const roundedFuelConsumptionPerEngine = roundToDecimal(fuelConsumptionPerEngine, 4)
+
+            const fuelPerEngineRounder = Math.ceil(this.selectedRange * Math.pow(10, 9) / this.selectedSpeed / 3600 * fuelConsumptionPerEngine * this.selectedEngine * engineSize * thrustModifier / 5000)
+            
+            const fuelPerEngine = fuelPerEngineRounder * 5000
+            const fuelSizePerEngine = fuelPerEngine / 50000
+
+            const propulsionSizePerEngine = engineSize + fuelSizePerEngine
+
+            if (propulsionSizePerEngine > shipSizePerEngine) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const usableSizePerEngine = shipSizePerEngine - propulsionSizePerEngine
+
+            const engineNumber = Math.max(Math.round(this.selectedTonnage / shipSizePerEngineTons - this.selectedHardTonnage), 1)
+            
+            const recommendedSize = engineNumber * shipSizePerEngine
+            const roundedRecommendedSize = roundToDecimal(recommendedSize, recommendedSize > 10 ? 0 : 1)
+
+            const recommendedTonnage = recommendedSize * 50
+            const roundedRecommendedTonnage = roundedRecommendedSize * 50
+
+            const recommendedFuel = engineNumber * fuelPerEngine
+
+            const preStep = (engineSize + fuelPerEngineRounder / 10) / shipSizePerEngine
+
+            const isCommercial = engineSize >= 25 && thrustModifier <= 0.5
+            const isJumpCommercial = this.selectedJump ? this.selectedJump > 1 : isCommercial
+
+            if (isCommercial !== isJumpCommercial) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            // Jump Drive Calculations
+
+            const jumpDriveSizeForTonnage = this.selectedJump ? Math.ceil(recommendedTonnage / this.selectedJumpEfficiency / this.selectedJump / 50) * (this.selectedJump === 1 ? 1 : 10) : 0
+            const jumpDriveCapacity = jumpDriveSizeForTonnage * this.selectedJumpEfficiency * this.selectedJump * 50 / (this.selectedJump === 1 ? 1 : 10)
+
+            const jumpDriveSize = Math.round(jumpDriveSizeForTonnage * this.selectedSquadronSize * this.selectedSqudronRadius)
+
+            // Armor
+
+            const armorArea = Math.pow(3 * Math.ceil(roundedRecommendedSize) / 4 / Math.PI, 2 / 3) * 4 * Math.PI
+            const armorStrength = armorArea * this.selectedLayers / 4
+            const armorColumns = Math.floor(armorArea / 4)
+            const armorSize = this.selectedArmor ? ceilToDecimal(armorStrength / this.selectedArmor, 1) : 0
+
+            // Usable Size
+
+            const usableSizeAfterPropulsion = roundedRecommendedSize - propulsionSizePerEngine * engineNumber
+            const roundedUsableSizeAfterPropulsion = roundToDecimal(usableSizeAfterPropulsion, 1)
+            const roundedUsableSizeAfterPropulsionTons = Math.round(roundedUsableSizeAfterPropulsion * 50)
+
+            if (usableSizeAfterPropulsion < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const usableSizeAfterArmor = usableSizeAfterPropulsion - armorSize
+            const roundedUsableSizeAfterArmor = roundToDecimal(usableSizeAfterArmor, 1)
+            const roundedUsableSizeAfterArmorTons = Math.round(roundedUsableSizeAfterArmor * 50)
+
+            if (usableSizeAfterArmor < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const usableSizeAfterJumpDrive = usableSizeAfterArmor - jumpDriveSize
+            const roundedUsableSizeAfterJumpDrive = roundToDecimal(usableSizeAfterJumpDrive, 1)
+            const roundedUsableSizeAfterJumpDriveTons = Math.round(roundedUsableSizeAfterJumpDrive * 50)
+
+            if (usableSizeAfterJumpDrive < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const calculationRecap = {
+              thrustModifier,
+              engineSize,
+
+              isCommercial,
+
+              enginePower,
+              engineNumber,
+              recommendedSize,
+              roundedRecommendedSize,
+              recommendedTonnage,
+              roundedRecommendedTonnage,
+              recommendedFuel,
+              roundedFuelConsumptionPerEngine,
+              fuelPerEngine,
+              fuelSizePerEngine,
+              shipSizePerEngine,
+              shipSizePerEngineTons,
+              propulsionSizePerEngine,
+
+              jumpDriveSizeForTonnage,
+              jumpDriveCapacity,
+              jumpDriveSize,
+
+              armorArea,
+              armorStrength,
+              armorColumns,
+              armorSize,
+
+              roundedUsableSizeAfterPropulsion,
+              roundedUsableSizeAfterPropulsionTons,
+              roundedUsableSizeAfterArmor,
+              roundedUsableSizeAfterArmorTons,
+              roundedUsableSizeAfterJumpDrive,
+              roundedUsableSizeAfterJumpDriveTons,
+            }
+
+            // By Tonnage
+            const tonnageCalculation = (Math.abs(this.selectedTonnage - engineNumber * shipSizePerEngineTons) / this.selectedTonnage * this.remainingUsableWeight + preStep) * 10 * this.selectedUsableWeight
+
+            // const tonnageCalculationFull = (Math.pow(Math.abs(this.selectedTonnage - Math.max(Math.round(this.selectedTonnage / 50 / (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000) - this.selectedHardTonnage), 1) * (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000 * 50)) / this.selectedTonnage, 1) * this.remainingUsableWeight + Math.pow((engineSize + Math.ceil(this.selectedRange * Math.pow(10, 9) / this.selectedSpeed / 3600 * this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5) / 5000 * this.selectedEngine * engineSize * thrustModifier) / 10) / (this.selectedEngine * engineSize * thrustModifier / this.selectedSpeed * 1000), 1)) * 10 * this.selectedUsableWeight
+
+            if (shipSizePerEngineTons * 2 * this.selectedHardTonnage <= this.selectedTonnage) {
+              tonnageAggregate.push({
+                ...calculationRecap,
+
+                calculation: tonnageCalculation,
+              })
+            }
+
+            // By Engine Size
+            const engineSizeCalculation = 1 - preStep
+            if (engineSizeCalculation > 0) {
+              const sizeScore = Math.pow(Math.abs(recommendedTonnage - this.selectedTonnage) / this.selectedTonnage * 10, 2) + Math.pow(1 - engineSizeCalculation, 4)
+
+              engineSizeAggregate.push({
+                ...calculationRecap,
+                
+                calculation: engineSizeCalculation,
+              })
+            }
+          }
+        })
+
+        return [tonnageAggregate, engineSizeAggregate]
+      }, [[], []])
+
+      tonnageCombinations.sort((alpha, beta) => {
+        return alpha.calculation - beta.calculation
+      })
+
+      engineSizeCombinations.sort((alpha, beta) => {
+        return beta.calculation - alpha.calculation
+      })
+
+      this.tonnageCombinations = tonnageCombinations
+      this.engineSizeCombinations = engineSizeCombinations
+
+      this.isCalculating = false
+
+      this.selectedOptimizationLine = 0
+      this.selectedOptimizationEngine = this.usableOptimizationEngineSizes[0]
+
+      if (this.optimizationCombinations.length) {
+        return true
+      }
+    },
   },
   computed: {
     ...mapGetters([
@@ -399,6 +540,10 @@ export default {
       'GameID',
       'RaceID',
     ]),
+
+    remainingUsableWeight() {
+      return 100 - this.selectedUsableWeight
+    },
 
     researchedTechIds() {
       return this.researchedTechs.map(tech => tech.TechID)
@@ -452,92 +597,32 @@ export default {
       return [...thrusts, end]
     },
 
-    combinations() {
-      let calculatedCombinations = this.usableThrustModifiers.reduce((combinations, thrustModifier) => {
-        this.usableEngineSizes.forEach(engineSize => {
-          combinations.push({
-            thrustModifier,
-            engineSize,
+    optimizationCombinations() {
+      switch(this.selectedOptimization) {
+        case 0: {
+          return this.tonnageCombinations
+        }
+        case 1: {
+          return this.optimizationCombinationsFromEngineSize
+        }
+      }
+    },
+    actualOptimizationCombination() {
+      return this.selectedOptimizationLine >= 0 && this.selectedOptimizationLine < this.optimizationCombinations.length ? this.optimizationCombinations[this.selectedOptimizationLine] : null
+    },
 
-            calculation: (1 - (engineSize + Math.ceil(this.selectedRange * Math.pow(10, 9) / this.selectedSpeed / 3600 * this.selectedFuelConsumtion * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5) / 5000 * this.selectedEngine * engineSize * thrustModifier) / 10) / (this.selectedEngine * engineSize * thrustModifier / this.selectedSpeed * 1000)),
-          })
-        })
+    usableOptimizationEngineSizes() {
+      const engineSizes = this.engineSizeCombinations.map(combination => combination.engineSize)
 
-        return combinations
-      }, [])
-
-      calculatedCombinations.sort((alpha, beta) => {
-        return beta.calculation - alpha.calculation
+      engineSizes.sort((alpha, beta) => {
+        return beta - alpha
       })
 
-      console.log(calculatedCombinations.slice(0, 20))
-    }
-
-    // Computed Values
-    // totalPower() {
-    //   if (!this.classSize || !this.speed || this.classSize < this.minimumClassSize || this.speed < this.minimumSpeed) {
-    //     return 0
-    //   }
-
-    //   return this.classSize * this.speed / 50000
-    // },
-    // hullSizePower() {
-    //   return this.selectedEngine * this.selectedPower
-    // },
-    // fuelUsePercentage() {
-    //   return Math.sqrt(10 / this.engineSize) * Math.pow(this.selectedPower, 2.5) * this.selectedConsumption
-    // },
-    // requiredEndurance() {
-    //   if (!this.speed || !this.range || this.speed < this.minimumSpeed || this.range < this.minimumRange) {
-    //     return 0
-    //   }
-
-    //   return 1 / (this.speed * 60 * 60) * this.range * Math.pow(10, 9)
-    // },
-    // requiredFuel() {
-    //   return this.fuelBurn * this.requiredEndurance
-    // },
-    // fuelBurn() {
-    //   return this.totalPower * this.fuelUsePercentage
-    // },
-    // hullSize() {
-    //   if (!this.classSize || this.classSize < this.minimumClassSize) {
-    //     return 0
-    //   }
-
-    //   return this.classSize / 50
-    // },
-    // engineSize() {
-    //   if (!this.engines || this.engines < this.minimumEngines) {
-    //     return 0
-    //   }
-
-    //   return this.totalPower / this.hullSizePower / this.engines
-    // },
-    // engineSizePercentage() {
-    //   if (!this.engines || !this.classSize || this.engines < this.minimumEngines || this.classSize < this.minimumClassSize) {
-    //     return 0
-    //   }
-
-    //   return (this.engineSize * 50) * this.engines / this.classSize
-    // },
-    // fuelSize() {
-    //   return this.requiredFuel / 50000
-    // },
-    // fuelSizePercentage() {
-    //   if (!this.classSize || this.classSize < this.minimumClassSize) {
-    //     return 0
-    //   }
-
-    //   return (this.fuelSize * 50) / this.classSize
-    // },
-    // remainingSize() {
-    //   if (!this.engines || this.engines < this.minimumEngines) {
-    //     return 0
-    //   }
-
-    //   return this.hullSize - (this.engineSize * this.engines) - this.fuelSize
-    // },
+      return Array.from(new Set(engineSizes))
+    },
+    optimizationCombinationsFromEngineSize() {
+      return this.engineSizeCombinations.filter(combination => combination.engineSize === this.selectedOptimizationEngine)
+    },
   },
   asyncComputed: {
     researchedTechs: {
@@ -694,5 +779,10 @@ export default {
       default: [],
     },
   },
+  watch: {
+    combinations(newCombinations) {
+      
+    }
+  }
 }
 </script>
