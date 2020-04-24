@@ -1,7 +1,6 @@
 <template>
   <div>
     <section class="section short-top">
-      
       <v-container fluid>
         <v-row justify="start">
           <v-col cols="12">
@@ -47,7 +46,7 @@
                   <v-select v-model="selectedJump" :items="jumps" hint="Jump Drive Type" solo persistent-hint dense></v-select>
                 </v-col>
                 <v-col cols="12" md="6" lg="3">
-                  <v-select v-model="selectedJumpEfficiency" :items="selectResearches(splitJumpEfficiencies)" item-text="Name" item-value="AdditionalInfo" :hint="selectedJump ? `${(selectedSquadronSize * selectedSqudronRadius).toFixed(2)} Total Coefficient` : 'No Jump Drive'" :disabled="!selectedJump" solo persistent-hint dense></v-select>
+                  <v-select v-model="selectedJumpEfficiency" :items="selectResearches(splitJumpEfficiencies)" item-text="Name" item-value="AdditionalInfo" :hint="selectedJump ? `${(selectedSquadronSize * selectedSquadronRadius).toFixed(2)} Total Coefficient` : 'No Jump Drive'" :disabled="!selectedJump" solo persistent-hint dense></v-select>
                 </v-col>
                 <v-col cols="12" md="6" lg="3">
                   <v-select v-model="selectedSquadronSize" :items="selectResearches(splitSquadronSizes)" item-text="Name" item-value="AdditionalInfo2" :hint="`Squadron Size ${selectedSquadronSize ? `- ${selectedSquadronSize}x Coefficient` : ''}`" :disabled="!selectedJump" solo persistent-hint dense>
@@ -59,7 +58,7 @@
                     </template></v-select>
                 </v-col>
                 <v-col cols="12" md="6" lg="3">
-                  <v-select v-model="selectedSqudronRadius" :items="selectResearches(splitSquadronRadiuses)" item-text="Name" item-value="AdditionalInfo2" :hint="`Jump Radius ${selectedSqudronRadius ? `- ${selectedSqudronRadius}x Coefficient` : ''}`" :disabled="!selectedJump" solo persistent-hint dense>
+                  <v-select v-model="selectedSquadronRadius" :items="selectResearches(splitSquadronRadiuses)" item-text="Name" item-value="AdditionalInfo2" :hint="`Jump Radius ${selectedSquadronRadius ? `- ${selectedSquadronRadius}x Coefficient` : ''}`" :disabled="!selectedJump" solo persistent-hint dense>
                     <template #item="{ item }">
                       {{ item.Name.split(' - ')[1] }}
                     </template>
@@ -106,12 +105,37 @@
             <v-container fluid>
               <v-row justify="start">
                 <v-col cols="12">
-                  <v-btn-toggle v-model="selectedOptimization" mandatory>
+                  <v-btn-toggle v-model="selectedOptimization" mandatory group tile dense color="deep-purple accent-3">
                     <v-btn v-for="optimization in optimizations" :key="optimization.value">
                       {{ optimization.text }}
                     </v-btn>
                   </v-btn-toggle>
                 </v-col>
+                <v-col cols="12" md="6">
+                  <v-sheet elevation="2" class="pa-2 body-2">
+                    <div>Drive - <span class="font-weight-medium">{{ this.selectedEngineItem.Name }}</span></div>
+                    <div>Approximate Speed - <span class="font-weight-medium">{{ this.selectedSpeed }}</span> Km/s</div>
+                    <div>Approximate Range - <span class="font-weight-medium">{{ this.selectedRange }}</span> BKm</div>
+                    <div>Fuel Efficiency - <span class="font-weight-medium">{{ this.selectedFuelConsumption }}</span> L/EPH</div>
+                  </v-sheet>
+                </v-col>
+                <v-col cols="12" md="6" v-if="this.selectedJump">
+                  <v-sheet elevation="2" class="pa-2 body-2">
+                    <div>Jump Drive - <span class="font-weight-medium">{{ this.selectedJump === 1 ? 'Military' : 'Commercial' }}</span></div>
+                    <div>Efficiency - <span class="font-weight-medium">{{ this.selectedJumpEfficiency }}</span></div>
+                    <div>Squadron Size - <span class="font-weight-medium">{{ Number.parseInt(this.selectedSquadronSizeItem.AdditionalInfo) }}</span></div>
+                    <div>Squadron Radius - <span class="font-weight-medium">{{ this.selectedSquadronRadiusItem.AdditionalInfo }}</span> Km</div>
+                  </v-sheet>
+                </v-col>
+                <v-col cols="12" md="6" v-if="this.selectedArmor">
+                  <v-sheet elevation="2" class="pa-2 body-2">
+                    <div>Armor - <span class="font-weight-medium">{{ this.selectedArmorItem.Name }}</span></div>
+                  </v-sheet>
+                </v-col>
+              </v-row>
+            </v-container>
+            <v-container fluid>
+              <v-row justify="start">
                 <v-col cols="12" v-if="selectedOptimization === 1">
                   <v-select v-model="selectedOptimizationEngine" :items="usableOptimizationEngineSizes" hint="Intended Engine Size (HS)" solo persistent-hint dense></v-select>
                 </v-col>
@@ -125,8 +149,8 @@
                     </v-list-item>
                     <v-list-item link>
                       <v-list-item-content>
-                        <v-list-item-title>{{ actualOptimizationCombination.engineSize }}</v-list-item-title>
-                        <v-list-item-subtitle>Optimal Engine Size (HS)</v-list-item-subtitle>
+                        <v-list-item-title>{{ actualOptimizationCombination.engineSize }} HS</v-list-item-title>
+                        <v-list-item-subtitle>Optimal Engine Size</v-list-item-subtitle>
                       </v-list-item-content>
                     </v-list-item>
                     <v-list-item link>
@@ -171,7 +195,7 @@
                     </v-list-item>
                     <v-list-item link v-if="selectedJump">
                       <v-list-item-content>
-                        <v-list-item-title>{{ actualOptimizationCombination.jumpDriveSize }} HS</v-list-item-title>
+                        <v-list-item-title>{{ actualOptimizationCombination.jumpDriveSize }} HS ({{ separatedNumber(actualOptimizationCombination.jumpDriveSizeTons) }} Tons)</v-list-item-title>
                         <v-list-item-subtitle>Jump Drive Size</v-list-item-subtitle>
                       </v-list-item-content>
                     </v-list-item>
@@ -213,7 +237,7 @@
 <script>
 import { Op } from 'sequelize'
 
-import { mapGetters } from 'vuex'
+import { mapGetters, mapState, mapMutations } from 'vuex'
 
 import { roundToDecimal, separatedNumber, ceilToDecimal } from '../../utilities/math'
 
@@ -243,7 +267,7 @@ export default {
       }],
 
       optimizations: [{
-        text: 'Optimize for Available Tonnage',
+        text: 'Optimize by Available Tonnage',
         value: 0,
       }, {
         text: 'Optimize by Engine Size',
@@ -254,29 +278,15 @@ export default {
       selectedOptimizationLine: 0,
       selectedOptimizationEngine: 25,
 
-      selectedFuelConsumption: 1,
-      selectedEngine: 1,
-      selectedEngineSize: 25,
-      selectedMinimumEngine: 2,
-
-      selectedTonnage: 15000,
-      selectedSpeed: 2000,
-      selectedRange: 100,
-
-      selectedThrustModifierRange: [0.5, 1],
-
-      selectedJump: 1,
-      selectedJumpEfficiency: 4,
-      selectedSquadronSize: 1,
-      selectedSqudronRadius: 1,
-
-      selectedArmor: 1,
-      selectedLayers: 1,
+      // selectedArmor: 1,
+      // selectedLayers: 1,
 
       selectedHardTonnage: 0.5,
       selectedUsableWeight: 65,
+      selectedMinimumEngine: 2,
 
       isCalculating: false,
+
       tonnageCombinations: [],
       engineSizeCombinations: [],
 
@@ -286,26 +296,28 @@ export default {
         required: value => !!value || 'Required.',
         positive: value => value > 0 || 'Must be positive.',
       },
-
-      //
-
-      selectedPower: 1,
-      selectedConsumption: 1,
-
-      minimumClassSize: 50,
-      classSize: null,
-
-      minimumSpeed: 10,
-      speed: null,
-
-      minimumRange: 0.001,
-      range: null,
-
-      minimumEngines: 1,
-      engines: null,
     }
   },
   methods: {
+    ...mapMutations('engine', [
+      'setSelectedTonnage',
+      'setSelectedSpeed',
+      'setSelectedRange',
+      
+      'setSelectedEngine',
+      'setSelectedFuelConsumption',
+      'setSelectedThrustModifierRange',
+      'setSelectedEngineSize',
+      
+      'setSelectedJump',
+      'setSelectedJumpEfficiency',
+      'setSelectedSquadronSize',
+      'setSelectedSquadronRadius',
+      
+      'setSelectedArmor',
+      'setSelectedLayers',
+    ]),
+
     separatedNumber(number) {
       return separatedNumber(number)
     },
@@ -326,7 +338,9 @@ export default {
     },
 
     openPanels(...openingPanels) {
-      this.panels.push(...openingPanels)
+      this.panels.push(...openingPanels.filter(panel => !this.panels.includes(panel)))
+
+      return true
     },
 
     selectResearches(split) {
@@ -337,7 +351,6 @@ export default {
         ...(unresearched.length ? [{ header: 'Unresearched' }, ...unresearched] : []),
       ]
     },
-    
     splitResearched(techs = [], researchedTechIds = []) {
       return techs.reduce(([researched, unresearched], tech) => {
         const split = researchedTechIds.includes(tech.TechSystemID) ? researched : unresearched
@@ -410,7 +423,8 @@ export default {
             const jumpDriveSizeForTonnage = this.selectedJump ? Math.ceil(recommendedTonnage / this.selectedJumpEfficiency / this.selectedJump / 50) * (this.selectedJump === 1 ? 1 : 10) : 0
             const jumpDriveCapacity = jumpDriveSizeForTonnage * this.selectedJumpEfficiency * this.selectedJump * 50 / (this.selectedJump === 1 ? 1 : 10)
 
-            const jumpDriveSize = Math.round(jumpDriveSizeForTonnage * this.selectedSquadronSize * this.selectedSqudronRadius)
+            const jumpDriveSize = Math.round(jumpDriveSizeForTonnage * this.selectedSquadronSize * this.selectedSquadronRadius)
+            const jumpDriveSizeTons = Math.round(jumpDriveSize * 50)
 
             // Armor
 
@@ -468,6 +482,7 @@ export default {
               jumpDriveSizeForTonnage,
               jumpDriveCapacity,
               jumpDriveSize,
+              jumpDriveSizeTons,
 
               armorArea,
               armorStrength,
@@ -534,6 +549,131 @@ export default {
     },
   },
   computed: {
+    ...mapState([
+      'engine',
+    ]),
+
+    selectedTonnage: {
+      set(tonnage) {
+        this.setSelectedTonnage(tonnage)
+      },
+      get() {
+        return this.engine.selectedTonnage
+      },
+    },
+    selectedSpeed: {
+      set(speed) {
+        this.setSelectedSpeed(speed)
+      },
+      get() {
+        return this.engine.selectedSpeed
+      },
+    },
+    selectedRange: {
+      set(range) {
+        this.setSelectedRange(range)
+      },
+      get() {
+        return this.engine.selectedRange
+      },
+    },
+    
+    selectedEngine: {
+      set(engine) {
+        this.setSelectedEngine(engine)
+      },
+      get() {
+        return this.engine.selectedEngine
+      },
+    },
+    selectedFuelConsumption: {
+      set(fuelConsumption) {
+        this.setSelectedFuelConsumption(fuelConsumption)
+      },
+      get() {
+        return this.engine.selectedFuelConsumption
+      },
+    },
+    selectedThrustModifierRange: {
+      set(thrustModifierRange) {
+        this.setSelectedThrustModifierRange(thrustModifierRange)
+      },
+      get() {
+        return this.engine.selectedThrustModifierRange
+      },
+    },
+    selectedEngineSize: {
+      set(engineSize) {
+        this.setSelectedEngineSize(engineSize)
+      },
+      get() {
+        return this.engine.selectedEngineSize
+      },
+    },
+    
+    selectedJump: {
+      set(jump) {
+        this.setSelectedJump(jump)
+      },
+      get() {
+        return this.engine.selectedJump
+      },
+    },
+    selectedJumpEfficiency: {
+      set(jumpEfficiency) {
+        this.setSelectedJumpEfficiency(jumpEfficiency)
+      },
+      get() {
+        return this.engine.selectedJumpEfficiency
+      },
+    },
+    selectedSquadronSize: {
+      set(squadronSize) {
+        this.setSelectedSquadronSize(squadronSize)
+      },
+      get() {
+        return this.engine.selectedSquadronSize
+      },
+    },
+    selectedSquadronRadius: {
+      set(squadronRadius) {
+        this.setSelectedSquadronRadius(squadronRadius)
+      },
+      get() {
+        return this.engine.selectedSquadronRadius
+      },
+    },
+
+    selectedEngineItem() {
+      return this.engines.find(engine => engine.AdditionalInfo === this.selectedEngine) || {}
+    },
+    selectedSquadronSizeItem() {
+      return this.squadronSizes.find(squadronSize => squadronSize.AdditionalInfo2 === this.selectedSquadronSize) || {}
+    },
+    selectedSquadronRadiusItem() {
+      return this.squadronRadiuses.find(squadronRadius => squadronRadius.AdditionalInfo2 === this.selectedSquadronRadius) || {}
+    },
+    selectedArmorItem() {
+      return this.armors.find(armor => armor.AdditionalInfo === this.selectedArmor) || {}
+    },
+    
+    selectedArmor: {
+      set(armor) {
+        this.setSelectedArmor(armor)
+      },
+      get() {
+        return this.engine.selectedArmor
+      },
+    },
+    selectedLayers: {
+      set(layers) {
+        this.setSelectedLayers(layers)
+      },
+      get() {
+        return this.engine.selectedLayers
+      },
+    },
+
     ...mapGetters([
       'database',
 

@@ -23,16 +23,16 @@ export const getters = {
 
 export const mutations = {
   replaceDatabase(state, { database }) {
-    this.state.database = database
+    state.database = database
   },
 
   setGame(state, { GameID }) {
-    this.state.GameID = GameID
+    state.GameID = GameID
   },
   setRace(state, { RaceID }) {
-    this.state.RaceID = RaceID
+    state.RaceID = RaceID
 
-    console.log(this.state)
+    console.log(state)
   }
 }
 
