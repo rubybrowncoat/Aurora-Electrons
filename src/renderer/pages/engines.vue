@@ -139,7 +139,7 @@
                 <v-col cols="12" v-if="selectedOptimization === 1">
                   <v-select v-model="selectedOptimizationEngine" :items="usableOptimizationEngineSizes" hint="Intended Engine Size (HS)" solo persistent-hint dense></v-select>
                 </v-col>
-                <v-col cols="12" md="6">
+                <v-col cols="12" sm="6">
                   <v-list two-line dense v-if="actualOptimizationCombination">
                     <v-list-item link>
                       <v-list-item-content>
@@ -179,7 +179,7 @@
                     </v-list-item>
                   </v-list>
                 </v-col>
-                <v-col cols="12" md=6>
+                <v-col cols="12" sm="6">
                   <v-list two-line dense v-if="actualOptimizationCombination">
                     <v-list-item link v-if="selectedArmor">
                       <v-list-item-content>
