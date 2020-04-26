@@ -73,7 +73,7 @@
     </v-content>
 
     <v-footer app>
-      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
+      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards // Engine Formulas by <span class="font-weight-bold">Iceranger</span></div>
     </v-footer>
   </v-app>
 </template>
