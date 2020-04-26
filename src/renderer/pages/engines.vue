@@ -155,8 +155,8 @@
                     </v-list-item>
                     <v-list-item link>
                       <v-list-item-content>
-                        <v-list-item-title>{{ actualOptimizationCombination.thrustModifier }}</v-list-item-title>
-                        <v-list-item-subtitle>Optimal Engine Power Multiplier</v-list-item-subtitle>
+                        <v-list-item-title>{{ Math.round(actualOptimizationCombination.thrustModifier * 100) }}%</v-list-item-title>
+                        <v-list-item-subtitle>Optimal Engine Power</v-list-item-subtitle>
                       </v-list-item-content>
                     </v-list-item>
                     <v-list-item link>
@@ -237,7 +237,7 @@
 <script>
 import { Op } from 'sequelize'
 
-import { mapGetters, mapState, mapMutations } from 'vuex'
+import { mapGetters, mapState, mapMutations, mapActions } from 'vuex'
 
 import { roundToDecimal, separatedNumber, ceilToDecimal } from '../../utilities/math'
 
@@ -299,6 +299,10 @@ export default {
     }
   },
   methods: {
+    ...mapActions('snackbar', [
+      'activateSnackbar',
+    ]),
+
     ...mapMutations('engine', [
       'setSelectedTonnage',
       'setSelectedSpeed',
@@ -326,8 +330,18 @@ export default {
       if (this.calculateCombinations()) {
         this.closePanels(0, 1)
         this.openPanels(2)
+
+        this.activateSnackbar({
+          color: 'success',
+          text: 'Optimization Results Available',
+        })
       } else {
         this.closePanels(2)
+        
+        this.activateSnackbar({
+          color: 'error',
+          text: 'No Optimal Results Available',
+        })
       }
     },
 

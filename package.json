@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "description": "Aurora Electrons",
   "repository": "https://github.com/rubybrowncoat/Aurora-Electrons",
   "main": "./dist/main/index.js",
@@ -48,6 +48,7 @@
   "dependencies": {
     "chokidar": "^3.3.1",
     "electron-root-path": "^1.0.16",
+    "romanum": "^1.0.1",
     "sequelize": "^5.21.6",
     "sqlite3": "^4.1.1"
   }

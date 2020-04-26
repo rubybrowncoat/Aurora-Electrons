@@ -830,11 +830,6 @@
     global-agent "^2.0.2"
     global-tunnel-ng "^2.7.1"
 
-"@mdi/font@5.0.45":
-  version "5.0.45"
-  resolved "https://registry.yarnpkg.com/@mdi/font/-/font-5.0.45.tgz#8eda40c41dc7ee9e7a51dbe9191c5c38b8482422"
-  integrity sha512-3sOO/UMyQqrmizW5zjvhKJP4FZFO7LblRw4G0alDxK1ekUwNxNXI7hYv8ACAv8H44riBuqlVJ7u39XDqv/Xwuw==
-
 "@nuxt/babel-preset-app@2.12.2":
   version "2.12.2"
   resolved "https://registry.yarnpkg.com/@nuxt/babel-preset-app/-/babel-preset-app-2.12.2.tgz#0e87c4f4f578868e74f6fa9e2a38cace5c77dac8"
@@ -7761,6 +7756,11 @@ roarr@^2.15.2:
     json-stringify-safe "^5.0.1"
     semver-compare "^1.0.0"
     sprintf-js "^1.1.2"
+
+romanum@^1.0.1:
+  version "1.0.1"
+  resolved "https://registry.yarnpkg.com/romanum/-/romanum-1.0.1.tgz#04bd3f429def482ee9e61c58a58b1088c74b58de"
+  integrity sha512-ncuNG0DEN6xBSWkW2e6uZHD/AqE1ID7JIY8tWbNCkvkWN6Jv7l1g3ex126pN6u/U2g+NS0M1nafeiwF5yBjqFg==
 
 run-queue@^1.0.0, run-queue@^1.0.3:
   version "1.0.3"

@@ -59,6 +59,12 @@
 
     <!-- Sizes your content based upon application components -->
     <v-content>
+      <v-snackbar v-model="snackbarStatus" :timeout="2000" :color="snackbar.color">
+        {{ snackbar.text }}
+        <v-btn dark text @click="snackbarStatus = false">
+          Close
+        </v-btn>
+      </v-snackbar>
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
@@ -67,7 +73,7 @@
     </v-content>
 
     <v-footer app>
-      <!-- -->
+      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
     </v-footer>
   </v-app>
 </template>
@@ -91,7 +97,7 @@
 
 <script>
 import appHeader from '@/components/header'
-import { mapActions, mapGetters } from 'vuex'
+import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 export default {
   data() {
@@ -104,17 +110,34 @@ export default {
   },
   components: { appHeader },
   methods: {
+    ...mapMutations('snackbar', [
+      'setActive',
+    ]),
+
     ...mapActions([
       'changeGame',
     ]),
   },
   computed: {
+    ...mapState([
+      'snackbar',
+    ]),
+
     ...mapGetters([
       'database',
 
       'GameID',
       'RaceID',
     ]),
+    
+    snackbarStatus: {
+      set(status) {
+        this.setActive(status)
+      },
+      get() {
+        return this.snackbar.active
+      },
+    },
   },
   asyncComputed: {
     games: {
