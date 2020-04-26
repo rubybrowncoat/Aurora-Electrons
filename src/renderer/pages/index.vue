@@ -1,6 +1,6 @@
 <template>
   <div class="recap-container">
-    <div v-if="!GameID">Select a game from the left-side menu.</div>
+    <div v-if="!GameID">Select a race from the left-side menu.</div>
 
     <v-expansion-panels v-model="panels" multiple>
       <v-expansion-panel v-if="research.length">

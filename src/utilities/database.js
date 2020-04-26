@@ -32,6 +32,7 @@ export const resetDatabase = (storagePath) => {
     GameID: Sequelize.INTEGER,
     RaceTitle: Sequelize.STRING,
     NPR: Sequelize.BOOLEAN,
+    ConventionalStart: Sequelize.BOOLEAN,
   }, {
     sequelize,
     modelName: 'race',
