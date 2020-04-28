@@ -2,17 +2,40 @@
   <div>
     <div class="mb-5" v-if="!RaceID">Select a race from the left-side menu to highlight researched technologies.</div>
 
-    <v-treeview :items="technologyTree" item-key="TechSystemID" activatable hoverable :open-all="false">
-      <template #label="{ item, active }">
-        <span :class="{
-          'green--text font-weight-bold': researchedTechnologyIds.includes(item.TechSystemID),
-        }">{{ item.Name }}</span>
+    
+    <v-container fluid>
+      <v-row justify="start">
+        <v-col cols="12">
+          <v-btn-toggle class="d-block" v-model="selectedFields" color="deep-purple accent-3" tile dense group multiple borderless>
+            <v-btn v-for="field in fields" :key="field.ResearchFieldID" small :value="field.ResearchFieldID">
+              <v-sheet v-if="field.Abbreviation" class="d-inline-block px-2 mr-2 font-weight-bold overline" :elevation="1" dark :color="makeColor(field.Abbreviation)">{{ field.Abbreviation }}</v-sheet>
+              {{ field.FieldName }}
+            </v-btn>
+          </v-btn-toggle>
+        </v-col>
+        <v-col cols="12">
+          <v-text-field v-model="search" hint="Search Technology by Name" placeholder="Technology Name" solo persistent-hint clearable dense></v-text-field>
+        </v-col>
+        <v-col cols="12">
+          <v-treeview :items="technologyTree" :search="search" item-key="TechSystemID" item-text="Name" activatable hoverable open-on-click :open-all="false">
+            <template #label="{ item }">
+              <span>
+                <v-sheet v-if="item.Abbreviation" :style="{
+                  fontFamily: 'Monaco, monospace',
+                }" class="d-inline-block px-3 font-weight-bold" :elevation="1" dark :color="makeColor(item.Abbreviation)">{{ item.Abbreviation }}</v-sheet>
+                {{ item.Name }}
+                <span v-if="researchedTechnologyIds.includes(item.TechSystemID)">💡</span>
+                <span v-else>- {{ item.DevelopCost || 0 }}RP</span>
+              </span>
 
-        <p class="overline mb-0" v-if="item.parents.length > 1 && active">
-          Requires <span v-for="(parent, index) in item.parents" :key="parent"><span class="font-weight-bold">{{ getTechnology(parent).Name }}</span><span v-if="index + 1 < item.parents.length">, </span></span>
-        </p>
-      </template>
-    </v-treeview>
+              <p class="overline mb-0" v-if="item.parents.length > 1">
+                Requires <span v-for="(parent, index) in item.parents" :key="parent"><span class="font-weight-bold">{{ getTechnology(parent).Name }}</span><span v-if="index + 1 < item.parents.length"> and </span></span>
+              </p>
+            </template>
+          </v-treeview>
+        </v-col>
+      </v-row>
+    </v-container>
   </div>
 </template>
 
@@ -21,14 +44,25 @@ import { remote } from 'electron'
 
 import { mapGetters } from 'vuex'
 
+import ColorHash from 'color-hash'
+const hasher = new ColorHash({ lightness: [0.3, 0.4, 0.5], saturation: [0.35, 0.5, 0.65] })
+
 export default {
   components: {},
   data() {
     return {
+      search: '',
+      selectedFields: [],
+
       individualTechnologies: {},
+      technologyTree: [],
     }
   },
   methods: {
+    makeColor(string) {
+      return hasher.hex(string)
+    },
+
     //
     getTechnology(id) {
       return this.individualTechnologies[id]
@@ -50,7 +84,7 @@ export default {
         if (foundParent) {
           this.addTechnology(foundParent)
         } else {
-          console.log('!!! ALERT', identifier)
+          console.log('!!! ALERT', identifier, technology.Name)
         }
       }
 
@@ -73,30 +107,15 @@ export default {
         if (!technology.parents.includes(identifier)) {
           technology.parents.push(identifier)
         }
+      } else if (!technology.parents.length) {
+        this.addToParent(technology, 'TransnewtonianStart')
       }
     },
-  },
-  computed: {
-    ...mapGetters([
-      'database',
-      
-      'GameID',
-      'RaceID',
-    ]),
-    
-    researchedTechnologyIds() {
-      const base = ['ConventionalStart']
-      const currentlyResearchedIds = this.researchedTechnologies.map(tech => tech.TechID)
 
-      if ((this.race.RaceID && !this.race.ConventionalStart) || currentlyResearchedIds.includes(27434)) {
-        base.push('TransnewtonianStart')
-      }
+    makeTechnologyTree() {
+      this.individualTechnologies = {}
 
-      return [...base, ...currentlyResearchedIds]
-    },
-
-    technologyTree() {
-      this.individualTechnologies['ConventionalStart'] = {
+      const conventionalStart = this.individualTechnologies['ConventionalStart'] = {
         TechSystemID: 'ConventionalStart',
         Name: 'Conventional Start',
 
@@ -104,7 +123,7 @@ export default {
         parents: [],
       }
       
-      this.individualTechnologies['TransnewtonianStart'] = {
+      const transnewtonianStart = this.individualTechnologies['TransnewtonianStart'] = {
         TechSystemID: 'TransnewtonianStart',
         Name: 'Transnewtonian Start',
 
@@ -112,9 +131,9 @@ export default {
         parents: [],
       }
 
-      this.individualTechnologies['ConventionalStart'].children.push(this.individualTechnologies['TransnewtonianStart'])
-
-      this.technologies.forEach(technology => {
+      this.technologies
+      .filter(technology => !this.selectedFields.length || this.selectedFields.includes(technology.ResearchFieldID))
+      .forEach(technology => {
         if (!this.individualTechnologies[technology.TechSystemID]) {
           this.addTechnology(technology)
         }
@@ -136,7 +155,30 @@ export default {
         }
       })
 
-      return [this.individualTechnologies['ConventionalStart']]
+      if (transnewtonianStart.children.length) {
+        this.addToParent(transnewtonianStart, 'ConventionalStart')
+      }
+
+      this.technologyTree = [conventionalStart]
+    },
+  },
+  computed: {
+    ...mapGetters([
+      'database',
+      
+      'GameID',
+      'RaceID',
+    ]),
+    
+    researchedTechnologyIds() {
+      const base = ['ConventionalStart']
+      const currentlyResearchedIds = this.researchedTechnologies.map(tech => tech.TechID)
+
+      if ((this.race.RaceID && !this.race.ConventionalStart) || currentlyResearchedIds.includes(27434)) {
+        base.push('TransnewtonianStart')
+      }
+
+      return [...base, ...currentlyResearchedIds]
     },
   },
   asyncComputed: {
@@ -155,13 +197,28 @@ export default {
       default: [],
     },
 
+    fields: {
+      async get() {
+        if (!this.database) {
+          return []
+        }
+
+        return await this.database.query(`select DIM_ResearchField.* from DIM_ResearchField where DIM_ResearchField.DoNotDisplay <> 1`).then(([ items ]) => {
+          console.log('Research Fields', items)
+
+          return items
+        })
+      },
+      default: [],
+    },
+
     technologies: {
       async get() {
         if (!this.database) {
           return []
         }
 
-        return await this.database.query(`select FCT_TechSystem.* from FCT_TechSystem where FCT_TechSystem.GameID = 0`).then(([ items ]) => {
+        return await this.database.query(`select FCT_TechSystem.*, DIM_TechType.*, DIM_ResearchField.* from FCT_TechSystem left join DIM_TechType on FCT_TechSystem.TechTypeID = DIM_TechType.TechTypeID left join DIM_ResearchField on DIM_TechType.FieldID = DIM_ResearchField.ResearchFieldID where FCT_TechSystem.GameID = 0 and DIM_ResearchField.DoNotDisplay != 1`).then(([ items ]) => {
           console.log('Technologies', items)
 
           return items
@@ -186,10 +243,18 @@ export default {
     }
   },
   watch: {
-    //
+    technologies(newTechnologies) {
+      console.log('TECHNOLOGIES CHANGE')
+      this.makeTechnologyTree()
+    },
+    selectedFields() {
+      console.log('SELECTEDFIELDS CHANGE')
+      this.makeTechnologyTree()
+    },
   },
   mounted() {
     //
+    window.explore = this
   },
 }
 </script>

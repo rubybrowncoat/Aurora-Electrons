@@ -34,7 +34,7 @@
                               <v-icon dark>mdi-minus</v-icon>
                             </v-btn>
                           </div>
-                          <v-select class="d-flex" v-model="filter.selectedMaterial" :items="filterMaterials" hint="Minimum Accessibility" solo persistent-hint dense></v-select>
+                          <v-select class="d-flex" v-model="filter.selectedMaterial" :items="filterMaterials" hint="Filtered Material" solo persistent-hint dense></v-select>
                         </v-sheet>
                       </v-col>
                       <v-col cols="12" md="3">
