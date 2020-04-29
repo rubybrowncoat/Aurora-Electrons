@@ -17,7 +17,6 @@ module.exports = {
   plugins: [
     { ssr: true, src: '@/plugins/async-computed.js' },
     { ssr: true, src: '@/plugins/icons.js' },
-    { ssr: true, src: '@/plugins/buefy.js' },
 
     { ssr: false, src: '@/plugins/database.js' },
   ],
