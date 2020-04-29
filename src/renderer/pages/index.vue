@@ -5,11 +5,11 @@
     <v-container fluid v-if="RaceID">
       <v-row justify="start">
         <v-col cols="12">
-          <v-btn-toggle class="d-inline-block" v-model="types" tile dense group multiple borderless>
-            <v-btn class="overline" elevation="1" active-class="font-weight-medium no-active" v-for="type in availableTypes" :key="type" :color="!types.includes(type) ? 'light' : (type === 'Research' ? 'pink lighten-4' : type === 'Production' ? 'light-green lighten-2' : 'blue lighten-4')" small :value="type">{{ type }}</v-btn>
-          </v-btn-toggle>
+          <v-btn class="overline d-inline-block" elevation="1" :color="showResearches ? 'pink lighten-4' : 'light'" small tile dense borderless @click="showResearches = !showResearches">Research</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="showProductions ? 'light-green lighten-2' : 'light'" small tile dense borderless @click="showProductions = !showProductions">Production</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="showShips ? 'blue lighten-4' : 'light'" small tile dense borderless @click="showShips = !showShips">Ship</v-btn>
           <v-btn class="overline d-inline-block" elevation="1" :color="showQueues ? 'yellow lighten-1' : 'light'" small tile dense borderless @click="toggleQueues">Show Queues</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" color="deep-purple accent-2" small dark tile dense borderless v-if="types.length !== availableTypes.length" @click="restoreTypes">All</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" color="deep-purple accent-2" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips" @click="restoreTypes">All</v-btn>
         </v-col>
       </v-row>
       <v-row justify="start">
@@ -66,8 +66,9 @@ export default {
   components: {},
   data() {
     return {
-      availableTypes: ['Research', 'Production', 'Ship'],
-      types: ['Research', 'Production', 'Ship'],
+      showResearches: true,
+      showProductions: true,
+      showShips: true,
 
       showQueues: true,
 
@@ -78,8 +79,14 @@ export default {
     separatedNumber,
     roundToDecimal,
 
+    isTypeActive(type) {
+      return this.types.includes(type)
+    },
+
     restoreTypes() {
-      this.types = [...this.availableTypes]
+      this.showResearches = true
+      this.showProductions = true
+      this.showShips = true
     },
 
     toggleQueues() {
@@ -91,19 +98,19 @@ export default {
 
     tasks() {
       return [
-        ...(this.types.includes('Research') ? this.research.filter(research => this.showQueues ? true : !research.Queue).map(research => ({
+        ...(this.showResearches ? this.research.filter(research => this.showQueues ? true : !research.Queue).map(research => ({
           ...research,
 
           RemainingDays: research.RemainingDays * (research.Queue ? 50000 : 1),
           TaskType: 'Research',
         })) : []),
-        ...(this.types.includes('Production') ? this.production.filter(production => this.showQueues ? true : !production.Queue).map(production => ({
+        ...(this.showProductions ? this.production.filter(production => this.showQueues ? true : !production.Queue).map(production => ({
           ...production,
 
           RemainingDays: production.RemainingDays * (production.Queue ? 50000 : 1),
           TaskType: 'Production',
         })) : []),
-        ...(this.types.includes('Ship') ? this.ships.filter(ship => this.showQueues ? true : !ship.Queue).map(ship => ({
+        ...(this.showShips ? this.ships.filter(ship => this.showQueues ? true : !ship.Queue).map(ship => ({
           ...ship,
 
           RemainingDays: ship.RemainingDays * (ship.Queue ? 50000 : 1),
