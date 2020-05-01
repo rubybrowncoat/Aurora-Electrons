@@ -27,6 +27,7 @@
                 {{ roundToDecimal(item.Amount, 1) }}x
               </span>
               {{ item.Name }} 
+              <span class="orange--text font-weight-bold" v-if="item.ProjectField !== item.CommanderField">(Field Mismatch)</span>
               <span class="overline uppercase float-right" v-if="item.ShipyardTaskType">[{{ ShipyardTaskTypeMap[item.ShipyardTaskType] }}]</span>
               <span class="overline uppercase float-right" v-if="item.ProductionType">[{{ ProductionTypeMap[item.ProductionType] }}]</span>
               <span v-if="item.TaskType === 'Ship'">({{ item.ClassName }} class)</span>
@@ -330,6 +331,7 @@ export default {
               PopulationID: currentProject.PopulationID,
               Name: queue.Name,
               ProjectField: queue.ProjectField,
+              CommanderField: currentProject.CommanderField,
               Facilities: currentProject.Facilities,
               RemainingProduction: queue.DevelopCost,
               Queue: true,
