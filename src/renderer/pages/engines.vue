@@ -442,7 +442,8 @@ export default {
 
             // Armor
 
-            const armorArea = Math.pow(3 * Math.ceil(roundedRecommendedSize) / 4 / Math.PI, 2 / 3) * 4 * Math.PI
+            const armorArea = Math.pow(recommendedSize * 0.75 / Math.PI, 2/3) * Math.PI
+            const armorWidth = Math.round(armorArea)
             const armorStrength = armorArea * this.selectedLayers / 4
             const armorColumns = Math.floor(armorArea / 4)
             const armorSize = this.selectedArmor ? ceilToDecimal(armorStrength / this.selectedArmor, 1) : 0
