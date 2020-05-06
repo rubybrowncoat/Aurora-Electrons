@@ -45,7 +45,7 @@ module.exports = {
   asar: false,
   productName: 'Aurora Electrons',
   appId: 'net.nerdship.aurora.electrons',
-  artifactName: 'aurora-electrons-${version}.${ext}',
+  artifactName: 'aurora-electrons.${ext}',
   directories: {
     output: 'build'
   },
