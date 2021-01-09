@@ -4,7 +4,7 @@ const windowsOS = {
   win: {
     icon: ICONS_DIR + 'win-icon.ico',
     publisherName: 'nerdship',
-    target: 'nsis'
+    target: 'portable'
   },
 
   nsis: {

@@ -6,7 +6,7 @@
     <v-container fluid>
       <v-row justify="start">
         <v-col cols="12">
-          <v-btn-toggle class="d-block" v-model="selectedFields" color="deep-purple accent-3" tile dense group multiple borderless>
+          <v-btn-toggle class="d-block" v-model="selectedFields" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>
             <v-btn v-for="field in fields" :key="field.ResearchFieldID" small :value="field.ResearchFieldID">
               <v-sheet v-if="field.Abbreviation" class="d-inline-block px-2 mr-2 font-weight-bold overline" :elevation="1" dark :color="makeColor(field.Abbreviation)">{{ field.Abbreviation }}</v-sheet>
               {{ field.FieldName }}
@@ -45,7 +45,9 @@ import { remote } from 'electron'
 import { mapGetters } from 'vuex'
 
 import ColorHash from 'color-hash'
+
 const hasher = new ColorHash({ lightness: [0.3, 0.4, 0.5], saturation: [0.35, 0.5, 0.65] })
+const darkHasher = new ColorHash({ lightness: [0.4, 0.5, 0.6], saturation: [0.45, 0.6, 0.75] })
 
 export default {
   components: {},
@@ -60,7 +62,7 @@ export default {
   },
   methods: {
     makeColor(string) {
-      return hasher.hex(string)
+      return this.$vuetify.theme.dark ? darkHasher.hex(string) : hasher.hex(string)
     },
 
     //

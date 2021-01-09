@@ -21,7 +21,7 @@
                   <v-container fluid>
                     <v-row justify="start">
                       <v-col cols="12">
-                        <v-btn-toggle class="d-block" v-model="materials" color="deep-purple accent-3" tile dense group multiple borderless>
+                        <v-btn-toggle class="d-block" v-model="materials" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>
                           <v-btn v-for="(material, key) in MaterialMap" :key="key" small :value="material">{{ material }}</v-btn>
                         </v-btn-toggle>
                       </v-col>
@@ -80,10 +80,10 @@
           </v-col>
           <v-col cols="12">
             <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups">
-              <template v-slot:item.SystemBodyOrder="{ item }">
+              <template v-slot:[`item.SystemBodyOrder`]="{ item }">
                 {{ bodyName(item) }}
               </template>
-              <template v-slot:item.GroundMineralSurvey="{ item }">
+              <template v-slot:[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
                   <template #activator="{ on }">
                     <span v-if="item.GroundMineralSurvey" v-on="on">M{{ item.GroundMineralSurvey }}</span>
@@ -93,13 +93,13 @@
                   <span>{{ GroundMineralSurveyMap[item.GroundMineralSurvey] }}</span>
                 </v-tooltip>
               </template>
-              <template v-slot:item.Potential="{ item }">
+              <template v-slot:[`item.Potential`]="{ item }">
                 <v-tooltip top>
                   <template #activator="{ on }">
                     <span :class="{
-                      'green--text text--lighten-1 font-weight-bold title': item.Potential >= 50,
-                      'red--text text--darken-3 font-weight-bold': item.Potential <= 20,
-                    }" v-on="on">{{ Math.round((item.Potential) / 10) }}</span>
+                      'green--text text--lighten-1 font-weight-bold title': item.Potential >= 5 * materialCount,
+                      'red--text text--darken-3 font-weight-bold': item.Potential <= 2 * materialCount,
+                    }" v-on="on">{{ Math.round(item.Potential / materialCount) }}</span>
                   </template>
                   
                   <span>{{ item.Potential.toFixed(3) }}</span>
@@ -112,7 +112,7 @@
                   'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
                 }" :key="material" v-if="item[material]">{{ separatedNumber(Math.round(item[material].Amount)) }} ({{ item[material].Accessibility }})</span>
               </template>
-              <template v-slot:item.TotalAmount="{ item }">
+              <template v-slot:[`item.TotalAmount`]="{ item }">
                 {{ separatedNumber(Math.round(item.TotalAmount)) }}
               </template>
             </v-data-table>
@@ -307,7 +307,7 @@ export default {
       }, {})
 
       return Object.values(aggregation).map(body => {
-        const [totalPotential, totalAmount] = Object.values(MaterialMap).reduce(([potential, amount], materialId) => {
+        const [totalPotential, totalAmount] = Object.values(this.materials).reduce(([potential, amount], materialId) => {
           const material = body[materialId]
 
           if (material) {
@@ -402,6 +402,10 @@ export default {
     },
     BodyClass() {
       return BodyClass
+    },
+
+    materialCount() {
+      return Object.keys(this.materials).length
     },
 
     headers() {

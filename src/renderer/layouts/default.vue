@@ -46,20 +46,30 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar color="pink" dark app>
-      <v-toolbar-title color="white">{{ title }}</v-toolbar-title>
+    <v-app-bar app>
+      <v-toolbar-title>{{ title }}</v-toolbar-title>
+      <v-spacer></v-spacer>
+      <v-btn icon v-if="$vuetify.theme.dark" @click="$vuetify.theme.dark = false">
+        <v-icon>mdi-lightbulb-on-outline</v-icon>
+      </v-btn>
+      <v-btn icon v-else @click="$vuetify.theme.dark = true">
+        <v-icon>mdi-lightbulb-on</v-icon>
+      </v-btn>
       <template #extension>
         <v-tabs>
           <v-tab to="/" @change="title = 'Production Recap'">Production</v-tab>
+          <v-tab to="/warnings" @change="title = 'Warnings'">Warnings</v-tab>
           <v-tab to="/minerals" @change="title = 'Mineral Breakdown'">Minerals</v-tab>
-          <v-tab to="/engines" @change="title = 'Ship Engines'">Engine</v-tab>
+          <v-tab to="/information" @change="title = 'Empire Information'">Information</v-tab>
+          <!-- <v-tab to="/engines" @change="title = 'Ship Engines'">Engine</v-tab> -->
           <v-tab to="/technologies" @change="title = 'Technology Tree'">Tech Tree</v-tab>
+          <v-tab to="/map" @change="title = 'Galaxy Map'">Map</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
 
     <!-- Sizes your content based upon application components -->
-    <v-content>
+    <v-main>
       <v-snackbar v-model="snackbarStatus" :timeout="2000" :color="snackbar.color">
         {{ snackbar.text }}
         <v-btn dark text @click="snackbarStatus = false">
@@ -71,10 +81,10 @@
       <v-container fluid>
         <nuxt />
       </v-container>
-    </v-content>
+    </v-main>
 
     <v-footer app>
-      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards // Engine Formulas by <span class="font-weight-bold">Iceranger</span></div>
+      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
     </v-footer>
   </v-app>
 </template>
@@ -118,6 +128,18 @@ export default {
     ...mapActions([
       'changeGame',
     ]),
+
+    themeInit() {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+      mediaQuery.addEventListener('change', (e) => {
+        console.log('mediaQuery listener', e)
+      })
+
+      if (mediaQuery.matches) {
+        this.$nextTick(() => this.$vuetify.theme.dark = true)
+      }
+    }
   },
   computed: {
     ...mapState([
@@ -159,6 +181,9 @@ export default {
       }, 
       default: [],
     },
+  },
+  mounted() {
+    this.themeInit()
   }
 }
 </script>

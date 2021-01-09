@@ -5,28 +5,22 @@
     <v-container fluid v-if="RaceID">
       <v-row justify="start">
         <v-col cols="12">
-          <v-btn class="overline d-inline-block" elevation="1" :color="showResearches ? 'pink lighten-4' : 'light'" small tile dense borderless @click="showResearches = !showResearches">Research</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="showProductions ? 'light-green lighten-2' : 'light'" small tile dense borderless @click="showProductions = !showProductions">Production</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="showShipyards ? 'purple accent-1' : 'light'" small tile dense borderless @click="showShipyards = !showShipyards">Shipyard</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="showShips ? 'blue lighten-4' : 'light'" small tile dense borderless @click="showShips = !showShips">Ship</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="showTrainings ? 'teal accent-3' : 'light'" small tile dense borderless @click="showTrainings = !showTrainings">Training</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="showQueues ? 'yellow lighten-1' : 'light'" small tile dense borderless @click="toggleQueues">Show Queues</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" color="deep-purple accent-2" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips" @click="restoreTypes">All</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Research', showResearches)" small tile dense borderless @click="showResearches = !showResearches">Research</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Production', showProductions)" small tile dense borderless @click="showProductions = !showProductions">Production</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Shipyard', showShipyards)" small tile dense borderless @click="showShipyards = !showShipyards">Shipyard</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Ship', showShips)" small tile dense borderless @click="showShips = !showShips">Ship</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Training', showTrainings)" small tile dense borderless @click="showTrainings = !showTrainings">Training</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Queue', showQueues)" small tile dense borderless @click="toggleQueues">Show Queues</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" color="typeColor()" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips || !showShipyards || !showTrainings" @click="restoreTypes">All</v-btn>
         </v-col>
       </v-row>
       <v-row justify="start">
         <v-col cols="12">
           <v-data-table ref="tablle" :headers="headers" :items="tasks" item-key="ID" class="elevation-1" sort-by="RemainingDays" disable-pagination hide-default-footer>
-            <template v-slot:item.TaskType="{ item }">
-              <span class="py-1 px-2 overline font-weight-medium elevation-1" :class="{
-                'pink lighten-4': item.TaskType === 'Research',
-                'light-green lighten-2': item.TaskType === 'Production',
-                'purple accent-1': item.TaskType === 'Shipyard',
-                'blue lighten-4': item.TaskType === 'Ship',
-                'teal accent-3': item.TaskType === 'Training',
-              }">{{ item.TaskType }}</span>
+            <template v-slot:[`item.TaskType`]="{ item }">
+              <span class="py-1 px-2 overline font-weight-medium elevation-1" :class="typeColor(item.TaskType)">{{ item.TaskType }}</span>
             </template>
-            <template v-slot:item.Name="{ item }">
+            <template v-slot:[`item.Name`]="{ item }">
               <span v-if="item.TaskType === 'Production'">
                 {{ roundToDecimal(item.Amount, 1) }}x
               </span>
@@ -38,24 +32,24 @@
               <span v-if="item.UpgradeTaskType === 7">to {{ item.ClassName }}</span>
               <span v-if="item.UpgradeTaskType === 8">to {{ item.CapacityTarget }}</span>
             </template>
-            <template v-slot:item.AnnualProduction="{ item }">
+            <template v-slot:[`item.AnnualProduction`]="{ item }">
               <span v-if="item.TaskType === 'Research'">
-                {{ Math.round(item.AnnualProduction) }} RP / {{ item.Facilities }} Labs
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} RP / {{ item.Facilities }} Labs
               </span>
               <span v-if="item.TaskType === 'Production'">
-                {{ Math.round(item.AnnualProduction) }} BP / {{ item.Percentage }}%
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP / {{ item.Percentage }}%
               </span>
               <span v-if="item.TaskType === 'Ship'">
-                {{ Math.round(item.AnnualProduction) }} BP
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP
               </span>
               <span v-if="item.TaskType === 'Shipyard'">
-                {{ Math.round(item.AnnualProduction) }} Mod Rate
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} Mod Rate
               </span>
               <span v-if="item.TaskType === 'Training'">
-                {{ Math.round(item.AnnualProduction) }} BP
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP
               </span>
             </template>
-            <template v-slot:item.RemainingDays="{ item }">
+            <template v-slot:[`item.RemainingDays`]="{ item }">
               <span :class="{
                 'red--text font-weight-bold': item.Queue,
                 'orange--text font-weight-bold': item.Paused,
@@ -142,6 +136,36 @@ export default {
 
     toggleQueues() {
       this.showQueues = !this.showQueues
+    },
+
+    typeColor(type, active = true) {
+      if (!active) {
+        return 'light'
+      }
+
+      switch(type) {
+        case 'Research': {
+          return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
+        }
+        case 'Production': {
+          return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
+        }
+        case 'Shipyard': {
+          return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
+        }
+        case 'Ship': {
+          return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
+        }
+        case 'Training': {
+          return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
+        }
+        case 'Queue': {
+          return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
+        }
+        default: {
+          return 'deep-purple accent-2'
+        }
+      }
     },
 
     populationConstructionCapacity(populationId) {
@@ -311,7 +335,7 @@ export default {
 
           TotalAnnualProduction,
           AnnualProduction: TotalAnnualProduction,
-          RemainingDays: ship.RemainingProduction / (TotalAnnualProduction / 365) // * (ship.Queue ? 50000 : 1) // No queues in shipyards
+          RemainingDays: ship.RemainingProduction / (TotalAnnualProduction / 365) // * (ship.Queue ? 50000 : 1) // No queues in shipyards!
         }
       })
     },
@@ -428,7 +452,7 @@ export default {
           return items
         })
 
-        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, VIR_ResearchBonus.CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_Anomalies.ResearchField as AnomalyField, FCT_Anomalies.ResearchBonus as AnomalyBonus, case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus, COALESCE(case when FCT_Anomalies.ResearchField = FCT_ResearchProject.ResSpecID then FCT_Anomalies.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_Anomalies on FCT_SystemBody.SystemBodyID = FCT_Anomalies.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, VIR_ResearchBonus.CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([ items ]) => {
           console.log('Research projects', items)
 
           return items

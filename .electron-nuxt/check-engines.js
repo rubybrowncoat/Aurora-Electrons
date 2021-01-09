@@ -78,11 +78,11 @@ function compare(a, b) {
   return 0;
 }
 
-try{
+try {
   checkNodeVersion();
   disallowNpm();
-  process.exit(0);
-}catch (e) {
+  // https://stackoverflow.com/questions/6398196/detect-if-called-through-require-or-directly-by-command-line
+  if (require.main === module) process.exit(0);
+} catch (e) {
   process.exit(1);
 }
-

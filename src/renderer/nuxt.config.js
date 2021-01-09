@@ -4,11 +4,13 @@
  * @link {https://nuxtjs.org/guide/configuration/}
  */
 
+const { resolve } = require('path')
 
 module.exports = {
-  mode: 'spa', // or 'universal'
+  ssr: false,
   head: {
-    title: 'Aurora Electrons'
+    title: 'Aurora Electrons',
+    meta: [{ charset: "utf-8" }]
   },
   loading: false,
   router: {
