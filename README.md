@@ -2,7 +2,7 @@
 
 Aurora electron companion applications.
 
-> Aurora Production Recap
+> Aurora production recap and other goodies
 
 #### Build Setup
 
