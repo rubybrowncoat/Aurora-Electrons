@@ -6,6 +6,8 @@ export const state = () => {
 
     GameID: null,
     RaceID: null,
+
+    GameTime: 0,
   }
 }
 
@@ -18,6 +20,9 @@ export const getters = {
   },
   RaceID(state) {
     return state.RaceID
+  },
+  GameTime(state) {
+    return state.GameTime
   },
 }
 
@@ -33,7 +38,10 @@ export const mutations = {
     state.RaceID = RaceID
 
     console.log(state)
-  }
+  },
+  setGameTime(state, { GameTime }) {
+    state.GameTime = GameTime
+  },
 }
 
 export const actions = {
@@ -45,6 +53,7 @@ export const actions = {
 
   changeGame({ commit }, { game, race = null }) {
     commit('setGame', game)
+    commit('setGameTime', game)
 
     if (race) {
       console.log('race', race)

@@ -1,5 +1,7 @@
 import Sequelize, { Model } from 'sequelize'
 
+import dayjs from 'dayjs'
+
 export const resetDatabase = (storagePath) => {
   console.log('## RESETTING ON', storagePath)
 
@@ -16,6 +18,19 @@ export const resetDatabase = (storagePath) => {
     },
     DefaultRaceID: Sequelize.INTEGER,
     GameName: Sequelize.STRING,
+
+    StartYear: Sequelize.INTEGER,
+    GameTime: Sequelize.FLOAT,
+
+    DateTime: {
+      type: Sequelize.VIRTUAL,
+      get() {
+        return dayjs(0).set('year', this.StartYear).set('hour', 0).add(this.GameTime, 'second').format('YYYY-MM-DD HH:mm:ss')
+      },
+      set(value) {
+        throw new Error('Do not try to set the `Date` value!')
+      }
+    }
   }, {
     sequelize,
     modelName: 'game',

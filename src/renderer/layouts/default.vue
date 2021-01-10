@@ -22,9 +22,12 @@
         <template v-for="game in games">
           <v-tooltip :key="game.GameID" right>
             <template #activator="{ on }">
-              <v-list-group prepend-icon="domain" :value="game.GameID == GameID" :title="game.GameName" v-if="game.Races.length > 1" v-on="on">
-                <template #activator>
-                  <v-list-item-title>{{ game.GameName }}</v-list-item-title>
+              <v-list-group prepend-icon="domain" append-icon :value="game.GameID == GameID" :title="game.GameName" v-if="game.Races.length > 1" v-on="on">
+                <template v-slot:activator>
+                  <v-list-item-content>
+                    <v-list-item-title>{{ game.GameName }}</v-list-item-title>
+                    <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
+                  </v-list-item-content>
                 </template>
                 <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID == RaceID" @click="changeGame({ game, race })">
                   <v-list-item-icon><v-icon>people</v-icon></v-list-item-icon>
@@ -35,9 +38,10 @@
               </v-list-group>
               <v-list-item :input-value="game.GameID == GameID" @click="changeGame({ game })" v-else v-on="on">
                 <v-list-item-icon><v-icon>domain</v-icon></v-list-item-icon>
-                <v-list-item-title>
-                  {{ game.GameName }}
-                </v-list-item-title>
+                <v-list-item-content>
+                  <v-list-item-title>{{ game.GameName }}</v-list-item-title>
+                  <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
+                </v-list-item-content>
               </v-list-item>
             </template>
             <span>{{ game.GameName }}</span>
@@ -63,7 +67,7 @@
           <v-tab to="/information" @change="title = 'Empire Information'">Information</v-tab>
           <!-- <v-tab to="/engines" @change="title = 'Ship Engines'">Engine</v-tab> -->
           <v-tab to="/technologies" @change="title = 'Technology Tree'">Tech Tree</v-tab>
-          <v-tab to="/map" @change="title = 'Galaxy Map'">Map</v-tab>
+          <v-tab to="/map" @change="title = 'Galaxy Map'">Map (WIP)</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>

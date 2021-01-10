@@ -9,7 +9,7 @@ const windowsOS = {
 
   nsis: {
     differentialPackage: true
-  }
+  },
 }
 
 const linuxOS = {

@@ -7,7 +7,7 @@
       <v-row justify="start">
         <v-col cols="12">
           <v-btn-toggle class="d-block" v-model="selectedFields" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>
-            <v-btn v-for="field in fields" :key="field.ResearchFieldID" small :value="field.ResearchFieldID">
+            <v-btn v-for="field in fields" :key="field.ResearchFieldID" :value="field.ResearchFieldID">
               <v-sheet v-if="field.Abbreviation" class="d-inline-block px-2 mr-2 font-weight-bold overline" :elevation="1" dark :color="makeColor(field.Abbreviation)">{{ field.Abbreviation }}</v-sheet>
               {{ field.FieldName }}
             </v-btn>
