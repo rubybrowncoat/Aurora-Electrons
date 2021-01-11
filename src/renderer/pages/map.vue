@@ -2,7 +2,30 @@
   <div class="fill-height">
     <div v-if="!RaceID">Select a race from the left-side menu.</div>
 
-    <div id="graph"></div>
+    <div id="graph-container" style="position: absolute; top: 12px; left: 12px; width: calc(100% - 24px); height: calc(100vh - 112px - 44px - 24px); z-index: 0;">
+      <div id="graph"></div>
+    </div>
+
+    <v-container fluid>
+      <v-row justify="start">
+        <v-col cols="4">
+          <v-select
+            :background-color="$vuetify.theme.dark ? 'rgba(5, 5, 10, 0.75)' : 'rgba(250, 250, 255, 0.85)'"
+
+            v-model="focusSystemId"
+            :items="sortedNodes"
+
+            item-text="name"
+            item-value="id"
+
+            label="Highlighted System"
+            
+            dense
+            outlined
+          ></v-select>
+        </v-col>
+      </v-row>
+    </v-container>
   </div>
 </template>
 
@@ -16,7 +39,10 @@ import romanum from 'romanum'
 import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
 
+import colors from 'vuetify/lib/util/colors'
+
 import ForceGraph from 'force-graph'
+import * as d3Force from 'd3-force'
 
 const secondsPerYear = 31536000
 
@@ -28,6 +54,8 @@ export default {
 
       distanceMultiplier: 1000000000,
       distance: 1,
+
+      focusSystemId: null,
 
       //
 
@@ -58,6 +86,27 @@ export default {
       'GameID',
       'RaceID',
     ]),
+
+    sortedNodes() {
+      const sortedNodes = [...this.mapElements.nodes]
+
+      sortedNodes.sort((alpha, beta) => {
+        if (alpha.id === this.focusSystemId) {
+          return 1
+        }
+
+        if (beta.id === this.focusSystemId) {
+          return -1
+        }
+
+        return alpha.name.localeCompare(beta.name)
+      })
+
+      return sortedNodes
+    },
+    sortedLinks() {
+      return [...this.mapElements.links]
+    },
 
     multipliedDistance() {
       return this.distance * this.distanceMultiplier
@@ -92,7 +141,9 @@ export default {
           return items.map(item => ({
             id: String(item.SystemID),
             name: item.Name,
-            neighbors: [],
+
+            neighbors: new Set(),
+            connections: new Set(),
           }))
         })
 
@@ -104,15 +155,28 @@ export default {
             const destination = nodes.find(node => node.id == item.DestinationID)
 
             if (origin && destination) {
-              aggregate.push({
-                id: String(item.WarpPointID),
-                source: String(item.SystemID),
-                target: String(item.DestinationID),
-                
-                gated: !!item.JumpGateStrength,
-              })
+              let extant = aggregate.find(link => link.target === origin.id && link.source === destination.id)
 
-              origin.neighbors.push(destination)
+              if (extant) {
+                extant.tsgated = !!item.JumpGateStrength
+              } else {
+                extant = {
+                  id: String(item.WarpPointID),
+                  source: String(item.SystemID),
+                  target: String(item.DestinationID),
+
+                  sourceName: origin.name,
+                  targetName: destination.name,
+                  
+                  stgated: !!item.JumpGateStrength,
+                  tsgated: false,
+                }
+
+                aggregate.push(extant)
+              }
+
+              origin.connections.add(extant)
+              origin.neighbors.add(destination)
             }
 
             return aggregate
@@ -134,32 +198,83 @@ export default {
     mapElements: {
       immediate: true,
       handler(data) {
-        console.log('data', data, this.graph)
-
-        if (data && this.graph) {   
-          console.log('ABDO')
-          this.graph.graphData(data)
+        if (data && this.graph) { 
+          this.graph.graphData({
+            nodes: this.sortedNodes,
+            links: this.sortedLinks,
+          })
         }
       }
     },
+    focusSystemId: {
+      handler(id) {
+        const selectedNode = this.sortedNodes.find(node => node.id === id)
+
+        this.graph.graphData({
+          nodes: this.sortedNodes,
+          links: this.sortedLinks,
+        })
+
+        this.graph.zoom(3, 600)
+        this.graph.centerAt(selectedNode.x, selectedNode.y, 400)
+      }
+    }
   },
   mounted() {
     const element = document.getElementById('graph')
     
     const highlightNodes = new Set()
+    const highlightLinks = new Set()
 
     this.graph = ForceGraph()(element)
-      .nodeRelSize(8)
+      .cooldownTime(Infinity)
+      .nodeVal(node => node.id === this.focusSystemId ? 12 : 8)
       .nodeLabel('')
-      .linkColor(() => this.$vuetify.theme.dark ? 'rgba(240, 240, 240, 0.8)' : 'rgba(18, 18, 18, 0.8)')
-      .linkWidth(3)
+      .linkColor(link => highlightLinks.has(link)
+        ? colors.cyan.lighten3
+        : ( link.stgated && link.tsgated 
+          ? colors.green.base 
+          : ( link.stgated || link.tsgated 
+            ? colors.orange.base
+            : colors.red.base
+          )
+        )
+      )
+      .linkWidth(link => highlightLinks.has(link) ? 8 : ( link.stgated && link.tsgated ? 6 : ( link.stgated || link.tsgated ? 4 : 2 ) ) )
+      .linkCanvasObject((link, ctx, globalScale) => {
+        const label = highlightLinks.has(link) ? '' : ( link.stgated && link.tsgated ? '' : ( link.stgated ? `Gated from ${link.sourceName}` : ( link.tsgated ? `Gated from ${link.targetName}` : '' ) ) )
+
+        if (label) {
+          const fontSize = 10 / globalScale
+          ctx.font = `${fontSize}px Sans-Serif`
+          
+          const textPos = Object.assign(...['x', 'y'].map(c => ({
+            [c]: link.source[c] + (link.target[c] - link.source[c]) / 2 // calc middle point
+          })))
+
+          const textWidth = ctx.measureText(label).width
+          const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
+
+          ctx.fillStyle = this.$vuetify.theme.dark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)' 
+          ctx.fillRect(textPos.x - bckgDimensions[0] / 2, textPos.y - bckgDimensions[1] / 2, ...bckgDimensions);
+
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = this.$vuetify.theme.dark ? 'white' : 'black'
+          ctx.fillText(label, textPos.x, textPos.y)
+        }
+      })
+      .linkCanvasObjectMode(() => 'after')
       .enableNodeDrag(true)
       .onNodeHover(node => {
         highlightNodes.clear()
+        highlightLinks.clear()
 
         if (node) {
           highlightNodes.add(node)
+
           node.neighbors.forEach(neighbor => highlightNodes.add(neighbor))
+          node.connections.forEach(connection => highlightLinks.add(connection))
 
           element.style.cursor = '-webkit-grab'
         } else {
@@ -167,37 +282,50 @@ export default {
         }
       })
       .onNodeClick(node => {
-        this.graph.centerAt(node.x, node.y, 400)
         this.graph.zoom(6, 600)
+        this.graph.centerAt(node.x, node.y, 400)
       })
-      .onNodeDragEnd(node => {
-        node.fx = node.x
-        node.fy = node.y
+      .onNodeDrag(node => {
+        highlightNodes.clear()
+
+        if (node) {
+          highlightNodes.add(node)
+        }
       })
+      // .onNodeDragEnd(node => {
+      //   node.fx = node.x
+      //   node.fy = node.y
+      // })
       .nodeCanvasObject((node, ctx, globalScale) => {
         const label = node.name
-        const fontSize = 12 / globalScale
+        const fontSize = ( node.id === this.focusSystemId ? 22 : 12 ) / globalScale
 
-        ctx.font = `${fontSize}px Sans-Serif`
+        ctx.font = `${this.focusSystemId === node.id ? 'bold ' : ''}${fontSize}px Sans-Serif`
 
         const textWidth = ctx.measureText(label).width
         const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
 
-        ctx.fillStyle = highlightNodes.has(node) ? 'red' : ( this.$vuetify.theme.dark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)' )
+        ctx.fillStyle = highlightNodes.has(node) ? colors.cyan.lighten2 : ( this.$vuetify.theme.dark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)' )
         ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
 
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        ctx.fillStyle = highlightNodes.has(node) ? 'white' : ( this.$vuetify.theme.dark ? 'black' : 'white' )
+        ctx.fillStyle = highlightNodes.has(node) ? colors.shades.black : ( this.focusSystemId === node.id ? colors.yellow.darken3 : ( this.$vuetify.theme.dark ? 'black' : 'white' ) )
         ctx.fillText(label, node.x, node.y)
       })
-      .linkDirectionalArrowLength(link => link.gated ? 6 : 0)
-      .linkDirectionalArrowRelPos(0)
-      .graphData(this.mapElements)
+      .d3Force("charge", d3Force.forceManyBody().strength(-50))
+      .d3Force('collide', d3Force.forceCollide(8))
+      .d3Force("center", d3Force.forceCenter(0,0))
+      .d3Force("manyBody", d3Force.forceManyBody().strength(-50))
+      .graphData({
+        nodes: this.sortedNodes,
+        links: this.sortedLinks,
+      })
 
     const linkForce = this.graph
       .d3Force('link')
-      .distance(link => link.gated ? 30 : 60)
+      .distance(link => link.stgated && link.tsgated ? 20 : ( link.stgated || link.tsgated ? 50 : 80 ))
+      .strength(1)
 
     window.addEventListener('resize', this.resizeGraph)
 
@@ -206,8 +334,10 @@ export default {
   beforeDestroy() {
     window.removeEventListener('resize', this.resizeGraph)
     
-    this.graph._destructor()
-    this.graph = null
+    if (this.graph) {
+      this.graph._destructor()
+      this.graph = null
+    }
   }
 }
 </script>
