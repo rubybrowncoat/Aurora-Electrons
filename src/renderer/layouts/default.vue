@@ -73,7 +73,7 @@
     </v-app-bar>
 
     <!-- Sizes your content based upon application components -->
-    <v-main>
+    <v-content>
       <v-snackbar v-model="snackbarStatus" :timeout="2000" :color="snackbar.color">
         {{ snackbar.text }}
         <v-btn dark text @click="snackbarStatus = false">
@@ -85,7 +85,7 @@
       <v-container fluid>
         <nuxt />
       </v-container>
-    </v-main>
+    </v-content>
 
     <v-footer app>
       <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>

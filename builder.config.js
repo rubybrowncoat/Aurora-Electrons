@@ -10,6 +10,10 @@ const windowsOS = {
   nsis: {
     differentialPackage: true
   },
+
+  portable: {
+    splashImage: "splash.bmp",
+  },
 }
 
 const linuxOS = {
