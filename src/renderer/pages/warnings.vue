@@ -92,7 +92,7 @@
                       <v-list-item v-for="ship in armorDamagedShips" :key="ship.ShipID">
                         <v-list-item-content>
                           <v-list-item-title>{{ ship.FleetName }} &mdash; {{ ship.ShipName }}</v-list-item-title>
-                          <v-list-item-subtitle>{{ ship.ArmorDamage }} Damage</v-list-item-subtitle>
+                          <v-list-item-subtitle>{{ ship.ArmorDamage }} damage - Thinnest remaining layer: <span :class="`${levelColor(ship.ThinnestLayer / ship.ArmourThickness)}--text`">{{ ship.ThinnestLayer }}</span> </v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -499,6 +499,7 @@ export default {
   },
   computed: {
     ...mapGetters([
+      'config',
       'database',
       
       'GameID',
@@ -622,7 +623,7 @@ export default {
           return []
         }
 
-        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, SUM(Damage) as ArmorDamage from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_ArmourDamage on FCT_Ship.ShipID = FCT_ArmourDamage.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_Ship.ShipID having SUM(Damage) > 0 order by ArmorDamage desc`).then(([ items ]) => {
+        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, SUM(FCT_ArmourDamage.Damage) as ArmorDamage,FCT_ShipClass.ArmourThickness, MIN(FCT_ShipClass.ArmourThickness - FCT_ArmourDamage.Damage) as ThinnestLayer from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID join FCT_ArmourDamage on FCT_Ship.ShipID = FCT_ArmourDamage.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_Ship.ShipID having SUM(FCT_ArmourDamage.Damage) > 0 order by ArmorDamage desc`).then(([ items ]) => {
           console.log('Armor Damaged Ships', items)
 
           return items
@@ -670,10 +671,14 @@ export default {
           return []
         }
 
-        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Ship.CurrentMaintSupplies, FCT_ShipClass.MaintSupplies, FCT_Ship.CurrentMaintSupplies / FCT_ShipClass.MaintSupplies as SupplyLevel from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and SupplyLevel < 1 and FCT_ShipClass.MaintSupplies > 0 ORDER BY SupplyLevel ASC`).then(([ items ]) => {
+        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ShipClassID, FCT_Fleet.FleetName, FCT_Ship.CurrentMaintSupplies, FCT_ShipClass.MaintSupplies, FCT_Ship.CurrentMaintSupplies / FCT_ShipClass.MaintSupplies as SupplyLevel from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and SupplyLevel < 1 and FCT_ShipClass.MaintSupplies > 0 ORDER BY SupplyLevel ASC`).then(([ items ]) => {
           console.log('Maintenanceless Ships', items)
 
-          return items
+          return items.filter(item => {
+            const exclusions = this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceExclusions`, [])
+
+            return !exclusions.includes(item.ShipClassID) && item.SupplyLevel * 100 <= this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceThreshold`, 100)
+          })
         })
 
         return ships

@@ -57,14 +57,14 @@
             </v-expansion-panels>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple>
+            <v-select v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
               <template v-slot:prepend-item>
                 <v-list-item
                   ripple
                   @click="toggleSystems"
                 >
                   <v-list-item-action>
-                    <v-icon :color="systems.length > 0 ? 'indigo darken-4' : ''">{{ systems.length > 0 
+                    <v-icon>{{ systems.length > 0 
                       ? systems.length == systemNames.length 
                         ? 'sentiment_very_satisfied'
                         : 'sentiment_satisfied'

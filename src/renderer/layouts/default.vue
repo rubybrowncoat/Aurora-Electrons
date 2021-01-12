@@ -53,6 +53,9 @@
     <v-app-bar app>
       <v-toolbar-title>{{ title }}</v-toolbar-title>
       <v-spacer></v-spacer>
+      <v-btn icon to="/settings" @click="title = 'Settings'">
+        <v-icon>mdi-wrench</v-icon>
+      </v-btn>
       <v-btn icon v-if="$vuetify.theme.dark" @click="$vuetify.theme.dark = false">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
@@ -60,14 +63,14 @@
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
       <template #extension>
-        <v-tabs>
-          <v-tab to="/" @change="title = 'Production Recap'">Production</v-tab>
-          <v-tab to="/warnings" @change="title = 'Warnings'">Warnings</v-tab>
-          <v-tab to="/minerals" @change="title = 'Mineral Breakdown'">Minerals</v-tab>
-          <v-tab to="/information" @change="title = 'Empire Information'">Information</v-tab>
-          <!-- <v-tab to="/engines" @change="title = 'Ship Engines'">Engine</v-tab> -->
-          <v-tab to="/technologies" @change="title = 'Technology Tree'">Tech Tree</v-tab>
-          <v-tab to="/map" @change="title = 'Galaxy Map'">Map (WIP)</v-tab>
+        <v-tabs v-model="tab" show-arrows center-active :hide-slider="title === 'Settings'">
+          <v-tab to="/" @change="title = 'Production Recap'" nuxt>Production</v-tab>
+          <v-tab to="/warnings" @change="title = 'Warnings'" nuxt>Warnings</v-tab>
+          <v-tab to="/minerals" @change="title = 'Mineral Breakdown'" nuxt>Minerals</v-tab>
+          <v-tab to="/information" @change="title = 'Empire Information'" nuxt>Information</v-tab>
+          <!-- <v-tab to="/engines" @change="title = 'Ship Engines'" nuxt>Engine</v-tab> -->
+          <v-tab to="/technologies" @change="title = 'Technology Tree'" nuxt>Tech Tree</v-tab>
+          <v-tab to="/map" @change="title = 'Galaxy Map'" nuxt>Map (WIP)</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
@@ -120,6 +123,8 @@ export default {
       drawer: true,
       mini: false,
 
+      tab: null,
+
       title: 'Production Recap',
     }
   },
@@ -151,6 +156,7 @@ export default {
     ]),
 
     ...mapGetters([
+      'config',
       'database',
 
       'GameID',

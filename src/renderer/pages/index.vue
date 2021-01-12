@@ -555,10 +555,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.recap-container {
-  //
-}
-
 .panel {
   margin-bottom: 20px;
 }

@@ -9,7 +9,7 @@
     <v-container fluid>
       <v-row justify="start">
         <v-col cols="4">
-          <v-select
+          <v-autocomplete
             :background-color="$vuetify.theme.dark ? 'rgba(5, 5, 10, 0.75)' : 'rgba(250, 250, 255, 0.85)'"
 
             v-model="focusSystemId"
@@ -20,9 +20,13 @@
 
             label="Highlighted System"
             
+            auto-select-first
+            hide-selected
+            
             dense
+            clearable
             outlined
-          ></v-select>
+          ></v-autocomplete>
         </v-col>
       </v-row>
     </v-container>
@@ -208,15 +212,20 @@ export default {
     },
     focusSystemId: {
       handler(id) {
-        const selectedNode = this.sortedNodes.find(node => node.id === id)
+        if (id) {
+          const selectedNode = this.sortedNodes.find(node => node.id === id)
 
-        this.graph.graphData({
-          nodes: this.sortedNodes,
-          links: this.sortedLinks,
-        })
+          this.graph.graphData({
+            nodes: this.sortedNodes,
+            links: this.sortedLinks,
+          })
 
-        this.graph.zoom(3, 600)
-        this.graph.centerAt(selectedNode.x, selectedNode.y, 400)
+          this.graph.centerAt(selectedNode.x, selectedNode.y, 400)
+          this.graph.zoom(3, 600)
+        } else {
+          this.graph.centerAt(0, 0, 400)
+          this.graph.zoom(1, 600)
+        }
       }
     }
   },

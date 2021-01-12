@@ -1,7 +1,12 @@
 import { resetDatabase } from '../../utilities/database'
 
+import Config from 'electron-store'
+
+const configConfiguration = {}
+
 export const state = () => {
   return {
+    config: new Config(configConfiguration),
     database: null,
 
     GameID: null,
@@ -12,9 +17,13 @@ export const state = () => {
 }
 
 export const getters = {
+  config(state) {
+    return state.config
+  },
   database(state) {
     return state.database
   },
+
   GameID(state) {
     return state.GameID
   },
@@ -27,6 +36,9 @@ export const getters = {
 }
 
 export const mutations = {
+  replaceConfig(state, { config }) {
+    state.config = config
+  },
   replaceDatabase(state, { database }) {
     state.database = database
   },
@@ -45,6 +57,12 @@ export const mutations = {
 }
 
 export const actions = {
+  reinstantiateConfig({ commit }) {
+    commit('replaceConfig', {
+      config: new Config(configConfiguration),
+    })
+  },
+
   renew({ commit }, { storagePath }) {
     commit('replaceDatabase', {
       database: resetDatabase(storagePath)

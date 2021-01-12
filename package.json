@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Aurora Electrons",
   "repository": "https://github.com/rubybrowncoat/Aurora-Electrons",
   "main": "./dist/main/index.js",
@@ -60,6 +60,7 @@
     "d3-force": "^2.1.1",
     "dayjs": "^1.10.3",
     "electron-root-path": "^1.0.16",
+    "electron-store": "^6.0.1",
     "force-graph": "1.34.1",
     "romanum": "^1.0.1",
     "sequelize": "^6.3.5",
