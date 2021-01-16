@@ -67,8 +67,8 @@
           <v-tab to="/" @change="title = 'Production Recap'" nuxt>Production</v-tab>
           <v-tab to="/warnings" @change="title = 'Warnings'" nuxt>Warnings</v-tab>
           <v-tab to="/minerals" @change="title = 'Mineral Breakdown'" nuxt>Minerals</v-tab>
+          <v-tab to="/habitability" @change="title = 'Habitability Breakdown'" nuxt>Habitability</v-tab>
           <v-tab to="/information" @change="title = 'Empire Information'" nuxt>Information</v-tab>
-          <!-- <v-tab to="/engines" @change="title = 'Ship Engines'" nuxt>Engine</v-tab> -->
           <v-tab to="/technologies" @change="title = 'Technology Tree'" nuxt>Tech Tree</v-tab>
           <v-tab to="/map" @change="title = 'Galaxy Map'" nuxt>Map (WIP)</v-tab>
         </v-tabs>

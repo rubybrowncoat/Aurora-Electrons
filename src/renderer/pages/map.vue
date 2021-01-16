@@ -139,12 +139,15 @@ export default {
           }
         }
 
-        const nodes = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const nodes = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies from FCT_RaceSysSurvey left join FCT_SystemBody on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_RaceSysSurvey.RaceID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} group by FCT_RaceSysSurvey.SystemID`).then(([ items ]) => {
           console.log('Systems', items)
 
           return items.map(item => ({
             id: String(item.SystemID),
             name: item.Name,
+
+            percentage: item.SurveyedBodies / item.SystemBodies,
+            empty: item.SystemBodies === 0,
 
             neighbors: new Set(),
             connections: new Set(),
@@ -237,7 +240,7 @@ export default {
 
     this.graph = ForceGraph()(element)
       .cooldownTime(Infinity)
-      .nodeVal(node => node.id === this.focusSystemId ? 12 : 8)
+      .nodeVal(node => node.id === this.focusSystemId ? 10 : 2)
       .nodeLabel('')
       .linkColor(link => highlightLinks.has(link)
         ? colors.cyan.lighten3
@@ -314,6 +317,27 @@ export default {
         const textWidth = ctx.measureText(label).width
         const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
 
+        // Fill with gradient
+        ctx.lineWidth = node.id === this.focusSystemId ? 4 : 2
+        if (!node.empty) {
+          ctx.strokeStyle = node.percentage === 1 ? 'lime' : 'green'
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI * node.percentage)
+          ctx.stroke()
+
+          if (node.percentage < 1) {
+            ctx.strokeStyle = 'darkred'
+            ctx.beginPath()
+            ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 2 * Math.PI * node.percentage, 2 * Math.PI)
+            ctx.stroke()
+          }
+        } else {
+          ctx.strokeStyle = 'gray'
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI)
+          ctx.stroke()
+        }
+
         ctx.fillStyle = highlightNodes.has(node) ? colors.cyan.lighten2 : ( this.$vuetify.theme.dark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)' )
         ctx.fillRect(node.x - bckgDimensions[0] / 2, node.y - bckgDimensions[1] / 2, ...bckgDimensions);
 
@@ -322,6 +346,7 @@ export default {
         ctx.fillStyle = highlightNodes.has(node) ? colors.shades.black : ( this.focusSystemId === node.id ? colors.yellow.darken3 : ( this.$vuetify.theme.dark ? 'black' : 'white' ) )
         ctx.fillText(label, node.x, node.y)
       })
+      .nodeCanvasObjectMode(() => 'after')
       .d3Force("charge", d3Force.forceManyBody().strength(-50))
       .d3Force('collide', d3Force.forceCollide(8))
       .d3Force("center", d3Force.forceCenter(0,0))

@@ -97,12 +97,12 @@
                 <v-tooltip top>
                   <template #activator="{ on }">
                     <span :class="{
-                      'green--text text--lighten-1 font-weight-bold title': item.Potential >= 5 * materialCount,
-                      'red--text text--darken-3 font-weight-bold': item.Potential <= 2 * materialCount,
-                    }" v-on="on">{{ Math.round(item.Potential / materialCount) }}</span>
+                      'green--text text--lighten-1 font-weight-bold title': item.Potential >= Math.PI / 2 * materialCount * 0.75,
+                      'red--text text--darken-3 font-weight-bold': item.Potential <= Math.PI / 2 * materialCount * 0.3,
+                    }" v-on="on">{{ roundToDecimal(( item.Potential * 10 ) / ( Math.PI / 2 * materialCount )) }}</span>
                   </template>
                   
-                  <span>{{ item.Potential.toFixed(3) }}</span>
+                  <span>{{ roundToDecimal(item.Potential, 3) }}</span>
                 </v-tooltip>
               </template>
               <template v-for="material in materials" v-slot:[`item.${material}`]="{ item }">
@@ -110,7 +110,7 @@
                   'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
                   'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
                   'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
-                }" :key="material" v-if="item[material]">{{ separatedNumber(Math.round(item[material].Amount)) }} ({{ item[material].Accessibility }})</span>
+                }" :key="material" v-if="item[material]">{{ separatedNumber(roundToDecimal(item[material].Amount)) }} ({{ item[material].Accessibility }})</span>
               </template>
               <template v-slot:[`item.TotalAmount`]="{ item }">
                 {{ separatedNumber(Math.round(item.TotalAmount)) }}
@@ -131,7 +131,7 @@ import { mapGetters } from 'vuex'
 import romanum from 'romanum'
 
 import { convertDisplayBase } from '../../utilities/generic'
-import { separatedNumber } from '../../utilities/math'
+import { separatedNumber, roundToDecimal } from '../../utilities/math'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -203,6 +203,9 @@ export default {
     }
   },
   methods: {
+    separatedNumber,
+    roundToDecimal,
+    
     addFilter() {
       this.filters.push({
         ...baseFilter,
@@ -220,10 +223,6 @@ export default {
       }
 
       return insideAccessibilityRange
-    },
-
-    separatedNumber(number) {
-      return separatedNumber(number)
     },
 
     toggleSystems() {
@@ -311,7 +310,7 @@ export default {
           const material = body[materialId]
 
           if (material) {
-            potential += Math.pow(material.Accessibility, 2) * Math.log10(Math.pow(material.Amount, 2))
+            potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - (Math.PI / 2))) * ( 0.5 - ( Math.cos(Math.PI * material.Accessibility) / 2 )))
             amount += material.Amount
           }
 
@@ -340,7 +339,7 @@ export default {
         }
 
         return names
-      }, {})).map(system => system)
+      }, {}))
     },
 
     preFilteredBodyGroups() {

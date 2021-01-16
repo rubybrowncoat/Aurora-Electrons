@@ -48,6 +48,7 @@ export const resetDatabase = (storagePath) => {
     RaceTitle: Sequelize.STRING,
     NPR: Sequelize.BOOLEAN,
     ConventionalStart: Sequelize.BOOLEAN,
+    WealthPoints: Sequelize.FLOAT,
   }, {
     sequelize,
     modelName: 'race',
