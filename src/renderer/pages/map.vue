@@ -28,6 +28,19 @@
             outlined
           ></v-autocomplete>
         </v-col>
+        <v-col cols="8">
+          <v-btn-toggle v-model="systemViewOption" dense mandatory>
+            <v-btn>
+              <v-icon class="mr-1">mdi-satellite</v-icon>
+              Geological
+            </v-btn>
+
+            <v-btn>
+              <v-icon class="mr-1">mdi-link-box-variant</v-icon>
+              Gravitational
+            </v-btn>
+          </v-btn-toggle>
+        </v-col>
       </v-row>
     </v-container>
   </div>
@@ -60,6 +73,7 @@ export default {
       distance: 1,
 
       focusSystemId: null,
+      systemViewOption: 0,
 
       //
 
@@ -112,6 +126,13 @@ export default {
       return [...this.mapElements.links]
     },
 
+    showGeologicalSurvey() {
+      return this.systemViewOption === 0
+    },
+    showGravitationalSurvey() {
+      return this.systemViewOption === 1
+    },
+
     multipliedDistance() {
       return this.distance * this.distanceMultiplier
     },
@@ -139,22 +160,25 @@ export default {
           }
         }
 
-        const nodes = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies from FCT_RaceSysSurvey left join FCT_SystemBody on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_RaceSysSurvey.RaceID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} group by FCT_RaceSysSurvey.SystemID`).then(([ items ]) => {
+        const nodes = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations from FCT_RaceSysSurvey left join (select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as VIR_GeologicalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GeologicalSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, sum(CAST(CASE WHEN FCT_SurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyLocations, sum(CAST(CASE WHEN FCT_RaceSurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSurveyLocations from FCT_SurveyLocation left join FCT_RaceSurveyLocation on FCT_SurveyLocation.SystemID = FCT_RaceSurveyLocation.SystemID and FCT_SurveyLocation.LocationNumber = FCT_RaceSurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_GravitationalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GravitationalSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([ items ]) => {
           console.log('Systems', items)
 
           return items.map(item => ({
             id: String(item.SystemID),
             name: item.Name,
 
-            percentage: item.SurveyedBodies / item.SystemBodies,
-            empty: item.SystemBodies === 0,
+            gravPercentage: item.SurveyedSurveyLocations / item.SurveyLocations,
+            geoPercentage: item.SurveyedSystemBodies / item.SystemBodies,
+            empty: !item.SystemBodies,
 
             neighbors: new Set(),
             connections: new Set(),
+
+            unexploredConnections: 0,
           }))
         })
 
-        const links = await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID where FCT_JumpPoint.WPLink <> 0 and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const links = await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([ items ]) => {
           console.log('Jump Points', items)
 
           return items.reduce((aggregate, item) => {
@@ -184,6 +208,8 @@ export default {
 
               origin.connections.add(extant)
               origin.neighbors.add(destination)
+            } else if (origin) {
+              origin.unexploredConnections += 1
             }
 
             return aggregate
@@ -314,28 +340,48 @@ export default {
 
         ctx.font = `${this.focusSystemId === node.id ? 'bold ' : ''}${fontSize}px Sans-Serif`
 
+        // if (node.name === 'Bogue') debugger
+
         const textWidth = ctx.measureText(label).width
         const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
 
-        // Fill with gradient
-        ctx.lineWidth = node.id === this.focusSystemId ? 4 : 2
-        if (!node.empty) {
-          ctx.strokeStyle = node.percentage === 1 ? 'lime' : 'green'
-          ctx.beginPath()
-          ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI * node.percentage)
-          ctx.stroke()
+        // Geo / Grav Survey State
+        const showSurvey = this.showGeologicalSurvey || this.showGravitationalSurvey
+        if (showSurvey) {
+          const percentage = this.showGeologicalSurvey ? node.geoPercentage : node.gravPercentage
+          const empty = this.showGeologicalSurvey ? node.empty : false
 
-          if (node.percentage < 1) {
-            ctx.strokeStyle = 'darkred'
+          ctx.lineWidth = node.id === this.focusSystemId ? 4 : 2
+          if (!empty) {
+            ctx.strokeStyle = percentage === 1 ? 'lime' : 'green'
             ctx.beginPath()
-            ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 2 * Math.PI * node.percentage, 2 * Math.PI)
+            ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI * percentage)
+            ctx.stroke()
+
+            if (percentage < 1) {
+              ctx.strokeStyle = 'darkred'
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 2 * Math.PI * percentage, 2 * Math.PI)
+              ctx.stroke()
+            }
+          } else {
+            ctx.strokeStyle = 'gray'
+            ctx.beginPath()
+            ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI)
             ctx.stroke()
           }
-        } else {
-          ctx.strokeStyle = 'gray'
+        }
+
+        // Unexplored Jump Points
+        for (let iterator = 0; iterator < node.unexploredConnections; iterator += 1) {
+          const radius = (node.id === this.focusSystemId ? 12 : 3) + (showSurvey ? 3 : 1 ) + 3 + (3 * Math.floor(iterator / 15))
+          const xPos = node.x + radius * -Math.sin(-24 * iterator * Math.PI / 180)
+          const yPos = node.y + radius * -Math.cos(-24 * iterator * Math.PI / 180)
+
           ctx.beginPath()
-          ctx.arc(node.x, node.y, node.id === this.focusSystemId ? 14 : 6, 0, 2 * Math.PI)
-          ctx.stroke()
+          ctx.arc(xPos, yPos, 1, 0, 2 * Math.PI)
+          ctx.fillStyle = 'orange'
+          ctx.fill()
         }
 
         ctx.fillStyle = highlightNodes.has(node) ? colors.cyan.lighten2 : ( this.$vuetify.theme.dark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)' )
