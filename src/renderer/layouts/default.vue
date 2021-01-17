@@ -53,7 +53,7 @@
     <v-app-bar app>
       <v-toolbar-title>{{ title }}</v-toolbar-title>
       <v-spacer></v-spacer>
-      <v-btn icon to="/settings" @click="title = 'Settings'">
+      <v-btn icon to="/settings" nuxt>
         <v-icon>mdi-wrench</v-icon>
       </v-btn>
       <v-btn icon v-if="$vuetify.theme.dark" @click="$vuetify.theme.dark = false">
@@ -64,13 +64,13 @@
       </v-btn>
       <template #extension>
         <v-tabs v-model="tab" show-arrows center-active :hide-slider="title === 'Settings'">
-          <v-tab to="/" @change="title = 'Production Recap'" nuxt>Production</v-tab>
-          <v-tab to="/warnings" @change="title = 'Warnings'" nuxt>Warnings</v-tab>
-          <v-tab to="/minerals" @change="title = 'Mineral Breakdown'" nuxt>Minerals</v-tab>
-          <v-tab to="/habitability" @change="title = 'Habitability Breakdown'" nuxt>Habitability</v-tab>
-          <v-tab to="/information" @change="title = 'Empire Information'" nuxt>Information</v-tab>
-          <v-tab to="/technologies" @change="title = 'Technology Tree'" nuxt>Tech Tree</v-tab>
-          <v-tab to="/map" @change="title = 'Galaxy Map'" nuxt>Map (WIP)</v-tab>
+          <v-tab to="/" nuxt>Production</v-tab>
+          <v-tab to="/warnings" nuxt>Warnings</v-tab>
+          <v-tab to="/minerals" nuxt>Minerals</v-tab>
+          <v-tab to="/habitability" nuxt>Habitability</v-tab>
+          <v-tab to="/information" nuxt>Information</v-tab>
+          <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
+          <v-tab to="/map" nuxt>Map (WIP)</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
@@ -124,8 +124,6 @@ export default {
       mini: false,
 
       tab: null,
-
-      title: 'Production Recap',
     }
   },
   components: { appHeader },
@@ -162,6 +160,38 @@ export default {
       'GameID',
       'RaceID',
     ]),
+
+    title() {
+      switch (this.$route.name) {
+        case 'index': {
+          return 'Production Recap'
+        }
+        case 'warnings': {
+          return 'Warnings'
+        }
+        case 'minerals': {
+          return 'Mineral Breakdown'
+        }
+        case 'habitability': {
+          return 'Habitability Breakdown'
+        }
+        case 'information': {
+          return 'Empire Information'
+        }
+        case 'technologies': {
+          return 'Technology Tree'
+        }
+        case 'map': {
+          return 'Galaxy Map'
+        }
+        case 'settings': {
+          return 'Settings'
+        }
+        default: {
+          return 'Default title'
+        }
+      }
+    },
     
     snackbarStatus: {
       set(status) {

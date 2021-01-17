@@ -25,7 +25,7 @@
             <v-text-field type="number" min="10" v-model.number="terraformers" placeholder="40" :hint="`Terraformers at ${selectedSpecies.TerraformingRate} rate`" :rules="[rules.required, rules.positive]" persistent-hint dense solo validate-on-blur></v-text-field>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+            <v-select :disabled="filterBySelectedBodies" v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
               <template v-slot:prepend-item>
                 <v-list-item
                   ripple
@@ -45,6 +45,32 @@
                 <v-divider class="mt-2"></v-divider>
               </template>
             </v-select>
+          </v-col>
+          <v-col cols="12" v-if="selectedBodies.length || filterBySelectedBodies">
+            <v-row>
+              <v-col cols="auto">
+                <v-btn class="d-block mb-1" style="width: 100%;" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Habitability</v-btn>
+                <v-btn :to="{
+                  path: 'minerals',
+                  query: { 
+                    bodies: JSON.stringify(selectedBodies.map(selection => ({ 
+                      SystemBodyID: selection.SystemBodyID, 
+                      SystemBodyName: selection.SystemBodyName, 
+                      SystemName: selection.SystemName, 
+                      BodyClass: selection.BodyClass, 
+                      Component: selection.Component, 
+                      PlanetNumber: selection.PlanetNumber, 
+                      OrbitNumber: selection.OrbitNumber, 
+                    }))) 
+                  },
+                }" style="width: 100%;" small outlined>Isolate in Minerals</v-btn>
+
+                <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
+              </v-col>
+              <v-col>
+                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ bodyName(body) }}</v-chip>
+              </v-col>
+            </v-row>
           </v-col>
           <v-col cols="6" md="3">
             <v-checkbox
@@ -73,10 +99,15 @@
           <v-col cols="12">
             <v-data-table class="elevation-2" :headers="headers" :items="filteredCalculatedBodies" item-key="SystemBodyID" :expanded.sync="expandedRows" :sort-desc.sync="sortDescending" show-expand @click:row="(data, { expand, isExpanded, item }) => item.Liveable && item.TerraformationTime && expand(!isExpanded)">
               <template v-slot:[`item.data-table-expand`]="{ item, isExpanded, expand }">
-                <template v-if="item.TerraformationTime">
-                  <v-btn @click.stop="expand(true)" v-if="!isExpanded" icon><v-icon>mdi-arrow-expand-vertical</v-icon></v-btn>
-                  <v-btn @click.stop="expand(false)" v-if="isExpanded" icon><v-icon>mdi-arrow-expand-up</v-icon></v-btn>
-                </template>
+                <td style="white-space: nowrap;">
+                  <v-btn @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)" v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon><v-icon>mdi-playlist-remove</v-icon></v-btn>
+                  <v-btn @click.stop="() => selectedBodies.push(item)" v-else icon><v-icon>mdi-playlist-plus</v-icon></v-btn>
+                  
+                  <template v-if="item.Liveable">
+                    <v-btn @click.stop="expand(false)" v-if="isExpanded" icon><v-icon>mdi-arrow-expand-up</v-icon></v-btn>
+                    <v-btn @click.stop="expand(true)" v-else icon><v-icon>mdi-arrow-expand-vertical</v-icon></v-btn>
+                  </template>
+                </td>
               </template>
               <template v-slot:expanded-item="{ item }">
                 <td :colspan="headers.length + 1" class="px-4 py-3" v-if="item.TerraformationPlan">
@@ -255,10 +286,11 @@
                 </span>
               </template>
               <template v-slot:[`item.Liveable`]="{ item }">
+                <span class="orange--text font-weight-bold" v-if="item.LowGravity && item.Liveable">LG</span>
                 <span :class="{
                   'green--text text--lighten-1 font-weight-bold': item.Liveable,
                   'red--text text--darken-3 font-weight-bold': !item.Liveable,
-                }">{{ item.Liveable ? 'Y' : 'N' }}</span>
+                }" v-else>{{ item.Liveable ? 'Y' : 'N' }}</span>
               </template>
               <template v-slot:[`item.TerraformationTime`]="{ item }">
                 <span v-if="item.TerraformationTime > 0">
@@ -277,6 +309,14 @@
                   'red--text text--darken-3 font-weight-bold': item.MiningPotential <= 3,
                 }" v-if="item.Minerals.length">{{ roundToDecimal(item.MiningPotential, 1) }}</span>
                 <span class="orange--text font-weight-bold" v-else>N/A</span>
+              </template>
+              <template v-slot:[`header.MiningPotential`]="{ header }">
+                <v-tooltip top>
+                  <template v-slot:activator="{ on }">
+                    <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
+                  </template>
+                  <span>Potential calculated for available minerals on the body.</span>
+                </v-tooltip>
               </template>
               <template v-slot:[`item.TotalMiningAmount`]="{ item }">
                 <span v-if="!item.BodySurveyed" class="orange--text font-weight-bold">
@@ -343,12 +383,6 @@ const maxBreathablePercentage = 30
 const earthSurfaceArea = 511187128
 const baseMaxPop = 12000
 
-const baseFilter = {
-  selectedMaterial: 'Any',
-  selectedAccessibility: 0.0,
-  selectedAmount: null,
-}
-
 export default {
   components: {},
   data() {
@@ -363,22 +397,11 @@ export default {
 
       expandedRows: [],
       sortDescending: [false],
-
-      filterMaterials: ['Any', 'All Present', 'All', ...Object.values(MaterialMap)],
-
-      accessibilities: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
-      selectedAccessibility: 0.1,
-
-      filters: [{
-        ...baseFilter,
-      }],
-
-      selectedAmount: null,
-
-      panels: [0, 1, 2],
       
-      materials: Object.values(MaterialMap),
       systems: [],
+
+      selectedBodies: [],
+      filterBySelectedBodies: false,
 
       //
 
@@ -391,25 +414,6 @@ export default {
   methods: {
     separatedNumber,
     roundToDecimal,
-
-    addFilter() {
-      this.filters.push({
-        ...baseFilter,
-      })
-    },
-    removeFilter(index) {
-      this.filters.splice(index, 1)
-    },
-    
-    applyMaterialFilter(material, filter) {
-      const insideAccessibilityRange = material.Accessibility >= filter.selectedAccessibility
-                
-      if (filter.selectedAmount) {
-        return material.Amount >= filter.selectedAmount && insideAccessibilityRange
-      }
-
-      return insideAccessibilityRange
-    },
 
     toggleSystems() {
       if (!this.systems.length) {
@@ -462,11 +466,11 @@ export default {
 
     filteredCalculatedBodies() {
       return this.calculatedBodies.filter(body => {
-        return this.systems.includes(body.SystemID) 
-          && (this.filterNonTerraformable ? body.Liveable : true) 
-          && (this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true) 
-          && (this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true) 
-          && (this.filterOtherPopulations ? !body.OtherPopulation || body.OwnPopulation : true) 
+        return ( this.filterBySelectedBodies ? !!this.selectedBodies.find(selection => selection.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID) )
+            && (this.filterNonTerraformable ? body.Liveable && !body.LowGravity : true) 
+            && (this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true) 
+            && (this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true) 
+            && (this.filterOtherPopulations ? !body.OtherPopulation || body.OwnPopulation : true) 
       })
     },
     calculatedBodies() {
@@ -484,6 +488,8 @@ export default {
         const newBody = {
           ...body,
 
+          LowGravity: body.Gravity < this.selectedSpecies.IdealGravity - this.selectedSpecies.GravityDeviation,
+
           MaximumPopulation: Math.max((maxPopPreModifiers * hydroModifier) / tidalModifier, 0.05),
           MaximumPopulationAtOptimalHydro: Math.max(maxPopPreModifiers / tidalModifier, 0.05),
         }
@@ -492,7 +498,6 @@ export default {
           const localTerraformingPower = earthSurfaceArea / localSurfaceArea * this.rawTerraformingPower
 
           const { breathablePressure, toxicPressure, greenhousePressure, antiGreenhousePressure, waterVapourPressure, neutralPressure, totalPressure, toxics, greenhouses, antiGreenhouses, neutrals } = body.Atmosphere.reduce((aggregate, gas) => {
-
             if (gas.AtmosGasID === this.selectedSpecies.BreatheID) {
               aggregate.breathablePressure += gas.GasAtm
             } else if (gas.Dangerous) {
@@ -717,10 +722,6 @@ export default {
       return BodyClass
     },
 
-    materialCount() {
-      return Object.keys(this.materials).length
-    },
-
     headers() {
       const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
@@ -757,6 +758,7 @@ export default {
           value: 'Liveable',
           divider: true,
           align: 'center',
+          sortable: false,
         },
         {
           text: 'Time (Y)',
@@ -770,7 +772,7 @@ export default {
               : alpha - beta,
         },
         {
-          text: 'Mineral Potential',
+          text: 'Potential',
           value: 'MiningPotential',
           divider: true,
           align: 'center',
@@ -912,6 +914,14 @@ export default {
       },
       default: [],
     },
+  },
+  asyncData({ route }) {
+    const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+
+    return {
+      selectedBodies,
+      filterBySelectedBodies: route.query.bodies && selectedBodies.length ? true : false,
+    }
   },
   watch: {
     systemNames: {

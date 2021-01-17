@@ -57,7 +57,7 @@
             </v-expansion-panels>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+            <v-select :disabled="filterBySelectedBodies" v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
               <template v-slot:prepend-item>
                 <v-list-item
                   ripple
@@ -78,8 +78,40 @@
               </template>
             </v-select>
           </v-col>
+          <v-col cols="12" v-if="selectedBodies.length || filterBySelectedBodies">
+            <v-row>
+              <v-col cols="auto">
+                <v-btn class="d-block mb-1" style="width: 100%;" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Minerals</v-btn>
+                <v-btn  :to="{
+                  path: 'habitability',
+                  query: { 
+                    bodies: JSON.stringify(selectedBodies.map(selection => ({ 
+                      SystemBodyID: selection.SystemBodyID, 
+                      SystemBodyName: selection.SystemBodyName, 
+                      SystemName: selection.SystemName,
+                      BodyClass: selection.BodyClass, 
+                      Component: selection.Component, 
+                      PlanetNumber: selection.PlanetNumber, 
+                      OrbitNumber: selection.OrbitNumber, 
+                    }))) 
+                  },
+                }" style="width: 100%;" small outlined>Isolate in Habitability</v-btn>
+
+                <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
+              </v-col>
+              <v-col>
+                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ bodyName(body) }}</v-chip>
+              </v-col>
+            </v-row>
+          </v-col>
           <v-col cols="12">
-            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups">
+            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand>
+              <template v-slot:[`item.data-table-expand`]="{ item }">
+                <td style="white-space: nowrap;">
+                  <v-btn @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)" v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon><v-icon>mdi-playlist-remove</v-icon></v-btn>
+                  <v-btn @click.stop="() => selectedBodies.push(item)" v-else icon><v-icon>mdi-playlist-plus</v-icon></v-btn>
+                </td>
+              </template>
               <template v-slot:[`item.SystemBodyOrder`]="{ item }">
                 {{ bodyName(item) }}
               </template>
@@ -103,6 +135,14 @@
                   </template>
                   
                   <span>{{ roundToDecimal(item.Potential, 3) }}</span>
+                </v-tooltip>
+              </template>
+              <template v-slot:[`header.Potential`]="{ header }">
+                <v-tooltip top>
+                  <template v-slot:activator="{ on }">
+                    <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
+                  </template>
+                  <span>Potential calculated for all listed minerals, including empty columns.</span>
                 </v-tooltip>
               </template>
               <template v-for="material in materials" v-slot:[`item.${material}`]="{ item }">
@@ -194,6 +234,9 @@ export default {
       materials: Object.values(MaterialMap),
       systems: [],
 
+      selectedBodies: [],
+      filterBySelectedBodies: false,
+
       //
 
       rules: {
@@ -270,7 +313,7 @@ export default {
       }
 
       const aggregation = this.minerals.reduce((bodies, item) => {
-        if (!this.systems.includes(item.SystemID)) {
+        if (this.filterBySelectedBodies ? !this.selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID) : !this.systems.includes(item.SystemID)) {
           return bodies
         }
 
@@ -479,6 +522,14 @@ export default {
       },
       default: [],
     },
+  },
+  asyncData({ route }) {
+    const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+
+    return {
+      selectedBodies,
+      filterBySelectedBodies: route.query.bodies && selectedBodies.length ? true : false,
+    }
   },
   watch: {
     systemNames: {
