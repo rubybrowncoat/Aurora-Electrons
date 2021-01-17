@@ -69,7 +69,6 @@ export default {
     return {
       graph: null,
 
-      distanceMultiplier: 1000000000,
       distance: 1,
 
       focusSystemId: null,
@@ -131,23 +130,6 @@ export default {
     },
     showGravitationalSurvey() {
       return this.systemViewOption === 1
-    },
-
-    multipliedDistance() {
-      return this.distance * this.distanceMultiplier
-    },
-    
-    civilianCargoCapacity() {
-      return this.ships.filter(ship => ship.ShippingLineID & ship.MaximumCargoLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
-    },
-    civilianColonistCapacity() {
-      return this.ships.filter(ship => ship.ShippingLineID & ship.MaximumColonistLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
-    },
-    militaryCargoCapacity() {
-      return this.ships.filter(ship => !ship.ShippingLineID & ship.MaximumCargoLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
-    },
-    militaryColonistCapacity() {
-      return this.ships.filter(ship => !ship.ShippingLineID && ship.MaximumColonistLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
     },
   },
   asyncComputed: {

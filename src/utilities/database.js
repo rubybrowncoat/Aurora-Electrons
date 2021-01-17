@@ -22,6 +22,8 @@ export const resetDatabase = (storagePath) => {
     StartYear: Sequelize.INTEGER,
     GameTime: Sequelize.FLOAT,
 
+    CivilianShippingLinesActive: Sequelize.BOOLEAN,
+
     DateTime: {
       type: Sequelize.VIRTUAL,
       get() {

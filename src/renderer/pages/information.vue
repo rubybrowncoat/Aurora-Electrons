@@ -18,22 +18,24 @@
               persistent-hint
             ></v-slider>
           </v-col>
-          <v-col cols="12" md="6">
-            <v-card>
-              <v-card-text class="pb-0">Civilian Freight Capacity</v-card-text>
-              <v-card-title>
-                {{ separatedNumber(civilianCargoCapacity) }} Tons per Annum
-              </v-card-title>
-            </v-card>
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-card>
-              <v-card-text class="pb-0">Civilian Colonist Capacity</v-card-text>
-              <v-card-title>
-                {{ separatedNumber(civilianColonistCapacity) }} People per Annum
-              </v-card-title>
-            </v-card>
-          </v-col>
+          <template v-if="CivilianShippingLinesActive">
+            <v-col cols="12" md="6">
+              <v-card>
+                <v-card-text class="pb-0">Civilian Freight Capacity</v-card-text>
+                <v-card-title>
+                  {{ separatedNumber(civilianCargoCapacity) }} Tons per Annum
+                </v-card-title>
+              </v-card>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-card>
+                <v-card-text class="pb-0">Civilian Colonist Capacity</v-card-text>
+                <v-card-title>
+                  {{ separatedNumber(civilianColonistCapacity) }} People per Annum
+                </v-card-title>
+              </v-card>
+            </v-col>
+          </template>
           <v-col cols="12">
             <v-autocomplete v-model="fleets" :items="fleetNames" label="Specific Military Fleets" item-text="FleetName" item-value="FleetID" clearable multiple small-chips deletable-chips></v-autocomplete>
           </v-col>
@@ -107,6 +109,8 @@ export default {
       
       'GameID',
       'RaceID',
+
+      'CivilianShippingLinesActive',
     ]),
 
     multipliedDistance() {
@@ -114,14 +118,14 @@ export default {
     },
     
     civilianCargoCapacity() {
-      return this.ships.filter(ship => ship.ShippingLineID & ship.MaximumCargoLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
+      return this.ships.filter(ship => ship.ShippingLineID && ship.MaximumCargoLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
     },
     civilianColonistCapacity() {
-      return this.ships.filter(ship => ship.ShippingLineID & ship.MaximumColonistLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
+      return this.ships.filter(ship => ship.ShippingLineID && ship.MaximumColonistLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
     },
 
     militaryCargoCapacity() {
-      return this.ships.filter(ship => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID & ship.MaximumCargoLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
+      return this.ships.filter(ship => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumCargoLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
     },
     militaryColonistCapacity() {
       return this.ships.filter(ship => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumColonistLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)

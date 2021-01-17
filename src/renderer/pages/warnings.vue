@@ -202,7 +202,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row class="mb-5" justify="start" v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length">
+        <v-row class="mb-5" justify="start" v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length">
           <v-col cols="12" class="display-1">
             Populations
           </v-col>
@@ -298,10 +298,27 @@
                   </v-list>
                 </v-expansion-panel-content>
               </v-expansion-panel>
+              <v-expansion-panel v-if="deadResearchProjects.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ deadResearchProjects.length }} dead research projects 
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="research in deadResearchProjects" :key="research.PopulationID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ research.SystemName }} {{ bodyName(research) }} &mdash; {{ research.ResearchName }}</v-list-item-title>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row class="mb-5" justify="start" v-if="governorlessPopulations.length || commanderlessNavalAdministrations.length || commanderlessSectors.length">
+        <v-row class="mb-5" justify="start" v-if="governorlessPopulations.length || commanderlessNavalAdministrations.length || commanderlessSectors.length || mismatchedResearchFields.length">
           <v-col cols="12" class="display-1">
             Administrations
           </v-col>
@@ -353,6 +370,24 @@
                       <v-list-item v-for="sector in commanderlessSectors" :key="sector.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title>{{ sector.PopName }} &mdash; {{ sector.SectorName }}</v-list-item-title>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="mismatchedResearchFields.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ mismatchedResearchFields.length }} researchers with mismatched projects 
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="researcher in mismatchedResearchFields" :key="researcher.CommanderID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ researcher.SystemName }} {{ bodyName(researcher) }} &mdash; {{ researcher.CommanderName }} on {{ researcher.ResearchName }}</v-list-item-title>
+                          <v-list-item-subtitle>Field: {{ researcher.FieldName }} &mdash; Commander field: {{ researcher.CommanderFieldName }} &mdash; RP: {{ roundToDecimal(researcher.ResearchPointsRequired, 1) }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -782,6 +817,22 @@ export default {
       },
       default: [],
     },
+    deadResearchProjects: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+        
+        const populations = await this.database.query(`select VIR_ResearchProductionPopulation.*, FCT_TechSystem.Name as ResearchName from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ResearchProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.ResearchValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ResearchProductionPopulation left join FCT_ResearchProject on VIR_ResearchProductionPopulation.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID where ResearchName is not null group by VIR_ResearchProductionPopulation.PopulationID having SUM(VIR_ResearchProductionPopulation.ResearchProductionAmount) = 0`).then(([ items ]) => {
+          console.log('Dead Research Projects', items)
+
+          return items
+        })
+
+        return populations
+      },
+      default: [],
+    },
     lowEfficiencyPopulations: {
       async get() {
         if (!this.database || !this.GameID) {
@@ -827,6 +878,22 @@ export default {
         })
 
         return populations
+      },
+      default: [],
+    },
+    mismatchedResearchFields: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+        
+        const scientists = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_Commander.CommanderID, FCT_Commander.Name as CommanderName, DIM_ResearchField_2.FieldName as CommanderFieldName, FCT_TechSystem.Name as ResearchName, DIM_ResearchField.FieldName, FCT_ResearchProject.ResearchPointsRequired from FCT_ResearchProject inner join FCT_Population on FCT_ResearchProject.PopulationID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join DIM_TechType on FCT_TechSystem.TechTypeID = DIM_TechType.TechTypeID left join DIM_ResearchField on DIM_TechType.FieldID = DIM_ResearchField.ResearchFieldID left join FCT_Commander on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID left join DIM_ResearchField as DIM_ResearchField_2 on FCT_Commander.ResSpecID = DIM_ResearchField_2.ResearchFieldID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID} and FCT_ResearchProject.ResSpecID != FCT_Commander.ResSpecID`).then(([ items ]) => {
+          console.log('Mismatched Research Fields', items)
+
+          return items
+        })
+
+        return scientists
       },
       default: [],
     },
