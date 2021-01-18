@@ -4,4 +4,4 @@ build/*
 !build/icons
 node_modules
 .DS_Store
-AuroraDB.db
+AuroraDB*.db

@@ -397,7 +397,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length">
+        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length">
           <v-col cols="12" class="display-1">
             Others
           </v-col>
@@ -433,6 +433,24 @@
                         <v-list-item-content>
                           <v-list-item-title>{{ lifepod.SystemName }} &mdash; {{ lifepod.ShipName }} &mdash; {{ lifepod.Crew }} People</v-list-item-title>
                           <v-list-item-subtitle>Time remaining: {{ podExpiration(lifepod) }}</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="knownWrecks.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ knownWrecks.length }} wrecks in explored space
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="wreck in knownWrecks" :key="wreck.WreckID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ bodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title>
+                          <v-list-item-subtitle>Size: {{ wreck.Size }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -958,6 +976,22 @@ export default {
         })
 
         return lifepods
+      },
+      default: [],
+    },
+    knownWrecks: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+        
+        const wrecks = await this.database.query(`select FCT_Wrecks.WreckID, FCT_Wrecks.Size, FCT_ShipClass.ClassName, CAST(CASE WHEN FCT_Wrecks.RaceID = FCT_RaceSysSurvey.RaceID THEN 1 ELSE 0 END AS BIT) as Owned, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Wrecks join FCT_RaceSysSurvey on FCT_Wrecks.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} left join FCT_ShipClass on FCT_Wrecks.ClassID = FCT_ShipClass.ShipClassID left join FCT_SystemBody on FCT_Wrecks.OrbitBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Wrecks.GameID = ${this.GameID}`).then(([ items ]) => {
+          console.log('Known Wrecks', items)
+
+          return items
+        })
+
+        return wrecks
       },
       default: [],
     },
