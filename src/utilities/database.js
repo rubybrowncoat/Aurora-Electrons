@@ -78,5 +78,33 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class PlanetaryInstallation extends Model {}
+  PlanetaryInstallation.init({
+    PlanetaryInstallationID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true
+    },
+    Name: Sequelize.STRING,
+    CargoPoints: Sequelize.INTEGER,
+    CivMove: Sequelize.BOOLEAN,
+    DisplayOrder: Sequelize.FLOAT,
+  }, {
+    sequelize,
+    modelName: 'planetaryInstallation',
+    tableName: 'DIM_PlanetaryInstallation',
+    timestamps: false,
+
+    defaultScope: {
+      order: [['DisplayOrder', 'DESC']]
+    },
+    scopes: {
+      civilianEconomy: {
+        where: {
+          CivMove: true,
+        },
+      },
+    }
+  })
+
   return sequelize
 }
