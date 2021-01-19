@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Aurora Electrons",
   "repository": "https://github.com/rubybrowncoat/Aurora-Electrons",
   "main": "./dist/main/index.js",
