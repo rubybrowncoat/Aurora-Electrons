@@ -82,10 +82,10 @@
                     <tbody>
                       <tr v-for="demand of demandsAndDepartures[installation.PlanetaryInstallationID]" :key="`${demand.PopulationID}-${demand.PlanetaryInstallationID}`">
                         <td class="py-2">
-                          <h3>{{ demand.SystemName }} <span v-if="`${demand.SystemName}-${bodyName(demand)}` !== demand.PopName && demand.SystemBodyName !== demand.PopName">{{ bodyName(demand) }}</span> &mdash; {{ demand.PopName }}</h3>
+                          <h3 v-html="populationName(demand)"></h3>
                           <template v-if="demand.Departures.length">
                             <div v-for="cargo of demand.Departures" :key="`${cargo.PlanetaryInstallationID}-${cargo.OriginPopulationID}-${cargo.DestinationPopulationID}`">
-                              <template v-if="cargo.DestinationPopulationID">{{ cargo.Amount }} units en route to <span v-if="`${cargo.DestinationSystemName}-${bodyName(cargo, 'Destination')}` !== cargo.DestinationPopulationName && cargo.DestinationSystemBodyName !== cargo.DestinationPopulationName">{{ cargo.DestinationSystemName }} {{ bodyName(cargo, 'Destination') }}  &mdash; </span> {{ cargo.DestinationPopulationName }}</template>
+                              <template v-if="cargo.DestinationPopulationID">{{ cargo.Amount }} units en route to <span v-html="populationName(cargo, 'Destination', true)"></span></template>
                               <template v-else>{{ cargo.Amount }} in cargo holds without destination.</template>
                             </div>
                           </template>
@@ -119,6 +119,7 @@ import romanum from 'romanum'
 
 import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
+import { populationName } from '../../utilities/aurora'
 
 const secondsPerYear = 31536000
 
@@ -140,9 +141,9 @@ export default {
     }
   },
   methods: {
-    separatedNumber(number) {
-      return separatedNumber(number)
-    },
+    separatedNumber,
+
+    populationName,
 
     flipDistance() {
       if (this.distance > 1000000000) {
@@ -151,39 +152,6 @@ export default {
         this.distance *= 10
       }
     },
-
-    bodyName(body, prefix = '') {
-      const processedBody = prefix ? {
-        SystemBodyID: body[`${prefix}SystemBodyID`],
-        PlanetNumber: body[`${prefix}PlanetNumber`],
-        OrbitNumber: body[`${prefix}OrbitNumber`],
-        BodyClass: body[`${prefix}BodyClass`],
-        SystemBodyName: body[`${prefix}SystemBodyName`],
-        Component: body[`${prefix}Component`],
-      } : body
-
-      if (processedBody.SystemBodyName) {
-        return processedBody.SystemBodyName
-      }
-      
-      switch (processedBody.BodyClass) {
-        case 1: {
-          return `${convertDisplayBase(processedBody.Component, 26)} ${romanum.toNumeral(processedBody.PlanetNumber)}`
-        }
-        case 2: {
-          return `${convertDisplayBase(processedBody.Component, 26)} ${romanum.toNumeral(processedBody.PlanetNumber)}-${processedBody.OrbitNumber}`
-        }
-        case 3: {
-          return `Asteroid #${processedBody.OrbitNumber}`
-        }
-        case 5: {
-          return `Comet #${processedBody.OrbitNumber}`
-        }
-        default: {
-          return `System Body #${processedBody.SystemBodyID}`
-        }
-      }
-    }
   },
   computed: {
     ...mapGetters([
@@ -244,7 +212,7 @@ export default {
             if (!aggregate[cargo.InstallationID][cargo.OriginPopulationID]) {
               aggregate[cargo.InstallationID][cargo.OriginPopulationID] = {
                 PopulationID: cargo.OriginPopulationID,
-                PopName: cargo.OriginPopulationName,
+                PopName: cargo.OriginPopName,
                 PlanetaryInstallationID: cargo.InstallationID,
                 InstallationName: cargo.InstallationName,
                 SystemName: cargo.OriginSystemName,
@@ -366,7 +334,7 @@ export default {
           return []
         }
 
-        const destinations = await this.database.query(`select FCT_ShipCargo.CargoID as InstallationID, FCT_ShipCargo.Amount, DIM_PlanetaryInstallation.Name as InstallationName, FCT_ShipCargo.StartingPop as OriginPopulationID, OriginPopulation.PopName as OriginPopulationName, FCT_MoveOrders.PopulationID as DestinationPopulationID, DestinationPopulation.PopName as DestinationPopulationName, OriginRaceSysSurvey.Name as OriginSystemName, OriginSystemBody.SystemBodyID as OriginSystemBodyID, OriginSystemBody.PlanetNumber as OriginPlanetNumber, OriginSystemBody.OrbitNumber as OriginOrbitNumber, OriginSystemBody.BodyClass as OriginBodyClass, OriginSystemBodyName.Name as OriginSystemBodyName, OriginStar.Component as OriginComponent, DestinationRaceSysSurvey.Name as DestinationSystemName, DestinationSystemBody.SystemBodyID as DestinationSystemBodyID, DestinationSystemBody.PlanetNumber as DestinationPlanetNumber, DestinationSystemBody.OrbitNumber as DestinationOrbitNumber, DestinationSystemBody.BodyClass as DestinationBodyClass, DestinationSystemBodyName.Name as DestinationSystemBodyName, DestinationStar.Component as DestinationComponent from FCT_ShipCargo left join FCT_Ship on FCT_ShipCargo.ShipID = FCT_Ship.ShipID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_MoveOrders on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_MoveOrders.DestinationItemType = 19 and FCT_MoveOrders.DestinationItemID = FCT_ShipCargo.CargoID left join DIM_PlanetaryInstallation on FCT_ShipCargo.CargoID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population as OriginPopulation on FCT_ShipCargo.StartingPop = OriginPopulation.PopulationID left join FCT_SystemBody as OriginSystemBody on OriginPopulation.SystemBodyID = OriginSystemBody.SystemBodyID left join FCT_SystemBodyName as OriginSystemBodyName on OriginSystemBody.SystemBodyID = OriginSystemBodyName.SystemBodyID and OriginPopulation.RaceID = OriginSystemBodyName.RaceID left join FCT_RaceSysSurvey as OriginRaceSysSurvey on OriginPopulation.SystemID = OriginRaceSysSurvey.SystemID and OriginPopulation.RaceID = OriginRaceSysSurvey.RaceID left join FCT_Star as OriginStar on OriginSystemBody.StarID = OriginStar.StarID left join FCT_Population as DestinationPopulation on FCT_MoveOrders.PopulationID = DestinationPopulation.PopulationID left join FCT_SystemBody as DestinationSystemBody on DestinationPopulation.SystemBodyID = DestinationSystemBody.SystemBodyID left join FCT_SystemBodyName as DestinationSystemBodyName on DestinationSystemBody.SystemBodyID = DestinationSystemBodyName.SystemBodyID and DestinationPopulation.RaceID = DestinationSystemBodyName.RaceID left join FCT_RaceSysSurvey as DestinationRaceSysSurvey on DestinationPopulation.SystemID = DestinationRaceSysSurvey.SystemID and DestinationPopulation.RaceID = DestinationRaceSysSurvey.RaceID left join FCT_Star as DestinationStar on DestinationSystemBody.StarID = DestinationStar.StarID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 2 and FCT_Ship.ShippingLineID != 0`).then(([ items ]) => {
+        const destinations = await this.database.query(`select FCT_ShipCargo.CargoID as InstallationID, FCT_ShipCargo.Amount, DIM_PlanetaryInstallation.Name as InstallationName, FCT_ShipCargo.StartingPop as OriginPopulationID, OriginPopulation.PopName as OriginPopName, FCT_MoveOrders.PopulationID as DestinationPopulationID, DestinationPopulation.PopName as DestinationPopName, OriginRaceSysSurvey.Name as OriginSystemName, OriginSystemBody.SystemBodyID as OriginSystemBodyID, OriginSystemBody.PlanetNumber as OriginPlanetNumber, OriginSystemBody.OrbitNumber as OriginOrbitNumber, OriginSystemBody.BodyClass as OriginBodyClass, OriginSystemBodyName.Name as OriginSystemBodyName, OriginStar.Component as OriginComponent, DestinationRaceSysSurvey.Name as DestinationSystemName, DestinationSystemBody.SystemBodyID as DestinationSystemBodyID, DestinationSystemBody.PlanetNumber as DestinationPlanetNumber, DestinationSystemBody.OrbitNumber as DestinationOrbitNumber, DestinationSystemBody.BodyClass as DestinationBodyClass, DestinationSystemBodyName.Name as DestinationSystemBodyName, DestinationStar.Component as DestinationComponent from FCT_ShipCargo left join FCT_Ship on FCT_ShipCargo.ShipID = FCT_Ship.ShipID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_MoveOrders on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_MoveOrders.DestinationItemType = 19 and FCT_MoveOrders.DestinationItemID = FCT_ShipCargo.CargoID left join DIM_PlanetaryInstallation on FCT_ShipCargo.CargoID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population as OriginPopulation on FCT_ShipCargo.StartingPop = OriginPopulation.PopulationID left join FCT_SystemBody as OriginSystemBody on OriginPopulation.SystemBodyID = OriginSystemBody.SystemBodyID left join FCT_SystemBodyName as OriginSystemBodyName on OriginSystemBody.SystemBodyID = OriginSystemBodyName.SystemBodyID and OriginPopulation.RaceID = OriginSystemBodyName.RaceID left join FCT_RaceSysSurvey as OriginRaceSysSurvey on OriginPopulation.SystemID = OriginRaceSysSurvey.SystemID and OriginPopulation.RaceID = OriginRaceSysSurvey.RaceID left join FCT_Star as OriginStar on OriginSystemBody.StarID = OriginStar.StarID left join FCT_Population as DestinationPopulation on FCT_MoveOrders.PopulationID = DestinationPopulation.PopulationID left join FCT_SystemBody as DestinationSystemBody on DestinationPopulation.SystemBodyID = DestinationSystemBody.SystemBodyID left join FCT_SystemBodyName as DestinationSystemBodyName on DestinationSystemBody.SystemBodyID = DestinationSystemBodyName.SystemBodyID and DestinationPopulation.RaceID = DestinationSystemBodyName.RaceID left join FCT_RaceSysSurvey as DestinationRaceSysSurvey on DestinationPopulation.SystemID = DestinationRaceSysSurvey.SystemID and DestinationPopulation.RaceID = DestinationRaceSysSurvey.RaceID left join FCT_Star as DestinationStar on DestinationSystemBody.StarID = DestinationStar.StarID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 2 and FCT_Ship.ShippingLineID != 0`).then(([ items ]) => {
           console.log('Routed Cargo', items)
 
           return items.reduce((aggregate, item) => {
@@ -384,7 +352,7 @@ export default {
                 InstallationName: item.InstallationName,
 
                 OriginPopulationID: item.OriginPopulationID,
-                OriginPopulationName: item.OriginPopulationName,
+                OriginPopName: item.OriginPopName,
 
                 OriginSystemName: item.OriginSystemName,
                 OriginSystemBodyID: item.OriginSystemBodyID,
@@ -395,7 +363,7 @@ export default {
                 OriginComponent: item.OriginComponent,
 
                 DestinationPopulationID: item.DestinationPopulationID,
-                DestinationPopulationName: item.DestinationPopulationName,
+                DestinationPopName: item.DestinationPopName,
 
                 DestinationSystemName: item.DestinationSystemName,
                 DestinationSystemBodyID: item.DestinationSystemBodyID,

@@ -17,19 +17,20 @@
         </v-col>
         <v-col cols="12">
           <v-treeview :items="technologyTree" :search="search" item-key="TechSystemID" item-text="Name" activatable hoverable open-on-click :open-all="false">
-            <template #label="{ item }">
+            <template #label="{ item }" class="green--background">
+              <div class="pa-1">
               <span>
                 <v-sheet v-if="item.Abbreviation" :style="{
                   fontFamily: 'Monaco, monospace',
                 }" class="d-inline-block px-3 font-weight-bold" :elevation="1" dark :color="makeColor(item.Abbreviation)">{{ item.Abbreviation }}</v-sheet>
                 {{ item.Name }}
-                <span v-if="researchedTechnologyIds.includes(item.TechSystemID)">💡</span>
-                <span v-else>- {{ item.DevelopCost || 0 }}RP</span>
+                <v-btn class="ml-3" color="red" dark x-small v-if="!researchedTechnologyIds.includes(item.TechSystemID)">{{ item.DevelopCost || 0 }}RP</v-btn>
               </span>
 
               <p class="overline mb-0" v-if="item.parents.length > 1">
-                Requires <span v-for="(parent, index) in item.parents" :key="parent"><span class="font-weight-bold">{{ getTechnology(parent).Name }}</span><span v-if="index + 1 < item.parents.length"> and </span></span>
+                Requires <span v-for="(parent, index) in getTechedParents(item)" :key="parent.TechSystemID"><span class="font-weight-bold" :class="[ researchedTechnologyIds.includes(parent.TechSystemID) ? 'green--text' : 'red--text text--lighten-1' ]">{{ parent.Name }}</span><span v-if="index + 1 < item.parents.length"> and </span></span>
               </p>
+              </div>
             </template>
           </v-treeview>
         </v-col>
@@ -67,6 +68,9 @@ export default {
     //
     getTechnology(id) {
       return this.individualTechnologies[id]
+    },
+    getTechedParents(technology) {
+      return technology.parents.map(parent => this.getTechnology(parent))
     },
 
     addTechnology(technology) {

@@ -68,7 +68,7 @@
                 <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
               </v-col>
               <v-col>
-                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ bodyName(body) }}</v-chip>
+                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
               </v-col>
             </v-row>
           </v-col>
@@ -241,7 +241,7 @@
                 </td>
               </template>
               <template v-slot:[`item.SystemBodyOrder`]="{ item }">
-                {{ bodyName(item) }}
+                {{ systemBodyName(item) }}
               </template>
               <template v-slot:[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
@@ -339,10 +339,8 @@ import { remote } from 'electron'
 
 import { mapGetters } from 'vuex'
 
-import romanum from 'romanum'
-
-import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
+import { systemBodyName } from '../../utilities/aurora'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -415,6 +413,8 @@ export default {
     separatedNumber,
     roundToDecimal,
 
+    systemBodyName,
+
     toggleSystems() {
       if (!this.systems.length) {
         this.systems = this.systemNames.map(system => system.SystemID)
@@ -422,30 +422,6 @@ export default {
         this.systems = []
       }
     },
-
-    bodyName(body) {
-      if (body.SystemBodyName) {
-        return body.SystemBodyName
-      }
-      
-      switch (body.BodyClass) {
-        case 1: {
-          return `${convertDisplayBase(body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
-        }
-        case 2: {
-          return `${convertDisplayBase(body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
-        }
-        case 3: {
-          return `Asteroid #${body.OrbitNumber}`
-        }
-        case 5: {
-          return `Comet #${body.OrbitNumber}`
-        }
-        default: {
-          return `System Body #${body.SystemBodyID}`
-        }
-      }
-    }
   },
   computed: {
     ...mapGetters([

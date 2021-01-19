@@ -20,7 +20,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="colony in stockpilingCivilianMinerals" :key="colony.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ colony.SystemName }} {{ bodyName(colony) }} &mdash; {{ colony.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(colony)"></v-list-item-title>
                           <v-list-item-subtitle>Currently stockpiling {{ separatedNumber(roundToDecimal(colony.TotalStockpile)) }} Tons of mineral</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -38,7 +38,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="colony in wastedMiningCapacity" :key="colony.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ colony.SystemName }} {{ bodyName(colony) }} &mdash; {{ colony.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(colony)"></v-list-item-title>
                           <div class="caption mt-3 font-weight-medium">
                             {{ colony.Installations.map(installation => `${installation.Amount}x ${installation.Name}`).join(', ') }}
                           </div>
@@ -218,7 +218,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in freeConstructionCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
                           <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -236,7 +236,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in freeOrdnanceCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
                           <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -254,7 +254,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in freeFighterCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
                           <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -272,7 +272,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in lowEfficiencyPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title><span :class="`${levelColor(population.Efficiency)}--text font-weight-bold`">{{ roundToDecimal(population.Efficiency * 100, 1) }}%</span> &mdash; {{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title><span :class="`${levelColor(population.Efficiency)}--text font-weight-bold`">{{ roundToDecimal(population.Efficiency * 100, 1) }}%</span> &mdash; <span  v-html="populationName(population)"></span></v-list-item-title>
                           <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -290,7 +290,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in selfSustainingDestinationPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
                           <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -308,7 +308,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="research in deadResearchProjects" :key="research.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ research.SystemName }} {{ bodyName(research) }} &mdash; {{ research.ResearchName }}</v-list-item-title>
+                          <v-list-item-title><span v-html="populationName(research)"></span> &mdash; {{ research.ResearchName }}</v-list-item-title>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -334,7 +334,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in governorlessPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ population.SystemName }} {{ bodyName(population) }} &mdash; {{ population.PopName }}</v-list-item-title>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
                           <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -386,7 +386,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="researcher in mismatchedResearchFields" :key="researcher.CommanderID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ researcher.SystemName }} {{ bodyName(researcher) }} &mdash; {{ researcher.CommanderName }} on {{ researcher.ResearchName }}</v-list-item-title>
+                          <v-list-item-title><span v-html="populationName(researcher)"></span> &mdash; {{ researcher.CommanderName }} on {{ researcher.ResearchName }}</v-list-item-title>
                           <v-list-item-subtitle>Field: {{ researcher.FieldName }} &mdash; Commander field: {{ researcher.CommanderFieldName }} &mdash; RP: {{ roundToDecimal(researcher.ResearchPointsRequired, 1) }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -449,7 +449,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="wreck in knownWrecks" :key="wreck.WreckID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ bodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title>
+                          <v-list-item-title>{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ systemBodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title>
                           <v-list-item-subtitle>Size: {{ wreck.Size }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -474,6 +474,7 @@ import romanum from 'romanum'
 
 import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
+import { systemBodyName, populationName } from '../../utilities/aurora'
 
 const secondsPerTwoWeeks = 1209600
 const secondsPerYear = 31536000
@@ -499,6 +500,9 @@ export default {
     separatedNumber,
     roundToDecimal,
 
+    systemBodyName,
+    populationName,
+
     levelColor(morale) {
       if (morale > 0.85) {
         return 'green'
@@ -509,30 +513,6 @@ export default {
       }
 
       return this.$vuetify.theme.dark ? 'yellow' : 'orange'
-    },
-
-    bodyName(body) {
-      if (body.SystemBodyName) {
-        return body.SystemBodyName
-      }
-      
-      switch (body.BodyClass) {
-        case 1: {
-          return `${convertDisplayBase(body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
-        }
-        case 2: {
-          return `${convertDisplayBase(body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
-        }
-        case 3: {
-          return `Asteroid #${body.OrbitNumber}`
-        }
-        case 5: {
-          return `Comet #${body.OrbitNumber}`
-        }
-        default: {
-          return `System Body #${body.SystemBodyID}`
-        }
-      }
     },
 
     podExpiration(lifepod) {
@@ -953,7 +933,7 @@ export default {
           return []
         }
         
-        const shipyards = await this.database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Population.PopName from FCT_Shipyard left join FCT_ShipClass on FCT_Shipyard.BuildClassID = FCT_ShipClass.ShipClassID left join FCT_Population on FCT_Shipyard.PopulationID = FCT_Population.PopulationID where FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID} and FCT_ShipClass.Obsolete = 0 order by FCT_Shipyard.Capacity * FCT_Shipyard.Slipways desc`).then(([ items ]) => {
+        const shipyards = await this.database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Population.PopName from FCT_Shipyard left join FCT_ShipClass on FCT_Shipyard.BuildClassID = FCT_ShipClass.ShipClassID left join FCT_Population on FCT_Shipyard.PopulationID = FCT_Population.PopulationID where FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID} and FCT_ShipClass.Obsolete = 1 order by FCT_Shipyard.Capacity * FCT_Shipyard.Slipways desc`).then(([ items ]) => {
           console.log('Obsolete Shipyards', items)
 
           return items

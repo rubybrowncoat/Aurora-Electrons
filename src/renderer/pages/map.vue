@@ -322,8 +322,6 @@ export default {
 
         ctx.font = `${this.focusSystemId === node.id ? 'bold ' : ''}${fontSize}px Sans-Serif`
 
-        // if (node.name === 'Bogue') debugger
-
         const textWidth = ctx.measureText(label).width
         const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
 
@@ -331,7 +329,7 @@ export default {
         const showSurvey = this.showGeologicalSurvey || this.showGravitationalSurvey
         if (showSurvey) {
           const percentage = this.showGeologicalSurvey ? node.geoPercentage : node.gravPercentage
-          const empty = this.showGeologicalSurvey ? node.empty : false
+          const empty = this.showGeologicalSurvey ? node.empty : node.neighbors.size + node.unexploredConnections === 1
 
           ctx.lineWidth = node.id === this.focusSystemId ? 4 : 2
           if (!empty) {
