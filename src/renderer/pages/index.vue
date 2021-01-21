@@ -3,8 +3,6 @@
     <div v-if="!GameID">Select a race from the left-side menu.</div>
 
     <v-container fluid v-if="RaceID">
-      {{ modifiedTerraformings }}
-
       <v-row justify="start">
         <v-col cols="12">
           <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Research', showResearches)" small tile dense borderless @click="showResearches = !showResearches">Research</v-btn>
@@ -32,6 +30,12 @@
               <span class="overline uppercase float-right" v-if="item.ShipyardTaskType">[{{ ShipyardTaskTypeMap[item.ShipyardTaskType] }}]</span>
               <span class="overline uppercase float-right" v-if="item.ProductionType">[{{ ProductionTypeMap[item.ProductionType] }}]</span>
               <span v-if="item.TaskType === 'Ship'">({{ item.ClassName }} class)</span>
+              <span v-if="item.TaskType === 'Terraforming'">
+                {{ item.GasName }} to {{ item.MaxAtm }} Atm
+                <div v-if="item.GasName === 'Water Vapour'" class="caption small">
+                  Hydrographic Extent to {{ item.TerraformStatus ? 'at least 20%' : 'at most 75%' }}.
+                </div>
+              </span>
               <span v-if="item.UpgradeTaskType === 7">to {{ item.ClassName }}</span>
               <span v-if="item.UpgradeTaskType === 8">to {{ item.CapacityTarget }}</span>
             </template>
@@ -52,7 +56,7 @@
                 {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP
               </span>
               <span v-if="item.TaskType === 'Terraforming'">
-                {{ roundToDecimal(item.AnnualProduction, 3) }} Atm
+                {{ roundToDecimal(item.AnnualProduction, 4) }} Atm
               </span>
             </template>
             <template v-slot:[`item.RemainingDays`]="{ item }">
@@ -60,9 +64,9 @@
                 'red--text font-weight-bold': item.Queue,
                 'orange--text font-weight-bold': item.Paused,
               }">
-                <span v-if="item.UpgradeTaskType === 8">~</span>
                 <span v-if="item.Queue && item.TaskType !== 'Research'">Queued</span>
-                <span v-else>{{ separatedNumber(roundToDecimal(item.RemainingDays, 1)) }}</span>
+                <span v-else-if="item.RemainingDays === 0" class="light-green--text font-weight-bold">Done!</span>
+                <span v-else><span v-if="item.UpgradeTaskType === 8 || item.TaskType === 'Terraforming'">~</span> {{ separatedNumber(roundToDecimal(item.RemainingDays, 1)) }}</span>
               </span>
             </template>
             <template v-slot:[`item.PopulationID`]="{ item }">
@@ -85,6 +89,12 @@ import { populationName } from '../../utilities/aurora'
 
 const secondsPerYear = 31536000
 const secondsPerDay = 86400
+
+const earthSurfaceArea = 511187128
+
+const condensationPerYear = 0.1
+const condensationToHydroRate = 40
+const waterVapourInAtmosphere = 0.01
 
 const ProductionTypeMap = {
   0: 'Construction',
@@ -113,8 +123,6 @@ const ShipyardUpgradeTypeMap = {
   8: 'Continual Capacity Upgrade',
   9: 'Spacemaster Modification',
 }
-
-const earthSurfaceArea = 511187128
 
 export default {
   components: {},
@@ -188,6 +196,15 @@ export default {
       }
     },
 
+    populationMinConstructionPeriod(populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.MinConstructionPeriod
+    },
     populationConstructionCapacity(populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
@@ -336,6 +353,10 @@ export default {
       }
 
       return this.navalAdministrations.reduce((map, navalAdministration) => {
+        if (!this.raceSystems[navalAdministration.SystemID]) {
+          return map
+        }
+
         map[navalAdministration.NavalAdminCommandID] = {
           ...navalAdministration,
 
@@ -349,7 +370,9 @@ export default {
             return aggregate
           }, new Set([this.raceSystems[navalAdministration.SystemID]]))
         }
-      })
+
+        return map
+      }, {})
     },
 
     modifiedResearches() {
@@ -457,6 +480,10 @@ export default {
     },
     modifiedTerraformings() {
       return Object.values(this.terraforms.reduce((map, terraform) => {
+        if (terraform.TerraformStatus && !terraform.MaxAtm) {
+          return map
+        }
+
         if (!map[terraform.PopulationID]) {
           map[terraform.PopulationID] = {
             ...terraform,
@@ -474,24 +501,92 @@ export default {
 
         return map
       }, {})).map(terraform => {
-        console.log(terraform.TerraformStatus, terraform.MaxAtm, terraform.GasAtm, terraform.PopName, terraform.planetaryCapacity, terraform.orbitalCapacity)
-
         const localSurfaceArea = 4 * Math.PI * Math.pow(terraform.Radius, 2)
         const totalCapacity = (terraform.planetaryCapacity + terraform.orbitalCapacity) * this.populationTerraformingSpeed(terraform.PopulationID)
+        const localCapacity = totalCapacity * (earthSurfaceArea / localSurfaceArea)
 
-        console.log('totalCapacity', terraform.planetaryCapacity, terraform.orbitalCapacity, totalCapacity)
-
-        const TotalAnnualProduction = totalCapacity * (earthSurfaceArea / localSurfaceArea)
-        
-        return {
+        const terraformingTask = {
           ...terraform,
 
           TaskType: 'Terraforming',
 
-          TotalAnnualProduction,
-          AnnualProduction: TotalAnnualProduction,
-          RemainingDays: Math.max(0, terraform.TerraformStatus ? terraform.MaxAtm - terraform.GasAtm : terraform.GasAtm - terraform.MaxAtm) / (TotalAnnualProduction / 365),
+          TotalAnnualProduction: totalCapacity * (earthSurfaceArea / localSurfaceArea),
+          AnnualProduction: 0,
+          RemainingDays: 0,
         }
+
+        terraformingTask.AnnualProduction = terraformingTask.TotalAnnualProduction
+
+        if (terraform.GasName === 'Water Vapour' && terraform.HydroID === 3 && terraformingTask.TotalAnnualProduction) {
+          const minConstructionPeriod = this.populationMinConstructionPeriod(terraform.PopulationID)
+
+          const roi = minConstructionPeriod / secondsPerYear
+          const periodDays = minConstructionPeriod / secondsPerDay
+
+          const roiCapacity = localCapacity / secondsPerYear * minConstructionPeriod
+          const roiCondensation = roi * condensationPerYear
+
+          const condensationPoint = terraform.AtmosPress * (terraform.HydroExt / 100) * waterVapourInAtmosphere
+
+          let periods = 0
+          if (terraform.TerraformStatus) {
+            let cycleExtent = terraform.HydroExt
+            let cycleAtm = terraform.GasAtm
+            let cyclePress = terraform.AtmosPress
+            while (cycleExtent <= 20) {
+              const roiCondensationPoint = cyclePress * (cycleExtent / 100) * waterVapourInAtmosphere
+              const roiEndLevel = cycleAtm + roiCapacity
+
+              const condensationAmount = roiEndLevel > roiCondensationPoint
+                ? cycleAtm - roiCondensation < roiCondensationPoint
+                  ? cycleAtm - roiCondensationPoint
+                  : cycleAtm - roiCondensation
+                : 0
+
+              cyclePress = cyclePress + Math.max(0, roiEndLevel - cycleAtm - condensationAmount) 
+              cycleAtm = Math.max(0, roiEndLevel - condensationAmount)
+              cycleExtent += condensationAmount * condensationToHydroRate
+
+              periods += 1
+            }
+          } else {
+            let cycleExtent = terraform.HydroExt
+            let cycleAtm = terraform.GasAtm
+            let cyclePress = terraform.AtmosPress
+            while (cycleExtent > 75) {
+              const roiEvaporationPoint = cyclePress * (cycleExtent / 100) * waterVapourInAtmosphere
+              const roiEndLevel = cycleAtm - roiCapacity
+
+              if (roiEndLevel > roiEvaporationPoint) {
+                cycleAtm = roiEndLevel
+              } else {
+                const evaporationAmount = roiEndLevel < 0
+                  ? roiEvaporationPoint
+                  : roiEndLevel < roiEvaporationPoint
+                    ? roiEvaporationPoint - terraform.GasAtm
+                    : 0
+
+                if (roiEndLevel < 0) {
+                  cyclePress = cyclePress - cycleAtm + evaporationAmount
+                  cycleAtm = roiEvaporationPoint
+                } else {
+                  cyclePress += evaporationAmount
+                  cycleAtm = roiEndLevel + evaporationAmount
+                }
+                
+                cycleExtent -= evaporationAmount * condensationToHydroRate
+              }
+
+              periods += 1
+            }
+          }
+
+          terraformingTask.RemainingDays = periods * periodDays
+        } else {
+          terraformingTask.RemainingDays = Math.max(0, terraform.TerraformStatus ? terraform.MaxAtm - terraform.GasAtm : terraform.GasAtm - terraform.MaxAtm) / (terraformingTask.TotalAnnualProduction / 365)
+        }
+        
+        return terraformingTask
       })
     },
 
@@ -702,13 +797,13 @@ export default {
           return []
         }
 
-        const orbitalTerraformers = await this.database.query(`select sum(FCT_ShipClass.Terraformers * FCT_CommanderBonuses.BonusValue) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = 38 and FCT_Ship.RaceID = 216 and FCT_ShipClass.Terraformers > 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`).then(([ items ]) => {
+        const orbitalTerraformers = await this.database.query(`select sum(FCT_ShipClass.Terraformers * FCT_CommanderBonuses.BonusValue) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`).then(([ items ]) => {
           console.log('Orbital Terraforms', items)
 
           return items
         })
 
-        const planetaryTerraformers = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = 38 and FCT_Population.RaceID = 216 and DIM_PlanetaryInstallation.TerraformValue > 0 group by FCT_Population.PopulationID`).then(([ items ]) => {
+        const planetaryTerraformers = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`).then(([ items ]) => {
           console.log('Planetary Terraforms', items)
 
           return items

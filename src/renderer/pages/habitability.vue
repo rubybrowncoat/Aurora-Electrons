@@ -675,11 +675,11 @@ export default {
     },
 
     systemNames() {
-      if (!this.calculatedBodies || !this.calculatedBodies.length) {
+      if (!this.bodies || !this.bodies.length) {
         return []
       }
 
-      return Object.values(this.calculatedBodies.reduce((names, item) => {
+      return Object.values(this.bodies.reduce((names, item) => {
         if (!names[item.SystemID]) {
           names[item.SystemID] = {
             SystemID: item.SystemID,
