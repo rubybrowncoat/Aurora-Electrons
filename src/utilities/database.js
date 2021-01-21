@@ -35,7 +35,6 @@ export const resetDatabase = (storagePath) => {
     }
   }, {
     sequelize,
-    modelName: 'game',
     tableName: 'FCT_Game',
     timestamps: false,
   })
@@ -53,13 +52,15 @@ export const resetDatabase = (storagePath) => {
     WealthPoints: Sequelize.FLOAT,
   }, {
     sequelize,
-    modelName: 'race',
     tableName: 'FCT_Race',
     timestamps: false,
-  })
 
-  Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID', as: 'Races' })
-  // Race.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID', as: 'Game' })
+    defaultScope: {
+      where: {
+        NPR: false,
+      },
+    },
+  })
 
   class TechSystem extends Model {}
   TechSystem.init({
@@ -73,8 +74,61 @@ export const resetDatabase = (storagePath) => {
     AdditionalInfo2: Sequelize.FLOAT,
   }, {
     sequelize,
-    modelName: 'techSystem',
     tableName: 'FCT_TechSystem',
+    timestamps: false,
+  })
+
+  class Population extends Model {}
+  Population.init({ // TO COMPLETE
+    PopulationID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    // Direct Relationships
+    GameID: Sequelize.INTEGER,
+    RaceID: Sequelize.INTEGER,
+    OriginalRaceID: Sequelize.INTEGER,
+    SystemID: Sequelize.INTEGER,
+    SystemBodyID: Sequelize.INTEGER,
+    TerraformingGasID: Sequelize.INTEGER,
+    GroundAttackID: Sequelize.INTEGER,
+    SpeciesID: Sequelize.INTEGER,
+    GenModSpeciesID: Sequelize.INTEGER,
+    FighterDestFleetID: Sequelize.INTEGER,
+    SpaceStationDestFleetID: Sequelize.INTEGER,
+
+    //
+    PopName: Sequelize.TEXT,
+    Capital: Sequelize.BOOLEAN,
+  }, {
+    sequelize,
+    tableName: 'FCT_Population',
+    timestamps: false,
+  })
+
+  class SystemBody extends Model {}
+  SystemBody.init({ // TO COMPLETE
+    SystemBodyID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    // Direct Relationships
+    GameID: Sequelize.INTEGER,
+    SystemID: Sequelize.INTEGER,
+    StarID: Sequelize.INTEGER,
+    ParentBodyID: Sequelize.INTEGER,
+    BodyTypeID: Sequelize.INTEGER,
+    HydroID: Sequelize.INTEGER,
+    RuinID: Sequelize.INTEGER,
+    RuinRaceID: Sequelize.INTEGER,
+    AsteroidBeltID: Sequelize.INTEGER,
+
+    Name: Sequelize.TEXT,
+  }, {
+    sequelize,
+    tableName: 'FCT_SystemBody',
     timestamps: false,
   })
 
@@ -90,13 +144,13 @@ export const resetDatabase = (storagePath) => {
     DisplayOrder: Sequelize.FLOAT,
   }, {
     sequelize,
-    modelName: 'planetaryInstallation',
     tableName: 'DIM_PlanetaryInstallation',
     timestamps: false,
 
     defaultScope: {
       order: [['DisplayOrder', 'DESC']]
     },
+    
     scopes: {
       civilianEconomy: {
         where: {
@@ -105,6 +159,15 @@ export const resetDatabase = (storagePath) => {
       },
     }
   })
+
+  // Relations
+  Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID' })
+
+  Race.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
+  Race.hasMany(Population, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
+
+  Population.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
+  Population.hasOne(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
 
   return sequelize
 }

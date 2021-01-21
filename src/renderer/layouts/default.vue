@@ -205,16 +205,14 @@ export default {
   asyncComputed: {
     games: {
       async get() {
-        if (!this.database || !this.database.models.game) {
+        if (!this.database || !this.database.models.Game) {
           return []
         }
 
-        const games = await this.database.models.game.findAll({ 
-          where: {
-            '$Races.NPR$': 0,
-          }, include: [ 
-            'Races',
-          ]
+        const games = await this.database.models.Game.findAll({ 
+          include: [{
+            model: this.database.models.Race,
+          }],
         })
 
         return games
