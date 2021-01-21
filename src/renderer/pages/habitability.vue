@@ -459,6 +459,9 @@ export default {
         const tidalModifier = body.TidalLock && BodyClass[body.BodyClass] !== 'Moon' ? 5 : 1
         const hydroModifier = body.HydroExt > 75 ? Math.max((100 - body.HydroExt) / 25, 0.01) : 1
 
+        if (body.SystemBodyName === 'Mercury')
+        console.log(body.SystemBodyName, body.TidalLock, tidalModifier)
+
         const maxPopPreModifiers = (localSurfaceArea / earthSurfaceArea) * baseMaxPop * this.selectedSpecies.PopulationDensityModifier
 
         const newBody = {
@@ -803,6 +806,7 @@ export default {
                 Albedo: item.Albedo,
                 RadiationLevel: item.RadiationLevel,
                 DustLevel: item.DustLevel,
+                TidalLock: item.TidalLock,
 
                 Populations: [],
                 Minerals: [],

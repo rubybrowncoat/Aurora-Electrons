@@ -3,8 +3,6 @@ import { convertDisplayBase } from "./generic"
 import romanum from 'romanum'
 
 export const systemBodyName = (body) => {
-  console.log(body)
-
   if (body.SystemBodyName) {
     return body.SystemBodyName
   }
