@@ -35,6 +35,7 @@ export const resetDatabase = (storagePath) => {
     }
   }, {
     sequelize,
+    modelName: 'Game',
     tableName: 'FCT_Game',
     timestamps: false,
   })
@@ -52,6 +53,7 @@ export const resetDatabase = (storagePath) => {
     WealthPoints: Sequelize.FLOAT,
   }, {
     sequelize,
+    modelName: 'Race',
     tableName: 'FCT_Race',
     timestamps: false,
 
@@ -74,6 +76,7 @@ export const resetDatabase = (storagePath) => {
     AdditionalInfo2: Sequelize.FLOAT,
   }, {
     sequelize,
+    modelName: 'TechSystem',
     tableName: 'FCT_TechSystem',
     timestamps: false,
   })
@@ -103,6 +106,7 @@ export const resetDatabase = (storagePath) => {
     Capital: Sequelize.BOOLEAN,
   }, {
     sequelize,
+    modelName: 'Population',
     tableName: 'FCT_Population',
     timestamps: false,
   })
@@ -128,6 +132,7 @@ export const resetDatabase = (storagePath) => {
     Name: Sequelize.TEXT,
   }, {
     sequelize,
+    modelName: 'SystemBody',
     tableName: 'FCT_SystemBody',
     timestamps: false,
   })
@@ -144,6 +149,7 @@ export const resetDatabase = (storagePath) => {
     DisplayOrder: Sequelize.FLOAT,
   }, {
     sequelize,
+    modelName: 'PlanetaryInstallation',
     tableName: 'DIM_PlanetaryInstallation',
     timestamps: false,
 
