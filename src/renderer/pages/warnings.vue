@@ -397,7 +397,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length">
+        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length || knownUnexploitedConstructs.length">
           <v-col cols="12" class="display-1">
             Others
           </v-col>
@@ -457,6 +457,25 @@
                   </v-list>
                 </v-expansion-panel-content>
               </v-expansion-panel>
+              <v-expansion-panel v-if="knownUnexploitedConstructs.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ knownUnexploitedConstructs.length }} unexploited ancient constructs
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="construct in knownUnexploitedConstructs" :key="construct.AncientConstructID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ construct.SystemBody.System.RaceSystemSurveys[0].Name }} &mdash; {{ modelSystemBodyName(construct.SystemBody) }}</v-list-item-title>
+                          <v-list-item-subtitle v-if="construct.OwnPopulations.length">Lacking 10 million population on the body</v-list-item-subtitle>
+                          <v-list-item-subtitle v-else>No population on the body</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
             </v-expansion-panels>
           </v-col>
         </v-row>
@@ -474,7 +493,7 @@ import romanum from 'romanum'
 
 import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
-import { systemBodyName, populationName } from '../../utilities/aurora'
+import { systemBodyName, modelSystemBodyName, populationName } from '../../utilities/aurora'
 
 const secondsPerTwoWeeks = 1209600
 const secondsPerYear = 31536000
@@ -501,6 +520,7 @@ export default {
     roundToDecimal,
 
     systemBodyName,
+    modelSystemBodyName,
     populationName,
 
     levelColor(morale) {
@@ -972,6 +992,60 @@ export default {
         })
 
         return wrecks
+      },
+      default: [],
+    },
+    knownUnexploitedConstructs: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const constructs = await this.database.models.AncientConstruct.findAll({
+          where: {
+            GameID: this.GameID,
+          },
+
+          include: [{
+            model: this.database.models.ResearchField,
+          }, {
+            required: true,
+            model: this.database.models.SystemBody,
+            include: [{
+              required: false,
+              model: this.database.models.Population,
+            }, {
+              required: true,
+              model: this.database.models.System,
+              include: [{
+                required: true,
+                model: this.database.models.RaceSystemSurvey,
+                where: {
+                  RaceID: this.RaceID,
+                }
+              }]
+            }, {
+              required: false,
+              model: this.database.models.SystemBodyName,
+              where: {
+                RaceID: this.RaceID,
+              }
+            }, {
+              model: this.database.models.Star,
+            }]
+          }],
+        }).then((items) => {
+          console.log('Unexploited Constructs', items)
+
+          return items.map(construct => {
+            construct.OwnPopulations = construct.SystemBody.Populations.filter(population => population.RaceID === this.RaceID)
+            construct.AlienPopulations = construct.SystemBody.Populations.filter(population => population.RaceID !== this.RaceID)
+
+            return construct
+          }).filter(construct => !construct.OwnPopulations.length || construct.OwnPopulations.filter(population => population.Population < 10).length)
+        })
+
+        return constructs
       },
       default: [],
     },

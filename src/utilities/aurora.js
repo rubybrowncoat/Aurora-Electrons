@@ -47,3 +47,16 @@ export const populationName = (population, prefix = '', suppressSystem = false) 
     ? processedPopulation.PopName
     : `${systemBodyComponent} &mdash; ${processedPopulation.PopName}`
 }
+
+export const modelSystemBodyName = (systemBody) => {
+  const normalizedModel = {
+    SystemBodyID: systemBody.SystemBodyID,
+    SystemBodyName: systemBody.SystemBodyNames.length ? systemBody.SystemBodyNames[0].Name : null,
+    BodyClass: systemBody.BodyClass,
+    Component: systemBody.Star.Component,
+    PlanetNumber: systemBody.PlanetNumber,
+    OrbitNumber: systemBody.OrbitNumber,
+  }
+
+  return systemBodyName(normalizedModel)
+}
