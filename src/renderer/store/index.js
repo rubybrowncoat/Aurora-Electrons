@@ -41,6 +41,10 @@ export const getters = {
 }
 
 export const mutations = {
+  configDidChange(state, { key, callback, returnant }) {
+    returnant.unsubscribe = state.config.onDidChange(key, callback)
+  },
+
   replaceConfig(state, { config }) {
     state.config = config
   },

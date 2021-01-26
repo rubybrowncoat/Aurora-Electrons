@@ -238,7 +238,7 @@ export default {
           return {}
         }
 
-        return await this.database.models.race.findByPk(this.RaceID).then(race => {
+        return await this.database.models.Race.findByPk(this.RaceID).then(race => {
           console.log('Race', race)
 
           return race

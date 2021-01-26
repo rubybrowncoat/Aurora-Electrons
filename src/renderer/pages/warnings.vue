@@ -1022,14 +1022,20 @@ export default {
                 model: this.database.models.RaceSystemSurvey,
                 where: {
                   RaceID: this.RaceID,
-                }
+                },
               }]
+            }, {
+              required: true,
+              model: this.database.models.SystemBodySurvey,
+              where: {
+                RaceID: this.RaceID,
+              },
             }, {
               required: false,
               model: this.database.models.SystemBodyName,
               where: {
                 RaceID: this.RaceID,
-              }
+              },
             }, {
               model: this.database.models.Star,
             }]

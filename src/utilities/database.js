@@ -56,12 +56,6 @@ export const resetDatabase = (storagePath) => {
     modelName: 'Race',
     tableName: 'FCT_Race',
     timestamps: false,
-
-    defaultScope: {
-      where: {
-        NPR: false,
-      },
-    },
   })
 
   class TechSystem extends Model {}
@@ -304,6 +298,26 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class SystemBodySurvey extends Model {}
+  SystemBodySurvey.init({
+    RaceID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    SystemBodyID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    // Direct Relationships
+    GameID: Sequelize.INTEGER,
+  }, {
+    sequelize,
+    modelName: 'SystemBodySurvey',
+    tableName: 'FCT_SystemBodySurveys',
+    timestamps: false,
+  })
+
   class PlanetaryInstallation extends Model {}
   PlanetaryInstallation.init({ // INCOMPLETE
     PlanetaryInstallationID: {
@@ -387,6 +401,7 @@ export const resetDatabase = (storagePath) => {
   Race.hasMany(Population, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(RaceSystemSurvey, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(SystemBodyName, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
+  Race.hasMany(SystemBodySurvey, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
 
   Population.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Population.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
@@ -407,10 +422,14 @@ export const resetDatabase = (storagePath) => {
   SystemBody.hasMany(Population, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   SystemBody.hasMany(AncientConstruct, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   SystemBody.hasMany(SystemBodyName, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
+  SystemBody.hasMany(SystemBodySurvey, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   SystemBody.belongsTo(Star, { foreignKey: 'StarID', sourceKey: 'StarID' })
 
   SystemBodyName.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   SystemBodyName.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
+  
+  SystemBodySurvey.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
+  SystemBodySurvey.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
 
   AncientConstruct.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
   AncientConstruct.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })

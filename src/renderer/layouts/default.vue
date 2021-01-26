@@ -19,34 +19,25 @@
       <v-divider></v-divider>
 
       <v-list>
-        <template v-for="game in games">
-          <v-tooltip :key="game.GameID" right>
-            <template #activator="{ on }">
-              <v-list-group prepend-icon="domain" append-icon :value="game.GameID == GameID" :title="game.GameName" v-if="game.Races.length > 1" v-on="on">
-                <template v-slot:activator>
-                  <v-list-item-content>
-                    <v-list-item-title>{{ game.GameName }}</v-list-item-title>
-                    <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
-                  </v-list-item-content>
-                </template>
-                <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID == RaceID" @click="changeGame({ game, race })">
-                  <v-list-item-icon><v-icon>people</v-icon></v-list-item-icon>
-                  <v-list-item-title>
-                    {{ race.RaceTitle }}
-                  </v-list-item-title>
-                </v-list-item>
-              </v-list-group>
-              <v-list-item :input-value="game.GameID == GameID" @click="changeGame({ game })" v-else v-on="on">
-                <v-list-item-icon><v-icon>domain</v-icon></v-list-item-icon>
+        <v-tooltip right v-for="game in games" :key="game.GameID">
+          <template #activator="{ on }">
+            <v-list-group prepend-icon="domain" append-icon :value="game.GameID === GameID" :title="game.GameName" @click="game.Races.length === 1 ? changeGame({ game }) : null" v-on="on">
+              <template v-slot:activator>
                 <v-list-item-content>
                   <v-list-item-title>{{ game.GameName }}</v-list-item-title>
                   <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
                 </v-list-item-content>
+              </template>
+              <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID === RaceID" @click="changeGame({ game, race })">
+                <v-list-item-icon><v-icon>people</v-icon></v-list-item-icon>
+                <v-list-item-title>
+                  {{ race.RaceTitle }}
+                </v-list-item-title>
               </v-list-item>
-            </template>
-            <span>{{ game.GameName }}</span>
-          </v-tooltip>
-        </template>
+            </v-list-group>
+          </template>
+          <span>{{ game.GameName }}</span>
+        </v-tooltip>
       </v-list>
     </v-navigation-drawer>
 
@@ -114,7 +105,7 @@
 </style>
 
 <script>
-import appHeader from '@/components/header'
+import AppHeader from '@/components/header'
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 export default {
@@ -124,12 +115,21 @@ export default {
       mini: false,
 
       tab: null,
+
+      // WATCHED CONFIG
+      spyNPR: false,
+      unsubscribeSpyNPR: null,
     }
   },
-  components: { appHeader },
+  components: { 
+    AppHeader,
+  },
   methods: {
     ...mapMutations('snackbar', [
       'setActive',
+    ]),
+    ...mapMutations([
+      'configDidChange',
     ]),
 
     ...mapActions([
@@ -212,6 +212,11 @@ export default {
         const games = await this.database.models.Game.findAll({ 
           include: [{
             model: this.database.models.Race,
+            ...(this.spyNPR ? null : {
+              where: {
+                NPR: false
+              },
+            }),
           }],
         })
 
@@ -220,8 +225,36 @@ export default {
       default: [],
     },
   },
+  watch: {
+    config: {
+      immediate: true,
+      handler(config) {
+        this.spyNPR = config.get('spyNPR', false)
+      },
+    },
+  },
   mounted() {
     this.themeInit()
+    
+    // CONFIG CHANGE SUBSCRIPTION
+    const mutationReturn = {}
+    this.configDidChange({
+      key: 'spyNPR',
+      callback: (value) => {
+        this.spyNPR = value
+      },
+
+      returnant: mutationReturn,
+    })
+    
+    if (mutationReturn.unsubscribe) {
+      this.unsubscribeSpyNPR = mutationReturn.unsubscribe
+    }
+  },
+  beforeDestroy() {
+    if (this.unsubscribeSpyNPR) {
+      this.unsubscribeSpyNPR()
+    }
   }
 }
 </script>

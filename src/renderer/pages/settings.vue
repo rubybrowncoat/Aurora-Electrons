@@ -1,13 +1,26 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
+    <v-container fluid>
+      <v-row>
+        <v-col>
+          <div class="display-1">
+            Application settings
+          </div>
+        </v-col>
+      </v-row>
+      <v-row justify="start">
+        <v-col cols="12">
+          <v-switch v-model="spyNPR" inset @change="setSpyNPR" :label="spyNPR ? 'Displays all races.' : 'Shows only player controlled races.'"></v-switch>
+        </v-col>
+      </v-row>
+    </v-container>
 
-    <div v-else>
+    <div v-if="RaceID">
       <v-container fluid>
         <v-row>
           <v-col>
             <div class="display-1">
-              Maintenance Threshold
+              Maintenance threshold
             </div>
           </v-col>
           <v-col cols="auto" class="d-flex align-center" v-if="!isMaintenanceDefault">
@@ -37,27 +50,29 @@
 </template>
 
 <script>
-import { remote } from 'electron'
-
 import { mapGetters } from 'vuex'
 
-import romanum from 'romanum'
-
-import { convertDisplayBase } from '../../utilities/generic'
-import { separatedNumber, roundToDecimal } from '../../utilities/math'
-
-const secondsPerYear = 31536000
+import { separatedNumber } from '../../utilities/math'
 
 export default {
   components: {},
   data() {
     return {
+      spyNPR: false,
+
       maintenanceThreshold: 0,
       maintenanceExclusions: [],
     }
   },
   methods: {
     separatedNumber,
+    
+    // APPLICATION
+    setSpyNPR(value) {
+      this.config.set(`spyNPR`, value)
+
+      this.spyNPR = value
+    },
     
     // MAINTENANCE
     setMaintenanceThreshold(value) {
@@ -86,6 +101,11 @@ export default {
       'GameID',
       'RaceID',
     ]),
+
+    // APPLICATION
+    storedSpyNPR() {
+      return this.config.get(`spyNPR`, false)
+    },
 
     // MAINTENANCE
     storedMaintenanceThreshold() {
@@ -117,6 +137,12 @@ export default {
     },
   },
   watch: {
+    storedSpyNPR: {
+      immediate: true,
+      handler(spyNPR) {
+        this.spyNPR = spyNPR
+      },
+    },
     storedMaintenanceThreshold: {
       immediate: true,
       handler(maintenanceThreshold) {
