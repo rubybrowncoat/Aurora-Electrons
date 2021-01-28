@@ -97,13 +97,80 @@ export const resetDatabase = (storagePath) => {
 
     //
     PopName: Sequelize.TEXT,
+    AcademyOfficers: Sequelize.REAL,
     Capital: Sequelize.BOOLEAN,
+    TerraformStatus: Sequelize.INTEGER,
+    PurchaseCivilianMinerals: Sequelize.NUMBER,
+    
+    // OUT OF ORDER
+    FuelStockpile: Sequelize.REAL,
+    MaintenanceStockpile: Sequelize.REAL,
     Population: Sequelize.REAL,
+    Duranium: Sequelize.REAL,
+    Neutronium: Sequelize.REAL,
+    Corbomite: Sequelize.REAL,
+    Tritanium: Sequelize.REAL,
+    Boronide: Sequelize.REAL,
+    Mercassium: Sequelize.REAL,
+    Vendarite: Sequelize.REAL,
+    Sorium: Sequelize.REAL,
+    Uridium: Sequelize.REAL,
+    Corundium: Sequelize.REAL,
+    Gallicite: Sequelize.REAL,
   }, {
     sequelize,
     modelName: 'Population',
     tableName: 'FCT_Population',
     timestamps: false,
+  })
+
+  class PopulationInstallation extends Model {}
+  PopulationInstallation.init({
+    GameID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    PopID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    PlanetaryInstallationID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    Amount: Sequelize.DOUBLE,
+  }, {
+    sequelize,
+    modelName: 'PopulationInstallation',
+    tableName: 'FCT_PopulationInstallations',
+    timestamps: false,
+  })
+
+  class PlanetaryInstallation extends Model {}
+  PlanetaryInstallation.init({ // INCOMPLETE
+    PlanetaryInstallationID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true
+    },
+
+    Name: Sequelize.STRING,
+    CargoPoints: Sequelize.INTEGER,
+    CivMove: Sequelize.BOOLEAN,
+    DisplayOrder: Sequelize.FLOAT,
+  }, {
+    sequelize,
+    modelName: 'PlanetaryInstallation',
+    tableName: 'DIM_PlanetaryInstallation',
+    timestamps: false,
+    
+    scopes: {
+      civilianEconomy: {
+        where: {
+          CivMove: true,
+        },
+      },
+    }
   })
 
   class System extends Model {}
@@ -189,7 +256,6 @@ export const resetDatabase = (storagePath) => {
     GameID: Sequelize.INTEGER,
     SystemID: Sequelize.INTEGER,
     StarTypeID: Sequelize.INTEGER,
-    
     
     Name: Sequelize.TEXT,
     Protostar: Sequelize.INTEGER,
@@ -318,34 +384,105 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
-  class PlanetaryInstallation extends Model {}
-  PlanetaryInstallation.init({ // INCOMPLETE
-    PlanetaryInstallationID: {
+  class Fleet extends Model {}
+  Fleet.init({ // INCOMPLETE
+    FleetID: {
       type: Sequelize.INTEGER,
-      primaryKey: true
+      primaryKey: true,
     },
 
-    Name: Sequelize.STRING,
-    CargoPoints: Sequelize.INTEGER,
-    CivMove: Sequelize.BOOLEAN,
-    DisplayOrder: Sequelize.FLOAT,
+    // Direct Relationships
+    GameID: Sequelize.INTEGER,
+    RaceID: Sequelize.INTEGER,
+    SystemID: Sequelize.INTEGER,
+    OrbitBodyID: Sequelize.INTEGER,
+    ParentCommandID: Sequelize.INTEGER,
+    AssignedPopulationID: Sequelize.INTEGER,
+    SpecialOrderID: Sequelize.INTEGER,
+    SpecialOrderID2: Sequelize.INTEGER,
+    EntryJPID: Sequelize.INTEGER,
+    AxisContactID: Sequelize.INTEGER,
+    NPROperationalGroupID: Sequelize.INTEGER,
+    AssignedFormationID: Sequelize.INTEGER,
+    SpecificThreatID: Sequelize.INTEGER,
+    AnchorFleetID: Sequelize.INTEGER,
+
+    FleetName: Sequelize.TEXT,
+    OrbitDistance: Sequelize.INTEGER,
+    OrbitBearing: Sequelize.DOUBLE,
+    TradeLocation: Sequelize.INTEGER,
+    CivilianFunction: Sequelize.INTEGER,
+    NPRHomeGuard: Sequelize.BOOLEAN,
+    TFTraining: Sequelize.BOOLEAN,
+    Speed: Sequelize.INTEGER,
+    MaxNebulaSpeed: Sequelize.INTEGER,
+    Xcor: Sequelize.DOUBLE,
+    Ycor: Sequelize.DOUBLE,
+    LastXcor: Sequelize.DOUBLE,
+    LastYcor: Sequelize.DOUBLE,
+    LastMoveTime: Sequelize.DOUBLE,
+    IncrementStartX: Sequelize.DOUBLE,
+    IncrementStartY: Sequelize.DOUBLE,
+    CycleMoves: Sequelize.INTEGER,
+    JustDivided: Sequelize.INTEGER,
+    Distance: Sequelize.INTEGER,
+    OffsetBearing: Sequelize.INTEGER,
+    ConditionOne: Sequelize.INTEGER,
+    ConditionTwo: Sequelize.INTEGER,
+    ConditionalOrderOne: Sequelize.INTEGER,
+    ConditionalOrderTwo: Sequelize.INTEGER,
+    AvoidDanger: Sequelize.BOOLEAN,
+    AvoidAlienSystems: Sequelize.BOOLEAN,
+    DisplaySensors: Sequelize.BOOLEAN,
+    DisplayWeapons: Sequelize.BOOLEAN,
+    ShippingLine: Sequelize.INTEGER,
+    UseMaximumSpeed: Sequelize.BOOLEAN,
+    RedeployOrderGiven: Sequelize.BOOLEAN,
+    MaxStandingOrderDistance: Sequelize.INTEGER,
+    NoSurrender: Sequelize.BOOLEAN,
+    AnchorFleetDistance: Sequelize.DOUBLE,
+    AnchorFleetBearingOffset: Sequelize.DOUBLE,
+    GuardNearestHostileContact: Sequelize.BOOLEAN,
+    UseAnchorDestination: Sequelize.BOOLEAN,
+    GuardNearestKnownWarship: Sequelize.BOOLEAN,
   }, {
     sequelize,
-    modelName: 'PlanetaryInstallation',
-    tableName: 'DIM_PlanetaryInstallation',
+    modelName: 'Fleet',
+    tableName: 'FCT_Fleet',
     timestamps: false,
+  })
 
-    defaultScope: {
-      order: [['DisplayOrder', 'DESC']]
+  class GroundUnitFormation extends Model {}
+  GroundUnitFormation.init({
+    FormationID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
     },
-    
-    scopes: {
-      civilianEconomy: {
-        where: {
-          CivMove: true,
-        },
-      },
-    }
+
+    GameID: Sequelize.INTEGER,
+    RaceID: Sequelize.INTEGER,
+    PopulationID: Sequelize.INTEGER,
+    ShipID: Sequelize.INTEGER,
+    ParentFormationID: Sequelize.INTEGER,
+    AssignedFormationID: Sequelize.INTEGER,
+    OriginalTemplateID: Sequelize.INTEGER,
+    ReplacementTemplateID: Sequelize.INTEGER,
+
+    Name: Sequelize.TEXT,
+    Abbreviation: Sequelize.TEXT,
+    BoardingStatus: Sequelize.INTEGER,
+    HideSubUnits: Sequelize.BOOLEAN,
+    FieldPosition: Sequelize.INTEGER,
+    RequiredRank: Sequelize.INTEGER,
+    ActiveSensorsOn: Sequelize.BOOLEAN,
+    Civilian: Sequelize.BOOLEAN,
+    UseForReplacements: Sequelize.BOOLEAN,
+    ReplacementPriority: Sequelize.INTEGER,
+  }, {
+    sequelize,
+    modelName: 'GroundUnitFormation',
+    tableName: 'FCT_GroundUnitFormation',
+    timestamps: false,
   })
 
   class ResearchField extends Model {}
@@ -392,25 +529,54 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class AetherRift extends Model {}
+  AetherRift.init({
+    // Direct Relationships
+    GameID: Sequelize.INTEGER,
+    SystemID: Sequelize.INTEGER,
+
+    Xcor: Sequelize.DOUBLE,
+    Ycor: Sequelize.DOUBLE,
+    Diameter: Sequelize.DOUBLE,
+  }, {
+    sequelize,
+    modelName: 'AetherRift',
+    tableName: 'FCT_AetherRift',
+    timestamps: false,
+  })
+  AetherRift.removeAttribute('id')
+
 
   // Relations
   Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID' })
   Game.hasMany(AncientConstruct, { foreignKey: 'GameID', sourceKey: 'GameID' })
+  Game.hasMany(AetherRift, { foreignKey: 'GameID', sourceKey: 'GameID' })
 
   Race.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
   Race.hasMany(Population, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(RaceSystemSurvey, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(SystemBodyName, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(SystemBodySurvey, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
+  Race.hasMany(Fleet, { foreignKey: 'RaceID' })
+  Race.hasMany(GroundUnitFormation, { foreignKey: 'RaceID' })
 
   Population.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Population.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   Population.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
+  Population.hasMany(PopulationInstallation, { foreignKey: 'PopID' })
+  Population.hasMany(GroundUnitFormation, { foreignKey: 'PopulationID' })
+
+  PopulationInstallation.belongsTo(Population, { foreignKey: 'PopID' })
+  PopulationInstallation.belongsTo(PlanetaryInstallation, { foreignKey: 'PlanetaryInstallationID', sourceKey: 'PlanetaryInstallationID' })
+
+  PlanetaryInstallation.hasMany(PopulationInstallation, { foreignKey: 'PlanetaryInstallationID', sourceKey: 'PlanetaryInstallationID' })
 
   System.hasMany(Population, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   System.hasMany(SystemBody, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   System.hasMany(RaceSystemSurvey, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   System.hasMany(Star, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
+  System.hasMany(Fleet, { foreignKey: 'SystemID' })
+  System.hasMany(AetherRift, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
 
   RaceSystemSurvey.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   RaceSystemSurvey.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
@@ -424,6 +590,7 @@ export const resetDatabase = (storagePath) => {
   SystemBody.hasMany(SystemBodyName, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   SystemBody.hasMany(SystemBodySurvey, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   SystemBody.belongsTo(Star, { foreignKey: 'StarID', sourceKey: 'StarID' })
+  SystemBody.hasMany(Fleet, { foreignKey: 'OrbitBodyID' })
 
   SystemBodyName.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   SystemBodyName.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
@@ -431,9 +598,19 @@ export const resetDatabase = (storagePath) => {
   SystemBodySurvey.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   SystemBodySurvey.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
 
+  Fleet.belongsTo(Race, { foreignKey: 'RaceID' })
+  Fleet.belongsTo(System, { foreignKey: 'SystemID' })
+  Fleet.belongsTo(SystemBody, { foreignKey: 'OrbitBodyID' })
+
+  GroundUnitFormation.belongsTo(Population, { foreignKey: 'PopulationID' })
+  GroundUnitFormation.belongsTo(Race, { foreignKey: 'RaceID' })
+
   AncientConstruct.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
   AncientConstruct.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   AncientConstruct.belongsTo(ResearchField, { foreignKey: 'ResearchFieldID', sourceKey: 'ResearchFieldID' })
+
+  AetherRift.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
+  AetherRift.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
 
   ResearchField.hasMany(AncientConstruct, { foreignKey: 'ResearchFieldID', sourceKey: 'ResearchFieldID' })
 

@@ -397,7 +397,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length || knownUnexploitedConstructs.length">
+        <v-row class="mb-5" justify="start" v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length || knownUnexploitedConstructs.length || dangerousRifts.length">
           <v-col cols="12" class="display-1">
             Others
           </v-col>
@@ -476,6 +476,37 @@
                   </v-list>
                 </v-expansion-panel-content>
               </v-expansion-panel>
+              <v-expansion-panel v-if="dangerousRifts.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ dangerousRifts.length }} dangerous rifts in occupied systems
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="(rift, index) in dangerousRifts" :key="index">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ rift.System.RaceSystemSurveys[0].Name }} &mdash; Size: {{ separatedNumber(roundToDecimal(rift.Diameter / 1000000, 2)) }}Mkm</v-list-item-title>
+                          <v-list-item-subtitle>
+                            {{ [
+                              rift.MilitaryFleets && `${rift.MilitaryFleets} military fleets`,
+                              rift.CivilianFleets && `${rift.CivilianFleets} civilian fleets`
+                            ].filter(f => f).join(', ') }}
+                          </v-list-item-subtitle>
+                          <v-list-item-subtitle>
+                            {{ [
+                              rift.InhabitedColonies && `${rift.InhabitedColonies} inhabited colonies`,
+                              rift.UsedColonies && `${rift.UsedColonies} used colonies`,
+                              rift.StockedColonies && `${rift.StockedColonies} stocked colonies`,
+                              rift.GroundUnitBases && `${rift.GroundUnitBases} ground unit bases`,
+                            ].filter(f => f).join(', ') }}
+                          </v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
             </v-expansion-panels>
           </v-col>
         </v-row>
@@ -485,13 +516,10 @@
 </template>
 
 <script>
-import { remote } from 'electron'
-
 import { mapGetters } from 'vuex'
 
-import romanum from 'romanum'
+import _partition from 'lodash/partition'
 
-import { convertDisplayBase } from '../../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
 import { systemBodyName, modelSystemBodyName, populationName } from '../../utilities/aurora'
 
@@ -1052,6 +1080,83 @@ export default {
         })
 
         return constructs
+      },
+      default: [],
+    },
+    dangerousRifts: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const rifts = await this.database.models.AetherRift.findAll({
+          where: {
+            GameID: this.GameID,
+          },
+
+          include: [{
+            required: true,
+            model: this.database.models.System,
+            include: [{
+              required: true,
+              model: this.database.models.RaceSystemSurvey,
+              where: {
+                RaceID: this.RaceID,
+              },
+            }, {
+              required: false,
+              model: this.database.models.Population,
+              where: {
+                RaceID: this.RaceID,
+              },
+              include: [{
+                model: this.database.models.PopulationInstallation,
+                // include: [{
+                //   required: true,
+                //   model: this.database.models.PlanetaryInstallation,
+                // }]
+              }, {
+                model: this.database.models.GroundUnitFormation,
+              }],
+            }, {
+              required: false,
+              model: this.database.models.Fleet,
+              where: {
+                RaceID: this.RaceID,
+              },
+            }],
+          }],
+
+          order: [['Diameter', 'DESC']]
+        }).then((items) => {
+          console.log('Dangerous Rifts', items)
+
+          return items.map(item => {
+            const [civilianFleets, militaryFleets] = _partition(item.System.Fleets, fleet => fleet.ShippingLine)
+
+            const [inhabitedColonies, uninhabitedColonies] = _partition(item.System.Populations, population => population.Population)
+            const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, population => population.PopulationInstallations.length)
+            const [stockedColonies, emptyColonies] = _partition(unusedColonies, population => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
+            const [groundUnitBases] = _partition(emptyColonies, population => population.GroundUnitFormations.length)
+
+            return {
+              ...item.toJSON(),
+
+              CivilianFleets: civilianFleets.length,
+              MilitaryFleets: militaryFleets.length,
+
+              InhabitedColonies: inhabitedColonies.length,
+              UsedColonies: usedColonies.length,
+              StockedColonies: stockedColonies.length,
+
+              GroundUnitBases: groundUnitBases.length,
+            }
+          }).filter(item => item.CivilianFleets || item.MilitaryFleets || item.InhabitedColonies || item.UsedColonies || item.StockedColonies || item.GroundUnitBases)
+        })
+
+        console.log(rifts)
+
+        return rifts
       },
       default: [],
     },
