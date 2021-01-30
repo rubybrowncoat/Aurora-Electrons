@@ -17,7 +17,7 @@
       </v-row>
       <v-row justify="start">
         <v-col cols="12">
-          <v-data-table ref="tablle" :headers="headers" :items="tasks" item-key="ID" class="elevation-1" sort-by="RemainingDays" disable-pagination hide-default-footer multi-sort>
+          <v-data-table ref="table" :headers="headers" :items="tasks" item-key="ID" class="elevation-1" sort-by="RemainingDays" disable-pagination hide-default-footer multi-sort>
             <template v-slot:[`item.TaskType`]="{ item }">
               <span class="py-1 px-2 overline font-weight-medium elevation-1" :class="typeColor(item.TaskType)">{{ item.TaskType }}</span>
             </template>
@@ -403,6 +403,8 @@ export default {
           return {
             ...research,
 
+            ID: `research-${research.ID}`,
+
             RemainingDays: research.RemainingDays + extraDays,
           }
         }
@@ -423,6 +425,7 @@ export default {
         return {
           ...production,
 
+          ID: `production-${production.ID}`,
           TaskType: 'Production',
           
           TotalAnnualProduction,
@@ -438,6 +441,7 @@ export default {
         return {
           ...ship,
 
+          ID: `ship-${ship.ID}`,
           TaskType: 'Ship',
 
           TotalAnnualProduction,
@@ -455,6 +459,7 @@ export default {
         return {
           ...shipyard,
 
+          ID: `shipyard-${shipyard.ID}`,
           TaskType: 'Shipyard',
 
           Name: `${shipyard.ShipyardName} - ${ShipyardUpgradeTypeMap[shipyard.UpgradeTaskType]}`,
@@ -470,6 +475,7 @@ export default {
         return {
           ...training,
 
+          ID: `training-${training.ID}`,
           TaskType: 'Training',
 
           TotalAnnualProduction,
@@ -508,6 +514,7 @@ export default {
         const terraformingTask = {
           ...terraform,
 
+          ID: `terraforming-${terraform.PopulationID}`,
           TaskType: 'Terraforming',
 
           TotalAnnualProduction: totalCapacity * (earthSurfaceArea / localSurfaceArea),
