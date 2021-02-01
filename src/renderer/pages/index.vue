@@ -5,14 +5,14 @@
     <v-container fluid v-if="RaceID">
       <v-row justify="start">
         <v-col cols="12">
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Research', showResearches)" small tile dense borderless @click="showResearches = !showResearches">Research</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Production', showProductions)" small tile dense borderless @click="showProductions = !showProductions">Production</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Shipyard', showShipyards)" small tile dense borderless @click="showShipyards = !showShipyards">Shipyard</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Ship', showShips)" small tile dense borderless @click="showShips = !showShips">Ship</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Training', showTrainings)" small tile dense borderless @click="showTrainings = !showTrainings">Training</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Terraforming', showTerraformings)" small tile dense borderless @click="showTerraformings = !showTerraformings">Terraforming</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Queue', showQueues)" small tile dense borderless @click="toggleQueues">Show Queues</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" color="typeColor()" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips || !showShipyards || !showTrainings" @click="restoreTypes">All</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Research', showResearches)" small tile dense borderless @click="setShowResearches(!showResearches)">Research</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Production', showProductions)" small tile dense borderless @click="setShowProductions(!showProductions)">Production</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Shipyard', showShipyards)" small tile dense borderless @click="setShowShipyards(!showShipyards)">Shipyard</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Ship', showShips)" small tile dense borderless @click="setShowShips(!showShips)">Ship</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Training', showTrainings)" small tile dense borderless @click="setShowTrainings(!showTrainings)">Training</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Terraforming', showTerraformings)" small tile dense borderless @click="setShowTerraformings(!showTerraformings)">Terraforming</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Queue', showQueues)" small tile dense borderless @click="setShowQueues(!showQueues)">Show Queues</v-btn>
+          <v-btn class="overline d-inline-block" elevation="1" color="typeColor()" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips || !showShipyards || !showTrainings || !showTerraformings" @click="resetProductionFilters">All</v-btn>
         </v-col>
       </v-row>
       <v-row justify="start">
@@ -82,7 +82,7 @@
 <script>
 import { remote } from 'electron'
 
-import { mapGetters } from 'vuex'
+import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
 import { populationName } from '../../utilities/aurora'
@@ -128,40 +128,38 @@ export default {
   components: {},
   data() {
     return {
-      showResearches: true,
-      showProductions: true,
-      showShipyards: true,
-      showShips: true,
-      showTrainings: true,
-      showTerraformings: true,
+      // showResearches: true,
+      // showProductions: true,
+      // showShipyards: true,
+      // showShips: true,
+      // showTrainings: true,
+      // showTerraformings: true,
 
-      showQueues: true,
+      // showQueues: true,
 
       panels: [0, 1, 2],
     }
   },
   methods: {
+    ...mapActions('production', [
+      'resetProductionFilters',
+    ]),
+
+    ...mapMutations('production', [
+      'setShowResearches',
+      'setShowProductions',
+      'setShowShipyards',
+      'setShowShips',
+      'setShowTrainings',
+      'setShowTerraformings',
+      
+      'setShowQueues',
+    ]),
+
     separatedNumber,
     roundToDecimal,
 
     populationName,
-
-    isTypeActive(type) {
-      return this.types.includes(type)
-    },
-
-    restoreTypes() {
-      this.showResearches = true
-      this.showProductions = true
-      this.showShipyards = true
-      this.showShips = true
-      this.showTrainings = true
-      this.showTerraformings = true
-    },
-
-    toggleQueues() {
-      this.showQueues = !this.showQueues
-    },
 
     typeColor(type, active = true) {
       if (!active) {
@@ -346,6 +344,17 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
+
+    ...mapState('production', [
+      'showResearches',
+      'showProductions',
+      'showShipyards',
+      'showShips',
+      'showTrainings',
+      'showTerraformings',
+      
+      'showQueues',
+    ]),
 
     adminsWithSystems() {
       if (!Object.values(this.raceSystems).length) {
