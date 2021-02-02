@@ -219,7 +219,7 @@
                       <v-list-item v-for="population in freeConstructionCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)"></v-list-item-title>
-                          <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
+                          <v-list-item-subtitle><span class="font-weight-bold">{{ roundToDecimal(population.FreePercentage, 4) }}%</span> available capacity</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -450,7 +450,7 @@
                       <v-list-item v-for="wreck in knownWrecks" :key="wreck.WreckID">
                         <v-list-item-content>
                           <v-list-item-title>{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ systemBodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title>
-                          <v-list-item-subtitle>Size: {{ wreck.Size }}</v-list-item-subtitle>
+                          <v-list-item-subtitle>Size: {{ wreck.Size }}<span v-if="wreck.Owned"> &mdash; Owned design</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -468,6 +468,7 @@
                       <v-list-item v-for="construct in knownUnexploitedConstructs" :key="construct.AncientConstructID">
                         <v-list-item-content>
                           <v-list-item-title>{{ construct.SystemBody.System.RaceSystemSurveys[0].Name }} &mdash; {{ modelSystemBodyName(construct.SystemBody) }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ roundToDecimal((construct.ResearchBonus - 1) * 100) }}% {{ construct.ResearchField.FieldName }}</v-list-item-subtitle>
                           <v-list-item-subtitle v-if="construct.OwnPopulations.length">Lacking 10 million population on the body</v-list-item-subtitle>
                           <v-list-item-subtitle v-else>No population on the body</v-list-item-subtitle>
                         </v-list-item-content>
@@ -824,7 +825,7 @@ export default {
         const populations = await this.database.query(`select VIR_ConstructionPopulation.*, 100 - SUM(FCT_IndustrialProjects.Percentage) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ConstructionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population inner join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.ConstructionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ConstructionPopulation left join FCT_IndustrialProjects on VIR_ConstructionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType IN (0,3,4) group by FCT_IndustrialProjects.PopulationID having SUM(FCT_IndustrialProjects.Percentage) < 100`).then(([ items ]) => {
           console.log('Free Construction Capacity', items)
 
-          return items
+          return items.filter(item => item.FreePercentage > 0.00006)
         })
 
         return populations
@@ -1076,7 +1077,7 @@ export default {
             construct.AlienPopulations = construct.SystemBody.Populations.filter(population => population.RaceID !== this.RaceID)
 
             return construct
-          }).filter(construct => !construct.OwnPopulations.length || construct.OwnPopulations.filter(population => population.Population < 10).length)
+          }).filter(construct => !construct.OwnPopulations.length || !construct.OwnPopulations.filter(population => population.Population > 10).length)
         })
 
         return constructs
