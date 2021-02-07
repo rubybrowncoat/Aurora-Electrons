@@ -4,7 +4,43 @@
 
     <div v-else>
       <v-container fluid>
-        <v-row class="mb-5" justify="start" v-if="stockpilingCivilianMinerals.length">
+        <v-row class="mb-5" justify="start" v-if="intruders.length">
+          <v-col cols="12" class="display-1">
+            Contacts
+          </v-col>
+          <v-col cols="12">
+            <v-expansion-panels hover>
+              <v-expansion-panel v-if="intruders.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  Intruders detected in {{ intruders.length }} systems
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-expansion-panels hover>
+                    <v-expansion-panel v-for="intruder in intruders" :key="intruder.System.SystemID">
+                      <v-expansion-panel-header class="font-weight-bold">
+                        {{ intruder.System.RaceSystemSurveys[0].Name }} &mdash;&nbsp; <span v-html="intruderTotals(intruder)"></span>
+                      </v-expansion-panel-header>
+
+                      <v-expansion-panel-content>
+                        <v-list nav dense>
+                          <v-list-item-group color="primary">
+                            <v-list-item v-for="group of Object.values(intruder.Contacts)" :key="`${intruder.System.SystemID}-${group.Race.RaceID}`">
+                              <v-list-item-content>
+                                <v-list-item-title>{{ group.Race.AlienRaces[0].AlienRaceName }} &mdash; {{ Object.entries(group.Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ') }} <span v-if="group.Race.AlienRaces[0].ContactStatus === 0">&mdash; <span class="red--text">Hostile</span></span></v-list-item-title>
+                              </v-list-item-content>
+                            </v-list-item>
+                          </v-list-item-group>
+                        </v-list>
+                      </v-expansion-panel-content>
+                    </v-expansion-panel>
+                  </v-expansion-panels>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+            </v-expansion-panels>
+          </v-col>
+        </v-row>
+        <v-row class="mb-5" justify="start" v-if="stockpilingCivilianMinerals.length || wastedMiningCapacity.length">
           <v-col cols="12" class="display-1">
             Economy
           </v-col>
@@ -468,7 +504,8 @@
                       <v-list-item v-for="construct in knownUnexploitedConstructs" :key="construct.AncientConstructID">
                         <v-list-item-content>
                           <v-list-item-title>{{ construct.SystemBody.System.RaceSystemSurveys[0].Name }} &mdash; {{ modelSystemBodyName(construct.SystemBody) }}</v-list-item-title>
-                          <v-list-item-subtitle>{{ roundToDecimal((construct.ResearchBonus - 1) * 100) }}% {{ construct.ResearchField.FieldName }}</v-list-item-subtitle>
+                          <v-list-item-subtitle v-if="construct.Active">{{ roundToDecimal((construct.ResearchBonus - 1) * 100) }}% {{ construct.ResearchField.FieldName }}</v-list-item-subtitle>
+                          <v-list-item-subtitle v-else>Dormant</v-list-item-subtitle>
                           <v-list-item-subtitle v-if="construct.OwnPopulations.length">Lacking 10 million population on the body</v-list-item-subtitle>
                           <v-list-item-subtitle v-else>No population on the body</v-list-item-subtitle>
                         </v-list-item-content>
@@ -524,6 +561,8 @@ import _partition from 'lodash/partition'
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
 import { systemBodyName, modelSystemBodyName, populationName } from '../../utilities/aurora'
 
+import { Op } from 'sequelize'
+
 const secondsPerTwoWeeks = 1209600
 const secondsPerYear = 31536000
 
@@ -552,6 +591,8 @@ export default {
     modelSystemBodyName,
     populationName,
 
+    _partition,
+
     levelColor(morale) {
       if (morale > 0.85) {
         return 'green'
@@ -577,6 +618,24 @@ export default {
       remainingSeconds -= minutes * 60
 
       return `${days > 0 && `${days}d `}${hours && `${hours}m `}${minutes && `${minutes}m `}${remainingSeconds && `${remainingSeconds}s`}` || 'Expired'
+    },
+
+    intruderTotals(intruder) {
+      return Object.entries(intruder.Totals).filter(([, contacts]) => contacts.length).map(([type, contacts]) => {
+        const [hostiles, neutrals] = _partition(contacts, contact => contact.ContactRace.AlienRaces[0].ContactStatus === 0)
+
+        const out = []
+
+        if (hostiles.length) {
+          out.push(`<span class="red--text">${hostiles.length} Hostile ${type}s</span>`)
+        }
+
+        if (neutrals.length) {
+          out.push(`${neutrals.length} ${type}s`)
+        }
+        
+        return out.join(', ')
+      }).join(', ')
     },
   },
   computed: {
@@ -822,7 +881,7 @@ export default {
           return []
         }
         
-        const populations = await this.database.query(`select VIR_ConstructionPopulation.*, 100 - SUM(FCT_IndustrialProjects.Percentage) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ConstructionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population inner join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.ConstructionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ConstructionPopulation left join FCT_IndustrialProjects on VIR_ConstructionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType IN (0,3,4) group by FCT_IndustrialProjects.PopulationID having SUM(FCT_IndustrialProjects.Percentage) < 100`).then(([ items ]) => {
+        const populations = await this.database.query(`select VIR_ConstructionPopulation.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ConstructionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population inner join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.ConstructionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ConstructionPopulation left join FCT_IndustrialProjects on VIR_ConstructionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType IN (0,3,4) group by FCT_IndustrialProjects.PopulationID having FreePercentage > 0`).then(([ items ]) => {
           console.log('Free Construction Capacity', items)
 
           return items.filter(item => item.FreePercentage > 0.00006)
@@ -838,7 +897,7 @@ export default {
           return []
         }
 
-        const populations = await this.database.query(`select VIR_OrdnanceProductionPopulation.*, 100 - SUM(FCT_IndustrialProjects.Percentage) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as OrdnanceProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.OrdnanceProductionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_OrdnanceProductionPopulation left join FCT_IndustrialProjects on VIR_OrdnanceProductionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType = 1 group by VIR_OrdnanceProductionPopulation.PopulationID having SUM(FCT_IndustrialProjects.Percentage) < 100`).then(([ items ]) => {
+        const populations = await this.database.query(`select VIR_OrdnanceProductionPopulation.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as OrdnanceProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.OrdnanceProductionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_OrdnanceProductionPopulation left join FCT_IndustrialProjects on VIR_OrdnanceProductionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType = 1 group by VIR_OrdnanceProductionPopulation.PopulationID having FreePercentage > 0`).then(([ items ]) => {
           console.log('Free Ordnance Production Capacity', items)
 
           return items
@@ -854,7 +913,7 @@ export default {
           return []
         }
         
-        const populations = await this.database.query(`select VIR_OrdnanceProductionPopulation.*, 100 - SUM(FCT_IndustrialProjects.Percentage) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as FighterProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.FighterProductionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_OrdnanceProductionPopulation left join FCT_IndustrialProjects on VIR_OrdnanceProductionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType = 2 group by VIR_OrdnanceProductionPopulation.PopulationID having SUM(FCT_IndustrialProjects.Percentage) < 100`).then(([ items ]) => {
+        const populations = await this.database.query(`select VIR_OrdnanceProductionPopulation.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as FighterProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.FighterProductionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_OrdnanceProductionPopulation left join FCT_IndustrialProjects on VIR_OrdnanceProductionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType = 2 group by VIR_OrdnanceProductionPopulation.PopulationID having FreePercentage > 0`).then(([ items ]) => {
           console.log('Free Fighter Production Capacity', items)
 
           return items
@@ -1077,7 +1136,7 @@ export default {
             construct.AlienPopulations = construct.SystemBody.Populations.filter(population => population.RaceID !== this.RaceID)
 
             return construct
-          }).filter(construct => !construct.OwnPopulations.length || !construct.OwnPopulations.filter(population => population.Population > 10).length)
+          }).filter(construct => !construct.Active || !construct.OwnPopulations.length || !construct.OwnPopulations.filter(population => population.Population > 10).length)
         })
 
         return constructs
@@ -1158,6 +1217,110 @@ export default {
         console.log(rifts)
 
         return rifts
+      },
+      default: [],
+    },
+    intruders: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const contacts = await this.database.models.Contact.findAll({
+          where: {
+            GameID: this.GameID,
+            DetectRaceID: this.RaceID,
+
+            ContactType: {
+              [Op.in]: [1, 3, 4, 12, 14, 16]
+            }
+          },
+
+          group: 'ContactID',
+          order: [['LastUpdate', 'DESC']],
+
+          include: [{
+            required: true,
+            model: this.database.models.System,
+            include: [{
+              required: true,
+              model: this.database.models.RaceSystemSurvey,
+              where: {
+                RaceID: this.RaceID,
+              },
+            }],
+          }, {
+            required: true,
+            model: this.database.models.Race,
+            as: 'ContactRace',
+
+            where: {
+              RaceID: {
+                [Op.ne]: this.RaceID
+              },
+            },
+
+            include: [{
+              model: this.database.models.AlienRace,
+
+              where: {
+                ViewRaceID: this.RaceID,
+              },
+            }],
+          }, {
+            required: false,
+            model: this.database.models.Population,
+          }]
+        }).then((items) => {
+          console.log('Intruder Contacts', items)
+
+          const typeMap = {
+            0: 'Other',
+            1: 'Ship',
+            3: 'Salvo',
+            4: 'Population',
+            12: 'GroundUnit',
+            14: 'GroundUnit',
+            16: 'Shipyard',
+          }
+
+          return Object.values(items.reduce((aggregate, contact) => {
+            if (!contact.ContactRace.AlienRaces.length) {
+              console.log('!!! NO ALIEN RACE', contact)
+
+              return aggregate
+            }
+
+            if ([2, 3].includes(contact.ContactRace.AlienRaces[0].ContactStatus)) {
+              return aggregate
+            }
+            
+
+            if (!aggregate[contact.SystemID]) {
+              aggregate[contact.SystemID] = {
+                System: contact.System,
+
+                Contacts: {},
+                Totals: Object.fromEntries(Object.values(typeMap).map(type => [type, []])),
+              }
+            }
+
+            if (!aggregate[contact.SystemID].Contacts[contact.ContactRaceID]) {
+              aggregate[contact.SystemID].Contacts[contact.ContactRaceID] = {
+                Race: contact.ContactRace,
+
+                Types: Object.fromEntries(Object.values(typeMap).map(type => [type, []])),
+              }
+            }
+
+            aggregate[contact.SystemID].Contacts[contact.ContactRaceID].Types[typeMap[contact.ContactType] || 'Other'].push(contact)
+            aggregate[contact.SystemID].Totals[typeMap[contact.ContactType] || 'Other'].push(contact)
+
+            return aggregate
+          }, {}))
+        })
+
+        return contacts
       },
       default: [],
     },

@@ -58,6 +58,46 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class AlienRace extends Model {}
+  AlienRace.init({
+    AlienRaceID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    ViewRaceID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    GameID: Sequelize.INTEGER,
+
+    AlienRaceName: Sequelize.TEXT,
+    Abbrev: Sequelize.TEXT,
+
+    FixedRelationship: Sequelize.INTEGER,
+    ContactStatus: Sequelize.INTEGER,
+    CommStatus: Sequelize.INTEGER,
+    CommModifier: Sequelize.DOUBLE,
+    TradeTreaty: Sequelize.BOOLEAN,
+    TechTreaty: Sequelize.BOOLEAN,
+    GeoTreaty: Sequelize.BOOLEAN,
+    GravTreaty: Sequelize.BOOLEAN,
+
+    ClassThemeID: Sequelize.INTEGER,
+    RealClassNames: Sequelize.INTEGER,
+    
+    DiplomaticPoints: Sequelize.DOUBLE,
+    AlienRaceIntelligencePoints: Sequelize.DOUBLE,
+    
+    FirstDetected: Sequelize.DOUBLE,
+    CommEstablished: Sequelize.DOUBLE,
+  }, {
+    sequelize,
+    modelName: 'AlienRace',
+    tableName: 'FCT_AlienRace',
+    timestamps: false,
+  })
+
   class TechSystem extends Model {}
   TechSystem.init({ // INCOMPLETE
     TechSystemID: {
@@ -546,6 +586,49 @@ export const resetDatabase = (storagePath) => {
   })
   AetherRift.removeAttribute('id')
 
+  class Contact extends Model {}
+  Contact.init({
+    UniqueID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    ContactID: Sequelize.INTEGER,
+
+    GameID: Sequelize.INTEGER,
+    SystemID: Sequelize.INTEGER,
+
+    DetectRaceID: Sequelize.INTEGER,
+    ContactRaceID: Sequelize.INTEGER,
+
+    ContactName: Sequelize.TEXT,
+    ContactMethod: Sequelize.INTEGER,
+    ContactType: Sequelize.INTEGER,
+    ContactStrength: Sequelize.DOUBLE,
+    ContactNumber: Sequelize.INTEGER,
+    Resolution: Sequelize.INTEGER,
+    Speed: Sequelize.INTEGER,
+
+    CreationTime: Sequelize.DOUBLE,
+    Reestablished: Sequelize.DOUBLE,
+    LastUpdate: Sequelize.DOUBLE,
+    ContinualContactTime: Sequelize.INTEGER,
+    
+    Xcor: Sequelize.DOUBLE,
+    Ycor: Sequelize.DOUBLE,
+    LastXcor: Sequelize.DOUBLE,
+    LastYcor: Sequelize.DOUBLE,
+    IncrementStartX: Sequelize.DOUBLE,
+    IncrementStartY: Sequelize.DOUBLE,
+
+    Msg: Sequelize.BOOLEAN,
+  }, {
+    sequelize,
+    modelName: 'Contact',
+    tableName: 'FCT_Contacts',
+    timestamps: false,
+  })
+
 
   // Relations
   Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID' })
@@ -559,12 +642,20 @@ export const resetDatabase = (storagePath) => {
   Race.hasMany(SystemBodySurvey, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Race.hasMany(Fleet, { foreignKey: 'RaceID' })
   Race.hasMany(GroundUnitFormation, { foreignKey: 'RaceID' })
+  Race.hasMany(AlienRace, { foreignKey: 'AlienRaceID' })
+
+  AlienRace.belongsTo(Game, { foreignKey: 'GameID' })
+  AlienRace.belongsTo(Race, { foreignKey: 'AlienRaceID' })
+  AlienRace.belongsTo(Race, { foreignKey: 'ViewRaceID', as: 'ViewRace' })
 
   Population.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   Population.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   Population.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   Population.hasMany(PopulationInstallation, { foreignKey: 'PopID' })
   Population.hasMany(GroundUnitFormation, { foreignKey: 'PopulationID' })
+  Population.hasMany(Contact, { foreignKey: 'ContactID', scope: {
+    ContactType: 4,
+  }})
 
   PopulationInstallation.belongsTo(Population, { foreignKey: 'PopID' })
   PopulationInstallation.belongsTo(PlanetaryInstallation, { foreignKey: 'PlanetaryInstallationID', sourceKey: 'PlanetaryInstallationID' })
@@ -605,6 +696,8 @@ export const resetDatabase = (storagePath) => {
   GroundUnitFormation.belongsTo(Population, { foreignKey: 'PopulationID' })
   GroundUnitFormation.belongsTo(Race, { foreignKey: 'RaceID' })
 
+  ResearchField.hasMany(AncientConstruct, { foreignKey: 'ResearchFieldID', sourceKey: 'ResearchFieldID' })
+
   AncientConstruct.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
   AncientConstruct.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   AncientConstruct.belongsTo(ResearchField, { foreignKey: 'ResearchFieldID', sourceKey: 'ResearchFieldID' })
@@ -612,7 +705,28 @@ export const resetDatabase = (storagePath) => {
   AetherRift.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
   AetherRift.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
 
-  ResearchField.hasMany(AncientConstruct, { foreignKey: 'ResearchFieldID', sourceKey: 'ResearchFieldID' })
+  Contact.belongsTo(Game, { foreignKey: 'GameID' })
+  Contact.belongsTo(System, { foreignKey: 'SystemID' })
+  Contact.belongsTo(Race, { foreignKey: 'DetectRaceID', as: 'DetectRace' })
+  Contact.belongsTo(Race, { foreignKey: 'ContactRaceID', as: 'ContactRace' })
+
+  Contact.belongsTo(Population, { foreignKey: 'ContactID' })
+  Contact.addHook('afterFind', results => {
+    console.log('makeContactVirtualProperty', results.length)
+
+    if (!Array.isArray(results)) {
+      results = [results]
+    }
+
+    for (const instance of results) {
+      if (instance.ContactType === 4 && instance.Population !== undefined) {
+        instance.Contact = instance.Population
+      }
+
+      delete instance.Population
+      delete instance.dataValues.Population
+    }
+  }, 'makeContactVirtualProperty')
 
   return sequelize
 }
