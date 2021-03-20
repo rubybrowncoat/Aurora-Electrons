@@ -42,6 +42,51 @@
                     <v-list-item-title>Select All</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
+                <v-list-item
+                  ripple
+                  @click="selectUnrestrictedSystems"
+
+                  v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length"
+
+                  :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))"
+                >
+                  <v-list-item-action>
+                    <v-icon>report_off</v-icon>
+                  </v-list-item-action>
+                  <v-list-item-content>
+                    <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
+                  </v-list-item-content>
+                </v-list-item>
+                <v-list-item
+                  ripple
+                  @click="selectOurSystems"
+
+                  v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length"
+
+                  :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))"
+                >
+                  <v-list-item-action>
+                    <v-icon>public</v-icon>
+                  </v-list-item-action>
+                  <v-list-item-content>
+                    <v-list-item-title>Select Colonized Systems</v-list-item-title>
+                  </v-list-item-content>
+                </v-list-item>
+                <v-list-item
+                  ripple
+                  @click="selectOurInhabitedSystems"
+
+                  v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length"
+
+                  :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))"
+                >
+                  <v-list-item-action>
+                    <v-icon>people</v-icon>
+                  </v-list-item-action>
+                  <v-list-item-content>
+                    <v-list-item-title>Select Inhabited Systems</v-list-item-title>
+                  </v-list-item-content>
+                </v-list-item>
                 <v-divider class="mt-2"></v-divider>
               </template>
             </v-select>
@@ -339,8 +384,12 @@ import { remote } from 'electron'
 
 import { mapGetters } from 'vuex'
 
+import _partition from 'lodash/partition'
+import _intersectionBy from 'lodash/intersectionBy'
+
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
 import { systemBodyName } from '../../utilities/aurora'
+import { areSetsEqual } from '../../utilities/generic'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -415,12 +464,24 @@ export default {
 
     systemBodyName,
 
+    areSetsEqual,
+
     toggleSystems() {
-      if (!this.systems.length) {
-        this.systems = this.systemNames.map(system => system.SystemID)
-      } else {
+      if (this.systems.length === this.systemNames.length) {
         this.systems = []
+      } else {
+        this.systems = this.systemNames.map(system => system.SystemID)
       }
+    },
+
+    selectOurSystems() {
+      this.systems = this.colonizedSystems.map(system => system.SystemID)
+    },
+    selectOurInhabitedSystems() {
+      this.systems = this.inhabitedColonizedSystems.map(system => system.SystemID)
+    },
+    selectUnrestrictedSystems() {
+      this.systems = this.unrestrictedSystems.map(system => system.SystemID)
     },
   },
   computed: {
@@ -762,7 +823,26 @@ export default {
           divider: true,
         },
       ]
-    }
+    },
+
+    unrestrictedSystems() {
+      return _intersectionBy(this.surveyedSystems.filter(system => system.RaceSystemSurveys.every(raceSystem => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
+    },
+    unrestrictedSystemsIds() {
+      return this.unrestrictedSystems.map(system => system.SystemID)
+    },
+    colonizedSystems() {
+      return _intersectionBy(this.surveyedSystems.filter(system => system.Populations.length), this.systemNames, 'SystemID')
+    },
+    colonizedSystemsIds() {
+      return this.colonizedSystems.map(system => system.SystemID)
+    },
+    inhabitedColonizedSystems() {
+      return this.colonizedSystems.filter(system => system.InhabitedColonies)
+    },
+    inhabitedColonizedSystemsIds() {
+      return this.inhabitedColonizedSystems.map(system => system.SystemID)
+    },
   },
   asyncComputed: {
     bodies: {
@@ -891,6 +971,50 @@ export default {
         }
           
         return species
+      },
+      default: [],
+    },
+    surveyedSystems: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const systems = await this.database.models.System.findAll({
+          where: {
+            GameID: this.GameID,
+          },
+
+          include: [{
+            required: true,
+            model: this.database.models.RaceSystemSurvey,
+            where: {
+              RaceID: this.RaceID,
+            },
+          }, {
+            required: false,
+            model: this.database.models.Population,
+            where: {
+              RaceID: this.RaceID,
+            },
+          }],
+        }).then((items) => {
+          console.log('Surveyed Systems', items)
+
+          return items.map(item => {
+            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, population => population.Population)
+
+            return {
+              ...item.toJSON(),
+
+              InhabitedColonies: inhabitedColonies.length,
+            }
+          })
+        })
+
+        console.log(systems)
+
+        return systems
       },
       default: [],
     },

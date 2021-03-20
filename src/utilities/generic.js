@@ -11,3 +11,5 @@ export const convertDisplayBase = (value, toBase) => {
   
   return newValue || '0'
 }
+
+export const areSetsEqual = (alpha, beta) => alpha.size === beta.size && [...alpha].every(value => beta.has(value))
