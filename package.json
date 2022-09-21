@@ -49,7 +49,7 @@
     "vue-async-computed": "^3.9.0",
     "vue-devtools": "^5.1.4",
     "vue-loader": "^15.9.1",
-    "vuetify": "^2.3.12",
+    "vuetify": "^2.6.10",
     "vuex": "^3.3.0",
     "webpack": "4.44.2",
     "webpack-node-externals": "2.5.2"
