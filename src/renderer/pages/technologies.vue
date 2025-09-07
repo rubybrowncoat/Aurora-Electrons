@@ -179,7 +179,7 @@ export default {
       const base = ['ConventionalStart']
       const currentlyResearchedIds = this.researchedTechnologies.map(tech => tech.TechID)
 
-      if ((this.race.RaceID && !this.race.ConventionalStart) || currentlyResearchedIds.includes(27434)) {
+      if ((this.race.RaceID && this.race.RaceStartingLevel > 0) || currentlyResearchedIds.includes(27434)) {
         base.push('TransnewtonianStart')
       }
 
