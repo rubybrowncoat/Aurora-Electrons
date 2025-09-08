@@ -10,7 +10,7 @@
               v-model="selectedSpeciesId"
               :items="species"
 
-              :item-text="item => `${item.SpeciesName} (${separatedNumber(roundToDecimal(item.TotalPopulation, 2))} M)`"
+              :item-text="item => `${item.SpeciesName} (${separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator)} M)`"
               item-value="SpeciesID"
 
               label="Species"
@@ -306,7 +306,7 @@
                       'red--text text--darken-3 font-weight-bold': !item.OwnPopulation && item.OtherPopulation,
                       'orange--text font-weight-bold': item.OwnPopulation && item.OtherPopulation,
                     }" v-on="on">
-                      {{ separatedNumber(roundToDecimal(item.TotalPopulation, 2)) }} / {{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2)) }}
+                      <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator) }}</span> / <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
                     </span>
                   </template>
                   
@@ -320,14 +320,14 @@
                     Alien Population
                   </span>
                 </v-tooltip>
-                <span v-else>{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2)) }}</span>
+                <span v-else>{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
               </template>
               <template v-slot:[`item.MaximumPopulationAtOptimalHydro`]="{ item }">
                 <span v-if="item.MaximumPopulationAtOptimalHydro === item.MaximumPopulation" class="green--text text--lighten-1 font-weight-bold">
                   Optimal
                 </span>
                 <span v-else>
-                  {{ separatedNumber(roundToDecimal(item.MaximumPopulationAtOptimalHydro, 2)) }}
+                  {{ separatedNumber(roundToDecimal(item.MaximumPopulationAtOptimalHydro, 2), separator) }}
                 </span>
               </template>
               <template v-slot:[`item.Liveable`]="{ item }">
@@ -339,7 +339,7 @@
               </template>
               <template v-slot:[`item.TerraformationTime`]="{ item }">
                 <span v-if="item.TerraformationTime > 0">
-                  {{ separatedNumber(roundToDecimal(item.TerraformationTime, 1)) }}
+                  {{ separatedNumber(roundToDecimal(item.TerraformationTime, 1), separator) }}
                 </span>
                 <span class="green--text text--lighten-1 font-weight-bold" v-else-if="item.Liveable">
                   Done
@@ -368,7 +368,7 @@
                   Unsurveyed
                 </span>
                 <span v-else>
-                  {{ separatedNumber(roundToDecimal(item.TotalMiningAmount)) }}
+                  <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.TotalMiningAmount), separator) }}</span>
                 </span>
               </template>
             </v-data-table>
@@ -486,11 +486,18 @@ export default {
   },
   computed: {
     ...mapGetters([
+      'config',
       'database',
       
       'GameID',
       'RaceID',
     ]),
+
+    separator() {
+      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+
+      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+    },
 
     selectedSpecies() {
       const extant = this.species.find(species => species.SpeciesID === this.selectedSpeciesId)

@@ -25,7 +25,7 @@
               <v-card>
                 <v-card-text class="pb-0">Civilian Freight Capacity</v-card-text>
                 <v-card-title>
-                  {{ separatedNumber(civilianCargoCapacity) }} Tons per Annum
+                  {{ separatedNumber(civilianCargoCapacity, separator) }} Tons per Annum
                 </v-card-title>
               </v-card>
             </v-col>
@@ -33,7 +33,7 @@
               <v-card>
                 <v-card-text class="pb-0">Civilian Colonist Capacity</v-card-text>
                 <v-card-title>
-                  {{ separatedNumber(civilianColonistCapacity) }} People per Annum
+                  {{ separatedNumber(civilianColonistCapacity, separator) }} People per Annum
                 </v-card-title>
               </v-card>
             </v-col>
@@ -45,7 +45,7 @@
             <v-card>
               <v-card-text class="pb-0">Military Freight Capacity</v-card-text>
               <v-card-title>
-                {{ separatedNumber(militaryCargoCapacity) }} Tons per Annum
+                {{ separatedNumber(militaryCargoCapacity, separator) }} Tons per Annum
               </v-card-title>
             </v-card>
           </v-col>
@@ -53,7 +53,7 @@
             <v-card>
               <v-card-text class="pb-0">Military Colonist Capacity</v-card-text>
               <v-card-title>
-                {{ separatedNumber(militaryColonistCapacity) }} People per Annum
+                {{ separatedNumber(militaryColonistCapacity, separator) }} People per Annum
               </v-card-title>
             </v-card>
           </v-col>
@@ -155,6 +155,7 @@ export default {
   },
   computed: {
     ...mapGetters([
+      'config',
       'database',
       
       'GameID',
@@ -162,6 +163,12 @@ export default {
 
       'CivilianShippingLinesActive',
     ]),
+
+    separator() {
+      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+
+      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+    },
 
     multipliedDistance() {
       return this.distance * this.distanceMultiplier

@@ -41,19 +41,19 @@
             </template>
             <template v-slot:[`item.AnnualProduction`]="{ item }">
               <span v-if="item.TaskType === 'Research'">
-                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} RP / {{ item.Facilities }} Labs
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} RP / {{ item.Facilities }} Labs
               </span>
               <span v-if="item.TaskType === 'Production'">
-                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP / {{ item.Percentage }}%
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} BP / {{ item.Percentage }}%
               </span>
               <span v-if="item.TaskType === 'Ship'">
-                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} BP
               </span>
               <span v-if="item.TaskType === 'Shipyard'">
-                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} Mod Rate
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} Mod Rate
               </span>
               <span v-if="item.TaskType === 'Training'">
-                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0)) }} BP
+                {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} BP
               </span>
               <span v-if="item.TaskType === 'Terraforming'">
                 {{ roundToDecimal(item.AnnualProduction, 4) }} Atm
@@ -66,7 +66,7 @@
               }">
                 <span v-if="item.Queue && item.TaskType !== 'Research'">Queued</span>
                 <span v-else-if="item.RemainingDays === 0" class="light-green--text font-weight-bold">Done!</span>
-                <span v-else><span v-if="item.UpgradeTaskType === 8 || item.TaskType === 'Terraforming'">~</span> {{ separatedNumber(roundToDecimal(item.RemainingDays, 1)) }}</span>
+                <span v-else><span v-if="item.UpgradeTaskType === 8 || item.TaskType === 'Terraforming'">~</span> {{ separatedNumber(roundToDecimal(item.RemainingDays, 1), separator) }}</span>
               </span>
             </template>
             <template v-slot:[`item.PopulationID`]="{ item }">
@@ -80,8 +80,6 @@
 </template>
 
 <script>
-import { remote } from 'electron'
-
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import { separatedNumber, roundToDecimal } from '../../utilities/math'
@@ -343,7 +341,13 @@ export default {
     },
   },
   computed: {
-    ...mapGetters(['database', 'GameID', 'RaceID']),
+    ...mapGetters([
+      'config',
+      'database',
+      
+      'GameID',
+      'RaceID',
+    ]),
 
     ...mapState('production', [
       'showResearches',
@@ -355,6 +359,12 @@ export default {
       
       'showQueues',
     ]),
+
+    separator() {
+      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+
+      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+    },
 
     adminsWithSystems() {
       if (!Object.values(this.raceSystems).length) {
@@ -692,7 +702,7 @@ export default {
           return items
         })
 
-        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, VIR_ResearchBonus.CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([ items ]) => {
           console.log('Research projects', items)
 
           return items
@@ -721,7 +731,7 @@ export default {
               Queue: true,
               Paused: currentProject.Paused,
               QueueChain: [currentProject.ID, ...queues.filter(subQueue => subQueue.CurrentProjectID === queue.CurrentProjectID && subQueue.ResearchOrder < queue.ResearchOrder).map(subQueue => `${currentProject.ID}-${subQueue.ResearchOrder}`)],
-              ActualCommanderResearchBonus: currentProject.ProjectField === queue.ProjectField ? currentProject.ActualCommanderResearchBonus : currentProject.CommanderBonus,
+              ActualCommanderResearchBonus: currentProject.ProjectField === queue.ProjectField ? (currentProject.ActualCommanderResearchBonus || 1) : (currentProject.CommanderBonus || 1),
               ActualAnomalyBonus: currentProject.ProjectField === queue.ProjectField ? currentProject.ActualAnomalyBonus : 1,
             })
           }

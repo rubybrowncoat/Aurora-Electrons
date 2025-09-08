@@ -65,6 +65,68 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class LogEventType extends Model {}
+  LogEventType.init({
+    EventTypeID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    Description: Sequelize.TEXT,
+    CombatDisplay: Sequelize.INTEGER,
+    DamageDisplay: Sequelize.INTEGER,
+    AttackEvent: Sequelize.BOOLEAN,
+    PlayerInterrupt: Sequelize.BOOLEAN,
+    AIInterrupt: Sequelize.BOOLEAN,
+  }, {
+    sequelize,
+    modelName: 'LogEventType',
+    tableName: 'DIM_EventType',
+    timestamps: false,
+  })
+
+  class LogEventColour extends Model {}
+  LogEventColour.init({
+    EventTypeID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+    RaceID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    GameID: Sequelize.INTEGER,
+    AlertColour: Sequelize.INTEGER,
+    TextColour: Sequelize.INTEGER,
+  }, {
+    sequelize,
+    modelName: 'LogEventColour',
+    tableName: 'FCT_EventColour',
+    timestamps: false,
+  })
+
+  class LogEvent extends Model {}
+  LogEvent.init({
+    GameID: Sequelize.INTEGER,
+    RaceID: Sequelize.INTEGER,
+    IncrementID: Sequelize.INTEGER,
+    SMOnly: Sequelize.BOOLEAN,
+    Time: Sequelize.DOUBLE,
+    EventType: Sequelize.INTEGER,
+    MessageText: Sequelize.TEXT,
+    SystemID: Sequelize.INTEGER,
+    Xcor: Sequelize.DOUBLE,
+    Ycor: Sequelize.DOUBLE,
+    IDType: Sequelize.INTEGER,
+    PopulationID: Sequelize.INTEGER,
+  }, {
+    sequelize,
+    modelName: 'LogEvent',
+    tableName: 'FCT_GameLog',
+    timestamps: false,
+  })
+  LogEvent.removeAttribute('id')
+
   class AlienRace extends Model {}
   AlienRace.init({
     AlienRaceID: {
@@ -330,57 +392,62 @@ export const resetDatabase = (storagePath) => {
     },
 
     // Direct Relationships
-    GameID: Sequelize.INTEGER,
-    SystemID: Sequelize.INTEGER,
-    StarID: Sequelize.INTEGER,
-    ParentBodyID: Sequelize.INTEGER,
-    BodyTypeID: Sequelize.INTEGER,
-    HydroID: Sequelize.INTEGER,
-    RuinID: Sequelize.INTEGER,
-    RuinRaceID: Sequelize.INTEGER,
-    AsteroidBeltID: Sequelize.INTEGER,
+    GameID: Sequelize.INTEGER, //
+    SystemID: Sequelize.INTEGER, //
+    StarID: Sequelize.INTEGER, //
+    ParentBodyID: Sequelize.INTEGER, //
+    BodyTypeID: Sequelize.INTEGER, //
+    HydroID: Sequelize.INTEGER, //
+    RuinID: Sequelize.INTEGER, //
+    RuinRaceID: Sequelize.INTEGER, //
+    AsteroidBeltID: Sequelize.INTEGER, //
+    FixedBodyParentID: Sequelize.INTEGER, //
 
-    Name: Sequelize.TEXT,
-    PlanetNumber: Sequelize.INTEGER,
-    OrbitNumber: Sequelize.INTEGER,
-    TrojanAsteroid: Sequelize.DOUBLE,
-    OrbitalDistance: Sequelize.DOUBLE,
-    CurrentDistance: Sequelize.DOUBLE,
-    HeadingInward: Sequelize.BOOLEAN,
-    Bearing: Sequelize.DOUBLE,
-    BodyClass: Sequelize.INTEGER,
-    Density: Sequelize.DOUBLE,
-    Radius: Sequelize.INTEGER,
-    Gravity: Sequelize.DOUBLE,
-    ParentBodyType: Sequelize.INTEGER,
-    Mass: Sequelize.DOUBLE,
-    EscapeVelocity: Sequelize.DOUBLE,
-    Year: Sequelize.DOUBLE,
-    TidalForce: Sequelize.DOUBLE,
-    TidalLock: Sequelize.BOOLEAN,
-    Tilt: Sequelize.INTEGER,
-    Eccentricity: Sequelize.DOUBLE,
-    DayValue: Sequelize.DOUBLE,
-    Roche: Sequelize.DOUBLE,
-    TectonicActivity: Sequelize.INTEGER,
-    Ring: Sequelize.BOOLEAN,
-    MagneticField: Sequelize.DOUBLE,
-    BaseTemp: Sequelize.DOUBLE,
-    SurfaceTemp: Sequelize.DOUBLE,
-    HydroExt: Sequelize.DOUBLE,
-    AtmosPress: Sequelize.DOUBLE,
-    Albedo: Sequelize.DOUBLE,
-    GHFactor: Sequelize.DOUBLE,
-    RGE: Sequelize.BOOLEAN,
-    Xcor: Sequelize.DOUBLE,
-    Ycor: Sequelize.DOUBLE,
-    PlanetIcon: Sequelize.TEXT,
-    RadiationLevel: Sequelize.DOUBLE,
-    DustLevel: Sequelize.DOUBLE,
-    AbandonedFactories: Sequelize.INTEGER,
-    DominantTerrain: Sequelize.INTEGER,
-    GroundMineralSurvey: Sequelize.INTEGER,
-    AGHFactor: Sequelize.DOUBLE,
+    Name: Sequelize.TEXT, //
+    PlanetNumber: Sequelize.INTEGER, //
+    OrbitNumber: Sequelize.INTEGER, //
+    TrojanAsteroid: Sequelize.DOUBLE, //
+    OrbitalDistance: Sequelize.DOUBLE, //
+    Bearing: Sequelize.DOUBLE, //
+    BodyClass: Sequelize.INTEGER, //
+    // Density: Sequelize.DOUBLE, ??? REPLACED BY WHAT? Radius and Mass?
+    Radius: Sequelize.INTEGER, //
+    Gravity: Sequelize.DOUBLE, //
+    ParentBodyType: Sequelize.INTEGER, //
+    Mass: Sequelize.DOUBLE, //
+    EscapeVelocity: Sequelize.DOUBLE, //
+    Year: Sequelize.DOUBLE, //
+    TidalForce: Sequelize.DOUBLE, //
+    TidalLock: Sequelize.BOOLEAN, //
+    Tilt: Sequelize.INTEGER, //
+    Eccentricity: Sequelize.DOUBLE, //
+    EccentricityDirection: Sequelize.DOUBLE, // Maybe replaces HeadingInward
+    MeanOrbitalSpeed: Sequelize.DOUBLE, //
+    CurrentOrbitalSpeed: Sequelize.DOUBLE, //
+    DistanceToOrbitCentre: Sequelize.DOUBLE, //
+    DistanceToParent: Sequelize.DOUBLE, // Maybe replaces CurrentDistance
+    DayValue: Sequelize.DOUBLE, //
+    Roche: Sequelize.DOUBLE, //
+    TectonicActivity: Sequelize.INTEGER, //
+    Ring: Sequelize.BOOLEAN, //
+    MagneticField: Sequelize.DOUBLE, //
+    BaseTemp: Sequelize.DOUBLE, //
+    SurfaceTemp: Sequelize.DOUBLE, //
+    HydroExt: Sequelize.DOUBLE, //
+    AtmosPress: Sequelize.DOUBLE, //
+    Albedo: Sequelize.DOUBLE, //
+    GHFactor: Sequelize.DOUBLE, //
+    RGE: Sequelize.BOOLEAN, //
+    Xcor: Sequelize.DOUBLE, //
+    Ycor: Sequelize.DOUBLE, //
+    PlanetIcon: Sequelize.TEXT, //
+    RadiationLevel: Sequelize.DOUBLE, //
+    DustLevel: Sequelize.DOUBLE, //
+    AbandonedFactories: Sequelize.INTEGER, //
+    DominantTerrain: Sequelize.INTEGER, //
+    GroundMineralSurvey: Sequelize.INTEGER, //
+    AGHFactor: Sequelize.DOUBLE, //
+    FixedBody: Sequelize.BOOLEAN, //
   }, {
     sequelize,
     modelName: 'SystemBody',
@@ -650,6 +717,19 @@ export const resetDatabase = (storagePath) => {
   Race.hasMany(Fleet, { foreignKey: 'RaceID' })
   Race.hasMany(GroundUnitFormation, { foreignKey: 'RaceID' })
   Race.hasMany(AlienRace, { foreignKey: 'AlienRaceID' })
+
+  LogEventType.hasMany(LogEvent, { foreignKey: 'EventType', sourceKey: 'EventTypeID' })
+  LogEventType.hasMany(LogEventColour, { foreignKey: 'EventTypeID', sourceKey: 'EventTypeID' })
+
+  LogEventColour.belongsTo(LogEventType, { foreignKey: 'EventTypeID', sourceKey: 'EventTypeID' })
+  LogEventColour.belongsTo(Game, { foreignKey: 'GameID' })
+  LogEventColour.belongsTo(Race, { foreignKey: 'RaceID' })
+
+  LogEvent.belongsTo(LogEventType, { foreignKey: 'EventType', sourceKey: 'EventTypeID' })
+  LogEvent.belongsTo(Game, { foreignKey: 'GameID' })
+  LogEvent.belongsTo(Race, { foreignKey: 'RaceID' })
+  LogEvent.belongsTo(Population, { foreignKey: 'PopulationID', sourceKey: 'PopulationID' })
+  LogEvent.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
 
   AlienRace.belongsTo(Game, { foreignKey: 'GameID' })
   AlienRace.belongsTo(Race, { foreignKey: 'AlienRaceID' })

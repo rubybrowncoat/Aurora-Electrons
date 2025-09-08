@@ -57,7 +57,7 @@
                       <v-list-item v-for="colony in stockpilingCivilianMinerals" :key="colony.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(colony)"></v-list-item-title>
-                          <v-list-item-subtitle>Currently stockpiling {{ separatedNumber(roundToDecimal(colony.TotalStockpile)) }} Tons of mineral</v-list-item-subtitle>
+                          <v-list-item-subtitle>Currently stockpiling <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(colony.TotalStockpile), separator) }} Tons of mineral</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -244,6 +244,24 @@
           </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
+              <v-expansion-panel v-if="freeResearchLabPopulations.length">
+                <v-expansion-panel-header class="font-weight-bold">
+                  {{ freeResearchLabPopulations.length }} populations with free research lab capacity
+                </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="population in freeResearchLabPopulations" :key="population.PopulationID">
+                        <v-list-item-content>
+                          <v-list-item-title v-html="populationName(population)"></v-list-item-title>
+                          <v-list-item-subtitle><span class="font-weight-bold">{{ population.AvailableFacilities - population.OccupiedFacilities }}</span> available labs</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
               <v-expansion-panel v-if="freeConstructionCapacityPopulations.length">
                 <v-expansion-panel-header class="font-weight-bold">
                   {{ freeConstructionCapacityPopulations.length }} populations with free construction capacity 
@@ -309,7 +327,7 @@
                       <v-list-item v-for="population in lowEfficiencyPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title><span :class="`${levelColor(population.Efficiency)}--text font-weight-bold`">{{ roundToDecimal(population.Efficiency * 100, 1) }}%</span> &mdash; <span  v-html="populationName(population)"></span></v-list-item-title>
-                          <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
+                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -327,7 +345,7 @@
                       <v-list-item v-for="population in selfSustainingDestinationPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)"></v-list-item-title>
-                          <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
+                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -371,7 +389,7 @@
                       <v-list-item v-for="population in governorlessPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)"></v-list-item-title>
-                          <v-list-item-subtitle>Population: {{ separatedNumber(roundToDecimal(population.Population * 1000000)) }}</v-list-item-subtitle>
+                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -450,7 +468,7 @@
                       <v-list-item v-for="shipyard in obsoleteShipyards" :key="shipyard.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title>{{ shipyard.PopName }} &mdash; {{ shipyard.ShipyardName }}</v-list-item-title>
-                          <v-list-item-subtitle>{{ shipyard.ClassName }} Class &mdash; {{ separatedNumber(shipyard.Capacity) }} Ton Capacity &mdash; Slipways: {{ shipyard.Slipways }}</v-list-item-subtitle>
+                          <v-list-item-subtitle>{{ shipyard.ClassName }} Class &mdash; <span class="text-no-wrap">{{ separatedNumber(shipyard.Capacity, separator) }}</span> Ton Capacity &mdash; Slipways: {{ shipyard.Slipways }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -524,7 +542,7 @@
                     <v-list-item-group color="primary">
                       <v-list-item v-for="(rift, index) in dangerousRifts" :key="index">
                         <v-list-item-content>
-                          <v-list-item-title>{{ rift.System.RaceSystemSurveys[0].Name }} &mdash; Size: {{ separatedNumber(roundToDecimal(rift.Diameter / 1000000, 2)) }}Mkm</v-list-item-title>
+                          <v-list-item-title>{{ rift.System.RaceSystemSurveys[0].Name }} &mdash; Size: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(rift.Diameter / 1000000, 2), separator) }}</span>Mkm</v-list-item-title>
                           <v-list-item-subtitle>
                             {{ [
                               rift.MilitaryFleets && `${rift.MilitaryFleets} military fleets`,
@@ -648,6 +666,12 @@ export default {
 
       'GameTime',
     ]),
+
+    separator() {
+      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+
+      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+    },
   },
   asyncComputed: {
     stockpilingCivilianMinerals: {
@@ -915,6 +939,22 @@ export default {
         
         const populations = await this.database.query(`select VIR_OrdnanceProductionPopulation.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as FighterProductionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.FighterProductionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_OrdnanceProductionPopulation left join FCT_IndustrialProjects on VIR_OrdnanceProductionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType = 2 group by VIR_OrdnanceProductionPopulation.PopulationID having FreePercentage > 0`).then(([ items ]) => {
           console.log('Free Fighter Production Capacity', items)
+
+          return items
+        })
+
+        return populations
+      },
+      default: [],
+    },
+    freeResearchLabPopulations: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+        
+        const populations = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as AvailableFacilities, VIR_PopulationResearch.Facilities as OccupiedFacilities, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join (select FCT_ResearchProject.PopulationID, SUM("FCT_ResearchProject"."Facilities") as "Facilities" from FCT_ResearchProject where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID} group by "FCT_ResearchProject"."PopulationID") as VIR_PopulationResearch on FCT_Population.PopulationID = VIR_PopulationResearch.PopulationID where FCT_Population.GameID = 138 and FCT_Population.RaceID = 779 and DIM_PlanetaryInstallation.ResearchValue > 0 GROUP BY FCT_Population.PopulationID having AvailableFacilities > OccupiedFacilities;`).then(([ items ]) => {
+          console.log('Free Research Labs', items)
 
           return items
         })

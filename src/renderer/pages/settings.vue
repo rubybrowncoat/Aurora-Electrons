@@ -13,6 +13,14 @@
           <v-switch v-model="spyNPR" inset @change="setSpyNPR" :label="spyNPR ? 'Displays all races.' : 'Shows only player controlled races.'"></v-switch>
         </v-col>
       </v-row>
+      <v-row justify="start">
+        <v-col cols="12" md="4">
+          <v-select class="d-flex" v-model="selectedSeparator" :items="curatedSeparators" @change="setSelectedSeparator" hint="Thousands Separator" solo persistent-hint dense></v-select>
+        </v-col>
+        <v-col cols="12" md="8">
+          <v-text-field v-model="exampleString" label="Example Number" :hint="separatedNumber(exampleString, thousandsSeparator)" solo persistent-hint dense type="number"></v-text-field>
+        </v-col>
+      </v-row>
     </v-container>
 
     <div v-if="RaceID">
@@ -58,7 +66,12 @@ export default {
   components: {},
   data() {
     return {
+      curatedSeparators: [`Tick`, 'Comma', 'Dash', 'Space', 'None'],
+
       spyNPR: false,
+      selectedSeparator: `Tick`,
+      thousandsSeparator: `'`,
+      exampleString: '1234567890.1234',
 
       maintenanceThreshold: 0,
       maintenanceExclusions: [],
@@ -72,6 +85,12 @@ export default {
       this.config.set(`spyNPR`, value)
 
       this.spyNPR = value
+    },
+    setSelectedSeparator(value) {
+      this.config.set(`selectedSeparator`, value)
+
+      this.selectedSeparator = value
+      this.thousandsSeparator = value === 'Tick' ? `'` : value === 'Comma' ? `,` : value === 'Dash' ? `-` : value === 'Space' ? ` ` : ''
     },
     
     // MAINTENANCE
@@ -105,6 +124,9 @@ export default {
     // APPLICATION
     storedSpyNPR() {
       return this.config.get(`spyNPR`, false)
+    },
+    storedSelectedSeparator() {
+      return this.config.get(`selectedSeparator`, `Tick`)
     },
 
     // MAINTENANCE
@@ -141,6 +163,13 @@ export default {
       immediate: true,
       handler(spyNPR) {
         this.spyNPR = spyNPR
+      },
+    },
+    storedSelectedSeparator: {
+      immediate: true,
+      handler(selectedSeparator) {
+        this.selectedSeparator = selectedSeparator
+        this.thousandsSeparator = selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
       },
     },
     storedMaintenanceThreshold: {

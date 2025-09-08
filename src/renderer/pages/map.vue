@@ -47,14 +47,7 @@
 </template>
 
 <script>
-import { remote } from 'electron'
-
 import { mapGetters } from 'vuex'
-
-import romanum from 'romanum'
-
-import { convertDisplayBase } from '../../utilities/generic'
-import { separatedNumber, roundToDecimal } from '../../utilities/math'
 
 import colors from 'vuetify/lib/util/colors'
 
@@ -83,10 +76,6 @@ export default {
     }
   },
   methods: {
-    separatedNumber(number) {
-      return separatedNumber(number)
-    },
-
     resizeGraph() {
       if (this.graph) {
         const element = document.getElementById('graph')

@@ -9,13 +9,17 @@ export default ({ store }) => {
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.indexOf('MacOS') !== -1
 
+  const headGame = false
+
   const storagePath = app.isPackaged
     ? isMac
       ? path.join(exePath, '../../../', 'AuroraDB.db')
       : process.env.PORTABLE_EXECUTABLE_DIR
-      ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db')
-      : path.join(exePath, 'AuroraDB.db')
-    : 'AuroraDB.db'
+        ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db')
+        : path.join(exePath, 'AuroraDB.db')
+    : headGame
+      ? path.join('../', 'AuroraDB.db')
+      : 'AuroraDB.db' 
   
   const watcher = chokidar.watch(storagePath, {
     persistent: true,

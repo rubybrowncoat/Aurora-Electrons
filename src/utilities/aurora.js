@@ -60,3 +60,13 @@ export const modelSystemBodyName = (systemBody) => {
 
   return systemBodyName(normalizedModel)
 }
+
+export const eventColorToRGBA = (colorInteger) => {
+  colorInteger >>>= 0;
+  const b = colorInteger & 0xFF,
+      g = (colorInteger & 0xFF00) >>> 8,
+      r = (colorInteger & 0xFF0000) >>> 16,
+      a = ( (colorInteger & 0xFF000000) >>> 24 ) / 255;
+
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}

@@ -195,10 +195,12 @@
                   'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
                   'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
                   'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
-                }" :key="material" v-if="item[material]">{{ separatedNumber(roundToDecimal(item[material].Amount)) }} ({{ item[material].Accessibility }})</span>
+                }" :key="material" v-if="item[material]"><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span>
               </template>
               <template v-slot:[`item.TotalAmount`]="{ item }">
-                {{ separatedNumber(Math.round(item.TotalAmount)) }}
+                <span class="text-no-wrap">
+                  {{ separatedNumber(Math.round(item.TotalAmount), separator) }}
+                </span>
               </template>
             </v-data-table>
           </v-col>
@@ -337,11 +339,18 @@ export default {
   },
   computed: {
     ...mapGetters([
+      'config',
       'database',
       
       'GameID',
       'RaceID',
     ]),
+
+    separator() {
+      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+
+      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+    },
 
     bodyGroups() {
       if (!this.minerals || !this.minerals.length) {

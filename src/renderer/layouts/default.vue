@@ -62,6 +62,7 @@
           <v-tab to="/information" nuxt>Information</v-tab>
           <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
           <v-tab to="/map" nuxt>Map (WIP)</v-tab>
+          <v-tab to="/log" nuxt>Log</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>

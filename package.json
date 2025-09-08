@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Aurora Electrons",
   "repository": "https://github.com/rubybrowncoat/Aurora-Electrons",
   "main": "./dist/main/index.js",
@@ -22,7 +22,7 @@
     "@types/node": "12.12.6"
   },
   "devDependencies": {
-    "@nuxtjs/vuetify": "^1.11.2",
+    "@nuxtjs/vuetify": "^1.12.3",
     "@xpda-dev/core": "^0.1.5",
     "@xpda-dev/electron-builder": "^0.2.1",
     "@xpda-dev/electron-launcher": "^0.2.1",
@@ -49,7 +49,7 @@
     "vue-async-computed": "^3.9.0",
     "vue-devtools": "^5.1.4",
     "vue-loader": "^15.9.1",
-    "vuetify": "^2.3.12",
+    "vuetify": "^2.7.2",
     "vuex": "^3.3.0",
     "webpack": "4.44.2",
     "webpack-node-externals": "2.5.2"
