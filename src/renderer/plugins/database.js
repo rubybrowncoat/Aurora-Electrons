@@ -9,7 +9,7 @@ export default ({ store }) => {
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.indexOf('MacOS') !== -1
 
-  const headGame = false
+  const headGame = process.env.NODE_ENV === 'development'
 
   const storagePath = app.isPackaged
     ? isMac

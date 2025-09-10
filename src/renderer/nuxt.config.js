@@ -26,6 +26,6 @@ module.exports = {
     '@nuxtjs/vuetify',
   ],
   modules: [
-    
+    // 
   ],
 };

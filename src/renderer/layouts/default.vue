@@ -60,9 +60,10 @@
           <v-tab to="/minerals" nuxt>Minerals</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/information" nuxt>Information</v-tab>
-          <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
-          <v-tab to="/map" nuxt>Map (WIP)</v-tab>
+          <v-tab to="/map" nuxt>Map</v-tab>
+          <!-- <v-tab to="/map_two" nuxt>Map 2 (SUPERWIP)</v-tab> -->
           <v-tab to="/log" nuxt>Log</v-tab>
+          <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>

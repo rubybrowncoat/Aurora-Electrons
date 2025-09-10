@@ -1,4 +1,5 @@
 import Sequelize, { Model } from 'sequelize'
+import sqlite3 from 'sqlite3'
 
 import dayjs from 'dayjs'
 
@@ -7,6 +8,8 @@ export const resetDatabase = (storagePath) => {
 
   const sequelize = new Sequelize({
     dialect: 'sqlite',
+    // dialectModule: sqlite3,
+
     storage: storagePath,
   })
 
