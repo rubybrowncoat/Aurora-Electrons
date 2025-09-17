@@ -1,33 +1,33 @@
 export const state = () => {
   return {
     active: false,
-    
+
     text: 'Action Successful',
     color: 'success',
   }
 }
 
 export const mutations = {
-  setActive(state, status) {
+  setActive (state, status) {
     state.active = status
   },
 
-  setText(state, text) {
+  setText (state, text) {
     state.text = text
   },
 
-  setColor(state, color) {
+  setColor (state, color) {
     state.color = color
-  }
+  },
 }
 
 export const actions = {
-  activateSnackbar({ commit }, snackbar = {}) {
-    if (snackbar.hasOwnProperty('text')) {
+  activateSnackbar ({ commit }, snackbar = {}) {
+    if (Object.prototype.hasOwnProperty.call(snackbar, 'text')) {
       commit('setText', snackbar.text)
     }
 
-    if (snackbar.hasOwnProperty('color')) {
+    if (Object.prototype.hasOwnProperty.call(snackbar, 'color')) {
       commit('setColor', snackbar.color)
     }
 

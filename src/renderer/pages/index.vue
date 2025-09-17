@@ -2,7 +2,7 @@
   <div class="recap-container">
     <div v-if="!GameID">Select a race from the left-side menu.</div>
 
-    <v-container fluid v-if="RaceID">
+    <v-container v-if="RaceID" fluid>
       <v-row justify="start">
         <v-col cols="12">
           <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Research', showResearches)" small tile dense borderless @click="setShowResearches(!showResearches)">Research</v-btn>
@@ -12,23 +12,23 @@
           <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Training', showTrainings)" small tile dense borderless @click="setShowTrainings(!showTrainings)">Training</v-btn>
           <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Terraforming', showTerraformings)" small tile dense borderless @click="setShowTerraformings(!showTerraformings)">Terraforming</v-btn>
           <v-btn class="overline d-inline-block" elevation="1" :color="typeColor('Queue', showQueues)" small tile dense borderless @click="setShowQueues(!showQueues)">Show Queues</v-btn>
-          <v-btn class="overline d-inline-block" elevation="1" color="typeColor()" small dark tile dense borderless v-if="!showResearches || !showProductions || !showShips || !showShipyards || !showTrainings || !showTerraformings" @click="resetProductionFilters">All</v-btn>
+          <v-btn v-if="!showResearches || !showProductions || !showShips || !showShipyards || !showTrainings || !showTerraformings" class="overline d-inline-block" elevation="1" color="typeColor()" small dark tile dense borderless @click="resetProductionFilters">All</v-btn>
         </v-col>
       </v-row>
       <v-row justify="start">
         <v-col cols="12">
           <v-data-table ref="table" :headers="headers" :items="tasks" item-key="ID" class="elevation-1" sort-by="RemainingDays" disable-pagination hide-default-footer multi-sort>
-            <template v-slot:[`item.TaskType`]="{ item }">
+            <template #[`item.TaskType`]="{ item }">
               <span class="py-1 px-2 overline font-weight-medium elevation-1" :class="typeColor(item.TaskType)">{{ item.TaskType }}</span>
             </template>
-            <template v-slot:[`item.Name`]="{ item }">
+            <template #[`item.Name`]="{ item }">
               <span v-if="item.TaskType === 'Production'">
                 {{ roundToDecimal(item.Amount, 1) }}x
               </span>
-              {{ item.Name }} 
-              <span class="orange--text font-weight-bold" v-if="item.ProjectField !== item.CommanderField">(Field Mismatch)</span>
-              <span class="overline uppercase float-right" v-if="item.ShipyardTaskType">[{{ ShipyardTaskTypeMap[item.ShipyardTaskType] }}]</span>
-              <span class="overline uppercase float-right" v-if="item.ProductionType">[{{ ProductionTypeMap[item.ProductionType] }}]</span>
+              {{ item.Name }}
+              <span v-if="item.ProjectField !== item.CommanderField" class="orange--text font-weight-bold">(Field Mismatch)</span>
+              <span v-if="item.ShipyardTaskType" class="overline uppercase float-right">[{{ ShipyardTaskTypeMap[item.ShipyardTaskType] }}]</span>
+              <span v-if="item.ProductionType" class="overline uppercase float-right">[{{ ProductionTypeMap[item.ProductionType] }}]</span>
               <span v-if="item.TaskType === 'Ship'">({{ item.ClassName }} class)</span>
               <span v-if="item.TaskType === 'Terraforming'">
                 {{ item.GasName }} to {{ item.MaxAtm }} Atm
@@ -39,7 +39,7 @@
               <span v-if="item.UpgradeTaskType === 7">to {{ item.ClassName }}</span>
               <span v-if="item.UpgradeTaskType === 8">to {{ item.CapacityTarget }}</span>
             </template>
-            <template v-slot:[`item.AnnualProduction`]="{ item }">
+            <template #[`item.AnnualProduction`]="{ item }">
               <span v-if="item.TaskType === 'Research'">
                 {{ separatedNumber(roundToDecimal(item.AnnualProduction, 0), separator) }} RP / {{ item.Facilities }} Labs
               </span>
@@ -59,18 +59,20 @@
                 {{ roundToDecimal(item.AnnualProduction, 4) }} Atm
               </span>
             </template>
-            <template v-slot:[`item.RemainingDays`]="{ item }">
-              <span :class="{
-                'red--text font-weight-bold': item.Queue,
-                'orange--text font-weight-bold': item.Paused,
-              }">
+            <template #[`item.RemainingDays`]="{ item }">
+              <span
+                :class="{
+                  'red--text font-weight-bold': item.Queue,
+                  'orange--text font-weight-bold': item.Paused,
+                }"
+              >
                 <span v-if="item.Queue && item.TaskType !== 'Research'">Queued</span>
                 <span v-else-if="item.RemainingDays === 0" class="light-green--text font-weight-bold">Done!</span>
                 <span v-else><span v-if="item.UpgradeTaskType === 8 || item.TaskType === 'Terraforming'">~</span> {{ separatedNumber(roundToDecimal(item.RemainingDays, 1), separator) }}</span>
               </span>
             </template>
-            <template v-slot:[`item.PopulationID`]="{ item }">
-              <span v-if="populationProductionModifiers[item.PopulationID]" v-html="populationName(populationProductionModifiers[item.PopulationID])"></span>
+            <template #[`item.PopulationID`]="{ item }">
+              <span v-if="populationProductionModifiers[item.PopulationID]" v-html="populationName(populationProductionModifiers[item.PopulationID])" />
             </template>
           </v-data-table>
         </v-col>
@@ -82,8 +84,8 @@
 <script>
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
-import { separatedNumber, roundToDecimal } from '../../utilities/math'
-import { populationName } from '../../utilities/aurora'
+import { separatedNumber, roundToDecimal } from '../utilities/math'
+import { populationName } from '../utilities/aurora'
 
 const secondsPerYear = 31536000
 const secondsPerDay = 86400
@@ -124,7 +126,7 @@ const ShipyardUpgradeTypeMap = {
 
 export default {
   components: {},
-  data() {
+  data () {
     return {
       // showResearches: true,
       // showProductions: true,
@@ -150,7 +152,7 @@ export default {
       'setShowShips',
       'setShowTrainings',
       'setShowTerraformings',
-      
+
       'setShowQueues',
     ]),
 
@@ -159,40 +161,40 @@ export default {
 
     populationName,
 
-    typeColor(type, active = true) {
+    typeColor (type, active = true) {
       if (!active) {
         return 'light'
       }
 
-      switch(type) {
-        case 'Research': {
-          return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
-        }
-        case 'Production': {
-          return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
-        }
-        case 'Shipyard': {
-          return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
-        }
-        case 'Ship': {
-          return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
-        }
-        case 'Training': {
-          return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
-        }
-        case 'Terraforming': {
-          return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
-        }
-        case 'Queue': {
-          return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
-        }
-        default: {
-          return 'deep-purple accent-2'
-        }
+      switch (type) {
+      case 'Research': {
+        return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
+      }
+      case 'Production': {
+        return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
+      }
+      case 'Shipyard': {
+        return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
+      }
+      case 'Ship': {
+        return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
+      }
+      case 'Training': {
+        return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
+      }
+      case 'Terraforming': {
+        return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
+      }
+      case 'Queue': {
+        return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
+      }
+      default: {
+        return 'deep-purple accent-2'
+      }
       }
     },
 
-    populationMinConstructionPeriod(populationId) {
+    populationMinConstructionPeriod (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -201,7 +203,7 @@ export default {
 
       return modifiers.MinConstructionPeriod
     },
-    populationConstructionCapacity(populationId) {
+    populationConstructionCapacity (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -210,7 +212,7 @@ export default {
 
       return (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower)
     },
-    populationOrdnanceCapacity(populationId) {
+    populationOrdnanceCapacity (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -219,7 +221,7 @@ export default {
 
       return modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower
     },
-    populationFighterCapacity(populationId) {
+    populationFighterCapacity (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -228,7 +230,7 @@ export default {
 
       return modifiers.FighterProduction * modifiers.OverallProductionModifier * modifiers.FighterProductionPower
     },
-    populationShipyardCapacity(populationId, ship) {
+    populationShipyardCapacity (populationId, ship) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -237,7 +239,7 @@ export default {
 
       return modifiers.ShipyardBuildRate * (1 + (ship.Size * ship.CommercialModifier / 100 - 1) / 2)
     },
-    populationShipyardUpgradeCapacity(populationId, shipyard) {
+    populationShipyardUpgradeCapacity (populationId, shipyard) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -248,16 +250,16 @@ export default {
 
       return (1 + (shipyard.Capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate
     },
-    populationResearchCapacity(populationId, research) {
+    populationResearchCapacity (populationId, research) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
         return 0
       }
 
-      return research.ActualCommanderResearchBonus * research.ActualAnomalyBonus * modifiers.OverallResearchModifier * research.Facilities;
+      return research.ActualCommanderResearchBonus * research.ActualAnomalyBonus * modifiers.OverallResearchModifier * research.Facilities
     },
-    populationTrainingCapacity(populationId) {
+    populationTrainingCapacity (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
@@ -267,35 +269,35 @@ export default {
       return modifiers.OverallGroundUnitModifier
     },
 
-    terraformingRate(populationId) {
+    terraformingRate (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
         return 0
       }
 
-      return modifiers.TerraformingRate 
+      return modifiers.TerraformingRate
     },
-    populationTerraformingRate(populationId) {
+    populationTerraformingRate (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
         return 0
       }
 
-      return modifiers.PopulationTerraformingRate 
+      return modifiers.PopulationTerraformingRate
     },
-    populationTerraformingSpeed(populationId) {
+    populationTerraformingSpeed (populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
         return 0
       }
 
-      return modifiers.TerraformingSpeed 
+      return modifiers.TerraformingSpeed
     },
 
-    shipyardContinualRemainingDays(shipyard) {
+    shipyardContinualRemainingDays (shipyard) {
       const modifiers = this.populationProductionModifiers[shipyard.PopulationID]
 
       if (!modifiers) {
@@ -304,7 +306,7 @@ export default {
 
       const roi = modifiers.MinConstructionPeriod / secondsPerYear
       const periodDays = modifiers.MinConstructionPeriod / secondsPerDay
-      
+
       let periods = 0
       let lastUpgrade = 0
       let newCapacity = shipyard.Capacity
@@ -325,8 +327,8 @@ export default {
 
       return periods * periodDays
     },
-    
-    navalAdminBonus(SystemID, NavalAdminCommandID) {
+
+    navalAdminBonus (SystemID, NavalAdminCommandID) {
       if (!this.adminsWithSystems || !Object.values(this.adminsWithSystems).length) {
         return 1
       }
@@ -344,7 +346,7 @@ export default {
     ...mapGetters([
       'config',
       'database',
-      
+
       'GameID',
       'RaceID',
     ]),
@@ -356,17 +358,17 @@ export default {
       'showShips',
       'showTrainings',
       'showTerraformings',
-      
+
       'showQueues',
     ]),
 
-    separator() {
-      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+    separator () {
+      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
-      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+      return selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
-    adminsWithSystems() {
+    adminsWithSystems () {
       if (!Object.values(this.raceSystems).length) {
         return {}
       }
@@ -382,19 +384,19 @@ export default {
           Systems: new Array(navalAdministration.NavalAdminCommandLevel).fill(null).reduce(aggregate => {
             const systemArray = [...aggregate]
 
-            systemArray.forEach((system) => {
+            systemArray.forEach(system => {
               system.Neighbors.forEach(aggregate.add, aggregate)
             })
 
             return aggregate
-          }, new Set([this.raceSystems[navalAdministration.SystemID]]))
+          }, new Set([this.raceSystems[navalAdministration.SystemID]])),
         }
 
         return map
       }, {})
     },
 
-    modifiedResearches() {
+    modifiedResearches () {
       const modifiedResearches = this.researches.map(research => {
         const TotalAnnualProduction = this.populationResearchCapacity(research.PopulationID, research)
 
@@ -411,14 +413,14 @@ export default {
 
       const dayMap = modifiedResearches.reduce((map, research) => {
         map[research.ID] = research.RemainingDays
-        
+
         return map
       }, {})
 
       return modifiedResearches.map(research => {
         if (research.Queue) {
           const extraDays = research.QueueChain.reduce((sum, projectId) => sum + dayMap[projectId], 0)
-        
+
           return {
             ...research,
 
@@ -431,9 +433,9 @@ export default {
         return research
       })
     },
-    modifiedProductions() {
+    modifiedProductions () {
       return this.productions.map(production => {
-        const TotalAnnualProduction = production.ProductionType === 1 
+        const TotalAnnualProduction = production.ProductionType === 1
           ? this.populationOrdnanceCapacity(production.PopulationID)
           : production.ProductionType === 2
             ? this.populationFighterCapacity(production.PopulationID)
@@ -446,14 +448,14 @@ export default {
 
           ID: `production-${production.ID}`,
           TaskType: 'Production',
-          
+
           TotalAnnualProduction,
           AnnualProduction,
           RemainingDays: production.RemainingProduction / (AnnualProduction / 365) * (production.Queue ? 50000 : 1),
         }
       })
     },
-    modifiedShips() {
+    modifiedShips () {
       return this.ships.map(ship => {
         const TotalAnnualProduction = this.populationShipyardCapacity(ship.PopulationID, ship)
 
@@ -465,16 +467,16 @@ export default {
 
           TotalAnnualProduction,
           AnnualProduction: TotalAnnualProduction,
-          RemainingDays: ship.RemainingProduction / (TotalAnnualProduction / 365) // * (ship.Queue ? 50000 : 1) // No queues in shipyards!
+          RemainingDays: ship.RemainingProduction / (TotalAnnualProduction / 365), // * (ship.Queue ? 50000 : 1) // No queues in shipyards!
         }
       })
     },
-    modifiedShipyards() {
+    modifiedShipyards () {
       return this.shipyards.map(shipyard => {
         const UpgradeRate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, shipyard)
 
-        let remainingDays = shipyard.UpgradeTaskType === 8 ? this.shipyardContinualRemainingDays(shipyard) : shipyard.RemainingProduction / UpgradeRate * secondsPerYear / secondsPerDay / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1)
-        
+        const remainingDays = shipyard.UpgradeTaskType === 8 ? this.shipyardContinualRemainingDays(shipyard) : shipyard.RemainingProduction / UpgradeRate * secondsPerYear / secondsPerDay / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1)
+
         return {
           ...shipyard,
 
@@ -483,14 +485,14 @@ export default {
 
           Name: `${shipyard.ShipyardName} - ${ShipyardUpgradeTypeMap[shipyard.UpgradeTaskType]}`,
           AnnualProduction: UpgradeRate,
-          RemainingDays: remainingDays
+          RemainingDays: remainingDays,
         }
       })
     },
-    modifiedTrainings() {
+    modifiedTrainings () {
       return this.trainings.map(training => {
         const TotalAnnualProduction = this.populationTrainingCapacity(training.PopulationID)
-        
+
         return {
           ...training,
 
@@ -503,7 +505,7 @@ export default {
         }
       })
     },
-    modifiedTerraformings() {
+    modifiedTerraformings () {
       return Object.values(this.terraforms.reduce((map, terraform) => {
         if (terraform.TerraformStatus && !terraform.MaxAtm) {
           return map
@@ -569,7 +571,7 @@ export default {
                   : cycleAtm - roiCondensation
                 : 0
 
-              cyclePress = cyclePress + Math.max(0, roiEndLevel - cycleAtm - condensationAmount) 
+              cyclePress = cyclePress + Math.max(0, roiEndLevel - cycleAtm - condensationAmount)
               cycleAtm = Math.max(0, roiEndLevel - condensationAmount)
               cycleExtent += condensationAmount * condensationToHydroRate
 
@@ -599,7 +601,7 @@ export default {
                   cyclePress += evaporationAmount
                   cycleAtm = roiEndLevel + evaporationAmount
                 }
-                
+
                 cycleExtent -= evaporationAmount * condensationToHydroRate
               }
 
@@ -611,12 +613,12 @@ export default {
         } else {
           terraformingTask.RemainingDays = Math.max(0, terraform.TerraformStatus ? terraform.MaxAtm - terraform.GasAtm : terraform.GasAtm - terraform.MaxAtm) / (terraformingTask.TotalAnnualProduction / 365)
         }
-        
+
         return terraformingTask
       })
     },
 
-    tasks() {
+    tasks () {
       return [
         ...(this.showResearches ? this.modifiedResearches : []),
         ...(this.showProductions ? this.modifiedProductions : []),
@@ -627,7 +629,7 @@ export default {
       ].filter(task => this.showQueues ? true : !task.Queue)
     },
 
-    headers() {
+    headers () {
       return [
         {
           text: 'Type',
@@ -658,25 +660,25 @@ export default {
         },
       ]
     },
-    
-    ProductionTypeMap() {
+
+    ProductionTypeMap () {
       return ProductionTypeMap
     },
-    ShipyardTaskTypeMap() {
+    ShipyardTaskTypeMap () {
       return ShipyardTaskTypeMap
     },
-    ShipyardUpgradeTypeMap() {
+    ShipyardUpgradeTypeMap () {
       return ShipyardUpgradeTypeMap
     },
   },
   asyncComputed: {
     populationProductionModifiers: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return {}
         }
 
-        const modifiers = await this.database.query(`select VIR_PopulationModifiers.PopulationID, VIR_PopulationModifiers.PopName, VIR_PopulationModifiers.ShipyardOperations, VIR_PopulationModifiers.MinConstructionPeriod, VIR_PopulationModifiers.FighterProduction, VIR_PopulationModifiers.FighterProductionPower, VIR_PopulationModifiers.OrdnanceProduction, VIR_PopulationModifiers.OrdnanceProductionPower, VIR_PopulationModifiers.ConstructionProduction, VIR_PopulationModifiers.ConstructionPower, VIR_PopulationModifiers.GroundConstructionPower, VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.RadiationProductionModifier as EngineerProductionModifier, VIR_PopulationModifiers.ActualPlanetCommanderConstructionBonus * VIR_PopulationModifiers.ActualSectorCommanderConstructionBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as OverallProductionModifier, VIR_PopulationModifiers.ActualPlanetCommanderShipbuildingBonus * VIR_PopulationModifiers.ActualSectorCommanderShipbuildingBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.ShipBuilding * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as ShipyardBuildRate,VIR_PopulationModifiers.TerraformingRate, VIR_PopulationModifiers.ActualPlanetCommanderTerraformingBonus * VIR_PopulationModifiers.ActualSectorCommanderTerraformingBonus * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod * VIR_PopulationModifiers.TerraformingRate as PopulationTerraformingRate, VIR_PopulationModifiers.TerraformingSpeed, VIR_PopulationModifiers.ResearchRateModifier * VIR_PopulationModifiers.Research * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod * VIR_PopulationModifiers.ResearchSpeed as OverallResearchModifier, VIR_PopulationModifiers.GroundFormationConstructionRate * VIR_PopulationModifiers.ActualPlanetCommanderGroundUnitBonus * VIR_PopulationModifiers.ActualSectorCommanderGroundUnitBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as OverallGroundUnitModifier, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from (select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.RaceID, (FCT_Game.ResearchSpeed / 100.0) as ResearchSpeed, (FCT_Game.TerraformingSpeed / 100.0) as TerraformingSpeed, FCT_Game.MinConstructionPeriod, FCT_Race.ConstructionProduction, FCT_Race.OrdnanceProduction, FCT_Race.FighterProduction, FCT_Race.Research, FCT_Race.ShipBuilding, FCT_Race.GroundFormationConstructionRate, coalesce(VIR_PlanetProduction.PlanetCommanderConstructionBonus, 1.0) as ActualPlanetCommanderConstructionBonus, coalesce(VIR_PlanetProduction.PlanetCommanderShipbuildingBonus, 1.0) as ActualPlanetCommanderShipbuildingBonus, coalesce(VIR_PlanetProduction.PlanetCommanderTerraformingBonus, 1.0) as ActualPlanetCommanderTerraformingBonus, coalesce(VIR_PlanetProduction.PlanetCommanderGroundUnitBonus, 1.0) as ActualPlanetCommanderGroundUnitBonus, coalesce(VIR_SectorProduction.SectorCommanderConstructionBonus, 1.0) as ActualSectorCommanderConstructionBonus, coalesce(VIR_SectorProduction.SectorCommanderShipbuildingBonus, 1.0) as ActualSectorCommanderShipbuildingBonus, coalesce(VIR_SectorProduction.SectorCommanderTerraformingBonus, 1.0) as ActualSectorCommanderTerraformingBonus, coalesce(VIR_SectorProduction.SectorCommanderGroundUnitBonus, 1.0) as ActualSectorCommanderGroundUnitBonus, FCT_Species.ProductionRateModifier, FCT_Race.TerraformingRate, FCT_Species.ResearchRateModifier, FCT_Race.EconomicProdModifier, FCT_Race.ShipyardOperations, FCT_Population.Efficiency, (1 - (FCT_SystemBody.RadiationLevel / 10000)) as RadiationProductionModifier, (1 - (FCT_Population.UnrestPoints / 100)) as PoliticalStability, DIM_PopPoliticalStatus.ProductionMod, coalesce(VIR_InstallationProduction.ConstructionPower, 0) as ConstructionPower, coalesce(VIR_InstallationProduction.OrdnanceProductionPower, 0) as OrdnanceProductionPower, coalesce(VIR_InstallationProduction.FighterProductionPower, 0) as FighterProductionPower, coalesce(VIR_GroundPopulationConstruction.GroundConstructionPower, 0) as GroundConstructionPower from FCT_Population left join (select FCT_Commander.CommandID, JOI_ConstructionCommanderBonuses.BonusValue as PlanetCommanderConstructionBonus, JOI_ShipbuildingCommanderBonuses.BonusValue as PlanetCommanderShipbuildingBonus, JOI_TerraformingCommanderBonuses.BonusValue as PlanetCommanderTerraformingBonus, JOI_GroundUnitCommanderBonuses.BonusValue as PlanetCommanderGroundUnitBonus from FCT_Commander left join FCT_CommanderBonuses as JOI_ConstructionCommanderBonuses on JOI_ConstructionCommanderBonuses.BonusID = 5 and JOI_ConstructionCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_ShipbuildingCommanderBonuses on JOI_ShipbuildingCommanderBonuses.BonusID = 4 and JOI_ShipbuildingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_TerraformingCommanderBonuses on JOI_TerraformingCommanderBonuses.BonusID = 9 and JOI_TerraformingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_GroundUnitCommanderBonuses on JOI_GroundUnitCommanderBonuses.BonusID = 11 and JOI_GroundUnitCommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (2,4) and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_PlanetProduction on VIR_PlanetProduction.CommandID = FCT_Population.PopulationID left join (select FCT_Population.PopulationID, 1 + (COALESCE(JOI_ConstructionCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderConstructionBonus, 1 + (COALESCE(JOI_ShipbuildingCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderShipbuildingBonus, 1 + (COALESCE(JOI_TerraformingCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderTerraformingBonus, 1 + (COALESCE(JOI_GroundUnitCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderGroundUnitBonus from FCT_Commander left join FCT_CommanderBonuses as JOI_ConstructionCommanderBonuses on JOI_ConstructionCommanderBonuses.BonusID = 5 and JOI_ConstructionCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_ShipbuildingCommanderBonuses on JOI_ShipbuildingCommanderBonuses.BonusID = 4 and JOI_ShipbuildingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_TerraformingCommanderBonuses on JOI_TerraformingCommanderBonuses.BonusID = 9 and JOI_TerraformingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_GroundUnitCommanderBonuses on JOI_GroundUnitCommanderBonuses.BonusID = 5 and JOI_GroundUnitCommanderBonuses.CommanderID = FCT_Commander.CommanderID inner join FCT_RaceSysSurvey on FCT_Commander.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 inner join FCT_Population on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID where FCT_Commander.CommanderType in (2,4) and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_SectorProduction on VIR_SectorProduction.PopulationID = FCT_Population.PopulationID left join (select FCT_PopulationInstallations.PopID, SUM(DIM_PlanetaryInstallation.ConstructionValue * FCT_PopulationInstallations.Amount) as ConstructionPower, SUM(DIM_PlanetaryInstallation.OrdnanceProductionValue * FCT_PopulationInstallations.Amount) as OrdnanceProductionPower, SUM(DIM_PlanetaryInstallation.FighterProductionValue * FCT_PopulationInstallations.Amount) as FighterProductionPower from DIM_PlanetaryInstallation left join FCT_PopulationInstallations on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID group by FCT_PopulationInstallations.PopID) as VIR_InstallationProduction on VIR_InstallationProduction.PopID = FCT_Population.PopulationID left join (select FCT_GroundUnitFormation.PopulationID, SUM(VIR_FormationConstruction.FormationConstructionRating * COALESCE(FCT_CommanderBonuses.BonusValue, 1)) as GroundConstructionPower from FCT_GroundUnitFormation left join (select FCT_GroundUnitFormationElement.*, SUM(FCT_GroundUnitFormationElement.Units * FCT_GroundUnitClass.ConstructionRating) as FormationConstructionRating from FCT_GroundUnitFormationElement left join FCT_GroundUnitClass on FCT_GroundUnitFormationElement.ClassID = FCT_GroundUnitClass.GroundUnitClassID group by FCT_GroundUnitFormationElement.FormationID) as VIR_FormationConstruction on FCT_GroundUnitFormation.FormationID = VIR_FormationConstruction.FormationID left join FCT_Commander on FCT_Commander.CommandID = FCT_GroundUnitFormation.FormationID and FCT_Commander.CommanderType in (1,4) and FCT_Commander.CommandType = 5 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 5 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID group by FCT_GroundUnitFormation.PopulationID) as VIR_GroundPopulationConstruction on VIR_GroundPopulationConstruction.PopulationID = FCT_Population.PopulationID left join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join DIM_PopPoliticalStatus on FCT_Population.PoliticalStatus = DIM_PopPoliticalStatus.StatusID left join FCT_Game on FCT_Population.GameID = FCT_Game.GameID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}) as VIR_PopulationModifiers left join FCT_SystemBody on VIR_PopulationModifiers.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and VIR_PopulationModifiers.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on VIR_PopulationModifiers.SystemID = FCT_RaceSysSurvey.SystemID and VIR_PopulationModifiers.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID`).then(([ items ]) => {
+        const modifiers = await this.database.query(`select VIR_PopulationModifiers.PopulationID, VIR_PopulationModifiers.PopName, VIR_PopulationModifiers.ShipyardOperations, VIR_PopulationModifiers.MinConstructionPeriod, VIR_PopulationModifiers.FighterProduction, VIR_PopulationModifiers.FighterProductionPower, VIR_PopulationModifiers.OrdnanceProduction, VIR_PopulationModifiers.OrdnanceProductionPower, VIR_PopulationModifiers.ConstructionProduction, VIR_PopulationModifiers.ConstructionPower, VIR_PopulationModifiers.GroundConstructionPower, VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.RadiationProductionModifier as EngineerProductionModifier, VIR_PopulationModifiers.ActualPlanetCommanderConstructionBonus * VIR_PopulationModifiers.ActualSectorCommanderConstructionBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as OverallProductionModifier, VIR_PopulationModifiers.ActualPlanetCommanderShipbuildingBonus * VIR_PopulationModifiers.ActualSectorCommanderShipbuildingBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.ShipBuilding * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as ShipyardBuildRate,VIR_PopulationModifiers.TerraformingRate, VIR_PopulationModifiers.ActualPlanetCommanderTerraformingBonus * VIR_PopulationModifiers.ActualSectorCommanderTerraformingBonus * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod * VIR_PopulationModifiers.TerraformingRate as PopulationTerraformingRate, VIR_PopulationModifiers.TerraformingSpeed, VIR_PopulationModifiers.ResearchRateModifier * VIR_PopulationModifiers.Research * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod * VIR_PopulationModifiers.ResearchSpeed as OverallResearchModifier, VIR_PopulationModifiers.GroundFormationConstructionRate * VIR_PopulationModifiers.ActualPlanetCommanderGroundUnitBonus * VIR_PopulationModifiers.ActualSectorCommanderGroundUnitBonus * VIR_PopulationModifiers.ProductionRateModifier * VIR_PopulationModifiers.EconomicProdModifier * VIR_PopulationModifiers.Efficiency * VIR_PopulationModifiers.RadiationProductionModifier * VIR_PopulationModifiers.PoliticalStability * VIR_PopulationModifiers.ProductionMod as OverallGroundUnitModifier, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from (select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.RaceID, (FCT_Game.ResearchSpeed / 100.0) as ResearchSpeed, (FCT_Game.TerraformingSpeed / 100.0) as TerraformingSpeed, FCT_Game.MinConstructionPeriod, FCT_Race.ConstructionProduction, FCT_Race.OrdnanceProduction, FCT_Race.FighterProduction, FCT_Race.Research, FCT_Race.ShipBuilding, FCT_Race.GroundFormationConstructionRate, coalesce(VIR_PlanetProduction.PlanetCommanderConstructionBonus, 1.0) as ActualPlanetCommanderConstructionBonus, coalesce(VIR_PlanetProduction.PlanetCommanderShipbuildingBonus, 1.0) as ActualPlanetCommanderShipbuildingBonus, coalesce(VIR_PlanetProduction.PlanetCommanderTerraformingBonus, 1.0) as ActualPlanetCommanderTerraformingBonus, coalesce(VIR_PlanetProduction.PlanetCommanderGroundUnitBonus, 1.0) as ActualPlanetCommanderGroundUnitBonus, coalesce(VIR_SectorProduction.SectorCommanderConstructionBonus, 1.0) as ActualSectorCommanderConstructionBonus, coalesce(VIR_SectorProduction.SectorCommanderShipbuildingBonus, 1.0) as ActualSectorCommanderShipbuildingBonus, coalesce(VIR_SectorProduction.SectorCommanderTerraformingBonus, 1.0) as ActualSectorCommanderTerraformingBonus, coalesce(VIR_SectorProduction.SectorCommanderGroundUnitBonus, 1.0) as ActualSectorCommanderGroundUnitBonus, FCT_Species.ProductionRateModifier, FCT_Race.TerraformingRate, FCT_Species.ResearchRateModifier, FCT_Race.EconomicProdModifier, FCT_Race.ShipyardOperations, FCT_Population.Efficiency, (1 - (FCT_SystemBody.RadiationLevel / 10000)) as RadiationProductionModifier, (1 - (FCT_Population.UnrestPoints / 100)) as PoliticalStability, DIM_PopPoliticalStatus.ProductionMod, coalesce(VIR_InstallationProduction.ConstructionPower, 0) as ConstructionPower, coalesce(VIR_InstallationProduction.OrdnanceProductionPower, 0) as OrdnanceProductionPower, coalesce(VIR_InstallationProduction.FighterProductionPower, 0) as FighterProductionPower, coalesce(VIR_GroundPopulationConstruction.GroundConstructionPower, 0) as GroundConstructionPower from FCT_Population left join (select FCT_Commander.CommandID, JOI_ConstructionCommanderBonuses.BonusValue as PlanetCommanderConstructionBonus, JOI_ShipbuildingCommanderBonuses.BonusValue as PlanetCommanderShipbuildingBonus, JOI_TerraformingCommanderBonuses.BonusValue as PlanetCommanderTerraformingBonus, JOI_GroundUnitCommanderBonuses.BonusValue as PlanetCommanderGroundUnitBonus from FCT_Commander left join FCT_CommanderBonuses as JOI_ConstructionCommanderBonuses on JOI_ConstructionCommanderBonuses.BonusID = 5 and JOI_ConstructionCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_ShipbuildingCommanderBonuses on JOI_ShipbuildingCommanderBonuses.BonusID = 4 and JOI_ShipbuildingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_TerraformingCommanderBonuses on JOI_TerraformingCommanderBonuses.BonusID = 9 and JOI_TerraformingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_GroundUnitCommanderBonuses on JOI_GroundUnitCommanderBonuses.BonusID = 11 and JOI_GroundUnitCommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (2,4) and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_PlanetProduction on VIR_PlanetProduction.CommandID = FCT_Population.PopulationID left join (select FCT_Population.PopulationID, 1 + (COALESCE(JOI_ConstructionCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderConstructionBonus, 1 + (COALESCE(JOI_ShipbuildingCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderShipbuildingBonus, 1 + (COALESCE(JOI_TerraformingCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderTerraformingBonus, 1 + (COALESCE(JOI_GroundUnitCommanderBonuses.BonusValue, 1) - 1) * 0.25 as SectorCommanderGroundUnitBonus from FCT_Commander left join FCT_CommanderBonuses as JOI_ConstructionCommanderBonuses on JOI_ConstructionCommanderBonuses.BonusID = 5 and JOI_ConstructionCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_ShipbuildingCommanderBonuses on JOI_ShipbuildingCommanderBonuses.BonusID = 4 and JOI_ShipbuildingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_TerraformingCommanderBonuses on JOI_TerraformingCommanderBonuses.BonusID = 9 and JOI_TerraformingCommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_CommanderBonuses as JOI_GroundUnitCommanderBonuses on JOI_GroundUnitCommanderBonuses.BonusID = 5 and JOI_GroundUnitCommanderBonuses.CommanderID = FCT_Commander.CommanderID inner join FCT_RaceSysSurvey on FCT_Commander.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 inner join FCT_Population on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID where FCT_Commander.CommanderType in (2,4) and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_SectorProduction on VIR_SectorProduction.PopulationID = FCT_Population.PopulationID left join (select FCT_PopulationInstallations.PopID, SUM(DIM_PlanetaryInstallation.ConstructionValue * FCT_PopulationInstallations.Amount) as ConstructionPower, SUM(DIM_PlanetaryInstallation.OrdnanceProductionValue * FCT_PopulationInstallations.Amount) as OrdnanceProductionPower, SUM(DIM_PlanetaryInstallation.FighterProductionValue * FCT_PopulationInstallations.Amount) as FighterProductionPower from DIM_PlanetaryInstallation left join FCT_PopulationInstallations on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID group by FCT_PopulationInstallations.PopID) as VIR_InstallationProduction on VIR_InstallationProduction.PopID = FCT_Population.PopulationID left join (select FCT_GroundUnitFormation.PopulationID, SUM(VIR_FormationConstruction.FormationConstructionRating * COALESCE(FCT_CommanderBonuses.BonusValue, 1)) as GroundConstructionPower from FCT_GroundUnitFormation left join (select FCT_GroundUnitFormationElement.*, SUM(FCT_GroundUnitFormationElement.Units * FCT_GroundUnitClass.ConstructionRating) as FormationConstructionRating from FCT_GroundUnitFormationElement left join FCT_GroundUnitClass on FCT_GroundUnitFormationElement.ClassID = FCT_GroundUnitClass.GroundUnitClassID group by FCT_GroundUnitFormationElement.FormationID) as VIR_FormationConstruction on FCT_GroundUnitFormation.FormationID = VIR_FormationConstruction.FormationID left join FCT_Commander on FCT_Commander.CommandID = FCT_GroundUnitFormation.FormationID and FCT_Commander.CommanderType in (1,4) and FCT_Commander.CommandType = 5 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 5 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID group by FCT_GroundUnitFormation.PopulationID) as VIR_GroundPopulationConstruction on VIR_GroundPopulationConstruction.PopulationID = FCT_Population.PopulationID left join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join DIM_PopPoliticalStatus on FCT_Population.PoliticalStatus = DIM_PopPoliticalStatus.StatusID left join FCT_Game on FCT_Population.GameID = FCT_Game.GameID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}) as VIR_PopulationModifiers left join FCT_SystemBody on VIR_PopulationModifiers.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and VIR_PopulationModifiers.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on VIR_PopulationModifiers.SystemID = FCT_RaceSysSurvey.SystemID and VIR_PopulationModifiers.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID`).then(([items]) => {
           console.log('Population Production Modifiers', items)
 
           return items
@@ -684,25 +686,25 @@ export default {
 
         return modifiers.reduce((map, modifier) => {
           map[modifier.PopulationID] = modifier
-          
+
           return map
         }, {})
       },
       default: {},
     },
     researches: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const queues = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`).then(([ items ]) => {
+        const queues = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`).then(([items]) => {
           console.log('Research queue', items)
 
           return items
         })
 
-        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const projects = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Research projects', items)
 
           return items
@@ -742,12 +744,12 @@ export default {
       default: [],
     },
     productions: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_Population.PopName, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.Amount * FCT_IndustrialProjects.ProdPerUnit as RemainingProduction, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused from FCT_IndustrialProjects left join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        return await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_Population.PopName, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.Amount * FCT_IndustrialProjects.ProdPerUnit as RemainingProduction, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused from FCT_IndustrialProjects left join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Industrial Production', items)
 
           return items
@@ -756,12 +758,12 @@ export default {
       default: [],
     },
     ships: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_Population.PopName, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Population on FCT_Population.PopulationID = FCT_ShipyardTask.PopulationID left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        return await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_Population.PopName, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Population on FCT_Population.PopulationID = FCT_ShipyardTask.PopulationID left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Ships', items)
 
           return items
@@ -770,12 +772,12 @@ export default {
       default: [],
     },
     shipyards: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Shipyard.ShipyardID as ID, FCT_Population.PopName, FCT_Shipyard.PopulationID, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.RetoolClassID, FCT_ShipClass.ClassName, FCT_Shipyard.TaskType as UpgradeTaskType, FCT_Shipyard.RequiredBP - FCT_Shipyard.CompletedBP as RemainingProduction, FCT_Shipyard.PauseActivity as Paused, FCT_Shipyard.CapacityTarget from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID left join FCT_ShipClass on FCT_Shipyard.RetoolClassID = FCT_ShipClass.ShipClassID where FCT_Shipyard.TaskType <> 0 and FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        return await this.database.query(`select FCT_Shipyard.ShipyardID as ID, FCT_Population.PopName, FCT_Shipyard.PopulationID, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.RetoolClassID, FCT_ShipClass.ClassName, FCT_Shipyard.TaskType as UpgradeTaskType, FCT_Shipyard.RequiredBP - FCT_Shipyard.CompletedBP as RemainingProduction, FCT_Shipyard.PauseActivity as Paused, FCT_Shipyard.CapacityTarget from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID left join FCT_ShipClass on FCT_Shipyard.RetoolClassID = FCT_ShipClass.ShipClassID where FCT_Shipyard.TaskType <> 0 and FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Shipyards', items)
 
           return items
@@ -784,12 +786,12 @@ export default {
       default: [],
     },
     trainings: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_GroundUnitTraining.TaskID as ID, FCT_Population.PopName, FCT_GroundUnitTraining.PopulationID, FCT_GroundUnitTraining.FormationName as Name, FCT_GroundUnitTraining.TotalBP - FCT_GroundUnitTraining.CompletedBP as RemainingProduction from FCT_GroundUnitTraining left join FCT_Population on FCT_Population.PopulationID = FCT_GroundUnitTraining.PopulationID where FCT_GroundUnitTraining.GameID = ${this.GameID} and FCT_GroundUnitTraining.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        return await this.database.query(`select FCT_GroundUnitTraining.TaskID as ID, FCT_Population.PopName, FCT_GroundUnitTraining.PopulationID, FCT_GroundUnitTraining.FormationName as Name, FCT_GroundUnitTraining.TotalBP - FCT_GroundUnitTraining.CompletedBP as RemainingProduction from FCT_GroundUnitTraining left join FCT_Population on FCT_Population.PopulationID = FCT_GroundUnitTraining.PopulationID where FCT_GroundUnitTraining.GameID = ${this.GameID} and FCT_GroundUnitTraining.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Trainings', items)
 
           return items
@@ -798,18 +800,18 @@ export default {
       default: [],
     },
     navalAdministrations: {
-       async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const admins = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.PopulationID, FCT_Population.SystemID, FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue as NavalAdminCommandLevel, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial from FCT_NavalAdminCommand inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_NavalAdminCommand.PopulationID left join FCT_Population on FCT_NavalAdminCommand.PopulationID = FCT_Population.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID left join FCT_Commander on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0`).then(([ items ]) => {
+        const admins = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.PopulationID, FCT_Population.SystemID, FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue as NavalAdminCommandLevel, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial from FCT_NavalAdminCommand inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_NavalAdminCommand.PopulationID left join FCT_Population on FCT_NavalAdminCommand.PopulationID = FCT_Population.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID left join FCT_Commander on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0`).then(([items]) => {
           console.log('Naval Administrations', items)
 
           return items.map(item => ({
             ...item,
 
-            Radius: item.Radius * Math.floor(Math.log(item.NavalAdminCommandLevel) / Math.log(2))
+            Radius: item.Radius * Math.floor(Math.log(item.NavalAdminCommandLevel) / Math.log(2)),
           }))
         })
 
@@ -818,18 +820,18 @@ export default {
       default: [],
     },
     terraforms: {
-       async get() {
+      async get () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const orbitalTerraformers = await this.database.query(`select sum(FCT_ShipClass.Terraformers * FCT_CommanderBonuses.BonusValue) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`).then(([ items ]) => {
+        const orbitalTerraformers = await this.database.query(`select sum(FCT_ShipClass.Terraformers * FCT_CommanderBonuses.BonusValue) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`).then(([items]) => {
           console.log('Orbital Terraforms', items)
 
           return items
         })
 
-        const planetaryTerraformers = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`).then(([ items ]) => {
+        const planetaryTerraformers = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`).then(([items]) => {
           console.log('Planetary Terraforms', items)
 
           return items
@@ -843,12 +845,12 @@ export default {
       default: [],
     },
     raceSystems: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return {}
         }
 
-        const systems = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const systems = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Systems', items)
 
           return items.reduce((map, item) => {
@@ -858,12 +860,12 @@ export default {
 
               Neighbors: new Set(),
             }
-            
+
             return map
           }, {})
         })
 
-        await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([ items ]) => {
+        await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([items]) => {
           console.log('Jump Points', items)
 
           items.forEach(item => {
@@ -881,7 +883,7 @@ export default {
       default: {},
     },
   },
-  mounted() {
+  mounted () {
     //
   },
 }
@@ -892,7 +894,7 @@ export default {
   margin-bottom: 20px;
 }
 
-.v-btn--active.no-active::before {                                                                             
+.v-btn--active.no-active::before {
   opacity: 0 !important;
 }
 </style>

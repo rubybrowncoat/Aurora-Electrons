@@ -8,7 +8,7 @@ export const convertDisplayBase = (value, toBase) => {
     newValue = toRange[decimlValue % toBase] + newValue
     decimlValue = (decimlValue - (decimlValue % toBase)) / toBase
   }
-  
+
   return newValue || '0'
 }
 

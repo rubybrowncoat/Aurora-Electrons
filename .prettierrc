@@ -2,6 +2,8 @@
   "parser": "vue",
   "trailingComma": "es5",
   "tabWidth": 2,
+  "printWidth": 8000,
   "semi": false,
-  "singleQuote": true
+  "singleQuote": true,
+  "arrowParens": "always"
 }

@@ -1,9 +1,9 @@
-import Sequelize, { Model } from 'sequelize'
-import sqlite3 from 'sqlite3'
+import { Model, Sequelize } from 'sequelize'
+// import sqlite3 from 'sqlite3'
 
-import dayjs from 'dayjs'
+import { gameTime } from './aurora'
 
-export const resetDatabase = (storagePath) => {
+export const resetDatabase = storagePath => {
   console.log('## RESETTING ON', storagePath)
 
   const sequelize = new Sequelize({
@@ -23,19 +23,19 @@ export const resetDatabase = (storagePath) => {
     GameName: Sequelize.STRING,
 
     StartYear: Sequelize.INTEGER,
-    GameTime: Sequelize.FLOAT,
+    GameTime: Sequelize.DOUBLE,
 
     CivilianShippingLinesActive: Sequelize.BOOLEAN,
 
     DateTime: {
       type: Sequelize.VIRTUAL,
-      get() {
-        return dayjs(0).set('year', this.StartYear).set('hour', 0).add(this.GameTime, 'second').format('YYYY-MM-DD HH:mm:ss')
+      get () {
+        return gameTime(this.StartYear, this.GameTime).format('YYYY-MM-DD HH:mm:ss')
       },
-      set(value) {
+      set (_value) {
         throw new Error('Do not try to set the `Date` value!')
-      }
-    }
+      },
+    },
   }, {
     sequelize,
     modelName: 'Game',
@@ -157,10 +157,10 @@ export const resetDatabase = (storagePath) => {
 
     ClassThemeID: Sequelize.INTEGER,
     RealClassNames: Sequelize.INTEGER,
-    
+
     DiplomaticPoints: Sequelize.DOUBLE,
     AlienRaceIntelligencePoints: Sequelize.DOUBLE,
-    
+
     FirstDetected: Sequelize.DOUBLE,
     CommEstablished: Sequelize.DOUBLE,
   }, {
@@ -213,7 +213,7 @@ export const resetDatabase = (storagePath) => {
     Capital: Sequelize.BOOLEAN,
     TerraformStatus: Sequelize.INTEGER,
     PurchaseCivilianMinerals: Sequelize.NUMBER,
-    
+
     // OUT OF ORDER
     FuelStockpile: Sequelize.REAL,
     MaintenanceStockpile: Sequelize.REAL,
@@ -263,7 +263,7 @@ export const resetDatabase = (storagePath) => {
   PlanetaryInstallation.init({ // INCOMPLETE
     PlanetaryInstallationID: {
       type: Sequelize.INTEGER,
-      primaryKey: true
+      primaryKey: true,
     },
 
     Name: Sequelize.STRING,
@@ -275,14 +275,14 @@ export const resetDatabase = (storagePath) => {
     modelName: 'PlanetaryInstallation',
     tableName: 'DIM_PlanetaryInstallation',
     timestamps: false,
-    
+
     scopes: {
       civilianEconomy: {
         where: {
           CivMove: true,
         },
       },
-    }
+    },
   })
 
   class System extends Model {}
@@ -368,7 +368,7 @@ export const resetDatabase = (storagePath) => {
     GameID: Sequelize.INTEGER,
     SystemID: Sequelize.INTEGER,
     StarTypeID: Sequelize.INTEGER,
-    
+
     Name: Sequelize.TEXT,
     Protostar: Sequelize.INTEGER,
     Xcor: Sequelize.DOUBLE,
@@ -509,59 +509,59 @@ export const resetDatabase = (storagePath) => {
     },
 
     // Direct Relationships
-    GameID: Sequelize.INTEGER,
-    RaceID: Sequelize.INTEGER,
-    SystemID: Sequelize.INTEGER,
-    OrbitBodyID: Sequelize.INTEGER,
-    ParentCommandID: Sequelize.INTEGER,
-    AssignedPopulationID: Sequelize.INTEGER,
-    SpecialOrderID: Sequelize.INTEGER,
-    SpecialOrderID2: Sequelize.INTEGER,
-    EntryJPID: Sequelize.INTEGER,
-    AxisContactID: Sequelize.INTEGER,
-    NPROperationalGroupID: Sequelize.INTEGER,
-    AssignedFormationID: Sequelize.INTEGER,
-    SpecificThreatID: Sequelize.INTEGER,
-    AnchorFleetID: Sequelize.INTEGER,
+    GameID: Sequelize.INTEGER, //
+    RaceID: Sequelize.INTEGER, //
+    SystemID: Sequelize.INTEGER, //
+    OrbitBodyID: Sequelize.INTEGER, //
+    ParentCommandID: Sequelize.INTEGER, //
+    AssignedPopulationID: Sequelize.INTEGER, //
+    // SpecialOrderID: Sequelize.INTEGER,
+    // SpecialOrderID2: Sequelize.INTEGER,
+    EntryJPID: Sequelize.INTEGER, //
+    AxisContactID: Sequelize.INTEGER, //
+    NPROperationalGroupID: Sequelize.INTEGER, //
+    AssignedFormationID: Sequelize.INTEGER, //
+    SpecificThreatID: Sequelize.INTEGER, //
+    AnchorFleetID: Sequelize.INTEGER, //
 
-    FleetName: Sequelize.TEXT,
-    OrbitDistance: Sequelize.INTEGER,
-    OrbitBearing: Sequelize.DOUBLE,
-    TradeLocation: Sequelize.INTEGER,
-    CivilianFunction: Sequelize.INTEGER,
-    NPRHomeGuard: Sequelize.BOOLEAN,
-    TFTraining: Sequelize.BOOLEAN,
-    Speed: Sequelize.INTEGER,
-    MaxNebulaSpeed: Sequelize.INTEGER,
-    Xcor: Sequelize.DOUBLE,
-    Ycor: Sequelize.DOUBLE,
-    LastXcor: Sequelize.DOUBLE,
-    LastYcor: Sequelize.DOUBLE,
-    LastMoveTime: Sequelize.DOUBLE,
-    IncrementStartX: Sequelize.DOUBLE,
-    IncrementStartY: Sequelize.DOUBLE,
-    CycleMoves: Sequelize.INTEGER,
-    JustDivided: Sequelize.INTEGER,
-    Distance: Sequelize.INTEGER,
-    OffsetBearing: Sequelize.INTEGER,
-    ConditionOne: Sequelize.INTEGER,
-    ConditionTwo: Sequelize.INTEGER,
-    ConditionalOrderOne: Sequelize.INTEGER,
-    ConditionalOrderTwo: Sequelize.INTEGER,
-    AvoidDanger: Sequelize.BOOLEAN,
-    AvoidAlienSystems: Sequelize.BOOLEAN,
-    DisplaySensors: Sequelize.BOOLEAN,
-    DisplayWeapons: Sequelize.BOOLEAN,
-    ShippingLine: Sequelize.INTEGER,
-    UseMaximumSpeed: Sequelize.BOOLEAN,
-    RedeployOrderGiven: Sequelize.BOOLEAN,
-    MaxStandingOrderDistance: Sequelize.INTEGER,
-    NoSurrender: Sequelize.BOOLEAN,
-    AnchorFleetDistance: Sequelize.DOUBLE,
-    AnchorFleetBearingOffset: Sequelize.DOUBLE,
-    GuardNearestHostileContact: Sequelize.BOOLEAN,
-    UseAnchorDestination: Sequelize.BOOLEAN,
-    GuardNearestKnownWarship: Sequelize.BOOLEAN,
+    FleetName: Sequelize.TEXT, //
+    OrbitDistance: Sequelize.INTEGER, //
+    OrbitBearing: Sequelize.DOUBLE, //
+    TradeLocation: Sequelize.INTEGER, //
+    CivilianFunction: Sequelize.INTEGER, //
+    NPRHomeGuard: Sequelize.BOOLEAN, //
+    TFTraining: Sequelize.BOOLEAN, //
+    Speed: Sequelize.INTEGER, //
+    MaxNebulaSpeed: Sequelize.INTEGER, //
+    Xcor: Sequelize.DOUBLE, //
+    Ycor: Sequelize.DOUBLE, //
+    LastXcor: Sequelize.DOUBLE, //
+    LastYcor: Sequelize.DOUBLE, //
+    LastMoveTime: Sequelize.DOUBLE, //
+    IncrementStartX: Sequelize.DOUBLE, //
+    IncrementStartY: Sequelize.DOUBLE, //
+    CycleMoves: Sequelize.INTEGER, //
+    JustDivided: Sequelize.INTEGER, //
+    Distance: Sequelize.INTEGER, //
+    OffsetBearing: Sequelize.INTEGER, //
+    ConditionOne: Sequelize.INTEGER, //
+    ConditionTwo: Sequelize.INTEGER, //
+    ConditionalOrderOne: Sequelize.INTEGER, //
+    ConditionalOrderTwo: Sequelize.INTEGER, //
+    AvoidDanger: Sequelize.BOOLEAN, //
+    AvoidAlienSystems: Sequelize.BOOLEAN, //
+    DisplaySensors: Sequelize.BOOLEAN, //
+    DisplayWeapons: Sequelize.BOOLEAN, //
+    ShippingLine: Sequelize.INTEGER, //
+    UseMaximumSpeed: Sequelize.BOOLEAN, //
+    RedeployOrderGiven: Sequelize.BOOLEAN, //
+    MaxStandingOrderDistance: Sequelize.INTEGER, //
+    NoSurrender: Sequelize.BOOLEAN, //
+    AnchorFleetDistance: Sequelize.DOUBLE, //
+    AnchorFleetBearingOffset: Sequelize.DOUBLE, //
+    GuardNearestHostileContact: Sequelize.BOOLEAN, //
+    UseAnchorDestination: Sequelize.BOOLEAN, //
+    GuardNearestKnownWarship: Sequelize.BOOLEAN, //
   }, {
     sequelize,
     modelName: 'Fleet',
@@ -584,6 +584,7 @@ export const resetDatabase = (storagePath) => {
     AssignedFormationID: Sequelize.INTEGER,
     OriginalTemplateID: Sequelize.INTEGER,
     ReplacementTemplateID: Sequelize.INTEGER,
+    OrgLinkID: Sequelize.INTEGER,
 
     Name: Sequelize.TEXT,
     Abbreviation: Sequelize.TEXT,
@@ -595,6 +596,7 @@ export const resetDatabase = (storagePath) => {
     Civilian: Sequelize.BOOLEAN,
     UseForReplacements: Sequelize.BOOLEAN,
     ReplacementPriority: Sequelize.INTEGER,
+    DoNotRecover: Sequelize.BOOLEAN,
   }, {
     sequelize,
     modelName: 'GroundUnitFormation',
@@ -690,7 +692,7 @@ export const resetDatabase = (storagePath) => {
     Reestablished: Sequelize.DOUBLE,
     LastUpdate: Sequelize.DOUBLE,
     ContinualContactTime: Sequelize.INTEGER,
-    
+
     Xcor: Sequelize.DOUBLE,
     Ycor: Sequelize.DOUBLE,
     LastXcor: Sequelize.DOUBLE,
@@ -705,7 +707,6 @@ export const resetDatabase = (storagePath) => {
     tableName: 'FCT_Contacts',
     timestamps: false,
   })
-
 
   // Relations
   Game.hasMany(Race, { foreignKey: 'GameID', sourceKey: 'GameID' })
@@ -743,9 +744,12 @@ export const resetDatabase = (storagePath) => {
   Population.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
   Population.hasMany(PopulationInstallation, { foreignKey: 'PopID' })
   Population.hasMany(GroundUnitFormation, { foreignKey: 'PopulationID' })
-  Population.hasMany(Contact, { foreignKey: 'ContactID', scope: {
-    ContactType: 4,
-  }})
+  Population.hasMany(Contact, {
+    foreignKey: 'ContactID',
+    scope: {
+      ContactType: 4,
+    },
+  })
 
   PopulationInstallation.belongsTo(Population, { foreignKey: 'PopID' })
   PopulationInstallation.belongsTo(PlanetaryInstallation, { foreignKey: 'PlanetaryInstallationID', sourceKey: 'PlanetaryInstallationID' })
@@ -775,7 +779,7 @@ export const resetDatabase = (storagePath) => {
 
   SystemBodyName.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   SystemBodyName.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
-  
+
   SystemBodySurvey.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   SystemBodySurvey.belongsTo(SystemBody, { foreignKey: 'SystemBodyID', sourceKey: 'SystemBodyID' })
 

@@ -21,27 +21,27 @@
                   <v-container fluid>
                     <v-row justify="start">
                       <v-col cols="12">
-                        <v-btn-toggle class="d-block" v-model="materials" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>
+                        <v-btn-toggle v-model="materials" class="d-block" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>
                           <v-btn v-for="(material, key) in MaterialMap" :key="key" small :value="material">{{ material }}</v-btn>
                         </v-btn-toggle>
                       </v-col>
                     </v-row>
-                    <v-row justify="start" v-for="(filter, index) in filters" :key="index">
+                    <v-row v-for="(filter, index) in filters" :key="index" justify="start">
                       <v-col cols="12" md="6">
                         <v-sheet class="d-flex flex-row">
                           <div class="d-flex mr-2">
-                            <v-btn color="red" dense @click="removeFilter(index)" :disabled="!index && filters.length === 1">
+                            <v-btn color="red" dense :disabled="!index && filters.length === 1" @click="removeFilter(index)">
                               <v-icon dark>mdi-minus</v-icon>
                             </v-btn>
                           </div>
-                          <v-select class="d-flex" v-model="filter.selectedMaterial" :items="filterMaterials" hint="Filtered Material" solo persistent-hint dense></v-select>
+                          <v-select v-model="filter.selectedMaterial" class="d-flex" :items="filterMaterials" hint="Filtered Material" solo persistent-hint dense />
                         </v-sheet>
                       </v-col>
                       <v-col cols="12" md="3">
-                        <v-select v-model="filter.selectedAccessibility" :items="accessibilities" hint="Minimum Accessibility" solo persistent-hint dense></v-select>
+                        <v-select v-model="filter.selectedAccessibility" :items="accessibilities" hint="Minimum Accessibility" solo persistent-hint dense />
                       </v-col>
                       <v-col cols="12" md="3">
-                        <v-text-field type="number" min="1" v-model.number="filter.selectedAmount" placeholder="45000" hint="Minimum Quantity" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense></v-text-field>
+                        <v-text-field v-model.number="filter.selectedAmount" type="number" min="1" placeholder="45000" hint="Minimum Quantity" :rules="[rules.required, rules.positive]" solo persistent-hint clearable dense />
                       </v-col>
                     </v-row>
                     <v-row>
@@ -57,30 +57,32 @@
             </v-expansion-panels>
           </v-col>
           <v-col cols="12">
-            <v-select :disabled="filterBySelectedBodies" v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
-              <template v-slot:prepend-item>
+            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+              <template #prepend-item>
                 <v-list-item
                   ripple
                   @click="toggleSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>{{ systems.length > 0 
-                      ? systems.length == systemNames.length 
-                        ? 'sentiment_very_satisfied'
-                        : 'sentiment_satisfied'
-                      : 'sentiment_very_dissatisfied' }}</v-icon>
+                    <v-icon>
+                      {{ systems.length > 0
+                        ? systems.length == systemNames.length
+                          ? 'sentiment_very_satisfied'
+                          : 'sentiment_satisfied'
+                        : 'sentiment_very_dissatisfied' }}
+                    </v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>{{ systems.length == systemNames.length ? 'Deselect All' : 'Select All' }}</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectUnrestrictedSystems"
-
                   v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))"
+
+                  @click="selectUnrestrictedSystems"
                 >
                   <v-list-item-action>
                     <v-icon>report_off</v-icon>
@@ -90,12 +92,12 @@
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectOurSystems"
-
                   v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))"
+
+                  @click="selectOurSystems"
                 >
                   <v-list-item-action>
                     <v-icon>public</v-icon>
@@ -105,12 +107,12 @@
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectOurInhabitedSystems"
-
                   v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))"
+
+                  @click="selectOurInhabitedSystems"
                 >
                   <v-list-item-action>
                     <v-icon>people</v-icon>
@@ -119,85 +121,93 @@
                     <v-list-item-title>Select Inhabited Systems</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
-                <v-divider class="mt-2"></v-divider>
+                <v-divider class="mt-2" />
               </template>
             </v-select>
           </v-col>
-          <v-col cols="12" v-if="selectedBodies.length || filterBySelectedBodies">
+          <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
             <v-row>
               <v-col cols="auto">
                 <v-btn class="d-block mb-1" style="width: 100%;" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Minerals</v-btn>
-                <v-btn  :to="{
-                  path: 'habitability',
-                  query: { 
-                    bodies: JSON.stringify(selectedBodies.map(selection => ({ 
-                      SystemBodyID: selection.SystemBodyID, 
-                      SystemBodyName: selection.SystemBodyName, 
-                      SystemName: selection.SystemName,
-                      BodyClass: selection.BodyClass, 
-                      Component: selection.Component, 
-                      PlanetNumber: selection.PlanetNumber, 
-                      OrbitNumber: selection.OrbitNumber, 
-                    }))) 
-                  },
-                }" style="width: 100%;" small outlined>Isolate in Habitability</v-btn>
+                <v-btn
+                  :to="{
+                    path: 'habitability',
+                    query: {
+                      bodies: JSON.stringify(selectedBodies.map(selection => ({
+                        SystemBodyID: selection.SystemBodyID,
+                        SystemBodyName: selection.SystemBodyName,
+                        SystemName: selection.SystemName,
+                        BodyClass: selection.BodyClass,
+                        Component: selection.Component,
+                        PlanetNumber: selection.PlanetNumber,
+                        OrbitNumber: selection.OrbitNumber,
+                      })))
+                    },
+                  }" style="width: 100%;" small outlined
+                >
+                  Isolate in Habitability
+                </v-btn>
 
                 <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
               </v-col>
               <v-col>
-                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
+                <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
               </v-col>
             </v-row>
           </v-col>
           <v-col cols="12">
             <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand>
-              <template v-slot:[`item.data-table-expand`]="{ item }">
+              <template #[`item.data-table-expand`]="{ item }">
                 <td style="white-space: nowrap;">
-                  <v-btn @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)" v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon><v-icon>mdi-playlist-remove</v-icon></v-btn>
-                  <v-btn @click.stop="() => selectedBodies.push(item)" v-else icon><v-icon>mdi-playlist-plus</v-icon></v-btn>
+                  <v-btn v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+                  <v-btn v-else icon @click.stop="() => selectedBodies.push(item)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
                 </td>
               </template>
-              <template v-slot:[`item.SystemBodyOrder`]="{ item }">
+              <template #[`item.SystemBodyOrder`]="{ item }">
                 {{ systemBodyName(item) }}
               </template>
-              <template v-slot:[`item.GroundMineralSurvey`]="{ item }">
+              <template #[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
                   <template #activator="{ on }">
                     <span v-if="item.GroundMineralSurvey" v-on="on">M{{ item.GroundMineralSurvey }}</span>
                     <span v-else v-on="on">❌</span>
                   </template>
-                  
+
                   <span>{{ GroundMineralSurveyMap[item.GroundMineralSurvey] }}</span>
                 </v-tooltip>
               </template>
-              <template v-slot:[`item.Potential`]="{ item }">
+              <template #[`item.Potential`]="{ item }">
                 <v-tooltip top>
                   <template #activator="{ on }">
-                    <span :class="{
-                      'green--text text--lighten-1 font-weight-bold title': item.Potential >= Math.PI / 2 * materialCount * 0.75,
-                      'red--text text--darken-3 font-weight-bold': item.Potential <= Math.PI / 2 * materialCount * 0.3,
-                    }" v-on="on">{{ roundToDecimal(( item.Potential * 10 ) / ( Math.PI / 2 * materialCount )) }}</span>
+                    <span
+                      :class="{
+                        'green--text text--lighten-1 font-weight-bold title': item.Potential >= Math.PI / 2 * materialCount * 0.75,
+                        'red--text text--darken-3 font-weight-bold': item.Potential <= Math.PI / 2 * materialCount * 0.3,
+                      }" v-on="on"
+                    >{{ roundToDecimal(( item.Potential * 10 ) / ( Math.PI / 2 * materialCount )) }}</span>
                   </template>
-                  
+
                   <span>{{ roundToDecimal(item.Potential, 3) }}</span>
                 </v-tooltip>
               </template>
-              <template v-slot:[`header.Potential`]="{ header }">
+              <template #[`header.Potential`]="{ header }">
                 <v-tooltip top>
-                  <template v-slot:activator="{ on }">
+                  <template #activator="{ on }">
                     <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
                   </template>
                   <span>Potential calculated for all listed minerals, including empty columns.</span>
                 </v-tooltip>
               </template>
-              <template v-for="material in materials" v-slot:[`item.${material}`]="{ item }">
-                <span :class="{
-                  'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
-                  'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
-                  'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
-                }" :key="material" v-if="item[material]"><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span>
+              <template v-for="material in materials" #[`item.${material}`]="{ item }">
+                <span
+                  v-if="item[material]" :key="material" :class="{
+                    'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
+                    'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
+                    'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
+                  }"
+                ><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span>
               </template>
-              <template v-slot:[`item.TotalAmount`]="{ item }">
+              <template #[`item.TotalAmount`]="{ item }">
                 <span class="text-no-wrap">
                   {{ separatedNumber(Math.round(item.TotalAmount), separator) }}
                 </span>
@@ -216,9 +226,9 @@ import { mapGetters } from 'vuex'
 import _partition from 'lodash/partition'
 import _intersectionBy from 'lodash/intersectionBy'
 
-import { separatedNumber, roundToDecimal } from '../../utilities/math'
-import { systemBodyName } from '../../utilities/aurora'
-import { areSetsEqual } from '../../utilities/generic'
+import { separatedNumber, roundToDecimal } from '../utilities/math'
+import { systemBodyName } from '../utilities/aurora'
+import { areSetsEqual } from '../utilities/generic'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -263,7 +273,7 @@ const baseFilter = {
 
 export default {
   components: {},
-  data() {
+  data () {
     return {
       filterMaterials: ['Any', 'All Present', 'All', ...Object.values(MaterialMap)],
 
@@ -277,7 +287,7 @@ export default {
       selectedAmount: null,
 
       panels: [0, 1, 2],
-      
+
       materials: Object.values(MaterialMap),
       systems: [],
 
@@ -299,19 +309,19 @@ export default {
     systemBodyName,
 
     areSetsEqual,
-    
-    addFilter() {
+
+    addFilter () {
       this.filters.push({
         ...baseFilter,
       })
     },
-    removeFilter(index) {
+    removeFilter (index) {
       this.filters.splice(index, 1)
     },
-    
-    applyMaterialFilter(material, filter) {
+
+    applyMaterialFilter (material, filter) {
       const insideAccessibilityRange = material.Accessibility >= filter.selectedAccessibility
-                
+
       if (filter.selectedAmount) {
         return material.Amount >= filter.selectedAmount && insideAccessibilityRange
       }
@@ -319,7 +329,7 @@ export default {
       return insideAccessibilityRange
     },
 
-    toggleSystems() {
+    toggleSystems () {
       if (this.systems.length === this.systemNames.length) {
         this.systems = []
       } else {
@@ -327,13 +337,13 @@ export default {
       }
     },
 
-    selectOurSystems() {
+    selectOurSystems () {
       this.systems = this.colonizedSystems.map(system => system.SystemID)
     },
-    selectOurInhabitedSystems() {
+    selectOurInhabitedSystems () {
       this.systems = this.inhabitedColonizedSystems.map(system => system.SystemID)
     },
-    selectUnrestrictedSystems() {
+    selectUnrestrictedSystems () {
       this.systems = this.unrestrictedSystems.map(system => system.SystemID)
     },
   },
@@ -341,18 +351,18 @@ export default {
     ...mapGetters([
       'config',
       'database',
-      
+
       'GameID',
       'RaceID',
     ]),
 
-    separator() {
-      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+    separator () {
+      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
-      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+      return selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
-    bodyGroups() {
+    bodyGroups () {
       if (!this.minerals || !this.minerals.length) {
         return null
       }
@@ -398,7 +408,7 @@ export default {
           const material = body[materialId]
 
           if (material) {
-            potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - (Math.PI / 2))) * ( 0.5 - ( Math.cos(Math.PI * material.Accessibility) / 2 )))
+            potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - (Math.PI / 2))) * (0.5 - (Math.cos(Math.PI * material.Accessibility) / 2)))
             amount += material.Amount
           }
 
@@ -413,7 +423,7 @@ export default {
         }
       })
     },
-    systemNames() {
+    systemNames () {
       if (!this.minerals || !this.minerals.length) {
         return null
       }
@@ -430,72 +440,72 @@ export default {
       }, {}))
     },
 
-    preFilteredBodyGroups() {
+    preFilteredBodyGroups () {
       return this.bodyGroups.filter(body => {
         return this.filters.every(filter => {
           switch (filter.selectedMaterial) {
-            case 'Any': {
-              return this.materials.some(materialName => {
-                const material = body[materialName]
-
-                if (!material) {
-                  return false
-                }
-
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            case 'All Present': {
-              return this.materials.every(materialName => {
-                const material = body[materialName]
-
-                if (!material) {
-                  return true
-                }
-
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            case 'All': {
-              return this.materials.every(materialName => {
-                const material = body[materialName]
-
-                if (!material) {
-                  return false
-                }
-
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            default: {
-              const material = body[filter.selectedMaterial]
+          case 'Any': {
+            return this.materials.some(materialName => {
+              const material = body[materialName]
 
               if (!material) {
                 return false
               }
 
-              return this.applyMaterialFilter(material, filter) 
+              return this.applyMaterialFilter(material, filter)
+            })
+          }
+          case 'All Present': {
+            return this.materials.every(materialName => {
+              const material = body[materialName]
+
+              if (!material) {
+                return true
+              }
+
+              return this.applyMaterialFilter(material, filter)
+            })
+          }
+          case 'All': {
+            return this.materials.every(materialName => {
+              const material = body[materialName]
+
+              if (!material) {
+                return false
+              }
+
+              return this.applyMaterialFilter(material, filter)
+            })
+          }
+          default: {
+            const material = body[filter.selectedMaterial]
+
+            if (!material) {
+              return false
             }
+
+            return this.applyMaterialFilter(material, filter)
+          }
           }
         })
       })
     },
 
-    MaterialMap() {
+    MaterialMap () {
       return MaterialMap
     },
-    GroundMineralSurveyMap() {
+    GroundMineralSurveyMap () {
       return GroundMineralSurveyMap
     },
-    BodyClass() {
+    BodyClass () {
       return BodyClass
     },
 
-    materialCount() {
+    materialCount () {
       return Object.keys(this.materials).length
     },
 
-    headers() {
+    headers () {
       const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
       return [
@@ -511,7 +521,7 @@ export default {
           sort: (alpha, beta) => {
             console.log(alpha, beta)
             return collator.compare(alpha, beta)
-          }
+          },
         },
         {
           text: 'Potential',
@@ -544,33 +554,33 @@ export default {
       ]
     },
 
-    unrestrictedSystems() {
+    unrestrictedSystems () {
       return _intersectionBy(this.surveyedSystems.filter(system => system.RaceSystemSurveys.every(raceSystem => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
     },
-    unrestrictedSystemsIds() {
+    unrestrictedSystemsIds () {
       return this.unrestrictedSystems.map(system => system.SystemID)
     },
-    colonizedSystems() {
+    colonizedSystems () {
       return _intersectionBy(this.surveyedSystems.filter(system => system.Populations.length), this.systemNames, 'SystemID')
     },
-    colonizedSystemsIds() {
+    colonizedSystemsIds () {
       return this.colonizedSystems.map(system => system.SystemID)
     },
-    inhabitedColonizedSystems() {
+    inhabitedColonizedSystems () {
       return this.colonizedSystems.filter(system => system.InhabitedColonies)
     },
-    inhabitedColonizedSystemsIds() {
+    inhabitedColonizedSystemsIds () {
       return this.inhabitedColonizedSystems.map(system => system.SystemID)
     },
   },
   asyncComputed: {
     minerals: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return []
         }
 
-        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID left join FCT_Race on FCT_Race.RaceID = FCT_SystemBodySurveys.RaceID and FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([ items ]) => {
+        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID left join FCT_Race on FCT_Race.RaceID = FCT_SystemBodySurveys.RaceID and FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Minerals', items)
 
           return items
@@ -581,13 +591,13 @@ export default {
 
         //   return items
         // })
-              
+
         return minerals
       },
       default: [],
     },
     surveyedSystems: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -610,7 +620,7 @@ export default {
               RaceID: this.RaceID,
             },
           }],
-        }).then((items) => {
+        }).then(items => {
           console.log('Surveyed Systems', items)
 
           return items.map(item => {
@@ -631,25 +641,40 @@ export default {
       default: [],
     },
   },
-  asyncData({ route }) {
-    const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+  asyncData ({ route }) {
+    console.log('minerals asyncData', route)
 
-    return {
-      selectedBodies,
-      filterBySelectedBodies: route.query.bodies && selectedBodies.length ? true : false,
+    if (route.query.bodies) {
+      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+
+      return {
+        selectedBodies,
+        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
+      }
+    } else if (route.query.systems) {
+      const systems = route.query.systems.split(',').map(id => parseInt(id, 10))
+      console.log('asyncData systems', systems)
+
+      return {
+        systems,
+      }
     }
+
+    return {}
   },
   watch: {
     systemNames: {
       immediate: true,
-      handler(newNames) {
+      handler (newNames) {
         if (newNames) {
-          this.systems = newNames.map(system => system.SystemID)
+          if (!this.systems.length) {
+            this.systems = newNames.map(system => system.SystemID)
+          }
         }
-      }
+      },
     },
   },
-  mounted() {
+  mounted () {
     //
   },
 }

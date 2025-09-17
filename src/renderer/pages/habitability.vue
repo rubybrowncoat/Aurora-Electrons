@@ -14,41 +14,43 @@
               item-value="SpeciesID"
 
               label="Species"
-              
+
               auto-select-first
-              
+
               dense
               solo
-            ></v-autocomplete>
+            />
           </v-col>
           <v-col cols="6">
-            <v-text-field type="number" min="10" v-model.number="terraformers" placeholder="40" :hint="`Terraformers at ${selectedSpecies.TerraformingRate} rate`" :rules="[rules.required, rules.positive]" persistent-hint dense solo validate-on-blur></v-text-field>
+            <v-text-field v-model.number="terraformers" type="number" min="10" placeholder="40" :hint="`Terraformers at ${selectedSpecies.TerraformingRate} rate`" :rules="[rules.required, rules.positive]" persistent-hint dense solo validate-on-blur />
           </v-col>
           <v-col cols="12">
-            <v-select :disabled="filterBySelectedBodies" v-model="systems" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
-              <template v-slot:prepend-item>
+            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+              <template #prepend-item>
                 <v-list-item
                   ripple
                   @click="toggleSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>{{ systems.length > 0 
-                      ? systems.length == systemNames.length 
-                        ? 'sentiment_very_satisfied'
-                        : 'sentiment_satisfied'
-                      : 'sentiment_very_dissatisfied' }}</v-icon>
+                    <v-icon>
+                      {{ systems.length > 0
+                        ? systems.length == systemNames.length
+                          ? 'sentiment_very_satisfied'
+                          : 'sentiment_satisfied'
+                        : 'sentiment_very_dissatisfied' }}
+                    </v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select All</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectUnrestrictedSystems"
-
                   v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))"
+
+                  @click="selectUnrestrictedSystems"
                 >
                   <v-list-item-action>
                     <v-icon>report_off</v-icon>
@@ -58,12 +60,12 @@
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectOurSystems"
-
                   v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))"
+
+                  @click="selectOurSystems"
                 >
                   <v-list-item-action>
                     <v-icon>public</v-icon>
@@ -73,12 +75,12 @@
                   </v-list-item-content>
                 </v-list-item>
                 <v-list-item
-                  ripple
-                  @click="selectOurInhabitedSystems"
-
                   v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length"
+                  ripple
 
                   :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))"
+
+                  @click="selectOurInhabitedSystems"
                 >
                   <v-list-item-action>
                     <v-icon>people</v-icon>
@@ -87,33 +89,37 @@
                     <v-list-item-title>Select Inhabited Systems</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
-                <v-divider class="mt-2"></v-divider>
+                <v-divider class="mt-2" />
               </template>
             </v-select>
           </v-col>
-          <v-col cols="12" v-if="selectedBodies.length || filterBySelectedBodies">
+          <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
             <v-row>
               <v-col cols="auto">
                 <v-btn class="d-block mb-1" style="width: 100%;" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Habitability</v-btn>
-                <v-btn :to="{
-                  path: 'minerals',
-                  query: { 
-                    bodies: JSON.stringify(selectedBodies.map(selection => ({ 
-                      SystemBodyID: selection.SystemBodyID, 
-                      SystemBodyName: selection.SystemBodyName, 
-                      SystemName: selection.SystemName, 
-                      BodyClass: selection.BodyClass, 
-                      Component: selection.Component, 
-                      PlanetNumber: selection.PlanetNumber, 
-                      OrbitNumber: selection.OrbitNumber, 
-                    }))) 
-                  },
-                }" style="width: 100%;" small outlined>Isolate in Minerals</v-btn>
+                <v-btn
+                  :to="{
+                    path: 'minerals',
+                    query: {
+                      bodies: JSON.stringify(selectedBodies.map(selection => ({
+                        SystemBodyID: selection.SystemBodyID,
+                        SystemBodyName: selection.SystemBodyName,
+                        SystemName: selection.SystemName,
+                        BodyClass: selection.BodyClass,
+                        Component: selection.Component,
+                        PlanetNumber: selection.PlanetNumber,
+                        OrbitNumber: selection.OrbitNumber,
+                      })))
+                    },
+                  }" style="width: 100%;" small outlined
+                >
+                  Isolate in Minerals
+                </v-btn>
 
                 <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
               </v-col>
               <v-col>
-                <v-chip class="mr-2 mb-2" v-for="body of selectedBodies" :key="body.SystemBodyID" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
+                <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
               </v-col>
             </v-row>
           </v-col>
@@ -121,41 +127,41 @@
             <v-checkbox
               v-model="filterNonTerraformable"
               label="Hide Non-Terraformable"
-            ></v-checkbox>
+            />
           </v-col>
           <v-col cols="6" md="3">
             <v-checkbox
               v-model="filterWithoutMinerals"
               label="Hide Without Minerals"
-            ></v-checkbox>
+            />
           </v-col>
           <v-col cols="6" md="3">
             <v-checkbox
               v-model="filterOwnPopulations"
               label="Hide Own Populations"
-            ></v-checkbox>
+            />
           </v-col>
           <v-col cols="6" md="3">
             <v-checkbox
               v-model="filterOtherPopulations"
               label="Hide Other Populations"
-            ></v-checkbox>
+            />
           </v-col>
           <v-col cols="12">
             <v-data-table class="elevation-2" :headers="headers" :items="filteredCalculatedBodies" item-key="SystemBodyID" :expanded.sync="expandedRows" :sort-desc.sync="sortDescending" show-expand @click:row="(data, { expand, isExpanded, item }) => item.Liveable && item.TerraformationTime && expand(!isExpanded)">
-              <template v-slot:[`item.data-table-expand`]="{ item, isExpanded, expand }">
+              <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
                 <td style="white-space: nowrap;">
-                  <v-btn @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)" v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon><v-icon>mdi-playlist-remove</v-icon></v-btn>
-                  <v-btn @click.stop="() => selectedBodies.push(item)" v-else icon><v-icon>mdi-playlist-plus</v-icon></v-btn>
-                  
+                  <v-btn v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+                  <v-btn v-else icon @click.stop="() => selectedBodies.push(item)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
+
                   <template v-if="item.Liveable">
-                    <v-btn @click.stop="expand(false)" v-if="isExpanded" icon><v-icon>mdi-arrow-expand-up</v-icon></v-btn>
-                    <v-btn @click.stop="expand(true)" v-else icon><v-icon>mdi-arrow-expand-vertical</v-icon></v-btn>
+                    <v-btn v-if="isExpanded" icon @click.stop="expand(false)"><v-icon>mdi-arrow-expand-up</v-icon></v-btn>
+                    <v-btn v-else icon @click.stop="expand(true)"><v-icon>mdi-arrow-expand-vertical</v-icon></v-btn>
                   </template>
                 </td>
               </template>
-              <template v-slot:expanded-item="{ item }">
-                <td :colspan="headers.length + 1" class="px-4 py-3" v-if="item.TerraformationPlan">
+              <template #expanded-item="{ item }">
+                <td v-if="item.TerraformationPlan" :colspan="headers.length + 1" class="px-4 py-3">
                   <v-container fluid>
                     <v-row justify="start">
                       <v-col cols="12" md="8">
@@ -164,7 +170,7 @@
                             <v-list-item-title>
                               <h2>Rough Terraforming Blueprint</h2>
                             </v-list-item-title>
-                            
+
                             <v-list-item-subtitle>
                               Hydrographic Extent: {{ roundToDecimal(item.HydroExt, 1) }} &mdash; Albedo: {{ roundToDecimal(item.Albedo, 1) }} (recalculate if albedo changes)
                             </v-list-item-subtitle>
@@ -172,7 +178,7 @@
                         </v-list-item>
 
                         <template v-if="item.TerraformationPlan.Toxics.length">
-                          <v-list-item two-line v-for="toxic of item.TerraformationPlan.Toxics" :key="toxic.AtmosGasID">
+                          <v-list-item v-for="toxic of item.TerraformationPlan.Toxics" :key="toxic.AtmosGasID" two-line>
                             <v-list-item-content>
                               <v-list-item-title class="text-wrap">
                                 Set {{ toxic.AtmosGasName }} to 0 maximum atm.
@@ -184,7 +190,7 @@
                           </v-list-item>
                         </template>
 
-                        <v-list-item two-line v-if="item.TerraformationPlan.WaterVapourTime">
+                        <v-list-item v-if="item.TerraformationPlan.WaterVapourTime" two-line>
                           <v-list-item-content>
                             <v-list-item-title class="text-wrap">
                               <span v-if="item.TerraformationPlan.WaterVapour > 0">Set Water Vapour to {{ roundToDecimal(item.TerraformationPlan.WaterVapour, 3) }} maximum atm.</span>
@@ -196,7 +202,7 @@
                           </v-list-item-content>
                         </v-list-item>
 
-                        <v-list-item two-line v-if="item.TerraformationPlan.BreathableTime">
+                        <v-list-item v-if="item.TerraformationPlan.BreathableTime" two-line>
                           <v-list-item-content>
                             <v-list-item-title class="text-wrap">
                               Set {{ item.TerraformationPlan.BreathableName }} to {{ roundToDecimal(item.TerraformationPlan.Breathable, 3) }} maximum atm.
@@ -207,7 +213,7 @@
                           </v-list-item-content>
                         </v-list-item>
 
-                        <v-list-item two-line v-if="item.TerraformationPlan.GreenhouseTime">
+                        <v-list-item v-if="item.TerraformationPlan.GreenhouseTime" two-line>
                           <v-list-item-content>
                             <v-list-item-title class="text-wrap">
                               Set {{ item.TerraformationPlan.GreenhouseName }} to {{ roundToDecimal(item.TerraformationPlan.Greenhouse - item.TerraformationPlan.GreenhouseSideContributions, 3) }} maximum atm.
@@ -218,7 +224,7 @@
                           </v-list-item-content>
                         </v-list-item>
 
-                        <v-list-item two-line v-if="item.TerraformationPlan.AntiGreenhouseTime">
+                        <v-list-item v-if="item.TerraformationPlan.AntiGreenhouseTime" two-line>
                           <v-list-item-content>
                             <v-list-item-title class="text-wrap">
                               Set {{ item.TerraformationPlan.AntiGreenhouseName }} to {{ roundToDecimal(item.TerraformationPlan.AntiGreenhouse - item.TerraformationPlan.AntiGreenhouseSideContributions, 3) }} maximum atm.
@@ -229,7 +235,7 @@
                           </v-list-item-content>
                         </v-list-item>
 
-                        <v-list-item two-line v-if="item.TerraformationPlan.NeutralTime">
+                        <v-list-item v-if="item.TerraformationPlan.NeutralTime" two-line>
                           <v-list-item-content>
                             <v-list-item-title class="text-wrap">
                               Set {{ item.TerraformationPlan.NeutralName }} to {{ roundToDecimal(item.TerraformationPlan.Neutral - item.TerraformationPlan.NeutralSideContributions, 3) }} maximum atm.
@@ -285,31 +291,33 @@
                   </v-container>
                 </td>
               </template>
-              <template v-slot:[`item.SystemBodyOrder`]="{ item }">
+              <template #[`item.SystemBodyOrder`]="{ item }">
                 {{ systemBodyName(item) }}
               </template>
-              <template v-slot:[`item.GroundMineralSurvey`]="{ item }">
+              <template #[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
                   <template #activator="{ on }">
                     <span v-if="item.GroundMineralSurvey" v-on="on">M{{ item.GroundMineralSurvey }}</span>
                     <span v-else v-on="on">❌</span>
                   </template>
-                  
+
                   <span>{{ GroundMineralSurveyMap[item.GroundMineralSurvey] }}</span>
                 </v-tooltip>
               </template>
-              <template v-slot:[`item.MaximumPopulation`]="{ item }">
-                <v-tooltip top v-if="item.Populations.length">
+              <template #[`item.MaximumPopulation`]="{ item }">
+                <v-tooltip v-if="item.Populations.length" top>
                   <template #activator="{ on }">
-                    <span :class="{
-                      'green--text text--lighten-1 font-weight-bold': item.OwnPopulation && !item.OtherPopulation,
-                      'red--text text--darken-3 font-weight-bold': !item.OwnPopulation && item.OtherPopulation,
-                      'orange--text font-weight-bold': item.OwnPopulation && item.OtherPopulation,
-                    }" v-on="on">
+                    <span
+                      :class="{
+                        'green--text text--lighten-1 font-weight-bold': item.OwnPopulation && !item.OtherPopulation,
+                        'red--text text--darken-3 font-weight-bold': !item.OwnPopulation && item.OtherPopulation,
+                        'orange--text font-weight-bold': item.OwnPopulation && item.OtherPopulation,
+                      }" v-on="on"
+                    >
                       <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator) }}</span> / <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
                     </span>
                   </template>
-                  
+
                   <span v-if="item.OwnPopulation && item.OtherPopulation">
                     Mixed Population
                   </span>
@@ -322,7 +330,7 @@
                 </v-tooltip>
                 <span v-else>{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
               </template>
-              <template v-slot:[`item.MaximumPopulationAtOptimalHydro`]="{ item }">
+              <template #[`item.MaximumPopulationAtOptimalHydro`]="{ item }">
                 <span v-if="item.MaximumPopulationAtOptimalHydro === item.MaximumPopulation" class="green--text text--lighten-1 font-weight-bold">
                   Optimal
                 </span>
@@ -330,40 +338,44 @@
                   {{ separatedNumber(roundToDecimal(item.MaximumPopulationAtOptimalHydro, 2), separator) }}
                 </span>
               </template>
-              <template v-slot:[`item.Liveable`]="{ item }">
-                <span class="orange--text font-weight-bold" v-if="item.LowGravity && item.Liveable">LG</span>
-                <span :class="{
-                  'green--text text--lighten-1 font-weight-bold': item.Liveable,
-                  'red--text text--darken-3 font-weight-bold': !item.Liveable,
-                }" v-else>{{ item.Liveable ? 'Y' : 'N' }}</span>
+              <template #[`item.Liveable`]="{ item }">
+                <span v-if="item.LowGravity && item.Liveable" class="orange--text font-weight-bold">LG</span>
+                <span
+                  v-else :class="{
+                    'green--text text--lighten-1 font-weight-bold': item.Liveable,
+                    'red--text text--darken-3 font-weight-bold': !item.Liveable,
+                  }"
+                >{{ item.Liveable ? 'Y' : 'N' }}</span>
               </template>
-              <template v-slot:[`item.TerraformationTime`]="{ item }">
+              <template #[`item.TerraformationTime`]="{ item }">
                 <span v-if="item.TerraformationTime > 0">
                   {{ separatedNumber(roundToDecimal(item.TerraformationTime, 1), separator) }}
                 </span>
-                <span class="green--text text--lighten-1 font-weight-bold" v-else-if="item.Liveable">
+                <span v-else-if="item.Liveable" class="green--text text--lighten-1 font-weight-bold">
                   Done
                 </span>
-                <span class="red--text text--darken-3 font-weight-bold" v-else>
+                <span v-else class="red--text text--darken-3 font-weight-bold">
                   Impossible
                 </span>
               </template>
-              <template v-slot:[`item.MiningPotential`]="{ item }">
-                <span :class="{
-                  'green--text text--lighten-1 font-weight-bold title': item.MiningPotential >= 7.5,
-                  'red--text text--darken-3 font-weight-bold': item.MiningPotential <= 3,
-                }" v-if="item.Minerals.length">{{ roundToDecimal(item.MiningPotential, 1) }}</span>
-                <span class="orange--text font-weight-bold" v-else>N/A</span>
+              <template #[`item.MiningPotential`]="{ item }">
+                <span
+                  v-if="item.Minerals.length" :class="{
+                    'green--text text--lighten-1 font-weight-bold title': item.MiningPotential >= 7.5,
+                    'red--text text--darken-3 font-weight-bold': item.MiningPotential <= 3,
+                  }"
+                >{{ roundToDecimal(item.MiningPotential, 1) }}</span>
+                <span v-else class="orange--text font-weight-bold">N/A</span>
               </template>
-              <template v-slot:[`header.MiningPotential`]="{ header }">
+              <template #[`header.MiningPotential`]="{ header }">
                 <v-tooltip top>
-                  <template v-slot:activator="{ on }">
+                  <template #activator="{ on }">
                     <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
                   </template>
                   <span>Potential calculated for available minerals on the body.</span>
                 </v-tooltip>
               </template>
-              <template v-slot:[`item.TotalMiningAmount`]="{ item }">
+              <template #[`item.TotalMiningAmount`]="{ item }">
                 <span v-if="!item.BodySurveyed" class="orange--text font-weight-bold">
                   Unsurveyed
                 </span>
@@ -387,9 +399,9 @@ import { mapGetters } from 'vuex'
 import _partition from 'lodash/partition'
 import _intersectionBy from 'lodash/intersectionBy'
 
-import { separatedNumber, roundToDecimal } from '../../utilities/math'
-import { systemBodyName } from '../../utilities/aurora'
-import { areSetsEqual } from '../../utilities/generic'
+import { separatedNumber, roundToDecimal } from '../utilities/math'
+import { systemBodyName } from '../utilities/aurora'
+import { areSetsEqual } from '../utilities/generic'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -432,7 +444,7 @@ const baseMaxPop = 12000
 
 export default {
   components: {},
-  data() {
+  data () {
     return {
       selectedSpeciesId: null,
       terraformers: 10,
@@ -444,7 +456,7 @@ export default {
 
       expandedRows: [],
       sortDescending: [false],
-      
+
       systems: [],
 
       selectedBodies: [],
@@ -466,7 +478,7 @@ export default {
 
     areSetsEqual,
 
-    toggleSystems() {
+    toggleSystems () {
       if (this.systems.length === this.systemNames.length) {
         this.systems = []
       } else {
@@ -474,13 +486,13 @@ export default {
       }
     },
 
-    selectOurSystems() {
+    selectOurSystems () {
       this.systems = this.colonizedSystems.map(system => system.SystemID)
     },
-    selectOurInhabitedSystems() {
+    selectOurInhabitedSystems () {
       this.systems = this.inhabitedColonizedSystems.map(system => system.SystemID)
     },
-    selectUnrestrictedSystems() {
+    selectUnrestrictedSystems () {
       this.systems = this.unrestrictedSystems.map(system => system.SystemID)
     },
   },
@@ -488,36 +500,36 @@ export default {
     ...mapGetters([
       'config',
       'database',
-      
+
       'GameID',
       'RaceID',
     ]),
 
-    separator() {
-      const selectedSeparator = this.config.get(`selectedSeparator`, `Tick`)
+    separator () {
+      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
-      return selectedSeparator === 'Tick' ? `'` : selectedSeparator === 'Comma' ? `,` : selectedSeparator === 'Dash' ? `-` : selectedSeparator === 'Space' ? ` ` : ''
+      return selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
-    selectedSpecies() {
+    selectedSpecies () {
       const extant = this.species.find(species => species.SpeciesID === this.selectedSpeciesId)
 
       return extant || {}
     },
-    rawTerraformingPower() {
+    rawTerraformingPower () {
       return this.selectedSpecies.TerraformingRate * this.terraformers
     },
 
-    filteredCalculatedBodies() {
+    filteredCalculatedBodies () {
       return this.calculatedBodies.filter(body => {
-        return ( this.filterBySelectedBodies ? !!this.selectedBodies.find(selection => selection.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID) )
-            && (this.filterNonTerraformable ? body.Liveable && !body.LowGravity : true) 
-            && (this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true) 
-            && (this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true) 
-            && (this.filterOtherPopulations ? !body.OtherPopulation || body.OwnPopulation : true) 
+        return (this.filterBySelectedBodies ? !!this.selectedBodies.find(selection => selection.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID)) &&
+            (this.filterNonTerraformable ? body.Liveable && !body.LowGravity : true) &&
+            (this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true) &&
+            (this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true) &&
+            (this.filterOtherPopulations ? !body.OtherPopulation || body.OwnPopulation : true)
       })
     },
-    calculatedBodies() {
+    calculatedBodies () {
       console.log('recalculate calculatedBodies')
 
       return this.selectedSpecies.SpeciesID ? this.bodies.filter(body => body.Gravity <= this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation).map(body => {
@@ -527,8 +539,7 @@ export default {
         const tidalModifier = body.TidalLock && BodyClass[body.BodyClass] !== 'Moon' ? 5 : 1
         const hydroModifier = body.HydroExt > 75 ? Math.max((100 - body.HydroExt) / 25, 0.01) : 1
 
-        if (body.SystemBodyName === 'Mercury')
-        console.log(body.SystemBodyName, body.TidalLock, tidalModifier)
+        if (body.SystemBodyName === 'Mercury') { console.log(body.SystemBodyName, body.TidalLock, tidalModifier) }
 
         const maxPopPreModifiers = (localSurfaceArea / earthSurfaceArea) * baseMaxPop * this.selectedSpecies.PopulationDensityModifier
 
@@ -627,7 +638,7 @@ export default {
           const workbaseSurfaceTemperature = body.BaseTemp * workbaseGreenhouseFactor * body.Albedo
 
           // GREENHOUSE
-          const requiredTemperature = workbaseSurfaceTemperature < this.selectedSpecies.IdealTemperature - this.selectedSpecies.TemperatureDeviation 
+          const requiredTemperature = workbaseSurfaceTemperature < this.selectedSpecies.IdealTemperature - this.selectedSpecies.TemperatureDeviation
             ? this.selectedSpecies.IdealTemperature - this.selectedSpecies.TemperatureDeviation
             : workbaseSurfaceTemperature > this.selectedSpecies.IdealTemperature + this.selectedSpecies.TemperatureDeviation
               ? this.selectedSpecies.IdealTemperature + this.selectedSpecies.TemperatureDeviation
@@ -706,7 +717,7 @@ export default {
 
         // MINERALS
         const [miningPotential, totalMiningAmount] = body.Minerals.reduce(([potential, amount], mineral) => {
-          potential += Math.atan(Math.pow(mineral.Amount / 20000, Math.cos((Math.PI / 2) * mineral.Accessibility - (Math.PI / 2))) * ( 0.5 - ( Math.cos(Math.PI * mineral.Accessibility) / 2 )))
+          potential += Math.atan(Math.pow(mineral.Amount / 20000, Math.cos((Math.PI / 2) * mineral.Accessibility - (Math.PI / 2))) * (0.5 - (Math.cos(Math.PI * mineral.Accessibility) / 2)))
           amount += mineral.Amount
 
           return [potential, amount]
@@ -714,13 +725,13 @@ export default {
 
         newBody.MiningPotential = body.Minerals.length && (miningPotential * 10) / (Math.PI / 2 * body.Minerals.length)
         newBody.TotalMiningAmount = totalMiningAmount
-        
+
         // EXTANT POPULATIONS
         const { totalPopulation, ownPopulation, otherPopulation } = body.Populations.reduce((aggregate, population) => {
           aggregate.totalPopulation += population.Population
-          
+
           const ownExtant = this.species.find(species => species.SpeciesID === population.SpeciesID)
-          
+
           if (ownExtant) {
             aggregate.ownPopulation = true
           } else {
@@ -742,7 +753,7 @@ export default {
       }) : []
     },
 
-    systemNames() {
+    systemNames () {
       if (!this.bodies || !this.bodies.length) {
         return []
       }
@@ -759,17 +770,17 @@ export default {
       }, {}))
     },
 
-    MaterialMap() {
+    MaterialMap () {
       return MaterialMap
     },
-    GroundMineralSurveyMap() {
+    GroundMineralSurveyMap () {
       return GroundMineralSurveyMap
     },
-    BodyClass() {
+    BodyClass () {
       return BodyClass
     },
 
-    headers() {
+    headers () {
       const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
       return [
@@ -812,10 +823,10 @@ export default {
           value: 'TerraformationTime',
           divider: true,
           align: 'center',
-          sort: (alpha, beta) => alpha === -Infinity 
-            ? (this.sortDescending[0] ? -1 : 1) 
-            : beta === -Infinity 
-              ? (this.sortDescending[0] ? 1 : -1) 
+          sort: (alpha, beta) => alpha === -Infinity
+            ? (this.sortDescending[0] ? -1 : 1)
+            : beta === -Infinity
+              ? (this.sortDescending[0] ? 1 : -1)
               : alpha - beta,
         },
         {
@@ -832,33 +843,33 @@ export default {
       ]
     },
 
-    unrestrictedSystems() {
+    unrestrictedSystems () {
       return _intersectionBy(this.surveyedSystems.filter(system => system.RaceSystemSurveys.every(raceSystem => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
     },
-    unrestrictedSystemsIds() {
+    unrestrictedSystemsIds () {
       return this.unrestrictedSystems.map(system => system.SystemID)
     },
-    colonizedSystems() {
+    colonizedSystems () {
       return _intersectionBy(this.surveyedSystems.filter(system => system.Populations.length), this.systemNames, 'SystemID')
     },
-    colonizedSystemsIds() {
+    colonizedSystemsIds () {
       return this.colonizedSystems.map(system => system.SystemID)
     },
-    inhabitedColonizedSystems() {
+    inhabitedColonizedSystems () {
       return this.colonizedSystems.filter(system => system.InhabitedColonies)
     },
-    inhabitedColonizedSystemsIds() {
+    inhabitedColonizedSystemsIds () {
       return this.inhabitedColonizedSystems.map(system => system.SystemID)
     },
   },
   asyncComputed: {
     bodies: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return []
         }
 
-        const bodies = await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.TidalLock, FCT_SystemBody.RadiationLevel, FCT_SystemBody.DustLevel, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID, FCT_Population.Population, FCT_Population.SpeciesID, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT) AS BodySurveyed, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.BoilingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel, DIM_Gases.Name as AtmosGasName from FCT_SystemBody left join FCT_Population on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_MineralDeposit on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID and FCT_SystemBodySurveys.SystemBodyID = FCT_MineralDeposit.SystemBodyID left join FCT_AtmosphericGas on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID left join DIM_Gases on FCT_AtmosphericGas.AtmosGasID = DIM_Gases.GasID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5) and FCT_SystemBody.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} order by FCT_SystemBody.SystemBodyID asc`).then(([ items ]) => {
+        const bodies = await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.TidalLock, FCT_SystemBody.RadiationLevel, FCT_SystemBody.DustLevel, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID, FCT_Population.Population, FCT_Population.SpeciesID, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT) AS BodySurveyed, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.BoilingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel, DIM_Gases.Name as AtmosGasName from FCT_SystemBody left join FCT_Population on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_MineralDeposit on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID and FCT_SystemBodySurveys.SystemBodyID = FCT_MineralDeposit.SystemBodyID left join FCT_AtmosphericGas on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID left join DIM_Gases on FCT_AtmosphericGas.AtmosGasID = DIM_Gases.GasID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5) and FCT_SystemBody.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} order by FCT_SystemBody.SystemBodyID asc`).then(([items]) => {
           console.log('Terraforming', items)
 
           const bodyPops = {}
@@ -956,18 +967,18 @@ export default {
             return aggregate
           }, {}))
         })
-              
+
         return bodies
       },
       default: [],
     },
     species: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return []
         }
 
-        const species = await this.database.query(`select FCT_Population.SpeciesID, FCT_Species.SpeciesName, sum(FCT_Population.Population) as TotalPopulation, FCT_Race.TerraformingRate, FCT_Species.BreatheID, DIM_Gases.Name as BreatheName, FCT_Species.Oxygen as IdealBreathePressure, FCT_Species.OxyDev as BreathePressureDeviation, FCT_Species.PressMax as MaximumPressure, FCT_Species.Temperature as IdealTemperature, FCT_Species.TempDev as TemperatureDeviation, FCT_Species.Gravity as IdealGravity, FCT_Species.GravDev as GravityDeviation, FCT_Species.PopulationDensityModifier from FCT_Population left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join FCT_Species on FCT_Population.SpeciesID = FCT_Species.SpeciesID left join DIM_Gases on FCT_Species.BreatheID = DIM_Gases.GasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SpeciesID`).then(([ items ]) => {
+        const species = await this.database.query(`select FCT_Population.SpeciesID, FCT_Species.SpeciesName, sum(FCT_Population.Population) as TotalPopulation, FCT_Race.TerraformingRate, FCT_Species.BreatheID, DIM_Gases.Name as BreatheName, FCT_Species.Oxygen as IdealBreathePressure, FCT_Species.OxyDev as BreathePressureDeviation, FCT_Species.PressMax as MaximumPressure, FCT_Species.Temperature as IdealTemperature, FCT_Species.TempDev as TemperatureDeviation, FCT_Species.Gravity as IdealGravity, FCT_Species.GravDev as GravityDeviation, FCT_Species.PopulationDensityModifier from FCT_Population left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join FCT_Species on FCT_Population.SpeciesID = FCT_Species.SpeciesID left join DIM_Gases on FCT_Species.BreatheID = DIM_Gases.GasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SpeciesID`).then(([items]) => {
           console.log('Species', items)
 
           return items
@@ -976,13 +987,13 @@ export default {
         if (species.length) {
           this.selectedSpeciesId = species[0].SpeciesID
         }
-          
+
         return species
       },
       default: [],
     },
     surveyedSystems: {
-      async get() {
+      async get () {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1005,7 +1016,7 @@ export default {
               RaceID: this.RaceID,
             },
           }],
-        }).then((items) => {
+        }).then(items => {
           console.log('Surveyed Systems', items)
 
           return items.map(item => {
@@ -1026,25 +1037,38 @@ export default {
       default: [],
     },
   },
-  asyncData({ route }) {
-    const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+  asyncData ({ route }) {
+    if (route.query.bodies) {
+      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
 
-    return {
-      selectedBodies,
-      filterBySelectedBodies: route.query.bodies && selectedBodies.length ? true : false,
+      return {
+        selectedBodies,
+        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
+      }
+    } else if (route.query.systems) {
+      const systems = route.query.systems.split(',').map(id => parseInt(id, 10))
+      console.log('asyncData systems', systems)
+
+      return {
+        systems,
+      }
     }
+
+    return {}
   },
   watch: {
     systemNames: {
       immediate: true,
-      handler(newNames) {
+      handler (newNames) {
         if (newNames) {
-          this.systems = newNames.map(system => system.SystemID)
+          if (!this.systems.length) {
+            this.systems = newNames.map(system => system.SystemID)
+          }
         }
-      }
+      },
     },
   },
-  mounted() {
+  mounted () {
     //
   },
 }

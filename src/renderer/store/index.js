@@ -1,6 +1,6 @@
-import { resetDatabase } from '../../utilities/database'
-
 import Config from 'electron-store'
+
+import { resetDatabase } from '../utilities/database'
 
 const configConfiguration = {}
 
@@ -12,6 +12,7 @@ export const state = () => {
     GameID: null,
     RaceID: null,
 
+    StartYear: 0,
     GameTime: 0,
 
     CivilianShippingLinesActive: true,
@@ -19,69 +20,73 @@ export const state = () => {
 }
 
 export const getters = {
-  config(state) {
+  config (state) {
     return state.config
   },
-  database(state) {
+  database (state) {
     return state.database
   },
 
-  GameID(state) {
+  GameID (state) {
     return state.GameID
   },
-  RaceID(state) {
+  RaceID (state) {
     return state.RaceID
   },
-  GameTime(state) {
+  StartYear (state) {
+    return state.StartYear
+  },
+  GameTime (state) {
     return state.GameTime
   },
-  CivilianShippingLinesActive(state) {
+  CivilianShippingLinesActive (state) {
     return state.CivilianShippingLinesActive
   },
 }
 
 export const mutations = {
-  configDidChange(state, { key, callback, returnant }) {
+  configDidChange (state, { key, callback, returnant }) {
     returnant.unsubscribe = state.config.onDidChange(key, callback)
   },
 
-  replaceConfig(state, { config }) {
+  replaceConfig (state, { config }) {
     state.config = config
   },
-  replaceDatabase(state, { database }) {
+  replaceDatabase (state, { database }) {
     state.database = database
   },
 
-  setGame(state, { GameID }) {
+  setGame (state, { GameID }) {
     state.GameID = GameID
   },
-  setRace(state, { RaceID }) {
+  setRace (state, { RaceID }) {
     state.RaceID = RaceID
 
     console.log(state)
   },
-  setGameTime(state, { GameTime }) {
+  setGameTime (state, { StartYear, GameTime }) {
+    state.StartYear = StartYear
     state.GameTime = GameTime
   },
-  setCivilianShippingLinesActive(state, { CivilianShippingLinesActive }) {
+  setCivilianShippingLinesActive (state, { CivilianShippingLinesActive }) {
     state.CivilianShippingLinesActive = CivilianShippingLinesActive
-  }
+  },
 }
 
 export const actions = {
-  reinstantiateConfig({ commit }) {
+  reinstantiateConfig ({ commit }) {
     commit('replaceConfig', {
       config: new Config(configConfiguration),
     })
   },
 
-  renew({ commit }, { storagePath }) {
+  renew ({ commit }, { storagePath }) {
     commit('replaceDatabase', {
-      database: resetDatabase(storagePath)
+      database: resetDatabase(storagePath),
     })
   },
 
-  changeGame({ commit }, { game, race = null }) {
+  changeGame ({ commit }, { game, race = null }) {
     commit('setGame', game)
     commit('setGameTime', game)
     commit('setCivilianShippingLinesActive', game)

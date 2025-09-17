@@ -1,13 +1,44 @@
-/* globals INCLUDE_RESOURCES_PATH */
-import { app } from 'electron'
+import path from 'path'
+import { promises as fsPromises } from 'fs'
 
-/**
- * Set `__resources` path to resources files in renderer process
- */
-global.__resources = undefined // eslint-disable-line no-underscore-dangle
-// noinspection BadExpressionStatementJS
-INCLUDE_RESOURCES_PATH // eslint-disable-line no-unused-expressions
-if (__resources === undefined) console.error('[Main-process]: Resources path is undefined')
+import { app, dialog, ipcMain } from 'electron'
+
+ipcMain.handle('request-storage-path', async () => {
+  const exePath = path.dirname(app.getPath('exe'))
+  const isMac = exePath.includes('MacOS')
+
+  const headGame = process.env.NODE_ENV === 'development' && false
+
+  const storagePath = app.isPackaged
+    ? isMac
+      ? path.join(exePath, '../../../', 'AuroraDB.db')
+      : process.env.PORTABLE_EXECUTABLE_DIR
+        ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db')
+        : path.join(exePath, 'AuroraDB.db')
+    : headGame
+      ? path.join('../', 'AuroraDB.db')
+      : 'AuroraDB_260_Reisen.db'
+
+  return storagePath
+})
+
+ipcMain.handle('save-png', (_event, imageData, filePath) => {
+  return dialog.showSaveDialog({
+    title: 'Save Map as PNG',
+    defaultPath: filePath,
+    filters: [
+      { name: 'PNG Image', extensions: ['png'] },
+    ],
+  }).then((result) => {
+    if (!result.canceled && result.filePath) {
+      console.log('Saving PNG to', result.filePath, imageData.length)
+
+      return fsPromises.writeFile(result.filePath, imageData, 'base64')
+    }
+
+    return result
+  })
+})
 
 // Quit when all windows are closed.
 app.on('window-all-closed', function () {

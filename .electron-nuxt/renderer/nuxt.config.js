@@ -19,10 +19,7 @@ const baseConfig = {
   dev: isDev,
   generate: {
     dir: path.join(DIST_DIR, 'renderer')
-  },
-  plugins: [
-    { ssr: true, src: path.join(__dirname, 'resources-plugin.js') }
-  ]
+  }
 };
 
 const baseExtend = (config, { isClient }) => {
@@ -33,25 +30,15 @@ const baseExtend = (config, { isClient }) => {
   })]
 
   config.target = 'electron-renderer'
-
-  // exclude browser field resolution
-  const mainFields = ['esnext', 'main'];
-  config.resolve.mainFields = mainFields;
-  config.resolve.aliasFields = mainFields;
-
+  
   config.node = {
     __dirname: !isProduction,
     __filename: !isProduction
   }
 
-  if (!isDev) {
-    // absolute path to files on production (default value: '/_nuxt/')
-    config.output.publicPath = '_nuxt/'
-  }
-
   config.plugins.push(
     new webpack.DefinePlugin({
-      INCLUDE_RESOURCES_PATH: isClient ? resourcesPath.nuxtClient() : resourcesPath.nuxtServer()
+      'process.resourcesPath': isClient ? resourcesPath.nuxtClient() : resourcesPath.nuxtServer()
     })
   )
 
@@ -63,18 +50,6 @@ const baseExtend = (config, { isClient }) => {
     const jsLoader = config.module.rules.find(el => el.test.test('sample.js') === true)
     if (jsLoader) jsLoader.use = [path.join(__dirname, 'do-nothing-loader.js')]
   }
-
-  // https://github.com/smt116/node-native-ext-loader#basepath-default-
-  const basePathToNativeModules = isProduction ? ['_nuxt'] : []
-  config.module.rules.push(
-    {
-      test: /\.node$/,
-      loader: 'native-ext-loader',
-      options: {
-        basePath: basePathToNativeModules
-      }
-    }
-  )
 
 }
 
@@ -90,7 +65,17 @@ const mergeConfig = customConfig => {
     if(baseConfig.build === undefined) baseConfig.build = {};
     baseConfig.build.extend = baseExtend;
   }
-  return deepmerge(baseConfig, customConfig);
+
+  if (customConfig.build !== undefined && customConfig.build.plugins !== undefined) {
+    // webpack config plugins should not use deep merge
+    let { plugins, ...rest } = customConfig.build;
+    customConfig.build = rest;
+    let result = deepmerge(baseConfig, customConfig);
+    result.build.plugins = plugins;
+    return result;
+  } else {
+    return deepmerge(baseConfig, customConfig);
+  }
 }
 
 

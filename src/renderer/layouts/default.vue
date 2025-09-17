@@ -7,7 +7,7 @@
         </v-list-item-avatar> -->
 
         <v-list-item-icon>
-          <v-icon large>my_location</v-icon>
+          <v-icon large>mdi-tooltip-account</v-icon>
         </v-list-item-icon>
 
         <v-list-item-title>Games</v-list-item-title>
@@ -16,41 +16,41 @@
           <v-icon>mdi-chevron-left</v-icon>
         </v-btn>
       </v-list-item>
-      <v-divider></v-divider>
+      <v-divider />
 
       <v-list>
-        <v-tooltip right v-for="game in games" :key="game.GameID">
+        <v-tooltip v-for="game in games" :key="game.GameID" right>
           <template #activator="{ on }">
-            <v-list-group prepend-icon="domain" append-icon :value="game.GameID === GameID" :title="game.GameName" @click="game.Races.length === 1 ? changeGame({ game }) : null" v-on="on">
-              <template v-slot:activator>
+            <v-list-group prepend-icon="mdi-domain" append-icon :value="game.GameID === GameID" :title="game.GameName" @click="game.Races.length === 1 ? changeGame({ game }) : null" v-on="on">
+              <template #activator>
                 <v-list-item-content>
                   <v-list-item-title>{{ game.GameName }}</v-list-item-title>
                   <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
                 </v-list-item-content>
               </template>
               <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID === RaceID" @click="changeGame({ game, race })">
-                <v-list-item-icon><v-icon>people</v-icon></v-list-item-icon>
+                <v-list-item-icon><v-icon>mdi-account-multiple</v-icon></v-list-item-icon>
                 <v-list-item-title>
                   {{ race.RaceTitle }}
                 </v-list-item-title>
               </v-list-item>
             </v-list-group>
           </template>
-          <span>{{ game.GameName }}</span>
+          <span>{{ game.GameName }} ({{ game.StartYear }})</span>
         </v-tooltip>
       </v-list>
     </v-navigation-drawer>
 
     <v-app-bar app>
       <v-toolbar-title>{{ title }}</v-toolbar-title>
-      <v-spacer></v-spacer>
+      <v-spacer />
       <v-btn icon to="/settings" nuxt>
         <v-icon>mdi-wrench</v-icon>
       </v-btn>
-      <v-btn icon v-if="$vuetify.theme.dark" @click="$vuetify.theme.dark = false">
+      <v-btn v-if="$vuetify.theme.dark" icon @click="$vuetify.theme.dark = false">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
-      <v-btn icon v-else @click="$vuetify.theme.dark = true">
+      <v-btn v-else icon @click="$vuetify.theme.dark = true">
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
       <template #extension>
@@ -60,8 +60,8 @@
           <v-tab to="/minerals" nuxt>Minerals</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/information" nuxt>Information</v-tab>
-          <v-tab to="/map" nuxt>Map</v-tab>
-          <!-- <v-tab to="/map_two" nuxt>Map 2 (SUPERWIP)</v-tab> -->
+          <v-tab to="/map" nuxt>Map (WIP)</v-tab>
+          <!-- <v-tab to="/map_old" nuxt>Map Old</v-tab> -->
           <v-tab to="/log" nuxt>Log</v-tab>
           <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
         </v-tabs>
@@ -89,6 +89,168 @@
   </v-app>
 </template>
 
+<script>
+import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
+// import AppHeader from '@/components/header'
+
+export default {
+  components: {
+    // AppHeader
+  },
+  data () {
+    return {
+      drawer: true,
+      mini: false,
+
+      tab: null,
+
+      // WATCHED CONFIG
+      spyNPR: false,
+      unsubscribeSpyNPR: null,
+    }
+  },
+  computed: {
+    ...mapState([
+      'snackbar',
+    ]),
+
+    ...mapGetters([
+      'config',
+      'database',
+
+      'GameID',
+      'RaceID',
+    ]),
+
+    title () {
+      switch (this.$route.name) {
+      case 'index': {
+        return 'Production Recap'
+      }
+      case 'warnings': {
+        return 'Warnings'
+      }
+      case 'minerals': {
+        return 'Mineral Breakdown'
+      }
+      case 'habitability': {
+        return 'Habitability Breakdown'
+      }
+      case 'information': {
+        return 'Empire Information'
+      }
+      case 'technologies': {
+        return 'Technology Tree'
+      }
+      case 'map': {
+        return 'Galaxy Map'
+      }
+      case 'settings': {
+        return 'Settings'
+      }
+      case 'log': {
+        return 'Game Log Viewer'
+      }
+      default: {
+        return 'Default title'
+      }
+      }
+    },
+
+    snackbarStatus: {
+      set (status) {
+        this.setActive(status)
+      },
+      get () {
+        return this.snackbar.active
+      },
+    },
+  },
+  watch: {
+    config: {
+      immediate: true,
+      handler (config) {
+        this.spyNPR = config.get('spyNPR', false)
+      },
+    },
+  },
+  mounted () {
+    this.themeInit()
+
+    // CONFIG CHANGE SUBSCRIPTION
+    const mutationReturn = {}
+    this.configDidChange({
+      key: 'spyNPR',
+      callback: value => {
+        this.spyNPR = value
+      },
+
+      returnant: mutationReturn,
+    })
+
+    if (mutationReturn.unsubscribe) {
+      this.unsubscribeSpyNPR = mutationReturn.unsubscribe
+    }
+  },
+  beforeDestroy () {
+    if (this.unsubscribeSpyNPR) {
+      this.unsubscribeSpyNPR()
+    }
+  },
+  methods: {
+    ...mapMutations('snackbar', [
+      'setActive',
+    ]),
+    ...mapMutations([
+      'configDidChange',
+    ]),
+
+    ...mapActions([
+      'changeGame',
+    ]),
+
+    themeInit () {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+
+      mediaQuery.addEventListener('change', e => {
+        console.log('mediaQuery listener', e)
+      })
+
+      if (mediaQuery.matches) {
+        this.$nextTick(() => {
+          this.$vuetify.theme.dark = true
+        })
+      }
+    },
+  },
+  asyncComputed: {
+    games: {
+      async get () {
+        if (!this.database || !this.database.models.Game) {
+          return []
+        }
+
+        const games = await this.database.models.Game.findAll({
+          include: [{
+            model: this.database.models.Race,
+            ...(this.spyNPR
+              ? null
+              : {
+                where: {
+                  NPR: false,
+                },
+              }),
+          }],
+        })
+
+        return games
+      },
+      default: [],
+    },
+  },
+}
+</script>
+
 <style lang="scss" scoped>
 .column {
   padding-bottom: 0;
@@ -105,158 +267,3 @@
   padding: 20px 0 20px 20px;
 }
 </style>
-
-<script>
-import AppHeader from '@/components/header'
-import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
-
-export default {
-  data() {
-    return {
-      drawer: true,
-      mini: false,
-
-      tab: null,
-
-      // WATCHED CONFIG
-      spyNPR: false,
-      unsubscribeSpyNPR: null,
-    }
-  },
-  components: { 
-    AppHeader,
-  },
-  methods: {
-    ...mapMutations('snackbar', [
-      'setActive',
-    ]),
-    ...mapMutations([
-      'configDidChange',
-    ]),
-
-    ...mapActions([
-      'changeGame',
-    ]),
-
-    themeInit() {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-
-      mediaQuery.addEventListener('change', (e) => {
-        console.log('mediaQuery listener', e)
-      })
-
-      if (mediaQuery.matches) {
-        this.$nextTick(() => this.$vuetify.theme.dark = true)
-      }
-    }
-  },
-  computed: {
-    ...mapState([
-      'snackbar',
-    ]),
-
-    ...mapGetters([
-      'config',
-      'database',
-
-      'GameID',
-      'RaceID',
-    ]),
-
-    title() {
-      switch (this.$route.name) {
-        case 'index': {
-          return 'Production Recap'
-        }
-        case 'warnings': {
-          return 'Warnings'
-        }
-        case 'minerals': {
-          return 'Mineral Breakdown'
-        }
-        case 'habitability': {
-          return 'Habitability Breakdown'
-        }
-        case 'information': {
-          return 'Empire Information'
-        }
-        case 'technologies': {
-          return 'Technology Tree'
-        }
-        case 'map': {
-          return 'Galaxy Map'
-        }
-        case 'settings': {
-          return 'Settings'
-        }
-        default: {
-          return 'Default title'
-        }
-      }
-    },
-    
-    snackbarStatus: {
-      set(status) {
-        this.setActive(status)
-      },
-      get() {
-        return this.snackbar.active
-      },
-    },
-  },
-  asyncComputed: {
-    games: {
-      async get() {
-        if (!this.database || !this.database.models.Game) {
-          return []
-        }
-
-        const games = await this.database.models.Game.findAll({ 
-          include: [{
-            model: this.database.models.Race,
-            ...(this.spyNPR ? null : {
-              where: {
-                NPR: false
-              },
-            }),
-          }],
-        })
-
-        return games
-      }, 
-      default: [],
-    },
-  },
-  watch: {
-    config: {
-      immediate: true,
-      handler(config) {
-        this.spyNPR = config.get('spyNPR', false)
-      },
-    },
-  },
-  mounted() {
-    this.themeInit()
-    
-    // CONFIG CHANGE SUBSCRIPTION
-    const mutationReturn = {}
-    this.configDidChange({
-      key: 'spyNPR',
-      callback: (value) => {
-        this.spyNPR = value
-      },
-
-      returnant: mutationReturn,
-    })
-    
-    if (mutationReturn.unsubscribe) {
-      this.unsubscribeSpyNPR = mutationReturn.unsubscribe
-    }
-  },
-  beforeDestroy() {
-    if (this.unsubscribeSpyNPR) {
-      this.unsubscribeSpyNPR()
-    }
-  }
-}
-</script>

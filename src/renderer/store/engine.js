@@ -3,12 +3,12 @@ export const state = () => {
     selectedTonnage: 15000,
     selectedSpeed: 2000,
     selectedRange: 100,
-    
+
     selectedEngine: 1,
     selectedFuelConsumption: 1,
     selectedThrustModifierRange: [0.5, 1],
     selectedEngineSize: 25,
-    
+
     selectedJump: 1,
     selectedJumpEfficiency: 4,
     selectedSquadronSize: 1,
@@ -20,46 +20,46 @@ export const state = () => {
 }
 
 export const mutations = {
-  setSelectedTonnage(state, tonnage) {
+  setSelectedTonnage (state, tonnage) {
     state.selectedTonnage = tonnage
   },
-  setSelectedSpeed(state, speed) {
+  setSelectedSpeed (state, speed) {
     state.selectedSpeed = speed
   },
-  setSelectedRange(state, range) {
+  setSelectedRange (state, range) {
     state.selectedRange = range
   },
-  
-  setSelectedEngine(state, engine) {
+
+  setSelectedEngine (state, engine) {
     state.selectedEngine = engine
   },
-  setSelectedFuelConsumption(state, fuelConsumption) {
+  setSelectedFuelConsumption (state, fuelConsumption) {
     state.selectedFuelConsumption = fuelConsumption
   },
-  setSelectedThrustModifierRange(state, thrustModifierRange) {
+  setSelectedThrustModifierRange (state, thrustModifierRange) {
     state.selectedThrustModifierRange = thrustModifierRange
   },
-  setSelectedEngineSize(state, engineSize) {
+  setSelectedEngineSize (state, engineSize) {
     state.selectedEngineSize = engineSize
   },
-  
-  setSelectedJump(state, jump) {
+
+  setSelectedJump (state, jump) {
     state.selectedJump = jump
   },
-  setSelectedJumpEfficiency(state, jumpEfficiency) {
+  setSelectedJumpEfficiency (state, jumpEfficiency) {
     state.selectedJumpEfficiency = jumpEfficiency
   },
-  setSelectedSquadronSize(state, squadronSize) {
+  setSelectedSquadronSize (state, squadronSize) {
     state.selectedSquadronSize = squadronSize
   },
-  setSelectedSquadronRadius(state, squadronRadius) {
+  setSelectedSquadronRadius (state, squadronRadius) {
     state.selectedSquadronRadius = squadronRadius
   },
 
-  setSelectedArmor(state, armor) {
+  setSelectedArmor (state, armor) {
     state.selectedArmor = armor
   },
-  setSelectedLayers(state, layers) {
+  setSelectedLayers (state, layers) {
     state.selectedLayers = layers
   },
 }
