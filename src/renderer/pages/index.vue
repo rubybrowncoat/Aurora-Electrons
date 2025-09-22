@@ -381,10 +381,10 @@ export default {
         map[navalAdministration.NavalAdminCommandID] = {
           ...navalAdministration,
 
-          Systems: new Array(navalAdministration.NavalAdminCommandLevel).fill(null).reduce(aggregate => {
+          Systems: new Array(navalAdministration.NavalAdminCommandLevel).fill(null).reduce((aggregate) => {
             const systemArray = [...aggregate]
 
-            systemArray.forEach(system => {
+            systemArray.forEach((system) => {
               system.Neighbors.forEach(aggregate.add, aggregate)
             })
 
@@ -397,7 +397,7 @@ export default {
     },
 
     modifiedResearches () {
-      const modifiedResearches = this.researches.map(research => {
+      const modifiedResearches = this.researches.map((research) => {
         const TotalAnnualProduction = this.populationResearchCapacity(research.PopulationID, research)
 
         return {
@@ -417,7 +417,7 @@ export default {
         return map
       }, {})
 
-      return modifiedResearches.map(research => {
+      return modifiedResearches.map((research) => {
         if (research.Queue) {
           const extraDays = research.QueueChain.reduce((sum, projectId) => sum + dayMap[projectId], 0)
 
@@ -434,7 +434,7 @@ export default {
       })
     },
     modifiedProductions () {
-      return this.productions.map(production => {
+      return this.productions.map((production) => {
         const TotalAnnualProduction = production.ProductionType === 1
           ? this.populationOrdnanceCapacity(production.PopulationID)
           : production.ProductionType === 2
@@ -456,7 +456,7 @@ export default {
       })
     },
     modifiedShips () {
-      return this.ships.map(ship => {
+      return this.ships.map((ship) => {
         const TotalAnnualProduction = this.populationShipyardCapacity(ship.PopulationID, ship)
 
         return {
@@ -472,7 +472,7 @@ export default {
       })
     },
     modifiedShipyards () {
-      return this.shipyards.map(shipyard => {
+      return this.shipyards.map((shipyard) => {
         const UpgradeRate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, shipyard)
 
         const remainingDays = shipyard.UpgradeTaskType === 8 ? this.shipyardContinualRemainingDays(shipyard) : shipyard.RemainingProduction / UpgradeRate * secondsPerYear / secondsPerDay / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1)
@@ -490,7 +490,7 @@ export default {
       })
     },
     modifiedTrainings () {
-      return this.trainings.map(training => {
+      return this.trainings.map((training) => {
         const TotalAnnualProduction = this.populationTrainingCapacity(training.PopulationID)
 
         return {
@@ -527,7 +527,7 @@ export default {
         }
 
         return map
-      }, {})).map(terraform => {
+      }, {})).map((terraform) => {
         const localSurfaceArea = 4 * Math.PI * Math.pow(terraform.Radius, 2)
         const totalCapacity = (terraform.planetaryCapacity + terraform.orbitalCapacity) * this.populationTerraformingSpeed(terraform.PopulationID)
         const localCapacity = totalCapacity * (earthSurfaceArea / localSurfaceArea)
@@ -626,7 +626,7 @@ export default {
         ...(this.showShips ? this.modifiedShips : []),
         ...(this.showTrainings ? this.modifiedTrainings : []),
         ...(this.showTerraformings ? this.modifiedTerraformings : []),
-      ].filter(task => this.showQueues ? true : !task.Queue)
+      ].filter((task) => this.showQueues ? true : !task.Queue)
     },
 
     headers () {
@@ -732,7 +732,7 @@ export default {
               RemainingProduction: queue.DevelopCost,
               Queue: true,
               Paused: currentProject.Paused,
-              QueueChain: [currentProject.ID, ...queues.filter(subQueue => subQueue.CurrentProjectID === queue.CurrentProjectID && subQueue.ResearchOrder < queue.ResearchOrder).map(subQueue => `${currentProject.ID}-${subQueue.ResearchOrder}`)],
+              QueueChain: [currentProject.ID, ...queues.filter((subQueue) => subQueue.CurrentProjectID === queue.CurrentProjectID && subQueue.ResearchOrder < queue.ResearchOrder).map((subQueue) => `${currentProject.ID}-${subQueue.ResearchOrder}`)],
               ActualCommanderResearchBonus: currentProject.ProjectField === queue.ProjectField ? (currentProject.ActualCommanderResearchBonus || 1) : (currentProject.CommanderBonus || 1),
               ActualAnomalyBonus: currentProject.ProjectField === queue.ProjectField ? currentProject.ActualAnomalyBonus : 1,
             })
@@ -808,7 +808,7 @@ export default {
         const admins = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.PopulationID, FCT_Population.SystemID, FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue as NavalAdminCommandLevel, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial from FCT_NavalAdminCommand inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_NavalAdminCommand.PopulationID left join FCT_Population on FCT_NavalAdminCommand.PopulationID = FCT_Population.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID left join FCT_Commander on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0`).then(([items]) => {
           console.log('Naval Administrations', items)
 
-          return items.map(item => ({
+          return items.map((item) => ({
             ...item,
 
             Radius: item.Radius * Math.floor(Math.log(item.NavalAdminCommandLevel) / Math.log(2)),
@@ -868,7 +868,7 @@ export default {
         await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([items]) => {
           console.log('Jump Points', items)
 
-          items.forEach(item => {
+          items.forEach((item) => {
             const origin = systems[item.SystemID]
             const destination = systems[item.DestinationID]
 

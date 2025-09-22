@@ -24,7 +24,7 @@ module.exports = {
   ],
   modules: [
     '@nuxtjs/vuetify',
-    // '@nuxtjs/sentry'
+    '@nuxtjs/sentry',
   ],
   vuetify: {
     theme: {

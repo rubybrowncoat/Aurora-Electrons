@@ -3,7 +3,7 @@ import { Model, Sequelize } from 'sequelize'
 
 import { gameTime } from './aurora'
 
-export const resetDatabase = storagePath => {
+export const resetDatabase = (storagePath) => {
   console.log('## RESETTING ON', storagePath)
 
   const sequelize = new Sequelize({
@@ -176,10 +176,27 @@ export const resetDatabase = storagePath => {
       type: Sequelize.INTEGER,
       primaryKey: true,
     },
-    Name: Sequelize.STRING,
-    ComponentName: Sequelize.STRING,
-    AdditionalInfo: Sequelize.FLOAT,
-    AdditionalInfo2: Sequelize.FLOAT,
+
+    GameID: Sequelize.INTEGER,
+    RaceID: Sequelize.INTEGER,
+    CategoryID: Sequelize.INTEGER,
+    TechTypeID: Sequelize.INTEGER,
+
+    Name: Sequelize.TEXT,
+    ComponentName: Sequelize.TEXT,
+    TechDescription: Sequelize.TEXT,
+    DevelopCost: Sequelize.INTEGER,
+    AdditionalInfo: Sequelize.DOUBLE,
+    AdditionalInfo2: Sequelize.DOUBLE,
+    AdditionalInfo3: Sequelize.DOUBLE,
+    AdditionalInfo4: Sequelize.DOUBLE,
+    Prerequisite1: Sequelize.INTEGER,
+    Prerequisite2: Sequelize.INTEGER,
+    NoTechScan: Sequelize.BOOLEAN,
+    RuinOnly: Sequelize.BOOLEAN,
+    AutomaticResearch: Sequelize.BOOLEAN,
+    StartingSystem: Sequelize.BOOLEAN,
+    ConventionalSystem: Sequelize.BOOLEAN,
   }, {
     sequelize,
     modelName: 'TechSystem',
@@ -805,7 +822,7 @@ export const resetDatabase = storagePath => {
   Contact.belongsTo(Race, { foreignKey: 'ContactRaceID', as: 'ContactRace' })
 
   Contact.belongsTo(Population, { foreignKey: 'ContactID' })
-  Contact.addHook('afterFind', results => {
+  Contact.addHook('afterFind', (results) => {
     console.log('makeContactVirtualProperty', results.length)
 
     if (!Array.isArray(results)) {

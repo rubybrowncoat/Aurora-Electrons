@@ -616,8 +616,8 @@ export default {
       //
 
       rules: {
-        required: value => !!value || 'Required.',
-        positive: value => value > 0 || 'Must be positive.',
+        required: (value) => !!value || 'Required.',
+        positive: (value) => value > 0 || 'Must be positive.',
       },
     }
   },
@@ -660,7 +660,7 @@ export default {
 
     intruderTotals (intruder) {
       return Object.entries(intruder.Totals).filter(([, contacts]) => contacts.length).map(([type, contacts]) => {
-        const [hostiles, neutrals] = _partition(contacts, contact => contact.ContactRace.AlienRaces[0].ContactStatus === 0)
+        const [hostiles, neutrals] = _partition(contacts, (contact) => contact.ContactRace.AlienRaces[0].ContactStatus === 0)
 
         const out = []
 
@@ -766,7 +766,7 @@ export default {
             })
 
             return aggregate
-          }, {})).map(item => ({
+          }, {})).map((item) => ({
             ...item,
 
             TotalProductionValue: item.Installations.reduce((sum, installation) => sum + (installation.MiningProductionValue * installation.Amount), 0),
@@ -825,7 +825,7 @@ export default {
             })
 
             return aggregate
-          }, {})).map(item => ({
+          }, {})).map((item) => ({
             ...item,
 
             TotalProductionValue: item.Installations.reduce((sum, installation) => sum + (installation.TerraformValue * installation.Amount), 0),
@@ -864,7 +864,7 @@ export default {
             })
 
             return aggregate
-          }, {})).map(item => ({
+          }, {})).map((item) => ({
             ...item,
 
             TotalCost: item.Components.reduce((sum, component) => sum + component.ComponentCost, 0),
@@ -934,7 +934,7 @@ export default {
         const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ShipClassID, FCT_Fleet.FleetName, FCT_Ship.CurrentMaintSupplies, FCT_ShipClass.MaintSupplies, FCT_Ship.CurrentMaintSupplies / FCT_ShipClass.MaintSupplies as SupplyLevel from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and SupplyLevel < 1 and FCT_ShipClass.MaintSupplies > 0 ORDER BY SupplyLevel ASC`).then(([items]) => {
           console.log('Maintenanceless Ships', items)
 
-          return items.filter(item => {
+          return items.filter((item) => {
             const exclusions = this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceExclusions`, [])
 
             return !exclusions.includes(item.ShipClassID) && item.SupplyLevel * 100 <= this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceThreshold`, 100)
@@ -1003,7 +1003,7 @@ export default {
         const populations = await this.database.query(`select VIR_ConstructionPopulation.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ConstructionAmount, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population inner join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.ConstructionValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ConstructionPopulation left join FCT_IndustrialProjects on VIR_ConstructionPopulation.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType IN (0,3,4) group by VIR_ConstructionPopulation.PopulationID having FreePercentage > 0`).then(([items]) => {
           console.log('Free Construction Capacity', items)
 
-          return items.filter(item => item.FreePercentage > 0.00006)
+          return items.filter((item) => item.FreePercentage > 0.00006)
         })
 
         return populations
@@ -1263,15 +1263,15 @@ export default {
               model: this.database.models.Star,
             }],
           }],
-        }).then(items => {
+        }).then((items) => {
           console.log('Unexploited Constructs', items)
 
-          return items.map(construct => {
-            construct.OwnPopulations = construct.SystemBody.Populations.filter(population => population.RaceID === this.RaceID)
-            construct.AlienPopulations = construct.SystemBody.Populations.filter(population => population.RaceID !== this.RaceID)
+          return items.map((construct) => {
+            construct.OwnPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID === this.RaceID)
+            construct.AlienPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID !== this.RaceID)
 
             return construct
-          }).filter(construct => !construct.Active || !construct.OwnPopulations.length || !construct.OwnPopulations.filter(population => population.Population > 10).length)
+          }).filter((construct) => !construct.Active || !construct.OwnPopulations.length || !construct.OwnPopulations.filter((population) => population.Population > 10).length)
         })
 
         return constructs
@@ -1323,16 +1323,16 @@ export default {
           }],
 
           order: [['Diameter', 'DESC']],
-        }).then(items => {
+        }).then((items) => {
           console.log('Dangerous Rifts', items)
 
-          return items.map(item => {
-            const [civilianFleets, militaryFleets] = _partition(item.System.Fleets, fleet => fleet.ShippingLine)
+          return items.map((item) => {
+            const [civilianFleets, militaryFleets] = _partition(item.System.Fleets, (fleet) => fleet.ShippingLine)
 
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.System.Populations, population => population.Population)
-            const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, population => population.PopulationInstallations.length)
-            const [stockedColonies, emptyColonies] = _partition(unusedColonies, population => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
-            const [groundUnitBases] = _partition(emptyColonies, population => population.GroundUnitFormations.length)
+            const [inhabitedColonies, uninhabitedColonies] = _partition(item.System.Populations, (population) => population.Population)
+            const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
+            const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
+            const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
 
             return {
               ...item.toJSON(),
@@ -1346,7 +1346,7 @@ export default {
 
               GroundUnitBases: groundUnitBases.length,
             }
-          }).filter(item => item.CivilianFleets || item.MilitaryFleets || item.InhabitedColonies || item.UsedColonies || item.StockedColonies || item.GroundUnitBases)
+          }).filter((item) => item.CivilianFleets || item.MilitaryFleets || item.InhabitedColonies || item.UsedColonies || item.StockedColonies || item.GroundUnitBases)
         })
 
         console.log(rifts)
@@ -1406,7 +1406,7 @@ export default {
             required: false,
             model: this.database.models.Population,
           }],
-        }).then(items => {
+        }).then((items) => {
           console.log('Intruder Contacts', items)
 
           const typeMap = {
@@ -1435,7 +1435,7 @@ export default {
                 System: contact.System,
 
                 Contacts: {},
-                Totals: Object.fromEntries(Object.values(typeMap).map(type => [type, []])),
+                Totals: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
               }
             }
 
@@ -1443,7 +1443,7 @@ export default {
               aggregate[contact.SystemID].Contacts[contact.ContactRaceID] = {
                 Race: contact.ContactRace,
 
-                Types: Object.fromEntries(Object.values(typeMap).map(type => [type, []])),
+                Types: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
               }
             }
 

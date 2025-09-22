@@ -135,8 +135,8 @@ export default {
       //
 
       rules: {
-        required: value => !!value || 'Required.',
-        positive: value => value > 0 || 'Must be positive.',
+        required: (value) => !!value || 'Required.',
+        positive: (value) => value > 0 || 'Must be positive.',
       },
     }
   },
@@ -175,17 +175,17 @@ export default {
     },
 
     civilianCargoCapacity () {
-      return this.ships.filter(ship => ship.ShippingLineID && ship.MaximumCargoLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
+      return this.ships.filter((ship) => ship.ShippingLineID && ship.MaximumCargoLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
     },
     civilianColonistCapacity () {
-      return this.ships.filter(ship => ship.ShippingLineID && ship.MaximumColonistLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
+      return this.ships.filter((ship) => ship.ShippingLineID && ship.MaximumColonistLoadingTime).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * secondsPerYear / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
     },
 
     militaryCargoCapacity () {
-      return this.ships.filter(ship => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumCargoLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
+      return this.ships.filter((ship) => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumCargoLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.CargoCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumCargoLoadingTime * 2))), 0)
     },
     militaryColonistCapacity () {
-      return this.ships.filter(ship => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumColonistLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
+      return this.ships.filter((ship) => (this.fleets.length ? this.fleets.includes(ship.FleetID) : true) && !ship.ShippingLineID && ship.MaximumColonistLoadingTime && this.multipliedDistance <= ship.MaxRange).reduce((aggregate, ship) => aggregate + roundToDecimal(ship.ColonistCapacity * Math.max(0, secondsPerYear - (secondsPerYear / ship.MaxRangeTime * ship.MaximumRefuellingTime)) / ((this.multipliedDistance * 2 / ship.MaxSpeed) + (ship.MaximumColonistLoadingTime * 2))), 0)
     },
 
     fleetNames () {
@@ -206,12 +206,12 @@ export default {
     },
 
     activeInstallations () {
-      return this.installations.filter(installation => this.demands[installation.PlanetaryInstallationID])
+      return this.installations.filter((installation) => this.demands[installation.PlanetaryInstallationID])
     },
     demandsAndDepartures () {
       return Object.values(this.cargoDestinations).reduce((aggregate, installation) => {
-        Object.values(installation).forEach(origin => {
-          Object.values(origin).forEach(cargo => {
+        Object.values(installation).forEach((origin) => {
+          Object.values(origin).forEach((cargo) => {
             if (!aggregate[cargo.InstallationID]) {
               aggregate[cargo.InstallationID] = {}
             }

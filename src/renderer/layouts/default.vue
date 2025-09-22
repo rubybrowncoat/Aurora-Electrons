@@ -64,6 +64,7 @@
           <!-- <v-tab to="/map_old" nuxt>Map Old</v-tab> -->
           <v-tab to="/log" nuxt>Log</v-tab>
           <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
+          <v-tab to="/engines" nuxt>Engines (WIP)</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
@@ -181,7 +182,7 @@ export default {
     const mutationReturn = {}
     this.configDidChange({
       key: 'spyNPR',
-      callback: value => {
+      callback: (value) => {
         this.spyNPR = value
       },
 
@@ -212,7 +213,7 @@ export default {
     themeInit () {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
-      mediaQuery.addEventListener('change', e => {
+      mediaQuery.addEventListener('change', (e) => {
         console.log('mediaQuery listener', e)
       })
 
@@ -236,10 +237,10 @@ export default {
             ...(this.spyNPR
               ? null
               : {
-                where: {
-                  NPR: false,
-                },
-              }),
+                  where: {
+                    NPR: false,
+                  },
+                }),
           }],
         })
 

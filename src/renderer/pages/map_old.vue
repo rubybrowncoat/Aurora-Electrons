@@ -124,8 +124,8 @@ export default {
       sectorColorChain: ['#e60049', '#0bb4ff', '#50e991', '#e6d800', '#9b19f5', '#ffa300', '#dc0ab4', '#b3d4ff', '#00bfa0', '#b30000', '#7c1158', '#4421af', '#1a53ff', '#0d88e6', '#00b7c7', '#5ad45a', '#8be04e', '#ebdc78', '#fd7f6f', '#7eb0d5', '#b2e061', '#bd7ebe', '#ffb55a', '#ffee65', '#beb9db', '#fdcce5', '#8bd3c7', '#ea5545', '#f46a9b', '#ef9b20', '#edbf33', '#ede15b', '#bdcf32', '#87bc45', '#27aeef', '#b33dc6'],
 
       rules: {
-        required: value => !!value || 'Required.',
-        positive: value => value > 0 || 'Must be positive.',
+        required: (value) => !!value || 'Required.',
+        positive: (value) => value > 0 || 'Must be positive.',
       },
     }
   },
@@ -160,19 +160,19 @@ export default {
 
       this.graph
         .cooldownTime(Infinity)
-        .nodeVal(node => node.id === this.focusSystemId ? 10 : 2)
-        .nodeLabel(node => {
+        .nodeVal((node) => node.id === this.focusSystemId ? 10 : 2)
+        .nodeLabel((node) => {
           return this.isShowingSectors ? node.sector : ''
         })
-        .linkColor(link => highlightLinks.has(link)
+        .linkColor((link) => highlightLinks.has(link)
           ? colors.cyan.lighten3
           : (link.stgated && link.tsgated
-            ? colors.green.base
-            : (link.stgated || link.tsgated
-              ? colors.orange.base
-              : colors.red.base
-            )
-          ),
+              ? colors.green.base
+              : (link.stgated || link.tsgated
+                  ? colors.orange.base
+                  : colors.red.base
+                )
+            ),
         )
         .nodeCanvasObjectMode(() => 'replace')
         .nodeCanvasObject((node, ctx, globalScale) => {
@@ -243,7 +243,7 @@ export default {
             ctx.font = `${this.focusSystemId === node.id ? 'bold ' : ''}${fontSize}px Sans-Serif`
 
             const textWidth = ctx.measureText(label).width
-            const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
+            const bckgDimensions = [textWidth, fontSize].map((n) => n + fontSize * 0.6) // some padding
 
             ctx.moveTo(node.x, node.y - 20)
 
@@ -256,7 +256,7 @@ export default {
             ctx.fillText(label, node.x, node.y + (18 * scaleFraction))
           }
         })
-        .linkWidth(link => highlightLinks.has(link) ? 8 : (link.stgated && link.tsgated ? 6 : (link.stgated || link.tsgated ? 4 : 2)))
+        .linkWidth((link) => highlightLinks.has(link) ? 8 : (link.stgated && link.tsgated ? 6 : (link.stgated || link.tsgated ? 4 : 2)))
         .linkCanvasObject((link, ctx, globalScale) => {
           const label = highlightLinks.has(link) ? '' : (link.stgated && link.tsgated ? '' : (link.stgated ? `Stable from ${link.sourceName}` : (link.tsgated ? `Stable from ${link.targetName}` : '')))
 
@@ -264,12 +264,12 @@ export default {
             const fontSize = 10 / globalScale
             ctx.font = `${fontSize}px Sans-Serif`
 
-            const textPos = Object.assign(...['x', 'y'].map(c => ({
+            const textPos = Object.assign(...['x', 'y'].map((c) => ({
               [c]: link.source[c] + (link.target[c] - link.source[c]) / 2, // calc middle point
             })))
 
             const textWidth = ctx.measureText(label).width
-            const bckgDimensions = [textWidth, fontSize].map(n => n + fontSize * 0.6) // some padding
+            const bckgDimensions = [textWidth, fontSize].map((n) => n + fontSize * 0.6) // some padding
 
             ctx.fillStyle = this.$vuetify.theme.dark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)'
             ctx.fillRect(textPos.x - bckgDimensions[0] / 2, textPos.y - bckgDimensions[1] / 2, ...bckgDimensions)
@@ -282,7 +282,7 @@ export default {
         })
         .linkCanvasObjectMode(() => 'after')
         .enableNodeDrag(true)
-        .onNodeHover(node => {
+        .onNodeHover((node) => {
           hoverNode = node
           highlightNodes.clear()
           highlightLinks.clear()
@@ -290,19 +290,19 @@ export default {
           if (node) {
             highlightNodes.add(node)
 
-            node.neighbors.forEach(neighbor => highlightNodes.add(neighbor))
-            node.connections.forEach(connection => highlightLinks.add(connection))
+            node.neighbors.forEach((neighbor) => highlightNodes.add(neighbor))
+            node.connections.forEach((connection) => highlightLinks.add(connection))
 
             element.style.cursor = '-webkit-grab'
           } else {
             element.style.cursor = null
           }
         })
-        .onNodeClick(node => {
+        .onNodeClick((node) => {
           this.graph.zoom(6, 600)
           this.graph.centerAt(node.x, node.y, 400)
         })
-        .onNodeDrag(node => {
+        .onNodeDrag((node) => {
           highlightNodes.clear()
 
           if (node) {
@@ -324,8 +324,8 @@ export default {
 
       if (this.useSavedPositions) {
         this.graph
-          .d3Force('x', d3Force.forceX(node => node.mapX).strength(1))
-          .d3Force('y', d3Force.forceY(node => node.mapY).strength(1))
+          .d3Force('x', d3Force.forceX((node) => node.mapX).strength(1))
+          .d3Force('y', d3Force.forceY((node) => node.mapY).strength(1))
       } else {
         this.graph
           .d3Force('center', d3Force.forceCenter().strength(0.1))
@@ -335,9 +335,9 @@ export default {
 
         const linkForce = this.graph
           .d3Force('link')
-          .distance(link => link.stgated && link.tsgated ? Math.min(75, 25 + Math.max(link.source.connections.size, link.target.connections.size) * 5) : (link.stgated || link.tsgated ? 80 : 100))
+          .distance((link) => link.stgated && link.tsgated ? Math.min(75, 25 + Math.max(link.source.connections.size, link.target.connections.size) * 5) : (link.stgated || link.tsgated ? 80 : 100))
           // .strength(1)
-          .strength(link => {
+          .strength((link) => {
             return 1 / Math.max(link.source.connections.size, link.target.connections.size)
           })
           .iterations(15)
@@ -387,7 +387,7 @@ export default {
 
       // 1. assign each link a nodePairId that combines their source and target independent of the links direction
       // 2. group links together that share the same two nodes or are self-loops
-      links.forEach(link => {
+      links.forEach((link) => {
         link.nodePairId = link.source <= link.target ? (link.source + '_' + link.target) : (link.target + '_' + link.source)
         const map = link.source === link.target ? selfLoopLinks : sameNodesLinks
         if (!map[link.nodePairId]) {
@@ -397,7 +397,7 @@ export default {
       })
 
       // Compute the curvature for self-loop links to avoid overlaps
-      Object.keys(selfLoopLinks).forEach(id => {
+      Object.keys(selfLoopLinks).forEach((id) => {
         const links = selfLoopLinks[id]
         const lastIndex = links.length - 1
         links[lastIndex].curvature = 1
@@ -408,7 +408,7 @@ export default {
       })
 
       // Compute the curvature for links sharing the same two nodes to avoid overlaps
-      Object.keys(sameNodesLinks).filter(nodePairId => sameNodesLinks[nodePairId].length > 1).forEach(nodePairId => {
+      Object.keys(sameNodesLinks).filter((nodePairId) => sameNodesLinks[nodePairId].length > 1).forEach((nodePairId) => {
         const links = sameNodesLinks[nodePairId]
         const lastIndex = links.length - 1
         const lastLink = links[lastIndex]
@@ -445,7 +445,7 @@ export default {
         }
 
         const sectors = await this.database.query(`select FCT_SectorCommand.*, count(FCT_RaceSysSurvey.SectorID) as SectorSystems from FCT_SectorCommand left join FCT_RaceSysSurvey on FCT_SectorCommand.SectorCommandID = FCT_RaceSysSurvey.SectorID where FCT_SectorCommand.GameID = ${this.GameID} and FCT_SectorCommand.RaceID = ${this.RaceID} group by FCT_SectorCommand.SectorCommandID`).then(([items]) => {
-          return items.map(item => ({
+          return items.map((item) => ({
             ...item,
             color: this.sectorColorChain[item.SectorCommandID % this.sectorColorChain.length],
           }))
@@ -466,7 +466,7 @@ export default {
         }
 
         const nodes = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_SectorCommand.SectorName, FCT_RaceSysSurvey.Name, VIR_GeologicalSurvey.PlanetaryBodies, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations from FCT_RaceSysSurvey left join (select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass IN (1, 2) THEN 1 ELSE 0 END AS INT)) as PlanetaryBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as VIR_GeologicalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GeologicalSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, sum(CAST(CASE WHEN FCT_SurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyLocations, sum(CAST(CASE WHEN FCT_RaceSurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSurveyLocations from FCT_SurveyLocation left join FCT_RaceSurveyLocation on FCT_SurveyLocation.SystemID = FCT_RaceSurveyLocation.SystemID and FCT_SurveyLocation.LocationNumber = FCT_RaceSurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_GravitationalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GravitationalSurvey.SystemID left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_RaceSysSurvey.SectorID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
-          return items.map(item => ({
+          return items.map((item) => ({
             id: String(item.SystemID),
             name: item.Name,
 
@@ -491,11 +491,11 @@ export default {
 
         const links = await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([items]) => {
           return items.reduce((aggregate, item) => {
-            const origin = nodes.find(node => node.id == item.SystemID)
-            const destination = nodes.find(node => node.id == item.DestinationID)
+            const origin = nodes.find((node) => node.id == item.SystemID)
+            const destination = nodes.find((node) => node.id == item.DestinationID)
 
             if (origin && destination) {
-              let extant = aggregate.find(link => link.target === origin.id && link.source === destination.id)
+              let extant = aggregate.find((link) => link.target === origin.id && link.source === destination.id)
 
               if (extant) {
                 extant.tsgated = !!item.JumpGateStrength
@@ -557,7 +557,7 @@ export default {
         }
 
         if (id) {
-          const selectedNode = this.sortedNodes.find(node => node.id === id)
+          const selectedNode = this.sortedNodes.find((node) => node.id === id)
 
           this.graph.graphData({
             nodes: this.sortedNodes,

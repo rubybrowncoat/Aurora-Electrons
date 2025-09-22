@@ -22,7 +22,7 @@ export default ({ store }) => {
   //     ? path.join('../', 'AuroraDB.db')
   //     : 'AuroraDB.db'
 
-  ipcRenderer.invoke('request-storage-path').then(storagePath => {
+  ipcRenderer.invoke('request-storage-path').then((storagePath) => {
     console.log('Returned storage path:', storagePath)
 
     const watcher = chokidar.watch(storagePath, {

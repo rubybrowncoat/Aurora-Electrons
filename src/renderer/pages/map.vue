@@ -153,6 +153,20 @@
           </v-col>
         </v-row>
       </v-container>
+      <v-dialog v-model="isSystemDialogOpen" fullscreen hide-overlay transition="dialog-bottom-transition">
+        <v-card>
+          <v-toolbar dark color="primary">
+            <v-btn icon dark @click="isSystemDialogOpen = false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+            <v-toolbar-title>System Details</v-toolbar-title>
+            <v-spacer />
+          </v-toolbar>
+          <v-card-text v-if="isSystemDialogOpen">
+            <system-view v-if="systemId" :system-id="systemId" />
+          </v-card-text>
+        </v-card>
+      </v-dialog>
     </template>
   </div>
 </template>
@@ -182,6 +196,7 @@ import navigator from 'cytoscape-navigator'
 import { gameTime } from '~/utilities/aurora'
 import { Vector2, Vector3 } from '~/utilities/map'
 import { scaleValue } from '~/utilities/math'
+import SystemView from '~/components/SystemView.vue'
 
 cytoscape.use(layoutUtilities)
 cytoscape.use(cxtmenu)
@@ -198,7 +213,9 @@ if (typeof cytoscape('core', 'navigator') === 'undefined') {
 const kmPerAU = 149597870.7
 
 export default {
-  components: {},
+  components: {
+    SystemView,
+  },
   data() {
     return {
       layoutInProgress: false,
@@ -266,6 +283,10 @@ export default {
       isSavingPositions: false,
       executedQueries: 0,
       totalQueries: 0,
+
+      // System Dialog
+      isSystemDialogOpen: false,
+      systemId: null,
 
       //
 
@@ -798,6 +819,16 @@ export default {
               content: '<span><i class="v-icon mdi mdi-lock"></i></span>',
               select: () => {
                 selectedNodes.lock()
+              },
+            })
+          }
+
+          if (selectedNodes.length === 1) {
+            commands.push({
+              content: '<span><i class="v-icon mdi mdi-information-outline"></i></span>',
+              select: () => {
+                this.systemId = selectedNodes[0].data('id')
+                this.isSystemDialogOpen = true
               },
             })
           }
@@ -1507,6 +1538,11 @@ export default {
 
       return this.calculateEdgeColor.cache[edgeId]
     },
+
+    openSystemDialog(systemId) {
+      this.systemId = systemId
+      this.isSystemDialogOpen = true
+    },
   },
   asyncComputed: {
     sectors: {
@@ -1570,32 +1606,30 @@ export default {
         }
 
         const nodes = await this.database
-          .query(
-            `
-          select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_SectorCommand.SectorName, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.ControlRaceID, FCT_Race.RaceTitle, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, VIR_GeologicalSurvey.PlanetaryBodies, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations, VIR_Population.PopulationNumber, VIR_Population.Population, VIR_Population.Capital from FCT_RaceSysSurvey
+          .query(`
+            select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_SectorCommand.SectorName, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.ControlRaceID, FCT_Race.RaceTitle, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, VIR_GeologicalSurvey.PlanetaryBodies, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations, VIR_Population.PopulationNumber, VIR_Population.Population, VIR_Population.Capital from FCT_RaceSysSurvey
 
-          left join (
-            select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass IN (1, 2) THEN 1 ELSE 0 END AS INT)) as PlanetaryBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID
-          ) as VIR_GeologicalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GeologicalSurvey.SystemID
+            left join (
+              select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass IN (1, 2) THEN 1 ELSE 0 END AS INT)) as PlanetaryBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID
+            ) as VIR_GeologicalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GeologicalSurvey.SystemID
 
-          left join (
-            select FCT_SurveyLocation.SystemID, sum(CAST(CASE WHEN FCT_SurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyLocations, sum(CAST(CASE WHEN FCT_RaceSurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSurveyLocations from FCT_SurveyLocation left join FCT_RaceSurveyLocation on FCT_SurveyLocation.SystemID = FCT_RaceSurveyLocation.SystemID and FCT_SurveyLocation.LocationNumber = FCT_RaceSurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID
-          ) as VIR_GravitationalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GravitationalSurvey.SystemID
+            left join (
+              select FCT_SurveyLocation.SystemID, sum(CAST(CASE WHEN FCT_SurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyLocations, sum(CAST(CASE WHEN FCT_RaceSurveyLocation.SystemID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSurveyLocations from FCT_SurveyLocation left join FCT_RaceSurveyLocation on FCT_SurveyLocation.SystemID = FCT_RaceSurveyLocation.SystemID and FCT_SurveyLocation.LocationNumber = FCT_RaceSurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID
+            ) as VIR_GravitationalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GravitationalSurvey.SystemID
 
-          left join (
-            select FCT_Population.SystemID, FCT_Population.Capital, count(FCT_Population.PopulationID) as PopulationNumber, sum(FCT_Population.Population) as Population from FCT_Population
-            where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID
-          ) as VIR_Population on FCT_RaceSysSurvey.SystemID = VIR_Population.SystemID
+            left join (
+              select FCT_Population.SystemID, FCT_Population.Capital, count(FCT_Population.PopulationID) as PopulationNumber, sum(FCT_Population.Population) as Population from FCT_Population
+              where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID
+            ) as VIR_Population on FCT_RaceSysSurvey.SystemID = VIR_Population.SystemID
 
-          left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_RaceSysSurvey.SectorID 
+            left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_RaceSysSurvey.SectorID 
 
-          left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID
-          left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber
-          left join FCT_Race on FCT_Race.RaceID = FCT_RaceSysSurvey.ControlRaceID
+            left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID
+            left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber
+            left join FCT_Race on FCT_Race.RaceID = FCT_RaceSysSurvey.ControlRaceID
 
-          where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}
-          `
-          )
+            where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}
+          `)
           .then(([items]) => {
             console.log('DB Systems', items)
 

@@ -443,10 +443,10 @@ export default {
     ]),
 
     filteredLogEvents () {
-      const filteredByType = this.logEvents.filter(event => this.activeTypes.includes(event.EventType))
+      const filteredByType = this.logEvents.filter((event) => this.activeTypes.includes(event.EventType))
 
       if (this.hideNonCustomized) {
-        return filteredByType.filter(event => event['LogEventType.LogEventColours.AlertColour'] || event['LogEventType.LogEventColours.TextColour'])
+        return filteredByType.filter((event) => event['LogEventType.LogEventColours.AlertColour'] || event['LogEventType.LogEventColours.TextColour'])
       }
 
       return filteredByType
@@ -470,7 +470,7 @@ export default {
           order: [['Description', 'ASC']],
         })
 
-        this.activeTypes = logEventTypes.map(type => type.EventTypeID)
+        this.activeTypes = logEventTypes.map((type) => type.EventTypeID)
 
         return logEventTypes
       },
@@ -527,10 +527,10 @@ export default {
           order: [['Time', 'DESC'], ['IncrementID', 'DESC']],
           raw: true,
         })
-          .then(items => {
+          .then((items) => {
             console.log('Game LogEvents', items)
 
-            return items.map(event => {
+            return items.map((event) => {
               event.DateTime = gameTime(event['Game.StartYear'], event.Time).format('YYYY-MM-DD HH:mm:ss')
 
               if (event['LogEventType.LogEventColours.AlertColour']) {

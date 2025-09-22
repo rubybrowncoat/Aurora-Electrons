@@ -72,7 +72,7 @@ export default {
       return this.individualTechnologies[id]
     },
     getTechedParents (technology) {
-      return technology.parents.map(parent => this.getTechnology(parent))
+      return technology.parents.map((parent) => this.getTechnology(parent))
     },
 
     addTechnology (technology) {
@@ -86,7 +86,7 @@ export default {
 
     addToParent (technology, identifier) {
       if (!this.individualTechnologies[identifier]) {
-        const foundParent = this.technologies.find(tech => tech.TechSystemID === identifier)
+        const foundParent = this.technologies.find((tech) => tech.TechSystemID === identifier)
 
         if (foundParent) {
           this.addTechnology(foundParent)
@@ -139,8 +139,8 @@ export default {
       }
 
       this.technologies
-        .filter(technology => !this.selectedFields.length || this.selectedFields.includes(technology.ResearchFieldID))
-        .forEach(technology => {
+        .filter((technology) => !this.selectedFields.length || this.selectedFields.includes(technology.ResearchFieldID))
+        .forEach((technology) => {
           if (!this.individualTechnologies[technology.TechSystemID]) {
             this.addTechnology(technology)
           }
@@ -179,7 +179,7 @@ export default {
 
     researchedTechnologyIds () {
       const base = ['ConventionalStart']
-      const currentlyResearchedIds = this.researchedTechnologies.map(tech => tech.TechID)
+      const currentlyResearchedIds = this.researchedTechnologies.map((tech) => tech.TechID)
 
       if ((this.race.RaceID && this.race.RaceStartingLevel > 0) || currentlyResearchedIds.includes(27434)) {
         base.push('TransnewtonianStart')
@@ -240,7 +240,7 @@ export default {
           return {}
         }
 
-        return await this.database.models.Race.findByPk(this.RaceID).then(race => {
+        return await this.database.models.Race.findByPk(this.RaceID).then((race) => {
           console.log('Race', race)
 
           return race

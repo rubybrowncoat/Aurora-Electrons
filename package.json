@@ -27,6 +27,7 @@
     "@nuxt/types": "^2.18.1",
     "@nuxt/typescript-build": "^2.1.0",
     "@nuxtjs/eslint-config-typescript": "8.0.0",
+    "@nuxtjs/sentry": "7.1.10",
     "@nuxtjs/vuetify": "^1.12.3",
     "@xpda-dev/core": "^0.1.6",
     "@xpda-dev/electron-builder": "^0.2.1",
@@ -40,7 +41,6 @@
     "eslint": "8.1.0",
     "eslint-friendly-formatter": "4.0.1",
     "eslint-loader": "4.0.2",
-    "lodash.mergewith": "^4.6.2",
     "node-sass": "^6.0.1",
     "nuxt": "^2.15.8",
     "roboto-fontface": "^0.10.0",
@@ -51,7 +51,6 @@
     "webpack-node-externals": "^3.0.0"
   },
   "dependencies": {
-    "@nuxtjs/sentry": "8.0.8",
     "chokidar": "^4.0.3",
     "color-hash": "^2.0.2",
     "cytoscape": "^3.33.1",
@@ -68,6 +67,8 @@
     "electron-store": "^8.2.0",
     "force-graph": "1.39.2",
     "lodash": "^4.17.21",
+    "pixi.js": "^6.5.10",
+    "pixi-viewport": "^4.35.0", 
     "romanum": "^1.0.1",
     "sequelize": "^6.37.7",
     "sqlite3": "5.0.0",

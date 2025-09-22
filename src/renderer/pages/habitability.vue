@@ -35,9 +35,9 @@
                     <v-icon>
                       {{ systems.length > 0
                         ? systems.length == systemNames.length
-                          ? 'sentiment_very_satisfied'
-                          : 'sentiment_satisfied'
-                        : 'sentiment_very_dissatisfied' }}
+                          ? 'mdi-emoticon-outline'
+                          : 'mdi-emoticon-happy-outline'
+                        : 'mdi-emoticon-sad-outline' }}
                     </v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
@@ -53,7 +53,7 @@
                   @click="selectUnrestrictedSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>report_off</v-icon>
+                    <v-icon>mdi-billiards-rack</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
@@ -68,7 +68,7 @@
                   @click="selectOurSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>public</v-icon>
+                    <v-icon>mdi-city-variant-outline</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Colonized Systems</v-list-item-title>
@@ -83,7 +83,7 @@
                   @click="selectOurInhabitedSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>people</v-icon>
+                    <v-icon>mdi-account-multiple-outline</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Inhabited Systems</v-list-item-title>
@@ -465,8 +465,8 @@ export default {
       //
 
       rules: {
-        required: value => !!value || 'Required.',
-        positive: value => value > 0 || 'Must be positive.',
+        required: (value) => !!value || 'Required.',
+        positive: (value) => value > 0 || 'Must be positive.',
       },
     }
   },
@@ -482,18 +482,18 @@ export default {
       if (this.systems.length === this.systemNames.length) {
         this.systems = []
       } else {
-        this.systems = this.systemNames.map(system => system.SystemID)
+        this.systems = this.systemNames.map((system) => system.SystemID)
       }
     },
 
     selectOurSystems () {
-      this.systems = this.colonizedSystems.map(system => system.SystemID)
+      this.systems = this.colonizedSystems.map((system) => system.SystemID)
     },
     selectOurInhabitedSystems () {
-      this.systems = this.inhabitedColonizedSystems.map(system => system.SystemID)
+      this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
     selectUnrestrictedSystems () {
-      this.systems = this.unrestrictedSystems.map(system => system.SystemID)
+      this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
     },
   },
   computed: {
@@ -512,7 +512,7 @@ export default {
     },
 
     selectedSpecies () {
-      const extant = this.species.find(species => species.SpeciesID === this.selectedSpeciesId)
+      const extant = this.species.find((species) => species.SpeciesID === this.selectedSpeciesId)
 
       return extant || {}
     },
@@ -521,8 +521,8 @@ export default {
     },
 
     filteredCalculatedBodies () {
-      return this.calculatedBodies.filter(body => {
-        return (this.filterBySelectedBodies ? !!this.selectedBodies.find(selection => selection.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID)) &&
+      return this.calculatedBodies.filter((body) => {
+        return (this.filterBySelectedBodies ? !!this.selectedBodies.find((selection) => selection.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID)) &&
             (this.filterNonTerraformable ? body.Liveable && !body.LowGravity : true) &&
             (this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true) &&
             (this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true) &&
@@ -532,7 +532,7 @@ export default {
     calculatedBodies () {
       console.log('recalculate calculatedBodies')
 
-      return this.selectedSpecies.SpeciesID ? this.bodies.filter(body => body.Gravity <= this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation).map(body => {
+      return this.selectedSpecies.SpeciesID ? this.bodies.filter((body) => body.Gravity <= this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation).map((body) => {
         const localSurfaceArea = 4 * Math.PI * Math.pow(body.Radius, 2)
 
         // MAXIMUM POPULATION
@@ -730,7 +730,7 @@ export default {
         const { totalPopulation, ownPopulation, otherPopulation } = body.Populations.reduce((aggregate, population) => {
           aggregate.totalPopulation += population.Population
 
-          const ownExtant = this.species.find(species => species.SpeciesID === population.SpeciesID)
+          const ownExtant = this.species.find((species) => species.SpeciesID === population.SpeciesID)
 
           if (ownExtant) {
             aggregate.ownPopulation = true
@@ -844,22 +844,22 @@ export default {
     },
 
     unrestrictedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter(system => system.RaceSystemSurveys.every(raceSystem => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
+      return _intersectionBy(this.surveyedSystems.filter((system) => system.RaceSystemSurveys.every((raceSystem) => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
     },
     unrestrictedSystemsIds () {
-      return this.unrestrictedSystems.map(system => system.SystemID)
+      return this.unrestrictedSystems.map((system) => system.SystemID)
     },
     colonizedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter(system => system.Populations.length), this.systemNames, 'SystemID')
+      return _intersectionBy(this.surveyedSystems.filter((system) => system.Populations.length), this.systemNames, 'SystemID')
     },
     colonizedSystemsIds () {
-      return this.colonizedSystems.map(system => system.SystemID)
+      return this.colonizedSystems.map((system) => system.SystemID)
     },
     inhabitedColonizedSystems () {
-      return this.colonizedSystems.filter(system => system.InhabitedColonies)
+      return this.colonizedSystems.filter((system) => system.InhabitedColonies)
     },
     inhabitedColonizedSystemsIds () {
-      return this.inhabitedColonizedSystems.map(system => system.SystemID)
+      return this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
   },
   asyncComputed: {
@@ -1016,11 +1016,11 @@ export default {
               RaceID: this.RaceID,
             },
           }],
-        }).then(items => {
+        }).then((items) => {
           console.log('Surveyed Systems', items)
 
-          return items.map(item => {
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, population => population.Population)
+          return items.map((item) => {
+            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, (population) => population.Population)
 
             return {
               ...item.toJSON(),
@@ -1046,7 +1046,7 @@ export default {
         filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
       }
     } else if (route.query.systems) {
-      const systems = route.query.systems.split(',').map(id => parseInt(id, 10))
+      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
       console.log('asyncData systems', systems)
 
       return {
@@ -1062,7 +1062,7 @@ export default {
       handler (newNames) {
         if (newNames) {
           if (!this.systems.length) {
-            this.systems = newNames.map(system => system.SystemID)
+            this.systems = newNames.map((system) => system.SystemID)
           }
         }
       },

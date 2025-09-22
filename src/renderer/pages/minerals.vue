@@ -67,9 +67,9 @@
                     <v-icon>
                       {{ systems.length > 0
                         ? systems.length == systemNames.length
-                          ? 'sentiment_very_satisfied'
-                          : 'sentiment_satisfied'
-                        : 'sentiment_very_dissatisfied' }}
+                          ? 'mdi-emoticon-outline'
+                          : 'mdi-emoticon-happy-outline'
+                        : 'mdi-emoticon-sad-outline' }}
                     </v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
@@ -85,7 +85,7 @@
                   @click="selectUnrestrictedSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>report_off</v-icon>
+                    <v-icon>mdi-billiards-rack</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
@@ -100,7 +100,7 @@
                   @click="selectOurSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>public</v-icon>
+                    <v-icon>mdi-city-variant-outline</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Colonized Systems</v-list-item-title>
@@ -115,7 +115,7 @@
                   @click="selectOurInhabitedSystems"
                 >
                   <v-list-item-action>
-                    <v-icon>people</v-icon>
+                    <v-icon>mdi-account-multiple-outline</v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>Select Inhabited Systems</v-list-item-title>
@@ -297,8 +297,8 @@ export default {
       //
 
       rules: {
-        required: value => !!value || 'Required.',
-        positive: value => value > 0 || 'Must be positive.',
+        required: (value) => !!value || 'Required.',
+        positive: (value) => value > 0 || 'Must be positive.',
       },
     }
   },
@@ -333,18 +333,18 @@ export default {
       if (this.systems.length === this.systemNames.length) {
         this.systems = []
       } else {
-        this.systems = this.systemNames.map(system => system.SystemID)
+        this.systems = this.systemNames.map((system) => system.SystemID)
       }
     },
 
     selectOurSystems () {
-      this.systems = this.colonizedSystems.map(system => system.SystemID)
+      this.systems = this.colonizedSystems.map((system) => system.SystemID)
     },
     selectOurInhabitedSystems () {
-      this.systems = this.inhabitedColonizedSystems.map(system => system.SystemID)
+      this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
     selectUnrestrictedSystems () {
-      this.systems = this.unrestrictedSystems.map(system => system.SystemID)
+      this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
     },
   },
   computed: {
@@ -368,7 +368,7 @@ export default {
       }
 
       const aggregation = this.minerals.reduce((bodies, item) => {
-        if (this.filterBySelectedBodies ? !this.selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID) : !this.systems.includes(item.SystemID)) {
+        if (this.filterBySelectedBodies ? !this.selectedBodies.find((selection) => selection.SystemBodyID === item.SystemBodyID) : !this.systems.includes(item.SystemID)) {
           return bodies
         }
 
@@ -403,7 +403,7 @@ export default {
         return bodies
       }, {})
 
-      return Object.values(aggregation).map(body => {
+      return Object.values(aggregation).map((body) => {
         const [totalPotential, totalAmount] = Object.values(this.materials).reduce(([potential, amount], materialId) => {
           const material = body[materialId]
 
@@ -441,11 +441,11 @@ export default {
     },
 
     preFilteredBodyGroups () {
-      return this.bodyGroups.filter(body => {
-        return this.filters.every(filter => {
+      return this.bodyGroups.filter((body) => {
+        return this.filters.every((filter) => {
           switch (filter.selectedMaterial) {
           case 'Any': {
-            return this.materials.some(materialName => {
+            return this.materials.some((materialName) => {
               const material = body[materialName]
 
               if (!material) {
@@ -456,7 +456,7 @@ export default {
             })
           }
           case 'All Present': {
-            return this.materials.every(materialName => {
+            return this.materials.every((materialName) => {
               const material = body[materialName]
 
               if (!material) {
@@ -467,7 +467,7 @@ export default {
             })
           }
           case 'All': {
-            return this.materials.every(materialName => {
+            return this.materials.every((materialName) => {
               const material = body[materialName]
 
               if (!material) {
@@ -535,7 +535,7 @@ export default {
           divider: true,
           align: 'center',
         },
-        ...this.materials.map(material => ({
+        ...this.materials.map((material) => ({
           text: material,
           value: material,
           sortable: true,
@@ -555,22 +555,22 @@ export default {
     },
 
     unrestrictedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter(system => system.RaceSystemSurveys.every(raceSystem => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
+      return _intersectionBy(this.surveyedSystems.filter((system) => system.RaceSystemSurveys.every((raceSystem) => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
     },
     unrestrictedSystemsIds () {
-      return this.unrestrictedSystems.map(system => system.SystemID)
+      return this.unrestrictedSystems.map((system) => system.SystemID)
     },
     colonizedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter(system => system.Populations.length), this.systemNames, 'SystemID')
+      return _intersectionBy(this.surveyedSystems.filter((system) => system.Populations.length), this.systemNames, 'SystemID')
     },
     colonizedSystemsIds () {
-      return this.colonizedSystems.map(system => system.SystemID)
+      return this.colonizedSystems.map((system) => system.SystemID)
     },
     inhabitedColonizedSystems () {
-      return this.colonizedSystems.filter(system => system.InhabitedColonies)
+      return this.colonizedSystems.filter((system) => system.InhabitedColonies)
     },
     inhabitedColonizedSystemsIds () {
-      return this.inhabitedColonizedSystems.map(system => system.SystemID)
+      return this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
   },
   asyncComputed: {
@@ -620,11 +620,11 @@ export default {
               RaceID: this.RaceID,
             },
           }],
-        }).then(items => {
+        }).then((items) => {
           console.log('Surveyed Systems', items)
 
-          return items.map(item => {
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, population => population.Population)
+          return items.map((item) => {
+            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, (population) => population.Population)
 
             return {
               ...item.toJSON(),
@@ -652,7 +652,7 @@ export default {
         filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
       }
     } else if (route.query.systems) {
-      const systems = route.query.systems.split(',').map(id => parseInt(id, 10))
+      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
       console.log('asyncData systems', systems)
 
       return {
@@ -668,7 +668,7 @@ export default {
       handler (newNames) {
         if (newNames) {
           if (!this.systems.length) {
-            this.systems = newNames.map(system => system.SystemID)
+            this.systems = newNames.map((system) => system.SystemID)
           }
         }
       },
