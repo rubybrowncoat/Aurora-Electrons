@@ -39,6 +39,17 @@ const unitsToPx = (u) => u * 150
 const DEG2RAD = Math.PI / 180
 const AU_KM = 149597870.7
 
+// Get WORLD rotation by summing ancestor local rotations (stable even with y-down & scales)
+const getWorldRotation = (displayObject) => {
+  let rot = 0
+  let o = displayObject
+  while (o) {
+    rot += o.rotation || 0
+    o = o.parent
+  }
+  return rot
+}
+
 // Star pixel radius from luminosity (L≈1 → readable, caps to avoid galaxy-sized suns)
 const starPixelRadius = (star, sizeOpts = {}) => {
   const {
@@ -112,8 +123,8 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   const cx = unitsToPx(c)
 
   // Ensure world orientation is φ even under a rotated parent
-  const parentRot = parentContainer.rotation || 0
-  orbitContainer.rotation = phi - parentRot
+  const parentWorldRot = getWorldRotation(parentContainer)
+  orbitContainer.rotation = phi - parentWorldRot
 
   // Choose which focus (left/right) the barycenter should be.
   // Rotate the world vector into the orbit-aligned frame and see
@@ -179,18 +190,26 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   orbitContainer.addChild(marker)
 
   // Optional label (stays upright)
+  let label = null
   if (opts.nameText) {
     const textStyle = new PIXI.TextStyle({ fill: 0xffffff, fontSize: 10 })
-    const label = new PIXI.Text(String(opts.nameText), textStyle)
+    label = new PIXI.Text(String(opts.nameText), textStyle)
     label.anchor.set(0.5, 1)
     label.position.set(marker.x, marker.y - 8)
-    if (opts.keepLabelUpright) {
-      label.rotation = -parentContainer.rotation - orbitContainer.rotation
-    }
     orbitContainer.addChild(label)
   }
 
   parentContainer.addChild(orbitContainer)
+
+  // Now that orbitContainer has a parent, adjust label rotation accurately using WORLD rotation
+  if (label) {
+    if (opts.keepLabelUpright) {
+      label.rotation = -getWorldRotation(orbitContainer)
+    } else {
+      label.rotation = -getWorldRotation(parentContainer)
+    }
+  }
+
   return { orbitContainer, marker }
 }
 
@@ -291,7 +310,7 @@ const drawSystem = (stage, system, opts = {}) => {
     const starLabel = new PIXI.Text(labelText, starLabelStyle)
     starLabel.anchor.set(0.5, 1)
     starLabel.position.set(sprite.position.x, sprite.position.y - (radiusPx + 6))
-    starLabel.rotation = -((parentContainer.rotation || 0) + orbitContainer.rotation)
+    starLabel.rotation = -getWorldRotation(orbitContainer)
     orbitContainer.addChild(starLabel)
 
     drawnByComponent.set(comp, { orbitContainer, marker, sprite, star })
