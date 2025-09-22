@@ -1,3 +1,11 @@
+export const safeModulo360 = (angle) => {
+  return ((angle % 360) + 360) % 360
+}
+
+export const approximatelyEquals = (a, b, epsilon = 1e-6) => {
+  return Math.abs(a - b) <= epsilon
+}
+
 export const roundToDecimal = (number, decimals = 0) => {
   return Math.round(number * Math.pow(10, decimals)) / Math.pow(10, decimals)
 }

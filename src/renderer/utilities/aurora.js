@@ -7,17 +7,19 @@ export const gameTime = (startYear, seconds) => {
   return dayjs(0).set('year', startYear).set('hour', 0).set('minute', 0).set('second', 0).add(seconds, 'second')
 }
 
-export const systemBodyName = (body) => {
+export const systemBodyName = (body, system = null) => {
   if (body.SystemBodyName) {
     return body.SystemBodyName
   }
 
+  const systemPrefix = system ? `${system.Name}-` : ''
+
   switch (body.BodyClass) {
   case 1: {
-    return `${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
+    return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
   }
   case 2: {
-    return `${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
+    return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
   }
   case 3: {
     return `Asteroid #${body.OrbitNumber}`

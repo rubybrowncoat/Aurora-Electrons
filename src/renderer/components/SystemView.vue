@@ -1,10 +1,20 @@
 <template>
   <div class="system-view">
+    <div id="pixi-container" style="width: 100vw; height: calc(100vh - 64px); position: absolute; top: 64px; left: 0" />
     <h1>{{ system?.Name }}</h1>
     <div class="system-content">
       <!-- Your system view content will go here -->
+      <v-btn
+        @click="
+          () => {
+            if (viewport) {
+              viewport.fitWorld()
+            }
+          }
+        "
+        >Fit to Screen</v-btn
+      >
     </div>
-    <div id="pixi-container" style="width: 100vw; height: calc(100vh - 64px); position: absolute; top: 64px; left: 0" />
   </div>
 </template>
 
@@ -16,6 +26,7 @@ import { clamp as _clamp } from 'lodash'
 import { Viewport } from 'pixi-viewport'
 import { mapGetters } from 'vuex'
 import { starName, systemBodyName, toNumber } from '~/utilities/aurora'
+import { approximatelyEquals, safeModulo360 } from '~/utilities/math'
 
 PIXI.settings.ROUND_PIXELS = true
 
@@ -38,6 +49,19 @@ const unitsToPx = (u) => u * 150
 
 const DEG2RAD = Math.PI / 180
 const AU_KM = 149597870.7
+
+const TEXT_STYLES = {
+  body: new PIXI.TextStyle({ fill: 0xffffff, fontSize: 10 }),
+  star: new PIXI.TextStyle({
+    fill: 0xffffff,
+    fontSize: 12,
+    fontWeight: 'bold',
+    dropShadow: true,
+    dropShadowDistance: 1,
+    dropShadowBlur: 0,
+    dropShadowAlpha: 0.6,
+  }),
+}
 
 // Get WORLD rotation by summing ancestor local rotations (stable even with y-down & scales)
 const getWorldRotation = (displayObject) => {
@@ -90,21 +114,23 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   const orbitContainer = new PIXI.Container()
   orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
 
+  // a/e/b/c in AU (then px)
   const a = Math.max(0, toNumber(bodyLike.OrbitalDistance, 0))
   let e = _clamp(toNumber(bodyLike.Eccentricity, 0), 0, 0.999)
-  if ((!e || e <= 0) && Number.isFinite(toNumber(bodyLike.DistanceToOrbitCentre))) {
+  if ((!e || e <= 0) && Number.isFinite(bodyLike.DistanceToOrbitCentre)) {
     const cWorld = Math.max(0, toNumber(bodyLike.DistanceToOrbitCentre, 0))
     if (a > 0) e = _clamp(cWorld / a, 0, 0.999)
   }
-
   const b = a * Math.sqrt(1 - e * e)
   const c = a * e
 
-  // Orientation of the apse line
-  const phiDeg = toNumber(bodyLike.EccentricityDirection, 0) // - 90 // uncomment if DB stores compass bearings
+  // Orientation of the apse line (legacy: DB gives math degrees)
+  const phiDeg = toNumber(bodyLike.EccentricityDirection, 0)
   const phi = phiDeg * DEG2RAD
+  const cosφ = Math.cos(phi)
+  const sinφ = Math.sin(phi)
 
-  // Optional exact DB position (km). If parentWorld* are provided we convert to relative.
+  // Optional exact DB position (km) -> relative (px)
   const xkm = toNumber(bodyLike.Xcor, NaN)
   const ykm = toNumber(bodyLike.Ycor, NaN)
   const pxkm = toNumber(opts.parentWorldXkm, NaN)
@@ -127,20 +153,15 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   orbitContainer.rotation = phi - parentWorldRot
 
   // Choose which focus (left/right) the barycenter should be.
-  // Rotate the world vector into the orbit-aligned frame and see
-  // whether centerX = +c or -c better satisfies the ellipse equation.
   let centerSign = 1
   let localX, localY
   if (Number.isFinite(dxPx) && Number.isFinite(dyPx) && (dxPx !== 0 || dyPx !== 0)) {
-    const cosφ = Math.cos(phi)
-    const sinφ = Math.sin(phi)
     localX = dxPx * cosφ + dyPx * sinφ
     localY = -dxPx * sinφ + dyPx * cosφ
 
     const err = (cxSign) => {
       const u = localX - cxSign * cx
       const v = localY
-      // ((x - cx)^2 / a^2) + (y^2 / b^2) ≈ 1
       return Math.abs((u * u) / (ax * ax) + (v * v) / (by * by) - 1)
     }
 
@@ -151,24 +172,23 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
 
   const cxSigned = centerSign * cx
 
-  if (opts.orbitLine) {
+  // Orbit path (skip if a==0, but still allow a marker)
+  if (opts.orbitLine && a > 0) {
     const g = new PIXI.Graphics()
     g.lineStyle(style.width ?? 1, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
     g.drawEllipse(cxSigned, 0, ax, by)
 
-    // store metadata so stroke width can be kept constant on zoom
+    // metadata so stroke width can be kept constant on zoom
     g._orbitMeta = {
       baseWidth: style.width ?? 1,
       color: style.color ?? 0x8aa1ff,
       alpha: style.alpha ?? 0.55,
       ax,
       by,
-      cx: cxSigned, // store signed center
+      cx: cxSigned,
+      lastDrawnWidth: null,
     }
-    if (opts.registry && Array.isArray(opts.registry)) {
-      opts.registry.push(g)
-    }
-
+    if (opts.registry && Array.isArray(opts.registry)) opts.registry.push(g)
     orbitContainer.addChild(g)
   }
 
@@ -179,9 +199,9 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   if (Number.isFinite(localX) && Number.isFinite(localY)) {
     marker.position.set(localX, localY)
   } else {
-    // Fallback: derive from bearing in screen space
+    // Fallback: derive from Bearing in screen space (legacy rule)
     const bearingDegRaw = toNumber(bodyLike.Bearing, 0)
-    const bearingDeg = ((bearingDegRaw % 360) + 360) % 360
+    const bearingDeg = safeModulo360(bearingDegRaw)
     const nu = (bearingDeg - 90) * DEG2RAD
     const r = a > 0 ? (a * (1 - e * e)) / (1 + e * Math.cos(nu)) : 0
     const rPx = unitsToPx(r)
@@ -189,11 +209,10 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   }
   orbitContainer.addChild(marker)
 
-  // Optional label (stays upright)
+  // Optional label (stays upright) — created first, rotated after container is attached
   let label = null
   if (opts.nameText) {
-    const textStyle = new PIXI.TextStyle({ fill: 0xffffff, fontSize: 10 })
-    label = new PIXI.Text(String(opts.nameText), textStyle)
+    label = new PIXI.Text(String(opts.nameText), TEXT_STYLES.body)
     label.anchor.set(0.5, 1)
     label.position.set(marker.x, marker.y - 8)
     orbitContainer.addChild(label)
@@ -201,13 +220,10 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
 
   parentContainer.addChild(orbitContainer)
 
-  // Now that orbitContainer has a parent, adjust label rotation accurately using WORLD rotation
+  // Now adjust label rotation accurately using WORLD rotation, but only if needed
   if (label) {
-    if (opts.keepLabelUpright) {
-      label.rotation = -getWorldRotation(orbitContainer)
-    } else {
-      label.rotation = -getWorldRotation(parentContainer)
-    }
+    const desired = opts.keepLabelUpright ? -getWorldRotation(orbitContainer) : -getWorldRotation(parentContainer)
+    if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
   }
 
   return { orbitContainer, marker }
@@ -217,7 +233,6 @@ const drawSystem = (stage, system, opts = {}) => {
   const { origin = { x: 0, y: 0 }, orbitStyle = { color: 0x6aa7ff, alpha: 0.45, width: 1 }, starSize = { sizeMode: 'luminosity', minPx: 4, maxPx: 22, scale: 5 } } = opts
 
   const stars = system?.System?.Stars || []
-
   const orbitRegistry = opts.orbitRegistry || []
 
   const root = new PIXI.Container()
@@ -227,9 +242,7 @@ const drawSystem = (stage, system, opts = {}) => {
   // Build index by Component and by StarID
   const byComponent = new Map()
   const byStarID = new Map()
-  stars.forEach((s) => {
-    byComponent.set(toNumber(s.Component, 1), s)
-  })
+  for (const s of stars) byComponent.set(toNumber(s.Component, 1), s)
 
   // Sort by hierarchy depth so parents get drawn first
   const compToParent = (s) => toNumber(s.OrbitingComponent, 0)
@@ -245,7 +258,7 @@ const drawSystem = (stage, system, opts = {}) => {
 
   // Draw
   const drawnByComponent = new Map()
-  ordered.forEach((star, index) => {
+  for (const [index, star] of ordered.entries()) {
     const comp = toNumber(star.Component, 1)
     const parentComp = toNumber(star.OrbitingComponent, 0)
 
@@ -280,17 +293,7 @@ const drawSystem = (stage, system, opts = {}) => {
     const sprite = drawStar(radiusPx, color)
 
     // Draw the star's ORBIT path and marker (its current orbital position)
-    const { orbitContainer, marker } = drawOrbitLocal(
-      parentContainer,
-      parentLocal,
-      bodyLike,
-      {
-        color,
-        alpha: orbitStyle.alpha,
-        width: orbitStyle.width,
-      },
-      { orbitLine: true, keepLabelUpright: true, parentWorldXkm, parentWorldYkm, registry: orbitRegistry }
-    )
+    const { orbitContainer, marker } = drawOrbitLocal(parentContainer, parentLocal, bodyLike, { color, alpha: orbitStyle.alpha, width: orbitStyle.width }, { orbitLine: true, keepLabelUpright: true, parentWorldXkm, parentWorldYkm, registry: orbitRegistry })
 
     // Draw the star itself at the marker
     sprite.position.copyFrom(marker.position)
@@ -298,24 +301,16 @@ const drawSystem = (stage, system, opts = {}) => {
 
     // Label for star (bigger, always shown)
     const labelText = starName(index, system)
-    const starLabelStyle = new PIXI.TextStyle({
-      fill: 0xffffff,
-      fontSize: 12,
-      fontWeight: 'bold',
-      dropShadow: true,
-      dropShadowDistance: 1,
-      dropShadowBlur: 0,
-      dropShadowAlpha: 0.6,
-    })
-    const starLabel = new PIXI.Text(labelText, starLabelStyle)
+    const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
     starLabel.anchor.set(0.5, 1)
     starLabel.position.set(sprite.position.x, sprite.position.y - (radiusPx + 6))
-    starLabel.rotation = -getWorldRotation(orbitContainer)
+    const desired = -getWorldRotation(orbitContainer)
+    if (!approximatelyEquals(starLabel.rotation, desired, 1e-6)) starLabel.rotation = desired
     orbitContainer.addChild(starLabel)
 
     drawnByComponent.set(comp, { orbitContainer, marker, sprite, star })
     byStarID.set(toNumber(star.StarID), { orbitContainer, marker, sprite, star })
-  })
+  }
 
   return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
 }
@@ -383,6 +378,8 @@ export default {
         const m = g._orbitMeta
         if (!m) continue
         const w = m.baseWidth / s
+        if (approximatelyEquals(m.lastDrawnWidth ?? -1, w, 1e-3)) continue // skip redundant redraws
+        m.lastDrawnWidth = w
         g.clear()
         g.lineStyle(w, m.color, m.alpha)
         g.drawEllipse(m.cx, 0, m.ax, m.by)
@@ -519,11 +516,4 @@ export default {
 }
 </script>
 
-<style scoped>
-.system-view {
-  padding: 20px;
-}
-.system-content {
-  margin-top: 20px;
-}
-</style>
+<style scoped></style>
