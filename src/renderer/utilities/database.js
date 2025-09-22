@@ -397,6 +397,12 @@ export const resetDatabase = (storagePath) => {
     OrbitalPeriod: Sequelize.DOUBLE,
     OrbitalDistance: Sequelize.DOUBLE,
     DisasterStatus: Sequelize.INTEGER,
+    Eccentricity: Sequelize.DOUBLE,
+    EccentricityDirection: Sequelize.DOUBLE,
+    MeanOrbitalSpeed: Sequelize.DOUBLE,
+    DistanceToOrbitCentre: Sequelize.DOUBLE,
+    DistanceToParent: Sequelize.DOUBLE,
+    CurrentOrbitalSpeed: Sequelize.DOUBLE,
   }, {
     sequelize,
     modelName: 'Star',

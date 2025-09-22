@@ -81,3 +81,20 @@ export const eventColorToRGBA = (colorInteger) => {
 
   return `rgba(${r}, ${g}, ${b}, ${a})`
 }
+
+export const toNumber = (v, fallback = 0) => {
+  if (v === null || v === undefined) return fallback
+  if (typeof v === 'string') {
+    const s = v.trim().toUpperCase()
+    if (s === '' || s === 'NULL' || s === 'NAN') return fallback
+  }
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+export const toBoolean = (v) => {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') return ['1', 'TRUE', 'YES'].includes(v.trim().toUpperCase())
+  return false
+}

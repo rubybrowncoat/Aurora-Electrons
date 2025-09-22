@@ -39,5 +39,7 @@ module.exports = {
       tabWidth: 2,
       comments: 8000,
     }],
+
+    'unicorn/number-literal-case': 0,
   },
 }

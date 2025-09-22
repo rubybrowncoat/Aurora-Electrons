@@ -7,7 +7,7 @@ ipcMain.handle('request-storage-path', async () => {
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.includes('MacOS')
 
-  const headGame = process.env.NODE_ENV === 'development' && false
+  const headGame = process.env.NODE_ENV === 'development'
 
   const storagePath = app.isPackaged
     ? isMac
