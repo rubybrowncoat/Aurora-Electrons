@@ -44,7 +44,7 @@ const bodyTypes = {
   11: 'Large Terrestrial Moon',
   14: 'Comet',
 }
-const renderOrbitBodyType = new Set([2, 3, 4, 5, 7, 8, 9, 10, 11]) // 7, 8, 9, 10, 11
+const renderOrbitBodyType = new Set([2, 3, 4, 5]) // 7, 8, 9, 10, 11
 const lunarBodyTypeIds = new Set([7, 8, 9, 10, 11])
 
 const isRenderOrbitBodyType = (id) => renderOrbitBodyType.has(toNumber(id, 0))
@@ -56,7 +56,7 @@ const kmToPx = (km) => unitsToPx(km / AU_KM)
 const TEXT_STYLES = {
   body: new PIXI.TextStyle({
     fill: 0xffffff,
-    fontSize: 10,
+    fontSize: 12,
     align: 'left',
 
     dropShadow: true,
@@ -66,7 +66,7 @@ const TEXT_STYLES = {
   }),
   star: new PIXI.TextStyle({
     fill: 0xffffff,
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: 'bold',
     align: 'center',
 
@@ -429,7 +429,7 @@ const drawSystem = (stage, system, stars, opts = {}) => {
         computedBodyPixelRadius: radiusPx,
         // and a bigger on-screen minimum than planets
         minBodyRadius: opts.minStarRadius ?? 6,
-      },
+      }
     )
 
     // color the marker like the star
@@ -588,6 +588,101 @@ export default {
       console.log(...asd)
     },
 
+    // --- WORLD MARKERS -------------------------------------------------------
+    _buildMarkerWorldTree(padding = 64) {
+      if (!this.viewport || !this._annotationRegistry) return null
+
+      // Compute world bounds of all markers (small boxes around center points)
+      const bounds = this._boundsInit()
+      const boxes = []
+
+      for (const entry of this._annotationRegistry) {
+        if (!entry?.marker || !entry?.orbitContainer) continue
+
+        // marker center in STAGE px
+        const gp = entry.orbitContainer.toGlobal(entry.marker.position)
+        // center in WORLD px
+        const cw = this.viewport.toWorld(gp.x, gp.y)
+
+        const hw = 10,
+          hh = 10 // 20x20 hit box around the marker
+        const x = cw.x - hw,
+          y = cw.y - hh,
+          w = hw * 2,
+          h = hh * 2
+
+        boxes.push({ x, y, width: w, height: h, entry })
+        this._boundsExpandRect(bounds, x, y, x + w, y + h)
+      }
+
+      if (!Number.isFinite(bounds.xMin)) return null
+
+      // pad & build quadtree with non-zero origin (important!)
+      bounds.xMin -= padding
+      bounds.yMin -= padding
+      bounds.xMax += padding
+      bounds.yMax += padding
+
+      const qt = new Quadtree({
+        x: bounds.xMin,
+        y: bounds.yMin,
+        width: bounds.xMax - bounds.xMin,
+        height: bounds.yMax - bounds.yMin,
+        maxDepth: 8,
+        maxChildren: 10,
+      })
+
+      for (const b of boxes) qt.insert(b)
+
+      this._markerWorldTree = qt
+      return qt
+    },
+
+    // --- WORLD ORBITS --------------------------------------------------------
+    _buildOrbitWorldTree(padding = 64) {
+      if (!this.viewport || !this._orbitRegistry) return null
+
+      const bounds = this._boundsInit()
+      const items = []
+
+      for (const g of this._orbitRegistry) {
+        const m = g && g._orbitMeta
+        if (!m) continue
+        // Ensure AABB exists
+        const aabb = m.aabbWorld || (this._cacheOrbitAABB(g), m.aabbWorld)
+        if (!aabb) continue
+
+        const x = aabb.xMin,
+          y = aabb.yMin
+        const w = aabb.xMax - aabb.xMin
+        const h = aabb.yMax - aabb.yMin
+
+        items.push({ x, y, width: w, height: h, g })
+        this._boundsExpandRect(bounds, x, y, x + w, y + h)
+      }
+
+      if (!Number.isFinite(bounds.xMin)) return null
+
+      bounds.xMin -= padding
+      bounds.yMin -= padding
+      bounds.xMax += padding
+      bounds.yMax += padding
+
+      const qt = new Quadtree({
+        x: bounds.xMin,
+        y: bounds.yMin,
+        width: bounds.xMax - bounds.xMin,
+        height: bounds.yMax - bounds.yMin,
+        maxDepth: 8,
+        maxChildren: 10,
+      })
+
+      for (const it of items) qt.insert(it)
+
+      this._orbitWorldTree = qt
+      return qt
+    },
+
     _labelPriority(entry) {
       switch (entry.bodyTypeId) {
         case 0:
@@ -693,31 +788,39 @@ export default {
 
       const s = this.viewport.scale?.x || 1
       const visible = this._getVisibleWorldRect(0)
+      const rect = { x: visible.xMin, y: visible.yMin, width: visible.xMax - visible.xMin, height: visible.yMax - visible.yMin }
       const MIN_ORBIT_SCREEN_R = 1.5
 
-      for (const g of this._orbitRegistry) {
+      // Determine which orbits intersect view via quadtree (fallback to full list)
+      let toProcess
+      if (this._orbitWorldTree) {
+        const hits = this._orbitWorldTree.retrieve(rect)
+        const set = new Set()
+        toProcess = []
+        for (const h of hits) {
+          const g = h.g
+          if (g && !set.has(g)) {
+            set.add(g)
+            toProcess.push(g)
+          }
+        }
+        // Hide everything else quickly
+        for (const g of this._orbitRegistry) g.renderable = set.has(g)
+      } else {
+        toProcess = this._orbitRegistry
+      }
+
+      for (const g of toProcess) {
         const m = g._orbitMeta
         if (!m) continue
 
-        // Quick LOD
+        // LOD: small radii
         const radiusWorld = m.radiusWorld ?? (m.isCircle ? m.r : Math.max(m.ax, m.by))
         const radiusScreen = radiusWorld * s
         if (radiusScreen < MIN_ORBIT_SCREEN_R) {
           g.renderable = false
           continue
         }
-
-        // Cached AABB (fallback to compute if missing)
-        const box = m.aabbWorld || (this._cacheOrbitAABB(g), m.aabbWorld)
-        if (!box) {
-          g.renderable = false
-          continue
-        }
-
-        const intersects = !(box.xMax < visible.xMin || box.xMin > visible.xMax || box.yMax < visible.yMin || box.yMin > visible.yMax)
-
-        g.renderable = intersects
-        if (!g.renderable) continue
 
         // keep constant stroke width
         const w = m.baseWidth / s
@@ -732,23 +835,41 @@ export default {
     },
 
     // redrawOrbitStrokes() {
-    //   const MIN_ORBIT_SCREEN_RADIUS = 1.5
-
     //   if (!this._orbitRegistry || !this.viewport) return
+
     //   const s = this.viewport.scale?.x || 1
+    //   const visible = this._getVisibleWorldRect(0)
+    //   const MIN_ORBIT_SCREEN_R = 1.5
+
     //   for (const g of this._orbitRegistry) {
     //     const m = g._orbitMeta
     //     if (!m) continue
 
-    //     // LOD: skip drawing orbits whose on-screen radius < ~0.75px
-    //     const radiusWorld = m.isCircle ? m.r : Math.max(m.ax, m.by)
+    //     // Quick LOD
+    //     const radiusWorld = m.radiusWorld ?? (m.isCircle ? m.r : Math.max(m.ax, m.by))
     //     const radiusScreen = radiusWorld * s
-    //     g.renderable = radiusScreen >= MIN_ORBIT_SCREEN_RADIUS
+    //     if (radiusScreen < MIN_ORBIT_SCREEN_R) {
+    //       g.renderable = false
+    //       continue
+    //     }
+
+    //     // Cached AABB (fallback to compute if missing)
+    //     const box = m.aabbWorld || (this._cacheOrbitAABB(g), m.aabbWorld)
+    //     if (!box) {
+    //       g.renderable = false
+    //       continue
+    //     }
+
+    //     const intersects = !(box.xMax < visible.xMin || box.xMin > visible.xMax || box.yMax < visible.yMin || box.yMin > visible.yMax)
+
+    //     g.renderable = intersects
     //     if (!g.renderable) continue
 
+    //     // keep constant stroke width
     //     const w = m.baseWidth / s
     //     if (approximatelyEquals(m.lastDrawnWidth ?? -1, w, 1e-3)) continue
     //     m.lastDrawnWidth = w
+
     //     g.clear()
     //     g.lineStyle(w, m.color, m.alpha)
     //     if (m.isCircle) g.drawCircle(0, 0, m.r)
@@ -784,7 +905,7 @@ export default {
         marker.drawCircle(0, 0, targetWorldR)
         marker.endFill()
 
-        marker.eventMode = 'static';
+        marker.eventMode = 'static'
         marker.on('pointerdown', (...asd) => {
           console.log('Marker clicked!', ...asd)
         })
@@ -816,77 +937,120 @@ export default {
 
     refreshVisibleAnnotations() {
       if (!this._annotationRegistry || !this.viewport) return
-      const rect = this._getVisibleWorldRect(64) // small padding
+
+      // world visible rect + small pad
+      const vw = this._getVisibleWorldRect(64)
+      const queryRect = { x: vw.xMin, y: vw.yMin, width: vw.xMax - vw.xMin, height: vw.yMax - vw.yMin }
+
+      // narrow to only markers in view
+      let entriesInView
+      if (this._markerWorldTree) {
+        const hits = this._markerWorldTree.retrieve(queryRect)
+        // dedupe (quadtree may return duplicates across nodes)
+        const seen = new Set()
+        entriesInView = []
+        for (const h of hits) {
+          const e = h.entry
+          if (e && !seen.has(e)) {
+            seen.add(e)
+            entriesInView.push(e)
+          }
+        }
+      } else {
+        entriesInView = this._annotationRegistry
+      }
+
+      // Hide everything first; we’ll re-enable the ones in view
+      for (const entry of this._annotationRegistry) {
+        if (entry.label) entry.label.renderable = false
+        if (entry.marker) entry.marker.renderable = false
+      }
+
       const candidates = []
 
-      for (const entry of this._annotationRegistry) {
-        const visible = this._isMarkerVisible(entry, rect)
-
-        if (!visible) {
-          if (entry.label) entry.label.renderable = false
-          if (entry.marker) entry.marker.renderable = false
-          continue
-        }
-
+      // Place labels + mark markers visible for entries in view
+      for (const entry of entriesInView) {
         if (entry.marker) entry.marker.renderable = true
-
-        // label placement
         if (entry.label) {
           this._placeLabel(entry)
           candidates.push({ entry, priority: this._labelPriority(entry) })
-          // const s = this.viewport.scale?.x || 1
-          // const invS = 1 / s
-          // if (!approximatelyEquals(entry.label.scale?.x, invS, 1e-3) || !approximatelyEquals(entry.label.scale?.y, invS, 1e-3)) {
-          //   entry.label.scale.set(invS, invS)
-          // }
-
-          // const pad = entry.labelPadPx ?? 8
-          // let targetX, targetY
-
-          // if (typeof entry.starRadiusPx === 'number') {
-          //   const dWorldY = entry.starRadiusPx + pad * invS
-          //   targetX = entry.marker?.x ?? 0
-          //   targetY = (entry.marker?.y ?? 0) + dWorldY
-          // } else if (entry.isPhysicalSizeBody && entry.computedBodyPixelRadius > 0) {
-          //   const physWorldR = entry.computedBodyPixelRadius
-          //   const minScreenR = entry.minBodyRadius ?? 0
-          //   const effectiveScreenR = Math.max(physWorldR * s, minScreenR)
-          //   const dWorldX = (effectiveScreenR + pad) * invS
-          //   targetX = (entry.marker?.x ?? 0) + dWorldX
-          //   targetY = entry.marker?.y ?? 0
-          // } else {
-          //   const markerBase = entry.markerBaseRadiusPx ?? 3
-          //   const dWorldX = (markerBase + pad) * invS
-          //   targetX = (entry.marker?.x ?? 0) + dWorldX
-          //   targetY = entry.marker?.y ?? 0
-          // }
-
-          // if (!approximatelyEquals(entry.label.x, targetX, 1e-3) || !approximatelyEquals(entry.label.y, targetY, 1e-3)) {
-          //   entry.label.position.set(targetX, targetY)
-          // }
-
-          // candidates.push({ entry, priority: this._labelPriority(entry) })
         }
       }
 
-      // Resolve overlaps by hierarchy priority (higher wins)
+      // Resolve label overlaps with a SCREEN-Space quadtree
       if (candidates.length) {
         candidates.sort((a, b) => b.priority - a.priority)
-        const accepted = []
+
+        const screenQT = new Quadtree({
+          x: 0,
+          y: 0,
+          width: this.pixi.view.width,
+          height: this.pixi.view.height,
+          maxDepth: 6,
+          maxChildren: 6,
+        })
+
         for (const c of candidates) {
-          const r = this._labelScreenRect(c.entry.label)
+          const r = this._labelScreenRect(c.entry.label) // stage coords
+          const probe = { x: r.x, y: r.y, width: r.w, height: r.h }
+          const near = screenQT.retrieve(probe)
+
           let overlaps = false
-          for (const ar of accepted) {
-            if (this._rectsOverlap(r, ar)) {
+          for (const n of near) {
+            // n has width/height keys (not w/h)
+            if (this._rectsOverlap({ x: r.x, y: r.y, w: r.w, h: r.h }, { x: n.x, y: n.y, w: n.width, h: n.height })) {
               overlaps = true
               break
             }
           }
+
           c.entry.label.renderable = !overlaps
-          if (!overlaps) accepted.push(r)
+          if (!overlaps) screenQT.insert(probe)
         }
       }
     },
+
+    // refreshVisibleAnnotations() {
+    //   if (!this._annotationRegistry || !this.viewport) return
+    //   const rect = this._getVisibleWorldRect(64) // small padding
+    //   const candidates = []
+
+    //   for (const entry of this._annotationRegistry) {
+    //     const visible = this._isMarkerVisible(entry, rect)
+
+    //     if (!visible) {
+    //       if (entry.label) entry.label.renderable = false
+    //       if (entry.marker) entry.marker.renderable = false
+    //       continue
+    //     }
+
+    //     if (entry.marker) entry.marker.renderable = true
+
+    //     // label placement
+    //     if (entry.label) {
+    //       this._placeLabel(entry)
+    //       candidates.push({ entry, priority: this._labelPriority(entry) })
+    //     }
+    //   }
+
+    //   // Resolve overlaps by hierarchy priority (higher wins)
+    //   if (candidates.length) {
+    //     candidates.sort((a, b) => b.priority - a.priority)
+    //     const accepted = []
+    //     for (const c of candidates) {
+    //       const r = this._labelScreenRect(c.entry.label)
+    //       let overlaps = false
+    //       for (const ar of accepted) {
+    //         if (this._rectsOverlap(r, ar)) {
+    //           overlaps = true
+    //           break
+    //         }
+    //       }
+    //       c.entry.label.renderable = !overlaps
+    //       if (!overlaps) accepted.push(r)
+    //     }
+    //   }
+    // },
 
     _scheduleVisibleAnnotationsRefresh() {
       if (this._annotationRaf) return
@@ -912,7 +1076,7 @@ export default {
 
       // Marker global (stage) position
       const g = oc.toGlobal(marker.position)
-      let tx = g.x;
+      let tx = g.x
       let ty = g.y
       if (side === 'E') tx += offset
       else if (side === 'W') tx -= offset
@@ -1060,56 +1224,6 @@ export default {
       b.yMax += padWorld
 
       return { ...b, width: b.xMax - b.xMin, height: b.yMax - b.yMin, cx: (b.xMin + b.xMax) / 2, cy: (b.yMin + b.yMax) / 2 }
-    },
-
-    createQuadTree(padding = 64) {
-      if (!this.viewport) return null
-      const toWorldXY = (gx, gy) => this.viewport.toWorld(gx, gy)
-      const b = this._boundsInit()
-
-      // 2) Markers, Labels, and Star Sprites clearance
-      if (this._annotationRegistry) {
-        for (const entry of this._annotationRegistry) {
-          // Marker rect
-          if (entry.marker) {
-            const mb = entry.marker.getBounds()
-            const tl = toWorldXY(mb.x, mb.y)
-            const br = toWorldXY(mb.x + mb.width, mb.y + mb.height)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-          }
-          // Label rect
-          if (entry.label) {
-            const lb = entry.label.getBounds()
-            const tl = toWorldXY(lb.x, lb.y)
-            const br = toWorldXY(lb.x + lb.width, lb.y + lb.height)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-          }
-          // Star sprite clearance (radius around marker in local space)
-          if (typeof entry.starRadiusPx === 'number' && entry.orbitContainer && entry.marker) {
-            const oc = entry.orbitContainer
-            const r = entry.starRadiusPx
-            const tlg = oc.toGlobal({ x: entry.marker.x - r, y: entry.marker.y - r })
-            const brg = oc.toGlobal({ x: entry.marker.x + r, y: entry.marker.y + r })
-            const tl = toWorldXY(tlg.x, tlg.y)
-            const br = toWorldXY(brg.x, brg.y)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-          }
-        }
-      }
-
-      b.xMin -= padding
-      b.yMin -= padding
-      b.xMax += padding
-      b.yMax += padding
-
-      const quadTree = new Quadtree({
-        width: b.xMax - b.xMin,
-        height: b.yMax - b.yMin,
-        maxDepth: 8,
-        maxChildren: 10,
-      })
-
-      return quadTree
     },
 
     getPrimaryStarWorldCenter() {
@@ -1260,23 +1374,10 @@ export default {
         },
       })
 
-      this.annotationQuadTree = this.createQuadTree()
-
-      for (const entry of this._annotationRegistry) {
-        if (entry.marker) {
-          const worldPosition = this.viewport.toWorld(entry.marker.getGlobalPosition())
-
-          this.annotationQuadTree.insert({
-            x: worldPosition.x - 10,
-            y: worldPosition.y - 10,
-            width: 20,
-            height: 20,
-            entry,
-          })
-        }
-      }
-
       this._cacheAllOrbitAABBs()
+
+      this._buildMarkerWorldTree()
+      this._buildOrbitWorldTree()
 
       // keep stroke width constant across zoom levels
       const refreshStroke = () => {

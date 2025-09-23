@@ -825,10 +825,11 @@ export default {
 
           if (selectedNodes.length === 1) {
             commands.push({
-              content: '<span><i class="v-icon mdi mdi-information-outline"></i></span>',
+              content: '<span><i class="v-icon mdi mdi-orbit"></i></span>',
               select: () => {
-                this.systemId = selectedNodes[0].data('id')
-                this.isSystemDialogOpen = true
+                this.openSystemDialog(selectedNodes[0].data('id'))
+                // this.systemId = selectedNodes[0].data('id')
+                // this.isSystemDialogOpen = true
               },
             })
           }
