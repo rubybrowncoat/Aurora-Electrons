@@ -577,6 +577,11 @@ export default {
       cancelAnimationFrame(this._annotationRaf)
       this._annotationRaf = null
     }
+
+    if (this._initRaf) {
+      cancelAnimationFrame(this._initRaf)
+      this._initRaf = null
+    }
   },
   methods: {
     loog(...asd) {
@@ -612,20 +617,35 @@ export default {
       }
     },
 
+    // _labelScreenRect(label) {
+    //   // Convert label world bounds to screen-space rect
+    //   const b = label.getBounds()
+    //   const p1 = this.viewport.toScreen(b.x, b.y)
+    //   const p2 = this.viewport.toScreen(b.x + b.width, b.y + b.height)
+    //   const x = Math.min(p1.x, p2.x)
+    //   const y = Math.min(p1.y, p2.y)
+    //   const w = Math.abs(p2.x - p1.x)
+    //   const h = Math.abs(p2.y - p1.y)
+    //   return { x, y, w, h }
+    // },
     _labelScreenRect(label) {
-      // Convert label world bounds to screen-space rect
+      // getBounds() returns global (stage) coordinates in Pixi v6
       const b = label.getBounds()
-      const p1 = this.viewport.toScreen(b.x, b.y)
-      const p2 = this.viewport.toScreen(b.x + b.width, b.y + b.height)
-      const x = Math.min(p1.x, p2.x)
-      const y = Math.min(p1.y, p2.y)
-      const w = Math.abs(p2.x - p1.x)
-      const h = Math.abs(p2.y - p1.y)
-      return { x, y, w, h }
+      return { x: b.x, y: b.y, w: b.width, h: b.height }
     },
 
     _rectsOverlap(a, b) {
       return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y)
+    },
+
+    // The on-screen radius of the marker disc
+    _effectiveScreenRadius(entry) {
+      const s = this.viewport?.scale?.x || 1
+      const meta = entry?.marker?._bodyMeta
+      if (!meta) return 0
+      const physWorldR = meta.physWorldR || 0
+      const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
+      return Math.max(physWorldR * s, minScreenR)
     },
 
     // Compute & cache an orbit's WORLD-space AABB into g._orbitMeta.aabbWorld
@@ -763,6 +783,11 @@ export default {
         marker.beginFill(meta.fill, 1)
         marker.drawCircle(0, 0, targetWorldR)
         marker.endFill()
+
+        marker.eventMode = 'static';
+        marker.on('pointerdown', (...asd) => {
+          console.log('Marker clicked!', ...asd)
+        })
       }
     },
 
@@ -807,38 +832,40 @@ export default {
 
         // label placement
         if (entry.label) {
-          const s = this.viewport.scale?.x || 1
-          const invS = 1 / s
-          if (!approximatelyEquals(entry.label.scale?.x, invS, 1e-3) || !approximatelyEquals(entry.label.scale?.y, invS, 1e-3)) {
-            entry.label.scale.set(invS, invS)
-          }
-
-          const pad = entry.labelPadPx ?? 8
-          let targetX, targetY
-
-          if (typeof entry.starRadiusPx === 'number') {
-            const dWorldY = entry.starRadiusPx + pad * invS
-            targetX = entry.marker?.x ?? 0
-            targetY = (entry.marker?.y ?? 0) + dWorldY
-          } else if (entry.isPhysicalSizeBody && entry.computedBodyPixelRadius > 0) {
-            const physWorldR = entry.computedBodyPixelRadius
-            const minScreenR = entry.minBodyRadius ?? 0
-            const effectiveScreenR = Math.max(physWorldR * s, minScreenR)
-            const dWorldX = (effectiveScreenR + pad) * invS
-            targetX = (entry.marker?.x ?? 0) + dWorldX
-            targetY = entry.marker?.y ?? 0
-          } else {
-            const markerBase = entry.markerBaseRadiusPx ?? 3
-            const dWorldX = (markerBase + pad) * invS
-            targetX = (entry.marker?.x ?? 0) + dWorldX
-            targetY = entry.marker?.y ?? 0
-          }
-
-          if (!approximatelyEquals(entry.label.x, targetX, 1e-3) || !approximatelyEquals(entry.label.y, targetY, 1e-3)) {
-            entry.label.position.set(targetX, targetY)
-          }
-
+          this._placeLabel(entry)
           candidates.push({ entry, priority: this._labelPriority(entry) })
+          // const s = this.viewport.scale?.x || 1
+          // const invS = 1 / s
+          // if (!approximatelyEquals(entry.label.scale?.x, invS, 1e-3) || !approximatelyEquals(entry.label.scale?.y, invS, 1e-3)) {
+          //   entry.label.scale.set(invS, invS)
+          // }
+
+          // const pad = entry.labelPadPx ?? 8
+          // let targetX, targetY
+
+          // if (typeof entry.starRadiusPx === 'number') {
+          //   const dWorldY = entry.starRadiusPx + pad * invS
+          //   targetX = entry.marker?.x ?? 0
+          //   targetY = (entry.marker?.y ?? 0) + dWorldY
+          // } else if (entry.isPhysicalSizeBody && entry.computedBodyPixelRadius > 0) {
+          //   const physWorldR = entry.computedBodyPixelRadius
+          //   const minScreenR = entry.minBodyRadius ?? 0
+          //   const effectiveScreenR = Math.max(physWorldR * s, minScreenR)
+          //   const dWorldX = (effectiveScreenR + pad) * invS
+          //   targetX = (entry.marker?.x ?? 0) + dWorldX
+          //   targetY = entry.marker?.y ?? 0
+          // } else {
+          //   const markerBase = entry.markerBaseRadiusPx ?? 3
+          //   const dWorldX = (markerBase + pad) * invS
+          //   targetX = (entry.marker?.x ?? 0) + dWorldX
+          //   targetY = entry.marker?.y ?? 0
+          // }
+
+          // if (!approximatelyEquals(entry.label.x, targetX, 1e-3) || !approximatelyEquals(entry.label.y, targetY, 1e-3)) {
+          //   entry.label.position.set(targetX, targetY)
+          // }
+
+          // candidates.push({ entry, priority: this._labelPriority(entry) })
         }
       }
 
@@ -869,6 +896,51 @@ export default {
       })
     },
 
+    // Place label using a screen-aligned offset: 'E', 'S', 'W', 'N' (we'll use E for bodies, S for stars)
+    _placeLabel(entry) {
+      const label = entry?.label
+      const marker = entry?.marker
+      const oc = entry?.orbitContainer
+      if (!label || !marker || !oc || !this.viewport) return
+
+      const padPx = entry.labelPadPx ?? 8
+      const effRpx = this._effectiveScreenRadius(entry)
+      const offset = effRpx + padPx
+
+      // Choose a consistent side
+      const side = entry.bodyTypeId === 0 ? 'S' : 'E' // stars below, bodies to the right
+
+      // Marker global (stage) position
+      const g = oc.toGlobal(marker.position)
+      let tx = g.x;
+      let ty = g.y
+      if (side === 'E') tx += offset
+      else if (side === 'W') tx -= offset
+      else if (side === 'S') ty += offset
+      else if (side === 'N') ty -= offset
+
+      // Convert target stage point back to the orbit container's local space
+      const local = oc.toLocal({ x: tx, y: ty })
+
+      // Update position only if it actually changed (prevents tiny thrashing)
+      if (!approximatelyEquals(label.x, local.x, 1e-3) || !approximatelyEquals(label.y, local.y, 1e-3)) {
+        label.position.set(local.x, local.y)
+      }
+
+      // Keep text upright relative to the world
+      if (entry.keepLabelUpright) {
+        const desired = -getWorldRotation(oc)
+        if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
+      }
+
+      // Maintain constant font size on screen
+      const s = this.viewport.scale?.x || 1
+      const invS = 1 / s
+      if (!approximatelyEquals(label.scale?.x, invS, 1e-3) || !approximatelyEquals(label.scale?.y, invS, 1e-3)) {
+        label.scale.set(invS, invS)
+      }
+    },
+
     // --- Bounds helpers ----------------------------------------------------
     _boundsInit() {
       return { xMin: Infinity, yMin: Infinity, xMax: -Infinity, yMax: -Infinity }
@@ -891,18 +963,14 @@ export default {
       const bh = Math.max(bounds.height, 1e-6)
       return Math.min(sw / bw, sh / bh)
     },
-    
+
     // Fast, scale-aware union of world AABBs.
     // Options:
     //   includeLabels: include label boxes (default: true)
     //   includeMarkers: include body/star discs (default: true)
     //   assumeScale: if provided, sizes that depend on on-screen px (labels, min-radius)
     //                are computed for this scale instead of the current zoom.
-    computeSceneBounds(paddingScreenPx = 64, {
-      includeLabels = true,
-      includeMarkers = true,
-      assumeScale = null,
-    } = {}) {
+    computeSceneBounds(paddingScreenPx = 64, { includeLabels = true, includeMarkers = true, assumeScale = null } = {}) {
       if (!this.viewport) return null
 
       const toWorld = (gx, gy) => this.viewport.toWorld(gx, gy)
@@ -949,8 +1017,8 @@ export default {
           // center in world
           const oc = entry.orbitContainer
           if (!oc) continue
-          const gp = oc.toGlobal(marker.position)          // stage px
-          const cw = toWorld(gp.x, gp.y)                   // world px
+          const gp = oc.toGlobal(marker.position) // stage px
+          const cw = toWorld(gp.x, gp.y) // world px
 
           // world radius for target scale = max(physWorldR, minScreenR / sTarget)
           const physRWorld = meta.physWorldR || 0
@@ -970,12 +1038,12 @@ export default {
           if (!label || !oc) continue
 
           const gp = oc.toGlobal({ x: label.x, y: label.y }) // stage px
-          const cw = toWorld(gp.x, gp.y)                      // world px
+          const cw = toWorld(gp.x, gp.y) // world px
 
           const wpx = label._baseWpx ?? label.width ?? 0
           const hpx = label._baseHpx ?? label.height ?? 0
-          const halfW = (wpx * 0.5) * invSTarget
-          const halfH = (hpx * 0.5) * invSTarget
+          const halfW = wpx * 0.5 * invSTarget
+          const halfH = hpx * 0.5 * invSTarget
 
           _expandCentered(cw.x, cw.y, halfW, halfH)
           any = true
@@ -1049,10 +1117,7 @@ export default {
       if (!sr) return null
 
       // Prefer Component 1; fallback to any with OrbitingComponent===0; else first
-      const primary =
-        (sr.byComponent && (sr.byComponent[1] || sr.byComponent['1'])) ||
-        Object.values(sr.byComponent || {}).find(e => toNumber(e.star?.OrbitingComponent, 0) === 0) ||
-        Object.values(sr.byComponent || {})[0]
+      const primary = (sr.byComponent && (sr.byComponent[1] || sr.byComponent['1'])) || Object.values(sr.byComponent || {}).find((e) => toNumber(e.star?.OrbitingComponent, 0) === 0) || Object.values(sr.byComponent || {})[0]
 
       if (!primary || !primary.marker) return null
       const gp = primary.marker.getGlobalPosition()
@@ -1110,14 +1175,17 @@ export default {
       this._initRaf = requestAnimationFrame(() => {
         this._initRaf = null
 
-        // Only initialize when we actually have stars (bodies may be empty)
+        if (!this.system) return
         if (!Array.isArray(this.stars) || this.stars.length === 0) return
         this.initPixi()
       })
     },
 
     initPixi() {
-      // extra safety: bail if stars not ready yet
+      if (!this.system) {
+        console.warn('initPixi: system not loaded yet')
+        return
+      }
       if (!Array.isArray(this.stars) || this.stars.length === 0) {
         console.warn('initPixi: stars not loaded yet')
         return
@@ -1233,7 +1301,7 @@ export default {
 
       this.viewport.addListener('zoomed', refreshBodies)
       this.viewport.addListener('pinch', refreshBodies)
-      
+
       this.fitToContent()
     },
   },
