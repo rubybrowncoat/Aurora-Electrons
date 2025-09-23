@@ -142,13 +142,15 @@ const starColorForComponent = (component) => {
   return pal[component] ?? 0xffffff
 }
 
-const drawStar = (radiusPx, color = 0xffffff, outline = 0x000000) => {
-  const g = new PIXI.Graphics()
-  g.beginFill(color, 1)
-  g.lineStyle(1, outline, 0.5)
-  g.drawCircle(0, 0, radiusPx)
-  g.endFill()
-  return g
+const starColor = (star) => {
+  const red = toNumber(star.StarType.Red, 0)
+  const green = toNumber(star.StarType.Green, 0)
+  const blue = toNumber(star.StarType.Blue, 0)
+
+  if (!red && !green && !blue) return starColorForComponent(star.Component)
+
+  // return hex int color
+  return ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff)
 }
 
 const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, opts = { orbitLine: true, keepLabelUpright: true, orbitRegistry: [], annotationRegistry: [], computedBodyPixelRadius: null, minBodyRadius: 3, labelPadPx: 8, parentWorldXkm: undefined, parentWorldYkm: undefined, nameText: undefined }) => {
@@ -317,6 +319,8 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
     label = new PIXI.Text(String(opts.nameText), TEXT_STYLES.body)
     label.anchor.set(0, 0.5)
     label.position.set(marker.x + (opts.labelPadPx ?? 8), marker.y)
+    label._baseWpx = label.width
+    label._baseHpx = label.height
     orbitContainer.addChild(label)
   }
 
@@ -406,7 +410,7 @@ const drawSystem = (stage, system, stars, opts = {}) => {
     }
 
     const radiusPx = starPixelRadius(star, starSize)
-    const color = starColorForComponent(comp)
+    const color = starColor(star)
 
     // Draw the star's ORBIT path and a marker that supports min-screen clamping
     const { orbitContainer, marker } = drawOrbitLocal(
@@ -442,6 +446,8 @@ const drawSystem = (stage, system, stars, opts = {}) => {
     const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
     starLabel.anchor.set(0.5, 0)
     starLabel.position.set(marker.position.x, marker.position.y + (radiusPx + 6))
+    starLabel._baseWpx = starLabel.width
+    starLabel._baseHpx = starLabel.height
     const desired = -getWorldRotation(orbitContainer)
     if (!approximatelyEquals(starLabel.rotation, desired, 1e-6)) starLabel.rotation = desired
     orbitContainer.addChild(starLabel)
@@ -530,7 +536,6 @@ function drawBodiesForSystem(rootContainer, bodies, starsResult, style = { color
       parentWorldYkm = starRef.star && toNumber(starRef.star.Ycor, NaN)
     }
 
-    debugger
     const r = drawBodyAround(parentContainer, parentLocalPos, body, style, parentWorldXkm, parentWorldYkm, orbitRegistry, annotationRegistry, extras)
 
     drawnByBodyId.set(toNumber(body.SystemBodyID, -1), { ...r, body })
@@ -548,16 +553,17 @@ export default {
     },
   },
   data() {
-    return {}
+    return {
+      _initRaf: null,
+    }
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
   },
   watch: {
-    systemBodies(newBodies, _oldBodies) {
-      console.log('systemBodies changed:', newBodies)
-      this.initPixi()
-    },
+    system: 'scheduleInitPixi',
+    stars: 'scheduleInitPixi',
+    systemBodies: 'scheduleInitPixi',
   },
   mounted() {},
   beforeDestroy() {
@@ -878,76 +884,112 @@ export default {
       this._boundsExpandPoint(b, x2, y2)
     },
 
-    // Compute world-space bounding box of all orbits, markers, and labels
-    computeSceneBounds(paddingScreenPx = 64) {
+    estimateScaleToFit(bounds) {
+      const sw = this.pixi?.view?.width || 1
+      const sh = this.pixi?.view?.height || 1
+      const bw = Math.max(bounds.width, 1e-6)
+      const bh = Math.max(bounds.height, 1e-6)
+      return Math.min(sw / bw, sh / bh)
+    },
+    
+    // Fast, scale-aware union of world AABBs.
+    // Options:
+    //   includeLabels: include label boxes (default: true)
+    //   includeMarkers: include body/star discs (default: true)
+    //   assumeScale: if provided, sizes that depend on on-screen px (labels, min-radius)
+    //                are computed for this scale instead of the current zoom.
+    computeSceneBounds(paddingScreenPx = 64, {
+      includeLabels = true,
+      includeMarkers = true,
+      assumeScale = null,
+    } = {}) {
       if (!this.viewport) return null
-      const toWorldXY = (gx, gy) => this.viewport.toWorld(gx, gy)
+
+      const toWorld = (gx, gy) => this.viewport.toWorld(gx, gy)
       const b = this._boundsInit()
       let any = false
 
-      // 1) Orbits (ellipse extrema transformed to world)
+      // ---- 1) Orbits: use cached world AABBs (built by _cacheAllOrbitAABBs)
       if (this._orbitRegistry) {
         for (const g of this._orbitRegistry) {
           const m = g && g._orbitMeta
-          const oc = g && g.parent
-          if (!m || !oc) continue
-          const pts = [
-            { x: m.cx - m.ax, y: 0 },
-            { x: m.cx + m.ax, y: 0 },
-            { x: m.cx, y: -m.by },
-            { x: m.cx, y: m.by },
-          ]
-          for (const p of pts) {
-            const gp = oc.toGlobal(p)
-            const wp = toWorldXY(gp.x, gp.y)
-            this._boundsExpandPoint(b, wp.x, wp.y)
-            any = true
-          }
+          if (!m || !m.aabbWorld) continue
+          this._boundsExpandRect(b, m.aabbWorld.xMin, m.aabbWorld.yMin, m.aabbWorld.xMax, m.aabbWorld.yMax)
+          any = true
         }
       }
 
-      // 2) Markers, Labels, and Star Sprites clearance
-      if (this._annotationRegistry) {
+      // We'll need a scale to translate px-sized things (labels, min-screen radii) to world units.
+      // If not provided, estimate from the orbit-only union (fast) or fall back to current zoom.
+      const sCurrent = this.viewport.scale?.x || 1
+      let sTarget = assumeScale
+      if (!sTarget) {
+        if (any) {
+          const tmp = { ...b, width: b.xMax - b.xMin, height: b.yMax - b.yMin }
+          sTarget = this.estimateScaleToFit(tmp)
+        } else {
+          sTarget = sCurrent
+        }
+      }
+      const invSTarget = 1 / sTarget
+
+      // Helper: expand by a world-aligned box centered at (cx,cy)
+      const _expandCentered = (cx, cy, halfW, halfH) => {
+        this._boundsExpandRect(b, cx - halfW, cy - halfH, cx + halfW, cy + halfH)
+      }
+
+      // ---- 2) Markers (discs): compute center via one toGlobal+toWorld, size analytically
+      if (includeMarkers && this._annotationRegistry) {
         for (const entry of this._annotationRegistry) {
-          // Marker rect
-          if (entry.marker) {
-            const mb = entry.marker.getBounds()
-            const tl = toWorldXY(mb.x, mb.y)
-            const br = toWorldXY(mb.x + mb.width, mb.y + mb.height)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-            any = true
-          }
-          // Label rect
-          if (entry.label) {
-            const lb = entry.label.getBounds()
-            const tl = toWorldXY(lb.x, lb.y)
-            const br = toWorldXY(lb.x + lb.width, lb.y + lb.height)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-            any = true
-          }
-          // Star sprite clearance (radius around marker in local space)
-          if (typeof entry.starRadiusPx === 'number' && entry.orbitContainer && entry.marker) {
-            const oc = entry.orbitContainer
-            const r = entry.starRadiusPx
-            const tlg = oc.toGlobal({ x: entry.marker.x - r, y: entry.marker.y - r })
-            const brg = oc.toGlobal({ x: entry.marker.x + r, y: entry.marker.y + r })
-            const tl = toWorldXY(tlg.x, tlg.y)
-            const br = toWorldXY(brg.x, brg.y)
-            this._boundsExpandRect(b, tl.x, tl.y, br.x, br.y)
-            any = true
-          }
+          const marker = entry?.marker
+          if (!marker) continue
+          const meta = marker._bodyMeta
+          if (!meta || !meta.isPhysical) continue
+
+          // center in world
+          const oc = entry.orbitContainer
+          if (!oc) continue
+          const gp = oc.toGlobal(marker.position)          // stage px
+          const cw = toWorld(gp.x, gp.y)                   // world px
+
+          // world radius for target scale = max(physWorldR, minScreenR / sTarget)
+          const physRWorld = meta.physWorldR || 0
+          const minScreenRpx = entry.minBodyRadius ?? meta.minScreenR ?? 0
+          const rWorld = Math.max(physRWorld, minScreenRpx * invSTarget)
+
+          _expandCentered(cw.x, cw.y, rWorld, rWorld)
+          any = true
+        }
+      }
+
+      // ---- 3) Labels: use cached intrinsic px size / target scale
+      if (includeLabels && this._annotationRegistry) {
+        for (const entry of this._annotationRegistry) {
+          const label = entry?.label
+          const oc = entry?.orbitContainer
+          if (!label || !oc) continue
+
+          const gp = oc.toGlobal({ x: label.x, y: label.y }) // stage px
+          const cw = toWorld(gp.x, gp.y)                      // world px
+
+          const wpx = label._baseWpx ?? label.width ?? 0
+          const hpx = label._baseHpx ?? label.height ?? 0
+          const halfW = (wpx * 0.5) * invSTarget
+          const halfH = (hpx * 0.5) * invSTarget
+
+          _expandCentered(cw.x, cw.y, halfW, halfH)
+          any = true
         }
       }
 
       if (!any) return null
 
-      // Add a bit of padding converted to world units using current scale
-      const invS = 1 / (this.viewport.scale?.x || 1)
-      const pad = (paddingScreenPx || 0) * invS
-      b.xMin -= pad
-      b.yMin -= pad
-      b.xMax += pad
-      b.yMax += pad
+      // ---- 4) Padding in world units at target scale
+      const padWorld = (paddingScreenPx || 0) * invSTarget
+      b.xMin -= padWorld
+      b.yMin -= padWorld
+      b.xMax += padWorld
+      b.yMax += padWorld
 
       return { ...b, width: b.xMax - b.xMin, height: b.yMax - b.yMin, cx: (b.xMin + b.xMax) / 2, cy: (b.yMin + b.yMax) / 2 }
     },
@@ -1002,26 +1044,85 @@ export default {
       return quadTree
     },
 
-    // Fit the viewport to the computed scene bounds with a margin factor
-    fitToContent(_margin = 0.1) {
+    getPrimaryStarWorldCenter() {
+      const sr = this._starsResult
+      if (!sr) return null
+
+      // Prefer Component 1; fallback to any with OrbitingComponent===0; else first
+      const primary =
+        (sr.byComponent && (sr.byComponent[1] || sr.byComponent['1'])) ||
+        Object.values(sr.byComponent || {}).find(e => toNumber(e.star?.OrbitingComponent, 0) === 0) ||
+        Object.values(sr.byComponent || {})[0]
+
+      if (!primary || !primary.marker) return null
+      const gp = primary.marker.getGlobalPosition()
+      return this.viewport.toWorld(gp.x, gp.y)
+    },
+
+    fitToContent() {
       if (!this.viewport) return
-      const bounds = this.computeSceneBounds(24)
-      console.log('fitToContent: computed bounds', bounds)
-      if (!bounds) return
+      // Pass 1: orbits + markers, fast
+      const b1 = this.computeSceneBounds(24, { includeLabels: false, includeMarkers: true })
+      if (!b1) return
 
-      this.viewport.snap(bounds.cx, bounds.cy, {
-        time: 0,
-        removeOnComplete: true,
-      })
-      this.viewport.fit(false, bounds.width, bounds.height)
+      const sFit = this.estimateScaleToFit(b1)
 
-      // refresh visuals at new zoom
+      // Pass 2: include labels using the target scale
+      const b2 = this.computeSceneBounds(24, { includeLabels: true, includeMarkers: true, assumeScale: sFit })
+
+      const desired = this.getPrimaryStarWorldCenter() || { x: b2.cx, y: b2.cy }
+
+      // Create a new bounds that is centered on desired and contains the original bounds
+      const leftExtent = desired.x - b2.xMin
+      const rightExtent = b2.xMax - desired.x
+      const newHalfWidth = Math.max(leftExtent, rightExtent)
+      const newXMin = desired.x - newHalfWidth
+      const newXMax = desired.x + newHalfWidth
+
+      const topExtent = desired.y - b2.yMin
+      const bottomExtent = b2.yMax - desired.y
+      const newHalfHeight = Math.max(topExtent, bottomExtent)
+      const newYMin = desired.y - newHalfHeight
+      const newYMax = desired.y + newHalfHeight
+
+      const newBounds = {
+        xMin: newXMin,
+        xMax: newXMax,
+        yMin: newYMin,
+        yMax: newYMax,
+        width: newXMax - newXMin,
+        height: newYMax - newYMin,
+        cx: desired.x,
+        cy: desired.y,
+      }
+
+      // Fit & center
+      this.viewport.fit(false, newBounds.width, newBounds.height)
+      this.viewport.snap(newBounds.cx, newBounds.cy, { time: 0, removeOnComplete: true })
+
       this._scheduleVisibleAnnotationsRefresh()
       this.redrawOrbitStrokes()
       this.redrawPhysicalBodyMarkers()
     },
 
+    scheduleInitPixi() {
+      if (this._initRaf) cancelAnimationFrame(this._initRaf)
+      this._initRaf = requestAnimationFrame(() => {
+        this._initRaf = null
+
+        // Only initialize when we actually have stars (bodies may be empty)
+        if (!Array.isArray(this.stars) || this.stars.length === 0) return
+        this.initPixi()
+      })
+    },
+
     initPixi() {
+      // extra safety: bail if stars not ready yet
+      if (!Array.isArray(this.stars) || this.stars.length === 0) {
+        console.warn('initPixi: stars not loaded yet')
+        return
+      }
+
       if (this.pixi) {
         this.pixi.destroy(true, true)
         this.pixi = null
@@ -1077,6 +1178,8 @@ export default {
         annotationRegistry: this._annotationRegistry,
       })
 
+      this._starsResult = starsResult
+
       drawBodiesForSystem(starsResult.root, this.systemBodies, starsResult, { color: 0x00ff00, alpha: 0.5, width: 2 }, this._orbitRegistry, this._annotationRegistry, {
         minBodyRadius: 3,
         sizeOpts: {
@@ -1130,11 +1233,8 @@ export default {
 
       this.viewport.addListener('zoomed', refreshBodies)
       this.viewport.addListener('pinch', refreshBodies)
-
-      // initial pass
-      this._scheduleVisibleAnnotationsRefresh()
-      this.redrawOrbitStrokes()
-      this.redrawPhysicalBodyMarkers()
+      
+      this.fitToContent()
     },
   },
   asyncComputed: {
