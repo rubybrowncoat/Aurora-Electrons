@@ -44,7 +44,7 @@ const bodyTypes = {
   11: 'Large Terrestrial Moon',
   14: 'Comet',
 }
-const renderOrbitBodyType = new Set([2, 3, 4, 5]) // 7, 8, 9, 10, 11
+const renderOrbitBodyType = new Set([2, 3, 4, 5, 7, 8, 9, 10, 11]) // 7, 8, 9, 10, 11
 const lunarBodyTypeIds = new Set([7, 8, 9, 10, 11])
 
 const isRenderOrbitBodyType = (id) => renderOrbitBodyType.has(toNumber(id, 0))
@@ -156,6 +156,7 @@ const starColor = (star) => {
 const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, opts = { orbitLine: true, keepLabelUpright: true, orbitRegistry: [], annotationRegistry: [], computedBodyPixelRadius: null, minBodyRadius: 3, labelPadPx: 8, parentWorldXkm: undefined, parentWorldYkm: undefined, nameText: undefined }) => {
   const orbitContainer = new PIXI.Container()
   orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
+  orbitContainer.cullable = true
 
   const isLunar = isLunarBodyType(bodyLike.BodyTypeID)
 
@@ -223,6 +224,7 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
       const w = style.width ?? 1
       g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
       g.drawCircle(0, 0, ax)
+      g.cullable = true
       g._orbitMeta = {
         baseWidth: w,
         color: style.color ?? 0x8aa1ff,
@@ -232,7 +234,10 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
         lastDrawnWidth: null,
       }
 
-      if (opts.orbitRegistry && Array.isArray(opts.orbitRegistry)) opts.orbitRegistry.push(g)
+      if (opts.orbitRegistry && Array.isArray(opts.orbitRegistry)) {
+        opts.orbitRegistry.push(g)
+      }
+
       orbitContainer.addChild(g)
     }
   } else {
@@ -264,6 +269,7 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
       const w = style.width ?? 1
       g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
       g.drawEllipse(cxSigned, 0, ax, by)
+      g.cullable = true
       g._orbitMeta = {
         baseWidth: w,
         color: style.color ?? 0x8aa1ff,
@@ -285,10 +291,11 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
   const physR = Math.max(1e-6, toNumber(opts.computedBodyPixelRadius, 0)) // avoid 0 for scale math
 
   // initial draw at the physical world radius; stroke will be normalized on first zoom refresh
-  marker.lineStyle(1, 0x000000, 1)
+  // marker.lineStyle(1, 0x000000, 1)
   marker.beginFill(0xffffff, 1)
   marker.drawCircle(0, 0, physR)
   marker.endFill()
+  marker.cullable = true
 
   // metadata to drive redraw-on-zoom (scale stays = 1 always)
   marker._bodyMeta = {
@@ -299,6 +306,7 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
     stroke: 0x000000,
     strokeAlpha: 1,
     lastDrawnWorldR: -1,
+    lastScale: 0,
   }
 
   if (Number.isFinite(localX) && Number.isFinite(localY)) {
@@ -321,6 +329,7 @@ const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x
     label.position.set(marker.x + (opts.labelPadPx ?? 8), marker.y)
     label._baseWpx = label.width
     label._baseHpx = label.height
+    label.cullable = true
     orbitContainer.addChild(label)
   }
 
@@ -879,38 +888,82 @@ export default {
 
     redrawPhysicalBodyMarkers() {
       if (!this._annotationRegistry || !this.viewport) return
-      const s = this.viewport.scale?.x || 1
-      const invS = 1 / s
 
-      for (const entry of this._annotationRegistry) {
+      const s = this.viewport.scale?.x || 1
+      const visible = this._getVisibleWorldRect(64)
+      const query = { x: visible.xMin, y: visible.yMin, width: visible.xMax - visible.xMin, height: visible.yMax - visible.yMin }
+
+      // Process only markers that intersect the viewport (fallback to all if no tree)
+      let entries
+      if (this._markerWorldTree) {
+        const hits = this._markerWorldTree.retrieve(query)
+        const seen = new Set()
+        entries = []
+        for (const h of hits) {
+          const e = h.entry
+          if (e && !seen.has(e)) {
+            seen.add(e)
+            entries.push(e)
+          }
+        }
+      } else {
+        entries = this._annotationRegistry
+      }
+
+      const EPS = 1e-3
+
+      for (const entry of entries) {
         const marker = entry?.marker
         const meta = marker && marker._bodyMeta
         if (!marker || !meta || !meta.isPhysical) continue
 
-        const physWorldR = meta.physWorldR
+        const physWorldR = meta.physWorldR || 0
         const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
 
-        // target on-screen radius = max(physical*s, minScreen)
+        // on-screen physical radius
         const physScreenR = physWorldR * s
-        const targetScreenR = Math.max(physScreenR, minScreenR)
-        const targetWorldR = targetScreenR * invS
 
-        if (approximatelyEquals(meta.lastDrawnWorldR ?? -1, targetWorldR, 1e-3)) continue
+        // scale factor to meet min on-screen radius, but never shrink below physical size
+        const clampSF = minScreenR > 0 && physScreenR > 0 ? minScreenR / physScreenR : 1
+        const newScale = Math.max(1, clampSF)
 
-        meta.lastDrawnWorldR = targetWorldR
-        marker.clear()
-        // 1 px stroke on screen -> stroke width in world units is (1 * invS)
-        // marker.lineStyle(1 * invS, meta.stroke, meta.strokeAlpha)
-        marker.beginFill(meta.fill, 1)
-        marker.drawCircle(0, 0, targetWorldR)
-        marker.endFill()
-
-        marker.eventMode = 'static'
-        marker.on('pointerdown', (...asd) => {
-          console.log('Marker clicked!', ...asd)
-        })
+        if (!approximatelyEquals(meta.lastScale ?? 0, newScale, EPS)) {
+          marker.scale.set(newScale, newScale)
+          meta.lastScale = newScale
+        }
       }
     },
+
+    // redrawPhysicalBodyMarkers() {
+    //   if (!this._annotationRegistry || !this.viewport) return
+    //   const s = this.viewport.scale?.x || 1
+    //   const invS = 1 / s
+
+    //   for (const entry of this._annotationRegistry) {
+    //     const marker = entry?.marker
+    //     const meta = marker && marker._bodyMeta
+    //     if (!marker || !meta || !meta.isPhysical) continue
+
+    //     const physWorldR = meta.physWorldR
+    //     const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
+
+    //     // target on-screen radius = max(physical*s, minScreen)
+    //     const physScreenR = physWorldR * s
+    //     const targetScreenR = Math.max(physScreenR, minScreenR)
+    //     const targetWorldR = targetScreenR * invS
+
+    //     if (approximatelyEquals(meta.lastDrawnWorldR ?? -1, targetWorldR, 1e-3)) continue
+
+    //     // Rerender
+    //     meta.lastDrawnWorldR = targetWorldR
+    //     marker.clear()
+    //     // 1 px stroke on screen -> stroke width in world units is (1 * invS)
+    //     // marker.lineStyle(1 * invS, meta.stroke, meta.strokeAlpha)
+    //     marker.beginFill(meta.fill, 1)
+    //     marker.drawCircle(0, 0, targetWorldR)
+    //     marker.endFill()
+    //   }
+    // },
 
     // Compute world-visible rectangle of the viewport (with optional padding)
     _getVisibleWorldRect(pad = 0) {
@@ -961,16 +1014,16 @@ export default {
       }
 
       // Hide everything first; we’ll re-enable the ones in view
-      for (const entry of this._annotationRegistry) {
-        if (entry.label) entry.label.renderable = false
-        if (entry.marker) entry.marker.renderable = false
-      }
+      // for (const entry of this._annotationRegistry) {
+      //   if (entry.label) entry.label.renderable = false
+      //   if (entry.marker) entry.marker.renderable = false
+      // }
 
       const candidates = []
 
       // Place labels + mark markers visible for entries in view
       for (const entry of entriesInView) {
-        if (entry.marker) entry.marker.renderable = true
+        // if (entry.marker) entry.marker.renderable = true
         if (entry.label) {
           this._placeLabel(entry)
           candidates.push({ entry, priority: this._labelPriority(entry) })
@@ -1400,6 +1453,7 @@ export default {
       this.viewport.addListener('zoomed', refreshStroke)
       this.viewport.addListener('pinch', refreshStroke)
 
+      this.viewport.addListener('moved', refreshBodies)
       this.viewport.addListener('zoomed', refreshBodies)
       this.viewport.addListener('pinch', refreshBodies)
 
