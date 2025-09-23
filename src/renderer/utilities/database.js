@@ -410,6 +410,39 @@ export const resetDatabase = (storagePath) => {
     timestamps: false,
   })
 
+  class StarType extends Model {}
+  StarType.init({
+    StellarTypeID: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+    },
+
+    SizeID: Sequelize.INTEGER,
+    AgeRangeID: Sequelize.INTEGER,
+
+    SpectralClass: Sequelize.TEXT,
+    SpectralNumber: Sequelize.INTEGER,
+    Checked: Sequelize.BOOLEAN,
+    NotPS: Sequelize.BOOLEAN,
+    MaxChance: Sequelize.INTEGER,
+    BDMaxChance: Sequelize.INTEGER,
+    SizeText: Sequelize.TEXT,
+    Luminosity: Sequelize.DOUBLE,
+    Mass: Sequelize.DOUBLE,
+    Temperature: Sequelize.INTEGER,
+    Radius: Sequelize.DOUBLE,
+    Red: Sequelize.INTEGER,
+    Green: Sequelize.INTEGER,
+    Blue: Sequelize.INTEGER,
+    MaxChanceOld: Sequelize.INTEGER,
+    ExtraJP: Sequelize.INTEGER,
+  }, {
+    sequelize,
+    modelName: 'StarType',
+    tableName: 'DIM_StellarType',
+    timestamps: false,
+  })
+
   class SystemBody extends Model {}
   SystemBody.init({
     SystemBodyID: {
@@ -789,6 +822,8 @@ export const resetDatabase = (storagePath) => {
   RaceSystemSurvey.belongsTo(Race, { foreignKey: 'RaceID', sourceKey: 'RaceID' })
   RaceSystemSurvey.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
 
+  Star.belongsTo(Game, { foreignKey: 'GameID', sourceKey: 'GameID' })
+  Star.belongsTo(StarType, { sourceKey: 'StarTypeID', targetKey: 'StellarTypeID', foreignKey: 'StarTypeID' })
   Star.belongsTo(System, { foreignKey: 'SystemID', sourceKey: 'SystemID' })
   Star.hasMany(SystemBody, { foreignKey: 'StarID', sourceKey: 'StarID' })
 
