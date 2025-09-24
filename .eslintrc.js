@@ -14,7 +14,7 @@ module.exports = {
   rules: {
     // StandardJS — The Rules
     indent: ['error', 2, { 
-      switchCase: 1,
+      'SwitchCase': 1,
       offsetTernaryExpressions: true,
     }],
     'comma-dangle': ['error', {
