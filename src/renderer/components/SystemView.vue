@@ -13,6 +13,7 @@
 import * as PIXI from 'pixi.js'
 
 import { clamp as _clamp } from 'lodash'
+import { color, hsl } from 'd3-color'
 
 import Quadtree from '@timohausmann/quadtree-js'
 import { Viewport } from 'pixi-viewport'
@@ -50,6 +51,181 @@ const lunarBodyTypeIds = new Set([7, 8, 9, 10, 11])
 const isRenderOrbitBodyType = (id) => renderOrbitBodyType.has(toNumber(id, 0))
 const isLunarBodyType = (id) => lunarBodyTypeIds.has(toNumber(id, 0))
 
+const intToHexStr = (n) => '#' + (n >>> 0).toString(16).padStart(6, '0')
+const toHexInt = (c) => parseInt(color(c).formatHex().slice(1), 16)
+const hslToInt = (h, s, l) => toHexInt(hsl(h, _clamp(s, 0, 1), _clamp(l, 0, 1)))
+const lightenInt = (hexInt, amt) => {
+  const c = hsl(intToHexStr(hexInt))
+  c.l = _clamp(c.l + (1 - c.l) * _clamp(amt, 0, 1), 0, 1)
+  return toHexInt(c)
+}
+const darkenInt = (hexInt, amt) => {
+  const c = hsl(intToHexStr(hexInt))
+  c.l = _clamp(c.l * (1 - _clamp(amt, 0, 1)), 0, 1)
+  return toHexInt(c)
+}
+const jitter = (seed) => {
+  const x = (toNumber(seed, 0) * 9301 + 49297) % 233280
+  return x / 233280 // 0..1
+}
+const pickBodyColor = (body) => {
+  // --- raw fields (defensive) ---
+  const t = body.SurfaceTemp ?? body.BaseTemp // °C
+  const hydro = toNumber(body.HydroID, 1) // 1..4
+  const rawHydroExt = toNumber(body.HydroExt, 0)
+  const hydroPct = rawHydroExt > 1 ? _clamp(rawHydroExt / 100, 0, 1) : _clamp(rawHydroExt, 0, 1)
+  const atm = toNumber(body.AtmosPress, 0) // ~bars
+  const terrain = toNumber(body.DominantTerrain, 0)
+  const type = toNumber(body.BodyTypeID, 0)
+  const ring = toNumber(body.Ring, 0)
+  const albedo = _clamp(toNumber(body.Albedo, 0.9), 0, 1)
+  const sid = toNumber(body.SystemBodyID, 0)
+
+  // --- type buckets from your mapping ---
+  const isAsteroid = type === 1
+  const isComet = type === 14
+  const isGasGiant = type === 4 || type === 5
+  const isTerrestrialLike = [2, 8, 9, 10, 11].includes(type)
+  const isDwarf = type === 3
+  const isSmallMoon = type === 7
+
+  // --- terrain palette (dominant cues) ---
+  const TERRAIN = {
+    10: 0xe8c07d,
+    22: 0xd5d0c4,
+    39: 0xe7984b,
+    31: 0xe0b476,
+    34: 0x91c76e,
+    4: 0x4fae5a,
+    30: 0x588f5d,
+    5: 0x1e8f3d,
+    27: 0x16a34a,
+    6: 0xa6c7d1,
+    23: 0xbfe9ff,
+    1: 0xa3a3a3,
+    3: 0x888c9a,
+    8: 0x5c8f64,
+    11: 0x6da090,
+    7: 0x3f5d2e,
+  }
+
+  // --- asteroids & comets ---
+  if (isAsteroid) {
+    const base = 0x7a7a7a
+    const j = (jitter(sid) - 0.5) * 0.25 // +/-12.5%
+    const mixed = j >= 0 ? lightenInt(base, j) : darkenInt(base, -j)
+    const rocky = darkenInt(mixed, 0.2)
+
+    return { fill: rocky, stroke: darkenInt(rocky, 0.35), ring: null }
+  }
+
+  if (isComet) {
+    const ice = 0xbfd8f7 // icy gray-blue
+    const j = (jitter(sid) - 0.5) * 0.2
+    const c = j >= 0 ? lightenInt(ice, j) : darkenInt(ice, -j)
+
+    return { fill: c, stroke: darkenInt(c, 0.35), ring: null }
+  }
+
+  // --- gas & super-jovians ---
+  if (isGasGiant) {
+    const T = t ?? 80
+    let base
+    if (T < -50) base = hslToInt(200, 0.35, 0.7) // cold: bluish
+    else if (T < 20) base = hslToInt(38, 0.35, 0.72) // cool: pale tan
+    else if (T < 120) base = hslToInt(28, 0.45, 0.6) // warm: beige
+    else base = hslToInt(18, 0.55, 0.48) // hot: orange-brown
+    // albedo tweak + super-jovians a bit deeper
+    base = albedo > 0.9 ? lightenInt(base, 0.06) : darkenInt(base, 0.06 * (1 - albedo))
+    if (type === 5) base = darkenInt(base, 0.08)
+    const stroke = darkenInt(base, 0.25)
+    const ringColor = ring ? lightenInt(base, 0.18) : null
+
+    return { fill: base, stroke, ring: ringColor }
+  }
+
+  // --- water-first logic (terrestrial-like, dwarfs, small moons) ---
+  const useTerrain = () => {
+    if (terrain && TERRAIN[terrain]) {
+      let base = TERRAIN[terrain]
+      const air = _clamp(atm / 1.0, 0, 1) // richer with thicker air up to ~1 bar
+      base = lightenInt(base, 0.06 * air)
+      return base
+    }
+    return null
+  }
+
+  const waterStateColor = () => {
+    if (hydro === 3 && hydroPct > 0) {
+      // liquid water
+      let ocean = 0x2a7fff
+      ocean = lightenInt(ocean, 0.15 * (1 - hydroPct))
+      return ocean
+    }
+    if (hydro === 4 && hydroPct > 0) {
+      // ice sheet
+      return 0xcfefff
+    }
+    if (hydro === 2 && hydroPct > 0) {
+      // vapor/cloudy
+      return 0x8ed8ff
+    }
+    return null
+  }
+
+  const climateFallback = () => {
+    if (t === undefined || t === null) return null
+    if (t < -30) return 0xc9e8ff // icy
+    if (t < 5) return 0xa6c7d1 // tundra
+    if (t < 25) return 0x6dbb7a // temperate
+    if (t < 45) return 0x9fcb6c // warm grass/savanna
+    return 0xe0a763 // hot desert
+  }
+
+  const finish = (base) => {
+    // Slight desat for dwarfs/small moons; slight boost for big terrestrial
+    if (isDwarf || isSmallMoon) base = darkenInt(base, 0.06)
+    if (isTerrestrialLike && (type === 2 || type === 11 || type === 9)) base = lightenInt(base, 0.04)
+    // Atmosphere richness (thin airless → duller)
+    base = albedo > 0.95 ? lightenInt(base, 0.05) : base
+    const stroke = darkenInt(base, 0.35)
+    return { fill: base, stroke, ring: ring ? lightenInt(base, 0.18) : null }
+  }
+
+  // Small moons lean rocky/icy even without rich terrain
+  if (isSmallMoon) {
+    const w = waterStateColor()
+    if (w) return finish(w)
+    const base = t !== undefined && t < -50 ? 0xbfd8f7 : 0x9ba3ae
+    return finish(base)
+  }
+
+  // Dwarfs: often cold/icy; otherwise neutral rocky
+  if (isDwarf) {
+    const w = waterStateColor()
+    if (w) return finish(w)
+    const terr = useTerrain()
+    if (terr) return finish(terr)
+    const base = climateFallback() ?? 0x9ba3ae
+    return finish(base)
+  }
+
+  // Terrestrial-like (planets & bigger moons)
+  if (isTerrestrialLike) {
+    const w = waterStateColor()
+    if (w) return finish(w)
+    const terr = useTerrain()
+    if (terr) return finish(terr)
+    const base = climateFallback() ?? 0x9ba3ae
+    return finish(base)
+  }
+
+  // absolute fallback
+  const rocky = 0x9ba3ae
+
+  return { fill: rocky, stroke: 0x556070, ring: ring ? 0xb3bbc7 : null }
+}
+
 const unitsToPx = (u) => u * PX_PER_AU * WORLD_MAGNIFICATION
 const kmToPx = (km) => unitsToPx(km / AU_KM)
 
@@ -57,23 +233,20 @@ const TEXT_STYLES = {
   body: new PIXI.TextStyle({
     fill: 0xffffff,
     fontSize: 12,
-    align: 'left',
+    // align: 'left',
 
     dropShadow: true,
     dropShadowDistance: 1,
-    dropShadowBlur: 0,
-    dropShadowAlpha: 1,
+    // dropShadowBlur: 0,
+    // dropShadowAlpha: 1,
   }),
   star: new PIXI.TextStyle({
     fill: 0xffffff,
     fontSize: 16,
     fontWeight: 'bold',
-    align: 'center',
 
     dropShadow: true,
-    dropShadowDistance: 1,
-    dropShadowBlur: 0,
-    dropShadowAlpha: 1,
+    dropShadowDistance: 2,
   }),
 }
 
@@ -153,406 +326,6 @@ const starColor = (star) => {
   return ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff)
 }
 
-const drawOrbitLocal = (parentContainer, position, bodyLike, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, opts = { orbitLine: true, keepLabelUpright: true, orbitRegistry: [], annotationRegistry: [], computedBodyPixelRadius: null, minBodyRadius: 3, labelPadPx: 8, parentWorldXkm: undefined, parentWorldYkm: undefined, nameText: undefined }) => {
-  const orbitContainer = new PIXI.Container()
-  orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
-  orbitContainer.cullable = true
-
-  const isLunar = isLunarBodyType(bodyLike.BodyTypeID)
-
-  // ---- a/e in raw units from DB (AU for planets/comets, km for moons)
-  const aRaw = Math.max(0, toNumber(bodyLike.OrbitalDistance, 0))
-  let e = _clamp(toNumber(bodyLike.Eccentricity, 0), 0, 0.999)
-
-  // If e omitted, infer from DistanceToOrbitCentre using consistent units
-  if ((!e || e <= 0) && Number.isFinite(bodyLike.DistanceToOrbitCentre) && aRaw > 0) {
-    const cRaw = Math.max(0, toNumber(bodyLike.DistanceToOrbitCentre, 0))
-    e = _clamp(cRaw / aRaw, 0, 0.999)
-  }
-
-  // Convert a/b/c → **pixels** with correct unit branch
-  const bRaw = aRaw * Math.sqrt(1 - e * e)
-  const cRaw = aRaw * e
-
-  const toPx = (valRaw) => (isLunar ? unitsToPx(valRaw / AU_KM) : unitsToPx(valRaw))
-  const ax = toPx(aRaw) // px
-  const by = toPx(bRaw) // px
-  const cx = toPx(cRaw) // px
-
-  // Bearing angle (math degrees in DB)
-  const phiDeg = toNumber(bodyLike.EccentricityDirection, 0)
-  const phi = phiDeg * DEG2RAD
-  const cosφ = Math.cos(phi)
-  const sinφ = Math.sin(phi)
-
-  // Optional exact DB world position (km) -> local delta (px)
-  const xkm = toNumber(bodyLike.Xcor, NaN)
-  const ykm = toNumber(bodyLike.Ycor, NaN)
-  const pxkm = toNumber(opts.parentWorldXkm, NaN)
-  const pykm = toNumber(opts.parentWorldYkm, NaN)
-
-  let dxPx, dyPx
-  if (Number.isFinite(xkm) && Number.isFinite(ykm)) {
-    const dxkm = Number.isFinite(pxkm) && Number.isFinite(pykm) ? xkm - pxkm : xkm
-    const dykm = Number.isFinite(pxkm) && Number.isFinite(pykm) ? ykm - pykm : ykm
-    dxPx = unitsToPx(dxkm / AU_KM)
-    dyPx = unitsToPx(dykm / AU_KM)
-  }
-
-  const parentWorldRot = getWorldRotation(parentContainer)
-  const circleMode = isLunar || approximatelyEquals(e, 0, 1e-9)
-
-  let localX, localY
-  let cxSigned = 0
-
-  if (circleMode) {
-    // orientation irrelevant for circles; neutralize parent world rotation
-    orbitContainer.rotation = -parentWorldRot
-
-    if (Number.isFinite(dxPx) && Number.isFinite(dyPx) && (dxPx !== 0 || dyPx !== 0)) {
-      localX = dxPx
-      localY = dyPx
-    } else {
-      const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
-      const nu = (bearingDeg - 90) * DEG2RAD
-      localX = ax * Math.cos(nu)
-      localY = ax * Math.sin(nu)
-    }
-
-    if (opts.orbitLine && aRaw > 0) {
-      const g = new PIXI.Graphics()
-      const w = style.width ?? 1
-      g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
-      g.drawCircle(0, 0, ax)
-      g.cullable = true
-      g._orbitMeta = {
-        baseWidth: w,
-        color: style.color ?? 0x8aa1ff,
-        alpha: style.alpha ?? 0.55,
-        isCircle: true,
-        r: ax,
-        lastDrawnWidth: null,
-      }
-
-      if (opts.orbitRegistry && Array.isArray(opts.orbitRegistry)) {
-        opts.orbitRegistry.push(g)
-      }
-
-      orbitContainer.addChild(g)
-    }
-  } else {
-    // Ellipse: keep world orientation = φ even under rotated parent
-    orbitContainer.rotation = phi - parentWorldRot
-
-    if (Number.isFinite(dxPx) && Number.isFinite(dyPx) && (dxPx !== 0 || dyPx !== 0)) {
-      const lx = dxPx * cosφ + dyPx * sinφ
-      const ly = -dxPx * sinφ + dyPx * cosφ
-      const err = (s) => {
-        const u = lx - s * cx
-        const v = ly
-        return Math.abs((u * u) / (ax * ax) + (v * v) / (by * by) - 1)
-      }
-      cxSigned = err(-1) < err(+1) ? -cx : +cx
-      localX = lx
-      localY = ly
-    } else {
-      const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
-      const nu = (bearingDeg - 90) * DEG2RAD
-      // r in px directly (a is ax px)
-      const rPx = ax > 0 ? (ax * (1 - e * e)) / (1 + e * Math.cos(nu)) : 0
-      localX = rPx * Math.cos(nu)
-      localY = rPx * Math.sin(nu)
-    }
-
-    if (opts.orbitLine && (ax > 0 || by > 0)) {
-      const g = new PIXI.Graphics()
-      const w = style.width ?? 1
-      g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
-      g.drawEllipse(cxSigned, 0, ax, by)
-      g.cullable = true
-      g._orbitMeta = {
-        baseWidth: w,
-        color: style.color ?? 0x8aa1ff,
-        alpha: style.alpha ?? 0.55,
-        isCircle: false,
-        ax,
-        by,
-        cx: cxSigned,
-        lastDrawnWidth: null,
-      }
-
-      if (opts.orbitRegistry && Array.isArray(opts.orbitRegistry)) opts.orbitRegistry.push(g)
-      orbitContainer.addChild(g)
-    }
-  }
-
-  // ---- Body marker (physical world radius; redraw on zoom for min-screen clamp)
-  const marker = new PIXI.Graphics()
-  const physR = Math.max(1e-6, toNumber(opts.computedBodyPixelRadius, 0)) // avoid 0 for scale math
-
-  // initial draw at the physical world radius; stroke will be normalized on first zoom refresh
-  // marker.lineStyle(1, 0x000000, 1)
-  marker.beginFill(0xffffff, 1)
-  marker.drawCircle(0, 0, physR)
-  marker.endFill()
-  marker.cullable = true
-
-  // metadata to drive redraw-on-zoom (scale stays = 1 always)
-  marker._bodyMeta = {
-    isPhysical: true,
-    physWorldR: physR, // world px
-    minScreenR: Math.max(0, toNumber(opts.minBodyRadius, 0)), // px on screen
-    fill: 0xffffff,
-    stroke: 0x000000,
-    strokeAlpha: 1,
-    lastDrawnWorldR: -1,
-    lastScale: 0,
-  }
-
-  if (Number.isFinite(localX) && Number.isFinite(localY)) {
-    marker.position.set(localX, localY)
-  } else {
-    // Final fallback (unit-correct now)
-    const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
-    const nu = (bearingDeg - 90) * DEG2RAD
-    const rPx = circleMode ? ax : (ax * (1 - e * e)) / (1 + e * Math.cos(nu))
-    marker.position.set(rPx * Math.cos(nu), rPx * Math.sin(nu))
-  }
-
-  orbitContainer.addChild(marker)
-
-  // Label
-  let label = null
-  if (opts.nameText) {
-    label = new PIXI.Text(String(opts.nameText), TEXT_STYLES.body)
-    label.anchor.set(0, 0.5)
-    label.position.set(marker.x + (opts.labelPadPx ?? 8), marker.y)
-    label._baseWpx = label.width
-    label._baseHpx = label.height
-    label.cullable = true
-    orbitContainer.addChild(label)
-  }
-
-  parentContainer.addChild(orbitContainer)
-
-  // Now adjust label rotation accurately using WORLD rotation, but only if needed
-  if (label) {
-    const desired = opts.keepLabelUpright ? -getWorldRotation(orbitContainer) : -getWorldRotation(parentContainer)
-    if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
-  }
-
-  if (opts.annotationRegistry && Array.isArray(opts.annotationRegistry)) {
-    opts.annotationRegistry.push({
-      orbitContainer,
-      marker,
-      label,
-      keepLabelUpright: !!opts.keepLabelUpright,
-      bodyTypeId: bodyLike.BodyTypeID,
-      labelPadPx: opts.labelPadPx ?? 8,
-
-      isPhysicalSizeBody: true,
-      computedBodyPixelRadius: physR, // world px
-      minBodyRadius: Math.max(0, toNumber(opts.minBodyRadius, 0)), // screen px
-    })
-  }
-
-  return { orbitContainer, marker }
-}
-
-const drawSystem = (stage, system, stars, opts = {}) => {
-  const { origin = { x: 0, y: 0 }, orbitStyle = { color: 0x6aa7ff, alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 } } = opts
-
-  const orbitRegistry = opts.orbitRegistry || []
-  const annotationRegistry = opts.annotationRegistry || []
-
-  const root = new PIXI.Container()
-  root.position.set(toNumber(origin.x), toNumber(origin.y))
-  stage.addChild(root)
-
-  // Build index by Component and by StarID
-  const byComponent = new Map()
-  const byStarID = new Map()
-  for (const s of stars) byComponent.set(toNumber(s.Component, 1), s)
-
-  // Sort by hierarchy depth so parents get drawn first
-  const compToParent = (s) => toNumber(s.OrbitingComponent, 0)
-  const depthOf = (s, seen = new Set()) => {
-    const parentC = compToParent(s)
-    if (!parentC) return 0
-    if (seen.has(s)) return 0
-    seen.add(s)
-    const parent = byComponent.get(parentC)
-    return parent ? 1 + depthOf(parent, seen) : 0
-  }
-  const ordered = [...stars].sort((a, b) => depthOf(a) - depthOf(b))
-
-  // Draw
-  const drawnByComponent = new Map()
-  for (const [index, star] of ordered.entries()) {
-    const comp = toNumber(star.Component, 1)
-    const parentComp = toNumber(star.OrbitingComponent, 0)
-
-    // Choose parent container & local focus point
-    let parentContainer = root
-    let parentLocal = { x: 0, y: 0 }
-    let parentWorldXkm, parentWorldYkm
-    if (parentComp) {
-      const parentDrawn = drawnByComponent.get(parentComp)
-      if (parentDrawn) {
-        parentContainer = parentDrawn.orbitContainer
-        parentLocal = parentDrawn.marker.position // orbit about the parent's current position
-        parentWorldXkm = toNumber(parentDrawn.star.Xcor, NaN)
-        parentWorldYkm = toNumber(parentDrawn.star.Ycor, NaN)
-      }
-    }
-
-    const bodyLike = {
-      BodyTypeID: 0, // star
-      OrbitalDistance: star.OrbitalDistance,
-      Eccentricity: star.Eccentricity,
-      EccentricityDirection: star.EccentricityDirection,
-      Bearing: star.Bearing,
-      DistanceToParent: star.DistanceToParent,
-      DistanceToOrbitCentre: star.DistanceToOrbitCentre,
-      Xcor: star.Xcor,
-      Ycor: star.Ycor,
-    }
-
-    const radiusPx = starPixelRadius(star, starSize)
-    const color = starColor(star)
-
-    // Draw the star's ORBIT path and a marker that supports min-screen clamping
-    const { orbitContainer, marker } = drawOrbitLocal(
-      parentContainer,
-      parentLocal,
-      bodyLike,
-      { color, alpha: orbitStyle.alpha, width: orbitStyle.width },
-      {
-        orbitLine: true,
-        keepLabelUpright: true,
-        parentWorldXkm,
-        parentWorldYkm,
-        orbitRegistry,
-        annotationRegistry,
-        // give stars their physical size in world px
-        computedBodyPixelRadius: radiusPx,
-        // and a bigger on-screen minimum than planets
-        minBodyRadius: opts.minStarRadius ?? 6,
-      }
-    )
-
-    // color the marker like the star
-    if (marker && marker._bodyMeta) {
-      marker._bodyMeta.fill = color
-      marker.clear()
-      marker.beginFill(color, 1)
-      marker.drawCircle(0, 0, marker._bodyMeta.physWorldR)
-      marker.endFill()
-    }
-
-    // Label for star (bigger, always shown)
-    const labelText = starName(index, system)
-    const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
-    starLabel.anchor.set(0.5, 0)
-    starLabel.position.set(marker.position.x, marker.position.y + (radiusPx + 6))
-    starLabel._baseWpx = starLabel.width
-    starLabel._baseHpx = starLabel.height
-    const desired = -getWorldRotation(orbitContainer)
-    if (!approximatelyEquals(starLabel.rotation, desired, 1e-6)) starLabel.rotation = desired
-    orbitContainer.addChild(starLabel)
-
-    // register star label & marker for visibility-based refresh & constant-size scaling
-    if (annotationRegistry && Array.isArray(annotationRegistry)) {
-      annotationRegistry.push({
-        orbitContainer,
-        marker,
-        label: starLabel,
-        keepLabelUpright: true,
-        bodyTypeId: 0, // star
-        labelPadPx: 6,
-        starRadiusPx: radiusPx,
-      })
-    }
-
-    drawnByComponent.set(comp, { orbitContainer, marker, star })
-    byStarID.set(toNumber(star.StarID), { orbitContainer, marker, star })
-  }
-
-  return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
-}
-
-function drawBodyAround(parentContainer, parentLocalPos, body, style = { color: 0x8aa1ff, alpha: 0.55, width: 1 }, parentWorldXkm, parentWorldYkm, orbitRegistry = [], annotationRegistry = [], extras = {}) {
-  const { sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, minBodyRadius = 3 } = extras
-
-  const rPx = Math.max(bodyPixelRadius(body, sizeOpts), 0)
-
-  return drawOrbitLocal(parentContainer, parentLocalPos, body, style, {
-    orbitLine: isRenderOrbitBodyType(body.BodyTypeID),
-    keepLabelUpright: true,
-    nameText: systemBodyName(body),
-    parentWorldXkm,
-    parentWorldYkm,
-    orbitRegistry,
-    annotationRegistry,
-    computedBodyPixelRadius: rPx,
-    minBodyRadius,
-  })
-}
-
-function drawBodiesForSystem(rootContainer, bodies, starsResult, style = { color: 0x8aa1ff, alpha: 0.55, width: 1 }, orbitRegistry = [], annotationRegistry = [], extras = {}) {
-  // index bodies and a depth function that climbs ParentBodyID
-  const byId = new Map()
-  for (const b of bodies) byId.set(toNumber(b.SystemBodyID, -1), b)
-
-  const depthMemo = new Map()
-  const depthOf = (b) => {
-    const id = toNumber(b.SystemBodyID, -1)
-    if (depthMemo.has(id)) return depthMemo.get(id)
-    const pid = toNumber(b.ParentBodyID, 0)
-    let d = 0
-    if (pid && byId.has(pid)) d = 1 + depthOf(byId.get(pid))
-    depthMemo.set(id, d)
-    return d
-  }
-
-  // draw parents before children
-  const ordered = [...bodies].sort((a, b) => depthOf(a) - depthOf(b))
-
-  // keep where each drawn body lives (container, marker, json)
-  const drawnByBodyId = new Map()
-
-  const out = []
-  for (const body of ordered) {
-    const sid = toNumber(body.StarID, NaN)
-    const starRef = starsResult.byStarID[String(sid)] || starsResult.byStarID[sid]
-
-    // choose parent anchor
-    let parentContainer = rootContainer
-    let parentLocalPos = { x: 0, y: 0 }
-    let parentWorldXkm, parentWorldYkm
-
-    const parentBodyId = toNumber(body.ParentBodyID, 0)
-    if (parentBodyId && drawnByBodyId.has(parentBodyId)) {
-      const parentDrawn = drawnByBodyId.get(parentBodyId)
-      parentContainer = parentDrawn.orbitContainer
-      parentLocalPos = parentDrawn.marker.position
-      parentWorldXkm = toNumber(parentDrawn.body.Xcor, NaN)
-      parentWorldYkm = toNumber(parentDrawn.body.Ycor, NaN)
-    } else if (starRef) {
-      parentContainer = starRef.orbitContainer
-      parentLocalPos = starRef.marker.position
-      parentWorldXkm = starRef.star && toNumber(starRef.star.Xcor, NaN)
-      parentWorldYkm = starRef.star && toNumber(starRef.star.Ycor, NaN)
-    }
-
-    const r = drawBodyAround(parentContainer, parentLocalPos, body, style, parentWorldXkm, parentWorldYkm, orbitRegistry, annotationRegistry, extras)
-
-    drawnByBodyId.set(toNumber(body.SystemBodyID, -1), { ...r, body })
-    out.push(r)
-  }
-  return out
-}
-
 export default {
   name: 'SystemView',
   props: {
@@ -591,10 +364,114 @@ export default {
       cancelAnimationFrame(this._initRaf)
       this._initRaf = null
     }
+
+    if (this._texCache) {
+      for (const k of Object.keys(this._texCache)) {
+        this._texCache[k].destroy(true)
+      }
+      this._texCache = null
+    }
   },
   methods: {
     loog(...asd) {
       console.log(...asd)
+    },
+
+    _makeTriangleTexture(size = 96) {
+      const g = new PIXI.Graphics()
+      const m = size * 0.5
+      // draw a centered triangle; white so we can tint
+      g.beginFill(0xffffff, 1)
+      g.moveTo(m, m - m)
+      g.lineTo(m - m, m + m)
+      g.lineTo(m + m, m + m)
+      g.closePath()
+      g.endFill()
+      const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
+      g.destroy(true)
+      return tex
+    },
+
+    _makeSquareTexture(size = 96) {
+      const g = new PIXI.Graphics()
+      const m = size * 0.5
+      // draw a centered square; white so we can tint
+      g.beginFill(0xffffff, 1)
+      g.drawRect(m - m, m - m, size, size)
+      g.endFill()
+      const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
+      g.destroy(true)
+      return tex
+    },
+
+    _makeRectTexture(size = 96, aspect = 0.4) {
+      const g = new PIXI.Graphics()
+      const w = size
+      const h = Math.max(1, Math.round(size * aspect)) // “flat square”
+      const x = (size - w) * 0.5
+      const y = (size - h) * 0.5
+      g.beginFill(0xffffff, 1)
+      g.drawRect(x, y, w, h)
+      g.endFill()
+      const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
+      g.destroy(true)
+      return tex
+    },
+
+    _makeCircleTexture(size = 96) {
+      // size: texture size in pixels (screen px), power of two is nice but not required
+      const g = new PIXI.Graphics()
+      const r = size / 2
+      g.beginFill(0xffffff, 1) // white; we'll tint per marker
+      g.drawCircle(r, r, r)
+      g.endFill()
+      const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
+      g.destroy(true)
+      return tex
+    },
+
+    _getShapeTexture(shape = 'circle', aspect = 0.4) {
+      this._texCache ||= {}
+      const key = `${shape}:${aspect}`
+      if (this._texCache[key]) return this._texCache[key]
+
+      let tex
+      if (shape === 'triangle') tex = this._makeTriangleTexture(256)
+      else if (shape === 'square') tex = this._makeSquareTexture(256)
+      else if (shape === 'flatSquare') tex = this._makeRectTexture(256, aspect)
+      else tex = this._makeCircleTexture(256) // fallback
+
+      this._texCache[key] = tex
+      return tex
+    },
+
+    _markerSpecForBody(body) {
+      const type = toNumber(body.BodyTypeID, 0)
+      if (type === 1) {
+        return {
+          shape: 'square',
+          aspect: 1,
+          rotation: 0,
+          texture: this._getShapeTexture('square'),
+        }
+      }
+
+      if (type === 14) {
+        return {
+          shape: 'triangle',
+          aspect: 1,
+          rotation: 0,
+          texture: this._getShapeTexture('triangle'),
+        }
+      }
+
+      // Everything else → circle (what you had)
+      return {
+        shape: 'circle',
+        aspect: 1,
+        rotation: 0,
+        texture: this._getShapeTexture('circle'),
+      }
     },
 
     // --- WORLD MARKERS -------------------------------------------------------
@@ -613,12 +490,12 @@ export default {
         // center in WORLD px
         const cw = this.viewport.toWorld(gp.x, gp.y)
 
-        const hw = 10,
-          hh = 10 // 20x20 hit box around the marker
-        const x = cw.x - hw,
-          y = cw.y - hh,
-          w = hw * 2,
-          h = hh * 2
+        const hw = 10
+        const hh = 10 // 20x20 hit box around the marker
+        const x = cw.x - hw
+        const y = cw.y - hh
+        const w = hw * 2
+        const h = hh * 2
 
         boxes.push({ x, y, width: w, height: h, entry })
         this._boundsExpandRect(bounds, x, y, x + w, y + h)
@@ -661,8 +538,8 @@ export default {
         const aabb = m.aabbWorld || (this._cacheOrbitAABB(g), m.aabbWorld)
         if (!aabb) continue
 
-        const x = aabb.xMin,
-          y = aabb.yMin
+        const x = aabb.xMin
+        const y = aabb.yMin
         const w = aabb.xMax - aabb.xMin
         const h = aabb.yMax - aabb.yMin
 
@@ -692,7 +569,7 @@ export default {
       return qt
     },
 
-    _labelPriority(entry) {
+    _annotationPriority(entry) {
       switch (entry.bodyTypeId) {
         case 0:
           return 1000 // stars highest
@@ -721,17 +598,6 @@ export default {
       }
     },
 
-    // _labelScreenRect(label) {
-    //   // Convert label world bounds to screen-space rect
-    //   const b = label.getBounds()
-    //   const p1 = this.viewport.toScreen(b.x, b.y)
-    //   const p2 = this.viewport.toScreen(b.x + b.width, b.y + b.height)
-    //   const x = Math.min(p1.x, p2.x)
-    //   const y = Math.min(p1.y, p2.y)
-    //   const w = Math.abs(p2.x - p1.x)
-    //   const h = Math.abs(p2.y - p1.y)
-    //   return { x, y, w, h }
-    // },
     _labelScreenRect(label) {
       // getBounds() returns global (stage) coordinates in Pixi v6
       const b = label.getBounds()
@@ -747,9 +613,14 @@ export default {
       const s = this.viewport?.scale?.x || 1
       const meta = entry?.marker?._bodyMeta
       if (!meta) return 0
-      const physWorldR = meta.physWorldR || 0
+
+      // If anisotropic, use the larger half-size.
+      const halfW = meta.physHalfWWorld ?? meta.physWorldR ?? 0
+      const halfH = meta.physHalfHWorld ?? meta.physWorldR ?? 0
+      const maxHalf = Math.max(halfW, halfH)
+
       const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
-      return Math.max(physWorldR * s, minScreenR)
+      return Math.max(maxHalf * s, minScreenR)
     },
 
     // Compute & cache an orbit's WORLD-space AABB into g._orbitMeta.aabbWorld
@@ -843,49 +714,6 @@ export default {
       }
     },
 
-    // redrawOrbitStrokes() {
-    //   if (!this._orbitRegistry || !this.viewport) return
-
-    //   const s = this.viewport.scale?.x || 1
-    //   const visible = this._getVisibleWorldRect(0)
-    //   const MIN_ORBIT_SCREEN_R = 1.5
-
-    //   for (const g of this._orbitRegistry) {
-    //     const m = g._orbitMeta
-    //     if (!m) continue
-
-    //     // Quick LOD
-    //     const radiusWorld = m.radiusWorld ?? (m.isCircle ? m.r : Math.max(m.ax, m.by))
-    //     const radiusScreen = radiusWorld * s
-    //     if (radiusScreen < MIN_ORBIT_SCREEN_R) {
-    //       g.renderable = false
-    //       continue
-    //     }
-
-    //     // Cached AABB (fallback to compute if missing)
-    //     const box = m.aabbWorld || (this._cacheOrbitAABB(g), m.aabbWorld)
-    //     if (!box) {
-    //       g.renderable = false
-    //       continue
-    //     }
-
-    //     const intersects = !(box.xMax < visible.xMin || box.xMin > visible.xMax || box.yMax < visible.yMin || box.yMin > visible.yMax)
-
-    //     g.renderable = intersects
-    //     if (!g.renderable) continue
-
-    //     // keep constant stroke width
-    //     const w = m.baseWidth / s
-    //     if (approximatelyEquals(m.lastDrawnWidth ?? -1, w, 1e-3)) continue
-    //     m.lastDrawnWidth = w
-
-    //     g.clear()
-    //     g.lineStyle(w, m.color, m.alpha)
-    //     if (m.isCircle) g.drawCircle(0, 0, m.r)
-    //     else g.drawEllipse(m.cx, 0, m.ax, m.by)
-    //   }
-    // },
-
     redrawPhysicalBodyMarkers() {
       if (!this._annotationRegistry || !this.viewport) return
 
@@ -920,50 +748,25 @@ export default {
         const physWorldR = meta.physWorldR || 0
         const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
 
-        // on-screen physical radius
+        const s = this.viewport.scale?.x || 1
         const physScreenR = physWorldR * s
 
-        // scale factor to meet min on-screen radius, but never shrink below physical size
-        const clampSF = minScreenR > 0 && physScreenR > 0 ? minScreenR / physScreenR : 1
-        const newScale = Math.max(1, clampSF)
+        // Extra scale needed to satisfy the minimum on-screen radius.
+        const clampScale = minScreenR > 0 && physScreenR > 0 ? Math.max(1, minScreenR / physScreenR) : 1
 
-        if (!approximatelyEquals(meta.lastScale ?? 0, newScale, EPS)) {
-          marker.scale.set(newScale, newScale)
-          meta.lastScale = newScale
+        // Preserve the sprite's base scale (physical world size) if present.
+        const baseX = meta.baseScaleX ?? 1
+        const baseY = meta.baseScaleY ?? baseX
+
+        const sx = baseX * clampScale
+        const sy = baseY * clampScale
+
+        if (!approximatelyEquals(marker.scale.x, sx, EPS) || !approximatelyEquals(marker.scale.y, sy, EPS)) {
+          marker.scale.set(sx, sy)
+          meta.lastClampScale = clampScale
         }
       }
     },
-
-    // redrawPhysicalBodyMarkers() {
-    //   if (!this._annotationRegistry || !this.viewport) return
-    //   const s = this.viewport.scale?.x || 1
-    //   const invS = 1 / s
-
-    //   for (const entry of this._annotationRegistry) {
-    //     const marker = entry?.marker
-    //     const meta = marker && marker._bodyMeta
-    //     if (!marker || !meta || !meta.isPhysical) continue
-
-    //     const physWorldR = meta.physWorldR
-    //     const minScreenR = entry.minBodyRadius ?? meta.minScreenR ?? 0
-
-    //     // target on-screen radius = max(physical*s, minScreen)
-    //     const physScreenR = physWorldR * s
-    //     const targetScreenR = Math.max(physScreenR, minScreenR)
-    //     const targetWorldR = targetScreenR * invS
-
-    //     if (approximatelyEquals(meta.lastDrawnWorldR ?? -1, targetWorldR, 1e-3)) continue
-
-    //     // Rerender
-    //     meta.lastDrawnWorldR = targetWorldR
-    //     marker.clear()
-    //     // 1 px stroke on screen -> stroke width in world units is (1 * invS)
-    //     // marker.lineStyle(1 * invS, meta.stroke, meta.strokeAlpha)
-    //     marker.beginFill(meta.fill, 1)
-    //     marker.drawCircle(0, 0, targetWorldR)
-    //     marker.endFill()
-    //   }
-    // },
 
     // Compute world-visible rectangle of the viewport (with optional padding)
     _getVisibleWorldRect(pad = 0) {
@@ -1013,12 +816,6 @@ export default {
         entriesInView = this._annotationRegistry
       }
 
-      // Hide everything first; we’ll re-enable the ones in view
-      // for (const entry of this._annotationRegistry) {
-      //   if (entry.label) entry.label.renderable = false
-      //   if (entry.marker) entry.marker.renderable = false
-      // }
-
       const candidates = []
 
       // Place labels + mark markers visible for entries in view
@@ -1026,7 +823,7 @@ export default {
         // if (entry.marker) entry.marker.renderable = true
         if (entry.label) {
           this._placeLabel(entry)
-          candidates.push({ entry, priority: this._labelPriority(entry) })
+          candidates.push({ entry, priority: this._annotationPriority(entry) })
         }
       }
 
@@ -1063,48 +860,6 @@ export default {
       }
     },
 
-    // refreshVisibleAnnotations() {
-    //   if (!this._annotationRegistry || !this.viewport) return
-    //   const rect = this._getVisibleWorldRect(64) // small padding
-    //   const candidates = []
-
-    //   for (const entry of this._annotationRegistry) {
-    //     const visible = this._isMarkerVisible(entry, rect)
-
-    //     if (!visible) {
-    //       if (entry.label) entry.label.renderable = false
-    //       if (entry.marker) entry.marker.renderable = false
-    //       continue
-    //     }
-
-    //     if (entry.marker) entry.marker.renderable = true
-
-    //     // label placement
-    //     if (entry.label) {
-    //       this._placeLabel(entry)
-    //       candidates.push({ entry, priority: this._labelPriority(entry) })
-    //     }
-    //   }
-
-    //   // Resolve overlaps by hierarchy priority (higher wins)
-    //   if (candidates.length) {
-    //     candidates.sort((a, b) => b.priority - a.priority)
-    //     const accepted = []
-    //     for (const c of candidates) {
-    //       const r = this._labelScreenRect(c.entry.label)
-    //       let overlaps = false
-    //       for (const ar of accepted) {
-    //         if (this._rectsOverlap(r, ar)) {
-    //           overlaps = true
-    //           break
-    //         }
-    //       }
-    //       c.entry.label.renderable = !overlaps
-    //       if (!overlaps) accepted.push(r)
-    //     }
-    //   }
-    // },
-
     _scheduleVisibleAnnotationsRefresh() {
       if (this._annotationRaf) return
       this._annotationRaf = requestAnimationFrame(() => {
@@ -1125,7 +880,7 @@ export default {
       const offset = effRpx + padPx
 
       // Choose a consistent side
-      const side = entry.bodyTypeId === 0 ? 'S' : 'E' // stars below, bodies to the right
+      const side = 'E' // entry.bodyTypeId === 0 ? 'S' : 'E' // stars below, bodies to the right
 
       // Marker global (stage) position
       const g = oc.toGlobal(marker.position)
@@ -1136,25 +891,20 @@ export default {
       else if (side === 'S') ty += offset
       else if (side === 'N') ty -= offset
 
-      // Convert target stage point back to the orbit container's local space
-      const local = oc.toLocal({ x: tx, y: ty })
-
-      // Update position only if it actually changed (prevents tiny thrashing)
-      if (!approximatelyEquals(label.x, local.x, 1e-3) || !approximatelyEquals(label.y, local.y, 1e-3)) {
-        label.position.set(local.x, local.y)
+      // Convert STAGE → WORLD (viewport) coords, because labelLayer is a child of viewport
+      const world = this.viewport.toWorld(tx, ty)
+      if (!approximatelyEquals(label.x, world.x, 1e-3) || !approximatelyEquals(label.y, world.y, 1e-3)) {
+        label.position.set(world.x, world.y)
       }
 
-      // Keep text upright relative to the world
-      if (entry.keepLabelUpright) {
-        const desired = -getWorldRotation(oc)
-        if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
-      }
-
-      // Maintain constant font size on screen
+      // Keep text upright and constant size on screen
       const s = this.viewport.scale?.x || 1
       const invS = 1 / s
       if (!approximatelyEquals(label.scale?.x, invS, 1e-3) || !approximatelyEquals(label.scale?.y, invS, 1e-3)) {
         label.scale.set(invS, invS)
+      }
+      if (!approximatelyEquals(label.rotation, 0, 1e-6)) {
+        label.rotation = 0
       }
     },
 
@@ -1337,6 +1087,437 @@ export default {
       this.redrawPhysicalBodyMarkers()
     },
 
+    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { color: 0x6aa7ff, alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, labelPadPx = 8, markerProvider = null } = {}) {
+      const root = new PIXI.Container()
+      root.position.set(toNumber(origin.x), toNumber(origin.y))
+      this.worldLayer.addChild(root)
+
+      // Build index by Component and by StarID
+      const byComponent = new Map()
+      const byStarID = new Map()
+      for (const s of stars) byComponent.set(toNumber(s.Component, 1), s)
+
+      // Sort by hierarchy depth so parents get drawn first
+      const compToParent = (s) => toNumber(s.OrbitingComponent, 0)
+      const depthOf = (s, seen = new Set()) => {
+        const parentC = compToParent(s)
+        if (!parentC) return 0
+        if (seen.has(s)) return 0
+        seen.add(s)
+        const parent = byComponent.get(parentC)
+        return parent ? 1 + depthOf(parent, seen) : 0
+      }
+      const ordered = [...stars].sort((a, b) => depthOf(a) - depthOf(b))
+
+      // Draw
+      const drawnByComponent = new Map()
+      for (const [index, star] of ordered.entries()) {
+        const comp = toNumber(star.Component, 1)
+        const parentComp = toNumber(star.OrbitingComponent, 0)
+
+        // Choose parent container & local focus point
+        let parentContainer = root
+        let parentLocal = { x: 0, y: 0 }
+        let parentWorldXkm, parentWorldYkm
+        if (parentComp) {
+          const parentDrawn = drawnByComponent.get(parentComp)
+          if (parentDrawn) {
+            parentContainer = parentDrawn.orbitContainer
+            parentLocal = parentDrawn.marker.position // orbit about the parent's current position
+            parentWorldXkm = toNumber(parentDrawn.star.Xcor, NaN)
+            parentWorldYkm = toNumber(parentDrawn.star.Ycor, NaN)
+          }
+        }
+
+        const bodyLike = {
+          BodyTypeID: 0, // star
+          OrbitalDistance: star.OrbitalDistance,
+          Eccentricity: star.Eccentricity,
+          EccentricityDirection: star.EccentricityDirection,
+          Bearing: star.Bearing,
+          DistanceToParent: star.DistanceToParent,
+          DistanceToOrbitCentre: star.DistanceToOrbitCentre,
+          Xcor: star.Xcor,
+          Ycor: star.Ycor,
+        }
+
+        const radiusPx = starPixelRadius(star, starSize)
+        const color = starColor(star)
+
+        // Draw the star's ORBIT path and a marker that supports min-screen clamping
+        const { orbitContainer, marker } = this.drawOrbit(bodyLike, {
+          parentContainer,
+          position: parentLocal,
+          orbitLine: true,
+          keepLabelUpright: true,
+          style: { color, alpha: orbitStyle.alpha, width: orbitStyle.width },
+          parentWorldXkm,
+          parentWorldYkm,
+          computedBodyPixelRadius: radiusPx,
+          minBodyRadius: minStarRadius ?? 6,
+          markerProvider,
+        })
+
+        if (marker && marker._bodyMeta) {
+          marker._bodyMeta.fill = color
+          if (marker.tint !== undefined) {
+            marker.tint = color // Sprite path
+          } else if (marker.clear) {
+            // Graphics fallback
+            marker.clear()
+            marker.beginFill(color, 1)
+            marker.drawCircle(0, 0, marker._bodyMeta.physWorldR)
+            marker.endFill()
+          }
+        }
+
+        // Label for star (bigger, always shown)
+        const labelText = starName(index, system)
+        const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
+        starLabel.anchor.set(0, 0.5)
+        starLabel.position.set(marker.position.x + radiusPx + labelPadPx, marker.position.y)
+        starLabel._baseWpx = starLabel.width
+        starLabel._baseHpx = starLabel.height
+        const desired = -getWorldRotation(orbitContainer)
+        if (!approximatelyEquals(starLabel.rotation, desired, 1e-6)) starLabel.rotation = desired
+        // orbitContainer.addChild(starLabel)
+
+        // register star label & marker for visibility-based refresh & constant-size scaling
+        if (this._annotationRegistry && Array.isArray(this._annotationRegistry)) {
+          this._annotationRegistry.push({
+            orbitContainer,
+            marker,
+            label: starLabel,
+            keepLabelUpright: true,
+            bodyTypeId: 0, // star
+            labelPadPx: 6,
+            starRadiusPx: radiusPx,
+          })
+        }
+
+        drawnByComponent.set(comp, { orbitContainer, marker, star })
+        byStarID.set(toNumber(star.StarID), { orbitContainer, marker, star })
+      }
+
+      return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
+    },
+
+    drawBodiesForSystem(bodies, { style = { color: 0x32cd32, alpha: 1, width: 2 }, sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, keepLabelUpright = true, labelPadPx = 8, minBodyRadius = 4, markerProvider = null } = {}) {
+      // index bodies and a depth function that climbs ParentBodyID
+      const byId = new Map()
+      for (const b of bodies) byId.set(toNumber(b.SystemBodyID, -1), b)
+
+      const depthMemo = new Map()
+      const depthOf = (b) => {
+        const id = toNumber(b.SystemBodyID, -1)
+        if (depthMemo.has(id)) return depthMemo.get(id)
+        const pid = toNumber(b.ParentBodyID, 0)
+        let d = 0
+        if (pid && byId.has(pid)) d = 1 + depthOf(byId.get(pid))
+        depthMemo.set(id, d)
+        return d
+      }
+
+      // draw parents before children
+      const ordered = [...bodies].sort((a, b) => depthOf(a) - depthOf(b))
+
+      // keep where each drawn body lives (container, marker, json)
+      const drawnByBodyId = new Map()
+
+      const out = []
+      for (const body of ordered) {
+        const sid = toNumber(body.StarID, NaN)
+        const starRef = this._starsResult.byStarID[String(sid)] || this._starsResult.byStarID[sid]
+
+        // choose parent anchor
+        let parentContainer = this._starsResult.root
+        let parentLocalPos = { x: 0, y: 0 }
+        let parentWorldXkm, parentWorldYkm
+
+        const parentBodyId = toNumber(body.ParentBodyID, 0)
+        if (parentBodyId && drawnByBodyId.has(parentBodyId)) {
+          const parentDrawn = drawnByBodyId.get(parentBodyId)
+          parentContainer = parentDrawn.orbitContainer
+          parentLocalPos = parentDrawn.marker.position
+          parentWorldXkm = toNumber(parentDrawn.body.Xcor, NaN)
+          parentWorldYkm = toNumber(parentDrawn.body.Ycor, NaN)
+        } else if (starRef) {
+          parentContainer = starRef.orbitContainer
+          parentLocalPos = starRef.marker.position
+          parentWorldXkm = starRef.star && toNumber(starRef.star.Xcor, NaN)
+          parentWorldYkm = starRef.star && toNumber(starRef.star.Ycor, NaN)
+        }
+
+        const rPx = Math.max(bodyPixelRadius(body, sizeOpts), 0)
+        const r = this.drawOrbit(body, {
+          parentContainer,
+          position: parentLocalPos,
+          orbitLine: isRenderOrbitBodyType(body.BodyTypeID),
+          keepLabelUpright,
+          nameText: systemBodyName(body),
+          style,
+          parentWorldXkm,
+          parentWorldYkm,
+          labelPadPx,
+          computedBodyPixelRadius: rPx,
+          minBodyRadius,
+          markerProvider,
+        })
+
+        drawnByBodyId.set(toNumber(body.SystemBodyID, -1), { ...r, body })
+        out.push(r)
+      }
+
+      return out
+    },
+
+    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null } = {}) {
+      const orbitContainer = new PIXI.Container()
+      orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
+      orbitContainer.cullable = true
+
+      const isLunar = isLunarBodyType(bodyLike.BodyTypeID)
+
+      // ---- a/e in raw units from DB (AU for planets/comets, km for moons)
+      const aRaw = Math.max(0, toNumber(bodyLike.OrbitalDistance, 0))
+      let e = _clamp(toNumber(bodyLike.Eccentricity, 0), 0, 0.999)
+
+      // If e omitted, infer from DistanceToOrbitCentre using consistent units
+      if ((!e || e <= 0) && Number.isFinite(bodyLike.DistanceToOrbitCentre) && aRaw > 0) {
+        const cRaw = Math.max(0, toNumber(bodyLike.DistanceToOrbitCentre, 0))
+        e = _clamp(cRaw / aRaw, 0, 0.999)
+      }
+
+      // Convert a/b/c → **pixels** with correct unit branch
+      const bRaw = aRaw * Math.sqrt(1 - e * e)
+      const cRaw = aRaw * e
+
+      const toPx = (valRaw) => (isLunar ? unitsToPx(valRaw / AU_KM) : unitsToPx(valRaw))
+      const ax = toPx(aRaw) // px
+      const by = toPx(bRaw) // px
+      const cx = toPx(cRaw) // px
+
+      // Bearing angle (math degrees in DB)
+      const phiDeg = toNumber(bodyLike.EccentricityDirection, 0)
+      const phi = phiDeg * DEG2RAD
+      const cosφ = Math.cos(phi)
+      const sinφ = Math.sin(phi)
+
+      // Optional exact DB world position (km) -> local delta (px)
+      const xkm = toNumber(bodyLike.Xcor, NaN)
+      const ykm = toNumber(bodyLike.Ycor, NaN)
+      const pxkm = toNumber(parentWorldXkm, NaN)
+      const pykm = toNumber(parentWorldYkm, NaN)
+
+      let dxPx, dyPx
+      if (Number.isFinite(xkm) && Number.isFinite(ykm)) {
+        const dxkm = Number.isFinite(pxkm) && Number.isFinite(pykm) ? xkm - pxkm : xkm
+        const dykm = Number.isFinite(pxkm) && Number.isFinite(pykm) ? ykm - pykm : ykm
+        dxPx = unitsToPx(dxkm / AU_KM)
+        dyPx = unitsToPx(dykm / AU_KM)
+      }
+
+      const parentWorldRot = getWorldRotation(parentContainer)
+      const circleMode = isLunar || approximatelyEquals(e, 0, 1e-9)
+
+      let localX, localY
+      let cxSigned = 0
+
+      if (circleMode) {
+        // orientation irrelevant for circles; neutralize parent world rotation
+        orbitContainer.rotation = -parentWorldRot
+
+        if (Number.isFinite(dxPx) && Number.isFinite(dyPx) && (dxPx !== 0 || dyPx !== 0)) {
+          localX = dxPx
+          localY = dyPx
+        } else {
+          const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
+          const nu = (bearingDeg - 90) * DEG2RAD
+          localX = ax * Math.cos(nu)
+          localY = ax * Math.sin(nu)
+        }
+
+        if (orbitLine && aRaw > 0) {
+          const g = new PIXI.Graphics()
+          const w = style.width ?? 1
+          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.drawCircle(0, 0, ax)
+          g.cullable = true
+          g._orbitMeta = {
+            baseWidth: w,
+            color: style.color ?? 0x8aa1ff,
+            alpha: style.alpha ?? 0.55,
+            isCircle: true,
+            r: ax,
+            lastDrawnWidth: null,
+          }
+
+          if (this._orbitRegistry && Array.isArray(this._orbitRegistry)) {
+            this._orbitRegistry.push(g)
+          }
+
+          orbitContainer.addChild(g)
+        }
+      } else {
+        // Ellipse: keep world orientation = φ even under rotated parent
+        orbitContainer.rotation = phi - parentWorldRot
+
+        if (Number.isFinite(dxPx) && Number.isFinite(dyPx) && (dxPx !== 0 || dyPx !== 0)) {
+          const lx = dxPx * cosφ + dyPx * sinφ
+          const ly = -dxPx * sinφ + dyPx * cosφ
+          const err = (s) => {
+            const u = lx - s * cx
+            const v = ly
+            return Math.abs((u * u) / (ax * ax) + (v * v) / (by * by) - 1)
+          }
+          cxSigned = err(-1) < err(+1) ? -cx : +cx
+          localX = lx
+          localY = ly
+        } else {
+          const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
+          const nu = (bearingDeg - 90) * DEG2RAD
+          // r in px directly (a is ax px)
+          const rPx = ax > 0 ? (ax * (1 - e * e)) / (1 + e * Math.cos(nu)) : 0
+          localX = rPx * Math.cos(nu)
+          localY = rPx * Math.sin(nu)
+        }
+
+        if (orbitLine && (ax > 0 || by > 0)) {
+          const g = new PIXI.Graphics()
+          const w = style.width ?? 1
+          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.drawEllipse(cxSigned, 0, ax, by)
+          g.cullable = true
+          g._orbitMeta = {
+            baseWidth: w,
+            color: style.color ?? 0x8aa1ff,
+            alpha: style.alpha ?? 0.55,
+            isCircle: false,
+            ax,
+            by,
+            cx: cxSigned,
+            lastDrawnWidth: null,
+          }
+
+          if (this._orbitRegistry && Array.isArray(this._orbitRegistry)) this._orbitRegistry.push(g)
+          orbitContainer.addChild(g)
+        }
+      }
+
+      // ---- Body marker (physical world radius; redraw on zoom for min-screen clamp)
+      const physR = Math.max(1e-6, toNumber(computedBodyPixelRadius, 0)) // avoid 0 for scale math
+      const { fill: markerColor } = pickBodyColor(bodyLike)
+
+      let marker
+      if (markerProvider) {
+        const spec = markerProvider(bodyLike)
+        const aspect = Math.max(1e-6, spec?.aspect ?? 1)
+
+        marker = new PIXI.Sprite(spec.texture)
+        marker.anchor.set(0.5)
+        marker.zIndex = this._annotationPriority(bodyLike)
+
+        // Physical size in WORLD units. Non-circles get independent width/height.
+        const widthWorld = Math.max(physR * 2, 1e-6 * 2)
+        const heightWorld = Math.max(widthWorld * aspect, 1e-6 * 2)
+        marker.width = widthWorld
+        marker.height = heightWorld
+
+        // Rotate for “diamond” asteroids
+        if (spec.rotation) marker.rotation = spec.rotation
+
+        marker.tint = markerColor
+
+        // Save base scale so the min-screen clamp multiplies instead of overwriting.
+        const baseScaleX = marker.scale.x
+        const baseScaleY = marker.scale.y
+
+        marker._bodyMeta = {
+          isPhysical: true,
+          physWorldR: physR, // keep for logic that assumes a radius
+          // also store anisotropic half-sizes so label offset can respect the bigger axis
+          physHalfWWorld: widthWorld * 0.5,
+          physHalfHWorld: heightWorld * 0.5,
+          minScreenR: Math.max(0, toNumber(minBodyRadius, 0)),
+          fill: markerColor,
+          baseScaleX,
+          baseScaleY,
+          lastClampScale: 1,
+        }
+      } else {
+        marker = new PIXI.Graphics()
+
+        // initial draw at the physical world radius; stroke will be normalized on first zoom refresh
+        // marker.lineStyle(1, 0x000000, 1)
+        marker.beginFill(0xffffff, 1)
+        marker.drawCircle(0, 0, physR)
+        marker.endFill()
+
+        marker.tint = markerColor
+
+        // metadata to drive redraw-on-zoom (scale stays = 1 always)
+        marker._bodyMeta = {
+          isPhysical: true,
+          physWorldR: physR, // world px
+          minScreenR: Math.max(0, toNumber(minBodyRadius, 0)), // px on screen
+          fill: markerColor,
+          // stroke: 0x000000,
+          // strokeAlpha: 1,
+          lastDrawnWorldR: -1,
+          lastScale: 1,
+        }
+      }
+
+      if (Number.isFinite(localX) && Number.isFinite(localY)) {
+        marker.position.set(localX, localY)
+      } else {
+        // Final fallback (unit-correct now)
+        const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
+        const nu = (bearingDeg - 90) * DEG2RAD
+        const rPx = circleMode ? ax : (ax * (1 - e * e)) / (1 + e * Math.cos(nu))
+        marker.position.set(rPx * Math.cos(nu), rPx * Math.sin(nu))
+      }
+
+      orbitContainer.addChild(marker)
+
+      // Label
+      let label = null
+      if (nameText) {
+        label = new PIXI.Text(String(nameText), TEXT_STYLES.body)
+        label.anchor.set(0, 0.5)
+        label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
+        label._baseWpx = label.width
+        label._baseHpx = label.height
+        label.cullable = true
+        // orbitContainer.addChild(label)
+      }
+
+      parentContainer.addChild(orbitContainer)
+
+      // Now adjust label rotation accurately using WORLD rotation, but only if needed
+      if (label) {
+        const desired = keepLabelUpright ? -getWorldRotation(orbitContainer) : -getWorldRotation(parentContainer)
+        if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
+      }
+
+      if (this._annotationRegistry && Array.isArray(this._annotationRegistry)) {
+        this._annotationRegistry.push({
+          orbitContainer,
+          marker,
+          label,
+          keepLabelUpright: !!keepLabelUpright,
+          bodyTypeId: bodyLike.BodyTypeID,
+          labelPadPx: labelPadPx ?? 8,
+
+          isPhysicalSizeBody: true,
+          computedBodyPixelRadius: physR, // world px
+          minBodyRadius: Math.max(0, toNumber(minBodyRadius, 0)), // screen px
+        })
+      }
+
+      return { orbitContainer, marker }
+    },
+
     scheduleInitPixi() {
       if (this._initRaf) cancelAnimationFrame(this._initRaf)
       this._initRaf = requestAnimationFrame(() => {
@@ -1404,19 +1585,25 @@ export default {
       this._orbitRegistry = []
       this._annotationRegistry = []
 
-      const starsResult = drawSystem(this.viewport, this.system || {}, this.stars, {
+      this.worldLayer = new PIXI.Container()
+      this.labelLayer = new PIXI.Container()
+
+      this.viewport.sortableChildren = true
+      this.labelLayer.zIndex = 1000
+
+      this.viewport.addChild(this.worldLayer) // content goes here
+      this.viewport.addChild(this.labelLayer) // labels go here (on top)
+
+      this._starsResult = this.drawSystem(this.system, this.stars, {
         origin: { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 },
+        orbitStyle: { color: 0x00ff00, alpha: 1, width: 1 },
         starSize: { exaggeration: 1, minPx: 0, maxPx: 1e7 },
-        minStarRadius: 6,
-        orbitStyle: { color: 0x00ff00, alpha: 0.35, width: 1 },
-        orbitRegistry: this._orbitRegistry,
-        annotationRegistry: this._annotationRegistry,
+        minStarRadius: 8,
+        markerProvider: this._markerSpecForBody,
       })
 
-      this._starsResult = starsResult
-
-      drawBodiesForSystem(starsResult.root, this.systemBodies, starsResult, { color: 0x00ff00, alpha: 0.5, width: 2 }, this._orbitRegistry, this._annotationRegistry, {
-        minBodyRadius: 3,
+      this.drawBodiesForSystem(this.systemBodies, {
+        style: { color: 0x32cd32, alpha: 1, width: 2 },
         sizeOpts: {
           // choose what you prefer:
           // radiusUnits: 'km', exaggeration: 1,  minPx: 0,    // strict physical realism
@@ -1425,37 +1612,45 @@ export default {
           // radiusUnits: 'km', exaggeration: 500, minPx: 0.5, // gently magnified for readability
           // radiusUnits: 'earthRadii', exaggeration: 1, minPx: 0.5, // if Radius is in R⊕
         },
+        keepLabelUpright: true,
+        labelPadPx: 8,
+        minBodyRadius: 5,
+        markerProvider: this._markerSpecForBody,
       })
+
+      for (const entry of this._annotationRegistry) {
+        if (entry.marker) {
+          const marker = entry.marker
+
+          // marker.tint = marker._bodyMeta.fill
+
+          marker.interactive = true
+          marker.on('pointerdown', (e, ...asd) => {
+            const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
+            this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
+          })
+        }
+
+        if (entry.label) {
+          this.labelLayer.addChild(entry.label) // put every label on the top layer
+        }
+      }
 
       this._cacheAllOrbitAABBs()
 
       this._buildMarkerWorldTree()
       this._buildOrbitWorldTree()
 
-      // keep stroke width constant across zoom levels
-      const refreshStroke = () => {
-        this.redrawOrbitStrokes()
-      }
+      const update = () => {
+        this.refreshVisibleAnnotations()
 
-      const refreshBodies = () => {
+        this.redrawOrbitStrokes()
         this.redrawPhysicalBodyMarkers()
       }
 
-      const schedule = () => {
-        this._scheduleVisibleAnnotationsRefresh()
-      }
-
-      this.viewport.addListener('moved', schedule)
-      this.viewport.addListener('zoomed', schedule)
-      this.viewport.addListener('pinch', schedule)
-
-      this.viewport.addListener('moved', refreshStroke)
-      this.viewport.addListener('zoomed', refreshStroke)
-      this.viewport.addListener('pinch', refreshStroke)
-
-      this.viewport.addListener('moved', refreshBodies)
-      this.viewport.addListener('zoomed', refreshBodies)
-      this.viewport.addListener('pinch', refreshBodies)
+      this.viewport.addListener('moved', update)
+      this.viewport.addListener('zoomed', update)
+      this.viewport.addListener('pinch', update)
 
       this.fitToContent()
     },

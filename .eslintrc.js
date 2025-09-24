@@ -13,8 +13,17 @@ module.exports = {
   // add your custom rules here
   rules: {
     // StandardJS — The Rules
-    indent: ['error', 2, { offsetTernaryExpressions: true }], // 2 spaces – for indentation
-    'comma-dangle': ['error', 'always-multiline'],
+    indent: ['error', 2, { 
+      switchCase: 1,
+      offsetTernaryExpressions: true,
+    }],
+    'comma-dangle': ['error', {
+      arrays: 'always-multiline',
+      objects: 'always-multiline',
+      imports: 'always-multiline',
+      exports: 'always-multiline',
+      functions: 'never',
+    }],
     'max-len': ['error', { code: 8000 }],
     'no-console': 'off',
     'arrow-parens': ['error', 'always'],
