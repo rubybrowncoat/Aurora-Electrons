@@ -72,7 +72,7 @@
     "pixi.js": "^6.5.10",
     "romanum": "^1.0.1",
     "sequelize": "^6.37.7",
-    "sqlite3": "5.0.0",
+    "sqlite3": "5.1.5",
     "vue-async-computed": "^4.0.1"
   }
 }
