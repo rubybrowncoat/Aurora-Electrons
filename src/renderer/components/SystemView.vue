@@ -1,7 +1,7 @@
 <template>
   <div class="system-view">
     <div id="pixi-container" style="width: 100vw; height: calc(100vh - 64px); position: absolute; top: 64px; left: 0" />
-    <h1>{{ system?.Name }}</h1>
+    <h1>{{ elements.system?.Name }}</h1>
     <div class="system-content">
       <!-- Your system view content will go here -->
       <v-btn @click="fitToContent"> Fit to Screen </v-btn>
@@ -343,9 +343,7 @@ export default {
     ...mapGetters(['database', 'GameID', 'RaceID']),
   },
   watch: {
-    system: 'scheduleInitPixi',
-    stars: 'scheduleInitPixi',
-    systemBodies: 'scheduleInitPixi',
+    elements: 'scheduleInitPixi',
   },
   mounted() {},
   beforeDestroy() {
@@ -418,6 +416,17 @@ export default {
       return tex
     },
 
+    _makeSquareOutlineTexture(size = 256, strokeFrac = 0.08) {
+      const g = new PIXI.Graphics()
+      const stroke = Math.max(1, Math.round(size * strokeFrac))
+      const pad = Math.ceil(stroke / 2)
+      g.lineStyle(stroke, 0xffffff, 1)        // white; we'll tint later
+      g.drawRect(pad, pad, size - 2 * pad, size - 2 * pad)
+      const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
+      g.destroy(true)
+      return tex
+    },
+
     _makeCircleTexture(size = 96) {
       // size: texture size in pixels (screen px), power of two is nice but not required
       const g = new PIXI.Graphics()
@@ -432,17 +441,38 @@ export default {
 
     _getShapeTexture(shape = 'circle', aspect = 0.4) {
       this._texCache ||= {}
+
+      // If app/renderer isn't ready, never return null — use a safe fallback
+      if (!this.pixi || !this.pixi.renderer) return PIXI.Texture.WHITE
+
+      // Renderer changed? nuke stale cache
+      if (this._texCacheRenderer && this._texCacheRenderer !== this.pixi.renderer) {
+        for (const t of Object.values(this._texCache)) {
+          try { t && !t.destroyed && t.destroy(true) } catch {}
+        }
+        this._texCache = {}
+      }
+      this._texCacheRenderer = this.pixi.renderer
+
       const key = `${shape}:${aspect}`
-      if (this._texCache[key]) return this._texCache[key]
+      let tex = this._texCache[key]
 
-      let tex
-      if (shape === 'triangle') tex = this._makeTriangleTexture(256)
-      else if (shape === 'square') tex = this._makeSquareTexture(256)
-      else if (shape === 'flatSquare') tex = this._makeRectTexture(256, aspect)
-      else tex = this._makeCircleTexture(256) // fallback
+      // Guard against destroyed/invalid textures
+      if (tex && (tex.destroyed || (tex.baseTexture && tex.baseTexture.destroyed))) {
+        tex = null
+        delete this._texCache[key]
+      }
 
-      this._texCache[key] = tex
-      return tex
+      if (!tex) {
+        if (shape === 'triangle') tex = this._makeTriangleTexture(256)
+        else if (shape === 'square') tex = this._makeSquareTexture(256)
+        else if (shape === 'squareOutline') tex = this._makeSquareOutlineTexture(256)
+        else if (shape === 'flatSquare') tex = this._makeRectTexture(256, aspect)
+        else tex = this._makeCircleTexture(256)
+        this._texCache[key] = tex || PIXI.Texture.WHITE
+      }
+
+      return this._texCache[key] || PIXI.Texture.WHITE
     },
 
     _markerSpecForBody(body) {
@@ -451,7 +481,7 @@ export default {
         return {
           shape: 'square',
           aspect: 1,
-          rotation: 0,
+          rotation: Math.PI / 4,
           texture: this._getShapeTexture('square'),
         }
       }
@@ -460,7 +490,7 @@ export default {
         return {
           shape: 'triangle',
           aspect: 1,
-          rotation: 0,
+          rotation: Math.PI,
           texture: this._getShapeTexture('triangle'),
         }
       }
@@ -483,10 +513,10 @@ export default {
       const boxes = []
 
       for (const entry of this._annotationRegistry) {
-        if (!entry?.marker || !entry?.orbitContainer) continue
+        if (!entry?.anchor || !entry?.orbitContainer) continue
 
         // marker center in STAGE px
-        const gp = entry.orbitContainer.toGlobal(entry.marker.position)
+        const gp = entry.orbitContainer.toGlobal(entry.anchor.position || { x: 0, y: 0 })
         // center in WORLD px
         const cw = this.viewport.toWorld(gp.x, gp.y)
 
@@ -569,8 +599,8 @@ export default {
       return qt
     },
 
-    _annotationPriority(entry) {
-      switch (entry.bodyTypeId) {
+    _annotationPriority(bodyTypeId) {
+      switch (bodyTypeId) {
         case 0:
           return 1000 // stars highest
         case 5:
@@ -579,6 +609,8 @@ export default {
           return 800 // Gas Giant
         case 2:
           return 600 // Terrestrial Planet
+        case 550:
+          return 550 // Custom: Jump Point
         case 3:
           return 500 // Dwarf Planet
         case 11:
@@ -781,8 +813,9 @@ export default {
 
     // Visibility test using marker bounds (cheap) against world rect
     _isMarkerVisible(entry, rect) {
-      if (!entry || !entry.marker) return false
-      const markerPosition = this.viewport.toWorld(entry.marker.getGlobalPosition())
+      if (!entry || !entry.anchor) return false
+      const gp = entry.orbitContainer.toGlobal(entry.anchor.position || { x: 0, y: 0 })
+      const markerPosition = this.viewport.toWorld(gp.x, gp.y)
       if (!markerPosition) return false
 
       if (markerPosition.x < rect.xMin || markerPosition.x > rect.xMax) return false
@@ -823,7 +856,7 @@ export default {
         // if (entry.marker) entry.marker.renderable = true
         if (entry.label) {
           this._placeLabel(entry)
-          candidates.push({ entry, priority: this._annotationPriority(entry) })
+          candidates.push({ entry, priority: this._annotationPriority(entry.bodyTypeId) })
         }
       }
 
@@ -871,9 +904,9 @@ export default {
     // Place label using a screen-aligned offset: 'E', 'S', 'W', 'N' (we'll use E for bodies, S for stars)
     _placeLabel(entry) {
       const label = entry?.label
-      const marker = entry?.marker
+      const anchor = entry?.anchor
       const oc = entry?.orbitContainer
-      if (!label || !marker || !oc || !this.viewport) return
+      if (!label || !anchor || !oc || !this.viewport) return
 
       const padPx = entry.labelPadPx ?? 8
       const effRpx = this._effectiveScreenRadius(entry)
@@ -883,7 +916,7 @@ export default {
       const side = 'E' // entry.bodyTypeId === 0 ? 'S' : 'E' // stars below, bodies to the right
 
       // Marker global (stage) position
-      const g = oc.toGlobal(marker.position)
+      const g = oc.toGlobal(anchor.position || { x: 0, y: 0 })
       let tx = g.x
       let ty = g.y
       if (side === 'E') tx += offset
@@ -976,6 +1009,8 @@ export default {
       // ---- 2) Markers (discs): compute center via one toGlobal+toWorld, size analytically
       if (includeMarkers && this._annotationRegistry) {
         for (const entry of this._annotationRegistry) {
+          const anchor = entry?.anchor
+          if (!anchor) continue
           const marker = entry?.marker
           if (!marker) continue
           const meta = marker._bodyMeta
@@ -984,7 +1019,7 @@ export default {
           // center in world
           const oc = entry.orbitContainer
           if (!oc) continue
-          const gp = oc.toGlobal(marker.position) // stage px
+          const gp = oc.toGlobal(anchor.position || { x: 0, y: 0 }) // stage px
           const cw = toWorld(gp.x, gp.y) // world px
 
           // world radius for target scale = max(physWorldR, minScreenR / sTarget)
@@ -1123,7 +1158,7 @@ export default {
           const parentDrawn = drawnByComponent.get(parentComp)
           if (parentDrawn) {
             parentContainer = parentDrawn.orbitContainer
-            parentLocal = parentDrawn.marker.position // orbit about the parent's current position
+            parentLocal = parentDrawn.anchor.position // orbit about the parent's current position
             parentWorldXkm = toNumber(parentDrawn.star.Xcor, NaN)
             parentWorldYkm = toNumber(parentDrawn.star.Ycor, NaN)
           }
@@ -1145,7 +1180,7 @@ export default {
         const color = starColor(star)
 
         // Draw the star's ORBIT path and a marker that supports min-screen clamping
-        const { orbitContainer, marker } = this.drawOrbit(bodyLike, {
+        const { orbitContainer, anchor, marker } = this.drawOrbit(bodyLike, {
           parentContainer,
           position: parentLocal,
           orbitLine: true,
@@ -1156,6 +1191,7 @@ export default {
           computedBodyPixelRadius: radiusPx,
           minBodyRadius: minStarRadius ?? 6,
           markerProvider,
+          deferredRegistration: true,
         })
 
         if (marker && marker._bodyMeta) {
@@ -1175,17 +1211,19 @@ export default {
         const labelText = starName(index, system)
         const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
         starLabel.anchor.set(0, 0.5)
-        starLabel.position.set(marker.position.x + radiusPx + labelPadPx, marker.position.y)
+        // starLabel.position.set(anchor.position.x + radiusPx + labelPadPx, anchor.position.y)
         starLabel._baseWpx = starLabel.width
         starLabel._baseHpx = starLabel.height
         const desired = -getWorldRotation(orbitContainer)
         if (!approximatelyEquals(starLabel.rotation, desired, 1e-6)) starLabel.rotation = desired
-        // orbitContainer.addChild(starLabel)
+
+        this.labelLayer.addChild(starLabel)
 
         // register star label & marker for visibility-based refresh & constant-size scaling
         if (this._annotationRegistry && Array.isArray(this._annotationRegistry)) {
           this._annotationRegistry.push({
             orbitContainer,
+            anchor,
             marker,
             label: starLabel,
             keepLabelUpright: true,
@@ -1195,8 +1233,8 @@ export default {
           })
         }
 
-        drawnByComponent.set(comp, { orbitContainer, marker, star })
-        byStarID.set(toNumber(star.StarID), { orbitContainer, marker, star })
+        drawnByComponent.set(comp, { orbitContainer, anchor, marker, star })
+        byStarID.set(toNumber(star.StarID), { orbitContainer, anchor, marker, star })
       }
 
       return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
@@ -1238,12 +1276,12 @@ export default {
         if (parentBodyId && drawnByBodyId.has(parentBodyId)) {
           const parentDrawn = drawnByBodyId.get(parentBodyId)
           parentContainer = parentDrawn.orbitContainer
-          parentLocalPos = parentDrawn.marker.position
+          parentLocalPos = parentDrawn.anchor.position
           parentWorldXkm = toNumber(parentDrawn.body.Xcor, NaN)
           parentWorldYkm = toNumber(parentDrawn.body.Ycor, NaN)
         } else if (starRef) {
           parentContainer = starRef.orbitContainer
-          parentLocalPos = starRef.marker.position
+          parentLocalPos = starRef.anchor.position
           parentWorldXkm = starRef.star && toNumber(starRef.star.Xcor, NaN)
           parentWorldYkm = starRef.star && toNumber(starRef.star.Ycor, NaN)
         }
@@ -1271,7 +1309,7 @@ export default {
       return out
     },
 
-    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null } = {}) {
+    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null, deferredRegistration = false } = {}) {
       const orbitContainer = new PIXI.Container()
       orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
       orbitContainer.cullable = true
@@ -1415,7 +1453,6 @@ export default {
 
         marker = new PIXI.Sprite(spec.texture)
         marker.anchor.set(0.5)
-        marker.zIndex = this._annotationPriority(bodyLike)
 
         // Physical size in WORLD units. Non-circles get independent width/height.
         const widthWorld = Math.max(physR * 2, 1e-6 * 2)
@@ -1449,11 +1486,9 @@ export default {
 
         // initial draw at the physical world radius; stroke will be normalized on first zoom refresh
         // marker.lineStyle(1, 0x000000, 1)
-        marker.beginFill(0xffffff, 1)
+        marker.beginFill(markerColor, 1)
         marker.drawCircle(0, 0, physR)
         marker.endFill()
-
-        marker.tint = markerColor
 
         // metadata to drive redraw-on-zoom (scale stays = 1 always)
         marker._bodyMeta = {
@@ -1468,31 +1503,50 @@ export default {
         }
       }
 
+      parentContainer.addChild(orbitContainer)
+
+      // Interactivity
+      marker.interactive = true
+      marker.on('pointerdown', (e, ...asd) => {
+        const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
+        this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
+      })
+
+      // Position & Anchor
+      const anchor = new PIXI.Container()
+
       if (Number.isFinite(localX) && Number.isFinite(localY)) {
-        marker.position.set(localX, localY)
+        anchor.position.set(localX, localY)
       } else {
         // Final fallback (unit-correct now)
         const bearingDeg = safeModulo360(toNumber(bodyLike.Bearing, 0))
         const nu = (bearingDeg - 90) * DEG2RAD
         const rPx = circleMode ? ax : (ax * (1 - e * e)) / (1 + e * Math.cos(nu))
-        marker.position.set(rPx * Math.cos(nu), rPx * Math.sin(nu))
+        anchor.position.set(rPx * Math.cos(nu), rPx * Math.sin(nu))
       }
 
-      orbitContainer.addChild(marker)
+      orbitContainer.addChild(anchor)
+
+      const gp = orbitContainer.toGlobal(anchor.position)
+      const wp = this.viewport.toWorld(gp.x, gp.y)
+
+      marker.position.set(wp.x, wp.y)
+      marker.zIndex = this._annotationPriority(bodyLike.BodyTypeID)
+
+      this.markerLayer.addChild(marker)
 
       // Label
       let label = null
       if (nameText) {
         label = new PIXI.Text(String(nameText), TEXT_STYLES.body)
         label.anchor.set(0, 0.5)
-        label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
+        // label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
         label._baseWpx = label.width
         label._baseHpx = label.height
         label.cullable = true
-        // orbitContainer.addChild(label)
-      }
 
-      parentContainer.addChild(orbitContainer)
+        this.labelLayer.addChild(label)
+      }
 
       // Now adjust label rotation accurately using WORLD rotation, but only if needed
       if (label) {
@@ -1500,9 +1554,10 @@ export default {
         if (!approximatelyEquals(label.rotation, desired, 1e-6)) label.rotation = desired
       }
 
-      if (this._annotationRegistry && Array.isArray(this._annotationRegistry)) {
+      if (!deferredRegistration && this._annotationRegistry && Array.isArray(this._annotationRegistry)) {
         this._annotationRegistry.push({
           orbitContainer,
+          anchor,
           marker,
           label,
           keepLabelUpright: !!keepLabelUpright,
@@ -1515,7 +1570,112 @@ export default {
         })
       }
 
-      return { orbitContainer, marker }
+      return { orbitContainer, anchor, marker }
+    },
+
+    drawJumpPoints(jumpPoints, {
+      minMarkerRadius = 6,          // px on screen
+      labelPadPx = 8,               // screen px
+    } = {}) {
+      if (!Array.isArray(jumpPoints) || !this._starsResult) return
+
+      const orbitContainer = this._starsResult.root      // use the same root as stars
+      const circleTex = this._getShapeTexture('circle')
+      const squareOutlineTex = this._getShapeTexture('squareOutline')
+
+      const COLOR_RED = 0xff3b30
+      const COLOR_ORANGE = 0xffa500
+
+      // tiny physical size; min-screen clamp makes it visible
+      const physR = 1e-6
+
+      for (const jp of jumpPoints) {
+        const xkm = toNumber(jp.Xcor, 0)
+        const ykm = toNumber(jp.Ycor, 0)
+
+        // local offset from system origin in **world px**
+        const localX = unitsToPx(xkm / AU_KM)
+        const localY = unitsToPx(ykm / AU_KM)
+
+        // anchor lives under the same root as stars, so all transforms match
+        const anchor = new PIXI.Container()
+        anchor.position.set(localX, localY)
+        orbitContainer.addChild(anchor)
+
+        // convert to viewport WORLD coords for the marker layer
+        const gp = orbitContainer.toGlobal(anchor.position)
+        const wp = this.viewport.toWorld(gp.x, gp.y)
+
+        const explored = toNumber(jp.Explored, 0) === 1
+        const hasGate = toNumber(jp.JumpGateStrength, 0) >= 1000
+        const tint = explored ? COLOR_ORANGE : COLOR_RED
+
+        // marker is a Container so we can stack shapes
+        const marker = new PIXI.Container()
+        marker.position.set(wp.x, wp.y)
+
+        // circle core
+        const core = new PIXI.Sprite(circleTex)
+        core.anchor.set(0.5)
+        const diameter = Math.max(physR * 2, 1e-6 * 2)
+        core.width = core.height = diameter
+        core.tint = tint
+        marker.addChild(core)
+
+        // optional square outline (gate present)
+        if (hasGate) {
+          const box = new PIXI.Sprite(squareOutlineTex)
+          box.anchor.set(0.5)
+          // a little larger than the circle core
+          box.width = box.height = diameter * 1.6
+          box.tint = tint
+          marker.addChild(box)
+        }
+
+        // metadata → min-screen clamping uses this
+        marker._bodyMeta = {
+          isPhysical: true,
+          physWorldR: physR,
+          minScreenR: Math.max(0, toNumber(minMarkerRadius, 0)),
+          fill: tint,
+          baseScaleX: 1,
+          baseScaleY: 1,
+          lastClampScale: 1,
+        }
+
+        // interactivity: tap to center/zoom like other markers
+        marker.interactive = true
+        marker.on('pointerdown', (e) => {
+          const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
+          this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
+        })
+
+        // draw order: above most bodies, below labels
+        marker.zIndex = this._annotationPriority(550) // Custom: 550
+        this.markerLayer.addChild(marker)
+
+        // label (optional; uses Name if present)
+        let label = null
+        const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Jump Point'
+        label = new PIXI.Text(labelText, TEXT_STYLES.body)
+        label.anchor.set(0, 0.5)
+        label._baseWpx = label.width
+        label._baseHpx = label.height
+        label.cullable = true
+        this.labelLayer.addChild(label)
+
+        // register for placement/visibility + LOD scaling
+        this._annotationRegistry.push({
+          orbitContainer,
+          anchor,
+          marker,
+          label,
+          keepLabelUpright: true,
+          bodyTypeId: 550, // Custom: 550
+          labelPadPx,
+          minBodyRadius: Math.max(0, toNumber(minMarkerRadius, 0)),
+        })
+      }
     },
 
     scheduleInitPixi() {
@@ -1523,23 +1683,34 @@ export default {
       this._initRaf = requestAnimationFrame(() => {
         this._initRaf = null
 
-        if (!this.system) return
-        if (!Array.isArray(this.stars) || this.stars.length === 0) return
+        if (!this.elements.system) return
+        if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
+
         this.initPixi()
       })
     },
 
     initPixi() {
-      if (!this.system) {
+      if (!this.elements.system) {
         console.warn('initPixi: system not loaded yet')
         return
       }
-      if (!Array.isArray(this.stars) || this.stars.length === 0) {
+
+      if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) {
         console.warn('initPixi: stars not loaded yet')
         return
       }
 
       if (this.pixi) {
+        if (this._texCache) {
+          for (const k of Object.keys(this._texCache)) {
+            try {
+              this._texCache[k].destroy(true)
+            } catch (e) {}
+          }
+          this._texCache = {}
+        }
+
         this.pixi.destroy(true, true)
         this.pixi = null
       }
@@ -1580,21 +1751,25 @@ export default {
         })
         .decelerate()
 
-      console.log('## systemBodies', this.systemBodies)
-
       this._orbitRegistry = []
       this._annotationRegistry = []
 
       this.worldLayer = new PIXI.Container()
+      this.markerLayer = new PIXI.Container()
       this.labelLayer = new PIXI.Container()
 
       this.viewport.sortableChildren = true
+      this.markerLayer.sortableChildren = true
+
+      this.worldLayer.zIndex = 0
+      this.markerLayer.zIndex = 500
       this.labelLayer.zIndex = 1000
 
-      this.viewport.addChild(this.worldLayer) // content goes here
-      this.viewport.addChild(this.labelLayer) // labels go here (on top)
+      this.viewport.addChild(this.worldLayer)
+      this.viewport.addChild(this.markerLayer)
+      this.viewport.addChild(this.labelLayer)
 
-      this._starsResult = this.drawSystem(this.system, this.stars, {
+      this._starsResult = this.drawSystem(this.elements.system, this.elements.stars, {
         origin: { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 },
         orbitStyle: { color: 0x00ff00, alpha: 1, width: 1 },
         starSize: { exaggeration: 1, minPx: 0, maxPx: 1e7 },
@@ -1602,7 +1777,7 @@ export default {
         markerProvider: this._markerSpecForBody,
       })
 
-      this.drawBodiesForSystem(this.systemBodies, {
+      this.drawBodiesForSystem(this.elements.systemBodies, {
         style: { color: 0x32cd32, alpha: 1, width: 2 },
         sizeOpts: {
           // choose what you prefer:
@@ -1618,22 +1793,11 @@ export default {
         markerProvider: this._markerSpecForBody,
       })
 
-      for (const entry of this._annotationRegistry) {
-        if (entry.marker) {
-          const marker = entry.marker
-
-          // marker.tint = marker._bodyMeta.fill
-
-          marker.interactive = true
-          marker.on('pointerdown', (e, ...asd) => {
-            const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
-            this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
-          })
-        }
-
-        if (entry.label) {
-          this.labelLayer.addChild(entry.label) // put every label on the top layer
-        }
+      if (Array.isArray(this.elements.jumpPoints) && this.elements.jumpPoints.length) {
+        this.drawJumpPoints(this.elements.jumpPoints, {
+          minMarkerRadius: 4,
+          labelPadPx: 6,
+        })
       }
 
       this._cacheAllOrbitAABBs()
@@ -1656,13 +1820,13 @@ export default {
     },
   },
   asyncComputed: {
-    system: {
+    elements: {
       async get() {
         if (!this.database || !this.RaceID) {
-          return null
+          return {}
         }
 
-        return await this.database.models.RaceSystemSurvey.findOne({
+        const system = await this.database.models.RaceSystemSurvey.findOne({
           where: {
             SystemID: this.$props.systemId,
             RaceID: this.RaceID,
@@ -1677,16 +1841,12 @@ export default {
           console.log('Loaded system:', system.toJSON())
           return system
         })
-      },
-      default: null,
-    },
-    stars: {
-      async get() {
-        if (!this.database) {
-          return []
+
+        if (!system) {
+          return {}
         }
 
-        return await this.database.models.Star.findAll({
+        const stars = await this.database.models.Star.findAll({
           where: {
             SystemID: this.$props.systemId,
           },
@@ -1700,16 +1860,12 @@ export default {
           console.log('Loaded stars:', stars)
           return stars
         })
-      },
-      default: [],
-    },
-    systemBodies: {
-      async get() {
-        if (!this.database || !this.RaceID) {
-          return []
+
+        if (!stars || !stars.length) {
+          return {}
         }
 
-        const bodies = await this.database.models.SystemBody.findAll({
+        const systemBodies = await this.database.models.SystemBody.findAll({
           where: {
             SystemID: this.$props.systemId,
           },
@@ -1736,9 +1892,31 @@ export default {
           }))
         })
 
-        return bodies
+        const jumpPoints = await this.database.query(`
+          select FCT_JumpPoint.*, FCT_RaceSysSurvey.Name as SourceName, VIR_Destination.SystemID as DestinationID, VIR_Destination.Name as DestinationName, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint 
+          
+          inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
+          left join (
+            select * from FCT_JumpPoint
+            left join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = 779 and FCT_RaceSysSurvey.GameID = 139 
+          ) as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID 
+          left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID 
+          left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
+          
+          where FCT_JumpPoint.SystemID = ${this.$props.systemId} and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
+        `).then(([items]) => {
+          console.log('Loaded jump points:', items)
+          return items
+        })
+
+        return {
+          system: system.toJSON(),
+          stars: stars.map((s) => s.toJSON()),
+          systemBodies,
+          jumpPoints,
+        }
       },
-      default: [],
+      default: {},
     },
   },
 }
