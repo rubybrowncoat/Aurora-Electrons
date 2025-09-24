@@ -17,7 +17,7 @@ ipcMain.handle('request-storage-path', async () => {
         : path.join(exePath, 'AuroraDB.db')
     : headGame
       ? path.join('../', 'AuroraDB.db')
-      : 'AuroraDB_260_Reisen.db'
+      : 'AuroraDB.db'
 
   return storagePath
 })

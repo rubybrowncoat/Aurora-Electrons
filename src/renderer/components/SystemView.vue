@@ -417,7 +417,9 @@ export default {
 
       if (this._texCache) {
         for (const k of Object.keys(this._texCache)) {
-          try { this._texCache[k].destroy(true) } catch {}
+          try {
+            this._texCache[k].destroy(true)
+          } catch {}
         }
         this._texCache = null
         this._texCacheRenderer = null
@@ -1771,15 +1773,15 @@ export default {
       }
 
       console.log('SystemView initPixi', this.$props)
-      
+
       const host = document.getElementById('pixi-container')
       if (!host) {
         console.warn('No pixi-container found... Aborting PIXI initialization.')
         return
       }
-      
-      const width  = host.clientWidth  || window.innerWidth
-      const height = host.clientHeight || (window.innerHeight - 64)
+
+      const width = host.clientWidth || window.innerWidth
+      const height = host.clientHeight || window.innerHeight - 64
 
       this.pixi = new PIXI.Application({
         width,
@@ -2016,7 +2018,7 @@ export default {
           inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
           left join (
             select * from FCT_JumpPoint
-            left join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = 779 and FCT_RaceSysSurvey.GameID = 139 
+            left join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
           ) as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID 
           left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID 
           left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
@@ -2079,7 +2081,7 @@ export default {
 .title {
   margin: 0;
   color: #fff;
-  text-shadow: 2px 2px 4px rgba(0,0,0,.7);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
   font-weight: 600;
 }
 </style>
