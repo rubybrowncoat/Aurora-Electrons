@@ -163,7 +163,7 @@
             <v-spacer />
           </v-toolbar>
           <v-card-text v-if="isSystemDialogOpen">
-            <system-view v-if="systemId" :system-id="systemId" />
+            <system-view v-if="systemId" :system-id="systemId" @jump="setSystem" />
           </v-card-text>
         </v-card>
       </v-dialog>
@@ -1543,6 +1543,9 @@ export default {
     openSystemDialog(systemId) {
       this.systemId = systemId
       this.isSystemDialogOpen = true
+    },
+    setSystem(systemId) {
+      this.systemId = systemId
     },
   },
   asyncComputed: {

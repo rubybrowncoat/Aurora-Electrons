@@ -61,10 +61,9 @@
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/information" nuxt>Information</v-tab>
           <v-tab to="/map" nuxt>Map (WIP)</v-tab>
-          <!-- <v-tab to="/map_old" nuxt>Map Old</v-tab> -->
           <v-tab to="/log" nuxt>Log</v-tab>
           <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
-          <v-tab to="/engines" nuxt>Engines (WIP)</v-tab>
+          <!-- <v-tab to="/engines" nuxt>Engines (WIP)</v-tab> -->
         </v-tabs>
       </template>
     </v-app-bar>

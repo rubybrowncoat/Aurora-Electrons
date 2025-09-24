@@ -1,10 +1,15 @@
 <template>
   <div class="system-view">
     <div id="pixi-container" style="width: 100vw; height: calc(100vh - 64px); position: absolute; top: 64px; left: 0" />
-    <h1>{{ elements.system?.Name }}</h1>
-    <div class="system-content">
-      <!-- Your system view content will go here -->
-      <v-btn @click="fitToContent"> Fit to Screen </v-btn>
+
+    <div class="ui-overlay">
+      <div class="chrome">
+        <h1 class="title">
+          {{ elements?.system?.Name }}
+        </h1>
+        <v-btn small @click="fitToContent">Fit to Screen</v-btn>
+      </div>
+      <!-- Add more UI here (panels, legends, filters, etc.) -->
     </div>
   </div>
 </template>
@@ -337,6 +342,11 @@ export default {
   data() {
     return {
       _initRaf: null,
+      _resizeRaf: null,
+
+      _needsUpdate: false,
+
+      userInteracted: false,
     }
   },
   computed: {
@@ -345,34 +355,73 @@ export default {
   watch: {
     elements: 'scheduleInitPixi',
   },
-  mounted() {},
+  mounted() {
+    window.addEventListener('resize', this._onResize, { passive: true })
+  },
   beforeDestroy() {
-    if (this.pixi) {
-      console.log('Destroying PIXI application??')
-      this.pixi.destroy(true, true)
-      this.pixi = null
-    }
+    window.removeEventListener('resize', this._onResize)
 
-    if (this._annotationRaf) {
-      cancelAnimationFrame(this._annotationRaf)
-      this._annotationRaf = null
-    }
-
-    if (this._initRaf) {
-      cancelAnimationFrame(this._initRaf)
-      this._initRaf = null
-    }
-
-    if (this._texCache) {
-      for (const k of Object.keys(this._texCache)) {
-        this._texCache[k].destroy(true)
-      }
-      this._texCache = null
-    }
+    this._cleanup()
   },
   methods: {
     loog(...asd) {
       console.log(...asd)
+    },
+
+    _cleanup() {
+      console.log('### CLEANUP')
+
+      // stop resize/update RAFs
+      if (this._resizeRaf) {
+        cancelAnimationFrame(this._resizeRaf)
+        this._resizeRaf = null
+      }
+      if (this._annotationRaf) {
+        cancelAnimationFrame(this._annotationRaf)
+        this._annotationRaf = null
+      }
+      if (this._initRaf) {
+        cancelAnimationFrame(this._initRaf)
+        this._initRaf = null
+      }
+
+      // remove viewport listeners and destroy it so its ticker callback is unhooked
+      if (this.viewport) {
+        this.viewport.off('moved', this._onUpdate)
+        this.viewport.off('zoomed', this._onUpdate)
+        this.viewport.off('pinch', this._onUpdate)
+
+        this.viewport.off('drag-start', this._markInteracted)
+        this.viewport.off('pinch-start', this._markInteracted)
+        this.viewport.off('wheel', this._markInteracted)
+
+        // pixi-viewport has its own destroy; use it to detach its tickerFunction
+        if (typeof this.viewport.destroy === 'function') {
+          this.viewport.destroy()
+        }
+
+        this.viewport = null
+      }
+
+      // clear registries/trees pointing at destroyed graphics
+      this._orbitRegistry = null
+      this._markerWorldTree = null
+      this._orbitWorldTree = null
+      this._annotationRegistry = null
+      this._starsResult = null
+
+      if (this.pixi) {
+        this.pixi.destroy(true, true)
+        this.pixi = null
+      }
+
+      if (this._texCache) {
+        for (const k of Object.keys(this._texCache)) {
+          try { this._texCache[k].destroy(true) } catch {}
+        }
+        this._texCache = null
+        this._texCacheRenderer = null
+      }
     },
 
     _makeTriangleTexture(size = 96) {
@@ -420,7 +469,7 @@ export default {
       const g = new PIXI.Graphics()
       const stroke = Math.max(1, Math.round(size * strokeFrac))
       const pad = Math.ceil(stroke / 2)
-      g.lineStyle(stroke, 0xffffff, 1)        // white; we'll tint later
+      g.lineStyle(stroke, 0xffffff, 1) // white; we'll tint later
       g.drawRect(pad, pad, size - 2 * pad, size - 2 * pad)
       const tex = this.pixi.renderer.generateTexture(g, { resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR })
       g.destroy(true)
@@ -448,7 +497,9 @@ export default {
       // Renderer changed? nuke stale cache
       if (this._texCacheRenderer && this._texCacheRenderer !== this.pixi.renderer) {
         for (const t of Object.values(this._texCache)) {
-          try { t && !t.destroyed && t.destroy(true) } catch {}
+          try {
+            t && !t.destroyed && t.destroy(true)
+          } catch {}
         }
         this._texCache = {}
       }
@@ -1115,9 +1166,13 @@ export default {
 
       // Fit & center
       this.viewport.fit(false, newBounds.width, newBounds.height)
+
+      this.viewport.once('snap-end', () => {
+        this.userInteracted = false
+      })
       this.viewport.snap(newBounds.cx, newBounds.cy, { time: 0, removeOnComplete: true })
 
-      this._scheduleVisibleAnnotationsRefresh()
+      this.refreshVisibleAnnotations()
       this.redrawOrbitStrokes()
       this.redrawPhysicalBodyMarkers()
     },
@@ -1573,13 +1628,16 @@ export default {
       return { orbitContainer, anchor, marker }
     },
 
-    drawJumpPoints(jumpPoints, {
-      minMarkerRadius = 6,          // px on screen
-      labelPadPx = 8,               // screen px
-    } = {}) {
+    drawJumpPoints(
+      jumpPoints,
+      {
+        minMarkerRadius = 6, // px on screen
+        labelPadPx = 8, // screen px
+      } = {}
+    ) {
       if (!Array.isArray(jumpPoints) || !this._starsResult) return
 
-      const orbitContainer = this._starsResult.root      // use the same root as stars
+      const orbitContainer = this._starsResult.root // use the same root as stars
       const circleTex = this._getShapeTexture('circle')
       const squareOutlineTex = this._getShapeTexture('squareOutline')
 
@@ -1646,8 +1704,16 @@ export default {
         // interactivity: tap to center/zoom like other markers
         marker.interactive = true
         marker.on('pointerdown', (e) => {
-          const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
-          this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
+          console.log('JumpPoint marker clicked', e, jp)
+
+          if (e.data.button === 0) {
+            const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
+            this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
+          } else if (e.data.button === 2) {
+            if (jp.Explored && jp.DestinationID) {
+              this.$emit('jump', jp.DestinationID)
+            }
+          }
         })
 
         // draw order: above most bodies, below labels
@@ -1656,7 +1722,7 @@ export default {
 
         // label (optional; uses Name if present)
         let label = null
-        const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Jump Point'
+        const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Unexplored'
         label = new PIXI.Text(labelText, TEXT_STYLES.body)
         label.anchor.set(0, 0.5)
         label._baseWpx = label.width
@@ -1686,6 +1752,9 @@ export default {
         if (!this.elements.system) return
         if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
 
+        this._cleanup()
+
+        this.userInteracted = false
         this.initPixi()
       })
     },
@@ -1701,43 +1770,31 @@ export default {
         return
       }
 
-      if (this.pixi) {
-        if (this._texCache) {
-          for (const k of Object.keys(this._texCache)) {
-            try {
-              this._texCache[k].destroy(true)
-            } catch (e) {}
-          }
-          this._texCache = {}
-        }
-
-        this.pixi.destroy(true, true)
-        this.pixi = null
-      }
-
-      console.log('SystemView mounted', this.$props)
-
-      this.pixi = new PIXI.Application({
-        width: window.innerWidth,
-        height: window.innerHeight - 64, // Adjust for toolbar height
-        backgroundColor: 0x000040,
-        antialias: false,
-      })
-
-      const pixiContainer = document.getElementById('pixi-container')
-      if (pixiContainer) {
-        pixiContainer.appendChild(this.pixi.view)
-      } else {
+      console.log('SystemView initPixi', this.$props)
+      
+      const host = document.getElementById('pixi-container')
+      if (!host) {
         console.warn('No pixi-container found... Aborting PIXI initialization.')
-
         return
       }
+      
+      const width  = host.clientWidth  || window.innerWidth
+      const height = host.clientHeight || (window.innerHeight - 64)
+
+      this.pixi = new PIXI.Application({
+        width,
+        height,
+        backgroundColor: 0x000040,
+        antialias: false,
+        autoDensity: true,
+        resolution: Math.max(window.devicePixelRatio || 1, 1),
+      })
+
+      host.appendChild(this.pixi.view)
 
       this.viewport = new Viewport({
-        screenWidth: window.innerWidth,
-        screenHeight: window.innerHeight - 64, // Adjust for toolbar height
-        worldWidth: 1000,
-        worldHeight: 1000,
+        screenWidth: width,
+        screenHeight: height,
 
         interaction: this.pixi.renderer.plugins.interaction, // the interaction module is important for wheel to work properly when renderer.view is placed or scaled
       })
@@ -1805,18 +1862,77 @@ export default {
       this._buildMarkerWorldTree()
       this._buildOrbitWorldTree()
 
-      const update = () => {
-        this.refreshVisibleAnnotations()
+      this.viewport.on('moved', this._onUpdate)
+      this.viewport.on('pinch', this._onUpdate)
+      this.viewport.on('zoomed', this._onUpdate)
 
-        this.redrawOrbitStrokes()
-        this.redrawPhysicalBodyMarkers()
+      this.viewport.on('drag-start', this._markInteracted)
+      this.viewport.on('pinch-start', this._markInteracted)
+      this.viewport.on('wheel', this._markInteracted)
+
+      this.pixi.ticker.add(this._tickerUpdate, undefined, PIXI.UPDATE_PRIORITY.INTERACTION)
+
+      this._onResize()
+    },
+
+    _tickerUpdate() {
+      if (!this._needsUpdate) return
+
+      this._needsUpdate = false
+      this._applyUpdate()
+    },
+
+    _markInteracted() {
+      this.userInteracted = true
+    },
+
+    _onUpdate() {
+      this._needsUpdate = true
+    },
+
+    _applyUpdate() {
+      if (!this.pixi || !this.viewport) return
+
+      this.refreshVisibleAnnotations()
+
+      this.redrawOrbitStrokes()
+      this.redrawPhysicalBodyMarkers()
+    },
+
+    _onResize() {
+      if (this._resizeRaf) return
+      this._resizeRaf = requestAnimationFrame(() => {
+        this._resizeRaf = null
+        this._applyResize()
+      })
+    },
+
+    _applyResize() {
+      if (!this.pixi || !this.viewport) return
+
+      // Match the PIXI view to the container (falls back to window)
+      const el = document.getElementById('pixi-container')
+      const w = (el?.clientWidth ?? window.innerWidth) | 0
+      const h = (el?.clientHeight ?? window.innerHeight - 64) | 0
+
+      // Save world center BEFORE resize so we can preserve it
+      const prevW = this.pixi.view.width
+      const prevH = this.pixi.view.height
+      const centerBefore = this.viewport.toWorld(prevW * 0.5, prevH * 0.5)
+
+      // Resize renderer + viewport screen
+      this.pixi.renderer.resize(w, h)
+      this.viewport.resize(w, h) // keeps world size, just updates screen size
+
+      // Keep the camera unless the user hasn't interacted yet
+      if (this.userInteracted) {
+        this.viewport.moveCenter(centerBefore.x, centerBefore.y)
+      } else {
+        // First view or untouched: fit nicely to content on layout changes
+        this.fitToContent()
       }
 
-      this.viewport.addListener('moved', update)
-      this.viewport.addListener('zoomed', update)
-      this.viewport.addListener('pinch', update)
-
-      this.fitToContent()
+      this._applyUpdate()
     },
   },
   asyncComputed: {
@@ -1892,7 +2008,9 @@ export default {
           }))
         })
 
-        const jumpPoints = await this.database.query(`
+        const jumpPoints = await this.database
+          .query(
+            `
           select FCT_JumpPoint.*, FCT_RaceSysSurvey.Name as SourceName, VIR_Destination.SystemID as DestinationID, VIR_Destination.Name as DestinationName, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint 
           
           inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
@@ -1904,10 +2022,12 @@ export default {
           left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
           
           where FCT_JumpPoint.SystemID = ${this.$props.systemId} and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
-        `).then(([items]) => {
-          console.log('Loaded jump points:', items)
-          return items
-        })
+        `
+          )
+          .then(([items]) => {
+            console.log('Loaded jump points:', items)
+            return items
+          })
 
         return {
           system: system.toJSON(),
@@ -1922,4 +2042,44 @@ export default {
 }
 </script>
 
-<style scoped></style>
+<style lang="scss" scoped>
+.system-view {
+  //
+}
+
+/* PIXI fills the area and stays at the bottom of the stack */
+#pixi-container {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  top: 64px;
+  left: 0;
+}
+
+.ui-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+
+  top: 64px;
+  left: 0;
+}
+
+.ui-overlay .chrome {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.title {
+  margin: 0;
+  color: #fff;
+  text-shadow: 2px 2px 4px rgba(0,0,0,.7);
+  font-weight: 600;
+}
+</style>
