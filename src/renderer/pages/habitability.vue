@@ -5,7 +5,7 @@
     <div v-else>
       <v-container fluid>
         <v-row justify="start">
-          <v-col >
+          <v-col>
             <v-autocomplete v-model="selectedSpeciesId" :items="species" :item-text="(item) => `${item.SpeciesName} (${separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator)} M)`" item-value="SpeciesID" label="Species" auto-select-first dense solo />
           </v-col>
           <v-col cols="4">
@@ -22,35 +22,61 @@
 
                 <v-list dense>
                   <v-list-item>
-                    <v-checkbox v-model="filterNonTerraformable" label="Hide Non-Terraformable" dense hide-details />
+                    <v-checkbox v-model="filterNonTerraformable" label="Hide Non-Terraformable" dense hide-details @change="config.set('habitabilityFilterNonTerraformable', filterNonTerraformable)" />
                   </v-list-item>
                   <v-list-item>
-                    <v-checkbox v-model="filterWithoutMinerals" label="Hide Without Minerals" dense hide-details />
-                  </v-list-item>
-
-                  <v-divider class="my-1" />
-
-                  <v-list-item>
-                    <v-checkbox v-model="filterOwnPopulations" label="Hide Own Populations" dense hide-details />
-                  </v-list-item>
-                  <v-list-item>
-                    <v-checkbox v-model="filterOtherPopulations" label="Hide Other Populations" dense hide-details />
+                    <v-checkbox v-model="filterWithoutMinerals" label="Hide Without Minerals" dense hide-details @change="config.set('habitabilityFilterWithoutMinerals', filterWithoutMinerals)" />
                   </v-list-item>
 
                   <v-divider class="my-1" />
 
                   <v-list-item>
-                    <v-checkbox v-model="filterDoneTerraforming" label="Hide Terraformed" dense hide-details />
+                    <v-checkbox v-model="filterOwnPopulations" label="Hide Own Populations" dense hide-details @change="config.set('habitabilityFilterOwnPopulations', filterOwnPopulations)" />
                   </v-list-item>
                   <v-list-item>
-                    <v-checkbox v-model="filterUninhabited" label="Hide Uninhabited" dense hide-details />
+                    <v-checkbox v-model="filterOtherPopulations" label="Hide Other Populations" dense hide-details @change="config.set('habitabilityFilterOtherPopulations', filterOtherPopulations)" />
+                  </v-list-item>
+
+                  <v-divider class="my-1" />
+
+                  <v-list-item>
+                    <v-checkbox v-model="filterDoneTerraforming" label="Hide Terraformed" dense hide-details @change="config.set('habitabilityFilterDoneTerraforming', filterDoneTerraforming)" />
+                  </v-list-item>
+                  <v-list-item>
+                    <v-checkbox v-model="filterUninhabited" label="Hide Uninhabited" dense hide-details @change="config.set('habitabilityFilterUninhabited', filterUninhabited)" />
+                  </v-list-item>
+
+                  <v-divider class="my-1" />
+
+                  <v-list-item>
+                    <v-btn
+                      text
+                      small
+                      @click="
+                        filterNonTerraformable = false
+                        filterWithoutMinerals = false
+                        filterOwnPopulations = false
+                        filterOtherPopulations = false
+                        filterDoneTerraforming = false
+                        filterUninhabited = false
+
+                        config.set('habitabilityFilterNonTerraformable', filterNonTerraformable)
+                        config.set('habitabilityFilterWithoutMinerals', filterWithoutMinerals)
+                        config.set('habitabilityFilterOwnPopulations', filterOwnPopulations)
+                        config.set('habitabilityFilterOtherPopulations', filterOtherPopulations)
+                        config.set('habitabilityFilterDoneTerraforming', filterDoneTerraforming)
+                        config.set('habitabilityFilterUninhabited', filterUninhabited)
+                      "
+                    >
+                      Reset Filters
+                    </v-btn>
                   </v-list-item>
                 </v-list>
               </v-menu>
             </div>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips @change="config.set('habitabilitySystems', systems)">
               <template #prepend-item>
                 <v-list-item ripple @click="toggleSystems">
                   <v-list-item-action>
@@ -127,8 +153,9 @@
                     selectedBodies = []
                     filterBySelectedBodies = false
                   "
-                  >Clear Selection</v-btn
                 >
+                  Clear Selection
+                </v-btn>
               </v-col>
               <v-col>
                 <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => (selectedBodies = selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID))">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
@@ -395,7 +422,6 @@ export default {
       }
     } else if (route.query.systems) {
       const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
-      console.log('asyncData systems', systems)
 
       return {
         systems,
@@ -470,8 +496,6 @@ export default {
       })
     },
     calculatedBodies() {
-      console.log('recalculate calculatedBodies')
-
       return this.selectedSpecies.SpeciesID ? this.bodies.filter((body) => body.Gravity <= this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation).map(this._bodyMap) : []
     },
 
@@ -601,9 +625,30 @@ export default {
         }
       },
     },
+    RaceID: {
+      immediate: true,
+      handler(newRaceID, oldRaceID) {
+        if (oldRaceID) {
+          console.log('RaceID changed', oldRaceID, newRaceID)
+          this.config.set('habitabilitySystems', [])
+          this.systems = []
+        }
+      },
+    },
   },
   created() {
     this.terraformers = this.config.get('habitabilityTerraformers', 10)
+
+    this.filterNonTerraformable = this.config.get('habitabilityFilterNonTerraformable', false)
+    this.filterWithoutMinerals = this.config.get('habitabilityFilterWithoutMinerals', false)
+    this.filterOwnPopulations = this.config.get('habitabilityFilterOwnPopulations', false)
+    this.filterOtherPopulations = this.config.get('habitabilityFilterOtherPopulations', false)
+    this.filterDoneTerraforming = this.config.get('habitabilityFilterDoneTerraforming', false)
+    this.filterUninhabited = this.config.get('habitabilityFilterUninhabited', false)
+
+    if (!this.systems.length) {
+      this.systems = this.config.get('habitabilitySystems', this.systems)
+    }
   },
   mounted() {
     //
@@ -622,16 +667,24 @@ export default {
       } else {
         this.systems = this.systemNames.map((system) => system.SystemID)
       }
+
+      this.config.set('habitabilitySystems', this.systems)
     },
 
     selectOurSystems() {
       this.systems = this.colonizedSystems.map((system) => system.SystemID)
+
+      this.config.set('habitabilitySystems', this.systems)
     },
     selectOurInhabitedSystems() {
       this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
+
+      this.config.set('habitabilitySystems', this.systems)
     },
     selectUnrestrictedSystems() {
       this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
+
+      this.config.set('habitabilitySystems', this.systems)
     },
 
     _bodyMap(body) {
@@ -641,9 +694,9 @@ export default {
       const tidalModifier = body.TidalLock && BodyClass[body.BodyClass] !== 'Moon' ? 5 : 1
       const hydroModifier = body.HydroExt > 75 ? Math.max((100 - body.HydroExt) / 25, 0.01) : 1
 
-      if (body.SystemBodyName === 'Mercury') {
-        console.log(body.SystemBodyName, body.TidalLock, tidalModifier)
-      }
+      // if (body.SystemBodyName === 'Mercury') {
+      //   console.log(body.SystemBodyName, body.TidalLock, tidalModifier)
+      // }
 
       const maxPopPreModifiers = (localSurfaceArea / earthSurfaceArea) * baseMaxPop * this.selectedSpecies.PopulationDensityModifier
 
@@ -723,8 +776,8 @@ export default {
         greenhouses.sort((alpha, beta) => beta.GasAtm - alpha.GasAtm)
         antiGreenhouses.sort((alpha, beta) => beta.GasAtm - alpha.GasAtm)
 
-        const greenhouseFactor = Math.min(1 + totalPressure / 10 + greenhousePressure - antiGreenhousePressure, 3)
-        const surfaceTemperature = body.BaseTemp * greenhouseFactor * body.Albedo
+        // const greenhouseFactor = Math.min(1 + totalPressure / 10 + greenhousePressure - antiGreenhousePressure, 3)
+        // const surfaceTemperature = body.BaseTemp * greenhouseFactor * body.Albedo
 
         // WATER VAPOUR
         const waterVapourNeeded = Math.max((20 - Math.min(body.HydroExt, 20)) * 0.025 - waterVapourPressure, 0)
@@ -1026,7 +1079,7 @@ export default {
           console.log('Surveyed Systems', items)
 
           return items.map((item) => {
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, (population) => population.Population)
+            const [inhabitedColonies] = _partition(item.Populations, (population) => population.Population)
 
             return {
               ...item.toJSON(),
@@ -1035,8 +1088,6 @@ export default {
             }
           })
         })
-
-        console.log(systems)
 
         return systems
       },

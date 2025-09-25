@@ -5,29 +5,32 @@
     <div v-else>
       <v-container fluid>
         <v-row v-if="intruders.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Contacts
-          </v-col>
+          <v-col cols="12" class="display-1"> Contacts </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="intruders.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  Intruders detected in {{ intruders.length }} systems
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> Intruders detected in {{ intruders.length }} systems </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-expansion-panels hover>
                     <v-expansion-panel v-for="intruder in intruders" :key="intruder.System.SystemID">
-                      <v-expansion-panel-header class="font-weight-bold">
-                        {{ intruder.System.RaceSystemSurveys[0].Name }} &mdash;&nbsp; <span v-html="intruderTotals(intruder)" />
-                      </v-expansion-panel-header>
+                      <v-expansion-panel-header class="font-weight-bold"> {{ intruder.System.RaceSystemSurveys[0].Name }} &mdash;&nbsp; <span v-html="intruderTotals(intruder)" /> </v-expansion-panel-header>
 
                       <v-expansion-panel-content>
                         <v-list nav dense>
                           <v-list-item-group color="primary">
                             <v-list-item v-for="group of Object.values(intruder.Contacts)" :key="`${intruder.System.SystemID}-${group.Race.RaceID}`">
                               <v-list-item-content>
-                                <v-list-item-title>{{ group.Race.AlienRaces[0].AlienRaceName }} &mdash; {{ Object.entries(group.Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ') }} <span v-if="group.Race.AlienRaces[0].ContactStatus === 0">&mdash; <span class="red--text">Hostile</span></span></v-list-item-title>
+                                <v-list-item-title
+                                  >{{ group.Race.AlienRaces[0].AlienRaceName }} &mdash;
+                                  {{
+                                    Object.entries(group.Types)
+                                      .filter(([, contacts]) => contacts.length)
+                                      .map(([type, contacts]) => `${contacts.length} ${type}s`)
+                                      .join(', ')
+                                  }}
+                                  <span v-if="group.Race.AlienRaces[0].ContactStatus === 0">&mdash; <span class="red--text">Hostile</span></span></v-list-item-title
+                                >
                               </v-list-item-content>
                             </v-list-item>
                           </v-list-item-group>
@@ -41,15 +44,11 @@
           </v-col>
         </v-row>
         <v-row v-if="stockpilingCivilianMinerals.length || wastedMiningCapacity.length || wastedTerraformingCapacity.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Economy
-          </v-col>
+          <v-col cols="12" class="display-1"> Economy </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="stockpilingCivilianMinerals.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ stockpilingCivilianMinerals.length }} stockpiling civilian mining colonies
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ stockpilingCivilianMinerals.length }} stockpiling civilian mining colonies </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -57,7 +56,9 @@
                       <v-list-item v-for="colony in stockpilingCivilianMinerals" :key="colony.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(colony)" />
-                          <v-list-item-subtitle>Currently stockpiling <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(colony.TotalStockpile), separator) }} Tons of mineral</span></v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            >Currently stockpiling <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(colony.TotalStockpile), separator) }} Tons of mineral</span></v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -65,9 +66,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="wastedMiningCapacity.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ wastedMiningCapacity.length }} colonies with wasted mining capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ wastedMiningCapacity.length }} colonies with wasted mining capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -76,7 +75,7 @@
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(colony)" />
                           <div class="caption mt-3 font-weight-medium">
-                            {{ colony.Installations.map(installation => `${installation.Amount}x ${installation.Name}`).join(', ') }}
+                            {{ colony.Installations.map((installation) => `${installation.Amount}x ${installation.Name}`).join(', ') }}
                           </div>
                         </v-list-item-content>
                       </v-list-item>
@@ -85,9 +84,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="wastedTerraformingCapacity.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ wastedTerraformingCapacity.length }} colonies with wasted terraforming capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ wastedTerraformingCapacity.length }} colonies with wasted terraforming capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -96,7 +93,7 @@
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(colony)" />
                           <div class="caption mt-3 font-weight-medium">
-                            {{ colony.Installations.map(installation => `${installation.Amount}x ${installation.Name}`).join(', ') }}
+                            {{ colony.Installations.map((installation) => `${installation.Amount}x ${installation.Name}`).join(', ') }}
                           </div>
                         </v-list-item-content>
                       </v-list-item>
@@ -107,16 +104,12 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Ships
-          </v-col>
+        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
+          <v-col cols="12" class="display-1"> Ships </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="damagedShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ damagedShips.length }} damaged ships
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ damagedShips.length }} damaged ships </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -129,7 +122,7 @@
                         <v-list-item-content>
                           <v-list-item-title>{{ ship.FleetName }} &mdash; {{ ship.ShipName }}</v-list-item-title>
                           <div class="caption mt-3 font-weight-medium">
-                            {{ ship.Components.map(component => `${component.ComponentName} (${component.ComponentCost * 2} MSP)`).join(', ') }}
+                            {{ ship.Components.map((component) => `${component.ComponentName} (${component.ComponentCost * 2} MSP)`).join(', ') }}
                           </div>
                         </v-list-item-content>
                       </v-list-item>
@@ -138,9 +131,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="armorDamagedShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ armorDamagedShips.length }} armor-damaged ships
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ armorDamagedShips.length }} armor-damaged ships </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -148,7 +139,9 @@
                       <v-list-item v-for="ship in armorDamagedShips" :key="ship.ShipID">
                         <v-list-item-content>
                           <v-list-item-title>{{ ship.FleetName }} &mdash; {{ ship.ShipName }}</v-list-item-title>
-                          <v-list-item-subtitle>{{ ship.ArmorDamage }} damage - Thinnest remaining layer: <span :class="`${levelColor(ship.ThinnestLayer / ship.ArmourThickness)}--text`">{{ ship.ThinnestLayer }}</span> </v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            >{{ ship.ArmorDamage }} damage - Thinnest remaining layer: <span :class="`${levelColor(ship.ThinnestLayer / ship.ArmourThickness)}--text`">{{ ship.ThinnestLayer }}</span>
+                          </v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -156,9 +149,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="lowMoraleCrews.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ lowMoraleCrews.length }} low morale crews
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ lowMoraleCrews.length }} low morale crews </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -176,9 +167,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="lowMaintenanceShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ lowMaintenanceShips.length }} low maintenance ships
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ lowMaintenanceShips.length }} low maintenance ships </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -189,9 +178,7 @@
                             <span :class="`${levelColor(ship.SupplyLevel)}--text font-weight-bold`">{{ roundToDecimal(ship.SupplyLevel * 100, 1) }}%</span>
                             &mdash; {{ ship.FleetName }} &mdash; {{ ship.ShipName }}
                           </v-list-item-title>
-                          <v-list-item-subtitle>
-                            {{ roundToDecimal(ship.CurrentMaintSupplies, 1) }}/{{ ship.MaintSupplies }} MSP
-                          </v-list-item-subtitle>
+                          <v-list-item-subtitle> {{ roundToDecimal(ship.CurrentMaintSupplies, 1) }}/{{ ship.MaintSupplies }} MSP </v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -199,9 +186,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="obsoleteShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ obsoleteShips.length }} active obsolete ships
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ obsoleteShips.length }} active obsolete ships </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -217,9 +202,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="fullyTrainedShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ fullyTrainedShips.length }} fully trained ships in training fleets
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ fullyTrainedShips.length }} fully trained ships in training fleets </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -235,9 +218,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="openFireShips.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ openFireShips.length }} active fire controls
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ openFireShips.length }} active fire controls </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -246,9 +227,27 @@
                         <v-list-item-content>
                           <v-list-item-title>{{ ship.FleetName }} &mdash; {{ ship.ShipName }}</v-list-item-title>
                           <ul class="caption mt-3 font-weight-medium">
-                            <li v-for="fireControl in ship.FireControls" :key="`#${fireControl.FireControlNum} ${fireControl.FireControlName}`">
-                              #{{ fireControl.FireControlNum }} {{ fireControl.FireControlName }}
-                            </li>
+                            <li v-for="fireControl in ship.FireControls" :key="`#${fireControl.FireControlNum} ${fireControl.FireControlName}`">#{{ fireControl.FireControlNum }} {{ fireControl.FireControlName }}</li>
+                          </ul>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="transportClassesWithoutCargoShuttles.length">
+                <v-expansion-panel-header class="font-weight-bold">{{ transportClassesWithoutCargoShuttles.length }} transport ship classes without cargo shuttles </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="shipClass in transportClassesWithoutCargoShuttles" :key="shipClass.ShipClassID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ shipClass.ClassName }} Class</v-list-item-title>
+                          <ul class="caption mt-3 font-weight-medium">
+                            <li v-if="shipClass.CargoCapacity">{{ separatedNumber(shipClass.CargoCapacity) }} tons</li>
+                            <li v-if="shipClass.ColonistCapacity">{{ separatedNumber(shipClass.ColonistCapacity) }} colonists</li>
+                            <li v-if="shipClass.TroopCapacity">{{ separatedNumber(shipClass.TroopCapacity) }} tons of troops</li>
                           </ul>
                         </v-list-item-content>
                       </v-list-item>
@@ -260,15 +259,11 @@
           </v-col>
         </v-row>
         <v-row v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Populations
-          </v-col>
+          <v-col cols="12" class="display-1"> Populations </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="freeResearchLabPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ freeResearchLabPopulations.length }} populations with free research lab capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ freeResearchLabPopulations.length }} populations with free research lab capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -276,7 +271,9 @@
                       <v-list-item v-for="population in freeResearchLabPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle><span class="font-weight-bold">{{ population.AvailableFacilities - population.OccupiedFacilities }}</span> available labs</v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            ><span class="font-weight-bold">{{ population.AvailableFacilities - population.OccupiedFacilities }}</span> available labs</v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -284,9 +281,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="freeConstructionCapacityPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ freeConstructionCapacityPopulations.length }} populations with free construction capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ freeConstructionCapacityPopulations.length }} populations with free construction capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -294,7 +289,9 @@
                       <v-list-item v-for="population in freeConstructionCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle><span class="font-weight-bold">{{ roundToDecimal(population.FreePercentage, 4) }}%</span> available capacity</v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            ><span class="font-weight-bold">{{ roundToDecimal(population.FreePercentage, 4) }}%</span> available capacity</v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -302,9 +299,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="freeOrdnanceCapacityPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ freeOrdnanceCapacityPopulations.length }} populations with free ordnance production capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ freeOrdnanceCapacityPopulations.length }} populations with free ordnance production capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -312,7 +307,9 @@
                       <v-list-item v-for="population in freeOrdnanceCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            ><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -320,9 +317,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="freeFighterCapacityPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ freeFighterCapacityPopulations.length }} populations with free fighter production capacity
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ freeFighterCapacityPopulations.length }} populations with free fighter production capacity </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -330,7 +325,9 @@
                       <v-list-item v-for="population in freeFighterCapacityPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            ><span class="font-weight-bold">{{ population.FreePercentage }}%</span> available capacity</v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -338,17 +335,19 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="lowEfficiencyPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ lowEfficiencyPopulations.length }} low efficiency populations
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ lowEfficiencyPopulations.length }} low efficiency populations </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
                     <v-list-item-group color="primary">
                       <v-list-item v-for="population in lowEfficiencyPopulations" :key="population.PopulationID">
                         <v-list-item-content>
-                          <v-list-item-title><span :class="`${levelColor(population.Efficiency)}--text font-weight-bold`">{{ roundToDecimal(population.Efficiency * 100, 1) }}%</span> &mdash; <span v-html="populationName(population)" /></v-list-item-title>
-                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
+                          <v-list-item-title
+                            ><span :class="`${levelColor(population.Efficiency)}--text font-weight-bold`">{{ roundToDecimal(population.Efficiency * 100, 1) }}%</span> &mdash; <span v-html="populationName(population)"
+                          /></v-list-item-title>
+                          <v-list-item-subtitle
+                            >Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -356,9 +355,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="selfSustainingDestinationPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ selfSustainingDestinationPopulations.length }} self-sustaining colonist destinations
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ selfSustainingDestinationPopulations.length }} self-sustaining colonist destinations </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -366,7 +363,9 @@
                       <v-list-item v-for="population in selfSustainingDestinationPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            >Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -374,9 +373,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="deadResearchProjects.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ deadResearchProjects.length }} dead research projects
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ deadResearchProjects.length }} dead research projects </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -394,15 +391,11 @@
           </v-col>
         </v-row>
         <v-row v-if="governorlessPopulations.length || commanderlessNavalAdministrations.length || commanderlessSectors.length || mismatchedResearchFields.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Administrations
-          </v-col>
+          <v-col cols="12" class="display-1"> Administrations </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="governorlessPopulations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ governorlessPopulations.length }} populations without governor
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ governorlessPopulations.length }} populations without governor </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -410,7 +403,9 @@
                       <v-list-item v-for="population in governorlessPopulations" :key="population.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title v-html="populationName(population)" />
-                          <v-list-item-subtitle>Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            >Population: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(population.Population * 1000000), separator) }}</span></v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -418,9 +413,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="commanderlessNavalAdministrations.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ commanderlessNavalAdministrations.length }} naval administrations without commander
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ commanderlessNavalAdministrations.length }} naval administrations without commander </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -435,9 +428,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="commanderlessSectors.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ commanderlessSectors.length }} sectors without commander
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ commanderlessSectors.length }} sectors without commander </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -452,9 +443,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="mismatchedResearchFields.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ mismatchedResearchFields.length }} researchers with mismatched projects
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ mismatchedResearchFields.length }} researchers with mismatched projects </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -473,15 +462,11 @@
           </v-col>
         </v-row>
         <v-row v-if="obsoleteShipyards.length || activeLifepods.length || knownWrecks.length || knownUnexploitedConstructs.length || dangerousRifts.length" class="mb-5" justify="start">
-          <v-col cols="12" class="display-1">
-            Others
-          </v-col>
+          <v-col cols="12" class="display-1"> Others </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel v-if="obsoleteShipyards.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ obsoleteShipyards.length }} shipyards tooled to obsolete class
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ obsoleteShipyards.length }} shipyards tooled to obsolete class </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -489,7 +474,9 @@
                       <v-list-item v-for="shipyard in obsoleteShipyards" :key="shipyard.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title>{{ shipyard.PopName }} &mdash; {{ shipyard.ShipyardName }}</v-list-item-title>
-                          <v-list-item-subtitle>{{ shipyard.ClassName }} Class &mdash; <span class="text-no-wrap">{{ separatedNumber(shipyard.Capacity, separator) }}</span> Ton Capacity &mdash; Slipways: {{ shipyard.Slipways }}</v-list-item-subtitle>
+                          <v-list-item-subtitle
+                            >{{ shipyard.ClassName }} Class &mdash; <span class="text-no-wrap">{{ separatedNumber(shipyard.Capacity, separator) }}</span> Ton Capacity &mdash; Slipways: {{ shipyard.Slipways }}</v-list-item-subtitle
+                          >
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -497,9 +484,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="activeLifepods.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ activeLifepods.length }} active lifepods
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ activeLifepods.length }} active lifepods </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -515,16 +500,16 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="knownWrecks.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ knownWrecks.length }} wrecks in explored space
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ knownWrecks.length }} wrecks in explored space </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
                     <v-list-item-group color="primary">
                       <v-list-item v-for="wreck in knownWrecks" :key="wreck.WreckID">
                         <v-list-item-content>
-                          <v-list-item-title>{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ systemBodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title>
+                          <v-list-item-title
+                            >{{ wreck.SystemName }} &mdash; <span v-if="wreck.SystemBodyID">Orbiting {{ systemBodyName(wreck) }} &mdash; </span> {{ wreck.ClassName }}</v-list-item-title
+                          >
                           <v-list-item-subtitle>Size: {{ wreck.Size }}<span v-if="wreck.Owned"> &mdash; Owned design</span></v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -533,9 +518,7 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="knownUnexploitedConstructs.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ knownUnexploitedConstructs.length }} unexploited ancient constructs
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ knownUnexploitedConstructs.length }} unexploited ancient constructs </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
@@ -554,29 +537,22 @@
                 </v-expansion-panel-content>
               </v-expansion-panel>
               <v-expansion-panel v-if="dangerousRifts.length">
-                <v-expansion-panel-header class="font-weight-bold">
-                  {{ dangerousRifts.length }} dangerous rifts in occupied systems
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> {{ dangerousRifts.length }} dangerous rifts in occupied systems </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-list nav dense>
                     <v-list-item-group color="primary">
                       <v-list-item v-for="(rift, index) in dangerousRifts" :key="index">
                         <v-list-item-content>
-                          <v-list-item-title>{{ rift.System.RaceSystemSurveys[0].Name }} &mdash; Size: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(rift.Diameter / 1000000, 2), separator) }}</span>Mkm</v-list-item-title>
+                          <v-list-item-title
+                            >{{ rift.System.RaceSystemSurveys[0].Name }} &mdash; Size: <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(rift.Diameter / 1000000, 2), separator) }}</span
+                            >Mkm</v-list-item-title
+                          >
                           <v-list-item-subtitle>
-                            {{ [
-                              rift.MilitaryFleets && `${rift.MilitaryFleets} military fleets`,
-                              rift.CivilianFleets && `${rift.CivilianFleets} civilian fleets`
-                            ].filter(f => f).join(', ') }}
+                            {{ [rift.MilitaryFleets && `${rift.MilitaryFleets} military fleets`, rift.CivilianFleets && `${rift.CivilianFleets} civilian fleets`].filter((f) => f).join(', ') }}
                           </v-list-item-subtitle>
                           <v-list-item-subtitle>
-                            {{ [
-                              rift.InhabitedColonies && `${rift.InhabitedColonies} inhabited colonies`,
-                              rift.UsedColonies && `${rift.UsedColonies} used colonies`,
-                              rift.StockedColonies && `${rift.StockedColonies} stocked colonies`,
-                              rift.GroundUnitBases && `${rift.GroundUnitBases} ground unit bases`,
-                            ].filter(f => f).join(', ') }}
+                            {{ [rift.InhabitedColonies && `${rift.InhabitedColonies} inhabited colonies`, rift.UsedColonies && `${rift.UsedColonies} used colonies`, rift.StockedColonies && `${rift.StockedColonies} stocked colonies`, rift.GroundUnitBases && `${rift.GroundUnitBases} ground unit bases`].filter((f) => f).join(', ') }}
                           </v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
@@ -606,7 +582,7 @@ const secondsPerTwoWeeks = 1209600
 
 export default {
   components: {},
-  data () {
+  data() {
     return {
       graph: null,
 
@@ -631,19 +607,19 @@ export default {
 
     _partition,
 
-    levelColor (morale) {
+    levelColor(morale) {
       if (morale > 0.85) {
         return 'green'
       }
 
-      if (morale < 0.30) {
+      if (morale < 0.3) {
         return 'red'
       }
 
       return this.$vuetify.theme.dark ? 'yellow' : 'orange'
     },
 
-    podExpiration (lifepod) {
+    podExpiration(lifepod) {
       let remainingSeconds = secondsPerTwoWeeks - (this.GameTime - lifepod.CreationTime)
 
       const days = Math.floor(remainingSeconds / 86400)
@@ -658,44 +634,39 @@ export default {
       return `${days > 0 && `${days}d `}${hours && `${hours}m `}${minutes && `${minutes}m `}${remainingSeconds && `${remainingSeconds}s`}` || 'Expired'
     },
 
-    intruderTotals (intruder) {
-      return Object.entries(intruder.Totals).filter(([, contacts]) => contacts.length).map(([type, contacts]) => {
-        const [hostiles, neutrals] = _partition(contacts, (contact) => contact.ContactRace.AlienRaces[0].ContactStatus === 0)
+    intruderTotals(intruder) {
+      return Object.entries(intruder.Totals)
+        .filter(([, contacts]) => contacts.length)
+        .map(([type, contacts]) => {
+          const [hostiles, neutrals] = _partition(contacts, (contact) => contact.ContactRace.AlienRaces[0].ContactStatus === 0)
 
-        const out = []
+          const out = []
 
-        if (hostiles.length) {
-          out.push(`<span class="red--text">${hostiles.length} Hostile ${type}s</span>`)
-        }
+          if (hostiles.length) {
+            out.push(`<span class="red--text">${hostiles.length} Hostile ${type}s</span>`)
+          }
 
-        if (neutrals.length) {
-          out.push(`${neutrals.length} ${type}s`)
-        }
+          if (neutrals.length) {
+            out.push(`${neutrals.length} ${type}s`)
+          }
 
-        return out.join(', ')
-      }).join(', ')
+          return out.join(', ')
+        })
+        .join(', ')
     },
   },
   computed: {
-    ...mapGetters([
-      'config',
-      'database',
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'GameTime']),
 
-      'GameID',
-      'RaceID',
-
-      'GameTime',
-    ]),
-
-    separator () {
+    separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
-      return selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
+      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
   },
   asyncComputed: {
     stockpilingCivilianMinerals: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -711,7 +682,7 @@ export default {
       default: [],
     },
     wastedMiningCapacity: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -725,7 +696,9 @@ export default {
         // left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID
         // left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID
 
-        const installations = await this.database.query(`
+        const installations = await this.database
+          .query(
+            `
           select DIM_PlanetaryInstallation.Name, DIM_PlanetaryInstallation.MiningProductionValue, FCT_PopulationInstallations.Amount, FCT_Population.PopulationID, FCT_Population.PopName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population
           
           left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID 
@@ -738,40 +711,44 @@ export default {
           left join FCT_MineralDeposit ON FCT_Population.SystemBodyID = FCT_MineralDeposit.SystemBodyID 
           
           where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.MiningProductionValue > 0 and FCT_MineralDeposit.MaterialID is null
-        `).then(([items]) => {
-          console.log('Wasted Mining Capacity', items)
+        `
+          )
+          .then(([items]) => {
+            console.log('Wasted Mining Capacity', items)
 
-          return Object.values(items.reduce((aggregate, item) => {
-            if (!aggregate[item.PopulationID]) {
-              aggregate[item.PopulationID] = {
-                PopulationID: item.PopulationID,
-                PopName: item.PopName,
+            return Object.values(
+              items.reduce((aggregate, item) => {
+                if (!aggregate[item.PopulationID]) {
+                  aggregate[item.PopulationID] = {
+                    PopulationID: item.PopulationID,
+                    PopName: item.PopName,
 
-                SystemName: item.SystemName,
-                SystemBodyID: item.SystemBodyID,
-                PlanetNumber: item.PlanetNumber,
-                OrbitNumber: item.OrbitNumber,
-                BodyClass: item.BodyClass,
-                SystemBodyName: item.SystemBodyName,
-                Component: item.Component,
+                    SystemName: item.SystemName,
+                    SystemBodyID: item.SystemBodyID,
+                    PlanetNumber: item.PlanetNumber,
+                    OrbitNumber: item.OrbitNumber,
+                    BodyClass: item.BodyClass,
+                    SystemBodyName: item.SystemBodyName,
+                    Component: item.Component,
 
-                Installations: [],
-              }
-            }
+                    Installations: [],
+                  }
+                }
 
-            aggregate[item.PopulationID].Installations.push({
-              Name: item.Name,
-              MiningProductionValue: item.MiningProductionValue,
-              Amount: item.Amount,
-            })
+                aggregate[item.PopulationID].Installations.push({
+                  Name: item.Name,
+                  MiningProductionValue: item.MiningProductionValue,
+                  Amount: item.Amount,
+                })
 
-            return aggregate
-          }, {})).map((item) => ({
-            ...item,
+                return aggregate
+              }, {})
+            ).map((item) => ({
+              ...item,
 
-            TotalProductionValue: item.Installations.reduce((sum, installation) => sum + (installation.MiningProductionValue * installation.Amount), 0),
-          }))
-        })
+              TotalProductionValue: item.Installations.reduce((sum, installation) => sum + installation.MiningProductionValue * installation.Amount, 0),
+            }))
+          })
 
         installations.sort((alpha, beta) => beta.TotalProductionValue - alpha.TotalProductionValue)
 
@@ -780,12 +757,14 @@ export default {
       default: [],
     },
     wastedTerraformingCapacity: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
 
-        const installations = await this.database.query(`
+        const installations = await this.database
+          .query(
+            `
           select DIM_PlanetaryInstallation.Name, DIM_PlanetaryInstallation.TerraformValue, FCT_PopulationInstallations.Amount, FCT_Population.PopulationID, FCT_Population.PopName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_Population
 
           left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID 
@@ -797,40 +776,44 @@ export default {
           join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID
 
           where FCT_Population.TerraformingGasID = 0 AND DIM_PlanetaryInstallation.Name = 'Terraforming Installation' and FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}
-        `).then(([items]) => {
-          console.log('Wasted Terraforming Installations', items)
+        `
+          )
+          .then(([items]) => {
+            console.log('Wasted Terraforming Installations', items)
 
-          return Object.values(items.reduce((aggregate, item) => {
-            if (!aggregate[item.PopulationID]) {
-              aggregate[item.PopulationID] = {
-                PopulationID: item.PopulationID,
-                PopName: item.PopName,
+            return Object.values(
+              items.reduce((aggregate, item) => {
+                if (!aggregate[item.PopulationID]) {
+                  aggregate[item.PopulationID] = {
+                    PopulationID: item.PopulationID,
+                    PopName: item.PopName,
 
-                SystemName: item.SystemName,
-                SystemBodyID: item.SystemBodyID,
-                PlanetNumber: item.PlanetNumber,
-                OrbitNumber: item.OrbitNumber,
-                BodyClass: item.BodyClass,
-                SystemBodyName: item.SystemBodyName,
-                Component: item.Component,
+                    SystemName: item.SystemName,
+                    SystemBodyID: item.SystemBodyID,
+                    PlanetNumber: item.PlanetNumber,
+                    OrbitNumber: item.OrbitNumber,
+                    BodyClass: item.BodyClass,
+                    SystemBodyName: item.SystemBodyName,
+                    Component: item.Component,
 
-                Installations: [],
-              }
-            }
+                    Installations: [],
+                  }
+                }
 
-            aggregate[item.PopulationID].Installations.push({
-              Name: item.Name,
-              TerraformValue: item.TerraformValue,
-              Amount: item.Amount,
-            })
+                aggregate[item.PopulationID].Installations.push({
+                  Name: item.Name,
+                  TerraformValue: item.TerraformValue,
+                  Amount: item.Amount,
+                })
 
-            return aggregate
-          }, {})).map((item) => ({
-            ...item,
+                return aggregate
+              }, {})
+            ).map((item) => ({
+              ...item,
 
-            TotalProductionValue: item.Installations.reduce((sum, installation) => sum + (installation.TerraformValue * installation.Amount), 0),
-          }))
-        })
+              TotalProductionValue: item.Installations.reduce((sum, installation) => sum + installation.TerraformValue * installation.Amount, 0),
+            }))
+          })
 
         installations.sort((alpha, beta) => beta.TotalProductionValue - alpha.TotalProductionValue)
 
@@ -839,7 +822,7 @@ export default {
       default: [],
     },
     damagedShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -847,24 +830,26 @@ export default {
         const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID inner join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0`).then(([items]) => {
           console.log('Damaged Ships', items)
 
-          return Object.values(items.reduce((aggregate, item) => {
-            if (!aggregate[item.ShipID]) {
-              aggregate[item.ShipID] = {
-                ShipID: item.ShipID,
-                ShipName: item.ShipName,
-                FleetName: item.FleetName,
+          return Object.values(
+            items.reduce((aggregate, item) => {
+              if (!aggregate[item.ShipID]) {
+                aggregate[item.ShipID] = {
+                  ShipID: item.ShipID,
+                  ShipName: item.ShipName,
+                  FleetName: item.FleetName,
 
-                Components: [],
+                  Components: [],
+                }
               }
-            }
 
-            aggregate[item.ShipID].Components.push({
-              ComponentName: item.ComponentName,
-              ComponentCost: item.ComponentCost,
-            })
+              aggregate[item.ShipID].Components.push({
+                ComponentName: item.ComponentName,
+                ComponentCost: item.ComponentCost,
+              })
 
-            return aggregate
-          }, {})).map((item) => ({
+              return aggregate
+            }, {})
+          ).map((item) => ({
             ...item,
 
             TotalCost: item.Components.reduce((sum, component) => sum + component.ComponentCost, 0),
@@ -878,7 +863,7 @@ export default {
       default: [],
     },
     armorDamagedShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -894,7 +879,7 @@ export default {
       default: [],
     },
     lowMoraleCrews: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -910,7 +895,7 @@ export default {
       default: [],
     },
     obsoleteShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -926,7 +911,7 @@ export default {
       default: [],
     },
     lowMaintenanceShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -946,7 +931,7 @@ export default {
       default: [],
     },
     fullyTrainedShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -962,7 +947,7 @@ export default {
       default: [],
     },
     openFireShips: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -970,24 +955,42 @@ export default {
         const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_ShipDesignComponents.Name as FCName, FCT_FireControlAssignment.FCNum from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_FireControlAssignment on FCT_Ship.ShipID = FCT_FireControlAssignment.ShipID left join FCT_ShipDesignComponents on FCT_FireControlAssignment.FCTypeID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_FireControlAssignment.OpenFire = 1`).then(([items]) => {
           console.log('Open Fire Ships', items)
 
-          return Object.values(items.reduce((aggregate, item) => {
-            if (!aggregate[item.ShipID]) {
-              aggregate[item.ShipID] = {
-                ShipID: item.ShipID,
-                ShipName: item.ShipName,
-                FleetName: item.FleetName,
+          return Object.values(
+            items.reduce((aggregate, item) => {
+              if (!aggregate[item.ShipID]) {
+                aggregate[item.ShipID] = {
+                  ShipID: item.ShipID,
+                  ShipName: item.ShipName,
+                  FleetName: item.FleetName,
 
-                FireControls: [],
+                  FireControls: [],
+                }
               }
-            }
 
-            aggregate[item.ShipID].FireControls.push({
-              FireControlName: item.FCName,
-              FireControlNum: item.FCNum,
-            })
+              aggregate[item.ShipID].FireControls.push({
+                FireControlName: item.FCName,
+                FireControlNum: item.FCNum,
+              })
 
-            return aggregate
-          }, {}))
+              return aggregate
+            }, {})
+          )
+        })
+
+        return ships
+      },
+      default: [],
+    },
+    transportClassesWithoutCargoShuttles: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const ships = await this.database.query(`select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity from FCT_ShipClass where (CargoCapacity > 0 or ColonistCapacity > 0) and CargoShuttleStrength = 0 and FCT_ShipClass.Obsolete != 1 and FCT_ShipClass.RaceID = ${this.RaceID} and FCT_ShipClass.GameID = ${this.GameID} ORDER BY FCT_ShipClass.ClassName ASC`).then(([items]) => {
+          console.log('Transport Classes Without Cargo Shuttles', items)
+
+          return items
         })
 
         return ships
@@ -995,7 +998,7 @@ export default {
       default: [],
     },
     freeConstructionCapacityPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1011,7 +1014,7 @@ export default {
       default: [],
     },
     freeOrdnanceCapacityPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1027,7 +1030,7 @@ export default {
       default: [],
     },
     freeFighterCapacityPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1043,7 +1046,7 @@ export default {
       default: [],
     },
     freeResearchLabPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1059,7 +1062,7 @@ export default {
       default: [],
     },
     deadResearchProjects: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1075,7 +1078,7 @@ export default {
       default: [],
     },
     lowEfficiencyPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1091,7 +1094,7 @@ export default {
       default: [],
     },
     selfSustainingDestinationPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1107,7 +1110,7 @@ export default {
       default: [],
     },
     governorlessPopulations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1123,7 +1126,7 @@ export default {
       default: [],
     },
     mismatchedResearchFields: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1139,7 +1142,7 @@ export default {
       default: [],
     },
     commanderlessNavalAdministrations: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1155,7 +1158,7 @@ export default {
       default: [],
     },
     commanderlessSectors: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1171,7 +1174,7 @@ export default {
       default: [],
     },
     obsoleteShipyards: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1187,7 +1190,7 @@ export default {
       default: [],
     },
     activeLifepods: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1203,7 +1206,7 @@ export default {
       default: [],
     },
     knownWrecks: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1219,7 +1222,7 @@ export default {
       default: [],
     },
     knownUnexploitedConstructs: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1229,49 +1232,62 @@ export default {
             GameID: this.GameID,
           },
 
-          include: [{
-            model: this.database.models.ResearchField,
-          }, {
-            required: true,
-            model: this.database.models.SystemBody,
-            include: [{
-              required: false,
-              model: this.database.models.Population,
-            }, {
+          include: [
+            {
+              model: this.database.models.ResearchField,
+            },
+            {
               required: true,
-              model: this.database.models.System,
-              include: [{
-                required: true,
-                model: this.database.models.RaceSystemSurvey,
-                where: {
-                  RaceID: this.RaceID,
+              model: this.database.models.SystemBody,
+              include: [
+                {
+                  required: false,
+                  model: this.database.models.Population,
                 },
-              }],
-            }, {
-              required: true,
-              model: this.database.models.SystemBodySurvey,
-              where: {
-                RaceID: this.RaceID,
-              },
-            }, {
-              required: false,
-              model: this.database.models.SystemBodyName,
-              where: {
-                RaceID: this.RaceID,
-              },
-            }, {
-              model: this.database.models.Star,
-            }],
-          }],
+                {
+                  required: true,
+                  model: this.database.models.System,
+                  include: [
+                    {
+                      required: true,
+                      model: this.database.models.RaceSystemSurvey,
+                      where: {
+                        RaceID: this.RaceID,
+                      },
+                    },
+                  ],
+                },
+                {
+                  required: true,
+                  model: this.database.models.SystemBodySurvey,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                },
+                {
+                  required: false,
+                  model: this.database.models.SystemBodyName,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                },
+                {
+                  model: this.database.models.Star,
+                },
+              ],
+            },
+          ],
         }).then((items) => {
           console.log('Unexploited Constructs', items)
 
-          return items.map((construct) => {
-            construct.OwnPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID === this.RaceID)
-            construct.AlienPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID !== this.RaceID)
+          return items
+            .map((construct) => {
+              construct.OwnPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID === this.RaceID)
+              construct.AlienPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID !== this.RaceID)
 
-            return construct
-          }).filter((construct) => !construct.Active || !construct.OwnPopulations.length || !construct.OwnPopulations.filter((population) => population.Population > 10).length)
+              return construct
+            })
+            .filter((construct) => !construct.Active || !construct.OwnPopulations.length || !construct.OwnPopulations.filter((population) => population.Population > 10).length)
         })
 
         return constructs
@@ -1279,7 +1295,7 @@ export default {
       default: [],
     },
     dangerousRifts: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1289,64 +1305,75 @@ export default {
             GameID: this.GameID,
           },
 
-          include: [{
-            required: true,
-            model: this.database.models.System,
-            include: [{
+          include: [
+            {
               required: true,
-              model: this.database.models.RaceSystemSurvey,
-              where: {
-                RaceID: this.RaceID,
-              },
-            }, {
-              required: false,
-              model: this.database.models.Population,
-              where: {
-                RaceID: this.RaceID,
-              },
-              include: [{
-                model: this.database.models.PopulationInstallation,
-                // include: [{
-                //   required: true,
-                //   model: this.database.models.PlanetaryInstallation,
-                // }]
-              }, {
-                model: this.database.models.GroundUnitFormation,
-              }],
-            }, {
-              required: false,
-              model: this.database.models.Fleet,
-              where: {
-                RaceID: this.RaceID,
-              },
-            }],
-          }],
+              model: this.database.models.System,
+              include: [
+                {
+                  required: true,
+                  model: this.database.models.RaceSystemSurvey,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                },
+                {
+                  required: false,
+                  model: this.database.models.Population,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                  include: [
+                    {
+                      model: this.database.models.PopulationInstallation,
+                      // include: [{
+                      //   required: true,
+                      //   model: this.database.models.PlanetaryInstallation,
+                      // }]
+                    },
+                    {
+                      model: this.database.models.GroundUnitFormation,
+                    },
+                  ],
+                },
+                {
+                  required: false,
+                  model: this.database.models.Fleet,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                },
+              ],
+            },
+          ],
 
           order: [['Diameter', 'DESC']],
         }).then((items) => {
           console.log('Dangerous Rifts', items)
 
-          return items.map((item) => {
-            const [civilianFleets, militaryFleets] = _partition(item.System.Fleets, (fleet) => fleet.ShippingLine)
+          return items
+            .map((item) => {
+              const [civilianFleets, militaryFleets] = _partition(item.System.Fleets, (fleet) => fleet.ShippingLine)
 
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.System.Populations, (population) => population.Population)
-            const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
-            const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
-            const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
+              const [inhabitedColonies, uninhabitedColonies] = _partition(item.System.Populations, (population) => population.Population)
+              const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
+              const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
+              const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
 
-            return {
-              ...item.toJSON(),
+              return {
+                ...item.toJSON(),
 
-              CivilianFleets: civilianFleets.length,
-              MilitaryFleets: militaryFleets.length,
+                CivilianFleets: civilianFleets.length,
+                MilitaryFleets: militaryFleets.length,
 
-              InhabitedColonies: inhabitedColonies.length,
-              UsedColonies: usedColonies.length,
-              StockedColonies: stockedColonies.length,
+                InhabitedColonies: inhabitedColonies.length,
+                UsedColonies: usedColonies.length,
+                StockedColonies: stockedColonies.length,
 
-              GroundUnitBases: groundUnitBases.length,
-            }
-          }).filter((item) => item.CivilianFleets || item.MilitaryFleets || item.InhabitedColonies || item.UsedColonies || item.StockedColonies || item.GroundUnitBases)
+                GroundUnitBases: groundUnitBases.length,
+              }
+            })
+            .filter((item) => item.CivilianFleets || item.MilitaryFleets || item.InhabitedColonies || item.UsedColonies || item.StockedColonies || item.GroundUnitBases)
         })
 
         console.log(rifts)
@@ -1356,7 +1383,7 @@ export default {
       default: [],
     },
     intruders: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -1374,38 +1401,46 @@ export default {
           group: 'ContactID',
           order: [['LastUpdate', 'DESC']],
 
-          include: [{
-            required: true,
-            model: this.database.models.System,
-            include: [{
+          include: [
+            {
               required: true,
-              model: this.database.models.RaceSystemSurvey,
-              where: {
-                RaceID: this.RaceID,
-              },
-            }],
-          }, {
-            required: true,
-            model: this.database.models.Race,
-            as: 'ContactRace',
-
-            where: {
-              RaceID: {
-                [Op.ne]: this.RaceID,
-              },
+              model: this.database.models.System,
+              include: [
+                {
+                  required: true,
+                  model: this.database.models.RaceSystemSurvey,
+                  where: {
+                    RaceID: this.RaceID,
+                  },
+                },
+              ],
             },
-
-            include: [{
-              model: this.database.models.AlienRace,
+            {
+              required: true,
+              model: this.database.models.Race,
+              as: 'ContactRace',
 
               where: {
-                ViewRaceID: this.RaceID,
+                RaceID: {
+                  [Op.ne]: this.RaceID,
+                },
               },
-            }],
-          }, {
-            required: false,
-            model: this.database.models.Population,
-          }],
+
+              include: [
+                {
+                  model: this.database.models.AlienRace,
+
+                  where: {
+                    ViewRaceID: this.RaceID,
+                  },
+                },
+              ],
+            },
+            {
+              required: false,
+              model: this.database.models.Population,
+            },
+          ],
         }).then((items) => {
           console.log('Intruder Contacts', items)
 
@@ -1419,39 +1454,41 @@ export default {
             16: 'Shipyard',
           }
 
-          return Object.values(items.reduce((aggregate, contact) => {
-            if (!contact.ContactRace.AlienRaces.length) {
-              console.log('!!! NO ALIEN RACE', contact)
+          return Object.values(
+            items.reduce((aggregate, contact) => {
+              if (!contact.ContactRace.AlienRaces.length) {
+                console.log('!!! NO ALIEN RACE', contact)
+
+                return aggregate
+              }
+
+              if ([2, 3].includes(contact.ContactRace.AlienRaces[0].ContactStatus)) {
+                return aggregate
+              }
+
+              if (!aggregate[contact.SystemID]) {
+                aggregate[contact.SystemID] = {
+                  System: contact.System,
+
+                  Contacts: {},
+                  Totals: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
+                }
+              }
+
+              if (!aggregate[contact.SystemID].Contacts[contact.ContactRaceID]) {
+                aggregate[contact.SystemID].Contacts[contact.ContactRaceID] = {
+                  Race: contact.ContactRace,
+
+                  Types: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
+                }
+              }
+
+              aggregate[contact.SystemID].Contacts[contact.ContactRaceID].Types[typeMap[contact.ContactType] || 'Other'].push(contact)
+              aggregate[contact.SystemID].Totals[typeMap[contact.ContactType] || 'Other'].push(contact)
 
               return aggregate
-            }
-
-            if ([2, 3].includes(contact.ContactRace.AlienRaces[0].ContactStatus)) {
-              return aggregate
-            }
-
-            if (!aggregate[contact.SystemID]) {
-              aggregate[contact.SystemID] = {
-                System: contact.System,
-
-                Contacts: {},
-                Totals: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
-              }
-            }
-
-            if (!aggregate[contact.SystemID].Contacts[contact.ContactRaceID]) {
-              aggregate[contact.SystemID].Contacts[contact.ContactRaceID] = {
-                Race: contact.ContactRace,
-
-                Types: Object.fromEntries(Object.values(typeMap).map((type) => [type, []])),
-              }
-            }
-
-            aggregate[contact.SystemID].Contacts[contact.ContactRaceID].Types[typeMap[contact.ContactType] || 'Other'].push(contact)
-            aggregate[contact.SystemID].Totals[typeMap[contact.ContactType] || 'Other'].push(contact)
-
-            return aggregate
-          }, {}))
+            }, {})
+          )
         })
 
         return contacts
@@ -1462,6 +1499,4 @@ export default {
 }
 </script>
 
-<style lang="scss" scoped>
-
-</style>
+<style lang="scss" scoped></style>

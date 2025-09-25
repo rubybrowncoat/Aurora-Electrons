@@ -507,12 +507,12 @@ export default {
 
     optimizationCombinations() {
       switch (this.selectedOptimization) {
-      case 0: {
-        return this.tonnageCombinations
-      }
-      case 1: {
-        return this.optimizationCombinationsFromEngineSize
-      }
+        case 0: {
+          return this.tonnageCombinations
+        }
+        case 1: {
+          return this.optimizationCombinationsFromEngineSize
+        }
       }
 
       return []
@@ -593,7 +593,7 @@ export default {
 
           return [researched, unresearched]
         },
-        [[], []],
+        [[], []]
       )
     },
 
@@ -763,7 +763,7 @@ export default {
 
           return [tonnageAggregate, engineSizeAggregate]
         },
-        [[], []],
+        [[], []]
       )
 
       tonnageCombinations.sort((alpha, beta) => {
@@ -802,7 +802,7 @@ export default {
           join FCT_Race on FCT_Race.GameID = FCT_RaceTech.GameID and FCT_RaceTech.RaceID = FCT_Race.RaceID
           
           where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}
-        `,
+        `
           )
           .then(([items]) => {
             console.log('Researched Technologies', items)

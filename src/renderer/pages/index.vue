@@ -167,30 +167,30 @@ export default {
       }
 
       switch (type) {
-      case 'Research': {
-        return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
-      }
-      case 'Production': {
-        return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
-      }
-      case 'Shipyard': {
-        return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
-      }
-      case 'Ship': {
-        return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
-      }
-      case 'Training': {
-        return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
-      }
-      case 'Terraforming': {
-        return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
-      }
-      case 'Queue': {
-        return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
-      }
-      default: {
-        return 'deep-purple accent-2'
-      }
+        case 'Research': {
+          return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
+        }
+        case 'Production': {
+          return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
+        }
+        case 'Shipyard': {
+          return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
+        }
+        case 'Ship': {
+          return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
+        }
+        case 'Training': {
+          return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
+        }
+        case 'Terraforming': {
+          return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
+        }
+        case 'Queue': {
+          return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
+        }
+        default: {
+          return 'deep-purple accent-2'
+        }
       }
     },
 

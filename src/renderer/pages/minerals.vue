@@ -444,48 +444,48 @@ export default {
       return this.bodyGroups.filter((body) => {
         return this.filters.every((filter) => {
           switch (filter.selectedMaterial) {
-          case 'Any': {
-            return this.materials.some((materialName) => {
-              const material = body[materialName]
+            case 'Any': {
+              return this.materials.some((materialName) => {
+                const material = body[materialName]
 
-              if (!material) {
-                return false
-              }
+                if (!material) {
+                  return false
+                }
 
-              return this.applyMaterialFilter(material, filter)
-            })
-          }
-          case 'All Present': {
-            return this.materials.every((materialName) => {
-              const material = body[materialName]
-
-              if (!material) {
-                return true
-              }
-
-              return this.applyMaterialFilter(material, filter)
-            })
-          }
-          case 'All': {
-            return this.materials.every((materialName) => {
-              const material = body[materialName]
-
-              if (!material) {
-                return false
-              }
-
-              return this.applyMaterialFilter(material, filter)
-            })
-          }
-          default: {
-            const material = body[filter.selectedMaterial]
-
-            if (!material) {
-              return false
+                return this.applyMaterialFilter(material, filter)
+              })
             }
+            case 'All Present': {
+              return this.materials.every((materialName) => {
+                const material = body[materialName]
 
-            return this.applyMaterialFilter(material, filter)
-          }
+                if (!material) {
+                  return true
+                }
+
+                return this.applyMaterialFilter(material, filter)
+              })
+            }
+            case 'All': {
+              return this.materials.every((materialName) => {
+                const material = body[materialName]
+
+                if (!material) {
+                  return false
+                }
+
+                return this.applyMaterialFilter(material, filter)
+              })
+            }
+            default: {
+              const material = body[filter.selectedMaterial]
+
+              if (!material) {
+                return false
+              }
+
+              return this.applyMaterialFilter(material, filter)
+            }
           }
         })
       })

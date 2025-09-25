@@ -15,21 +15,21 @@ export const systemBodyName = (body, system = null) => {
   const systemPrefix = system ? `${system.Name}-` : ''
 
   switch (body.BodyClass) {
-  case 1: {
-    return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
-  }
-  case 2: {
-    return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
-  }
-  case 3: {
-    return `Asteroid #${body.OrbitNumber}`
-  }
-  case 5: {
-    return `Comet #${body.OrbitNumber}`
-  }
-  default: {
-    return `System Body #${body.SystemBodyID}`
-  }
+    case 1: {
+      return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
+    }
+    case 2: {
+      return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
+    }
+    case 3: {
+      return `Asteroid #${body.OrbitNumber}`
+    }
+    case 5: {
+      return `Comet #${body.OrbitNumber}`
+    }
+    default: {
+      return `System Body #${body.SystemBodyID}`
+    }
   }
 }
 

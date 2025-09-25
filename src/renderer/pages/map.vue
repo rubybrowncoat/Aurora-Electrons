@@ -1100,13 +1100,6 @@ export default {
         this.distanceColorChain = ['lime', 'red']
       }
 
-      console.log('Test Distance Scaler')
-      const scaledDistances = []
-      for (let i = 0; i <= 1500; i += 0.5) {
-        scaledDistances.push(scaleValue(i))
-      }
-      console.log(scaledDistances)
-
       this.graph.fit()
 
       const unpositionedNodes = this.graph.nodes().filter((node) => {

@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons-new",
-  "version": "0.9.6",
+  "version": "0.9.8",
   "description": "Aurora Electrons",
   "main": "./dist/main/index.js",
   "scripts": {
@@ -16,11 +16,7 @@
   "license": "MIT",
   "homepage": "https://github.com/michalzaq12/electron-nuxt/blob/master/README.md",
   "engines": {
-    "node": ">=14.14.9"
-  },
-  "resolutions": {
-    "@types/node": "14.14.9",
-    "node-gyp": "8.2.0"
+    "node": ">=20.17.0"
   },
   "devDependencies": {
     "@mdi/font": "^6.4.95",
@@ -62,17 +58,15 @@
     "cytoscape-layout-utilities": "^1.1.1",
     "cytoscape-navigator": "^2.0.2",
     "d3-color": "^2.0.0",
-    "d3-force": "^2.1.1",
     "d3-interpolate": "^2.0.1",
     "dayjs": "^1.11.18",
     "electron-store": "^8.2.0",
-    "force-graph": "1.39.2",
     "lodash": "^4.17.21",
     "pixi-viewport": "^4.35.0",
     "pixi.js": "^6.5.10",
     "romanum": "^1.0.1",
     "sequelize": "^6.37.7",
-    "sqlite3": "5.0.0",
+    "sqlite3": "5.1.5",
     "vue-async-computed": "^4.0.1"
   }
 }

@@ -62,6 +62,7 @@
           <v-tab to="/information" nuxt>Information</v-tab>
           <v-tab to="/map" nuxt>Map (WIP)</v-tab>
           <v-tab to="/log" nuxt>Log</v-tab>
+          <v-tab to="/designed-tech" nuxt>Designed Tech (WIP)</v-tab>
           <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
           <!-- <v-tab to="/engines" nuxt>Engines (WIP)</v-tab> -->
         </v-tabs>
@@ -124,36 +125,39 @@ export default {
 
     title () {
       switch (this.$route.name) {
-      case 'index': {
-        return 'Production Recap'
-      }
-      case 'warnings': {
-        return 'Warnings'
-      }
-      case 'minerals': {
-        return 'Mineral Breakdown'
-      }
-      case 'habitability': {
-        return 'Habitability Breakdown'
-      }
-      case 'information': {
-        return 'Empire Information'
-      }
-      case 'technologies': {
-        return 'Technology Tree'
-      }
-      case 'map': {
-        return 'Galaxy Map'
-      }
-      case 'settings': {
-        return 'Settings'
-      }
-      case 'log': {
-        return 'Game Log Viewer'
-      }
-      default: {
-        return 'Default title'
-      }
+        case 'index': {
+          return 'Production Recap'
+        }
+        case 'warnings': {
+          return 'Warnings'
+        }
+        case 'minerals': {
+          return 'Mineral Breakdown'
+        }
+        case 'habitability': {
+          return 'Habitability Breakdown'
+        }
+        case 'information': {
+          return 'Empire Information'
+        }
+        case 'technologies': {
+          return 'Technology Tree'
+        }
+        case 'map': {
+          return 'Galaxy Map'
+        }
+        case 'settings': {
+          return 'Settings'
+        }
+        case 'log': {
+          return 'Game Log Viewer'
+        }
+        case 'designed-tech': {
+          return 'Designed Technologies'
+        }
+        default: {
+          return 'Default title'
+        }
       }
     },
 
