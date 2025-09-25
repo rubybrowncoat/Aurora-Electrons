@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons-new",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "Aurora Electrons",
   "main": "./dist/main/index.js",
   "scripts": {

@@ -47,6 +47,7 @@
                   <v-chip v-if="item.SpinalWeapon" x-small color="purple accent-4" text-color="white" class="ml-1 px-1 font-weight-medium">Spinal</v-chip>
                   <v-chip v-if="item.ShippingLineSystem" x-small color="light-green darken-1" text-color="black" class="ml-1 px-1 font-weight-bold">Civilian</v-chip>
                   <v-chip v-if="(item.ComponentTypeID === 16 && item.SpecialFunction === 2) || (item.ComponentTypeID !== 16 && item.MilitarySystem === 0)" x-small color="orange" text-color="white" class="ml-1 px-1 font-weight-medium">Commercial</v-chip>
+                  <v-chip v-if="item.Prototype" x-small color="cyan darken-2" text-color="white" class="ml-1 px-1 font-weight-medium">Prototype</v-chip>
                   <v-chip v-if="item.Obsolete" x-small color="red accent-4" text-color="white" class="ml-1 px-1 font-weight-medium">Obsolete</v-chip>
                 </div>
               </template>
@@ -418,6 +419,29 @@ export default {
         },
         ...sizeCostCrewHTKColumns,
       ],
+      51: [
+        // Decoy Launchers
+        nameColumn,
+        {
+          text: 'Maximum Decoy Size',
+          value: 'ComponentValue',
+          divider: true,
+          render: (component) => this.standardSeparatedNumber(component.ComponentValue),
+        },
+        {
+          text: 'Hangar Reload',
+          value: 'RateOfFire',
+          divider: true,
+          render: (component) => `${this.standardSeparatedDecimal(component.RateOfFire / 60, 1)} min - ${this.standardSeparatedDecimal(component.RateOfFire / 3600, 1)}h`,
+        },
+        {
+          text: 'MF Reload',
+          value: 'MFRateOfFire',
+          divider: true,
+          render: (component) => `${this.standardSeparatedDecimal(component.MFRateOfFire / 3600, 1)} h`,
+        },
+        ...sizeCostCrewHTKColumns,
+      ],
       34: [
         // EM Detection Sensors
         nameColumn,
@@ -473,6 +497,23 @@ export default {
           value: 'MaxExplosionSize',
           divider: true,
           render: (component) => `${this.standardSeparatedNumber(component.MaxExplosionSize)} / ${this.standardSeparatedDecimal(component.ExplosionChance, 1)}%`,
+        },
+        ...sizeCostCrewHTKColumns,
+      ],
+      49: [
+        // Fighter Pod Bays
+        nameColumn,
+        {
+          text: 'Hangar Reload',
+          value: 'RateOfFire',
+          divider: true,
+          render: (component) => `${this.standardSeparatedDecimal(component.RateOfFire / 60, 1)} min - ${this.standardSeparatedDecimal(component.RateOfFire / 3600, 1)}h`,
+        },
+        {
+          text: 'MF Reload',
+          value: 'MFRateOfFire',
+          divider: true,
+          render: (component) => `${this.standardSeparatedDecimal(component.MFRateOfFire / 3600, 1)} h`,
         },
         ...sizeCostCrewHTKColumns,
       ],
@@ -675,6 +716,56 @@ export default {
       50: [
         // Miscellaneous Components
         nameColumn,
+        ...sizeCostCrewHTKColumns,
+      ],
+      24: [
+        // Missile Fire Controls
+        nameColumn,
+        {
+          text: 'Range (mKm)',
+          value: 'MaxSensorRange',
+          divider: true,
+          render: (component) => this.standardSeparatedDecimal(component.MaxSensorRange / 1e6, 2),
+        },
+        {
+          text: 'Resolution',
+          value: 'Resolution',
+          divider: true,
+          render: (component) => this.standardSeparatedNumber(component.Resolution),
+        },
+        {
+          text: 'Emissions',
+          value: 'ComponentValue',
+          divider: true,
+          render: (component) => this.standardSeparatedNumber(component.ComponentValue),
+        },
+        ...sizeCostCrewHTKColumns,
+      ],
+      3: [
+        // Missile Launchers
+        nameColumn,
+        {
+          text: 'Missile Size',
+          value: 'ComponentValue',
+          divider: true,
+          render: (component) => this.standardSeparatedNumber(component.ComponentValue),
+        },
+        {
+          text: 'Recycle Time',
+          value: 'RateOfFire',
+          divider: true,
+          render: (component) => {
+            const seconds = component.RateOfFire
+
+            if (seconds < 60) {
+              return `${this.standardSeparatedDecimal(seconds, 1)} s`
+            } else if (seconds < 3600) {
+              return `${this.standardSeparatedDecimal(seconds / 60, 1)} m (${this.standardSeparatedDecimal(seconds, 1)} s)`
+            } else {
+              return `${this.standardSeparatedDecimal(seconds / 3600, 1)} h (${this.standardSeparatedDecimal(seconds, 1)} s)`
+            }
+          },
+        },
         ...sizeCostCrewHTKColumns,
       ],
       47: [
@@ -982,6 +1073,10 @@ export default {
           break
         case 5: // Power Plants
           component.PowerPerHS = component.ComponentValue / component.Size
+          break
+        case 51: // Decoy Launchers
+        case 49: // Fighter Pod Bays
+          component.MFRateOfFire = component.RateOfFire * 10
           break
         default:
           break

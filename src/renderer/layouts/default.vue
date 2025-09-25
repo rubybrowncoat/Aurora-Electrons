@@ -47,10 +47,10 @@
       <v-btn icon to="/settings" nuxt>
         <v-icon>mdi-wrench</v-icon>
       </v-btn>
-      <v-btn v-if="$vuetify.theme.dark" icon @click="$vuetify.theme.dark = false">
+      <v-btn v-if="$vuetify.theme.dark" icon @click="setDarkMode(false)">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
-      <v-btn v-else icon @click="$vuetify.theme.dark = true">
+      <v-btn v-else icon @click="setDarkMode(true)">
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
       <template #extension>
@@ -92,11 +92,10 @@
 
 <script>
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
-// import AppHeader from '@/components/header'
 
 export default {
   components: {
-    // AppHeader
+    //
   },
   data () {
     return {
@@ -123,7 +122,7 @@ export default {
       'RaceID',
     ]),
 
-    title () {
+    title() {
       switch (this.$route.name) {
         case 'index': {
           return 'Production Recap'
@@ -178,9 +177,10 @@ export default {
       },
     },
   },
-  mounted () {
-    this.themeInit()
-
+  created() {
+    this.$vuetify.theme.dark = this.config.get('darkMode', false)
+  },
+  mounted() {
     // CONFIG CHANGE SUBSCRIPTION
     const mutationReturn = {}
     this.configDidChange({
@@ -213,18 +213,9 @@ export default {
       'changeGame',
     ]),
 
-    themeInit () {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-
-      mediaQuery.addEventListener('change', (e) => {
-        console.log('mediaQuery listener', e)
-      })
-
-      if (mediaQuery.matches) {
-        this.$nextTick(() => {
-          this.$vuetify.theme.dark = true
-        })
-      }
+    setDarkMode(value) {
+      this.$vuetify.theme.dark = value
+      this.config.set('darkMode', value)
     },
   },
   asyncComputed: {
