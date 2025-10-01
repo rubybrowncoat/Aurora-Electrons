@@ -948,6 +948,11 @@ export default {
 
       console.log('Center to Point Distances Computed', centerToPointDistances)
 
+      const jumpPointBySourceAndDestination = new Map()
+      for (const jumpPoint of this.mapElements.jumpPoints) {
+        jumpPointBySourceAndDestination.set(`${jumpPoint.sourceSystemId}-${jumpPoint.destinationSystemId}`, jumpPoint)
+      }
+
       const calculateChainDistance2 = (chain, lastHopToCenter = true) => {
         let totalDistance = 0
 
@@ -980,26 +985,56 @@ export default {
             continue
           }
 
-          const jumpPointToPrevious = this.mapElements.jumpPoints.find((jp) => {
-            return jp.sourceSystemId === system.id() && jp.destinationSystemId === previousSystem.id()
-          })
+          // const jumpPointToPrevious = this.mapElements.jumpPoints.find((jp) => {
+          //   return jp.sourceSystemId === system.id() && jp.destinationSystemId === previousSystem.id()
+          // })
+          const jumpPointToPrevious = jumpPointBySourceAndDestination.get(`${system.id()}-${previousSystem.id()}`)
 
-          const jumpPointToNext = this.mapElements.jumpPoints.find((jp) => {
-            return jp.sourceSystemId === system.id() && jp.destinationSystemId === nextSystem.id()
-          })
+          // const jumpPointToNext = this.mapElements.jumpPoints.find((jp) => {
+          //   return jp.sourceSystemId === system.id() && jp.destinationSystemId === nextSystem.id()
+          // })
+          const jumpPointToNext = jumpPointBySourceAndDestination.get(`${system.id()}-${nextSystem.id()}`)
 
           if (!jumpPointToPrevious || !jumpPointToNext) {
             console.error('### MISSING JUMP POINTS?', system.data(), previousSystem.data(), nextSystem.data(), jumpPointToPrevious, jumpPointToNext)
             continue
           }
 
-          totalDistance += new Vector2(jumpPointToPrevious.mapX, jumpPointToPrevious.mapY).distanceTo(new Vector2(jumpPointToNext.mapX, jumpPointToNext.mapY)) / 1000000000
+          totalDistance += new Vector2(jumpPointToPrevious.mapX, jumpPointToPrevious.mapY).distanceTo(new Vector2(jumpPointToNext.mapX, jumpPointToNext.mapY)) / 1_000_000_000
         }
 
         return totalDistance
       }
 
+      const bestByState = new Map()
+      const enteredChainSignatures = new Set()
+
+      // Depth fuse: no simple path can be longer than number of nodes
+      const maxDepth = this.graph.nodes().length
+
       const process = (node, chain, distances) => {
+        // Fuse: bail if ever beyond the simple-path upper bound
+        if (chain.length > maxDepth) {
+          return distances
+        }
+
+        const chainSignature = chain.map((n) => n.id()).join('>')
+        if (enteredChainSignatures.has(chainSignature)) {
+          console.log('Already Entered Chain Signature', chainSignature)
+
+          return distances
+        }
+
+        enteredChainSignatures.add(chainSignature)
+
+        // if (chain.length > 1) {
+        //   const callingNode = chain[chain.length - 2]
+        //   console.log(`Processing Node ${node.data('name')} (${node.id()}) From Node ${callingNode.data('name')} (${callingNode.id()}) Chain Length ${chain.length} Distances So Far ${Object.keys(distances).length}`)
+        //   // console.log('Chain Signature', chainSignature)
+        // } else {
+        //   console.log(`Processing Initial Node ${node.data('name')} (${node.id()}) Chain Length ${chain.length} Distances So Far ${Object.keys(distances).length}`)
+        // }
+
         const neighbors = node.neighborhood('node')
 
         neighbors.forEach((neighbor) => {
@@ -1010,20 +1045,30 @@ export default {
 
           const newChain = chain.union(neighbor)
 
+          const previousId = node.id()
+          const stateKey = `${neighborId}|${previousId}`
+
+          const newDistance = calculateChainDistance2(newChain)
+
+          // If we have already found an equal or better way to enter this state, prune
+          if (newDistance >= (bestByState.get(stateKey) ?? Infinity)) {
+            return
+          }
+
+          bestByState.set(stateKey, newDistance)
+
           if (!distances[neighborId]) {
-            const distance = calculateChainDistance2(newChain)
             const previousDistance = chain.length > 1 ? calculateChainDistance2(chain, false) : 0
 
             distances[neighborId] = {
               name: neighbor.data('name'),
-              distance,
-              hopDistance: distance - previousDistance,
+              distance: newDistance,
+              hopDistance: newDistance - previousDistance,
               chain: newChain.toArray(),
               chainNames: newChain.map((n) => n.data('name')),
             }
           } else {
             const existingDistance = distances[neighborId].distance
-            const newDistance = calculateChainDistance2(newChain)
 
             if (newDistance < existingDistance) {
               const previousDistance = chain.length > 1 ? calculateChainDistance2(chain, false) : 0
@@ -1040,6 +1085,12 @@ export default {
 
           process(neighbor, newChain, distances)
         })
+
+        // if (chain.length > 1) {
+        //   console.log('Completed Node', node.data('name'), 'From Node', chain[chain.length - 2].data('name'), 'Distances So Far', Object.keys(distances).length)
+        // } else {
+        //   console.log('Completed Initial Node', node.data('name'), 'Distances So Far', Object.keys(distances).length)
+        // }
 
         return distances
       }
@@ -1092,10 +1143,10 @@ export default {
       const capitalDistanceValues = Object.values(capitalDistances)
       if (capitalDistanceValues.length) {
         const longestChain = Math.max(...capitalDistanceValues.map((d) => d.chain.length - 1))
-        console.log('Longest Chain', longestChain)
+        // console.log('Longest Chain', longestChain)
 
         this.distanceColorChain = quantize(interpolateHslLong('lime', 'red'), longestChain)
-        console.log('Distance Scale', this.distanceColorChain)
+        // console.log('Distance Scale', this.distanceColorChain)
       } else {
         this.distanceColorChain = ['lime', 'red']
       }
