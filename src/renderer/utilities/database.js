@@ -59,6 +59,7 @@ export const resetDatabase = (storagePath) => {
     StartingWealth: Sequelize.REAL,
     AnnualWealth: Sequelize.REAL,
     WealthCreationRate: Sequelize.REAL,
+    ColonizationSkill: Sequelize.REAL,
 
     RaceStartingLevel: Sequelize.INTEGER,
   }, {

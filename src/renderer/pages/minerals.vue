@@ -156,7 +156,7 @@
             </v-row>
           </v-col>
           <v-col cols="12">
-            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand>
+            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand :items-per-page.sync="itemsPerPage" :sort-by.sync="sortBy" :sort-desc.sync="sortDescending">
               <template #[`item.data-table-expand`]="{ item }">
                 <td style="white-space: nowrap;">
                   <v-btn v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
@@ -273,6 +273,27 @@ const baseFilter = {
 
 export default {
   components: {},
+  asyncData ({ route }) {
+    console.log('minerals asyncData', route)
+
+    if (route.query.bodies) {
+      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+
+      return {
+        selectedBodies,
+        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
+      }
+    } else if (route.query.systems) {
+      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
+      console.log('asyncData systems', systems)
+
+      return {
+        systems,
+      }
+    }
+
+    return {}
+  },
   data () {
     return {
       filterMaterials: ['Any', 'All Present', 'All', ...Object.values(MaterialMap)],
@@ -294,6 +315,10 @@ export default {
       selectedBodies: [],
       filterBySelectedBodies: false,
 
+      itemsPerPage: 10,
+      sortBy: [],
+      sortDescending: [false],
+
       //
 
       rules: {
@@ -301,51 +326,6 @@ export default {
         positive: (value) => value > 0 || 'Must be positive.',
       },
     }
-  },
-  methods: {
-    separatedNumber,
-    roundToDecimal,
-
-    systemBodyName,
-
-    areSetsEqual,
-
-    addFilter () {
-      this.filters.push({
-        ...baseFilter,
-      })
-    },
-    removeFilter (index) {
-      this.filters.splice(index, 1)
-    },
-
-    applyMaterialFilter (material, filter) {
-      const insideAccessibilityRange = material.Accessibility >= filter.selectedAccessibility
-
-      if (filter.selectedAmount) {
-        return material.Amount >= filter.selectedAmount && insideAccessibilityRange
-      }
-
-      return insideAccessibilityRange
-    },
-
-    toggleSystems () {
-      if (this.systems.length === this.systemNames.length) {
-        this.systems = []
-      } else {
-        this.systems = this.systemNames.map((system) => system.SystemID)
-      }
-    },
-
-    selectOurSystems () {
-      this.systems = this.colonizedSystems.map((system) => system.SystemID)
-    },
-    selectOurInhabitedSystems () {
-      this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
-    },
-    selectUnrestrictedSystems () {
-      this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
-    },
   },
   computed: {
     ...mapGetters([
@@ -513,11 +493,13 @@ export default {
           text: 'System',
           value: 'SystemName',
           divider: true,
+          class: 'text-no-wrap',
         },
         {
           text: 'Body',
           value: 'SystemBodyOrder',
           divider: true,
+          class: 'text-no-wrap',
           sort: (alpha, beta) => {
             console.log(alpha, beta)
             return collator.compare(alpha, beta)
@@ -528,18 +510,21 @@ export default {
           value: 'Potential',
           divider: true,
           align: 'center',
+          class: 'text-no-wrap',
         },
         {
           text: 'Ground',
           value: 'GroundMineralSurvey',
           divider: true,
           align: 'center',
+          class: 'text-no-wrap',
         },
         ...this.materials.map((material) => ({
           text: material,
           value: material,
           sortable: true,
           align: 'center',
+          class: 'text-no-wrap',
           sort: (alpha, beta) => {
             const alphaQuantity = alpha ? alpha.Amount : 0
             const betaQuantity = beta ? beta.Amount : 0
@@ -550,6 +535,7 @@ export default {
         {
           text: 'Total',
           value: 'TotalAmount',
+          class: 'text-no-wrap',
         },
       ]
     },
@@ -571,6 +557,95 @@ export default {
     },
     inhabitedColonizedSystemsIds () {
       return this.inhabitedColonizedSystems.map((system) => system.SystemID)
+    },
+  },
+  watch: {
+    itemsPerPage: {
+      handler(newValue) {
+        console.log('[Minerals] itemsPerPage changed:', newValue)
+        this.$store.commit('tables/setMineralsItemsPerPage', newValue)
+      },
+    },
+    sortBy: {
+      deep: true,
+      handler(newValue) {
+        console.log('[Minerals] sortBy changed:', newValue)
+        this.$store.commit('tables/setMineralsSortBy', newValue)
+      },
+    },
+    sortDescending: {
+      deep: true,
+      handler(newValue) {
+        console.log('[Minerals] sortDescending changed:', newValue)
+        this.$store.commit('tables/setMineralsSortDescending', newValue)
+      },
+    },
+    systemNames: {
+      immediate: true,
+      handler (newNames) {
+        if (newNames) {
+          if (!this.systems.length) {
+            this.systems = newNames.map((system) => system.SystemID)
+          }
+        }
+      },
+    },
+  },
+  created() {
+    // Initialize table settings from store
+    if (this.$store.state.tables) {
+      this.itemsPerPage = this.$store.state.tables.mineralsItemsPerPage || 10
+      this.sortBy = Array.isArray(this.$store.state.tables.mineralsSortBy) ? [...this.$store.state.tables.mineralsSortBy] : []
+      this.sortDescending = Array.isArray(this.$store.state.tables.mineralsSortDescending) ? [...this.$store.state.tables.mineralsSortDescending] : [false]
+      console.log('[Minerals] Initialized from store - itemsPerPage:', this.itemsPerPage, 'sortBy:', this.sortBy, 'sortDescending:', this.sortDescending)
+    }
+  },
+  mounted () {
+    //
+  },
+  methods: {
+    separatedNumber,
+    roundToDecimal,
+
+    systemBodyName,
+
+    areSetsEqual,
+
+    addFilter () {
+      this.filters.push({
+        ...baseFilter,
+      })
+    },
+    removeFilter (index) {
+      this.filters.splice(index, 1)
+    },
+
+    applyMaterialFilter (material, filter) {
+      const insideAccessibilityRange = material.Accessibility >= filter.selectedAccessibility
+
+      if (filter.selectedAmount) {
+        return material.Amount >= filter.selectedAmount && insideAccessibilityRange
+      }
+
+      return insideAccessibilityRange
+    },
+
+    toggleSystems () {
+      if (this.systems.length === this.systemNames.length) {
+        this.systems = []
+      } else {
+        this.systems = this.systemNames.map((system) => system.SystemID)
+      }
+    },
+
+    selectOurSystems () {
+      this.systems = this.colonizedSystems.map((system) => system.SystemID)
+    },
+    selectOurInhabitedSystems () {
+      this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
+    },
+    selectUnrestrictedSystems () {
+      this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
     },
   },
   asyncComputed: {
@@ -624,7 +699,7 @@ export default {
           console.log('Surveyed Systems', items)
 
           return items.map((item) => {
-            const [inhabitedColonies, uninhabitedColonies] = _partition(item.Populations, (population) => population.Population)
+            const [inhabitedColonies, _uninhabitedColonies] = _partition(item.Populations, (population) => population.Population)
 
             return {
               ...item.toJSON(),
@@ -640,42 +715,6 @@ export default {
       },
       default: [],
     },
-  },
-  asyncData ({ route }) {
-    console.log('minerals asyncData', route)
-
-    if (route.query.bodies) {
-      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
-
-      return {
-        selectedBodies,
-        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
-      }
-    } else if (route.query.systems) {
-      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
-      console.log('asyncData systems', systems)
-
-      return {
-        systems,
-      }
-    }
-
-    return {}
-  },
-  watch: {
-    systemNames: {
-      immediate: true,
-      handler (newNames) {
-        if (newNames) {
-          if (!this.systems.length) {
-            this.systems = newNames.map((system) => system.SystemID)
-          }
-        }
-      },
-    },
-  },
-  mounted () {
-    //
   },
 }
 </script>
