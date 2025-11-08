@@ -24,7 +24,7 @@ module.exports = {
       exports: 'always-multiline',
       functions: 'never',
     }],
-    'max-len': ['error', { code: 8000 }],
+    'max-len': ['error', { code: 28000 }],
     'no-console': 'off',
     'arrow-parens': ['error', 'always'],
     curly: ['error', 'multi-line'],
@@ -43,10 +43,10 @@ module.exports = {
     'vue/multi-word-component-names': 'off',
     'vue/singleline-html-element-content-newline': 0,
     'vue/max-len': ['error', {
-      code: 8000,
-      template: 8000,
+      code: 28000,
+      template: 28000,
       tabWidth: 2,
-      comments: 8000,
+      comments: 28000,
     }],
 
     'unicorn/number-literal-case': 0,

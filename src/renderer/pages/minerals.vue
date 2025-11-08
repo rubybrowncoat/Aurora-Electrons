@@ -13,9 +13,7 @@
           <v-col cols="12">
             <v-expansion-panels hover>
               <v-expansion-panel>
-                <v-expansion-panel-header class="font-weight-bold">
-                  Filters
-                </v-expansion-panel-header>
+                <v-expansion-panel-header class="font-weight-bold"> Filters </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
                   <v-container fluid>
@@ -59,31 +57,17 @@
           <v-col cols="12">
             <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
               <template #prepend-item>
-                <v-list-item
-                  ripple
-                  @click="toggleSystems"
-                >
+                <v-list-item ripple @click="toggleSystems">
                   <v-list-item-action>
                     <v-icon>
-                      {{ systems.length > 0
-                        ? systems.length == systemNames.length
-                          ? 'mdi-emoticon-outline'
-                          : 'mdi-emoticon-happy-outline'
-                        : 'mdi-emoticon-sad-outline' }}
+                      {{ systems.length > 0 ? (systems.length == systemNames.length ? 'mdi-emoticon-outline' : 'mdi-emoticon-happy-outline') : 'mdi-emoticon-sad-outline' }}
                     </v-icon>
                   </v-list-item-action>
                   <v-list-item-content>
                     <v-list-item-title>{{ systems.length == systemNames.length ? 'Deselect All' : 'Select All' }}</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
-                <v-list-item
-                  v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length"
-                  ripple
-
-                  :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))"
-
-                  @click="selectUnrestrictedSystems"
-                >
+                <v-list-item v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))" @click="selectUnrestrictedSystems">
                   <v-list-item-action>
                     <v-icon>mdi-billiards-rack</v-icon>
                   </v-list-item-action>
@@ -91,14 +75,7 @@
                     <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
-                <v-list-item
-                  v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length"
-                  ripple
-
-                  :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))"
-
-                  @click="selectOurSystems"
-                >
+                <v-list-item v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))" @click="selectOurSystems">
                   <v-list-item-action>
                     <v-icon>mdi-city-variant-outline</v-icon>
                   </v-list-item-action>
@@ -106,14 +83,7 @@
                     <v-list-item-title>Select Colonized Systems</v-list-item-title>
                   </v-list-item-content>
                 </v-list-item>
-                <v-list-item
-                  v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length"
-                  ripple
-
-                  :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))"
-
-                  @click="selectOurInhabitedSystems"
-                >
+                <v-list-item v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))" @click="selectOurInhabitedSystems">
                   <v-list-item-action>
                     <v-icon>mdi-account-multiple-outline</v-icon>
                   </v-list-item-action>
@@ -128,38 +98,53 @@
           <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
             <v-row>
               <v-col cols="auto">
-                <v-btn class="d-block mb-1" style="width: 100%;" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Minerals</v-btn>
+                <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Minerals</v-btn>
                 <v-btn
                   :to="{
                     path: 'habitability',
                     query: {
-                      bodies: JSON.stringify(selectedBodies.map(selection => ({
-                        SystemBodyID: selection.SystemBodyID,
-                        SystemBodyName: selection.SystemBodyName,
-                        SystemName: selection.SystemName,
-                        BodyClass: selection.BodyClass,
-                        Component: selection.Component,
-                        PlanetNumber: selection.PlanetNumber,
-                        OrbitNumber: selection.OrbitNumber,
-                      })))
+                      bodies: JSON.stringify(
+                        selectedBodies.map((selection) => ({
+                          SystemBodyID: selection.SystemBodyID,
+                          SystemBodyName: selection.SystemBodyName,
+                          SystemName: selection.SystemName,
+                          BodyClass: selection.BodyClass,
+                          Component: selection.Component,
+                          PlanetNumber: selection.PlanetNumber,
+                          OrbitNumber: selection.OrbitNumber,
+                        }))
+                      ),
                     },
-                  }" style="width: 100%;" small outlined
+                  }"
+                  style="width: 100%"
+                  small
+                  outlined
                 >
                   Isolate in Habitability
                 </v-btn>
 
-                <v-btn class="d-block mt-4" style="width: 100%;" small outlined @click="selectedBodies = []; filterBySelectedBodies = false">Clear Selection</v-btn>
+                <v-btn
+                  class="d-block mt-4"
+                  style="width: 100%"
+                  small
+                  outlined
+                  @click="
+                    selectedBodies = []
+                    filterBySelectedBodies = false
+                  "
+                  >Clear Selection</v-btn
+                >
               </v-col>
               <v-col>
-                <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== body.SystemBodyID)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
+                <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => (selectedBodies = selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID))">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
               </v-col>
             </v-row>
           </v-col>
           <v-col cols="12">
             <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand :items-per-page.sync="itemsPerPage" :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :footer-props="{ itemsPerPageOptions }">
               <template #[`item.data-table-expand`]="{ item }">
-                <td style="white-space: nowrap;">
-                  <v-btn v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+                <td style="white-space: nowrap">
+                  <v-btn v-if="selectedBodies.find((selection) => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => (selectedBodies = selectedBodies.filter((selection) => selection.SystemBodyID !== item.SystemBodyID))"><v-icon>mdi-playlist-remove</v-icon></v-btn>
                   <v-btn v-else icon @click.stop="() => selectedBodies.push(item)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
                 </td>
               </template>
@@ -181,10 +166,12 @@
                   <template #activator="{ on }">
                     <span
                       :class="{
-                        'green--text text--lighten-1 font-weight-bold title': item.Potential >= Math.PI / 2 * materialCount * 0.75,
-                        'red--text text--darken-3 font-weight-bold': item.Potential <= Math.PI / 2 * materialCount * 0.3,
-                      }" v-on="on"
-                    >{{ roundToDecimal(( item.Potential * 10 ) / ( Math.PI / 2 * materialCount )) }}</span>
+                        'green--text text--lighten-1 font-weight-bold title': item.Potential >= (Math.PI / 2) * materialCount * 0.75,
+                        'red--text text--darken-3 font-weight-bold': item.Potential <= (Math.PI / 2) * materialCount * 0.3,
+                      }"
+                      v-on="on"
+                      >{{ roundToDecimal((item.Potential * 10) / ((Math.PI / 2) * materialCount)) }}</span
+                    >
                   </template>
 
                   <span>{{ roundToDecimal(item.Potential, 3) }}</span>
@@ -200,12 +187,15 @@
               </template>
               <template v-for="material in materials" #[`item.${material}`]="{ item }">
                 <span
-                  v-if="item[material]" :key="material" :class="{
+                  v-if="item[material]"
+                  :key="material"
+                  :class="{
                     'green--text text--lighten-1 font-weight-bold': item[material].Accessibility > 0.7,
                     'red--text text--darken-3 font-weight-bold': item[material].Accessibility <= 0.2,
                     'orange--text text--accent-3': item[material].Accessibility <= 0.4 && item[material].Accessibility > 0.2,
                   }"
-                ><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span>
+                  ><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span
+                >
               </template>
               <template #[`item.TotalAmount`]="{ item }">
                 <span class="text-no-wrap">
@@ -273,7 +263,7 @@ const baseFilter = {
 
 export default {
   components: {},
-  asyncData ({ route }) {
+  asyncData({ route }) {
     console.log('minerals asyncData', route)
 
     if (route.query.bodies) {
@@ -294,16 +284,18 @@ export default {
 
     return {}
   },
-  data () {
+  data() {
     return {
       filterMaterials: ['Any', 'All Present', 'All', ...Object.values(MaterialMap)],
 
       accessibilities: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1],
       selectedAccessibility: 0.1,
 
-      filters: [{
-        ...baseFilter,
-      }],
+      filters: [
+        {
+          ...baseFilter,
+        },
+      ],
 
       selectedAmount: null,
 
@@ -328,25 +320,19 @@ export default {
     }
   },
   computed: {
-    ...mapGetters([
-      'config',
-      'database',
-
-      'GameID',
-      'RaceID',
-    ]),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
     itemsPerPageOptions() {
       return [10, 15, 30, 50, 100]
     },
 
-    separator () {
+    separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
-      return selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
+      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
-    bodyGroups () {
+    bodyGroups() {
       if (!this.minerals || !this.minerals.length) {
         return null
       }
@@ -388,16 +374,19 @@ export default {
       }, {})
 
       return Object.values(aggregation).map((body) => {
-        const [totalPotential, totalAmount] = Object.values(this.materials).reduce(([potential, amount], materialId) => {
-          const material = body[materialId]
+        const [totalPotential, totalAmount] = Object.values(this.materials).reduce(
+          ([potential, amount], materialId) => {
+            const material = body[materialId]
 
-          if (material) {
-            potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - (Math.PI / 2))) * (0.5 - (Math.cos(Math.PI * material.Accessibility) / 2)))
-            amount += material.Amount
-          }
+            if (material) {
+              potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - Math.PI / 2)) * (0.5 - Math.cos(Math.PI * material.Accessibility) / 2))
+              amount += material.Amount
+            }
 
-          return [potential, amount]
-        }, [0, 0])
+            return [potential, amount]
+          },
+          [0, 0]
+        )
 
         return {
           ...body,
@@ -407,24 +396,26 @@ export default {
         }
       })
     },
-    systemNames () {
+    systemNames() {
       if (!this.minerals || !this.minerals.length) {
         return null
       }
 
-      return Object.values(this.minerals.reduce((names, item) => {
-        if (!names[item.SystemID]) {
-          names[item.SystemID] = {
-            SystemID: item.SystemID,
-            SystemName: item.SystemName,
+      return Object.values(
+        this.minerals.reduce((names, item) => {
+          if (!names[item.SystemID]) {
+            names[item.SystemID] = {
+              SystemID: item.SystemID,
+              SystemName: item.SystemName,
+            }
           }
-        }
 
-        return names
-      }, {}))
+          return names
+        }, {})
+      )
     },
 
-    preFilteredBodyGroups () {
+    preFilteredBodyGroups() {
       return this.bodyGroups.filter((body) => {
         return this.filters.every((filter) => {
           switch (filter.selectedMaterial) {
@@ -475,21 +466,21 @@ export default {
       })
     },
 
-    MaterialMap () {
+    MaterialMap() {
       return MaterialMap
     },
-    GroundMineralSurveyMap () {
+    GroundMineralSurveyMap() {
       return GroundMineralSurveyMap
     },
-    BodyClass () {
+    BodyClass() {
       return BodyClass
     },
 
-    materialCount () {
+    materialCount() {
       return Object.keys(this.materials).length
     },
 
-    headers () {
+    headers() {
       const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
       return [
@@ -544,22 +535,30 @@ export default {
       ]
     },
 
-    unrestrictedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter((system) => system.RaceSystemSurveys.every((raceSystem) => !raceSystem.MilitaryRestrictedSystem)), this.systemNames, 'SystemID')
+    unrestrictedSystems() {
+      return _intersectionBy(
+        this.surveyedSystems.filter((system) => system.RaceSystemSurveys.every((raceSystem) => !raceSystem.MilitaryRestrictedSystem)),
+        this.systemNames,
+        'SystemID'
+      )
     },
-    unrestrictedSystemsIds () {
+    unrestrictedSystemsIds() {
       return this.unrestrictedSystems.map((system) => system.SystemID)
     },
-    colonizedSystems () {
-      return _intersectionBy(this.surveyedSystems.filter((system) => system.Populations.length), this.systemNames, 'SystemID')
+    colonizedSystems() {
+      return _intersectionBy(
+        this.surveyedSystems.filter((system) => system.Populations.length),
+        this.systemNames,
+        'SystemID'
+      )
     },
-    colonizedSystemsIds () {
+    colonizedSystemsIds() {
       return this.colonizedSystems.map((system) => system.SystemID)
     },
-    inhabitedColonizedSystems () {
+    inhabitedColonizedSystems() {
       return this.colonizedSystems.filter((system) => system.InhabitedColonies)
     },
-    inhabitedColonizedSystemsIds () {
+    inhabitedColonizedSystemsIds() {
       return this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
   },
@@ -586,7 +585,7 @@ export default {
     },
     systemNames: {
       immediate: true,
-      handler (newNames) {
+      handler(newNames) {
         if (newNames) {
           if (!this.systems.length) {
             this.systems = newNames.map((system) => system.SystemID)
@@ -604,7 +603,7 @@ export default {
       console.log('[Minerals] Initialized from store - itemsPerPage:', this.itemsPerPage, 'sortBy:', this.sortBy, 'sortDescending:', this.sortDescending)
     }
   },
-  mounted () {
+  mounted() {
     //
   },
   methods: {
@@ -615,16 +614,16 @@ export default {
 
     areSetsEqual,
 
-    addFilter () {
+    addFilter() {
       this.filters.push({
         ...baseFilter,
       })
     },
-    removeFilter (index) {
+    removeFilter(index) {
       this.filters.splice(index, 1)
     },
 
-    applyMaterialFilter (material, filter) {
+    applyMaterialFilter(material, filter) {
       const insideAccessibilityRange = material.Accessibility >= filter.selectedAccessibility
 
       if (filter.selectedAmount) {
@@ -634,7 +633,7 @@ export default {
       return insideAccessibilityRange
     },
 
-    toggleSystems () {
+    toggleSystems() {
       if (this.systems.length === this.systemNames.length) {
         this.systems = []
       } else {
@@ -642,19 +641,19 @@ export default {
       }
     },
 
-    selectOurSystems () {
+    selectOurSystems() {
       this.systems = this.colonizedSystems.map((system) => system.SystemID)
     },
-    selectOurInhabitedSystems () {
+    selectOurInhabitedSystems() {
       this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
-    selectUnrestrictedSystems () {
+    selectUnrestrictedSystems() {
       this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
     },
   },
   asyncComputed: {
     minerals: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -676,7 +675,7 @@ export default {
       default: [],
     },
     surveyedSystems: {
-      async get () {
+      async get() {
         if (!this.database || !this.GameID) {
           return []
         }
@@ -686,19 +685,22 @@ export default {
             GameID: this.GameID,
           },
 
-          include: [{
-            required: true,
-            model: this.database.models.RaceSystemSurvey,
-            where: {
-              RaceID: this.RaceID,
+          include: [
+            {
+              required: true,
+              model: this.database.models.RaceSystemSurvey,
+              where: {
+                RaceID: this.RaceID,
+              },
             },
-          }, {
-            required: false,
-            model: this.database.models.Population,
-            where: {
-              RaceID: this.RaceID,
+            {
+              required: false,
+              model: this.database.models.Population,
+              where: {
+                RaceID: this.RaceID,
+              },
             },
-          }],
+          ],
         }).then((items) => {
           console.log('Surveyed Systems', items)
 
@@ -723,6 +725,4 @@ export default {
 }
 </script>
 
-<style lang="scss" scoped>
-
-</style>
+<style lang="scss" scoped></style>

@@ -1,35 +1,42 @@
 import dayjs from 'dayjs'
+import utcPlugin from 'dayjs/plugin/utc.js'
 import romanum from 'romanum'
 
 import { convertDisplayBase } from './generic'
 
+dayjs.extend(utcPlugin)
+
 export const gameTime = (startYear, seconds) => {
-  return dayjs(0).set('year', startYear).set('hour', 0).set('minute', 0).set('second', 0).add(seconds, 'second')
+  return dayjs.utc(0).set('year', startYear).set('hour', 0).set('minute', 0).set('second', 0).add(seconds, 'second')
 }
 
 export const systemBodyName = (body, system = null) => {
-  if (body.SystemBodyName) {
-    return body.SystemBodyName
-  }
+  try {
+    if (body.SystemBodyName) {
+      return body.SystemBodyName
+    }
 
-  const systemPrefix = system ? `${system.Name}-` : ''
+    const systemPrefix = system ? `${system.Name}-` : ''
 
-  switch (body.BodyClass) {
-    case 1: {
-      return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
+    switch (body.BodyClass) {
+      case 1: {
+        return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}`
+      }
+      case 2: {
+        return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
+      }
+      case 3: {
+        return `Asteroid #${body.OrbitNumber}`
+      }
+      case 5: {
+        return `Comet #${body.OrbitNumber}`
+      }
+      default: {
+        return `System Body #${body.SystemBodyID}`
+      }
     }
-    case 2: {
-      return `${systemPrefix}${convertDisplayBase(body.Star?.Component ?? body.Component, 26)} ${romanum.toNumeral(body.PlanetNumber)}-${body.OrbitNumber}`
-    }
-    case 3: {
-      return `Asteroid #${body.OrbitNumber}`
-    }
-    case 5: {
-      return `Comet #${body.OrbitNumber}`
-    }
-    default: {
-      return `System Body #${body.SystemBodyID}`
-    }
+  } catch (e) {
+    return `System Body #${body.SystemBodyID}`
   }
 }
 

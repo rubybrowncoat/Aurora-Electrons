@@ -140,208 +140,6 @@ export default {
       panels: [0, 1, 2],
     }
   },
-  methods: {
-    ...mapActions('production', [
-      'resetProductionFilters',
-    ]),
-
-    ...mapMutations('production', [
-      'setShowResearches',
-      'setShowProductions',
-      'setShowShipyards',
-      'setShowShips',
-      'setShowTrainings',
-      'setShowTerraformings',
-
-      'setShowQueues',
-    ]),
-
-    separatedNumber,
-    roundToDecimal,
-
-    populationName,
-
-    typeColor (type, active = true) {
-      if (!active) {
-        return 'light'
-      }
-
-      switch (type) {
-        case 'Research': {
-          return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
-        }
-        case 'Production': {
-          return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
-        }
-        case 'Shipyard': {
-          return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
-        }
-        case 'Ship': {
-          return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
-        }
-        case 'Training': {
-          return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
-        }
-        case 'Terraforming': {
-          return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
-        }
-        case 'Queue': {
-          return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
-        }
-        default: {
-          return 'deep-purple accent-2'
-        }
-      }
-    },
-
-    populationMinConstructionPeriod (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.MinConstructionPeriod
-    },
-    populationConstructionCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower)
-    },
-    populationOrdnanceCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower
-    },
-    populationFighterCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.FighterProduction * modifiers.OverallProductionModifier * modifiers.FighterProductionPower
-    },
-    populationShipyardCapacity (populationId, ship) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.ShipyardBuildRate * (1 + (ship.Size * ship.CommercialModifier / 100 - 1) / 2)
-    },
-    populationShipyardUpgradeCapacity (populationId, shipyard) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      const commercialModifier = shipyard.SYType === 1 ? 1 : 0.1
-
-      return (1 + (shipyard.Capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate
-    },
-    populationResearchCapacity (populationId, research) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return research.ActualCommanderResearchBonus * research.ActualAnomalyBonus * modifiers.OverallResearchModifier * research.Facilities
-    },
-    populationTrainingCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.OverallGroundUnitModifier
-    },
-
-    terraformingRate (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.TerraformingRate
-    },
-    populationTerraformingRate (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.PopulationTerraformingRate
-    },
-    populationTerraformingSpeed (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.TerraformingSpeed
-    },
-
-    shipyardContinualRemainingDays (shipyard) {
-      const modifiers = this.populationProductionModifiers[shipyard.PopulationID]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      const roi = modifiers.MinConstructionPeriod / secondsPerYear
-      const periodDays = modifiers.MinConstructionPeriod / secondsPerDay
-
-      let periods = 0
-      let lastUpgrade = 0
-      let newCapacity = shipyard.Capacity
-      do {
-        const wat = (120 * shipyard.Slipways) * modifiers.ShipyardOperations
-        const stepUpgradeRate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, {
-          SYType: shipyard.SYType,
-          Capacity: newCapacity,
-        }) * roi
-
-        lastUpgrade = stepUpgradeRate / wat * (shipyard.SYType === 1 ? 500 : 5000)
-        newCapacity += lastUpgrade
-        periods += 1
-      } while (newCapacity < shipyard.CapacityTarget)
-
-      // const extraPeriod = modifiers.MinConstructionPeriod * (newCapacity - shipyard.CapacityTarget) / lastUpgrade
-      // const extraPeriodDays = extraPeriod / secondsPerDay
-
-      return periods * periodDays
-    },
-
-    navalAdminBonus (SystemID, NavalAdminCommandID) {
-      if (!this.adminsWithSystems || !Object.values(this.adminsWithSystems).length) {
-        return 1
-      }
-
-      const administration = this.adminsWithSystems[NavalAdminCommandID]
-
-      if (!administration || !administration.Systems.has(SystemID) || !administration.BonusValue) {
-        return 1
-      }
-
-      return (1 + (administration.BonusValue - 1) * administration.Industrial) * this.navalAdminBonus(SystemID, administration.ParentCommandID)
-    },
-  },
   computed: {
     ...mapGetters([
       'config',
@@ -554,7 +352,7 @@ export default {
           const roiCapacity = localCapacity / secondsPerYear * minConstructionPeriod
           const roiCondensation = roi * condensationPerYear
 
-          const condensationPoint = terraform.AtmosPress * (terraform.HydroExt / 100) * waterVapourInAtmosphere
+          // const condensationPoint = terraform.AtmosPress * (terraform.HydroExt / 100) * waterVapourInAtmosphere
 
           let periods = 0
           if (terraform.TerraformStatus) {
@@ -669,6 +467,208 @@ export default {
     },
     ShipyardUpgradeTypeMap () {
       return ShipyardUpgradeTypeMap
+    },
+  },
+  methods: {
+    ...mapActions('production', [
+      'resetProductionFilters',
+    ]),
+
+    ...mapMutations('production', [
+      'setShowResearches',
+      'setShowProductions',
+      'setShowShipyards',
+      'setShowShips',
+      'setShowTrainings',
+      'setShowTerraformings',
+
+      'setShowQueues',
+    ]),
+
+    separatedNumber,
+    roundToDecimal,
+
+    populationName,
+
+    typeColor (type, active = true) {
+      if (!active) {
+        return 'light'
+      }
+
+      switch (type) {
+        case 'Research': {
+          return this.$vuetify.theme.dark ? 'pink darken-2' : 'pink lighten-4'
+        }
+        case 'Production': {
+          return this.$vuetify.theme.dark ? 'light-green darken-2' : 'light-green lighten-2'
+        }
+        case 'Shipyard': {
+          return this.$vuetify.theme.dark ? 'purple darken-1' : 'purple accent-1'
+        }
+        case 'Ship': {
+          return this.$vuetify.theme.dark ? 'blue' : 'blue lighten-4'
+        }
+        case 'Training': {
+          return this.$vuetify.theme.dark ? 'teal darken-1' : 'teal accent-3'
+        }
+        case 'Terraforming': {
+          return this.$vuetify.theme.dark ? 'lime darken-1' : 'lime lighten-3'
+        }
+        case 'Queue': {
+          return this.$vuetify.theme.dark ? 'yellow darken-3' : 'yellow lighten-1'
+        }
+        default: {
+          return 'deep-purple accent-2'
+        }
+      }
+    },
+
+    populationMinConstructionPeriod (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.MinConstructionPeriod
+    },
+    populationConstructionCapacity (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower)
+    },
+    populationOrdnanceCapacity (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower
+    },
+    populationFighterCapacity (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.FighterProduction * modifiers.OverallProductionModifier * modifiers.FighterProductionPower
+    },
+    populationShipyardCapacity (populationId, ship) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.ShipyardBuildRate * (1 + (ship.Size * ship.CommercialModifier / 100 - 1) / 2)
+    },
+    populationShipyardUpgradeCapacity (populationId, shipyard) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      const commercialModifier = shipyard.SYType === 1 ? 1 : 0.1
+
+      return (1 + (shipyard.Capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate
+    },
+    populationResearchCapacity (populationId, research) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return research.ActualCommanderResearchBonus * research.ActualAnomalyBonus * modifiers.OverallResearchModifier * research.Facilities
+    },
+    populationTrainingCapacity (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.OverallGroundUnitModifier
+    },
+
+    terraformingRate (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.TerraformingRate
+    },
+    populationTerraformingRate (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.PopulationTerraformingRate
+    },
+    populationTerraformingSpeed (populationId) {
+      const modifiers = this.populationProductionModifiers[populationId]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      return modifiers.TerraformingSpeed
+    },
+
+    shipyardContinualRemainingDays (shipyard) {
+      const modifiers = this.populationProductionModifiers[shipyard.PopulationID]
+
+      if (!modifiers) {
+        return 0
+      }
+
+      const roi = modifiers.MinConstructionPeriod / secondsPerYear
+      const periodDays = modifiers.MinConstructionPeriod / secondsPerDay
+
+      let periods = 0
+      let lastUpgrade = 0
+      let newCapacity = shipyard.Capacity
+      do {
+        const wat = (120 * shipyard.Slipways) * modifiers.ShipyardOperations
+        const stepUpgradeRate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, {
+          SYType: shipyard.SYType,
+          Capacity: newCapacity,
+        }) * roi
+
+        lastUpgrade = stepUpgradeRate / wat * (shipyard.SYType === 1 ? 500 : 5000)
+        newCapacity += lastUpgrade
+        periods += 1
+      } while (newCapacity < shipyard.CapacityTarget)
+
+      // const extraPeriod = modifiers.MinConstructionPeriod * (newCapacity - shipyard.CapacityTarget) / lastUpgrade
+      // const extraPeriodDays = extraPeriod / secondsPerDay
+
+      return periods * periodDays
+    },
+
+    navalAdminBonus (SystemID, NavalAdminCommandID) {
+      if (!this.adminsWithSystems || !Object.values(this.adminsWithSystems).length) {
+        return 1
+      }
+
+      const administration = this.adminsWithSystems[NavalAdminCommandID]
+
+      if (!administration || !administration.Systems.has(SystemID) || !administration.BonusValue) {
+        return 1
+      }
+
+      return (1 + (administration.BonusValue - 1) * administration.Industrial) * this.navalAdminBonus(SystemID, administration.ParentCommandID)
     },
   },
   asyncComputed: {

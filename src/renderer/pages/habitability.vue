@@ -516,7 +516,7 @@
                     'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
                     'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
                     'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
-                    'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited') || item.TerraformableStatus.includes('(LG)'),
+                    'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited'),
                     'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
                     'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
                   }"
@@ -1900,18 +1900,10 @@ export default {
         })
 
         // If the plan worsens colony cost, try to find better temperature
-        if (
-          plannedColonyCosts.overall > currentColonyCosts.overall ||
-          plannedColonyCosts.periapsis > currentColonyCosts.periapsis ||
-          plannedColonyCosts.apoapsis > currentColonyCosts.apoapsis
-        ) {
+        if (plannedColonyCosts.overall > currentColonyCosts.overall || plannedColonyCosts.periapsis > currentColonyCosts.periapsis || plannedColonyCosts.apoapsis > currentColonyCosts.apoapsis) {
           // Try to find temperature that minimizes colony cost instead
           let bestTemperature = targetMeanTemperature
-          let bestCost = Math.max(
-            plannedColonyCosts.overall ?? Infinity,
-            plannedColonyCosts.periapsis ?? Infinity,
-            plannedColonyCosts.apoapsis ?? Infinity
-          )
+          let bestCost = Math.max(plannedColonyCosts.overall ?? Infinity, plannedColonyCosts.periapsis ?? Infinity, plannedColonyCosts.apoapsis ?? Infinity)
           let improvedWithinConstraints = false
 
           // First, sample temperatures across the valid range to find one that improves cost
@@ -1920,11 +1912,11 @@ export default {
           for (let i = 0; i <= tempSamples; i += 1) {
             const testTemp = minAllowedMeanTemperature + tempStep * i
             const testSolution = solveForAlbedo(effectiveAlbedo)
-            
+
             if (testSolution?.plan) {
               // Manually set temperature for cost comparison
               testSolution.plan.TargetMeanTemperature = testTemp
-              
+
               const testColonyCosts = this.colonyCosts({
                 ...body,
                 SurfaceTemp: testTemp,
@@ -1935,18 +1927,10 @@ export default {
                 Atmosphere: [],
               })
 
-              const testCost = Math.max(
-                testColonyCosts.overall ?? Infinity,
-                testColonyCosts.periapsis ?? Infinity,
-                testColonyCosts.apoapsis ?? Infinity
-              )
+              const testCost = Math.max(testColonyCosts.overall ?? Infinity, testColonyCosts.periapsis ?? Infinity, testColonyCosts.apoapsis ?? Infinity)
 
               // Track if this improves over current (not just over plan)
-              const improvesOverCurrent = testCost < Math.max(
-                currentColonyCosts.overall ?? Infinity,
-                currentColonyCosts.periapsis ?? Infinity,
-                currentColonyCosts.apoapsis ?? Infinity
-              )
+              const improvesOverCurrent = testCost < Math.max(currentColonyCosts.overall ?? Infinity, currentColonyCosts.periapsis ?? Infinity, currentColonyCosts.apoapsis ?? Infinity)
 
               if (testCost < bestCost) {
                 bestCost = testCost
@@ -1960,11 +1944,7 @@ export default {
 
           // If no improvement within constraints, try extended temperature range as last resort
           if (!improvedWithinConstraints) {
-            const currentCost = Math.max(
-              currentColonyCosts.overall ?? Infinity,
-              currentColonyCosts.periapsis ?? Infinity,
-              currentColonyCosts.apoapsis ?? Infinity
-            )
+            const currentCost = Math.max(currentColonyCosts.overall ?? Infinity, currentColonyCosts.periapsis ?? Infinity, currentColonyCosts.apoapsis ?? Infinity)
 
             // Extend search range beyond species limits
             const extendedMinTemp = speciesMinTemperature * 0.5 // Try cooler
@@ -1974,10 +1954,10 @@ export default {
             for (let i = 0; i <= 20; i += 1) {
               const testTemp = extendedMinTemp + extendedStep * i
               const testSolution = solveForAlbedo(effectiveAlbedo)
-              
+
               if (testSolution?.plan) {
                 testSolution.plan.TargetMeanTemperature = testTemp
-                
+
                 const testColonyCosts = this.colonyCosts({
                   ...body,
                   SurfaceTemp: testTemp,
@@ -1988,11 +1968,7 @@ export default {
                   Atmosphere: [],
                 })
 
-                const testCost = Math.max(
-                  testColonyCosts.overall ?? Infinity,
-                  testColonyCosts.periapsis ?? Infinity,
-                  testColonyCosts.apoapsis ?? Infinity
-                )
+                const testCost = Math.max(testColonyCosts.overall ?? Infinity, testColonyCosts.periapsis ?? Infinity, testColonyCosts.apoapsis ?? Infinity)
 
                 if (testCost < bestCost && testCost < currentCost) {
                   bestCost = testCost
@@ -2003,11 +1979,7 @@ export default {
           }
 
           // If we found a better temperature, use it
-          if (bestCost < Math.max(
-            plannedColonyCosts.overall ?? Infinity,
-            plannedColonyCosts.periapsis ?? Infinity,
-            plannedColonyCosts.apoapsis ?? Infinity
-          )) {
+          if (bestCost < Math.max(plannedColonyCosts.overall ?? Infinity, plannedColonyCosts.periapsis ?? Infinity, plannedColonyCosts.apoapsis ?? Infinity)) {
             targetMeanTemperature = bestTemperature
             // Re-solve with the new target temperature
             effectiveAlbedo = body.Albedo
