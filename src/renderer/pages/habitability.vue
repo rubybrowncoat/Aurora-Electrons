@@ -2048,6 +2048,10 @@ export default {
         CurrentTemperatureHigh: body.SurfaceTemp * highSwingRatio,
       }
 
+      if (body.SystemBodyID === 2001311) {
+        debugger
+      }
+
       const currentColonyCosts = this.colonyCosts(body)
       newBody.CurrentColonyCostOverall = currentColonyCosts.overall
       newBody.CurrentColonyCostPeriapsis = currentColonyCosts.periapsis
@@ -2235,9 +2239,9 @@ export default {
             Atmosphere: plannedAtmosphere,
           })
 
-          const overallCost = plannedColonyCosts.overall
-          const periapsisCost = plannedColonyCosts.periapsis
-          const apoapsisCost = plannedColonyCosts.apoapsis
+          let overallCost = plannedColonyCosts.overall
+          let periapsisCost = plannedColonyCosts.periapsis
+          let apoapsisCost = plannedColonyCosts.apoapsis
 
           // Optimization: If planned colony cost equals current cost, only remove toxics
           // No point in adjusting atmosphere if it doesn't improve habitability
@@ -2248,7 +2252,7 @@ export default {
           const costsAreEqual = Math.abs(overallCost - currentOverall) < 0.01 && Math.abs(periapsisCost - currentPeriapsis) < 0.01 && Math.abs(apoapsisCost - currentApoapsis) < 0.01
 
           // Reject plans that worsen colony cost - terraforming should improve habitability, not make it worse
-          const costsWorse = overallCost > currentOverall || periapsisCost > currentPeriapsis || apoapsisCost > currentApoapsis
+          const costsWorse = overallCost > currentOverall && periapsisCost > currentPeriapsis && apoapsisCost > currentApoapsis
 
           if (costsWorse) {
             // Plan would make colony cost worse - don't terraform
@@ -2279,6 +2283,16 @@ export default {
               newBody.TerraformationPlan = null
               newBody.TerraformationTime = 0
             }
+          }
+
+          if (body.SystemBodyID === 2001311) {
+            debugger
+          }
+
+          if (costsWorse) {
+            overallCost = currentOverall
+            periapsisCost = currentPeriapsis
+            apoapsisCost = currentApoapsis
           }
 
           if (Number.isFinite(overallCost) && Number.isFinite(periapsisCost) && Number.isFinite(apoapsisCost) && overallCost >= 0 && periapsisCost >= 0 && apoapsisCost >= 0) {
@@ -2369,7 +2383,7 @@ export default {
       newBody.OwnPopulation = ownPopulation
       newBody.OtherPopulation = otherPopulation
 
-      if (newBody.TerraformationPlan && newBody.SystemBodyID === 1997767) {
+      if (newBody.TerraformationPlan && newBody.SystemBodyID === 2001311) {
         console.log(newBody)
       }
 
