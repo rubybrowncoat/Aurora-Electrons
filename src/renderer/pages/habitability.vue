@@ -437,7 +437,7 @@
                   <span>{{ GroundMineralSurveyMap[item.GroundMineralSurvey] }}</span>
                 </v-tooltip>
               </template>
-              <template #[`item.CurrentColonyCost`]="{ item }">
+              <template #[`item.CurrentColonyCostOverall`]="{ item }">
                 <span v-if="item.CurrentColonyCostOverall != null && item.CurrentColonyCostPeriapsis != null && item.CurrentColonyCostApoapsis != null">
                   <span v-if="item.CurrentColonyCostOverall === item.CurrentColonyCostPeriapsis && item.CurrentColonyCostOverall === item.CurrentColonyCostApoapsis">
                     {{ roundToDecimal(item.CurrentColonyCostOverall, 2) }}
@@ -476,13 +476,34 @@
                   {{ separatedNumber(roundToDecimal(item.MaximumPopulationAtOptimalHydro, 2), separator) }}
                 </span>
               </template>
-              <template #[`item.TerraformableStatus`]="{ item }">
+              <template #[`item.PlannedColonyCostMetric`]="{ item }">
+                <v-tooltip v-if="item.PlannedColonyCostOverall != null && item.TerraformationTime > 0" top>
+                  <template #activator="{ on, attrs }">
+                    <span
+                      :class="{
+                        'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
+                        'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
+                        'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
+                        'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited') || item.TerraformableStatus.includes('(LG)'),
+                        'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
+                        'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
+                      }"
+                      v-bind="attrs"
+                      v-on="on"
+                    >
+                      {{ item.TerraformableStatus }}
+                    </span>
+                  </template>
+                  <span>Planned Colony Cost: {{ roundToDecimal(item.PlannedColonyCostMetric, 2) }}</span>
+                </v-tooltip>
                 <span
+                  v-else
                   :class="{
                     'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
                     'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
                     'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
                     'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited') || item.TerraformableStatus.includes('(LG)'),
+                    'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
                     'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
                   }"
                 >
@@ -738,10 +759,9 @@ export default {
         },
         {
           text: 'Current Cost',
-          value: 'CurrentColonyCost',
+          value: 'CurrentColonyCostOverall',
           divider: true,
           align: 'center',
-          sortable: false,
         },
         {
           text: 'Max Population (M)',
@@ -755,10 +775,9 @@ export default {
         },
         {
           text: 'Terraformable',
-          value: 'TerraformableStatus',
+          value: 'PlannedColonyCostMetric',
           divider: true,
           align: 'center',
-          sortable: false,
         },
         {
           text: 'Time (Y)',
@@ -846,14 +865,6 @@ export default {
         if (oldRaceID) {
           this.config.set('habitabilitySystems', [])
           this.systems = []
-        }
-      },
-    },
-    race: {
-      immediate: true,
-      handler(newRace, oldRace) {
-        if (newRace) {
-          this.testColonyCosts()
         }
       },
     },
@@ -2154,7 +2165,7 @@ export default {
             } else if (overallCost < 4 && periapsisCost < 4 && apoapsisCost < 4) {
               terraformableStatus = 'Limited'
             } else {
-              terraformableStatus = 'No'
+              terraformableStatus = 'Insufficient'
             }
           } else {
             terraformable = false
@@ -2172,7 +2183,12 @@ export default {
         terraformableStatus = 'No (HG)'
       }
 
-      if (gravityLow || gravityNegligible) {
+      if (gravityNegligible) {
+        terraformable = false
+        terraformableStatus = 'No (LG)'
+      }
+
+      if (gravityLow && !gravityNegligible) {
         if (terraformableStatus === 'Yes') {
           terraformableStatus = 'Partial'
         }
@@ -2182,6 +2198,8 @@ export default {
 
       newBody.Terraformable = terraformable && !terraformableStatus.startsWith('No')
       newBody.TerraformableStatus = terraformableStatus
+
+      newBody.PlannedColonyCostMetric = terraformable && newBody.TerraformationTime > 0 ? Math.max(newBody.PlannedColonyCostOverall, newBody.PlannedColonyCostPeriapsis, newBody.PlannedColonyCostApoapsis) : Infinity
 
       // MINERALS
       const [miningPotential, totalMiningAmount] = body.Minerals.reduce(
