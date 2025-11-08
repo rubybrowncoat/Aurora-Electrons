@@ -156,7 +156,7 @@
             </v-row>
           </v-col>
           <v-col cols="12">
-            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand :items-per-page.sync="itemsPerPage" :sort-by.sync="sortBy" :sort-desc.sync="sortDescending">
+            <v-data-table class="elevation-2" :headers="headers" :items="preFilteredBodyGroups" show-expand :items-per-page.sync="itemsPerPage" :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :footer-props="{ itemsPerPageOptions }">
               <template #[`item.data-table-expand`]="{ item }">
                 <td style="white-space: nowrap;">
                   <v-btn v-if="selectedBodies.find(selection => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => selectedBodies = selectedBodies.filter(selection => selection.SystemBodyID !== item.SystemBodyID)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
@@ -335,6 +335,10 @@ export default {
       'GameID',
       'RaceID',
     ]),
+
+    itemsPerPageOptions() {
+      return [10, 15, 30, 50, 100]
+    },
 
     separator () {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')

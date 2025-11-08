@@ -240,7 +240,21 @@
                                 </span>
                                 maximum atm.
                               </template>
-                              <span v-else>Set Water Vapour to a small amount and wait for Hydrographic Extent to be higher than 20.</span>
+                              <span v-else>
+                                Set Water Vapour to
+                                <span class="target-value">
+                                  {{ roundToDecimal(item.TerraformationPlan.WaterVapour, 3) }}
+                                  <v-tooltip top>
+                                    <template #activator="{ on, attrs }">
+                                      <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.WaterVapour)">
+                                        <v-icon x-small>mdi-content-copy</v-icon>
+                                      </v-btn>
+                                    </template>
+                                    <span>Copy value</span>
+                                  </v-tooltip>
+                                </span>
+                                maximum atm.
+                              </span>
                             </v-list-item-title>
                             <v-list-item-subtitle>
                               This is going to take about {{ roundToDecimal(item.TerraformationPlan.WaterVapourTime, 2) }} years.
@@ -484,7 +498,7 @@
                         'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
                         'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
                         'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
-                        'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited') || item.TerraformableStatus.includes('(LG)'),
+                        'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited'),
                         'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
                         'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
                       }"
@@ -518,7 +532,8 @@
                 <span v-else-if="item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes')" class="green--text text--lighten-1 font-weight-bold"> Done </span>
                 <span v-else-if="item.TerraformableStatus.startsWith('Partial')" class="light-blue--text text--lighten-1 font-weight-bold"> Done </span>
                 <span v-else-if="item.TerraformableStatus.startsWith('Near')" class="teal--text text--lighten-1 font-weight-bold"> Done </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Limited') || item.TerraformableStatus.includes('(LG)')" class="orange--text font-weight-bold"> Done </span>
+                <span v-else-if="item.TerraformableStatus.startsWith('Limited')" class="orange--text font-weight-bold"> Done </span>
+                <span v-else-if="item.TerraformableStatus.startsWith('Insufficient') || item.TerraformableStatus.includes('(LG)')" class="deep-orange--text darken-1 font-weight-bold"> Done </span>
                 <span v-else class="red--text text--darken-3 font-weight-bold">Impossible</span>
               </template>
               <template #[`item.MiningPotential`]="{ item }">
@@ -667,7 +682,7 @@ export default {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
     itemsPerPageOptions() {
-      return [10, 30, 50, 100]
+      return [10, 15, 30, 50, 100]
     },
 
     separator() {
@@ -1602,7 +1617,7 @@ export default {
         let projectedHydroId = body.HydroID
         let targetHydroExt = body.HydroExt
 
-        for (let iteration = 0; iteration < 16; iteration += 1) {
+        for (let iteration = 0; iteration < 32; iteration += 1) {
           const previousNeutralMain = finalNeutralMain
           const previousWater = finalWater
 
@@ -1871,6 +1886,138 @@ export default {
       if (solution?.plan) {
         solution.plan.TargetAlbedo = effectiveAlbedo
         solution.plan.AlbedoChange = effectiveAlbedo - body.OriginalAlbedo
+
+        // Check if this plan improves colony cost - if not, try to find a cost-optimized temperature
+        const currentColonyCosts = this.colonyCosts(body)
+        const plannedColonyCosts = this.colonyCosts({
+          ...body,
+          SurfaceTemp: solution.plan.TargetMeanTemperature,
+          Albedo: solution.plan.TargetAlbedo,
+          AtmosPress: solution.plan.TargetTotalPressure,
+          HydroExt: solution.plan.TargetHydroExt,
+          HydroID: solution.plan.TargetHydroID,
+          Atmosphere: [], // Placeholder - we'll calculate it properly if needed
+        })
+
+        // If the plan worsens colony cost, try to find better temperature
+        if (
+          plannedColonyCosts.overall > currentColonyCosts.overall ||
+          plannedColonyCosts.periapsis > currentColonyCosts.periapsis ||
+          plannedColonyCosts.apoapsis > currentColonyCosts.apoapsis
+        ) {
+          // Try to find temperature that minimizes colony cost instead
+          let bestTemperature = targetMeanTemperature
+          let bestCost = Math.max(
+            plannedColonyCosts.overall ?? Infinity,
+            plannedColonyCosts.periapsis ?? Infinity,
+            plannedColonyCosts.apoapsis ?? Infinity
+          )
+          let improvedWithinConstraints = false
+
+          // First, sample temperatures across the valid range to find one that improves cost
+          const tempSamples = 10
+          const tempStep = (maxAllowedMeanTemperature - minAllowedMeanTemperature) / tempSamples
+          for (let i = 0; i <= tempSamples; i += 1) {
+            const testTemp = minAllowedMeanTemperature + tempStep * i
+            const testSolution = solveForAlbedo(effectiveAlbedo)
+            
+            if (testSolution?.plan) {
+              // Manually set temperature for cost comparison
+              testSolution.plan.TargetMeanTemperature = testTemp
+              
+              const testColonyCosts = this.colonyCosts({
+                ...body,
+                SurfaceTemp: testTemp,
+                Albedo: effectiveAlbedo,
+                AtmosPress: testSolution.plan.TargetTotalPressure,
+                HydroExt: testSolution.plan.TargetHydroExt,
+                HydroID: testSolution.plan.TargetHydroID,
+                Atmosphere: [],
+              })
+
+              const testCost = Math.max(
+                testColonyCosts.overall ?? Infinity,
+                testColonyCosts.periapsis ?? Infinity,
+                testColonyCosts.apoapsis ?? Infinity
+              )
+
+              // Track if this improves over current (not just over plan)
+              const improvesOverCurrent = testCost < Math.max(
+                currentColonyCosts.overall ?? Infinity,
+                currentColonyCosts.periapsis ?? Infinity,
+                currentColonyCosts.apoapsis ?? Infinity
+              )
+
+              if (testCost < bestCost) {
+                bestCost = testCost
+                bestTemperature = testTemp
+                if (improvesOverCurrent) {
+                  improvedWithinConstraints = true
+                }
+              }
+            }
+          }
+
+          // If no improvement within constraints, try extended temperature range as last resort
+          if (!improvedWithinConstraints) {
+            const currentCost = Math.max(
+              currentColonyCosts.overall ?? Infinity,
+              currentColonyCosts.periapsis ?? Infinity,
+              currentColonyCosts.apoapsis ?? Infinity
+            )
+
+            // Extend search range beyond species limits
+            const extendedMinTemp = speciesMinTemperature * 0.5 // Try cooler
+            const extendedMaxTemp = speciesMaxTemperature * 1.5 // Try hotter
+            const extendedStep = (extendedMaxTemp - extendedMinTemp) / 20
+
+            for (let i = 0; i <= 20; i += 1) {
+              const testTemp = extendedMinTemp + extendedStep * i
+              const testSolution = solveForAlbedo(effectiveAlbedo)
+              
+              if (testSolution?.plan) {
+                testSolution.plan.TargetMeanTemperature = testTemp
+                
+                const testColonyCosts = this.colonyCosts({
+                  ...body,
+                  SurfaceTemp: testTemp,
+                  Albedo: effectiveAlbedo,
+                  AtmosPress: testSolution.plan.TargetTotalPressure,
+                  HydroExt: testSolution.plan.TargetHydroExt,
+                  HydroID: testSolution.plan.TargetHydroID,
+                  Atmosphere: [],
+                })
+
+                const testCost = Math.max(
+                  testColonyCosts.overall ?? Infinity,
+                  testColonyCosts.periapsis ?? Infinity,
+                  testColonyCosts.apoapsis ?? Infinity
+                )
+
+                if (testCost < bestCost && testCost < currentCost) {
+                  bestCost = testCost
+                  bestTemperature = testTemp
+                }
+              }
+            }
+          }
+
+          // If we found a better temperature, use it
+          if (bestCost < Math.max(
+            plannedColonyCosts.overall ?? Infinity,
+            plannedColonyCosts.periapsis ?? Infinity,
+            plannedColonyCosts.apoapsis ?? Infinity
+          )) {
+            targetMeanTemperature = bestTemperature
+            // Re-solve with the new target temperature
+            effectiveAlbedo = body.Albedo
+            solution = solveForAlbedo(effectiveAlbedo)
+            if (solution?.plan) {
+              solution.plan.TargetAlbedo = effectiveAlbedo
+              solution.plan.AlbedoChange = effectiveAlbedo - body.OriginalAlbedo
+            }
+          }
+        }
       }
 
       return solution.plan
@@ -2128,7 +2275,16 @@ export default {
 
           const costsAreEqual = Math.abs(overallCost - currentOverall) < 0.01 && Math.abs(periapsisCost - currentPeriapsis) < 0.01 && Math.abs(apoapsisCost - currentApoapsis) < 0.01
 
-          if (costsAreEqual) {
+          // Reject plans that worsen colony cost - terraforming should improve habitability, not make it worse
+          const costsWorse = overallCost > currentOverall || periapsisCost > currentPeriapsis || apoapsisCost > currentApoapsis
+
+          if (costsWorse) {
+            // Plan would make colony cost worse - don't terraform
+            newBody.TerraformationPlan = null
+            newBody.TerraformationTime = -Infinity
+            terraformable = false
+            terraformableStatus = 'No'
+          } else if (costsAreEqual) {
             if (newTerraformationPlan.ToxicTime > 0) {
               // Only keep toxic removal, skip all other atmospheric adjustments
               newTerraformationPlan.WaterVapour = newTerraformationPlan.WaterVapourStart
@@ -2199,7 +2355,7 @@ export default {
       newBody.Terraformable = terraformable && !terraformableStatus.startsWith('No')
       newBody.TerraformableStatus = terraformableStatus
 
-      newBody.PlannedColonyCostMetric = terraformable && newBody.TerraformationTime > 0 ? Math.max(newBody.PlannedColonyCostOverall, newBody.PlannedColonyCostPeriapsis, newBody.PlannedColonyCostApoapsis) : Infinity
+      newBody.PlannedColonyCostMetric = terraformable && newBody.TerraformationTime > 0 ? Math.max(newBody.PlannedColonyCostOverall, newBody.PlannedColonyCostPeriapsis, newBody.PlannedColonyCostApoapsis) : terraformable ? 25000 + Math.max(newBody.CurrentColonyCostOverall, newBody.CurrentColonyCostPeriapsis, newBody.CurrentColonyCostApoapsis) : Infinity
 
       // MINERALS
       const [miningPotential, totalMiningAmount] = body.Minerals.reduce(
