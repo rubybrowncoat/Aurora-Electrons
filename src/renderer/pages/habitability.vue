@@ -1659,27 +1659,43 @@ export default {
               const greenhouseAdjustable = Math.max(finalGreenhouse - greenhouseSideContributions, 0)
               if (greenhouseAdjustable > tolerance) {
                 const scale = targetRatio / finalRatio
-                finalGreenhouse = greenhouseSideContributions + greenhouseAdjustable * scale
+                const newGreenhouse = greenhouseSideContributions + greenhouseAdjustable * scale
+                // Cap greenhouse contribution so that ghM = 1 + totalPressure/10 + ghAtm doesn't exceed 3
+                const maxGreenhouseAtm = Math.max(0, 2 - finalTotal / 10)
+                finalGreenhouse = Math.min(newGreenhouse, maxGreenhouseAtm)
               } else {
                 const antiCapacity = Math.max(0, species.MaximumPressure - finalTotal)
                 if (antiCapacity <= tolerance) {
                   return null
                 }
                 const antiDelta = Math.min(Math.max(ratioError, tolerance), antiCapacity)
-                finalAnti += antiDelta
+                // Cap anti-greenhouse contribution so that aghM = 1 + dustTerm + aghAtm doesn't exceed 3
+                const maxAntiGreenhouseAtm = Math.max(0, 2 - dustTerm)
+                const constrainedAntiDelta = Math.min(antiDelta, maxAntiGreenhouseAtm - finalAnti)
+                if (constrainedAntiDelta > 0) {
+                  finalAnti += constrainedAntiDelta
+                }
               }
             } else {
               const antiAdjustable = Math.max(finalAnti - antiGreenhouseSideContributions, 0)
               if (antiAdjustable > tolerance) {
                 const scale = targetRatio / finalRatio
-                finalAnti = antiGreenhouseSideContributions + antiAdjustable * scale
+                const newAnti = antiGreenhouseSideContributions + antiAdjustable * scale
+                // Cap anti-greenhouse contribution so that aghM = 1 + dustTerm + aghAtm doesn't exceed 3
+                const maxAntiGreenhouseAtm = Math.max(0, 2 - dustTerm)
+                finalAnti = Math.min(newAnti, maxAntiGreenhouseAtm)
               } else {
                 const greenhouseCapacity = Math.max(0, species.MaximumPressure - finalTotal)
                 if (greenhouseCapacity <= tolerance) {
                   return null
                 }
                 const greenhouseDelta = Math.min(Math.max(-ratioError, tolerance), greenhouseCapacity)
-                finalGreenhouse += greenhouseDelta
+                // Cap greenhouse contribution so that ghM = 1 + totalPressure/10 + ghAtm doesn't exceed 3
+                const maxGreenhouseAtm = Math.max(0, 2 - finalTotal / 10)
+                const constrainedGreenhouseDelta = Math.min(greenhouseDelta, maxGreenhouseAtm - finalGreenhouse)
+                if (constrainedGreenhouseDelta > 0) {
+                  finalGreenhouse += constrainedGreenhouseDelta
+                }
               }
             }
           }
