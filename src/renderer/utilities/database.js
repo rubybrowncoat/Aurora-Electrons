@@ -50,6 +50,7 @@ export const resetDatabase = (storagePath) => {
       primaryKey: true,
     },
     GameID: Sequelize.INTEGER,
+    RaceGridSize: Sequelize.INTEGER,
     RaceName: Sequelize.TEXT,
     RaceTitle: Sequelize.TEXT,
     NPR: Sequelize.BOOLEAN,
@@ -57,9 +58,11 @@ export const resetDatabase = (storagePath) => {
     WealthPoints: Sequelize.REAL,
     PreviousWealth: Sequelize.REAL,
     StartingWealth: Sequelize.REAL,
-    AnnualWealth: Sequelize.REAL,
+    AnnualWealth: Sequelize.INTEGER,
+    GovTypeID: Sequelize.INTEGER,
     WealthCreationRate: Sequelize.REAL,
     ColonizationSkill: Sequelize.REAL,
+    MaximumOrbitalMiningDiameter: Sequelize.INTEGER,
 
     RaceStartingLevel: Sequelize.INTEGER,
   }, {

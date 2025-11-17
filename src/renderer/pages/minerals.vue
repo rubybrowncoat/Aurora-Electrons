@@ -55,45 +55,81 @@
             </v-expansion-panels>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
-              <template #prepend-item>
-                <v-list-item ripple @click="toggleSystems">
-                  <v-list-item-action>
-                    <v-icon>
-                      {{ systems.length > 0 ? (systems.length == systemNames.length ? 'mdi-emoticon-outline' : 'mdi-emoticon-happy-outline') : 'mdi-emoticon-sad-outline' }}
-                    </v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>{{ systems.length == systemNames.length ? 'Deselect All' : 'Select All' }}</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))" @click="selectUnrestrictedSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-billiards-rack</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))" @click="selectOurSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-city-variant-outline</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Colonized Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))" @click="selectOurInhabitedSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-account-multiple-outline</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Inhabited Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-divider class="mt-2" />
-              </template>
-            </v-select>
+            <v-row>
+              <v-col class="pr-2">
+                <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+                  <template #prepend-item>
+                    <v-list-item ripple @click="toggleSystems">
+                      <v-list-item-action>
+                        <v-icon>
+                          {{ systems.length > 0 ? (systems.length == systemNames.length ? 'mdi-emoticon-outline' : 'mdi-emoticon-happy-outline') : 'mdi-emoticon-sad-outline' }}
+                        </v-icon>
+                      </v-list-item-action>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ systems.length == systemNames.length ? 'Deselect All' : 'Select All' }}</v-list-item-title>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))" @click="selectUnrestrictedSystems">
+                      <v-list-item-action>
+                        <v-icon>mdi-billiards-rack</v-icon>
+                      </v-list-item-action>
+                      <v-list-item-content>
+                        <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))" @click="selectOurSystems">
+                      <v-list-item-action>
+                        <v-icon>mdi-city-variant-outline</v-icon>
+                      </v-list-item-action>
+                      <v-list-item-content>
+                        <v-list-item-title>Select Colonized Systems</v-list-item-title>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-list-item v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))" @click="selectOurInhabitedSystems">
+                      <v-list-item-action>
+                        <v-icon>mdi-account-multiple-outline</v-icon>
+                      </v-list-item-action>
+                      <v-list-item-content>
+                        <v-list-item-title>Select Inhabited Systems</v-list-item-title>
+                      </v-list-item-content>
+                    </v-list-item>
+                    <v-divider class="mt-2" />
+                  </template>
+                </v-select>
+              </v-col>
+              <v-col cols="auto" class="d-flex align-center">
+                <v-menu offset-y :close-on-content-click="false">
+                  <template #activator="{ on, attrs }">
+                    <v-btn outlined small class="px-2 min-width-0" style="min-width: 0" v-bind="attrs" v-on="on">
+                      <span v-if="filterOrbitalEligibility === 'all'">All Bodies</span>
+                      <span v-else>{{ orbitalEligibilityLabel }}</span>
+                    </v-btn>
+                  </template>
+
+                  <v-list dense>
+                    <v-list-item v-for="option in orbitalEligibilityOptions" :key="option.value" ripple @click="filterOrbitalEligibility = option.value">
+                      <v-list-item-action>
+                        <v-icon v-if="filterOrbitalEligibility === option.value">mdi-checkbox-marked</v-icon>
+                        <v-icon v-else>mdi-checkbox-blank-outline</v-icon>
+                      </v-list-item-action>
+                      <v-list-item-content>
+                        <v-list-item-title>{{ option.text }}</v-list-item-title>
+                        <v-list-item-subtitle v-if="option.value === 'eligible' && maximumOrbitalMiningDiameter">≤ {{ formatOrbitalDiameter(maximumOrbitalMiningDiameter) }}</v-list-item-subtitle>
+                      </v-list-item-content>
+                    </v-list-item>
+
+                    <v-divider class="my-1" />
+
+                    <v-list-item>
+                      <v-list-item-content>
+                        <v-list-item-title class="text--secondary" v-if="maximumOrbitalMiningDiameter">Race max diameter: {{ formatOrbitalDiameter(maximumOrbitalMiningDiameter) }}</v-list-item-title>
+                        <v-list-item-title class="text--secondary" v-else>Race maximum unknown</v-list-item-title>
+                      </v-list-item-content>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
+              </v-col>
+            </v-row>
           </v-col>
           <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
             <v-row>
@@ -197,6 +233,11 @@
                   ><span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item[material].Amount), separator) }}</span> ({{ item[material].Accessibility }})</span
                 >
               </template>
+              <template #[`item.TotalAccessibility`]="{ item }">
+                <span class="text-no-wrap">
+                  {{ roundToDecimal(item.TotalAccessibility, 2) }}
+                </span>
+              </template>
               <template #[`item.TotalAmount`]="{ item }">
                 <span class="text-no-wrap">
                   {{ separatedNumber(Math.round(item.TotalAmount), separator) }}
@@ -297,6 +338,13 @@ export default {
         },
       ],
 
+      filterOrbitalEligibility: 'all',
+      orbitalEligibilityOptions: [
+        { text: 'All bodies', value: 'all' },
+        { text: 'Orbital mining eligible', value: 'eligible' },
+        { text: 'Not orbital mining eligible', value: 'ineligible' },
+      ],
+
       selectedAmount: null,
 
       panels: [0, 1, 2],
@@ -359,6 +407,8 @@ export default {
             SystemBodyType: item.BodyTypeID,
 
             GroundMineralSurvey: item.GroundMineralSurvey,
+            Radius: item.Radius,
+            Diameter: item.Radius ? item.Radius * 2 : null,
           }
         }
 
@@ -374,18 +424,19 @@ export default {
       }, {})
 
       return Object.values(aggregation).map((body) => {
-        const [totalPotential, totalAmount] = Object.values(this.materials).reduce(
-          ([potential, amount], materialId) => {
+        const [totalPotential, totalAmount, totalAccessibility] = Object.values(this.materials).reduce(
+          ([potential, amount, accessibility], materialId) => {
             const material = body[materialId]
 
             if (material) {
               potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - Math.PI / 2)) * (0.5 - Math.cos(Math.PI * material.Accessibility) / 2))
               amount += material.Amount
+              accessibility += material.Accessibility
             }
 
-            return [potential, amount]
+            return [potential, amount, accessibility]
           },
-          [0, 0]
+          [0, 0, 0]
         )
 
         return {
@@ -393,6 +444,7 @@ export default {
 
           Potential: totalPotential,
           TotalAmount: totalAmount,
+          TotalAccessibility: totalAccessibility,
         }
       })
     },
@@ -416,54 +468,56 @@ export default {
     },
 
     preFilteredBodyGroups() {
-      return this.bodyGroups.filter((body) => {
-        return this.filters.every((filter) => {
-          switch (filter.selectedMaterial) {
-            case 'Any': {
-              return this.materials.some((materialName) => {
-                const material = body[materialName]
+      return this.bodyGroups
+        .filter((body) => this.passesOrbitalMiningFilter(body))
+        .filter((body) => {
+          return this.filters.every((filter) => {
+            switch (filter.selectedMaterial) {
+              case 'Any': {
+                return this.materials.some((materialName) => {
+                  const material = body[materialName]
 
-                if (!material) {
-                  return false
-                }
+                  if (!material) {
+                    return false
+                  }
 
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            case 'All Present': {
-              return this.materials.every((materialName) => {
-                const material = body[materialName]
-
-                if (!material) {
-                  return true
-                }
-
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            case 'All': {
-              return this.materials.every((materialName) => {
-                const material = body[materialName]
-
-                if (!material) {
-                  return false
-                }
-
-                return this.applyMaterialFilter(material, filter)
-              })
-            }
-            default: {
-              const material = body[filter.selectedMaterial]
-
-              if (!material) {
-                return false
+                  return this.applyMaterialFilter(material, filter)
+                })
               }
+              case 'All Present': {
+                return this.materials.every((materialName) => {
+                  const material = body[materialName]
 
-              return this.applyMaterialFilter(material, filter)
+                  if (!material) {
+                    return true
+                  }
+
+                  return this.applyMaterialFilter(material, filter)
+                })
+              }
+              case 'All': {
+                return this.materials.every((materialName) => {
+                  const material = body[materialName]
+
+                  if (!material) {
+                    return false
+                  }
+
+                  return this.applyMaterialFilter(material, filter)
+                })
+              }
+              default: {
+                const material = body[filter.selectedMaterial]
+
+                if (!material) {
+                  return false
+                }
+
+                return this.applyMaterialFilter(material, filter)
+              }
             }
-          }
+          })
         })
-      })
     },
 
     MaterialMap() {
@@ -474,6 +528,13 @@ export default {
     },
     BodyClass() {
       return BodyClass
+    },
+    maximumOrbitalMiningDiameter() {
+      return this.race ? this.race.MaximumOrbitalMiningDiameter : null
+    },
+    orbitalEligibilityLabel() {
+      const active = this.orbitalEligibilityOptions.find((option) => option.value === this.filterOrbitalEligibility)
+      return active ? active.text : ''
     },
 
     materialCount() {
@@ -531,6 +592,14 @@ export default {
           text: 'Total',
           value: 'TotalAmount',
           class: 'text-no-wrap',
+          sort: (alpha, beta) => (beta || 0) - (alpha || 0),
+        },
+        {
+          text: 'Total Accessibility',
+          value: 'TotalAccessibility',
+          align: 'center',
+          class: 'text-no-wrap',
+          sort: (alpha, beta) => (beta || 0) - (alpha || 0),
         },
       ]
     },
@@ -583,6 +652,9 @@ export default {
         this.$store.commit('tables/setMineralsSortDescending', newValue)
       },
     },
+    filterOrbitalEligibility(newValue) {
+      this.config.set('mineralsFilterOrbitalEligibility', newValue)
+    },
     systemNames: {
       immediate: true,
       handler(newNames) {
@@ -601,6 +673,11 @@ export default {
       this.sortBy = Array.isArray(this.$store.state.tables.mineralsSortBy) ? [...this.$store.state.tables.mineralsSortBy] : []
       this.sortDescending = Array.isArray(this.$store.state.tables.mineralsSortDescending) ? [...this.$store.state.tables.mineralsSortDescending] : [false]
       console.log('[Minerals] Initialized from store - itemsPerPage:', this.itemsPerPage, 'sortBy:', this.sortBy, 'sortDescending:', this.sortDescending)
+    }
+
+    const savedOrbitalFilter = this.config.get('mineralsFilterOrbitalEligibility', 'all')
+    if (this.orbitalEligibilityOptions.some((option) => option.value === savedOrbitalFilter)) {
+      this.filterOrbitalEligibility = savedOrbitalFilter
     }
   },
   mounted() {
@@ -650,15 +727,71 @@ export default {
     selectUnrestrictedSystems() {
       this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
     },
+    formatOrbitalDiameter(value) {
+      if (value == null) {
+        return ''
+      }
+
+      return `${this.separatedNumber(Math.round(value), this.separator)} km`
+    },
+    passesOrbitalMiningFilter(body) {
+      if (this.filterOrbitalEligibility === 'all') {
+        return true
+      }
+
+      if (!this.maximumOrbitalMiningDiameter) {
+        return true
+      }
+
+      const diameter = body.Diameter ?? (body.Radius != null ? body.Radius * 2 : null)
+
+      if (diameter == null) {
+        return this.filterOrbitalEligibility !== 'eligible'
+      }
+
+      const isEligible = diameter <= this.maximumOrbitalMiningDiameter
+
+      if (this.filterOrbitalEligibility === 'eligible') {
+        return isEligible
+      }
+
+      if (this.filterOrbitalEligibility === 'ineligible') {
+        return !isEligible
+      }
+
+      return true
+    },
   },
   asyncComputed: {
+    race: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        const race = await this.database.models.Race.findOne({
+          where: {
+            GameID: this.GameID,
+            RaceID: this.RaceID,
+          },
+        }).then((race) => {
+          if (race) {
+            console.log('Loaded race:', race.toJSON())
+          }
+          return race
+        })
+
+        return race
+      },
+      default: null,
+    },
     minerals: {
       async get() {
         if (!this.database || !this.GameID) {
           return []
         }
 
-        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID left join FCT_Race on FCT_Race.RaceID = FCT_SystemBodySurveys.RaceID and FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
+        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID left join FCT_Race on FCT_Race.RaceID = FCT_SystemBodySurveys.RaceID and FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Minerals', items)
 
           return items
