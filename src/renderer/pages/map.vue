@@ -309,7 +309,6 @@ export default {
               //   const cap = "round"              // "round" | "butt" | "square"
 
               //   const isEmpty = node.data('empty')
-              const unexploredConnections = node.data('unexploredConnections')
               //   const percentage = this.showGeologicalSurvey ? node.data('geoPercentage') : this.showGravitationalSurvey ? node.data('gravPercentage') : 0
               const cx = size / 2
               const cy = size / 2
@@ -349,14 +348,28 @@ export default {
               //         ? "" // no slice
               //         : `<path d="${d}" fill="${stroke}" />`
 
-              // Unexplored Jump Points
               let connections = ''
-              for (let iterator = 0; iterator < unexploredConnections; iterator += 1) {
-                const radius = 21 + 3 * Math.floor(iterator / 15)
-                const xPos = cx + radius * -Math.sin((-32 * iterator * Math.PI) / 180)
-                const yPos = cy + radius * -Math.cos((-32 * iterator * Math.PI) / 180)
+              if (this.showGeologicalSurvey) {
+                const unexploredGroundPotentials = node.data('unexploredGroundPotentials')
 
-                connections += `<circle cx="${xPos}" cy="${yPos}" r="3" fill="#Ff7034" />`
+                for (let iterator = 0; iterator < unexploredGroundPotentials; iterator += 1) {
+                  const radius = (cx - 4) + 3 * Math.floor(iterator / 15)
+                  const xPos = cx + radius * -Math.sin((-32 * iterator * Math.PI) / 180)
+                  const yPos = cy + radius * -Math.cos((-32 * iterator * Math.PI) / 180)
+
+                  connections += `<circle cx="${xPos}" cy="${yPos}" r="3" fill="#DF42AF" />`
+                }
+              } else if (this.showGravitationalSurvey) {
+              // Unexplored Jump Points
+                const unexploredConnections = node.data('unexploredConnections')
+
+                for (let iterator = 0; iterator < unexploredConnections; iterator += 1) {
+                  const radius = (cx - 4) + 3 * Math.floor(iterator / 15)
+                  const xPos = cx + radius * -Math.sin((-32 * iterator * Math.PI) / 180)
+                  const yPos = cy + radius * -Math.cos((-32 * iterator * Math.PI) / 180)
+
+                  connections += `<circle cx="${xPos}" cy="${yPos}" r="3" fill="#Ff7034" />`
+                }
               }
 
               const lockIconSize = size / 3
@@ -566,6 +579,7 @@ export default {
 
             connections: node.connections.size,
             unexploredConnections: node.unexploredConnections,
+            unexploredGroundPotentials: node.unexploredGroundPotentials,
 
             empty: node.empty,
             entirelyEmpty: node.entirelyEmpty,
@@ -1712,6 +1726,7 @@ export default {
               connections: new Set(),
 
               unexploredConnections: 0,
+              unexploredGroundPotentials: 0,
             }))
           })
 
@@ -1728,6 +1743,25 @@ export default {
         }, {})
 
         console.log('Positions', positions)
+
+        await this.database.query(`
+          select FCT_SystemBody.SystemBodyID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.SystemID, FCT_RaceSysSurvey.Name as SystemName from FCT_SystemBody
+
+          left join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID}
+          inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID}
+
+          where FCT_SystemBody.GroundMineralSurvey > 0 and FCT_SystemBody.GameID = ${this.GameID}`
+        ).then(([items]) => {
+          console.log('DB Ground Survey Potentials', items)
+
+          return items.forEach((item) => {
+            const system = nodes.find((node) => node.id === String(item.SystemID))
+
+            if (system) {
+              system.unexploredGroundPotentials += 1
+            }
+          })
+        })
 
         const jumpPoints = await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`).then(([items]) => {
           console.log('DB Jump Points', items)

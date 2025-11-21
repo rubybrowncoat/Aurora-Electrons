@@ -111,13 +111,8 @@
 </template>
 
 <script>
-import { remote } from 'electron'
-
 import { mapGetters } from 'vuex'
 
-import romanum from 'romanum'
-
-import { convertDisplayBase } from '../utilities/generic'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { populationName } from '../utilities/aurora'
 
@@ -139,19 +134,6 @@ export default {
         positive: (value) => value > 0 || 'Must be positive.',
       },
     }
-  },
-  methods: {
-    separatedNumber,
-
-    populationName,
-
-    flipDistance () {
-      if (this.distance > 1000000000) {
-        this.distance /= 10
-      } else {
-        this.distance *= 10
-      }
-    },
   },
   computed: {
     ...mapGetters([
@@ -252,6 +234,19 @@ export default {
       }, {})
     },
   },
+  methods: {
+    separatedNumber,
+
+    populationName,
+
+    flipDistance () {
+      if (this.distance > 1000000000) {
+        this.distance /= 10
+      } else {
+        this.distance *= 10
+      }
+    },
+  },
   asyncComputed: {
     ships: {
       async get () {
@@ -259,10 +254,20 @@ export default {
           return []
         }
 
-        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShippingLineID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MaxSpeed, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_ShipClass.EnginePower * FCT_ShipClass.FuelEfficiency ) * 3600, 0) as MaxRangeTime, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_ShipClass.EnginePower * FCT_ShipClass.FuelEfficiency ) * 3600 * FCT_ShipClass.MaxSpeed, 0) as MaxRange, COALESCE(20 * FCT_ShipClass.CargoCapacity / ( FCT_ShipClass.CargoShuttleStrength * FCT_Race.CargoShuttleLoadModifier ), 0) as MaximumCargoLoadingTime, COALESCE(10 * FCT_ShipClass.ColonistCapacity / ( FCT_ShipClass.CargoShuttleStrength * FCT_Race.CargoShuttleLoadModifier ), 0) as MaximumColonistLoadingTime, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_Race.MaxRefuellingRate / 3600 ), 0) as MaximumRefuellingTime, FCT_ShippingLines.LineName, FCT_Fleet.FleetName from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_ShippingLines on FCT_Ship.ShippingLineID = FCT_ShippingLines.ShippingLineID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_Race on FCT_Ship.RaceID = FCT_Race.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => {
+        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShippingLineID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoShuttleStrength, FCT_Race.CargoShuttleLoadModifier, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MaxSpeed, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_ShipClass.EnginePower * FCT_ShipClass.FuelEfficiency ) * 3600, 0) as MaxRangeTime, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_ShipClass.EnginePower * FCT_ShipClass.FuelEfficiency ) * 3600 * FCT_ShipClass.MaxSpeed, 0) as MaxRange, COALESCE(FCT_ShipClass.FuelCapacity / ( FCT_Race.MaxRefuellingRate / 3600 ), 0) as MaximumRefuellingTime, FCT_ShippingLines.LineName, FCT_Fleet.FleetName from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_ShippingLines on FCT_Ship.ShippingLineID = FCT_ShippingLines.ShippingLineID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_Race on FCT_Ship.RaceID = FCT_Race.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Ships', items)
 
-          return items
+          const ships = items.map((item) => {
+            const shuttleModifier = item.CargoShuttleStrength > 0 ? item.CargoShuttleStrength * item.CargoShuttleLoadModifier : 1
+
+            return {
+              ...item,
+              MaximumCargoLoadingTime: item.CargoCapacity * 20 / shuttleModifier,
+              MaximumColonistLoadingTime: item.ColonistCapacity * 10 / shuttleModifier,
+            }
+          })
+
+          return ships
         })
 
         return ships
