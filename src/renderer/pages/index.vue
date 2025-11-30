@@ -172,7 +172,7 @@ export default {
       }
 
       return this.navalAdministrations.reduce((map, navalAdministration) => {
-        if (!this.raceSystems[navalAdministration.SystemID]) {
+        if (!this.raceSystems[navalAdministration.SystemID] || navalAdministration.NavalAdminCommandLevel === 0) {
           return map
         }
 

@@ -104,7 +104,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
+        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || misconfiguredSupplyShipClasses.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Ships </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
@@ -179,6 +179,22 @@
                             &mdash; {{ ship.FleetName }} &mdash; {{ ship.ShipName }}
                           </v-list-item-title>
                           <v-list-item-subtitle> {{ roundToDecimal(ship.CurrentMaintSupplies, 1) }}/{{ ship.MaintSupplies }} MSP </v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="misconfiguredSupplyShipClasses.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ misconfiguredSupplyShipClasses.length }} misconfigured supply ship classes </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="shipClass in misconfiguredSupplyShipClasses" :key="shipClass.ShipClassID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ shipClass.ClassName }} Class</v-list-item-title>
+                          <v-list-item-subtitle>No minimum supply level set</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -597,6 +613,15 @@ export default {
       },
     }
   },
+  computed: {
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'GameTime']),
+
+    separator() {
+      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
+
+      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
+    },
+  },
   methods: {
     separatedNumber,
     roundToDecimal,
@@ -653,15 +678,6 @@ export default {
           return out.join(', ')
         })
         .join(', ')
-    },
-  },
-  computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'GameTime']),
-
-    separator() {
-      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
-
-      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
   },
   asyncComputed: {
@@ -916,13 +932,74 @@ export default {
           return []
         }
 
-        const ships = await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ShipClassID, FCT_Fleet.FleetName, FCT_Ship.CurrentMaintSupplies, FCT_ShipClass.MaintSupplies, FCT_Ship.CurrentMaintSupplies / FCT_ShipClass.MaintSupplies as SupplyLevel from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and SupplyLevel < 1 and FCT_ShipClass.MaintSupplies > 0 ORDER BY SupplyLevel ASC`).then(([items]) => {
+        const ships = await this.database.query(`
+          select
+            FCT_Ship.ShipID,
+            FCT_Ship.ShipName,
+            FCT_ShipClass.ShipClassID,
+            FCT_Fleet.FleetName,
+            FCT_ShipClass.MinimumSupplies,
+            FCT_Ship.CurrentMaintSupplies,
+            FCT_ShipClass.MaintSupplies,
+            case
+              when FCT_ShipClass.SupplyShip = 1 and FCT_ShipClass.MinimumSupplies > 0
+              then min(1.0, CAST(FCT_Ship.CurrentMaintSupplies as real) / FCT_ShipClass.MinimumSupplies)
+              when FCT_ShipClass.MaintSupplies > 0
+              then min(1.0, CAST(FCT_Ship.CurrentMaintSupplies as real) / FCT_ShipClass.MaintSupplies)
+              else 0.0
+            end as SupplyLevel
+          from FCT_Ship
+          left join FCT_Fleet
+            on FCT_Ship.FleetID = FCT_Fleet.FleetID
+          left join FCT_ShipClass
+            on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID
+          where
+            FCT_Ship.GameID = ${this.GameID}
+            and FCT_Ship.RaceID = ${this.RaceID}
+            and FCT_Ship.ShippingLineID = 0
+            and FCT_ShipClass.MaintSupplies > 0
+            and SupplyLevel < 1
+          order by
+            SupplyLevel ASC
+        `).then(([items]) => {
           console.log('Maintenanceless Ships', items)
 
           return items.filter((item) => {
             const exclusions = this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceExclusions`, [])
 
             return !exclusions.includes(item.ShipClassID) && item.SupplyLevel * 100 <= this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceThreshold`, 100)
+          })
+        })
+
+        return ships
+      },
+      default: [],
+    },
+    misconfiguredSupplyShipClasses: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const ships = await this.database.query(`
+          select
+            FCT_ShipClass.ShipClassID,
+            FCT_ShipClass.ClassName
+          from FCT_ShipClass
+          where
+            FCT_ShipClass.GameID = ${this.GameID}
+            and FCT_ShipClass.RaceID = ${this.RaceID}
+            AND FCT_ShipClass.ClassShippingLineID = 0
+            and FCT_ShipClass.SupplyShip = 1
+            AND FCT_ShipClass.MaintSupplies > 0
+            and FCT_ShipClass.MinimumSupplies = 0
+        `).then(([items]) => {
+          console.log('Misconfigured Supply Ship Classes', items)
+
+          return items.filter((item) => {
+            const exclusions = this.config.get(`game.${this.GameID}.race.${this.RaceID}.maintenanceExclusions`, [])
+
+            return !exclusions.includes(item.ShipClassID)
           })
         })
 
@@ -987,7 +1064,7 @@ export default {
           return []
         }
 
-        const ships = await this.database.query(`select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity from FCT_ShipClass where (CargoCapacity > 0 or ColonistCapacity > 0) and CargoShuttleStrength = 0 and FCT_ShipClass.Obsolete != 1 and FCT_ShipClass.RaceID = ${this.RaceID} and FCT_ShipClass.GameID = ${this.GameID} ORDER BY FCT_ShipClass.ClassName ASC`).then(([items]) => {
+        const ships = await this.database.query(`select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity from FCT_ShipClass where FCT_ShipClass.Size > 10 and (CargoCapacity > 0 or ColonistCapacity > 0) and CargoShuttleStrength = 0 and FCT_ShipClass.Obsolete != 1 and FCT_ShipClass.RaceID = ${this.RaceID} and FCT_ShipClass.GameID = ${this.GameID} ORDER BY FCT_ShipClass.ClassName ASC`).then(([items]) => {
           console.log('Transport Classes Without Cargo Shuttles', items)
 
           return items
@@ -1227,6 +1304,34 @@ export default {
           return []
         }
 
+        const orbitalPopulations = await this.database.query(`
+          select FCT_Fleet.AssignedPopulationID, sum(FCT_ShipCargo.Amount) as LoadedColonistAmount, VIR_StandardBerths.StandardBerthCapacity as StandardBerthCapacity from FCT_Fleet
+
+          left join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID
+          inner join (
+              select FCT_ClassComponent.ClassID, sum(FCT_ClassComponent.NumComponent * FCT_ShipDesignComponents.ComponentValue) as StandardBerthCapacity from FCT_ClassComponent
+
+              left join FCT_ShipDesignComponents on FCT_ClassComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID
+
+              where FCT_ShipDesignComponents.ComponentTypeID = 17 and FCT_ShipDesignComponents.SpecialFunction = 7 group by FCT_ClassComponent.ClassID
+          ) as VIR_StandardBerths on VIR_StandardBerths.ClassID = FCT_Ship.ShipClassID
+          left join FCT_ShipCargo on FCT_Ship.ShipID = FCT_ShipCargo.ShipID and FCT_ShipCargo.CargoTypeID = 1
+
+          where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.AssignedPopulationID != 0 group by FCT_Fleet.AssignedPopulationID
+        `).then(([items]) => {
+          const populations = items.reduce((accumulator, item) => {
+            accumulator[item.AssignedPopulationID] = {
+              PopulationID: item.AssignedPopulationID,
+              LoadedColonistAmount: item.LoadedColonistAmount || 0,
+              StandardBerthCapacity: item.StandardBerthCapacity || 0,
+            }
+
+            return accumulator
+          }, {})
+
+          return populations
+        })
+
         const constructs = await this.database.models.AncientConstruct.findAll({
           where: {
             GameID: this.GameID,
@@ -1282,8 +1387,21 @@ export default {
 
           return items
             .map((construct) => {
-              construct.OwnPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID === this.RaceID)
-              construct.AlienPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID !== this.RaceID)
+              construct.OwnPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID === this.RaceID).map((population) => {
+                const orbitalPopulation = orbitalPopulations[population.PopulationID] || {
+                  LoadedColonistAmount: 0,
+                  StandardBerthCapacity: 0,
+                }
+
+                if (orbitalPopulation.LoadedColonistAmount >= orbitalPopulation.StandardBerthCapacity) {
+                  population.Population += orbitalPopulation.StandardBerthCapacity
+                } else {
+                  population.Population += orbitalPopulation.LoadedColonistAmount
+                }
+
+                return population
+              })
+              // construct.AlienPopulations = construct.SystemBody.Populations.filter((population) => population.RaceID !== this.RaceID)
 
               return construct
             })
