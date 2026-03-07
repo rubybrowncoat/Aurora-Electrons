@@ -419,6 +419,39 @@ export default {
 
               return '#C8D9DC'
             },
+            'border-width': (node) => {
+              if (node.data('entirelyEmpty')) {
+                return 4
+              }
+
+              if (node.data('cometOnly')) {
+                return 4
+              }
+
+              return 2
+            },
+            'border-style': (node) => {
+              if (node.data('entirelyEmpty')) {
+                return 'dotted'
+              }
+
+              if (node.data('cometOnly')) {
+                return 'dashed'
+              }
+
+              return 'solid'
+            },
+            'border-color': (node) => {
+              if (node.data('entirelyEmpty')) {
+                return '#777'
+              }
+
+              if (node.data('cometOnly')) {
+                return '#Ff7034'
+              }
+
+              return 'green'
+            },
 
             // LABEL
             label: 'data(name)',
@@ -583,6 +616,8 @@ export default {
 
             empty: node.empty,
             entirelyEmpty: node.entirelyEmpty,
+            cometOnly: node.cometOnly,
+            bodyCategory: node.bodyCategory,
 
             geoPercentage: node.geoPercentage,
             gravPercentage: node.gravPercentage,
@@ -1670,10 +1705,10 @@ export default {
 
         const nodes = await this.database
           .query(`
-            select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_SectorCommand.SectorName, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.ControlRaceID, FCT_AlienRace.AlienRaceName, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, VIR_GeologicalSurvey.PlanetaryBodies, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations, VIR_Population.PopulationNumber, VIR_Population.Population, VIR_Population.Capital from FCT_RaceSysSurvey
+            select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_SectorCommand.SectorName, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.ControlRaceID, FCT_AlienRace.AlienRaceName, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, VIR_GeologicalSurvey.PlanetaryBodies, VIR_GeologicalSurvey.CometBodies, VIR_GeologicalSurvey.SystemBodies, VIR_GeologicalSurvey.SurveyedSystemBodies, VIR_GravitationalSurvey.SurveyLocations, VIR_GravitationalSurvey.SurveyedSurveyLocations, VIR_Population.PopulationNumber, VIR_Population.Population, VIR_Population.Capital from FCT_RaceSysSurvey
 
             left join (
-              select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass IN (1, 2) THEN 1 ELSE 0 END AS INT)) as PlanetaryBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID
+              select FCT_SystemBody.SystemID, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass IN (1, 2) THEN 1 ELSE 0 END AS INT)) as PlanetaryBodies, sum(CAST(CASE WHEN FCT_SystemBody.BodyClass = 5 THEN 1 ELSE 0 END AS INT)) as CometBodies, sum(CAST(CASE WHEN FCT_SystemBody.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SystemBodies, sum(CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT)) as SurveyedSystemBodies from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID
             ) as VIR_GeologicalSurvey on FCT_RaceSysSurvey.SystemID = VIR_GeologicalSurvey.SystemID
 
             left join (
@@ -1696,38 +1731,50 @@ export default {
           .then(([items]) => {
             console.log('DB Systems', items)
 
-            return items.map((item) => ({
-              id: String(item.SystemID),
-              name: item.Name,
+            return items.map((item) => {
+              const systemBodies = Number(item.SystemBodies) || 0
+              const planetaryBodies = Number(item.PlanetaryBodies) || 0
+              const cometBodies = Number(item.CometBodies) || 0
 
-              mapX: item.Xcor,
-              mapY: item.Ycor,
+              const entirelyEmpty = systemBodies === 0
+              const cometOnly = !entirelyEmpty && planetaryBodies === 0 && cometBodies > 0 && cometBodies === systemBodies
+              const bodyCategory = entirelyEmpty ? 'empty' : cometOnly ? 'comet-only' : 'planetary'
 
-              galacticPosition: item.X !== null ? new Vector3(item.X, item.Y, item.Z).multiplyScalar(18) : null,
+              return {
+                id: String(item.SystemID),
+                name: item.Name,
 
-              gravPercentage: item.SurveyLocations ? item.SurveyedSurveyLocations / item.SurveyLocations : 0,
-              geoPercentage: item.SystemBodies ? item.SurveyedSystemBodies / item.SystemBodies : 0,
-              empty: !item.PlanetaryBodies,
-              entirelyEmpty: !item.SystemBodies,
+                mapX: item.Xcor,
+                mapY: item.Ycor,
 
-              populationNumber: item.PopulationNumber || 0,
-              population: item.Population || 0,
-              capital: !!item.Capital,
+                galacticPosition: item.X !== null ? new Vector3(item.X, item.Y, item.Z).multiplyScalar(18) : null,
 
-              sectorId: item.SectorID,
-              sector: item.SectorName,
+                gravPercentage: item.SurveyLocations ? item.SurveyedSurveyLocations / item.SurveyLocations : 0,
+                geoPercentage: systemBodies ? item.SurveyedSystemBodies / systemBodies : 0,
+                empty: planetaryBodies === 0,
+                entirelyEmpty,
+                cometOnly,
+                bodyCategory,
 
-              controllerId: item.ControlRaceID,
-              controller: item.AlienRaceName || (item.ControlRaceID ? 'Unknown' : 'Uncontrolled'),
+                populationNumber: item.PopulationNumber || 0,
+                population: item.Population || 0,
+                capital: !!item.Capital,
 
-              discovered: gameTime(this.StartYear, item.DiscoveredTime).format('YYYY-MM-DD HH:mm:ss'),
+                sectorId: item.SectorID,
+                sector: item.SectorName,
 
-              neighbors: new Set(),
-              connections: new Set(),
+                controllerId: item.ControlRaceID,
+                controller: item.AlienRaceName || (item.ControlRaceID ? 'Unknown' : 'Uncontrolled'),
 
-              unexploredConnections: 0,
-              unexploredGroundPotentials: 0,
-            }))
+                discovered: gameTime(this.StartYear, item.DiscoveredTime).format('YYYY-MM-DD HH:mm:ss'),
+
+                neighbors: new Set(),
+                connections: new Set(),
+
+                unexploredConnections: 0,
+                unexploredGroundPotentials: 0,
+              }
+            })
           })
 
         console.log('Nodes', nodes)

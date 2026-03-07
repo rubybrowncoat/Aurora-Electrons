@@ -18,7 +18,7 @@
               v-model="activeTypes" :items="logEventTypes" item-text="Description" item-value="EventTypeID"
               label="Select Active Event Types" multiple
             >
-              <template #selection="{ item, index }">
+              <template #selection="{ index }">
                 <v-chip v-if="activeTypes.length === logEventTypes.length && index === 0" small>
                   All Event Types
                 </v-chip>
@@ -160,13 +160,11 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapGetters, mapMutations, mapState } from 'vuex'
 
 import { has } from 'lodash'
 import { separatedNumber } from '../utilities/math'
 import { eventColorToRGBA, gameTime, populationName } from '../utilities/aurora'
-
-const secondsPerYear = 31536000
 
 export default {
   components: {},
@@ -417,11 +415,109 @@ export default {
       hideNonCustomized: false,
     }
   },
+  computed: {
+    ...mapGetters([
+      'database',
+
+      'GameID',
+      'RaceID',
+    ]),
+
+    ...mapState('log', [
+      'filtersByContext',
+    ]),
+
+    logContextKey () {
+      if (!this.GameID || !this.RaceID) {
+        return null
+      }
+
+      return `${this.GameID}:${this.RaceID}`
+    },
+
+    filteredLogEvents () {
+      const filteredByType = this.logEvents.filter((event) => this.activeTypes.includes(event.EventType))
+
+      if (this.hideNonCustomized) {
+        return filteredByType.filter((event) => event['LogEventType.LogEventColours.AlertColour'] || event['LogEventType.LogEventColours.TextColour'])
+      }
+
+      return filteredByType
+    },
+  },
+  watch: {
+    GameID: {
+      immediate: true,
+      handler () {
+        this.loadStoredLogFilters()
+      },
+    },
+    RaceID: {
+      immediate: true,
+      handler () {
+        this.loadStoredLogFilters()
+      },
+    },
+    hideNonCustomized (value) {
+      if (!this.logContextKey) {
+        return
+      }
+
+      this.setHideNonCustomized({
+        contextKey: this.logContextKey,
+        value,
+      })
+    },
+    activeTypes: {
+      deep: true,
+      handler (value) {
+        if (!this.logContextKey) {
+          return
+        }
+
+        const normalizedTypeIDs = value
+          .map((typeID) => Number(typeID))
+          .filter((typeID) => Number.isInteger(typeID))
+
+        this.setActiveTypes({
+          contextKey: this.logContextKey,
+          value: normalizedTypeIDs,
+        })
+      },
+    },
+  },
+  mounted () {
+    this.loadStoredLogFilters()
+  },
   methods: {
+    ...mapMutations('log', [
+      'setHideNonCustomized',
+      'setActiveTypes',
+    ]),
+
     eventColorToRGBA,
     separatedNumber,
 
     populationName,
+
+    loadStoredLogFilters () {
+      if (!this.logContextKey) {
+        return
+      }
+
+      const storedFilters = this.filtersByContext[this.logContextKey] || {}
+      this.hideNonCustomized = !!storedFilters.hideNonCustomized
+
+      const storedActiveTypes = storedFilters.activeTypes
+
+      if (Array.isArray(storedActiveTypes)) {
+        this.activeTypes = storedActiveTypes
+          .map((typeID) => Number(typeID))
+          .filter((typeID) => Number.isInteger(typeID))
+      } else {
+        this.activeTypes = []
+      }
+    },
 
     hasEventIcon (event) {
       if (has(this.eventIcons, event.EventType)) {
@@ -432,24 +528,6 @@ export default {
     },
     eventIcon (event) {
       return this.eventIcons[event.EventType]
-    },
-  },
-  computed: {
-    ...mapGetters([
-      'database',
-
-      'GameID',
-      'RaceID',
-    ]),
-
-    filteredLogEvents () {
-      const filteredByType = this.logEvents.filter((event) => this.activeTypes.includes(event.EventType))
-
-      if (this.hideNonCustomized) {
-        return filteredByType.filter((event) => event['LogEventType.LogEventColours.AlertColour'] || event['LogEventType.LogEventColours.TextColour'])
-      }
-
-      return filteredByType
     },
   },
   asyncComputed: {
@@ -470,7 +548,29 @@ export default {
           order: [['Description', 'ASC']],
         })
 
-        this.activeTypes = logEventTypes.map((type) => type.EventTypeID)
+        const availableTypeIDs = logEventTypes.map((type) => type.EventTypeID)
+        const storedFilters = this.logContextKey ? this.filtersByContext[this.logContextKey] : null
+        const storedActiveTypes = storedFilters && Array.isArray(storedFilters.activeTypes)
+          ? storedFilters.activeTypes
+          : null
+
+        if (Array.isArray(storedActiveTypes)) {
+          const normalizedStoredTypeIDs = storedActiveTypes
+            .map((typeID) => Number(typeID))
+            .filter((typeID) => Number.isInteger(typeID))
+
+          if (!normalizedStoredTypeIDs.length) {
+            this.activeTypes = availableTypeIDs
+          } else {
+            const validStoredTypeIDs = normalizedStoredTypeIDs.filter((typeID) => availableTypeIDs.includes(typeID))
+
+            this.activeTypes = validStoredTypeIDs.length ? validStoredTypeIDs : availableTypeIDs
+          }
+        } else if (!this.activeTypes.length) {
+          this.activeTypes = availableTypeIDs
+        }
+
+        this.hideNonCustomized = storedFilters ? !!storedFilters.hideNonCustomized : false
 
         return logEventTypes
       },
@@ -551,9 +651,6 @@ export default {
       },
       default: [],
     },
-  },
-  mounted () {
-    //
   },
 }
 </script>

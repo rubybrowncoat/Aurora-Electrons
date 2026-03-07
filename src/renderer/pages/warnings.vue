@@ -104,7 +104,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || misconfiguredSupplyShipClasses.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
+        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || misconfiguredSupplyShipClasses.length || misconfiguredTankerShipClasses.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Ships </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
@@ -195,6 +195,22 @@
                         <v-list-item-content>
                           <v-list-item-title>{{ shipClass.ClassName }} Class</v-list-item-title>
                           <v-list-item-subtitle>No minimum supply level set</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="misconfiguredTankerShipClasses.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ misconfiguredTankerShipClasses.length }} misconfigured tanker ship classes </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="shipClass in misconfiguredTankerShipClasses" :key="shipClass.ShipClassID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ shipClass.ClassName }} Class</v-list-item-title>
+                          <v-list-item-subtitle>No minimum fuel level set</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -1001,6 +1017,35 @@ export default {
 
             return !exclusions.includes(item.ShipClassID)
           })
+        })
+
+        return ships
+      },
+      default: [],
+    },
+    misconfiguredTankerShipClasses: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return []
+        }
+
+        const ships = await this.database.query(`
+          select
+            FCT_ShipClass.ShipClassID,
+            FCT_ShipClass.ClassName
+          from FCT_ShipClass
+          where
+            FCT_ShipClass.GameID = ${this.GameID}
+            and FCT_ShipClass.RaceID = ${this.RaceID}
+            and FCT_ShipClass.ClassShippingLineID = 0
+            and FCT_ShipClass.FuelTanker = 1
+            and FCT_ShipClass.FuelCapacity > 0
+            and FCT_ShipClass.MinimumFuel = 0
+            and FCT_ShipClass.EnginePower > 0
+        `).then(([items]) => {
+          console.log('Misconfigured Tanker Ship Classes', items)
+
+          return items
         })
 
         return ships

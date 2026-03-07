@@ -5,4 +5,4 @@
 
 TODOS
 
-- I would also recommend adding a warning for when a tanker ship class has its minimum fuel set as 0, and it isn't a space stations
+- Reorganize system ownership grouping in map to account for precursors
