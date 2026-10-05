@@ -272,19 +272,18 @@ JS: for each specialist ship, candidates = pool rows with `Level >= ship.RankReq
 
 Synthetic injections: orders deleted from a cargo-carrying fleet (W2, W1), a grav-survey order added to a fleet without a survey sensor (W3), `MiningModules = 3` set on a class whose fleets sit at a colony without deposits and at a body above the diameter limit (W4), `MassDriverDest` cleared on three Regulus colonies (W6), `Prototype = 3` set on a race component (W9), a fleet's `AssignedPopulationID` set to 999999 (W10).
 
-**W1: idle fleets.** Non-civilian, mobile fleets with at least one non-overhauling, non-docked ship and no `FCT_MoveOrders` rows. Speed 1 fleets are immobile stations or trailers and are excluded. 171 fleets have no orders on the sample, 136 are mobile, and 134 of those sit at an own colony (parked home fleets); the UI should default to "not at an own colony" (the 2 TDF Patrol Flotillas in Epsilon Ceti and Eta Cassiopei, both in deep space) with a toggle for the parked ones, and persist per-fleet ignores in `this.config` under `game.<GameID>.race.<RaceID>.idleFleetExclusions` (the same pattern as `maintenanceExclusions`). Replaces the reference's name-prefix filters.
+**W1: idle fleets.** Non-civilian, mobile fleets with no `FCT_MoveOrders` rows and at least one available ship: one that is neither overhauling nor docked. Both conditions apply to the same ship, so an overhauling carrier with a docked craft isn't idle. Speed 1 fleets are immobile stations or trailers and are excluded. 171 fleets have no orders on the sample, 136 are mobile, and 134 of those sit at an own colony (parked home fleets); the UI should default to "not at an own colony" (the 2 TDF Patrol Flotillas in Epsilon Ceti and Eta Cassiopei, both in deep space) with a toggle for the parked ones, and persist per-fleet ignores in `this.config` under `game.<GameID>.race.<RaceID>.idleFleetExclusions` (the same pattern as `maintenanceExclusions`). Replaces the reference's name-prefix filters.
 
 ```sql
 select f.FleetID, f.FleetName, f.SystemID, rss.Name as SystemName, f.OrbitBodyID, f.Speed, fs.Ships, fs.Fuel, (select p.PopName from FCT_Population as p where p.SystemBodyID = f.OrbitBodyID and p.RaceID = f.RaceID and p.GameID = f.GameID limit 1) as ColonyName, (select jp.WarpPointID from FCT_JumpPoint as jp where jp.SystemID = f.SystemID and jp.GameID = f.GameID and jp.Xcor = f.Xcor and jp.Ycor = f.Ycor limit 1) as AtJumpPointID, f.ConditionalOrderOne, f.AnchorFleetID
 from FCT_Fleet as f
 inner join (
   select s.FleetID, count(*) as Ships, sum(s.Fuel) as Fuel,
-    sum(case when s.MaintenanceState = 2 then 1 else 0 end) as Overhauling,
-    sum(case when s.MothershipID > 0 then 1 else 0 end) as Docked
+    sum(case when s.MaintenanceState <> 2 and s.MothershipID = 0 then 1 else 0 end) as Available
   from FCT_Ship as s
   where s.GameID = ${this.GameID} and s.RaceID = ${this.RaceID}
   group by s.FleetID
-) as fs on fs.FleetID = f.FleetID and fs.Overhauling < fs.Ships and fs.Docked < fs.Ships
+) as fs on fs.FleetID = f.FleetID and fs.Available > 0
 left join FCT_RaceSysSurvey as rss on rss.SystemID = f.SystemID and rss.RaceID = f.RaceID and rss.GameID = f.GameID
 where f.GameID = ${this.GameID} and f.RaceID = ${this.RaceID}
   and f.ShippingLine = 0 and f.CivilianFunction = 0 and f.Speed > 1
