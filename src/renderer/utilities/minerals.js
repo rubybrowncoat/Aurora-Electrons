@@ -179,16 +179,21 @@ export const TRANSFER_TYPES = new Set([7, 8, 12, 13, 20])
 
 export const flowGroupOf = (type) => FLOW_GROUPS.find((group) => group.types.includes(type))
 
-// How many days of history the ledger rows cover: each event stands for one
-// production cycle, so add one step after the first event.
-export const ledgerCoverageDays = ({ gameTime, firstTime, lastTime, events, windowDays }) => {
-  if (!events || firstTime == null) {
+// How many days of history the ledger rows cover, the same span for every flow. Production
+// events (mining, construction, maintenance…) come once per cycle, each standing for the cycle
+// before it; transfers can fall in between. So the history starts where the cycle holding the
+// earliest event of any kind starts. `anchorTime` is a production event's time (the latest
+// mining one) and `cycleDays` the cycle length.
+export const ledgerCoverageDays = ({ gameTime, firstTime, anchorTime, cycleDays, windowDays }) => {
+  if (firstTime == null || anchorTime == null || !(cycleDays > 0)) {
     return 0
   }
 
-  const stepDays = events > 1 ? (lastTime - firstTime) / (events - 1) / SECONDS_PER_DAY : 5
+  const anchorBack = (gameTime - anchorTime) / SECONDS_PER_DAY
+  const firstBack = (gameTime - firstTime) / SECONDS_PER_DAY
+  const cycles = Math.floor((firstBack - anchorBack) / cycleDays + 1e-9) + 1
 
-  return Math.min(windowDays, (gameTime - firstTime) / SECONDS_PER_DAY + stepDays)
+  return Math.min(windowDays, anchorBack + cycles * cycleDays)
 }
 
 const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')

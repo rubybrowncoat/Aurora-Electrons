@@ -214,6 +214,8 @@ import { systemBodyName, populationName } from '../utilities/aurora'
 import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, stockProjection, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
 
 const BUCKET_DAYS = 5
+// The production cycle when the ledger has too few mining events to measure it (the game's default).
+const DEFAULT_CYCLE_DAYS = 5
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
 
@@ -292,20 +294,25 @@ export default {
         return 0
       }
 
-      // Each mining event stands for one production cycle; minerals mined together share their times.
+      // Mining is the steadiest series: one event per production cycle, minerals mined together
+      // sharing their times. It sets the cycle; the history starts at the earliest row of any kind.
       const mining = this.ledger.filter((row) => row.MineralDataType === 1)
-      const rows = mining.length ? mining : this.ledger
+      const cycleRows = mining.length ? mining : this.ledger
       const eventsByMineral = {}
 
-      rows.forEach((row) => {
+      cycleRows.forEach((row) => {
         eventsByMineral[row.MaterialID] = (eventsByMineral[row.MaterialID] || 0) + row.Events
       })
 
+      const events = Math.max(...Object.values(eventsByMineral))
+      const cycleFirst = Math.min(...cycleRows.map((row) => row.FirstTime))
+      const cycleLast = Math.max(...cycleRows.map((row) => row.LastTime))
+
       return ledgerCoverageDays({
         gameTime: this.game.GameTime,
-        firstTime: Math.min(...rows.map((row) => row.FirstTime)),
-        lastTime: Math.max(...rows.map((row) => row.LastTime)),
-        events: Math.max(...Object.values(eventsByMineral)),
+        firstTime: Math.min(...this.ledger.map((row) => row.FirstTime)),
+        anchorTime: cycleLast,
+        cycleDays: events > 1 ? (cycleLast - cycleFirst) / (events - 1) / SECONDS_PER_DAY : DEFAULT_CYCLE_DAYS,
         windowDays: this.windowDays,
       })
     },
