@@ -246,7 +246,7 @@ Several pages need the same pieces. Building them once avoids four copies of the
 3. Distance from the capital comes from G2.
 4. Decide whether this is a new page or a "Targets" mode of Habitability (open question 2).
 
-**Caveats.** The docs say CMC qualification needs Duranium; the workbook also accepts Gallicite. The plan follows the docs, so confirm.
+**Decided.** CMC qualification accepts Duranium or Gallicite, as the workbook does (the docs say Duranium only).
 
 ### 8. Maintenance Budget
 
@@ -465,4 +465,3 @@ These are existing-code issues the analysis turned up. I haven't changed any of 
 2. **Navigation:** there are already 9 tabs. Group the new pages (for example Economy: Finances, Runway, Fuel, Maintenance; Colonies: Outlook, Targets; Exploration: Survey, Routes) or keep one tab per page? Should Colonization Targets and Mineral Runway be tabs inside Habitability and Minerals?
 3. **Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?
 4. **Estimates:** for the formulas that are only in the workbook (population growth rate, harvester output, add-slipway cost), is an "estimate" label enough, or should those columns wait until they're confirmed in game?
-5. **CMC rule:** Duranium only (docs) or Duranium or Gallicite (workbook)?
