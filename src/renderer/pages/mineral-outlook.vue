@@ -211,10 +211,10 @@ import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, stockProjection, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
+import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, stockProjection, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
 
 const BUCKET_DAYS = 5
-// The production cycle when the ledger has too few mining events to measure it (the game's default).
+// The production cycle when the ledger has too few production ticks to measure it (the game's default).
 const DEFAULT_CYCLE_DAYS = 5
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
@@ -294,25 +294,15 @@ export default {
         return 0
       }
 
-      // Mining is the steadiest series: one event per production cycle, minerals mined together
-      // sharing their times. It sets the cycle; the history starts at the earliest row of any kind.
-      const mining = this.ledger.filter((row) => row.MineralDataType === 1)
-      const cycleRows = mining.length ? mining : this.ledger
-      const eventsByMineral = {}
-
-      cycleRows.forEach((row) => {
-        eventsByMineral[row.MaterialID] = (eventsByMineral[row.MaterialID] || 0) + row.Events
-      })
-
-      const events = Math.max(...Object.values(eventsByMineral))
-      const cycleFirst = Math.min(...cycleRows.map((row) => row.FirstTime))
-      const cycleLast = Math.max(...cycleRows.map((row) => row.LastTime))
+      // The production ticks (distinct times of production-phase rows, counted in SQL) set the
+      // cycle; the history starts at the earliest row of any kind.
+      const [{ ProductionTicks: ticks, FirstTick: firstTick, LastTick: lastTick }] = this.ledger
 
       return ledgerCoverageDays({
         gameTime: this.game.GameTime,
         firstTime: Math.min(...this.ledger.map((row) => row.FirstTime)),
-        anchorTime: cycleLast,
-        cycleDays: events > 1 ? (cycleLast - cycleFirst) / (events - 1) / SECONDS_PER_DAY : DEFAULT_CYCLE_DAYS,
+        anchorTime: ticks ? lastTick : Math.max(...this.ledger.map((row) => row.LastTime)),
+        cycleDays: ticks > 1 ? (lastTick - firstTick) / (ticks - 1) / SECONDS_PER_DAY : DEFAULT_CYCLE_DAYS,
         windowDays: this.windowDays,
       })
     },
@@ -938,7 +928,7 @@ export default {
 
         try {
           const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
-          const rows = table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, count(distinct FCT_RaceMineralData.Time) as Events from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
+          const rows = table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
 
           if (request === this.ledgerRequest) {
             this.ledgerError = null

@@ -177,13 +177,17 @@ export const FLOW_GROUPS = [
 
 export const TRANSFER_TYPES = new Set([7, 8, 12, 13, 20])
 
+// Types the game logs in its production phase, once per cycle and all at the same time (on the
+// sample, every one of them falls on a mining tick). Salvage and transfers come at other times.
+export const PRODUCTION_TYPES = FLOW_GROUPS.filter((group) => group.key !== 'salvage').flatMap((group) => group.types)
+
 export const flowGroupOf = (type) => FLOW_GROUPS.find((group) => group.types.includes(type))
 
 // How many days of history the ledger rows cover, the same span for every flow. Production
 // events (mining, construction, maintenance…) come once per cycle, each standing for the cycle
 // before it; transfers can fall in between. So the history starts where the cycle holding the
-// earliest event of any kind starts. `anchorTime` is a production event's time (the latest
-// mining one) and `cycleDays` the cycle length.
+// earliest event of any kind starts. `anchorTime` is a production tick (the latest one) and
+// `cycleDays` the cycle length.
 export const ledgerCoverageDays = ({ gameTime, firstTime, anchorTime, cycleDays, windowDays }) => {
   if (firstTime == null || anchorTime == null || !(cycleDays > 0)) {
     return 0
