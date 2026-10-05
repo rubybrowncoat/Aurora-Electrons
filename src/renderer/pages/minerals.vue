@@ -57,7 +57,7 @@
           <v-col cols="12">
             <v-row>
               <v-col class="pr-2">
-                <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+                <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
                   <template #prepend-item>
                     <v-list-item ripple @click="toggleSystems">
                       <v-list-item-action>
@@ -95,7 +95,7 @@
                     </v-list-item>
                     <v-divider class="mt-2" />
                   </template>
-                </v-select>
+                </v-autocomplete>
               </v-col>
               <v-col cols="auto" class="d-flex align-center">
                 <v-menu offset-y :close-on-content-click="false">
@@ -464,7 +464,7 @@ export default {
 
           return names
         }, {})
-      )
+      ).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
     },
 
     preFilteredBodyGroups() {

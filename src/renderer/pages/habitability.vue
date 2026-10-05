@@ -76,7 +76,7 @@
             </div>
           </v-col>
           <v-col cols="12">
-            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips @change="config.set('habitabilitySystems', systems)">
+            <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips @change="config.set('habitabilitySystems', systems)">
               <template #prepend-item>
                 <v-list-item ripple @click="toggleSystems">
                   <v-list-item-action>
@@ -114,7 +114,7 @@
                 </v-list-item>
                 <v-divider class="mt-2" />
               </template>
-            </v-select>
+            </v-autocomplete>
           </v-col>
           <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
             <v-row>
@@ -738,7 +738,7 @@ export default {
 
           return names
         }, {})
-      )
+      ).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
     },
 
     MaterialMap() {
