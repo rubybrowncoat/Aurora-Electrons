@@ -1,5 +1,7 @@
 # New pages from Aur_Calcs: ranked plan
 
+> **Status:** Mineral Runway (1) and Mining Outlook (2) are built, together as the **Outlook** tab (`pages/mineral-outlook.vue`), with Chart.js for charts (G3) and the shared production mixin (G1, partly). The rest is waiting for prioritisation.
+
 This plan lists features from the Aur_Calcs workbook (`references/aurcalcs/`) and its companion SQL collection (`references/queries/`) that Aurora Electrons doesn't have yet. It ranks them by utility and beauty, and gives a short action plan for each. Nothing in it is implemented yet. Pick the order, and comment on the PR with changes.
 
 The SQL is in three appendices. Every query there was run read-only against the sample save (GameID 140, RaceID 784), and the row counts and sample rows are quoted with it:
@@ -35,8 +37,8 @@ Scores:
 
 | # | Page | Category | Source | Utility | Beauty | Effort |
 |---|---|---|---|---|---|---|
-| 1 | [Mineral Runway](#1-mineral-runway) | Mining | Minerals sheet, `mineral use.sql`, `Minerals on Ships.sql` | 5 | 5 | M |
-| 2 | [Mining Outlook](#2-mining-outlook) | Mining | OrbMin, SurfMin, OrbMin_src | 5 | 4 | M |
+| 1 | [Mineral Runway](#1-mineral-runway) ✅ | Mining | Minerals sheet, `mineral use.sql`, `Minerals on Ships.sql` | 5 | 5 | M |
+| 2 | [Mining Outlook](#2-mining-outlook) ✅ | Mining | OrbMin, SurfMin, OrbMin_src | 5 | 4 | M |
 | 3 | [Colony Outlook](#3-colony-outlook) | Colonies | Pop, Species | 5 | 4 | L |
 | 4 | [Finances](#4-finances) | Economy | `Wealth Use.sql`, `WealthUseByTypeByDay.sql` | 4 | 5 | S |
 | 5 | [Survey Progress](#5-survey-progress) | Exploration | Survey, GrndSurvey | 4 | 5 | M |
@@ -458,10 +460,11 @@ These are existing-code issues the analysis turned up. I haven't changed any of 
 2. **Naval admin bonus chain** (`index.vue` ~660–672 and ~808). The query hard-codes commander bonus 9 and doesn't select `ParentAdminCommandID`, so the recursion never climbs past the first admin command. The sample has nested commands (1350 under 1345). G1 fixes it.
 3. **`wastedMiningCapacity`** (`warnings.vue` ~716) counts every installation with `MiningProductionValue > 0`. That includes Conventional Industry and CMCs. Narrow it to mines, automated mines and forced-labour mining camps if false positives show up.
 4. **`FCT_Population.LastColonyCost` is stale.** The app doesn't use it, but any future page should use `ReqInf` instead (Colony Outlook).
+5. **The Production page never applies naval admin bonuses** (`index.vue` `navalAdminBonus`). Its range check calls `administration.Systems.has(SystemID)` with a number, but the set holds system objects, so the check always fails and orbital terraformers get no admin bonus. The Outlook page uses its own helper, `navalAdminChainBonus` in `utilities/minerals.js`; G1 should move the Production page onto it.
 
 ## Open questions for you
 
-1. **Charts:** add Chart.js (recommended) or draw SVG by hand?
+1. ~~**Charts:** add Chart.js or draw SVG by hand?~~ Chart.js, decided.
 2. **Navigation:** there are already 9 tabs. Group the new pages (for example Economy: Finances, Runway, Fuel, Maintenance; Colonies: Outlook, Targets; Exploration: Survey, Routes) or keep one tab per page? Should Colonization Targets and Mineral Runway be tabs inside Habitability and Minerals?
 3. **Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?
 4. **Estimates:** for the formulas that are only in the workbook (population growth rate, harvester output, add-slipway cost), is an "estimate" label enough, or should those columns wait until they're confirmed in game?
