@@ -50,6 +50,20 @@ The settings toggle `spyNPR` exposes NPRs in the race picker. That's the only in
 - **Odd column names:** `FCT_System.Stars` (the model calls it `StarCount`), `FCT_AncientConstruct.ResearchField` (the model calls it `ResearchFieldID`), and `FCT_PopulationInstallations.PopID` (not `PopulationID`).
 - Commander bonuses come from `FCT_CommanderBonuses`, joined on `BonusID`, and the bonus names are in `DIM_CommanderBonusType`. The ones used in code are 3 Research, 4 Shipbuilding, 5 Production, 9 Terraforming, and 11 Ground Construction. `FCT_Commander.CommandType` identifies what a commander leads: 1 ship, 3 population, 4 sector, 5 ground formation, 7 research project, 12 naval admin. `CommandID` holds the matching ID, and `CommanderType` the officer type.
 
+## Commander bonus rules
+
+These are the rules the production maths relies on, checked against the references below. A bonus value is a multiplier such as 1.2. A command that passes on a share `s` of it contributes `1 + (bonus - 1) * s`.
+
+- **Sector governors** apply a quarter of each of their bonuses, by bonus type, to every colony in the sector. Use the same bonus type the planetary governor uses: Production 5, Shipbuilding 4, Terraforming 9, Ground Construction 11. Ground-unit construction is documented only as "plus any governor bonus"; ID 11 is inferred from the save's dedicated `Ground Construction` bonus type.
+- **Naval Admin Commands** pass their commander's bonuses to ships using the shares in `DIM_NavalAdminCommandType`. The `Industrial` column is the share of **Mining and Terraforming**: Industrial 25%, Logistics 10%, General 5%. Orbital terraformers therefore use the admin commander's Terraforming bonus (9), not Production. Commands chain multiplicatively up the tree, but only while each command is within its parent's command radius and has a commander of sufficient rank.
+- **Ground construction elements** have capacity = construction rating × units × race construction rating × the formation commander's **Production** bonus (5) × 100 tons.
+
+### Game-rule references
+
+- Docs: https://aurora4x-docs.vercel.app/ (single-page app). The raw markdown is at `https://aurora4x-docs.vercel.app/current/<topic>.md`, e.g. `naval-organization`, `colonies`, `ground-forces`, `terraforming`.
+- Wiki: https://aurora4x.net/wiki/ (use the bare domain; `www.` is blocked in cloud sessions). It's community-written, and some pages hedge or are out of date, so prefer the docs.
+- Forum: https://aurora4x.com/ (Discourse). Steve Walmsley's patch-notes threads are authoritative. Search with `/search.json?q=<terms>`, and read a thread's raw text at `/raw/<topic id>`.
+
 ## Sequelize models (`src/renderer/utilities/database.js`)
 
 `resetDatabase()` defines 23 models with `timestamps: false`. Several are marked `// INCOMPLETE`, meaning they only map the columns the app needs. Add columns as required.

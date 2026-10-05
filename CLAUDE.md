@@ -30,6 +30,7 @@ There is no test suite and no CI (`.github/` is git-ignored).
 - In dev, the app reads `./AuroraDB.db` from the repo root, which is git-ignored and must never be committed.
 - In cloud sessions, `.claude/hooks/session-start.sh` extracts the fixture if it's missing, runs `yarn install --ignore-scripts`, and fetches sqlite3's Node binary. That's enough for lint and web mode, but not for `yarn dev` or `yarn build`. Locally, extract it with `unzip fixtures/AuroraDB.zip`, or copy in a real save.
 - Check SQL against the sample with Python's sqlite3, opened read-only. See `docs/WORKFLOW.md`.
+- Check game rules against the Aurora docs, wiki, and forum before changing game maths. `docs/DATABASE.md` § Game-rule references lists them and how to read them; the docs site is the primary source.
 
 ## Working rules
 
