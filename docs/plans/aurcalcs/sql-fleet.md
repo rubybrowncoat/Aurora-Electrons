@@ -71,7 +71,7 @@ Validated: 1 row: `(52641546.56, NULL, 0.0, 26325265, 2200.0, 9485513425, 1)`.
 - Treasury history without extra data: `balance(t) = WealthPoints - sum(net of all steps after t)`. On the sample the start-of-year balance reconstructs to about 27.2 M (52.64 M - 25.48 M); treat it as an estimate because trade and tax events outside `FCT_WealthData` (and `WealthPoints` rounding) are not in the rows.
 - Chart: stacked bars for income above the axis and expenses below, one series per `Description`; sort series by `Income desc, DisplayOrder`. Unknown `UseID`s (not in the DIM table) fall back to `Unknown (id)` (handled in SQL).
 
-**Reuse.** Models `Race` already maps `WealthPoints` and `AnnualWealth` (utilities/database.js:58-61). Time helpers in utilities/aurora.js. No charting library is in package.json (only cytoscape and d3-color/d3-interpolate), so draw the stacked bars as plain SVG or with Vuetify's `v-sparkline`, or add a small library deliberately.
+**Reuse.** Models `Race` already maps `WealthPoints` and `AnnualWealth` (utilities/database.js:58-61). Time helpers in utilities/aurora.js. Draw the stacked bars with the Chart.js wrapper Mineral Outlook added (`components/charts/ChartCanvas.vue`, G3); its flows chart is already a diverging stacked bar of income and use.
 
 **Caveats / open questions.**
 - Scope is the selected race only, as required. On the sample `FCT_WealthData` holds rows only for race 784 (1,776 rows), so NPR finances are not even stored; always keep the `RaceID` filter.

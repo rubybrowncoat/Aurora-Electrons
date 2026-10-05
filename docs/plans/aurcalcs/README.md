@@ -2,7 +2,7 @@
 
 > **Status:** Mineral Runway (1) and Mining Outlook (2) are built, together as the **Outlook** tab (`pages/mineral-outlook.vue`), with Chart.js for charts (G3) and the shared production mixin (G1, partly). The rest is waiting for prioritisation.
 
-This plan lists features from the Aur_Calcs workbook (`references/aurcalcs/`) and its companion SQL collection (`references/queries/`) that Aurora Electrons doesn't have yet. It ranks them by utility and beauty, and gives a short action plan for each. Nothing in it is implemented yet. Pick the order, and comment on the PR with changes.
+This plan lists features from the Aur_Calcs workbook (`references/aurcalcs/`) and its companion SQL collection (`references/queries/`) that Aurora Electrons doesn't have yet. It ranks them by utility and beauty, and gives a short action plan for each. The status line above says what's built. Pick the order for the rest, and comment on the PR with changes.
 
 The SQL is in three appendices. Every query there was run read-only against the sample save (GameID 140, RaceID 784), and the row counts and sample rows are quoted with it:
 
@@ -25,7 +25,7 @@ The workbook has 62 sheets:
 - About 12 are connecting sheets: lookups, constants, intermediate columns, scratch work. They aren't features.
 - The rest are features. They were checked against what the app's pages already show, and only the new parts made the list.
 
-The query collection was swept the same way. Its 181 files include at least 37 that write to the save, plus many that depend on the author's fleet-naming conventions. Only read-only, convention-free logic was kept.
+The query collection was swept the same way. Its 172 scripts include at least 37 that write to the save, plus many that depend on the author's fleet-naming conventions. Only read-only, convention-free logic was kept.
 
 Scores:
 
@@ -65,9 +65,9 @@ Several pages need the same pieces. Building them once avoids four copies of the
 - **G2. Jump graph and distances.**
   - Load the race's explored jump points and run a Dijkstra in JS, ordering routes by fewest jumps, then by distance. A Vuex module can then hold "jumps and km from the capital" for every system.
   - Route Finder is built on it. Colonization Targets, Survey Progress and Hauling use it for distances. (`sql-fleet.md` § 4)
-- **G3. Charts.**
-  - The app has no charting library (cytoscape and pixi.js only). Seven of these pages want line, area or stacked-bar charts.
-  - I recommend Chart.js used directly, behind one small wrapper component that takes series and follows the Vuetify theme, rather than a Vue-specific chart wrapper. Hand-written SVG is the alternative. This is open question 1.
+- **G3. Charts.** ✅ Built with Mineral Outlook.
+  - Seven of these pages want line, area or stacked-bar charts. Before this work, the app had no charting library (cytoscape and pixi.js only).
+  - Chart.js, used directly behind one small wrapper, `components/charts/ChartCanvas.vue`, that takes series and follows the Vuetify theme. The palette and theme tokens are in `components/charts/theme.js`.
 - **G4. Mineral ledger.**
   - Aurora 2.6+ logs every mining, usage and transfer event per mineral in `FCT_RaceMineralData`.
   - It's the most accurate production and consumption source for Mineral Runway, and it validated the surface-mining formula used by Mining Outlook: across 385 colony × mineral series, the median error is 1e-15. (`sql-mining.md` § 2a)
@@ -420,8 +420,8 @@ It also has a what-if for any class at a chosen yard, and a "share of constructi
 
 This is my recommendation for the order to build in, taking the shared groundwork into account. It's yours to change.
 
-1. **G3 charts + Finances (4).** It's small and needs only real data, and it proves the chart component.
-2. **G1 mixin + G4 ledger, then Mineral Runway (1) and Mining Outlook (2).** These are the highest utility, and they share the mining rate code.
+1. **Finances (4).** It's small and needs only real data. The chart component (G3) is already built.
+2. ~~**G1 mixin + G4 ledger, then Mineral Runway (1) and Mining Outlook (2).**~~ Built as the Outlook tab. G1 is partly done: the Production page still has its own naval admin code (see [Found along the way](#found-along-the-way)).
 3. **Colony Outlook (3).** It's the biggest of the high-utility pages and builds on G1.
 4. **Fleet hygiene warnings (10).** These are quick wins between the larger pages.
 5. **G2 jump graph, then Survey Progress (5), Route Finder (11) and Colonization Targets (7).** All three need distances.

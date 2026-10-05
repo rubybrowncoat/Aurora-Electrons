@@ -4,7 +4,7 @@
 
 ## How it gets its data
 
-The workbook reads a save through an ODBC DSN (`AuroraDB32`) and runs `SELECT * FROM "main"."vw_*"` against 25 SQL views that the author created inside their `AuroraDB.db`. Each result lands in a `*_src` sheet (or a table on a calculation sheet), and the other sheets compute from those tables, their named ranges (368 of them), and some manually entered plans and overrides.
+The workbook reads a save through an ODBC DSN (`AuroraDB32`) and runs `SELECT * FROM "main"."vw_*"` against 25 SQL views that the author created inside their `AuroraDB.db`. Each result lands in a `*_src` sheet (or a table on a calculation sheet), and the other sheets compute from those tables, their defined names (367 of them), and some manually entered plans and overrides.
 
 Aurora Electrons must not install views in users' saves. When a feature is ported, the view's SQL becomes an inline query in the page, scoped by `GameID` and `RaceID` like every other query in the app.
 
