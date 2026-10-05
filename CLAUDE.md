@@ -9,6 +9,8 @@ Detailed docs:
 - `docs/ARCHITECTURE.md`: processes, build pipeline, store, pages, and utilities.
 - `docs/DATABASE.md`: the Aurora save schema, scoping rules, data quirks, and which page reads what.
 - `docs/WORKFLOW.md`: setup, making and verifying changes, releases, and commits.
+- `docs/plans/aurcalcs/`: the ranked plan for new pages ported from the Aur_Calcs workbook, with validated SQL appendices.
+- `references/`: the Aur_Calcs workbook and a community SQL collection, kept as feature references. Many of the queries write to the save; never run them on a real one.
 
 ## Commands
 
