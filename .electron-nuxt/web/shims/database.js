@@ -2,7 +2,7 @@
 // Same surface the pages use (`query` and `models.X.find*`), backed by the
 // dev server's database middleware instead of an in-process Sequelize.
 
-const ENDPOINT = '/__aurora-db'
+import { databaseRequest } from './database-request'
 
 const modelStubs = new WeakSet()
 
@@ -37,7 +37,7 @@ const encode = (value) => {
 }
 
 const request = async (route, payload) => {
-  const response = await fetch(`${ENDPOINT}${route}`, {
+  const response = await databaseRequest(route, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

@@ -3,7 +3,8 @@
   Electron. Electron/Node-only modules are swapped for the shims in ./web/shims,
   and database calls go to ./web/database-middleware.js, which runs the real
   Sequelize models against ./AuroraDB.db (override with AURORA_DB).
-  The dev server listens on localhost only; the middleware accepts raw SQL.
+  The middleware executes raw SQL, so the server listens on localhost only and
+  the middleware answers only the page (see web/database-middleware.js).
  */
 process.env.NODE_ENV = 'development'
 
@@ -15,7 +16,7 @@ const nuxtConfig = require('./renderer/nuxt.config.js')
 
 const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
 const PORT = Number(process.env.PORT) || SERVER_PORT
-const HOST = process.env.HOST || 'localhost'
+const HOST = 'localhost'
 
 // `yarn install --ignore-scripts`, and any later install that relinks sqlite3,
 // leaves it without its native binary; every database call would then fail.
@@ -47,14 +48,27 @@ nuxtConfig.build.extend = function (config, ctx) {
   config.module.rules.push({ test: /\.mjs$/, include: /node_modules/, type: 'javascript/auto' })
 }
 
+const databaseMiddleware = require('./web/database-middleware')
+
 nuxtConfig.serverMiddleware = [
-  { path: '/__aurora-db', handler: require('./web/database-middleware') },
+  databaseMiddleware.guardHost,
+  { path: '/__aurora-db', handler: databaseMiddleware.handleDatabase },
 ]
+
+// Nuxt registers `/__open-in-editor` ahead of serverMiddleware, out of guardHost's reach.
+nuxtConfig.debug = false
 
 // Keep test sessions out of the Sentry project.
 nuxtConfig.sentry = { ...nuxtConfig.sentry, disabled: true }
 
 const nuxt = new Nuxt(nuxtConfig)
+
+// The shims send this token back with every database call. It goes into the
+// rendered page only (behind guardHost): Nuxt's head config would also land in
+// the client bundle, which webpack's dev middleware serves to any origin.
+nuxt.hook('render:route', (_url, result) => {
+  result.html = result.html.replace('</head>', `<meta name="aurora-web-token" content="${databaseMiddleware.TOKEN}"></head>`)
+})
 
 nuxt.ready()
   .then(() => new Builder(nuxt).build())

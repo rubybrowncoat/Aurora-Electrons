@@ -1,6 +1,8 @@
 // Web mode stand-in for `chokidar`: emits `add` once, then polls the dev
 // server for the database's mtime and emits `change` when it moves.
 
+import { databaseRequest } from './database-request'
+
 const POLL_INTERVAL = 2000
 
 export const watch = (path) => {
@@ -27,7 +29,7 @@ export const watch = (path) => {
 
   let lastModified = null
 
-  const poll = () => fetch('/__aurora-db/stat')
+  const poll = () => databaseRequest('/stat')
     .then((response) => (response.ok ? response.json() : null))
     .then((stat) => {
       if (!stat) {

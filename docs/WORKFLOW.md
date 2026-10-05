@@ -32,8 +32,8 @@
   - `chokidar` polls the database file's mtime, so replacing `./AuroraDB.db` still reloads the views.
   - `sequelize` exports only `Op` and `QueryTypes`.
   - `utilities/database.js` is replaced by a proxy that forwards `query()` and read-only `findAll`/`findOne`/`findByPk`/`count`/`findAndCountAll` calls to the dev server.
-- `.electron-nuxt/web/database-middleware.js` handles those calls at `/__aurora-db/*`. It runs the **real** models from `src/renderer/utilities/database.js` against `./AuroraDB.db`; set `AURORA_DB=path/to/save.db` to use another file. It accepts raw SQL, so keep the server on localhost.
-- Sentry is disabled in web mode.
+- `.electron-nuxt/web/database-middleware.js` handles those calls at `/__aurora-db/*`. It runs the **real** models from `src/renderer/utilities/database.js` against `./AuroraDB.db`; set `AURORA_DB=path/to/save.db` to use another file. Because it executes raw SQL, the server listens on localhost only, and the middleware answers only the web-mode page. Requests need a `localhost` Host header, a same-origin Origin, a JSON body, and the per-run token from the page's `aurora-web-token` meta tag, sent as `X-Aurora-Web-Token`. To call it with curl, read the token from the page first.
+- Sentry is disabled in web mode, and so is Nuxt's `/__open-in-editor` dev endpoint, which would otherwise answer any origin.
 
 With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright. It selects the sample race, visits every tab plus settings, prints `ok`/`FAIL` per page with console errors, page errors, and failed database calls, and saves a screenshot of each page. You can configure it with these environment variables:
 
