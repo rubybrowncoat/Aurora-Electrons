@@ -67,7 +67,7 @@ Sample rows (trimmed): `{PopName:'Brimstone', MaterialID:1, Amount:9.99996e11, A
 
 ```sql
 select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Ship.ShipID, FCT_Ship.ShipName,
-  FCT_ShipClass.MiningModules, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID,
+  FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MiningModules, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID,
   FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber,
   FCT_SystemBody.OrbitNumber, FCT_SystemBody.Radius * 2 as Diameter, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component,
   FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount,
@@ -122,7 +122,9 @@ const surfaceRate = (r, owned = true) => {
   return (r.ManualMineCount * r.Efficiency + (mines - r.ManualMineCount)) * r.MineProduction * r.Accessibility * r.GovernorBonus * r.SectorBonus * modifier
 }
 // Orbital: workbook formula, UNVERIFIED (no miners in the sample). adminBonus = product up the chain of 1 + (MiningBonusValue - 1) * Industrial
-const orbitalRate = (r, adminBonus) => r.MiningModules * r.MineProduction * r.CommanderBonus * adminBonus * r.Accessibility
+// A ship short of crew mines at CurrentCrew / ClassCrew (docs crew-and-commanders, v2.6), capped at 1
+const crewFraction = (r) => r.ClassCrew > 0 ? Math.min(1, Math.max(0, r.CurrentCrew) / r.ClassCrew) : 1
+const orbitalRate = (r, adminBonus) => r.MiningModules * r.MineProduction * r.CommanderBonus * adminBonus * crewFraction(r) * r.Accessibility
 // group rows by `${SystemBodyID}-${MaterialID}`, sum the rates, then:
 const FLOOR = 0.1 // accessibility never falls below this
 const ENDLESS_YEARS = 10000

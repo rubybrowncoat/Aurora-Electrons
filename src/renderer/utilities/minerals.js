@@ -51,8 +51,12 @@ export const surfaceRate = (row, owned = true) => {
   return (row.ManualMineCount * row.Efficiency + (mines - row.ManualMineCount)) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * modifier
 }
 
-// The workbook's orbital formula; unverified, the sample has no player orbital miners.
-export const orbitalRate = (row, adminBonus = 1) => row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * row.Accessibility
+// A ship short of crew runs its mining modules at Current Crew / Class Crew (docs:
+// crew-and-commanders, v2.6). Over-crewed ships don't mine faster; uncrewed classes always run.
+export const crewFraction = (row) => (row.ClassCrew > 0 ? Math.min(1, Math.max(0, row.CurrentCrew) / row.ClassCrew) : 1)
+
+// The workbook's orbital formula, plus the crew rule; unverified, the sample has no player orbital miners.
+export const orbitalRate = (row, adminBonus = 1) => row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crewFraction(row) * row.Accessibility
 
 const declineShape = (deposit) => {
   const { Amount: amount, Accessibility: accessibility, HalfOriginalAmount: half, OriginalAcc: original } = deposit
