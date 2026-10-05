@@ -36,7 +36,6 @@ export const cmcMineralIds = (stored) => {
 export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount >= CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
 export const SECONDS_PER_DAY = 86400
-export const DAYS_PER_YEAR = 365
 
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
@@ -158,7 +157,8 @@ const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : prod
 
 // Minerals the industrial queue will consume over the next year: each project's
 // cost scaled to one year of work at its share of the colony's capacity; queued
-// entries count only while the year has capacity left (as "mineral use.sql" does).
+// entries count only while the year has capacity left (as "mineral use.sql" does),
+// and only for the capacity earlier entries leave.
 // `capacityOf(PopulationID, ProductionType)`: BP/yr at 100%.
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
@@ -171,6 +171,7 @@ export const annualQueueDemand = (projects, capacityOf) => {
   })
 
   Object.values(groups).forEach((group) => {
+    // The year's capacity spent so far, in percent of a full year at 100%.
     let usedPercent = 0
 
     ;[...new Set(group.map((project) => project.Queue))].sort((a, b) => a - b).forEach((queue) => {
@@ -179,21 +180,23 @@ export const annualQueueDemand = (projects, capacityOf) => {
       }
 
       group.filter((project) => project.Queue === queue).forEach((project) => {
-        const yearlyBP = (capacityOf(project.PopulationID, project.ProductionType) * project.Percentage) / 100
+        const capacity = capacityOf(project.PopulationID, project.ProductionType)
         const remainingBP = project.Amount * project.ProdPerUnit
 
-        if (!yearlyBP || !remainingBP) {
+        if (!capacity || !project.Percentage || !remainingBP) {
           return
         }
 
-        const days = (DAYS_PER_YEAR * remainingBP) / yearlyBP
-        const oneYearFactor = days > DAYS_PER_YEAR ? DAYS_PER_YEAR / days : 1
+        // A year at the project's own share, but no more than earlier projects left.
+        const availablePercent = Math.max(0, Math.min(project.Percentage, 100 - usedPercent))
+        const builtBP = Math.min(remainingBP, (capacity * availablePercent) / 100)
+        const oneYearFactor = builtBP / remainingBP
 
         MINERALS.forEach((mineral) => {
           demand[mineral.name] += project.Amount * (project[mineral.name] || 0) * oneYearFactor
         })
 
-        usedPercent += project.Percentage * Math.min(1, days / DAYS_PER_YEAR)
+        usedPercent += (100 * builtBP) / capacity
       })
     })
   })

@@ -255,7 +255,7 @@ from FCT_ShipyardTask
 where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID} and FCT_ShipyardTask.Paused = 0
 ```
 
-Sample row: `{PopName:'Fortuna', ProductionType:1, Description:'...Mjolnir', Percentage:100, Amount:8179.29, ProdPerUnit:211.85, Corbomite:1.75, Tritanium:75, Boronide:105, Uridium:15.1, Gallicite:15}`. The mineral columns are **per unit**. `industrialProjects.sql` re-derives production capacity from installations with governor/sector bonuses only (no efficiency, radiation, unrest...), so the page's existing capacity helpers replace it. `annualQueueDemand` follows "mineral use.sql" (cost x `min(1, 365/CompletionDays)`, queue entries only while capacity is left) but takes capacity from `capacityOf`:
+Sample row: `{PopName:'Fortuna', ProductionType:1, Description:'...Mjolnir', Percentage:100, Amount:8179.29, ProdPerUnit:211.85, Corbomite:1.75, Tritanium:75, Boronide:105, Uridium:15.1, Gallicite:15}`. The mineral columns are **per unit**. `industrialProjects.sql` re-derives production capacity from installations with governor/sector bonuses only (no efficiency, radiation, unrest...), so the page's existing capacity helpers replace it. `annualQueueDemand` follows "mineral use.sql" (cost x `min(1, 365/CompletionDays)`, queue entries only while capacity is left) but takes capacity from `capacityOf`, and caps each queued entry at the capacity earlier entries leave ("mineral use.sql" doesn't, so a short active project followed by a long queued one counted more than a year of work):
 
 ```js
 const MINERALS = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
@@ -282,21 +282,23 @@ function annualQueueDemand (projects, capacityOf) {
       }
 
       group.filter((project) => project.Queue === queue).forEach((project) => {
-        const yearlyBP = capacityOf(project.PopulationID, project.ProductionType) * project.Percentage / 100
+        const capacity = capacityOf(project.PopulationID, project.ProductionType)
         const remainingBP = project.Amount * project.ProdPerUnit
 
-        if (!yearlyBP || !remainingBP) {
+        if (!capacity || !project.Percentage || !remainingBP) {
           return
         }
 
-        const days = 365 * remainingBP / yearlyBP
-        const oneYearFactor = days > 365 ? 365 / days : 1 // only one year's worth of the cost
+        // a year at the project's own share, but no more than earlier projects left
+        const availablePercent = Math.max(0, Math.min(project.Percentage, 100 - usedPercent))
+        const builtBP = Math.min(remainingBP, capacity * availablePercent / 100)
+        const oneYearFactor = builtBP / remainingBP // only one year's worth of the cost
 
         MINERALS.forEach((mineral) => {
           demand[mineral] += project.Amount * (project[mineral] || 0) * oneYearFactor
         })
 
-        usedPercent += project.Percentage * Math.min(1, days / 365)
+        usedPercent += 100 * builtBP / capacity
       })
     })
   })
