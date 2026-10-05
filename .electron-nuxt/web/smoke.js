@@ -21,7 +21,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:9080'
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
 const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-smoke')
-const PAGES = (process.env.SMOKE_PAGES || '/,/warnings,/minerals,/mineral-outlook,/colony-outlook,/habitability,/information,/map,/log,/designed-tech,/technologies,/settings').split(',')
+const PAGES = (process.env.SMOKE_PAGES || '/,/warnings,/minerals,/mineral-outlook,/colony-outlook,/logistics,/habitability,/information,/map,/log,/designed-tech,/technologies,/settings').split(',')
 
 const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
