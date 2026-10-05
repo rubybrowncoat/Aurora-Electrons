@@ -323,7 +323,7 @@ group by mo.MoveOrderID
 having (mo.MoveActionID = 9 and GeoShips = 0) or (mo.MoveActionID = 12 and GravShips = 0)
 order by f.FleetName, mo.MoveOrder
 ```
-**W4: orbital miners at bodies they cannot mine.** `MaximumOrbitalMiningDiameter` is 4000 on the sample race (the docs say the tech line starts at 100 km and ends at 500 km, so trust the saved value, not the docs); a body qualifies when `Radius * 2 <= MaximumOrbitalMiningDiameter`. A body with no `FCT_MineralDeposit` rows has nothing to mine. To respect fog of war the check reports 'not geo-surveyed' when the race has no `FCT_SystemBodySurveys` row for the body, instead of revealing deposit data. Fleets with orders are skipped (in transit or releasing tractored ships). Synthetic: `('BG-01 Core Group', 'Brimstone', diameter 4500 > 4000, deposits 11, 'body too large')` and two fleets at Aurelia (no deposits). Also see the Warnings page's `wastedMiningCapacity` for surface mines.
+**W4: orbital miners at bodies they cannot mine.** `MaximumOrbitalMiningDiameter` is 4000 on the sample race (the docs say the tech line starts at 100 km and ends at 500 km, so trust the saved value, not the docs); a body qualifies when `Radius * 2 <= MaximumOrbitalMiningDiameter`. A body with no `FCT_MineralDeposit` rows has nothing to mine. To respect fog of war the check reports 'not geo-surveyed' when the race has no `FCT_SystemBodySurveys` row for the body, instead of revealing deposit data. The deposit join is gated on that survey row, so `Deposits` stays null for an unsurveyed body. Fleets with orders are skipped (in transit or releasing tractored ships). Synthetic: `('BG-01 Core Group', 'Brimstone', diameter 4500 > 4000, deposits 11, 'body too large')` and two fleets at Aurelia (no deposits). Also see the Warnings page's `wastedMiningCapacity` for surface mines.
 
 ```sql
 select f.FleetID, f.FleetName, f.SystemID, rss.Name as SystemName, f.OrbitBodyID, sb.BodyClass, sb.PlanetNumber, sb.OrbitNumber, star.Component, sbn.Name as BodyName, sb.Radius * 2 as DiameterKm, r.MaximumOrbitalMiningDiameter as MaxDiameterKm, dep.Deposits, sum(sc.MiningModules) as MiningModules, case when sbs.SystemBodyID is null then 'not geo-surveyed' when dep.Deposits is null then 'no deposits' else 'body too large' end as Reason
@@ -336,7 +336,7 @@ left join FCT_Star as star on star.StarID = sb.StarID
 left join FCT_SystemBodyName as sbn on sbn.SystemBodyID = sb.SystemBodyID and sbn.RaceID = f.RaceID
 left join FCT_SystemBodySurveys as sbs on sbs.SystemBodyID = sb.SystemBodyID and sbs.RaceID = f.RaceID and sbs.GameID = f.GameID
 left join FCT_RaceSysSurvey as rss on rss.SystemID = f.SystemID and rss.RaceID = f.RaceID and rss.GameID = f.GameID
-left join (select SystemBodyID, count(*) as Deposits from FCT_MineralDeposit where GameID = ${this.GameID} group by SystemBodyID) as dep on dep.SystemBodyID = sb.SystemBodyID
+left join (select SystemBodyID, count(*) as Deposits from FCT_MineralDeposit where GameID = ${this.GameID} group by SystemBodyID) as dep on dep.SystemBodyID = sb.SystemBodyID and sbs.SystemBodyID is not null
 where f.GameID = ${this.GameID} and f.RaceID = ${this.RaceID} and f.OrbitBodyID > 0
   and (sbs.SystemBodyID is null or dep.Deposits is null or sb.Radius * 2 > r.MaximumOrbitalMiningDiameter)
   and not exists (select 1 from FCT_MoveOrders as mo where mo.FleetID = f.FleetID)
