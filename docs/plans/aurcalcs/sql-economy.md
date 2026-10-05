@@ -1,6 +1,6 @@
 # Economy pages: SQL and maths for four planned pages
 
-Scope: Colony Outlook, Maintenance Budget, Fuel Balance, Shipyard Planner. Design only: nothing here is implemented yet.
+Scope: Colony Outlook, Maintenance Budget, Fuel Balance, Shipyard Planner. Sections 1–3 are built (Colonies and Logistics tabs); [`build-2.md`](build-2.md) records where the pages depart from this design. Most importantly, maintenance upkeep is charged by location, not by assignment, and the refinery and MSP formulas, species modifier included, are confirmed by the mineral ledger. Section 4 (Shipyard Planner) is design only.
 
 ## 0. Read this first
 

@@ -77,7 +77,8 @@ Anything that must survive a restart goes to electron-store through `this.config
 - Habitability: `habitabilitySystems`, `habitabilityTerraformers`, and the `habitabilityFilter*` keys (`OwnPopulations`, `OtherPopulations`, `Uninhabited`, `NonTerraformable`, `DoneTerraforming`, `WithoutMinerals`).
 - Minerals: `mineralsFilterOrbitalEligibility`.
 - Designed tech: `designedTechCategoryId`, `designedTechFilterObsolete`, `designedTechFilterCivilian`, `designedTechFilterCommercial`.
-- Per race: `game.<GameID>.race.<RaceID>.maintenanceThreshold` and `.maintenanceExclusions`.
+- Colony Outlook: `colonyOutlookHorizon`, `colonyOutlookAttentionOnly`. Logistics: `logisticsView`, `logisticsShowIdleLocations`. Finances: `financesWindowDays`. Survey Progress: `surveyShowSurveyed`.
+- Per race: `game.<GameID>.race.<RaceID>.maintenanceThreshold` and `.maintenanceExclusions`; the Warnings page's idle-fleet choices `.idleFleetsAtColonies` and `.idleFleetExclusions` (fleet IDs).
 
 ### Pages
 
@@ -86,10 +87,14 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 | Route | Tab | File | Shows |
 |---|---|---|---|
 | `/` | Production | `pages/index.vue` | Production recap: research projects and queues, industrial projects, shipyard tasks and upgrades, ground-unit training, and terraforming. Each item shows its remaining time, with planet, sector, commander, and naval-admin bonuses applied. |
-| `/warnings` | Warnings | `pages/warnings.vue` | About 30 checks grouped into Contacts, Economy, Ships, Populations, Administrations, and Others. Examples: intruders, wasted mining or terraforming capacity, damaged and low-maintenance ships, idle labs and factories, governorless populations, lifepods, wrecks, unexploited ancient constructs, and dangerous rifts. |
+| `/warnings` | Warnings | `pages/warnings.vue` | About 40 checks grouped into Contacts, Economy, Ships, Fleets, Populations, Administrations, and Others. Examples: intruders, wasted mining or terraforming capacity, mining colonies with nowhere to send minerals, damaged, under-crewed and low-maintenance ships, idle fleets, cargo or survey orders that can't complete, idle labs and factories, governorless populations, lifepods, wrecks, unexploited ancient constructs, and dangerous rifts. |
 | `/minerals` | Minerals | `pages/minerals.vue` | Mineral deposits on surveyed bodies. Filters include system, orbital-mining eligibility, and accessibility totals. A CMC chip marks bodies with enough of a qualifying mineral for a civilian mining complex (minerals set in Settings). |
 | `/mineral-outlook` | Outlook | `pages/mineral-outlook.vue` | Mineral runway and depletion forecast. Stock, production and use per mineral from the game's mineral ledger, with years of stock left. Sources and uses by purpose, a stock and output projection per mineral, and every mined deposit's years to half-mined and to empty. |
+| `/colony-outlook` | Colonies | `pages/colony-outlook.vue` | Per colony: population growth and a projection over a chosen horizon, how full the body is, the infrastructure cap and when growth hits it, the worker split (services, agriculture, workers needed, free or short) now and at the horizon, and colonists or installations on their way. |
+| `/logistics` | Logistics | `pages/logistics.vue` | Fuel: stock in colonies, tankers and ships, refinery and harvester output, Sorium cover, an estimated burn range and burn by class. Maintenance supplies: per maintenance location, stock, production, maintained tonnage against capacity, MSP used, net and how long it lasts; supply ships. |
+| `/finances` | Finances | `pages/finances.vue` | Wealth income and spending by category from the save's year of history: totals, a per-cycle stacked chart with the net, a ranked list and the treasury worked back from today. |
 | `/habitability` | Habitability | `pages/habitability.vue` | Colony cost per species and body, plus terraforming plans and their costs, with persistent filters. |
+| `/survey-progress` | Survey | `pages/survey-progress.vue` | Survey work left: a map of known systems coloured by the gravitational and geological survey left, per-system locations and bodies with points, survey fleets with their points a day and what they're doing, and ground-survey sites. |
 | `/information` | Information | `pages/information.vue` | Transport capacity: civilian and military freight and colonists per year over a chosen distance. Also civilian network work orders, meaning installation supply and demand. |
 | `/map` | Map (WIP) | `pages/map.vue`, `components/SystemView.vue` | Galaxy map of the systems and jump points the race knows, with sectors, controllers, and survey progress. Includes a per-system PIXI view, PNG export, and **Save Positions**, which writes back to the save. |
 | `/log` | Log | `pages/log.vue` | The full game log with event-type filters, coloured with the race's event colours. |
@@ -110,10 +115,14 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 - `generic.js` has `convertDisplayBase`, which turns star component numbers into letters, and `areSetsEqual`.
 - `map.js` has the `Vector2` and `Vector3` classes used by the map.
 - `minerals.js` has the mineral maths: surface and orbital mining rates, the deposit depletion forecast (`depositForecast`, `depositStateAt`), the ledger's flow groups, the industry queue's yearly mineral demand, and naval-admin radius, required ranks and bonus chains.
+- `naval-admins.js` has `loadNavalAdmins(database, { GameID, RaceID, bonusId, share })`: the race's admin commands with one commander bonus (6 Mining with the Industrial share, 2 Survey with the Survey share), their eligibility and the systems in range, ready for `navalAdminChainBonus`.
+- `colonies.js` has the colony maths: body capacity, population growth, infrastructure per million and cap, the worker split, and a month-by-month projection.
+- `logistics.js` has refinery and MSP production, maintenance capacity, maintenance locations with their Effective Maintenance Rate, full-power fuel burn and harvester output.
+- `load-tracking.js` has `tracked(key, getter)`, which records each async-computed read's outcome in the page's `loadErrors` (null once it succeeds, the message while it fails), plus `allLoaded` and `joinLabels`. Pages use it to show an error with a Retry button instead of partial numbers while a read fails.
 
 ### Mixins and charts
 
-- `mixins/production-modifiers.js` loads every population's production modifiers and provides the construction, ordnance and fighter capacity helpers. The Production and Mineral Outlook pages share it.
+- `mixins/production-modifiers.js` loads every population's production modifiers and provides the construction, ordnance and fighter capacity helpers. The Production, Mineral Outlook, Colony Outlook and Logistics pages share it. Its read is tracked, so a page with `loadErrors` can wait for it.
 - `components/charts/ChartCanvas.vue` wraps Chart.js. Pass `type`, `data` and `options`. It applies the design-system colours for the current theme, a crosshair on line charts, and labelled vertical markers (`options.plugins.guides.markers`). `components/charts/theme.js` holds those colours and the validated categorical palette. In light mode three of its hues are under 3:1 on white, so any chart that uses them needs a table view.
 
 ### Leftovers

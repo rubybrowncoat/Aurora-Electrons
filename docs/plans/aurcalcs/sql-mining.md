@@ -451,6 +451,8 @@ Run on the sample: all 145 systems with surveyed bodies are reachable, 19 ms for
 
 ## 4. Survey Progress
 
+**Built** as the Survey tab. Two changes from this design: survey speed applies to ships only (docs `fleet-movement`), and ship rates use the science officer's full Survey bonus (`CommandType` 10) or half the captain's, times the share of crew aboard. See [`build-2.md`](build-2.md).
+
 **Purpose.** Per known system: gravitational survey locations done vs remaining, geological survey bodies done vs remaining, points still needed, the ships and ground teams working on it, and a points-based ETA.
 
 **Reuse.** `map.vue` already reads `FCT_RaceSurveyLocation`/`FCT_SystemBodySurveys`; `habitability.vue` has `BodySurveyed`. The fleet/ship rows resemble `information.vue`'s ship queries. The naval-admin survey share (`DIM_NavalAdminCommandType.Survey`) works like the mining share in feature 1c (BonusID 2 = Survey).

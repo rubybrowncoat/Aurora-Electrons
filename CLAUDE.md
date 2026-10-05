@@ -1,6 +1,6 @@
 # Aurora Electrons
 
-Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows dashboards the game doesn't have: production recap, warnings, minerals, habitability, logistics, galaxy map, game log, designed tech, and tech tree.
+Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows dashboards the game doesn't have: production recap, warnings, minerals and their outlook, colonies, logistics (fuel and maintenance), finances, habitability, survey progress, transport information, galaxy map, game log, designed tech, and tech tree.
 
 Stack: Electron 16 + Nuxt 2 (SPA, Vue 2, Vuetify 2, Vuex 3), built on the electron-nuxt template. Data comes through Sequelize 6 over sqlite3, mostly as raw SQL. User preferences go to electron-store.
 
@@ -43,7 +43,7 @@ There is no test suite and no CI (`.github/` is git-ignored).
 - The app is read-only toward the save. The single exception is the map's "Save Positions" button (`UPDATE FCT_RaceSysSurvey`). Don't add writes without an explicit request, a confirmation dialog, and testing against a copy.
 - Interpolating `GameID` and `RaceID` (numbers from the DB) into SQL is the existing pattern. Anything a user types must go through Sequelize `replacements` instead.
 - Persistent preferences go through `this.config` (electron-store). Per-game or per-race keys are named `game.<GameID>.race.<RaceID>.<key>`. State that only needs to last for the session goes in a Vuex module under `src/renderer/store/`.
-- A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`.
+- A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`, and its route in the default page list of `.electron-nuxt/web/smoke.js`.
 - Lint the files you touch and add no new problems. Don't fix unrelated lint, and don't run `yarn lint:fix` on the whole tree.
 - Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Say so when a change depends on those.
 

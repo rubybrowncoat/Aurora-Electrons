@@ -1,6 +1,10 @@
 # New pages from Aur_Calcs: ranked plan
 
-> **Status:** Mineral Runway (1) and Mining Outlook (2) are built, together as the **Outlook** tab (`pages/mineral-outlook.vue`), with Chart.js for charts (G3) and the shared production mixin (G1, partly). The rest is waiting for prioritisation.
+> **Status:** built so far:
+> - Mineral Runway (1) and Mining Outlook (2), together as the **Outlook** tab (`pages/mineral-outlook.vue`), with Chart.js for charts (G3) and the shared production mixin (G1, partly).
+> - Colony Outlook (3), Finances (4), Survey Progress (5), Fuel Balance with Maintenance Budget (6 + 8, one **Logistics** tab) and the fleet hygiene warnings (10). [`build-2.md`](build-2.md) has their analysis, the rules checked against the save and the docs, and what changed from the appendices.
+>
+> The rest is waiting for prioritisation.
 
 This plan lists features from the Aur_Calcs workbook (`references/aurcalcs/`) and its companion SQL collection (`references/queries/`) that Aurora Electrons doesn't have yet. It ranks them by utility and beauty, and gives a short action plan for each. The status line above says what's built. Pick the order for the rest, and comment on the PR with changes.
 
@@ -8,6 +12,7 @@ The SQL is in three appendices. Every query there was run read-only against the 
 
 - [`sql-mining.md`](sql-mining.md): Mining Outlook, Mineral Runway, Colonization Targets, Survey Progress.
 - [`sql-economy.md`](sql-economy.md): Colony Outlook, Maintenance Budget, Fuel Balance, Shipyard Planner.
+- [`build-2.md`](build-2.md): how the second batch of pages was built, and where it departs from the appendices (maintenance by location, ledger-checked refinery and MSP formulas, crew rules).
 - [`sql-fleet.md`](sql-fleet.md): Finances, Commanders, Fleet hygiene warnings, Route Finder, Lagrange Points, Hauling Planner.
 
 All of it follows the app's rules (`CLAUDE.md`):
@@ -39,14 +44,14 @@ Scores:
 |---|---|---|---|---|---|---|
 | 1 | [Mineral Runway](#1-mineral-runway) ✅ | Mining | Minerals sheet, `mineral use.sql`, `Minerals on Ships.sql` | 5 | 5 | M |
 | 2 | [Mining Outlook](#2-mining-outlook) ✅ | Mining | OrbMin, SurfMin, OrbMin_src | 5 | 4 | M |
-| 3 | [Colony Outlook](#3-colony-outlook) | Colonies | Pop, Species | 5 | 4 | L |
-| 4 | [Finances](#4-finances) | Economy | `Wealth Use.sql`, `WealthUseByTypeByDay.sql` | 4 | 5 | S |
-| 5 | [Survey Progress](#5-survey-progress) | Exploration | Survey, GrndSurvey | 4 | 5 | M |
-| 6 | [Fuel Balance](#6-fuel-balance) | Logistics | BigPlan, FuelUse, FuelFairies, SorHarv_src | 4 | 4 | M |
+| 3 | [Colony Outlook](#3-colony-outlook) ✅ | Colonies | Pop, Species | 5 | 4 | L |
+| 4 | [Finances](#4-finances) ✅ | Economy | `Wealth Use.sql`, `WealthUseByTypeByDay.sql` | 4 | 5 | S |
+| 5 | [Survey Progress](#5-survey-progress) ✅ | Exploration | Survey, GrndSurvey | 4 | 5 | M |
+| 6 | [Fuel Balance](#6-fuel-balance) ✅ | Logistics | BigPlan, FuelUse, FuelFairies, SorHarv_src | 4 | 4 | M |
 | 7 | [Colonization Targets](#7-colonization-targets) | Colonies | ColTargs, CCOver, TFPlan (2) | 4 | 4 | M |
-| 8 | [Maintenance Budget](#8-maintenance-budget) | Logistics | Pop (MSP), BigPlan, `ShipSizeAndCostByPopulation.sql` | 4 | 3 | M |
+| 8 | [Maintenance Budget](#8-maintenance-budget) ✅ | Logistics | Pop (MSP), BigPlan, `ShipSizeAndCostByPopulation.sql` | 4 | 3 | M |
 | 9 | [Commanders](#9-commanders) | Personnel | `Commander List with Bonuses and Traits.sql`, Yearly 26/27 | 4 | 3 | M |
-| 10 | [Fleet hygiene warnings](#10-fleet-hygiene-warnings) | Fleet | Yearly checklist queries | 4 | 2 | S |
+| 10 | [Fleet hygiene warnings](#10-fleet-hygiene-warnings) ✅ | Fleet | Yearly checklist queries | 4 | 2 | S |
 | 11 | [Route Finder & Distances](#11-route-finder--distances) | Exploration | JPs, JPRoutes, SysInfo, `dfs.sql` | 3 | 5 | M |
 | 12 | [Empire History](#12-empire-history) | Economy | Yearly | 3 | 5 | L |
 | 13 | [Shipyard Planner](#13-shipyard-planner) | Industry | Yards, ShipyardGrowth, QCalc | 3 | 3 | M |
@@ -420,12 +425,12 @@ It also has a what-if for any class at a chosen yard, and a "share of constructi
 
 This is my recommendation for the order to build in, taking the shared groundwork into account. It's yours to change.
 
-1. **Finances (4).** It's small and needs only real data. The chart component (G3) is already built.
+1. ~~**Finances (4).**~~ Built.
 2. ~~**G1 mixin + G4 ledger, then Mineral Runway (1) and Mining Outlook (2).**~~ Built as the Outlook tab. G1 is partly done: the Production page still has its own naval admin code (see [Found along the way](#found-along-the-way)).
-3. **Colony Outlook (3).** It's the biggest of the high-utility pages and builds on G1.
-4. **Fleet hygiene warnings (10).** These are quick wins between the larger pages.
-5. **G2 jump graph, then Survey Progress (5), Route Finder (11) and Colonization Targets (7).** All three need distances.
-6. **Fuel Balance (6) + Maintenance Budget (8)** as one Logistics page.
+3. ~~**Colony Outlook (3).**~~ Built.
+4. ~~**Fleet hygiene warnings (10).**~~ Built; [`build-2.md`](build-2.md) has the per-check verdicts.
+5. **G2 jump graph, then Route Finder (11) and Colonization Targets (7).** Survey Progress (5) is built without it; G2 would add travel time to its survey estimates.
+6. ~~**Fuel Balance (6) + Maintenance Budget (8)** as one Logistics page.~~ Built.
 7. **Commanders (9), Shipyard Planner (13), Hauling (14), Lagrange (15), Empire History (12).**
 
 ## Not ported
@@ -460,11 +465,13 @@ These are existing-code issues the analysis turned up. Each gets its own fix; th
 2. **Naval admin bonus chain** (`index.vue` ~660–672 and ~808). The query hard-codes commander bonus 9 and doesn't select `ParentAdminCommandID`, so the recursion never climbs past the first admin command. The sample has nested commands (1350 under 1345). G1 fixes it.
 3. **`wastedMiningCapacity`** (`warnings.vue` ~716) counts every installation with `MiningProductionValue > 0`. That includes Conventional Industry and CMCs. Narrow it to mines, automated mines and forced-labour mining camps if false positives show up.
 4. **`FCT_Population.LastColonyCost` is stale.** The app doesn't use it, but any future page should use `ReqInf` instead (Colony Outlook).
-5. **The Production page never applies naval admin bonuses** (`index.vue` `navalAdminBonus`). Its range check calls `administration.Systems.has(SystemID)` with a number, but the set holds system objects, so the check always fails and orbital terraformers get no admin bonus. Its range is also wrong once the check is fixed: `adminsWithSystems` walks `NavalAdminCommandLevel` jumps (4,096 on the sample's homeworld) instead of the radius, and the unused `Radius` it computes is one jump short (`floor(log2(level))`, no `+ 1`). It also ignores flag-bridge commands and commander rank. The Outlook page uses its own helpers in `utilities/minerals.js` (`navalAdminRadius`, `navalAdminRequiredRanks`, `navalAdminChainBonus`); G1 should move the Production page onto them.
+5. **The Production page never applies naval admin bonuses** (`index.vue` `navalAdminBonus`). Its range check calls `administration.Systems.has(SystemID)` with a number, but the set holds system objects, so the check always fails and orbital terraformers get no admin bonus. Its range is also wrong once the check is fixed: `adminsWithSystems` walks `NavalAdminCommandLevel` jumps (4,096 on the sample's homeworld) instead of the radius, and the unused `Radius` it computes is one jump short (`floor(log2(level))`, no `+ 1`). It also ignores flag-bridge commands and commander rank. The Outlook page uses its own helpers in `utilities/minerals.js` (`navalAdminRadius`, `navalAdminRequiredRanks`, `navalAdminChainBonus`), and `utilities/naval-admins.js` now loads the commands for any bonus (Outlook, Logistics and Survey use it). G1 should move the Production page onto them, with the Terraforming bonus (9).
+6. ~~**The Warnings page's Populations section ignored free research labs.**~~ **Fixed.** Its `v-if` didn't list `freeResearchLabPopulations`, so a save whose only population warning was idle labs showed nothing.
+7. **Upkeep by assignment (`sql-economy.md` § 2A) isn't what the game charges.** Ships use MSP at their location. Logistics follows the game; see [`build-2.md`](build-2.md).
 
 ## Open questions for you
 
 1. ~~**Charts:** add Chart.js or draw SVG by hand?~~ Chart.js, decided.
-2. **Navigation:** there are already 9 tabs. Group the new pages (for example Economy: Finances, Runway, Fuel, Maintenance; Colonies: Outlook, Targets; Exploration: Survey, Routes) or keep one tab per page? Should Colonization Targets and Mineral Runway be tabs inside Habitability and Minerals?
+2. **Navigation:** there are now 14 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics and Finances after Minerals; Survey after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
 3. **Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?
-4. **Estimates:** for the formulas that are only in the workbook (population growth rate, harvester output, add-slipway cost), is an "estimate" label enough, or should those columns wait until they're confirmed in game?
+4. **Estimates:** for the formulas that aren't confirmed in game (population growth rate, harvester output, survey rates, add-slipway cost), is an "estimate" label enough, or should those columns wait? Growth now has forum and patch-note support; refinery and MSP output are confirmed by the save's own ledger.
