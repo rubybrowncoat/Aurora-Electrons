@@ -551,13 +551,14 @@ export default {
       steps.forEach((year, index) => {
         if (index > 0) {
           const span = year - steps[index - 1]
-          const income = (output[index] + output[index - 1]) / 2 + row.otherIncome
+          const net = (output[index] + output[index - 1]) / 2 + row.otherIncome - row.used
 
-          level = Math.max(0, level + (income - row.used) * span)
-
-          if (level === 0 && runOut === null) {
-            runOut = year
+          // The stock empties inside this step: place the crossing, not the step's end.
+          if (runOut === null && net < 0 && level + net * span <= 0) {
+            runOut = steps[index - 1] + level / -net
           }
+
+          level = Math.max(0, level + net * span)
         }
 
         stock.push(level)
