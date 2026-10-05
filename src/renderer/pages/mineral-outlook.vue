@@ -21,116 +21,126 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="ledgerLoaded && !hasLedger" type="info" outlined dense class="mt-3">
+      <v-alert v-if="ledgerFailed" type="error" outlined dense class="mt-3">
+        Couldn't read the mineral ledger: {{ ledgerError }}. The game may be saving; the page reads it again when the save changes.
+        <template #append>
+          <v-btn small text color="error" @click="$asyncComputed.ledger.update()">Retry</v-btn>
+        </template>
+      </v-alert>
+      <v-alert v-else-if="ledgerLoaded && !hasLedger" type="info" outlined dense class="mt-3">
         This save has no mineral ledger (Aurora 2.6 adds one). Production comes from your mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
       </v-alert>
+      <v-progress-linear v-else-if="!ledgerLoaded" indeterminate class="mt-3" />
 
-      <v-row class="mt-2">
-        <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-          <v-card class="stat-tile" elevation="1">
-            <div class="caption text--secondary">{{ tile.label }}</div>
-            <div class="stat-value">
-              <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-            </div>
-            <div class="caption text--secondary">{{ tile.note }}</div>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <v-card class="panel" elevation="1">
-        <div class="panel-head">
-          <span>Mineral runway</span>
-          <v-chip small>{{ coverageLabel }}</v-chip>
-        </div>
-        <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
-          <template #[`item.name`]="{ item }">
-            <span class="font-weight-medium">{{ item.name }}</span>
-          </template>
-          <template #[`item.stock`]="{ item }">{{ tons(item.stock) }}</template>
-          <template #[`item.transit`]="{ item }">
-            <span :class="{ 'text--secondary': !item.transit }">{{ tons(item.transit) }}</span>
-          </template>
-          <template #[`item.produced`]="{ item }">{{ tons(item.produced) }}</template>
-          <template #[`item.used`]="{ item }">{{ tons(item.used) }}</template>
-          <template #[`item.net`]="{ item }">
-            <span class="text-no-wrap">
-              <v-icon small :color="item.net < 0 ? 'error' : 'success'">{{ item.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up' }}</v-icon>
-              {{ signedTons(item.net) }}
-            </span>
-          </template>
-          <template #[`item.runwaySort`]="{ item }">
-            <div class="runway-cell">
-              <div class="meter" :title="runwayLabel(item)">
-                <div class="meter-fill" :class="statusColor(item.status)" :style="{ width: `${meterWidth(item)}%` }" />
+      <!-- Runway, flows and the focused outlook need the ledger, or to know there is none: never a guess while it's loading or failed. -->
+      <template v-if="ledgerLoaded">
+        <v-row class="mt-2">
+          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
+            <v-card class="stat-tile" elevation="1">
+              <div class="caption text--secondary">{{ tile.label }}</div>
+              <div class="stat-value">
+                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
               </div>
-              <span class="text-no-wrap">
-                <v-icon small :color="statusColor(item.status)">{{ statusIcon(item.status) }}</v-icon>
-                {{ runwayLabel(item) }}
-              </span>
-            </div>
-          </template>
-          <template #[`item.queue`]="{ item }">
-            <span :class="{ 'text--secondary': !item.queue }">{{ tons(item.queue) }}</span>
-          </template>
-          <template #[`item.trend`]="{ item }">
-            <v-sparkline v-if="item.trend.length > 1" :value="item.trend" :color="theme.inkMuted" :line-width="2" :padding="4" :smooth="2" height="36" width="120" class="trend" />
-            <span v-else class="text--secondary">—</span>
-          </template>
-        </v-data-table>
-        <div class="panel-foot caption text--secondary">
-          {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
-          Click a row to see its outlook.
-        </div>
-      </v-card>
+              <div class="caption text--secondary">{{ tile.note }}</div>
+            </v-card>
+          </v-col>
+        </v-row>
 
-      <v-card class="panel" elevation="1">
-        <div class="panel-head">
-          <span>Where minerals come from and go</span>
-          <v-btn-toggle v-model="flowsView" mandatory dense>
-            <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
-            <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
-          </v-btn-toggle>
-        </div>
-        <div class="panel-body">
-          <template v-if="flowsView === 'chart'">
-            <div class="legend">
-              <span v-for="group in presentFlowGroups" :key="group.key" class="legend-item">
-                <span class="swatch" :style="{ background: flowColor(group.key) }" />{{ group.label }}
-              </span>
-            </div>
-            <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
-            <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
-          </template>
-          <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" disable-pagination hide-default-footer dense />
-        </div>
-      </v-card>
-
-      <v-card v-if="focusRow" class="panel" elevation="1">
-        <div class="panel-head">
-          <span>{{ focusRow.name }} outlook</span>
-          <span>
-            <v-chip small class="mr-2">
-              <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
-            </v-chip>
-            <v-chip small>{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
-          </span>
-        </div>
-        <div class="panel-body">
-          <v-row>
-            <v-col cols="12" md="6">
-              <div class="chart-title">Projected stockpile</div>
-              <chart-canvas type="line" :data="stockChart" :options="stockOptions" :height="240" :label="`Projected ${focusRow.name} stockpile over ${horizon} years`" />
-            </v-col>
-            <v-col cols="12" md="6">
-              <div class="chart-title">Projected mining output</div>
-              <chart-canvas type="line" :data="outputChart" :options="outputOptions" :height="240" :label="`Projected ${focusRow.name} mining output over ${horizon} years`" />
-            </v-col>
-          </v-row>
-          <div class="caption text--secondary">
-            Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
+        <v-card class="panel" elevation="1">
+          <div class="panel-head">
+            <span>Mineral runway</span>
+            <v-chip small>{{ coverageLabel }}</v-chip>
           </div>
-        </div>
-      </v-card>
+          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
+            <template #[`item.name`]="{ item }">
+              <span class="font-weight-medium">{{ item.name }}</span>
+            </template>
+            <template #[`item.stock`]="{ item }">{{ tons(item.stock) }}</template>
+            <template #[`item.transit`]="{ item }">
+              <span :class="{ 'text--secondary': !item.transit }">{{ tons(item.transit) }}</span>
+            </template>
+            <template #[`item.produced`]="{ item }">{{ tons(item.produced) }}</template>
+            <template #[`item.used`]="{ item }">{{ tons(item.used) }}</template>
+            <template #[`item.net`]="{ item }">
+              <span class="text-no-wrap">
+                <v-icon small :color="item.net < 0 ? 'error' : 'success'">{{ item.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up' }}</v-icon>
+                {{ signedTons(item.net) }}
+              </span>
+            </template>
+            <template #[`item.runwaySort`]="{ item }">
+              <div class="runway-cell">
+                <div class="meter" :title="runwayLabel(item)">
+                  <div class="meter-fill" :class="statusColor(item.status)" :style="{ width: `${meterWidth(item)}%` }" />
+                </div>
+                <span class="text-no-wrap">
+                  <v-icon small :color="statusColor(item.status)">{{ statusIcon(item.status) }}</v-icon>
+                  {{ runwayLabel(item) }}
+                </span>
+              </div>
+            </template>
+            <template #[`item.queue`]="{ item }">
+              <span :class="{ 'text--secondary': !item.queue }">{{ tons(item.queue) }}</span>
+            </template>
+            <template #[`item.trend`]="{ item }">
+              <v-sparkline v-if="item.trend.length > 1" :value="item.trend" :color="theme.inkMuted" :line-width="2" :padding="4" :smooth="2" height="36" width="120" class="trend" />
+              <span v-else class="text--secondary">—</span>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
+            Click a row to see its outlook.
+          </div>
+        </v-card>
+
+        <v-card class="panel" elevation="1">
+          <div class="panel-head">
+            <span>Where minerals come from and go</span>
+            <v-btn-toggle v-model="flowsView" mandatory dense>
+              <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
+              <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
+            </v-btn-toggle>
+          </div>
+          <div class="panel-body">
+            <template v-if="flowsView === 'chart'">
+              <div class="legend">
+                <span v-for="group in presentFlowGroups" :key="group.key" class="legend-item">
+                  <span class="swatch" :style="{ background: flowColor(group.key) }" />{{ group.label }}
+                </span>
+              </div>
+              <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
+              <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
+            </template>
+            <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" disable-pagination hide-default-footer dense />
+          </div>
+        </v-card>
+
+        <v-card v-if="focusRow" class="panel" elevation="1">
+          <div class="panel-head">
+            <span>{{ focusRow.name }} outlook</span>
+            <span>
+              <v-chip small class="mr-2">
+                <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
+              </v-chip>
+              <v-chip small>{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
+            </span>
+          </div>
+          <div class="panel-body">
+            <v-row>
+              <v-col cols="12" md="6">
+                <div class="chart-title">Projected stockpile</div>
+                <chart-canvas type="line" :data="stockChart" :options="stockOptions" :height="240" :label="`Projected ${focusRow.name} stockpile over ${horizon} years`" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <div class="chart-title">Projected mining output</div>
+                <chart-canvas type="line" :data="outputChart" :options="outputOptions" :height="240" :label="`Projected ${focusRow.name} mining output over ${horizon} years`" />
+              </v-col>
+            </v-row>
+            <div class="caption text--secondary">
+              Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
+            </div>
+          </div>
+        </v-card>
+      </template>
 
       <v-card class="panel" elevation="1">
         <div class="panel-head">
@@ -232,6 +242,9 @@ export default {
       windowOptions: [30, 90, 180, 365],
       horizonOptions: [25, 50, 100, 250],
       windowDays: 365,
+      // The last ledger read's error message, or null. Kept here because the async-computed
+      // plugin's own error flag isn't reactive under Vue 2.
+      ledgerError: null,
       horizon: 50,
       focusMineralId: null,
       flowsView: 'chart',
@@ -265,8 +278,13 @@ export default {
       return !!(this.ledger && this.ledger.length)
     },
 
+    // Read, or known to be absent. A failed read keeps the last value, which may be stale.
     ledgerLoaded() {
-      return this.ledger !== null
+      return this.ledger !== null && !this.ledgerFailed
+    },
+
+    ledgerFailed() {
+      return this.ledgerError !== null
     },
 
     coverageDays() {
@@ -913,21 +931,33 @@ export default {
       default: null,
     },
     // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now.
-    // Older saves don't have the table: null means "not loaded", [] means "none".
+    // Older saves don't have the table: null means "not loaded", [] means "none". Any other
+    // failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {
       async get() {
         if (!this.database || !this.GameID || !this.RaceID) {
           return null
         }
 
+        // Read before the first await, so a window change re-runs this getter.
         const windowDays = Number(this.windowDays) || 365
+        const request = (this.ledgerRequest = (this.ledgerRequest || 0) + 1)
 
         try {
-          return await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, count(distinct FCT_RaceMineralData.Time) as Events from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items)
-        } catch (error) {
-          console.warn('[Mineral Outlook] No mineral ledger in this save', error)
+          const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
+          const rows = table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, count(distinct FCT_RaceMineralData.Time) as Events from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
 
-          return []
+          if (request === this.ledgerRequest) {
+            this.ledgerError = null
+          }
+
+          return rows
+        } catch (error) {
+          if (request === this.ledgerRequest) {
+            this.ledgerError = (error && error.message) || String(error)
+          }
+
+          throw error
         }
       },
       default: null,
