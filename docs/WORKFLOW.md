@@ -43,6 +43,8 @@ With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright. It
 
 Fonts and icons load from Google Fonts and jsDelivr. In the cloud those requests can fail, and the script reports them as notes rather than failures.
 
+`yarn web` stops at startup if sqlite3 can't load, and prints the command that fetches its binary. Any `yarn install` that relinks sqlite3 removes the binary, because `--ignore-scripts` skips its download. If port 9080 is taken (another `yarn web`, or `yarn dev`), Nuxt falls back to a random port. `yarn web` then prints the real URL, which you pass to the smoke test as `BASE_URL`.
+
 Limits: web mode doesn't run main-process code (IPC handlers, storage-path resolution, the window, packaging). Writes still happen: map → Save Positions updates `./AuroraDB.db`. Re-extract the fixture to reset it.
 
 ## Making a change
@@ -93,6 +95,14 @@ Limits: web mode doesn't run main-process code (IPC handlers, storage-path resol
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
 - **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally you can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
+
+## Dependency updates
+
+Dependabot opens security-update PRs against `master`. Most of them only bump a transitive entry in `yarn.lock`.
+
+- To check one, fetch it with `git fetch origin pull/<n>/head:dependabot-<n>` and merge it into a scratch branch. Then run `yarn install --frozen-lockfile --ignore-scripts --ignore-engines`, re-fetch sqlite3's binary, lint, and run `yarn web` plus `yarn web:smoke`. The per-page row and text counts should match a run on `master`.
+- Lockfile PRs can conflict with one another in `yarn.lock`. Don't hand-edit the file. Either run `yarn install` without `--frozen-lockfile` on the conflicted file, which makes yarn merge it, or comment `@dependabot rebase` on the PR.
+- An Electron major upgrade is a migration, not a merge. It touches the main process (`enableRemoteModule`/`remote`, `protocol.registerFileProtocol`), electron-builder, electron-devtools-installer, and native modules, and web mode can't test any of that.
 
 ## Releasing
 
