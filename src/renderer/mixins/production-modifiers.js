@@ -1,6 +1,9 @@
+import { tracked } from '../utilities/load-tracking'
+
 // Per-population production modifiers and the capacity helpers built on them,
-// shared by the Production and Mineral Outlook pages. The host component
-// provides `database`, `GameID` and `RaceID` (mapGetters).
+// shared by the Production, Mineral Outlook, Colony Outlook and Logistics pages.
+// The host component provides `database`, `GameID` and `RaceID` (mapGetters), and
+// can list `populationProductionModifiers` among its tracked reads (`loadErrors`).
 export default {
   methods: {
     populationConstructionCapacity (populationId) {
@@ -33,7 +36,7 @@ export default {
   },
   asyncComputed: {
     populationProductionModifiers: {
-      async get () {
+      get: tracked('populationProductionModifiers', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return {}
         }
@@ -49,7 +52,7 @@ export default {
 
           return map
         }, {})
-      },
+      }),
       default: {},
     },
   },
