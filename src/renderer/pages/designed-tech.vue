@@ -884,10 +884,10 @@ export default {
           },
         },
         {
+          // No `render`: the name comes from the save, so it's shown as text, never as HTML.
           text: 'Second Stage',
-          value: 'SecondStageName',
+          value: 'SecondStage',
           divider: true,
-          render: (missile) => (missile.SecondStageID ? `${missile.NumSS} × ${missile.SecondStageName}` : '-'),
         },
       ],
       47: [
@@ -1227,6 +1227,7 @@ export default {
       missile.ShippingLineSystem = 0
 
       missile.TotalRange = missile.MaxRange + (missile.SecondStageID ? missile.SecondStageMaxRange || 0 : 0)
+      missile.SecondStage = missile.SecondStageID ? `${missile.NumSS} × ${missile.SecondStageName}` : '-'
 
       return missile
     },
