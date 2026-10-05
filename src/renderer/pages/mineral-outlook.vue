@@ -21,19 +21,19 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="ledgerFailed" type="error" outlined dense class="mt-3">
-        Couldn't read the mineral ledger: {{ ledgerError }}. The game may be saving; the page reads it again when the save changes.
+      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
+        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
         <template #append>
-          <v-btn small text color="error" @click="$asyncComputed.ledger.update()">Retry</v-btn>
+          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
         </template>
       </v-alert>
-      <v-alert v-else-if="ledgerLoaded && !hasLedger" type="info" outlined dense class="mt-3">
+      <v-alert v-else-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
         This save has no mineral ledger (Aurora 2.6 adds one). Production comes from your mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
       </v-alert>
-      <v-progress-linear v-else-if="!ledgerLoaded" indeterminate class="mt-3" />
+      <v-progress-linear v-else-if="!forecastReady" indeterminate class="mt-3" />
 
-      <!-- Runway, flows and the focused outlook need the ledger, or to know there is none: never a guess while it's loading or failed. -->
-      <template v-if="ledgerLoaded">
+      <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
+      <template v-if="forecastReady">
         <v-row class="mt-2">
           <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
             <v-card class="stat-tile" elevation="1">
@@ -142,7 +142,7 @@
         </v-card>
       </template>
 
-      <v-card class="panel" elevation="1">
+      <v-card v-if="depositsReady" class="panel" elevation="1">
         <div class="panel-head">
           <span>Deposits being mined</span>
           <span class="d-flex align-center">
@@ -216,6 +216,45 @@ import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY
 const BUCKET_DAYS = 5
 // The production cycle when the ledger has too few production ticks to measure it (the game's default).
 const DEFAULT_CYCLE_DAYS = 5
+
+// Every read behind the runway and the forecasts, named for the error message.
+const INPUT_LABELS = {
+  game: 'the game clock',
+  stockpile: 'the stockpiles',
+  cargo: 'cargo in transit',
+  packets: 'mass-driver packets',
+  ledger: 'the mineral ledger',
+  surfaceMining: 'colony mining',
+  orbitalMining: 'orbital mining',
+  navalAdmins: 'naval admin commands',
+  industrialProjects: 'the industry queue',
+}
+const FORECAST_INPUTS = Object.keys(INPUT_LABELS)
+const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
+
+// Wraps an async-computed getter so each read's outcome lands in `loadErrors[key]`: null once
+// it succeeds, the message while it fails (the plugin's own status isn't reactive under Vue 2).
+// A failure still rejects, so the plugin keeps the last value. The getter runs synchronously up
+// to its first await, so its dependencies are still tracked; only the latest read counts.
+const tracked = (key, get) => function () {
+  const requests = (this.loadRequests = this.loadRequests || {})
+  const request = (requests[key] = (requests[key] || 0) + 1)
+  const settle = (error) => {
+    if (request === requests[key]) {
+      this.$set(this.loadErrors, key, error)
+    }
+  }
+
+  return get.call(this).then((value) => {
+    settle(null)
+
+    return value
+  }, (error) => {
+    settle((error && error.message) || String(error))
+
+    throw error
+  })
+}
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
 
@@ -244,9 +283,9 @@ export default {
       windowOptions: [30, 90, 180, 365],
       horizonOptions: [25, 50, 100, 250],
       windowDays: 365,
-      // The last ledger read's error message, or null. Kept here because the async-computed
-      // plugin's own error flag isn't reactive under Vue 2.
-      ledgerError: null,
+      // Each read's outcome, by async-computed key: null once it succeeds, the error message while
+      // it fails (see `tracked`).
+      loadErrors: {},
       horizon: 50,
       focusMineralId: null,
       flowsView: 'chart',
@@ -280,13 +319,24 @@ export default {
       return !!(this.ledger && this.ledger.length)
     },
 
-    // Read, or known to be absent. A failed read keeps the last value, which may be stale.
-    ledgerLoaded() {
-      return this.ledger !== null && !this.ledgerFailed
+    failedInputs() {
+      return FORECAST_INPUTS.filter((key) => this.loadErrors[key])
     },
 
-    ledgerFailed() {
-      return this.ledgerError !== null
+    failedInputsText() {
+      const labels = this.failedInputs.map((key) => INPUT_LABELS[key])
+
+      return labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}` : labels[0]
+    },
+
+    // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last,
+    // possibly stale, value, so it doesn't count).
+    forecastReady() {
+      return FORECAST_INPUTS.every((key) => this.loadErrors[key] === null) && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
+    },
+
+    depositsReady() {
+      return DEPOSIT_INPUTS.every((key) => this.loadErrors[key] === null)
     },
 
     coverageDays() {
@@ -642,15 +692,12 @@ export default {
   watch: {
     mineralRows: {
       immediate: true,
-      handler(rows) {
-        if (this.focusMineralId || !rows.length || !this.stockpile || this.ledger === null) {
-          return
-        }
-
-        const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
-
-        this.focusMineralId = declining ? declining.id : rows[0].id
+      handler() {
+        this.pickFocusMineral()
       },
+    },
+    forecastReady() {
+      this.pickFocusMineral()
     },
   },
   created() {
@@ -660,6 +707,23 @@ export default {
     this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
   },
   methods: {
+    // Focus the mineral that runs out first, once the forecast can say which.
+    pickFocusMineral() {
+      const rows = this.mineralRows
+
+      if (this.focusMineralId || !rows.length || !this.forecastReady) {
+        return
+      }
+
+      const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
+
+      this.focusMineralId = declining ? declining.id : rows[0].id
+    },
+
+    retryFailedInputs() {
+      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
+    },
+
     flowColor(key) {
       return flowColor(this.$vuetify.theme.dark, key)
     },
@@ -872,27 +936,27 @@ export default {
   },
   asyncComputed: {
     game: {
-      async get() {
+      get: tracked('game', async function () {
         if (!this.database || !this.GameID) {
           return null
         }
 
         return await this.database.query(`select FCT_Game.GameTime, FCT_Game.StartYear from FCT_Game where FCT_Game.GameID = ${this.GameID}`).then(([items]) => items[0] || null)
-      },
+      }),
       default: null,
     },
     stockpile: {
-      async get() {
+      get: tracked('stockpile', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return null
         }
 
         return await this.database.query(`select sum(FCT_Population.Duranium) as Duranium, sum(FCT_Population.Neutronium) as Neutronium, sum(FCT_Population.Corbomite) as Corbomite, sum(FCT_Population.Tritanium) as Tritanium, sum(FCT_Population.Boronide) as Boronide, sum(FCT_Population.Mercassium) as Mercassium, sum(FCT_Population.Vendarite) as Vendarite, sum(FCT_Population.Sorium) as Sorium, sum(FCT_Population.Uridium) as Uridium, sum(FCT_Population.Corundium) as Corundium, sum(FCT_Population.Gallicite) as Gallicite from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
-      },
+      }),
       default: null,
     },
     cargo: {
-      async get() {
+      get: tracked('cargo', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return {}
         }
@@ -900,74 +964,59 @@ export default {
         const rows = await this.database.query(`select FCT_ShipCargo.CargoID as MaterialID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`).then(([items]) => items)
 
         return Object.fromEntries(rows.map((row) => [row.MaterialID, row.Amount]))
-      },
+      }),
       default: {},
     },
     packets: {
-      async get() {
+      get: tracked('packets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return null
         }
 
         return await this.database.query(`select sum(FCT_MassDriverPackets.Duranium) as Duranium, sum(FCT_MassDriverPackets.Neutronium) as Neutronium, sum(FCT_MassDriverPackets.Corbomite) as Corbomite, sum(FCT_MassDriverPackets.Tritanium) as Tritanium, sum(FCT_MassDriverPackets.Boronide) as Boronide, sum(FCT_MassDriverPackets.Mercassium) as Mercassium, sum(FCT_MassDriverPackets.Vendarite) as Vendarite, sum(FCT_MassDriverPackets.Sorium) as Sorium, sum(FCT_MassDriverPackets.Uridium) as Uridium, sum(FCT_MassDriverPackets.Corundium) as Corundium, sum(FCT_MassDriverPackets.Gallicite) as Gallicite from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
-      },
+      }),
       default: null,
     },
     // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now.
     // Older saves don't have the table: null means "not loaded", [] means "none". Any other
     // failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {
-      async get() {
+      get: tracked('ledger', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return null
         }
 
         // Read before the first await, so a window change re-runs this getter.
         const windowDays = Number(this.windowDays) || 365
-        const request = (this.ledgerRequest = (this.ledgerRequest || 0) + 1)
+        const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
 
-        try {
-          const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
-          const rows = table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
-
-          if (request === this.ledgerRequest) {
-            this.ledgerError = null
-          }
-
-          return rows
-        } catch (error) {
-          if (request === this.ledgerRequest) {
-            this.ledgerError = (error && error.message) || String(error)
-          }
-
-          throw error
-        }
-      },
+        return table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
+      }),
       default: null,
     },
     surfaceMining: {
-      async get() {
+      get: tracked('surfaceMining', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
         return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Radius * 2 as Diameter, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, VIR_Mines.MineCount, VIR_Mines.OwnedMineCount, VIR_Mines.ManualMineCount, FCT_Race.MineProduction, coalesce(VIR_Governor.BonusValue, 1) as GovernorBonus, 1 + (coalesce(VIR_Sector.BonusValue, 1) - 1) * 0.25 as SectorBonus, FCT_Population.Efficiency, (1 - FCT_SystemBody.RadiationLevel / 10000) as RadiationModifier, (1 - FCT_Population.UnrestPoints / 100) as StabilityModifier, DIM_PopPoliticalStatus.ProductionMod as PoliticalModifier, FCT_Race.EconomicProdModifier from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Population.RaceID and FCT_SystemBodySurveys.GameID = FCT_Population.GameID inner join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID inner join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue) as MineCount, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID = 39 and VIR_Owner.PurchaseCivilianMinerals = 0 then 0 else FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue end) as OwnedMineCount, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID in (7, 38, 48) then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as ManualMineCount from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID inner join FCT_Population as VIR_Owner on VIR_Owner.PopulationID = FCT_PopulationInstallations.PopID where FCT_PopulationInstallations.GameID = ${this.GameID} and DIM_PlanetaryInstallation.MiningProductionValue > 0 and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Mines on VIR_Mines.PopID = FCT_Population.PopulationID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_Governor on VIR_Governor.CommandID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_Sector on VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
-      },
+      }),
       default: [],
     },
     orbitalMining: {
-      async get() {
+      get: tracked('orbitalMining', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
         return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MiningModules, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Radius * 2 as Diameter, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, coalesce(VIR_Commander.BonusValue, 1) as CommanderBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID inner join FCT_Population on FCT_Population.PopulationID = FCT_Fleet.AssignedPopulationID and FCT_Population.SystemBodyID = FCT_Fleet.OrbitBodyID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID inner join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
-      },
+      }),
       default: [],
     },
     // Naval admin commands with their Mining bonus and the systems in their range.
     navalAdmins: {
-      async get() {
+      get: tracked('navalAdmins', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return {}
         }
@@ -999,17 +1048,17 @@ export default {
             Systems: radius === null || admin.SystemID == null ? new Set() : systemsWithinJumps(graph, admin.SystemID, radius),
           }]
         }))
-      },
+      }),
       default: {},
     },
     industrialProjects: {
-      async get() {
+      get: tracked('industrialProjects', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
         return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => items)
-      },
+      }),
       default: [],
     },
   },
