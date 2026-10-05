@@ -51,6 +51,7 @@
   },
   "dependencies": {
     "@timohausmann/quadtree-js": "^1.2.6",
+    "chart.js": "^4.5.1",
     "chokidar": "^4.0.3",
     "color-hash": "^2.0.2",
     "cytoscape": "^3.33.1",

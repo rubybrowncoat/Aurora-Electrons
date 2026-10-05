@@ -48,6 +48,10 @@ nuxtConfig.build.extend = function (config, ctx) {
   config.module.rules.push({ test: /\.mjs$/, include: /node_modules/, type: 'javascript/auto' })
 }
 
+// Electron loads Chart.js through Node, which reads its static class fields;
+// webpack 4 can't parse them, so the web bundle transpiles it.
+nuxtConfig.build.transpile = [...(nuxtConfig.build.transpile || []), 'chart.js', '@kurkle/color']
+
 const databaseMiddleware = require('./web/database-middleware')
 
 nuxtConfig.serverMiddleware = [
