@@ -437,7 +437,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length || forgottenPrototypes.length" class="mb-5" justify="start">
+        <v-row v-if="freeResearchLabPopulations.length || freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length || forgottenPrototypes.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Populations </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
