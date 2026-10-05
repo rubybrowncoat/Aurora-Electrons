@@ -6,13 +6,13 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Ledger window</span>
-          <v-btn-toggle v-model="windowDays" mandatory dense @change="config.set('mineralOutlookWindowDays', windowDays)">
+          <v-btn-toggle v-model="windowDays" mandatory dense @change="(value) => config.set('mineralOutlookWindowDays', value)">
             <v-btn v-for="days in windowOptions" :key="days" :value="days" small>{{ days }} d</v-btn>
           </v-btn-toggle>
         </v-col>
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Horizon</span>
-          <v-btn-toggle v-model="horizon" mandatory dense @change="config.set('mineralOutlookHorizon', horizon)">
+          <v-btn-toggle v-model="horizon" mandatory dense @change="(value) => config.set('mineralOutlookHorizon', value)">
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
@@ -136,8 +136,8 @@
         <div class="panel-head">
           <span>Deposits being mined</span>
           <span class="d-flex align-center">
-            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" />
-            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" />
+            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" @change="(value) => config.set('mineralOutlookAllDeposits', !!value)" />
+            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" @change="(value) => config.set('mineralOutlookOnlyEmptying', !!value)" />
           </span>
         </div>
         <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositSortBy" :sort-desc.sync="depositSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, 60, -1] }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
@@ -654,6 +654,8 @@ export default {
   created() {
     this.windowDays = this.config.get('mineralOutlookWindowDays', 365)
     this.horizon = this.config.get('mineralOutlookHorizon', 50)
+    this.allDeposits = this.config.get('mineralOutlookAllDeposits', false)
+    this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
   },
   methods: {
     flowColor(key) {
