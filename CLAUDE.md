@@ -17,7 +17,7 @@ yarn install    # yarn only (npm is rejected by preinstall). postinstall runs `y
 yarn dev        # Nuxt dev server on :9080 + Electron with devtools; Ctrl/Cmd+E relaunches Electron
 yarn build      # production build + electron-builder packages into build/
 yarn web        # renderer as a plain browser app on :9080, backed by ./AuroraDB.db (no Electron needed)
-yarn web:smoke  # with `yarn web` running: Chromium visits every page, reports errors, saves screenshots
+yarn web:smoke  # with `yarn web` running: Chromium visits every page, reports errors, saves screenshots (locally, run `npx playwright install chromium` once)
 yarn lint       # ESLint over src/ (the baseline is not clean, see below)
 node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>   # lint only what you touched
 ```

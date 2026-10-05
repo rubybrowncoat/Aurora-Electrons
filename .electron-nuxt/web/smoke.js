@@ -1,5 +1,7 @@
 /*
-  Smoke test for web mode (`yarn web` must be running).
+  Smoke test for web mode (`yarn web` must be running). Needs Playwright's
+  Chromium: run `npx playwright install chromium` once locally; cloud
+  containers already provide it through PLAYWRIGHT_BROWSERS_PATH.
   Selects a game/race, visits every page, and reports console errors, page
   errors, failed database calls, and a screenshot per page.
 
@@ -13,16 +15,7 @@
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
-const { execSync } = require('child_process')
-
-const requirePlaywright = () => {
-  try {
-    return require('playwright')
-  } catch (e) {
-    // Cloud containers ship Playwright globally rather than in the project.
-    return require(path.join(execSync('npm root -g').toString().trim(), 'playwright'))
-  }
-}
+const { chromium } = require('playwright')
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:9080'
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
@@ -34,7 +27,6 @@ const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
 
 const run = async () => {
-  const { chromium } = requirePlaywright()
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 
