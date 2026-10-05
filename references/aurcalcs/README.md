@@ -35,3 +35,5 @@ Aurora Electrons must not install views in users' saves. When a feature is porte
 | `vw_surveylocations` | `SrvLoc_src` | Survey location coordinates |
 | `vw_tfbodies` | `TFBodies_src` | Bodies' atmosphere and orbit data for terraforming |
 | `vw_tfplan` | `TF_src` | Per-body minerals, accessibility, atmosphere, colony cost |
+
+The SQL behind most of these views is in `references/queries/excel/`.
