@@ -17,3 +17,8 @@ fi
 # --ignore-scripts skips the Electron/native rebuilds and the `yarn lint:fix` postinstall,
 # which would rewrite files. Enough for `yarn lint`; not enough for `yarn dev`/`yarn build`.
 yarn install --frozen-lockfile --ignore-scripts --ignore-engines 1>&2
+
+# Web mode (`yarn web`) runs Sequelize in Node, so fetch sqlite3's prebuilt Node binary.
+if ! ls node_modules/sqlite3/lib/binding/*/node_sqlite3.node >/dev/null 2>&1; then
+  (cd node_modules/sqlite3 && ../.bin/node-pre-gyp install --fallback-to-build=false) 1>&2
+fi
