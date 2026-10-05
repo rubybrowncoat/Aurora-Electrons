@@ -815,7 +815,7 @@ export default {
           value: 'SensorStrength',
           divider: true,
           render: (missile) => this.missileValue(missile.SensorStrength),
-          tooltip: (missile) => (missile.SensorStrength > 0 ? [`Resolution: ${this.standardSeparatedNumber(missile.SensorResolution)}`, `Range: ${this.standardSeparatedDecimal(missile.SensorRange / 1e6, 2)} mKm`] : 'No active sensor'),
+          tooltip: (missile) => (missile.SensorStrength > 0 ? [`Resolution: ${this.standardSeparatedNumber(missile.SensorResolution)}`, `Range: ${this.standardSeparatedDecimal(missile.SensorRange / 1e6, 2)} mKm`] : ['No active sensor']),
         },
         {
           text: 'Thermal',
