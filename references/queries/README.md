@@ -1,6 +1,6 @@
 # Community Aurora SQL queries
 
-A collection of SQL scripts for Aurora C# saves, by the same author as `references/aurcalcs/Aur_Calcs260.xlsx`. It's kept here as a reference for features and game maths to port into Aurora Electrons. The files are unchanged from the source, apart from line endings normalized by `.gitattributes`.
+A collection of SQL scripts for Aurora C# saves that accompanies `references/aurcalcs/Aur_Calcs260.xlsx`. It's kept here as a reference for features and game maths to port into Aurora Electrons. The files are unchanged from the source, apart from line endings normalized by `.gitattributes`.
 
 **Don't run these against a save you care about.** At least 37 of them write to the database (`UPDATE`, `DELETE`, `INSERT`, `CREATE VIEW`): they rename fleets, purge history, move cargo, create views, and so on. Aurora Electrons is read-only toward the save (see `CLAUDE.md`), so only the read queries are candidates for porting, rewritten as inline queries scoped by `GameID` and `RaceID`. To experiment, use a copy of the save.
 
