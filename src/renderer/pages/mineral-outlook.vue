@@ -211,7 +211,7 @@ import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
+import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, stockProjection, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
 
 const BUCKET_DAYS = 5
 const CRITICAL_YEARS = 5
@@ -561,25 +561,11 @@ export default {
         return { stock: [], output: [], status: 'ok', summary: '' }
       }
 
-      const output = steps.map((year) => this.focusDeposits.reduce((sum, deposit) => sum + depositStateAt(deposit, deposit.rate, year).rate * deposit.deliveredShare, 0))
-      const stock = []
-      let level = row.stock + row.transit
-      let runOut = null
-
-      steps.forEach((year, index) => {
-        if (index > 0) {
-          const span = year - steps[index - 1]
-          const net = (output[index] + output[index - 1]) / 2 + row.otherIncome - row.used
-
-          // The stock empties inside this step: place the crossing, not the step's end.
-          if (runOut === null && net < 0 && level + net * span <= 0) {
-            runOut = steps[index - 1] + level / -net
-          }
-
-          level = Math.max(0, level + net * span)
-        }
-
-        stock.push(level)
+      const { stock, output, runOut } = stockProjection({
+        start: row.stock + row.transit,
+        otherNet: row.otherIncome - row.used,
+        deposits: this.focusDeposits.map((deposit) => ({ deposit, rate: deposit.rate, share: deposit.deliveredShare })),
+        steps,
       })
 
       const firstEmpty = this.focusDeposits.filter((deposit) => !deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon).sort((a, b) => a.forecast.yearsToDepletion - b.forecast.yearsToDepletion)[0]

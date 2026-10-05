@@ -123,6 +123,44 @@ export const depositStateAt = (deposit, rate, years) => {
 // Evenly spaced [0, horizon] samples for a chart.
 export const yearSteps = (horizon, points = 80) => Array.from({ length: points + 1 }, (_, index) => (horizon * index) / points)
 
+// One mineral's stockpile over `steps` (years): today's stock, what each deposit still delivers
+// (exactly, from depositStateAt's remaining amounts, so a deposit never gives more than it holds),
+// and every other flow at today's net rate. Mining only slows down, so the level is concave: it
+// crosses zero at most once, and between the first two samples that bracket it.
+// `deposits`: [{ deposit, rate (t/yr now), share (of the output that reaches the stockpile) }]
+export const stockProjection = ({ start, otherNet, deposits, steps }) => {
+  const initial = deposits.map(({ deposit, rate }) => depositStateAt(deposit, rate, 0).amount)
+  const levelAt = (years) => deposits.reduce((sum, { deposit, rate, share }, index) => sum + (initial[index] - depositStateAt(deposit, rate, years).amount) * share, start + otherNet * years)
+  const levels = steps.map(levelAt)
+  const output = steps.map((years) => deposits.reduce((sum, { deposit, rate, share }) => sum + depositStateAt(deposit, rate, years).rate * share, 0))
+  let runOut = null
+
+  if (start <= 0 && output[0] + otherNet < 0) {
+    runOut = 0
+  } else {
+    const index = levels.findIndex((level, i) => i > 0 && level <= 0 && levels[i - 1] > 0)
+
+    if (index > 0) {
+      let low = steps[index - 1]
+      let high = steps[index]
+
+      for (let iteration = 0; iteration < 60; iteration++) {
+        const middle = (low + high) / 2
+
+        if (levelAt(middle) > 0) {
+          low = middle
+        } else {
+          high = middle
+        }
+      }
+
+      runOut = high
+    }
+  }
+
+  return { stock: levels.map((level) => Math.max(0, level)), output, runOut }
+}
+
 // The ledger's purposes, folded to eight groups so a chart never needs a ninth colour.
 // Transfers between your own colonies (freighters, mass drivers) and the starting stockpile
 // aren't empire income or spending, so they're left out.
