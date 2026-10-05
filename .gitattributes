@@ -16,6 +16,9 @@
 *.png binary
 *.ico binary
 *.icns binary
+*.bmp binary
+*.zip binary
+*.db binary
 *.vue text
 
 # git objects as text for diff
