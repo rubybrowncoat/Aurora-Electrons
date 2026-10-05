@@ -63,6 +63,7 @@
           <v-tab to="/logistics" nuxt>Logistics</v-tab>
           <v-tab to="/finances" nuxt>Finances</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
+          <v-tab to="/survey-progress" nuxt>Survey</v-tab>
           <v-tab to="/information" nuxt>Information</v-tab>
           <v-tab to="/map" nuxt>Map (WIP)</v-tab>
           <v-tab to="/log" nuxt>Log</v-tab>
@@ -151,6 +152,9 @@ export default {
         }
         case 'habitability': {
           return 'Habitability Breakdown'
+        }
+        case 'survey-progress': {
+          return 'Survey Progress'
         }
         case 'information': {
           return 'Empire Information'
