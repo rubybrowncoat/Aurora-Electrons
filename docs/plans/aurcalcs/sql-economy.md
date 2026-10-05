@@ -145,8 +145,18 @@ const growthRate = (c, pop, bodyPop, cap) => { // per year; base curve is workbo
   return raw * c.PopulationGrowthBonus * crowd - c.RadiationLevel / 40000
 }
 const infraPerM = (c) => c.ReqInf > 0 ? c.ReqInf / c.Population : 0
-const lowGravity = (c) => c.Gravity < c.MinimumGravity // LG bodies count only LGInfrastructure
-const infraCap = (c) => infraPerM(c) ? (lowGravity(c) ? c.LGInfrastructure : c.Infrastructure + c.LGInfrastructure) / infraPerM(c) : Infinity
+// Aurora 2.6 removed low-gravity infrastructure (docs planetary-installations, v2.6): ordinary infrastructure
+// counts on every body, and a low-gravity body needs twice as much, which the game's live ReqInf already holds.
+// Only a pre-2.6 save (one with an LG installation type, DIM_PlanetaryInstallation.LGInfrastructureValue > 0)
+// counts LG infrastructure alone on low-gravity bodies: pass legacyLowGravity for those.
+const lowGravity = (c) => c.Gravity < c.MinimumGravity
+const infraCap = (c, legacyLowGravity = false) => {
+  if (!infraPerM(c)) {
+    return Infinity
+  }
+
+  return (legacyLowGravity && lowGravity(c) ? c.LGInfrastructure : c.Infrastructure + c.LGInfrastructure) / infraPerM(c)
+}
 // project monthly: pop += pop * growthRate(...) / 12, bodyPop += same delta; months until pop >= infraCap(c)
 const workers = (c, pop) => { // all in M
   const cc = c.ReqInf > 0 ? c.ReqInf * c.PopulationDensityModifier / (c.Population * 100) : 0
@@ -166,8 +176,8 @@ Sample JS results: Phobos infra cap 1,062.6 M vs pop 37.3, growth 2.71%/yr, so i
 - Orbital population (Ark modules on ships, docs `colonies`) is not modelled: `Population` is surface population only. Orbital pop would change service/agri shares (workbook `AU6` comment). I did not check the sample for them.
 - Growth curve and radiation term are workbook-derived (section 0); show growth as an estimate. Easy verification: compare `Population` between two saves of the same game.
 - Inbound colonists use move orders with `MoveActionID` 6/96/177 only; a fleet with several unload orders is counted at each destination (same as the reference view). `FCT_ShipCargo` has no destination of its own.
-- Gravity check uses species `Gravity - GravDev`; the sample DIM table has no Low Gravity Infrastructure row (id 41 in the workbook), so I sum `InfrastructureValue`/`LGInfrastructureValue` instead of hard-coding ids 9/41.
-- The LG "x2 on colony cost" in workbook column AH is avoided by using `ReqInf`; I could not test an LG colony (none in the sample has CC > 0).
+- Gravity check uses species `Gravity - GravDev`. The sample DIM table has no Low Gravity Infrastructure row (id 41 in the workbook) because Aurora 2.6 removed it, so I sum `InfrastructureValue`/`LGInfrastructureValue` instead of hard-coding ids 9/41. On a 2.6+ save `LGInfrastructure` is always 0, and a low-gravity colony with 1 M people, `ReqInf` 200 and 200 infrastructure is at its cap of 1 M, not at 0.
+- The LG "x2 on colony cost" in workbook column AH is avoided by using `ReqInf`, the game's live requirement. I could not test an LG colony (none in the sample has CC > 0).
 
 
 ---
