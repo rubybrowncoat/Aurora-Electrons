@@ -13,12 +13,37 @@
 
 ## Cloud sessions (Claude Code on the web)
 
-`.claude/hooks/session-start.sh` runs at session start, and only when `CLAUDE_CODE_REMOTE=true`. It does two things:
+`.claude/hooks/session-start.sh` runs at session start, and only when `CLAUDE_CODE_REMOTE=true`. It does three things:
 
-- extracts `fixtures/AuroraDB.zip` to `./AuroraDB.db` if that file is missing, and
-- runs `yarn install --frozen-lockfile --ignore-scripts --ignore-engines`.
+- extracts `fixtures/AuroraDB.zip` to `./AuroraDB.db` if that file is missing,
+- runs `yarn install --frozen-lockfile --ignore-scripts --ignore-engines`, and
+- fetches sqlite3's prebuilt Node binary if it's missing.
 
-`--ignore-scripts` skips the Electron and native rebuilds and the `lint:fix` postinstall. Lint works afterwards, but `yarn dev` and `yarn build` don't, and there's no display anyway. In the cloud, verification therefore means lint plus running SQL against the sample. State clearly when UI behaviour hasn't been checked at runtime.
+`--ignore-scripts` skips the Electron and native rebuilds and the `lint:fix` postinstall. Lint and web mode work afterwards, but `yarn dev` and `yarn build` don't. In the cloud, verification means lint, SQL against the sample, and web mode.
+
+## Web mode
+
+`yarn web` serves the renderer as a plain browser app on `http://localhost:9080`, with no Electron involved:
+
+- `.electron-nuxt/web.js` builds the Nuxt renderer for a `web` webpack target. Electron bundles nothing from `dependencies`, but web mode bundles all of them.
+- Node and Electron modules are swapped for the shims in `.electron-nuxt/web/shims/`:
+  - `electron` answers the `request-storage-path` and `save-png` IPC calls; PNG export becomes a browser download.
+  - `electron-store` persists to `localStorage`.
+  - `chokidar` polls the database file's mtime, so replacing `./AuroraDB.db` still reloads the views.
+  - `sequelize` exports only `Op` and `QueryTypes`.
+  - `utilities/database.js` is replaced by a proxy that forwards `query()` and read-only `findAll`/`findOne`/`findByPk`/`count`/`findAndCountAll` calls to the dev server.
+- `.electron-nuxt/web/database-middleware.js` handles those calls at `/__aurora-db/*`. It runs the **real** models from `src/renderer/utilities/database.js` against `./AuroraDB.db`; set `AURORA_DB=path/to/save.db` to use another file. It accepts raw SQL, so keep the server on localhost.
+- Sentry is disabled in web mode.
+
+With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright. It selects the sample race, visits every tab plus settings, prints `ok`/`FAIL` per page with console errors, page errors, and failed database calls, and saves a screenshot of each page. You can configure it with these environment variables:
+
+- `SMOKE_PAGES=/,/map` limits the run to those routes. Add `/engines` to include the hidden WIP page.
+- `SMOKE_OUT=dir` sets where screenshots go. The default is a temporary directory.
+- `AURORA_GAME` and `AURORA_RACE` select a different game and race.
+
+Fonts and icons load from Google Fonts and jsDelivr. In the cloud those requests can fail, and the script reports them as notes rather than failures.
+
+Limits: web mode doesn't run main-process code (IPC handlers, storage-path resolution, the window, packaging). Writes still happen: map → Save Positions updates `./AuroraDB.db`. Re-extract the fixture to reset it.
 
 ## Making a change
 
@@ -66,7 +91,7 @@
 
 - **Lint what you touched:** `node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>`. You can add `--fix` for those files only. The repo-wide baseline isn't clean: at the time of writing, `yarn lint` reports 17 errors and 119 warnings. Don't fix unrelated problems, and don't introduce new ones.
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
-- **UI:** run `yarn dev` locally, select "Aurelian Empire" (race 784) in the sidebar, and exercise the page. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
+- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally you can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
 
 ## Releasing

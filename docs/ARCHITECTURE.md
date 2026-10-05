@@ -21,7 +21,7 @@ Node `>=20.17` (`.nvmrc`: 20) and Yarn 1 are enforced by `.electron-nuxt/check-e
 
 ## Build pipeline (`.electron-nuxt/`)
 
-This directory is the electron-nuxt template's tooling. Treat it as vendored unless a change needs it.
+Most of this directory is the electron-nuxt template's tooling; treat that part as vendored unless a change needs it. `web.js` and `web/` are this project's own.
 
 - `yarn dev` runs `dev.js` and then `index.js` with `NODE_ENV=development`. It does three things:
   - webpack builds the main process from `src/main/boot/index.dev.js` into `dist/main/index.js`.
@@ -32,6 +32,7 @@ This directory is the electron-nuxt template's tooling. Treat it as vendored unl
   - Nuxt *generates* static files into `dist/renderer`, which the app serves over a custom `app://` protocol.
   
   electron-builder then packages the app using `builder.config.js`: a Windows portable exe with `splash.bmp`, a Linux deb, and a macOS dmg. It runs with `asar: false` and writes to `build/`.
+- `yarn web` runs `web.js`, which builds the same renderer for a plain browser and uses the shims and database middleware in `web/`. See "Web mode" in `docs/WORKFLOW.md`.
 - `renderer/nuxt.config.js` merges the base config into `src/renderer/nuxt.config.js`. The base config sets `srcDir`, the hash router, and the generate dir, plus an `electron-renderer` webpack target with `dependencies` left external.
 
 ## Main process (`src/main/`)

@@ -16,6 +16,8 @@ Detailed docs:
 yarn install    # yarn only (npm is rejected by preinstall). postinstall runs `yarn lint:fix` over src/, so review unrelated diffs
 yarn dev        # Nuxt dev server on :9080 + Electron with devtools; Ctrl/Cmd+E relaunches Electron
 yarn build      # production build + electron-builder packages into build/
+yarn web        # renderer as a plain browser app on :9080, backed by ./AuroraDB.db (no Electron needed)
+yarn web:smoke  # with `yarn web` running: Chromium visits every page, reports errors, saves screenshots
 yarn lint       # ESLint over src/ (the baseline is not clean, see below)
 node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>   # lint only what you touched
 ```
@@ -26,7 +28,7 @@ There is no test suite and no CI (`.github/` is git-ignored).
 
 - `fixtures/AuroraDB.zip` holds a sample save: one game, "Aurelian Empire" (GameID 140), with player race 784 and 14 NPRs. Keep it in the repo.
 - In dev, the app reads `./AuroraDB.db` from the repo root, which is git-ignored and must never be committed.
-- In cloud sessions, `.claude/hooks/session-start.sh` extracts the fixture if it's missing and runs `yarn install --ignore-scripts`. That's enough for lint, but not for `yarn dev` or `yarn build`. Locally, extract it with `unzip fixtures/AuroraDB.zip`, or copy in a real save.
+- In cloud sessions, `.claude/hooks/session-start.sh` extracts the fixture if it's missing, runs `yarn install --ignore-scripts`, and fetches sqlite3's Node binary. That's enough for lint and web mode, but not for `yarn dev` or `yarn build`. Locally, extract it with `unzip fixtures/AuroraDB.zip`, or copy in a real save.
 - Check SQL against the sample with Python's sqlite3, opened read-only. See `docs/WORKFLOW.md`.
 
 ## Working rules
@@ -40,7 +42,7 @@ There is no test suite and no CI (`.github/` is git-ignored).
 - Persistent preferences go through `this.config` (electron-store). Per-game or per-race keys are named `game.<GameID>.race.<RaceID>.<key>`. State that only needs to last for the session goes in a Vuex module under `src/renderer/store/`.
 - A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`.
 - Lint the files you touch and add no new problems. Don't fix unrelated lint, and don't run `yarn lint:fix` on the whole tree.
-- In cloud sessions, Electron can't run. Say so when a UI change hasn't been verified at runtime.
+- Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Say so when a change depends on those.
 
 ## Commits and PRs
 

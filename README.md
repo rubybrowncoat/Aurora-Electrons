@@ -12,6 +12,9 @@ yarn dev
 # build electron application for production
 yarn build
 
+# serve the renderer in a browser for testing, without Electron
+yarn web
+
 # lint all JS/Vue component files in `src/`
 yarn lint
 
