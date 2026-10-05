@@ -93,6 +93,7 @@ const comparator = (a, b) => (a === b ? 0 : a < b ? -1 : 1)
 const toCentigrade = (kelvin) => kelvin - KELVIN_OFFSET
 
 const TONS_PER_HULL_SPACE = 50
+const TONS_PER_MSP = 2.5
 const KELVIN_OFFSET = 273.15
 
 export default {
@@ -136,7 +137,7 @@ export default {
         return []
       }
 
-      const allComponents = [...this.baselineComponents, ...this.researchedComponents, ...this.species]
+      const allComponents = [...this.baselineComponents, ...this.researchedComponents, ...this.species, ...this.missiles]
 
       console.log(
         'Filtered Components',
@@ -768,6 +769,127 @@ export default {
         },
         ...sizeCostCrewHTKColumns,
       ],
+      4: [
+        // Missiles
+        nameColumn,
+        {
+          text: 'Size (MSP)',
+          value: 'Size',
+          divider: true,
+          render: (missile) => `<span class="text-no-wrap">${this.standardSeparatedDecimal(missile.Size, 2)} <span class="grey--text">(${this.standardSeparatedDecimal(missile.Size * TONS_PER_MSP, 2)} t)</span></span>`,
+        },
+        {
+          text: 'Speed (km/s)',
+          value: 'Speed',
+          divider: true,
+          render: (missile) => this.standardSeparatedNumber(missile.Speed),
+        },
+        {
+          text: 'First Stage (mKm)',
+          value: 'MaxRange',
+          divider: true,
+          render: (missile) => this.standardSeparatedDecimal(missile.MaxRange / 1e6, 2),
+          tooltip: (missile) => [`Endurance: ${this.formatDuration(missile.Endurance)}`, `Fuel: ${this.standardSeparatedNumber(missile.FuelRequired)} L`],
+        },
+        {
+          text: 'Total Range (mKm)',
+          value: 'TotalRange',
+          divider: true,
+          render: (missile) => this.standardSeparatedDecimal(missile.TotalRange / 1e6, 2),
+          tooltip: (missile) => {
+            if (!missile.SecondStageID) {
+              return ['Single stage']
+            }
+
+            return [`First stage: ${this.standardSeparatedDecimal(missile.MaxRange / 1e6, 2)} mKm`, `Second stage: ${this.standardSeparatedDecimal(missile.SecondStageMaxRange / 1e6, 2)} mKm`, `Separation range: ${this.standardSeparatedNumber(missile.SeparationRange)} km`]
+          },
+        },
+        {
+          text: 'Warhead',
+          value: 'WarheadStrength',
+          divider: true,
+          render: (missile) => (missile.MultipleWarheads > 1 ? `<span class="text-no-wrap">${this.standardSeparatedDecimal(missile.WarheadStrength, 2)} <span class="grey--text">(${missile.MultipleWarheads} warheads)</span></span>` : this.standardSeparatedDecimal(missile.WarheadStrength, 2)),
+        },
+        {
+          text: 'Active',
+          value: 'SensorStrength',
+          divider: true,
+          render: (missile) => this.missileValue(missile.SensorStrength),
+          tooltip: (missile) => (missile.SensorStrength > 0 ? [`Resolution: ${this.standardSeparatedNumber(missile.SensorResolution)}`, `Range: ${this.standardSeparatedDecimal(missile.SensorRange / 1e6, 2)} mKm`] : 'No active sensor'),
+        },
+        {
+          text: 'Thermal',
+          value: 'ThermalStrength',
+          divider: true,
+          render: (missile) => this.missileValue(missile.ThermalStrength),
+        },
+        {
+          text: 'EM',
+          value: 'EMStrength',
+          divider: true,
+          render: (missile) => this.missileValue(missile.EMStrength),
+        },
+        {
+          text: 'Geo',
+          value: 'Geostrength',
+          divider: true,
+          render: (missile) => this.missileValue(missile.Geostrength),
+        },
+        {
+          text: 'Decoys',
+          value: 'NumDecoys',
+          divider: true,
+          render: (missile) => this.missileValue(missile.NumDecoys),
+        },
+        {
+          text: 'ECCM',
+          value: 'ECCM',
+          divider: true,
+          render: (missile) => this.missileValue(missile.ECCM),
+        },
+        {
+          text: 'ATG',
+          value: 'ATG',
+          divider: true,
+          render: (missile) => (missile.ATG > 1 ? `+${this.standardSeparatedNumber(Math.round((missile.ATG - 1) * 100))}%` : '-'),
+          tooltip: 'Active Terminal Guidance: multiplier to the final chance to hit',
+        },
+        {
+          text: 'Retargeting',
+          value: 'Retargeting',
+          divider: true,
+          render: (missile) => (missile.Retargeting ? 'Yes' : '-'),
+        },
+        {
+          text: 'Radiation',
+          value: 'RadDamage',
+          divider: true,
+          render: (missile) => this.missileValue(missile.RadDamage),
+        },
+        {
+          text: 'Cost',
+          value: 'Cost',
+          divider: true,
+          render: (missile) => this.standardSeparatedDecimal(missile.Cost, 2),
+          tooltip: (missile) => {
+            const rows = ['Materials Required', '']
+
+            ;['Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite'].forEach((mineral) => {
+              if (missile[mineral] > 0) {
+                rows.push(`${mineral}: ${this.standardSeparatedDecimal(missile[mineral], 2)}`)
+              }
+            })
+
+            return rows
+          },
+        },
+        {
+          text: 'Second Stage',
+          value: 'SecondStageName',
+          divider: true,
+          render: (missile) => (missile.SecondStageID ? `${missile.NumSS} × ${missile.SecondStageName}` : '-'),
+        },
+      ],
       47: [
         // Species
         nameColumn,
@@ -1006,8 +1128,6 @@ export default {
         ...sizeCostCrewHTKColumns,
       ],
     }
-
-    // TODO: Special case for missiles
   },
   mounted() {
     //
@@ -1021,6 +1141,21 @@ export default {
     },
     standardSeparatedDecimal(number, decimalPlaces = 2) {
       return separatedNumber(roundToDecimal(number, decimalPlaces), this.separator)
+    },
+
+    missileValue(value) {
+      return value > 0 ? this.standardSeparatedDecimal(value, 2) : '-'
+    },
+    formatDuration(seconds) {
+      if (seconds < 60) {
+        return `${this.standardSeparatedDecimal(seconds, 1)} s`
+      } else if (seconds < 3600) {
+        return `${this.standardSeparatedDecimal(seconds / 60, 1)} m`
+      } else if (seconds < 86400) {
+        return `${this.standardSeparatedDecimal(seconds / 3600, 1)} h`
+      }
+
+      return `${this.standardSeparatedDecimal(seconds / 86400, 1)} d`
     },
 
     onRowClick(item, payload) {
@@ -1083,6 +1218,17 @@ export default {
       }
 
       return component
+    },
+
+    augmentMissile(missile) {
+      missile.SDComponentID = `missile-${missile.MissileID}`
+      missile.CategoryID = 4 // Missiles
+      missile.MilitarySystem = 1
+      missile.ShippingLineSystem = 0
+
+      missile.TotalRange = missile.MaxRange + (missile.SecondStageID ? missile.SecondStageMaxRange || 0 : 0)
+
+      return missile
     },
 
     augmentSpecies(species) {
@@ -1199,6 +1345,34 @@ export default {
           })
 
         return components
+      },
+      default: [],
+    },
+    missiles: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        const missiles = await this.database
+          .query(
+            `
+          select FCT_MissileType.MissileID, FCT_MissileType.Name, FCT_RaceTech.Obsolete, FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_MissileType.Size, FCT_MissileType.Speed, FCT_MissileType.MaxRange, FCT_MissileType.Endurance, FCT_MissileType.FuelRequired, FCT_MissileType.WarheadStrength, FCT_MissileType.MultipleWarheads, FCT_MissileType.RadDamage, FCT_MissileType.SensorStrength, FCT_MissileType.SensorResolution, FCT_MissileType.SensorRange, FCT_MissileType.ThermalStrength, FCT_MissileType.EMStrength, FCT_MissileType.Geostrength, FCT_MissileType.NumDecoys, FCT_MissileType.ECCM, FCT_MissileType.ATG, FCT_MissileType.Retargeting, FCT_MissileType.Cost, FCT_MissileType.Corbomite, FCT_MissileType.Tritanium, FCT_MissileType.Boronide, FCT_MissileType.Uridium, FCT_MissileType.Gallicite, FCT_MissileType.SecondStageID, FCT_MissileType.NumSS, FCT_MissileType.SeparationRange, SecondStage.Name as SecondStageName, SecondStage.MaxRange as SecondStageMaxRange from FCT_RaceTech
+
+          inner join FCT_MissileType on FCT_RaceTech.TechID = FCT_MissileType.MissileID and FCT_MissileType.GameID = FCT_RaceTech.GameID
+          inner join FCT_TechSystem on FCT_RaceTech.TechID = FCT_TechSystem.TechSystemID
+          left join FCT_MissileType as SecondStage on FCT_MissileType.SecondStageID = SecondStage.MissileID and SecondStage.GameID = FCT_MissileType.GameID
+
+          where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID} and FCT_TechSystem.RaceID = FCT_RaceTech.RaceID
+        `
+          )
+          .then(([items]) => {
+            console.log('Missiles', items)
+
+            return items.map((missile) => this.augmentMissile(missile))
+          })
+
+        return missiles
       },
       default: [],
     },
