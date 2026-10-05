@@ -454,9 +454,9 @@ This is my recommendation for the order to build in, taking the shared groundwor
 
 ## Found along the way
 
-These are existing-code issues the analysis turned up. I haven't changed any of them, since each deserves its own fix.
+These are existing-code issues the analysis turned up. Each gets its own fix; the ones done so far are marked.
 
-1. **Fog-of-war leak in Minerals** (`minerals.vue` ~794). The survey subquery's `left join FCT_Race` doesn't filter, so deposits on bodies surveyed by any race show up. In the sample that's 5,368 deposits instead of 5,327.
+1. ~~**Fog-of-war leak in Minerals**~~ **Fixed.** The survey subquery's `left join FCT_Race` didn't filter, so deposits on bodies surveyed by any race showed up: 5,368 deposits instead of 5,327 in the sample. It's now scoped to the race's own `FCT_SystemBodySurveys` rows.
 2. **Naval admin bonus chain** (`index.vue` ~660–672 and ~808). The query hard-codes commander bonus 9 and doesn't select `ParentAdminCommandID`, so the recursion never climbs past the first admin command. The sample has nested commands (1350 under 1345). G1 fixes it.
 3. **`wastedMiningCapacity`** (`warnings.vue` ~716) counts every installation with `MiningProductionValue > 0`. That includes Conventional Industry and CMCs. Narrow it to mines, automated mines and forced-labour mining camps if false positives show up.
 4. **`FCT_Population.LastColonyCost` is stale.** The app doesn't use it, but any future page should use `ReqInf` instead (Colony Outlook).
