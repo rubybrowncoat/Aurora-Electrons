@@ -1,0 +1,102 @@
+// Colony maths for the Colony Outlook page: body capacity, population growth, infrastructure and
+// the worker split. Sources and checks: docs/plans/aurcalcs/build-2.md § Colony Outlook.
+
+const EARTH_SURFACE_AREA = 511187128
+// Millions of people an Earth-sized body holds (docs `colonies`, Population Capacity).
+const EARTH_CAPACITY = 12000
+// Every non-gas-giant body holds at least 50,000 people.
+const MINIMUM_CAPACITY = 0.05
+const MONTHS_PER_YEAR = 12
+
+// Millions of people the body holds before growth stops: surface area, the species' density,
+// less above 75% water (1% at 100%) and a fifth on a tide-locked planet. Moons are exempt from
+// the tidal rule, as in habitability.vue.
+export const bodyCapacity = ({ Radius, HydroExt, TidalLock, BodyClass, PopulationDensityModifier }) => {
+  const area = 4 * Math.PI * Radius ** 2
+  const water = HydroExt > 75 ? Math.max((100 - HydroExt) / 25, 0.01) : 1
+  const tidal = TidalLock && BodyClass !== 2 ? 5 : 1
+
+  return Math.max(((area / EARTH_SURFACE_AREA) * EARTH_CAPACITY * PopulationDensityModifier * water) / tidal, MINIMUM_CAPACITY)
+}
+
+// Growth before modifiers: 20% / cube root of the population in millions, at most 10%.
+export const baseGrowthRate = (population) => (population > 0 ? Math.min(0.1, 0.2 / Math.cbrt(population)) : 0)
+
+// Full growth up to a third of the body's capacity, then a linear fall to none at capacity.
+export const crowdingFactor = (bodyPopulation, capacity) => (capacity > 0 ? Math.max(0, Math.min(1, 1.5 * (1 - bodyPopulation / capacity))) : 0)
+
+// Annual growth as a fraction. Radiation takes 1% per 400 points off the result.
+export const growthRate = (colony, population, bodyPopulation, capacity) => baseGrowthRate(population) * colony.PopulationGrowthModifier * colony.PopulationGrowthBonus * crowdingFactor(bodyPopulation, capacity) - (colony.RadiationLevel || 0) / 40000
+
+// Infrastructure per million people. The game's live requirement (`ReqInf`) already doubles it on
+// low-gravity bodies (Aurora 2.6), so it's used rather than the stale `LastColonyCost`.
+export const infrastructurePerMillion = (colony) => (colony.ReqInf > 0 && colony.Population > 0 ? colony.ReqInf / colony.Population : 0)
+
+// Millions of people the colony's infrastructure supports; Infinity when it needs none.
+export const infrastructureCapacity = (colony, infrastructure = colony.Infrastructure + colony.LGInfrastructure) => {
+  const perMillion = infrastructurePerMillion(colony)
+
+  return perMillion ? infrastructure / perMillion : Infinity
+}
+
+// The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density).
+export const colonyCost = (colony) => (colony.ReqInf > 0 && colony.Population > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100) : 0)
+
+// Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%;
+// agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work.
+// Required: installations and shipyards. Reproduces the save's stored Efficiency on the sample.
+export const workerSplit = (colony, population) => {
+  const service = population > 0 ? Math.min(0.7, (population / 1000) ** 0.25) : 0
+  const agriculture = 0.05 + colonyCost(colony) * 0.05
+  const available = Math.max(0, 1 - service - agriculture) * population
+  const required = colony.InstallationWorkers + colony.YardWorkers
+
+  return {
+    population,
+    service: service * population,
+    agriculture: Math.min(agriculture, 1 - service) * population,
+    available,
+    required,
+    free: available - required,
+    efficiency: required > 0 ? Math.min(1, available / required) : 1,
+  }
+}
+
+// Month-by-month population over `years`, with inbound colonists landed at the start. Growth
+// stops at the infrastructure cap (above it the population shrinks and unrest rises) and fades
+// out toward the body's capacity, shared with any other population on the same body.
+// Returns the monthly series and when each limit is reached (months, or null past the horizon).
+export const projectColony = (colony, { years, inboundColonists = 0, capacity, otherPopulation = 0, infrastructureCap = Infinity }) => {
+  const months = Math.round(years * MONTHS_PER_YEAR)
+  const series = []
+  let population = colony.Population + inboundColonists
+  let crowdedAt = null
+  let infrastructureAt = population >= infrastructureCap ? 0 : null
+
+  for (let month = 0; month <= months; month++) {
+    series.push(population)
+
+    if ((otherPopulation + population) / capacity >= 1 / 3 && crowdedAt === null) {
+      crowdedAt = month
+    }
+
+    if (month === months) {
+      break
+    }
+
+    const rate = growthRate(colony, population, otherPopulation + population, capacity)
+    let next = population * (1 + rate) ** (1 / MONTHS_PER_YEAR)
+
+    if (rate > 0 && next >= infrastructureCap) {
+      next = Math.max(population, infrastructureCap)
+
+      if (infrastructureAt === null) {
+        infrastructureAt = month + 1
+      }
+    }
+
+    population = Math.max(0, next)
+  }
+
+  return { series, final: population, crowdedAt, infrastructureAt }
+}
