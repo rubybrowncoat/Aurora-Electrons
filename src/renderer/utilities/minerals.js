@@ -16,6 +16,25 @@ export const MINERALS = [
   { id: 11, name: 'Gallicite' },
 ]
 
+// A body can host a civilian mining complex with at least 10,000 t of a qualifying
+// mineral at accessibility 0.7 or better. The docs name Duranium only, the Aur_Calcs
+// workbook adds Gallicite; the qualifying minerals are a setting (`cmcMinerals`).
+export const CMC_CONFIG_KEY = 'cmcMinerals'
+export const CMC_DEFAULT_MINERAL_IDS = [1, 11]
+export const CMC_MIN_AMOUNT = 10000
+export const CMC_MIN_ACCESSIBILITY = 0.7
+
+// The stored setting, kept to known mineral IDs; anything else falls back to the default.
+export const cmcMineralIds = (stored) => {
+  if (!Array.isArray(stored)) {
+    return [...CMC_DEFAULT_MINERAL_IDS]
+  }
+
+  return stored.map(Number).filter((id) => MINERALS.some((mineral) => mineral.id === id))
+}
+
+export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount >= CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
+
 export const SECONDS_PER_DAY = 86400
 export const DAYS_PER_YEAR = 365
 

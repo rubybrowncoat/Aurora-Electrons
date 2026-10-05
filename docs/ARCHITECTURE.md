@@ -87,7 +87,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 |---|---|---|---|
 | `/` | Production | `pages/index.vue` | Production recap: research projects and queues, industrial projects, shipyard tasks and upgrades, ground-unit training, and terraforming. Each item shows its remaining time, with planet, sector, commander, and naval-admin bonuses applied. |
 | `/warnings` | Warnings | `pages/warnings.vue` | About 30 checks grouped into Contacts, Economy, Ships, Populations, Administrations, and Others. Examples: intruders, wasted mining or terraforming capacity, damaged and low-maintenance ships, idle labs and factories, governorless populations, lifepods, wrecks, unexploited ancient constructs, and dangerous rifts. |
-| `/minerals` | Minerals | `pages/minerals.vue` | Mineral deposits on surveyed bodies. Filters include system, orbital-mining eligibility, and accessibility totals. |
+| `/minerals` | Minerals | `pages/minerals.vue` | Mineral deposits on surveyed bodies. Filters include system, orbital-mining eligibility, and accessibility totals. A CMC chip marks bodies with enough of a qualifying mineral for a civilian mining complex (minerals set in Settings). |
 | `/mineral-outlook` | Outlook | `pages/mineral-outlook.vue` | Mineral runway and depletion forecast. Stock, production and use per mineral from the game's mineral ledger, with years of stock left. Sources and uses by purpose, a stock and output projection per mineral, and every mined deposit's years to half-mined and to empty. |
 | `/habitability` | Habitability | `pages/habitability.vue` | Colony cost per species and body, plus terraforming plans and their costs, with persistent filters. |
 | `/information` | Information | `pages/information.vue` | Transport capacity: civilian and military freight and colonists per year over a chosen distance. Also civilian network work orders, meaning installation supply and demand. |
@@ -95,7 +95,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 | `/log` | Log | `pages/log.vue` | The full game log with event-type filters, coloured with the race's event colours. |
 | `/designed-tech` | Designed Tech (WIP) | `pages/designed-tech.vue` | The race's designed components by category. |
 | `/technologies` | Tech Tree | `pages/technologies.vue` | The tech tree by research field, with researched techs highlighted and RP costs. |
-| `/settings` | wrench icon | `pages/settings.vue` | NPR visibility, the thousands separator, and the per-race maintenance threshold and excluded classes. |
+| `/settings` | wrench icon | `pages/settings.vue` | NPR visibility, the thousands separator, the minerals that qualify a body for a civilian mining complex (`cmcMinerals`, default Duranium and Gallicite), and the per-race maintenance threshold and excluded classes. |
 | `/engines` | hidden | `pages/engines.vue` | An engine planner. It's a work in progress, and its tab is commented out. |
 
 ### Utilities (`utilities/`)

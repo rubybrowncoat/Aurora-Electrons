@@ -186,6 +186,12 @@
               </template>
               <template #[`item.SystemBodyOrder`]="{ item }">
                 {{ systemBodyName(item) }}
+                <v-tooltip v-if="cmcQualifyingMinerals(item).length" top max-width="360">
+                  <template #activator="{ on }">
+                    <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
+                  </template>
+                  <span>Qualifies for a civilian mining complex: {{ cmcQualifyingMinerals(item).join(', ') }} (10,000 t+ at accessibility 0.7+). The game also needs a populated system and a body under 80 AU from its star; change the minerals in Settings.</span>
+                </v-tooltip>
               </template>
               <template #[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
@@ -260,6 +266,7 @@ import _intersectionBy from 'lodash/intersectionBy'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName } from '../utilities/aurora'
 import { areSetsEqual } from '../utilities/generic'
+import { CMC_CONFIG_KEY, MINERALS, cmcMineralIds, qualifiesForCmc } from '../utilities/minerals'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -369,6 +376,10 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+
+    cmcMineralNames() {
+      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY)).map((id) => MINERALS.find((mineral) => mineral.id === id).name)
+    },
 
     itemsPerPageOptions() {
       return [10, 15, 30, 50, 100]
@@ -688,6 +699,10 @@ export default {
     roundToDecimal,
 
     systemBodyName,
+
+    cmcQualifyingMinerals(body) {
+      return this.cmcMineralNames.filter((name) => qualifiesForCmc(body[name]))
+    },
 
     areSetsEqual,
 

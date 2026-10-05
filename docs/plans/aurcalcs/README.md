@@ -248,7 +248,7 @@ Several pages need the same pieces. Building them once avoids four copies of the
 3. Distance from the capital comes from G2.
 4. Decide whether this is a new page or a "Targets" mode of Habitability (open question 2).
 
-**Decided.** CMC qualification accepts Duranium or Gallicite, as the workbook does (the docs say Duranium only).
+**Decided.** The qualifying minerals are a setting (`cmcMinerals`), defaulting to Duranium or Gallicite as the workbook does (the docs say Duranium only). The Minerals page already marks qualifying bodies; this page should read the same setting.
 
 ### 8. Maintenance Budget
 
