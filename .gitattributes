@@ -19,6 +19,7 @@
 *.bmp binary
 *.zip binary
 *.db binary
+*.xlsx binary
 *.vue text
 
 # git objects as text for diff
