@@ -109,7 +109,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 - `math.js` has rounding helpers, `separatedNumber` for thousands separators, `scaleValue` (a piecewise-linear scaler used by the map), and `safeModulo360`.
 - `generic.js` has `convertDisplayBase`, which turns star component numbers into letters, and `areSetsEqual`.
 - `map.js` has the `Vector2` and `Vector3` classes used by the map.
-- `minerals.js` has the mineral maths: surface and orbital mining rates, the deposit depletion forecast (`depositForecast`, `depositStateAt`), the ledger's flow groups, the industry queue's yearly mineral demand, and naval-admin bonus chains.
+- `minerals.js` has the mineral maths: surface and orbital mining rates, the deposit depletion forecast (`depositForecast`, `depositStateAt`), the ledger's flow groups, the industry queue's yearly mineral demand, and naval-admin radius, required ranks and bonus chains.
 
 ### Mixins and charts
 

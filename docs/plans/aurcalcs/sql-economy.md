@@ -371,6 +371,8 @@ left join FCT_CommanderBonuses cbt on cbt.CommanderID = c.CommanderID and cbt.Bo
 where a.GameID = ${this.GameID} and a.RaceID = ${this.RaceID}
 ```
 
+`NavalAdminCommandLevel` is the HQ level, not the radius. Use the radius, required-rank and flag-bridge handling in `mineral-outlook.vue`'s `navalAdmins` and `utilities/minerals.js` (`navalAdminRadius`, `navalAdminRequiredRanks`, `navalAdminChainBonus`); docs/DATABASE.md § Commander bonus rules has the rules.
+
 ### SQL 3E: fuel held in tankers, stations and other ships
 ```sql
 select

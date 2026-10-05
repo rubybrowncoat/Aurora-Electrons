@@ -201,7 +201,7 @@ import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, orbitalRate, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
+import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, navalAdminRadius, navalAdminRequiredRanks, orbitalRate, surfaceRate, systemsWithinJumps, yearSteps } from '../utilities/minerals'
 
 const BUCKET_DAYS = 5
 const CRITICAL_YEARS = 5
@@ -958,12 +958,13 @@ export default {
           return {}
         }
 
-        const admins = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.ParentAdminCommandID as ParentCommandID, FCT_Population.SystemID, FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue as NavalAdminCommandLevel, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial as Share from FCT_NavalAdminCommand inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_NavalAdminCommand.PopulationID left join FCT_Population on FCT_NavalAdminCommand.PopulationID = FCT_Population.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID left join FCT_Commander on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 and FCT_Commander.RaceID = FCT_NavalAdminCommand.RaceID left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 6 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0`).then(([items]) => items)
+        const admins = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.ParentAdminCommandID as ParentCommandID, FCT_NavalAdminCommand.ShipID, FCT_NavalAdminCommand.MinimumRankPriority, case when FCT_NavalAdminCommand.ShipID > 0 then VIR_Flagship.SystemID else FCT_Population.SystemID end as SystemID, coalesce(VIR_Headquarters.Level, 0) as HeadquartersLevel, FCT_Ranks.Priority as RankPriority, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial as Share from FCT_NavalAdminCommand left join FCT_Population on FCT_Population.PopulationID = FCT_NavalAdminCommand.PopulationID left join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue) as Level from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0 group by FCT_PopulationInstallations.PopID) as VIR_Headquarters on VIR_Headquarters.PopID = FCT_NavalAdminCommand.PopulationID left join (select FCT_Ship.ShipID, FCT_Fleet.SystemID from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}) as VIR_Flagship on VIR_Flagship.ShipID = FCT_NavalAdminCommand.ShipID left join DIM_NavalAdminCommandType on DIM_NavalAdminCommandType.CommandTypeID = FCT_NavalAdminCommand.AdminCommandTypeID left join FCT_Commander on FCT_Commander.CommandID = FCT_NavalAdminCommand.NavalAdminCommandID and FCT_Commander.CommandType = 12 and FCT_Commander.RaceID = FCT_NavalAdminCommand.RaceID left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID left join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID}`).then(([items]) => items)
 
         if (!admins.some((admin) => admin.BonusValue)) {
           return {}
         }
 
+        const captains = await this.database.query(`select FCT_Fleet.ParentCommandID as NavalAdminCommandID, min(FCT_Ranks.Priority) as RankPriority from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Commander on FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID inner join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.ParentCommandID > 0 group by FCT_Fleet.ParentCommandID`).then(([items]) => items)
         const links = await this.database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_JumpPoint.GameID = ${this.GameID}`).then(([items]) => items)
         const graph = {}
 
@@ -972,7 +973,18 @@ export default {
           ;(graph[link.DestinationID] = graph[link.DestinationID] || new Set()).add(link.SystemID)
         })
 
-        return Object.fromEntries(admins.map((admin) => [admin.NavalAdminCommandID, { ...admin, Systems: systemsWithinJumps(graph, admin.SystemID, admin.NavalAdminCommandLevel * (admin.Radius || 1)) }]))
+        const byId = Object.fromEntries(admins.map((admin) => [admin.NavalAdminCommandID, admin]))
+        const required = navalAdminRequiredRanks(byId, Object.fromEntries(captains.map((captain) => [captain.NavalAdminCommandID, captain.RankPriority])))
+
+        return Object.fromEntries(admins.map((admin) => {
+          const radius = navalAdminRadius(admin)
+
+          return [admin.NavalAdminCommandID, {
+            ...admin,
+            Eligible: admin.RankPriority != null && admin.RankPriority <= required[admin.NavalAdminCommandID],
+            Systems: radius === null || admin.SystemID == null ? new Set() : systemsWithinJumps(graph, admin.SystemID, radius),
+          }]
+        }))
       },
       default: {},
     },

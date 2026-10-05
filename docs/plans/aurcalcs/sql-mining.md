@@ -110,7 +110,7 @@ left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 6 and FCT_Comma
 where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0
 ```
 
-No admin command has a Mining bonus in the sample (`MiningBonusValue` null); the scratch copy with a synthetic 1.1 on command 1386 returned it. Sorium **harvesters** deplete a gas giant but produce fuel, not stockpile minerals, and none exist here, so they are out of scope.
+No admin command has a Mining bonus in the sample (`MiningBonusValue` null); the scratch copy with a synthetic 1.1 on command 1386 returned it. The page's version of this query (`navalAdmins` in `mineral-outlook.vue`) goes further, following docs/DATABASE.md § Commander bonus rules. It sums the HQ level per population and converts it to a radius (1 jump plus 1 per doubling), and keeps commands on flag bridges (radius 0, at the ship's system), which the `inner join` here drops. It also loads each commander's rank, so a command without a commander of the required rank breaks the chain. Sorium **harvesters** deplete a gas giant but produce fuel, not stockpile minerals, and none exist here, so they are out of scope.
 
 ### 1d. JS side
 

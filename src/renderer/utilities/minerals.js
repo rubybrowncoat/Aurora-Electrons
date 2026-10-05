@@ -227,18 +227,76 @@ export const systemsWithinJumps = (graph, systemId, jumps) => {
   return reached
 }
 
+// An admin command's radius in jumps, or null when it has no base. A Naval Headquarters
+// adds one jump per doubling of its level (levels 1, 2, 4, 8 give 1, 2, 3, 4), times the
+// command type's multiplier (Patrol and Survey 2). A command on a flag bridge reaches
+// only its own system.
+export const navalAdminRadius = ({ ShipID, HeadquartersLevel, Radius }) => {
+  if (ShipID) {
+    return 0
+  }
+
+  if (!(HeadquartersLevel >= 1)) {
+    return null
+  }
+
+  return (1 + Math.floor(Math.log2(HeadquartersLevel))) * (Radius || 1)
+}
+
+// The rank each admin command's commander needs, as an `FCT_Ranks.Priority` (1 is the
+// highest): one rank above the best captain in its directly attached fleets, above each
+// direct subordinate's required rank and commander, and at least its set minimum.
+// `admins`: { [NavalAdminCommandID]: { ParentCommandID, RankPriority, MinimumRankPriority } }
+// `captainRanks`: { [NavalAdminCommandID]: best captain's Priority }
+export const navalAdminRequiredRanks = (admins, captainRanks) => {
+  const children = {}
+  const required = {}
+
+  Object.values(admins).forEach((admin) => {
+    ;(children[admin.ParentCommandID] = children[admin.ParentCommandID] || []).push(admin)
+  })
+
+  const visit = (admin, path) => {
+    const id = admin.NavalAdminCommandID
+
+    if (id in required) {
+      return required[id]
+    } else if (path.has(id)) {
+      return Infinity
+    }
+
+    path.add(id)
+
+    const candidates = [admin.MinimumRankPriority > 0 ? admin.MinimumRankPriority : Infinity, (captainRanks[id] || Infinity) - 1]
+
+    ;(children[id] || []).forEach((child) => {
+      candidates.push(visit(child, path) - 1, (child.RankPriority || Infinity) - 1)
+    })
+
+    path.delete(id)
+    required[id] = Math.max(1, Math.min(...candidates))
+
+    return required[id]
+  }
+
+  Object.values(admins).forEach((admin) => visit(admin, new Set()))
+
+  return required
+}
+
 // Naval admin bonuses chain up the command tree: the ship must be within its own
 // command's range, and each command's HQ within its parent's range for the parent
-// to apply too (docs/DATABASE.md § Commander bonus rules). Each one passes on its
-// commander's bonus scaled by the command type's share.
-// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Systems: Set } }
+// to apply too. A command without a commander of the required rank breaks the chain
+// (docs/DATABASE.md § Commander bonus rules). Each one passes on its commander's
+// bonus scaled by the command type's share.
+// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Systems: Set } }
 export const navalAdminChainBonus = (admins, systemId, commandId) => {
   let bonus = 1
   let location = systemId
   const visited = new Set()
   let current = admins[commandId]
 
-  while (current && !visited.has(current.NavalAdminCommandID) && current.Systems.has(location)) {
+  while (current && !visited.has(current.NavalAdminCommandID) && current.Eligible && current.Systems.has(location)) {
     visited.add(current.NavalAdminCommandID)
 
     if (current.BonusValue) {
