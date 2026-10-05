@@ -50,6 +50,9 @@ The settings toggle `spyNPR` exposes NPRs in the race picker. That's the only in
 - **Odd column names:** `FCT_System.Stars` (the model calls it `StarCount`), `FCT_AncientConstruct.ResearchField` (the model calls it `ResearchFieldID`), and `FCT_PopulationInstallations.PopID` (not `PopulationID`).
 - Commander bonuses come from `FCT_CommanderBonuses`, joined on `BonusID`, and the bonus names are in `DIM_CommanderBonusType`. The ones used in code are 3 Research, 4 Shipbuilding, 5 Production, 9 Terraforming, and 11 Ground Construction. `FCT_Commander.CommandType` identifies what a commander leads: 1 ship, 3 population, 4 sector, 5 ground formation, 7 research project, 12 naval admin. `CommandID` holds the matching ID, and `CommanderType` the officer type.
 
+- **Mineral ledger** (Aurora 2.6+): `FCT_RaceMineralData` logs every mineral movement per population, mineral (`MineralID` 1–11), type and time, in tonnes, always positive. `DIM_MineralDataType.Income` says which direction a type is. Types 7, 8, 12 and 13 (freighter and mass-driver transfers) and 20 (starting stockpile) move minerals between your own colonies, so leave them out of empire totals. Mining events come once per production cycle (5 days in the sample), and the sample holds about 40 days. Mineral Outlook annualises it and groups the types in `utilities/minerals.js` (`FLOW_GROUPS`).
+- **Deposit accessibility** stays at `OriginalAcc` until `Amount` falls to `HalfOriginalAmount`, then falls linearly with the amount: `0.1 + (OriginalAcc - 0.1) × Amount / HalfOriginalAmount`. It reaches 0.1 as the deposit empties. Deposits that start at or below 0.1 don't decline. A ground survey can raise `Accessibility` without updating `OriginalAcc`.
+
 ## Commander bonus rules
 
 These are the rules the production maths relies on, checked against the references below. A bonus value is a multiplier such as 1.2. A command that passes on a share `s` of it contributes `1 + (bonus - 1) * s`.
@@ -97,6 +100,7 @@ Some details:
 | Production (`index.vue`) | FCT_ResearchProject/Queue, FCT_IndustrialProjects, FCT_ShipyardTask, FCT_Shipyard, FCT_GroundUnitTraining, FCT_Population(+Installations), FCT_Commander(+Bonuses), FCT_NavalAdminCommand, FCT_AncientConstruct, FCT_AtmosphericGas, FCT_JumpPoint, FCT_RaceJumpPointSurvey |
 | Warnings | Models above + FCT_Ship, FCT_ShipClass, FCT_ClassComponent, FCT_ShipDesignComponents, FCT_DamagedComponent, FCT_ArmourDamage, FCT_FireControlAssignment, FCT_Lifepods, FCT_Wrecks, FCT_MineralDeposit, FCT_SectorCommand |
 | Minerals | FCT_MineralDeposit, FCT_SystemBody, FCT_SystemBodySurveys, FCT_RaceSysSurvey, DIM_KnownSystems |
+| Mineral Outlook | FCT_RaceMineralData, DIM_MineralDataType, FCT_MineralDeposit, FCT_Population, FCT_PopulationInstallations, DIM_PlanetaryInstallation, FCT_ShipCargo, FCT_MassDriverPackets, FCT_IndustrialProjects, FCT_Ship, FCT_ShipClass, FCT_Fleet, FCT_NavalAdminCommand, FCT_Commander, FCT_CommanderBonuses, FCT_SystemBodySurveys |
 | Habitability | FCT_SystemBody, FCT_AtmosphericGas, DIM_Gases, FCT_Species, FCT_MineralDeposit, FCT_SystemBodySurveys |
 | Information | FCT_Ship, FCT_ShipClass, FCT_ShipCargo, FCT_Fleet, FCT_MoveOrders, FCT_PopInstallationDemand, FCT_ShippingLines, DIM_PlanetaryInstallation |
 | Map | FCT_RaceSysSurvey, FCT_System, FCT_JumpPoint, FCT_RaceJumpPointSurvey, FCT_SurveyLocation, FCT_RaceSurveyLocation, FCT_SystemBodySurveys, FCT_SectorCommand, FCT_AlienRace, DIM_KnownSystems; SystemView: Star, StarType, SystemBody, SystemBodyName |

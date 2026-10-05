@@ -14,6 +14,7 @@ Aurora Electrons is an Electron desktop app whose renderer is a Nuxt 2 single-pa
 | File watching | `chokidar` 4 |
 | Galaxy map | `cytoscape` with cola, cose-bilkent, fcose, cxtmenu, layout-utilities, and navigator plugins |
 | System view | `pixi.js` 6, `pixi-viewport`, `@timohausmann/quadtree-js` |
+| Charts | `chart.js` 4, through `components/charts/ChartCanvas.vue` |
 | Misc | `dayjs` (UTC), `lodash`, `d3-color`/`d3-interpolate`, `color-hash`, `romanum` |
 | Error reporting | `@nuxtjs/sentry`, with the DSN in `src/renderer/nuxt.config.js` |
 
@@ -87,6 +88,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 | `/` | Production | `pages/index.vue` | Production recap: research projects and queues, industrial projects, shipyard tasks and upgrades, ground-unit training, and terraforming. Each item shows its remaining time, with planet, sector, commander, and naval-admin bonuses applied. |
 | `/warnings` | Warnings | `pages/warnings.vue` | About 30 checks grouped into Contacts, Economy, Ships, Populations, Administrations, and Others. Examples: intruders, wasted mining or terraforming capacity, damaged and low-maintenance ships, idle labs and factories, governorless populations, lifepods, wrecks, unexploited ancient constructs, and dangerous rifts. |
 | `/minerals` | Minerals | `pages/minerals.vue` | Mineral deposits on surveyed bodies. Filters include system, orbital-mining eligibility, and accessibility totals. |
+| `/mineral-outlook` | Outlook | `pages/mineral-outlook.vue` | Mineral runway and depletion forecast. Stock, production and use per mineral from the game's mineral ledger, with years of stock left. Sources and uses by purpose, a stock and output projection per mineral, and every mined deposit's years to half-mined and to empty. |
 | `/habitability` | Habitability | `pages/habitability.vue` | Colony cost per species and body, plus terraforming plans and their costs, with persistent filters. |
 | `/information` | Information | `pages/information.vue` | Transport capacity: civilian and military freight and colonists per year over a chosen distance. Also civilian network work orders, meaning installation supply and demand. |
 | `/map` | Map (WIP) | `pages/map.vue`, `components/SystemView.vue` | Galaxy map of the systems and jump points the race knows, with sectors, controllers, and survey progress. Includes a per-system PIXI view, PNG export, and **Save Positions**, which writes back to the save. |
@@ -107,6 +109,12 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 - `math.js` has rounding helpers, `separatedNumber` for thousands separators, `scaleValue` (a piecewise-linear scaler used by the map), and `safeModulo360`.
 - `generic.js` has `convertDisplayBase`, which turns star component numbers into letters, and `areSetsEqual`.
 - `map.js` has the `Vector2` and `Vector3` classes used by the map.
+- `minerals.js` has the mineral maths: surface and orbital mining rates, the deposit depletion forecast (`depositForecast`, `depositStateAt`), the ledger's flow groups, the industry queue's yearly mineral demand, and naval-admin bonus chains.
+
+### Mixins and charts
+
+- `mixins/production-modifiers.js` loads every population's production modifiers and provides the construction, ordnance and fighter capacity helpers. The Production and Mineral Outlook pages share it.
+- `components/charts/ChartCanvas.vue` wraps Chart.js. Pass `type`, `data` and `options`. It applies the design-system colours for the current theme, a crosshair on line charts, and labelled vertical markers (`options.plugins.guides.markers`). `components/charts/theme.js` holds those colours and the validated categorical palette. In light mode three of its hues are under 3:1 on white, so any chart that uses them needs a table view.
 
 ### Leftovers
 

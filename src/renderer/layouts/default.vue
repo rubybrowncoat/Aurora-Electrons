@@ -58,6 +58,7 @@
           <v-tab to="/" nuxt>Production</v-tab>
           <v-tab to="/warnings" nuxt>Warnings</v-tab>
           <v-tab to="/minerals" nuxt>Minerals</v-tab>
+          <v-tab to="/mineral-outlook" nuxt>Outlook</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/information" nuxt>Information</v-tab>
           <v-tab to="/map" nuxt>Map (WIP)</v-tab>
@@ -132,6 +133,9 @@ export default {
         }
         case 'minerals': {
           return 'Mineral Breakdown'
+        }
+        case 'mineral-outlook': {
+          return 'Mineral Outlook'
         }
         case 'habitability': {
           return 'Habitability Breakdown'
