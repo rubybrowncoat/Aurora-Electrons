@@ -43,7 +43,7 @@
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="stockpilingCivilianMinerals.length || wastedMiningCapacity.length || wastedTerraformingCapacity.length" class="mb-5" justify="start">
+        <v-row v-if="stockpilingCivilianMinerals.length || wastedMiningCapacity.length || wastedTerraformingCapacity.length || massDriverOrphans.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Economy </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
@@ -101,10 +101,27 @@
                   </v-list>
                 </v-expansion-panel-content>
               </v-expansion-panel>
+              <v-expansion-panel v-if="massDriverOrphans.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ massDriverOrphans.length }} mining colonies without a mass driver destination </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <div class="caption mb-2">These colonies mine and have mass drivers, and other colonies share their system, but they send nothing anywhere, so minerals pile up where they're dug. Colonies that receive packets themselves are left out.</div>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="colony in massDriverOrphans" :key="colony.PopulationID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ populationText(colony) }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ separatedNumber(colony.Mines, separator) }} mines, {{ colony.Drivers }} mass drivers, {{ colony.OtherColonies }} other {{ colony.OtherColonies === 1 ? 'colony' : 'colonies' }} in the system</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || misconfiguredSupplyShipClasses.length || misconfiguredTankerShipClasses.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length" class="mb-5" justify="start">
+        <v-row v-if="damagedShips.length || armorDamagedShips.length || lowMoraleCrews.length || lowMaintenanceShips.length || misconfiguredSupplyShipClasses.length || misconfiguredTankerShipClasses.length || obsoleteShips.length || fullyTrainedShips.length || openFireShips.length || transportClassesWithoutCargoShuttles.length || undermannedShips.length || outdatedCrewQuarters.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Ships </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
@@ -287,10 +304,140 @@
                   </v-list>
                 </v-expansion-panel-content>
               </v-expansion-panel>
+              <v-expansion-panel v-if="undermannedShips.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ undermannedShips.length }} ships short of crew </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <div class="caption mb-2">Survey sensors, harvesters, orbital mining, maintenance, salvage, terraforming and jump-gate modules run at the share of crew aboard, cargo handling slows, and morale drops below half a crew.</div>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="ship in undermannedShips" :key="ship.ShipID">
+                        <v-list-item-content>
+                          <v-list-item-title>
+                            <span :class="`${levelColor(ship.CurrentCrew / ship.ClassCrew)}--text font-weight-bold`">{{ roundToDecimal((ship.CurrentCrew / ship.ClassCrew) * 100, 1) }}%</span>
+                            &mdash; {{ ship.FleetName }} &mdash; {{ ship.ShipName }}
+                          </v-list-item-title>
+                          <v-list-item-subtitle>{{ ship.ClassName }} Class: {{ separatedNumber(ship.CurrentCrew, separator) }} of {{ separatedNumber(ship.ClassCrew, separator) }} crew</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="outdatedCrewQuarters.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ outdatedCrewQuarters.length }} ship classes with outdated crew quarters </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <div class="caption mb-2">Each class keeps the Crew Quarters Design of the day it was designed. Update CDE on the class window (unlock the class first) to free the space on new ships.</div>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="shipClass in outdatedCrewQuarters" :key="shipClass.ShipClassID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ shipClass.ClassName }} Class</v-list-item-title>
+                          <v-list-item-subtitle>Crew quarters at {{ roundToDecimal(shipClass.ClassEfficiency * 100, 0) }}% of standard size, {{ roundToDecimal(shipClass.RaceEfficiency * 100, 0) }}% possible{{ shipClass.Locked ? ', locked' : '' }}; {{ shipClass.Ships }} {{ shipClass.Ships === 1 ? 'ship' : 'ships' }} built</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
             </v-expansion-panels>
           </v-col>
         </v-row>
-        <v-row v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length" class="mb-5" justify="start">
+        <v-row v-if="idleFleets.length || idleCargoShips.length || blindSurveyOrders.length || strandedMiners.length || orphanedFleets.length" class="mb-5" justify="start">
+          <v-col cols="12" class="display-1"> Fleets </v-col>
+          <v-col cols="12">
+            <v-expansion-panels hover>
+              <v-expansion-panel v-if="idleFleets.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ visibleIdleFleets.length }} idle fleets{{ idleFleetsAtColonies ? '' : ' away from your colonies' }} </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <div class="d-flex align-center flex-wrap caption mb-2">
+                    <span class="mr-4">Mobile fleets with no orders and at least one ship that isn't overhauling or docked. Fleets following another fleet are left out.</span>
+                    <v-switch v-model="idleFleetsAtColonies" :label="`Include ${parkedIdleFleets} parked at your colonies`" dense hide-details class="mt-0 mr-4" @change="(value) => config.set(`game.${GameID}.race.${RaceID}.idleFleetsAtColonies`, !!value)" />
+                    <v-btn v-if="ignoredIdleFleets" x-small text @click="clearIdleFleetExclusions">Show {{ ignoredIdleFleets }} ignored</v-btn>
+                  </div>
+                  <v-list nav dense>
+                    <v-list-item v-for="fleet in visibleIdleFleets" :key="fleet.FleetID">
+                      <v-list-item-content>
+                        <v-list-item-title>{{ fleet.FleetName }}</v-list-item-title>
+                        <v-list-item-subtitle>{{ fleet.location }} &mdash; {{ fleet.Ships }} {{ fleet.Ships === 1 ? 'ship' : 'ships' }}{{ fleet.StandingOrders ? ', has standing orders' : '' }}{{ fleet.ConditionalOrders ? ', has conditional orders' : '' }}</v-list-item-subtitle>
+                      </v-list-item-content>
+                      <v-list-item-action>
+                        <v-btn icon small title="Ignore this fleet" @click="ignoreIdleFleet(fleet.FleetID)"><v-icon small>mdi-eye-off</v-icon></v-btn>
+                      </v-list-item-action>
+                    </v-list-item>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="idleCargoShips.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ idleCargoShips.length }} ships carrying cargo with no orders </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="ship in idleCargoShips" :key="ship.ShipID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ ship.FleetName }} &mdash; {{ ship.ShipName }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ cargoLabel(ship) }} in {{ ship.SystemName }}</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="blindSurveyOrders.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ blindSurveyOrders.length }} survey orders without the sensors for them </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="order in blindSurveyOrders" :key="order.MoveOrderID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ order.FleetName }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ order.Description }}: no ship in the fleet has a {{ order.MoveActionID === 9 ? 'geological' : 'gravitational' }} survey sensor</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="strandedMiners.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ strandedMiners.length }} orbital mining fleets at bodies they can't mine </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="fleet in strandedMiners" :key="fleet.FleetID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ fleet.FleetName }} &mdash; {{ systemBodyName(fleet, { Name: fleet.SystemName }) }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ strandedMinerReason(fleet) }} ({{ fleet.MiningModules }} mining modules)</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="orphanedFleets.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ orphanedFleets.length }} fleets assigned to a colony that no longer exists </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="fleet in orphanedFleets" :key="fleet.FleetID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ fleet.FleetName }}</v-list-item-title>
+                          <v-list-item-subtitle>In {{ fleet.SystemName || 'an unknown system' }}; assign it to a colony again</v-list-item-subtitle>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+            </v-expansion-panels>
+          </v-col>
+        </v-row>
+        <v-row v-if="freeConstructionCapacityPopulations.length || freeOrdnanceCapacityPopulations.length || freeFighterCapacityPopulations.length || lowEfficiencyPopulations.length || selfSustainingDestinationPopulations.length || deadResearchProjects.length || forgottenPrototypes.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Populations </v-col>
           <v-col cols="12">
             <v-expansion-panels hover>
@@ -413,6 +560,23 @@
                       <v-list-item v-for="research in deadResearchProjects" :key="research.PopulationID">
                         <v-list-item-content>
                           <v-list-item-title><span v-html="populationName(research)" /> &mdash; {{ research.ResearchName }}</v-list-item-title>
+                        </v-list-item-content>
+                      </v-list-item>
+                    </v-list-item-group>
+                  </v-list>
+                </v-expansion-panel-content>
+              </v-expansion-panel>
+              <v-expansion-panel v-if="forgottenPrototypes.length">
+                <v-expansion-panel-header class="font-weight-bold"> {{ forgottenPrototypes.length }} research prototypes with no project </v-expansion-panel-header>
+
+                <v-expansion-panel-content>
+                  <div class="caption mb-2">Components marked for research that no lab is researching and no colony has queued.</div>
+                  <v-list nav dense>
+                    <v-list-item-group color="primary">
+                      <v-list-item v-for="component in forgottenPrototypes" :key="component.SDComponentID">
+                        <v-list-item-content>
+                          <v-list-item-title>{{ component.Name }}</v-list-item-title>
+                          <v-list-item-subtitle>{{ component.TypeDescription }}</v-list-item-subtitle>
                         </v-list-item-content>
                       </v-list-item>
                     </v-list-item-group>
@@ -621,6 +785,10 @@ export default {
       distanceMultiplier: 1000000000,
       distance: 1,
 
+      // Per race: show idle fleets parked at the race's colonies, and fleets the player ignores.
+      idleFleetsAtColonies: false,
+      idleFleetExclusions: [],
+
       //
 
       rules: {
@@ -637,6 +805,29 @@ export default {
 
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
+
+    // Idle fleets at the race's own colonies are usually parked on purpose, so they're hidden unless asked for.
+    visibleIdleFleets() {
+      return this.idleFleets.filter((fleet) => (this.idleFleetsAtColonies || !fleet.ColonyName) && !this.idleFleetExclusions.includes(fleet.FleetID)).map((fleet) => ({ ...fleet, location: this.idleFleetLocation(fleet) }))
+    },
+
+    parkedIdleFleets() {
+      return this.idleFleets.filter((fleet) => fleet.ColonyName && !this.idleFleetExclusions.includes(fleet.FleetID)).length
+    },
+
+    ignoredIdleFleets() {
+      return this.idleFleets.filter((fleet) => this.idleFleetExclusions.includes(fleet.FleetID)).length
+    },
+  },
+  watch: {
+    // The idle-fleet choices are stored per game and race.
+    RaceID: {
+      immediate: true,
+      handler() {
+        this.idleFleetsAtColonies = this.config.get(`game.${this.GameID}.race.${this.RaceID}.idleFleetsAtColonies`, false)
+        this.idleFleetExclusions = this.config.get(`game.${this.GameID}.race.${this.RaceID}.idleFleetExclusions`, [])
+      },
+    },
   },
   methods: {
     separatedNumber,
@@ -647,6 +838,42 @@ export default {
     populationName,
 
     _partition,
+
+    // populationName() as plain text, for names that shouldn't go through v-html.
+    populationText(population) {
+      return populationName(population).replace(/&mdash;/g, '—')
+    },
+    idleFleetLocation(fleet) {
+      if (fleet.ColonyName) {
+        return `At ${fleet.ColonyName}`
+      } else if (fleet.OrbitBodyID > 0) {
+        return `Orbiting ${systemBodyName(fleet, { Name: fleet.SystemName })}`
+      } else if (fleet.JumpPointID) {
+        return `At a jump point in ${fleet.SystemName}`
+      }
+
+      return `Deep space in ${fleet.SystemName}`
+    },
+    ignoreIdleFleet(fleetId) {
+      this.idleFleetExclusions = [...this.idleFleetExclusions, fleetId]
+      this.config.set(`game.${this.GameID}.race.${this.RaceID}.idleFleetExclusions`, this.idleFleetExclusions)
+    },
+    clearIdleFleetExclusions() {
+      this.idleFleetExclusions = []
+      this.config.set(`game.${this.GameID}.race.${this.RaceID}.idleFleetExclusions`, [])
+    },
+    cargoLabel(ship) {
+      return [ship.Colonists ? `${separatedNumber(ship.Colonists, this.separator)} colonists` : null, ship.Installations ? `${separatedNumber(roundToDecimal(ship.Installations, 2), this.separator)} installations` : null, ship.Minerals ? `${separatedNumber(roundToDecimal(ship.Minerals), this.separator)} t of minerals` : null, ship.Other ? `${separatedNumber(roundToDecimal(ship.Other, 2), this.separator)} other cargo` : null].filter(Boolean).join(', ')
+    },
+    strandedMinerReason(fleet) {
+      if (fleet.Reason === 'not surveyed') {
+        return 'You haven\'t surveyed this body'
+      } else if (fleet.Reason === 'no deposits') {
+        return 'No minerals here'
+      }
+
+      return `${separatedNumber(roundToDecimal(fleet.Diameter), this.separator)} km across, more than the ${separatedNumber(fleet.MaximumDiameter, this.separator)} km orbital mining can handle`
+    },
 
     levelColor(morale) {
       if (morale > 0.85) {
@@ -697,6 +924,105 @@ export default {
     },
   },
   asyncComputed: {
+    // Mobile military fleets with no orders and a ship that is neither overhauling nor docked (sql-fleet.md § 3, W1).
+    idleFleets: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, VIR_Ships.Ships, (select FCT_Population.PopName from FCT_Population where FCT_Population.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_Population.RaceID = FCT_Fleet.RaceID and FCT_Population.GameID = FCT_Fleet.GameID and FCT_Fleet.OrbitBodyID > 0 limit 1) as ColonyName, (select FCT_JumpPoint.WarpPointID from FCT_JumpPoint where FCT_JumpPoint.SystemID = FCT_Fleet.SystemID and FCT_JumpPoint.GameID = FCT_Fleet.GameID and FCT_JumpPoint.Xcor = FCT_Fleet.Xcor and FCT_JumpPoint.Ycor = FCT_Fleet.Ycor limit 1) as JumpPointID, (select count(*) from FCT_FleetStandingOrder where FCT_FleetStandingOrder.FleetID = FCT_Fleet.FleetID) as StandingOrders, FCT_Fleet.ConditionalOrderOne + FCT_Fleet.ConditionalOrderTwo as ConditionalOrders from FCT_Fleet inner join (select FCT_Ship.FleetID, count(*) as Ships, sum(case when FCT_Ship.MaintenanceState <> 2 and FCT_Ship.MothershipID = 0 then 1 else 0 end) as Available from FCT_Ship where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} group by FCT_Ship.FleetID) as VIR_Ships on VIR_Ships.FleetID = FCT_Fleet.FleetID and VIR_Ships.Available > 0 left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.ShippingLine = 0 and FCT_Fleet.CivilianFunction = 0 and FCT_Fleet.Speed > 1 and FCT_Fleet.AnchorFleetID = 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) order by FCT_Fleet.FleetName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Ships of order-less mobile fleets that still carry cargo (W2). Civilian lines wait for orders by design.
+    idleCargoShips: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ClassName, FCT_RaceSysSurvey.Name as SystemName, sum(case when FCT_ShipCargo.CargoTypeID = 1 then FCT_ShipCargo.Amount else 0 end) as Colonists, sum(case when FCT_ShipCargo.CargoTypeID = 2 then FCT_ShipCargo.Amount else 0 end) as Installations, sum(case when FCT_ShipCargo.CargoTypeID = 3 then FCT_ShipCargo.Amount else 0 end) as Minerals, sum(case when FCT_ShipCargo.CargoTypeID not in (1, 2, 3) then FCT_ShipCargo.Amount else 0 end) as Other from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ShipCargo on FCT_ShipCargo.ShipID = FCT_Ship.ShipID and FCT_ShipCargo.Amount > 0 left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.ShippingLine = 0 and FCT_Fleet.CivilianFunction = 0 and FCT_Fleet.Speed > 1 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) group by FCT_Ship.ShipID order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Geological (9) and gravitational (12) survey orders in fleets without that sensor (W3).
+    blindSurveyOrders: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_MoveOrders.MoveOrderID, FCT_MoveOrders.MoveActionID, FCT_MoveOrders.Description, sum(case when FCT_ShipClass.GeoSurvey > 0 then 1 else 0 end) as GeoShips, sum(case when FCT_ShipClass.GravSurvey > 0 then 1 else 0 end) as GravShips from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_MoveOrders.MoveActionID in (9, 12) group by FCT_MoveOrders.MoveOrderID having (FCT_MoveOrders.MoveActionID = 9 and GeoShips = 0) or (FCT_MoveOrders.MoveActionID = 12 and GravShips = 0) order by FCT_Fleet.FleetName, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Orbital miners parked where they can't mine: an unsurveyed body, no deposits, or too large (W4).
+    strandedMiners: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius * 2 as Diameter, FCT_Race.MaximumOrbitalMiningDiameter as MaximumDiameter, sum(FCT_ShipClass.MiningModules) as MiningModules, case when FCT_SystemBodySurveys.SystemBodyID is null then 'not surveyed' when VIR_Deposits.Deposits is null then 'no deposits' else 'too large' end as Reason from FCT_Fleet inner join FCT_Race on FCT_Race.RaceID = FCT_Fleet.RaceID and FCT_Race.GameID = FCT_Fleet.GameID inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Fleet.RaceID and FCT_SystemBodySurveys.GameID = FCT_Fleet.GameID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join (select FCT_MineralDeposit.SystemBodyID, count(*) as Deposits from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.Amount > 0 group by FCT_MineralDeposit.SystemBodyID) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.SystemBodyID is not null where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.OrbitBodyID > 0 and FCT_Ship.MothershipID = 0 and (FCT_SystemBodySurveys.SystemBodyID is null or VIR_Deposits.Deposits is null or FCT_SystemBody.Radius * 2 > FCT_Race.MaximumOrbitalMiningDiameter) and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Colonies with mines, mass drivers and deposits that send nowhere while sharing a system with other colonies; hubs (destinations of others) are left out (W6).
+    massDriverOrphans: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, VIR_Installations.Mines, VIR_Installations.Drivers, (select count(*) from FCT_Population as VIR_Other where VIR_Other.SystemID = FCT_Population.SystemID and VIR_Other.RaceID = FCT_Population.RaceID and VIR_Other.GameID = FCT_Population.GameID and VIR_Other.PopulationID <> FCT_Population.PopulationID) as OtherColonies from FCT_Population inner join (select FCT_PopulationInstallations.PopID, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID in (7, 12, 48) then FCT_PopulationInstallations.Amount else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Drivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID and VIR_Installations.Mines > 0 and VIR_Installations.Drivers > 0 inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Population.RaceID and FCT_SystemBodySurveys.GameID = FCT_Population.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.MassDriverDest = 0 and exists (select 1 from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount > 0) and exists (select 1 from FCT_Population as VIR_Other where VIR_Other.SystemID = FCT_Population.SystemID and VIR_Other.RaceID = FCT_Population.RaceID and VIR_Other.GameID = FCT_Population.GameID and VIR_Other.PopulationID <> FCT_Population.PopulationID) and not exists (select 1 from FCT_Population as VIR_Sender where VIR_Sender.MassDriverDest = FCT_Population.PopulationID and VIR_Sender.GameID = FCT_Population.GameID) order by FCT_Population.PopName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Ships below their class crew (W7).
+    undermannedShips: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ClassName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_Ship.CrewMorale from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.Crew > 0 and FCT_Ship.CurrentCrew < FCT_ShipClass.Crew order by FCT_Ship.CurrentCrew * 1.0 / FCT_ShipClass.Crew, FCT_Fleet.FleetName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Own, current classes whose Crew Design Efficiency is behind the race's (W8). CrewQuartersHS is always 0, so class crew is the filter.
+    outdatedCrewQuarters: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.CrewDesignEfficiency as ClassEfficiency, FCT_Race.CrewDesignEfficiency as RaceEfficiency, FCT_ShipClass.Locked, (select count(*) from FCT_Ship where FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID and FCT_Ship.GameID = FCT_ShipClass.GameID) as Ships from FCT_ShipClass inner join FCT_Race on FCT_Race.RaceID = FCT_ShipClass.RaceID and FCT_Race.GameID = FCT_ShipClass.GameID where FCT_ShipClass.GameID = ${this.GameID} and FCT_ShipClass.RaceID = ${this.RaceID} and FCT_ShipClass.Obsolete = 0 and FCT_ShipClass.ClassShippingLineID = 0 and FCT_ShipClass.OtherRaceClassID = 0 and FCT_ShipClass.Crew > 0 and FCT_ShipClass.CrewDesignEfficiency > FCT_Race.CrewDesignEfficiency + 0.0001 order by FCT_ShipClass.ClassName`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Components marked as research prototypes (Prototype 3) with no project and nothing queued (W9).
+    forgottenPrototypes: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, DIM_ComponentType.TypeDescription from FCT_RaceTech inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_RaceTech.TechID left join DIM_ComponentType on DIM_ComponentType.ComponentTypeID = FCT_ShipDesignComponents.ComponentTypeID where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID} and FCT_ShipDesignComponents.Prototype = 3 and not exists (select 1 from FCT_ResearchProject where FCT_ResearchProject.TechID = FCT_RaceTech.TechID and FCT_ResearchProject.RaceID = FCT_RaceTech.RaceID and FCT_ResearchProject.GameID = FCT_RaceTech.GameID) and not exists (select 1 from FCT_ResearchQueue inner join FCT_Population on FCT_Population.PopulationID = FCT_ResearchQueue.PopulationID where FCT_ResearchQueue.TechSystemID = FCT_RaceTech.TechID and FCT_ResearchQueue.GameID = FCT_RaceTech.GameID and FCT_Population.RaceID = FCT_RaceTech.RaceID) order by FCT_ShipDesignComponents.Name`).then(([items]) => items)
+      },
+      default: [],
+    },
+    // Fleets assigned to a population ID that no longer exists (W10).
+    orphanedFleets: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.AssignedPopulationID, FCT_RaceSysSurvey.Name as SystemName from FCT_Fleet left join FCT_Population on FCT_Population.PopulationID = FCT_Fleet.AssignedPopulationID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.AssignedPopulationID <> 0 and FCT_Population.PopulationID is null order by FCT_Fleet.FleetName`).then(([items]) => items)
+      },
+      default: [],
+    },
     stockpilingCivilianMinerals: {
       async get() {
         if (!this.database || !this.GameID) {
