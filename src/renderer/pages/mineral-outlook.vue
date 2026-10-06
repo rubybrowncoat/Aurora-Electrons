@@ -268,6 +268,7 @@ export default {
       loadErrors: {},
       horizon: 50,
       focusMineralId: null,
+      fallbackFocusId: null,
       flowsView: 'chart',
       allDeposits: false,
       onlyEmptying: false,
@@ -677,6 +678,15 @@ export default {
     forecastReady() {
       this.pickFocusMineral()
     },
+    depositsReady() {
+      this.pickFocusMineral()
+    },
+    // A mineral the user picks is theirs to keep; only the fallback gets replaced.
+    focusMineralId(id) {
+      if (id !== this.fallbackFocusId) {
+        this.fallbackFocusId = null
+      }
+    },
   },
   created() {
     this.windowDays = this.config.get('mineralOutlookWindowDays', 365)
@@ -685,17 +695,28 @@ export default {
     this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
   },
   methods: {
-    // Focus the mineral that runs out first, once the forecast can say which.
+    // Focus the mineral that runs out first, once the forecast can say which. The deposits panel
+    // filters by the focus and doesn't wait for the forecast, so until then the mineral whose
+    // deposit empties first stands in (and gives way to the runway pick).
     pickFocusMineral() {
       const rows = this.mineralRows
 
-      if (this.focusMineralId || !rows.length || !this.forecastReady) {
+      if (!rows.length || (this.focusMineralId && this.focusMineralId !== this.fallbackFocusId)) {
         return
       }
 
-      const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
+      if (this.forecastReady) {
+        const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
 
-      this.focusMineralId = declining ? declining.id : rows[0].id
+        this.fallbackFocusId = null
+        this.focusMineralId = declining ? declining.id : rows[0].id
+      } else if (!this.focusMineralId && this.depositsReady) {
+        const emptiest = this.deposits.reduce((first, deposit) => (first && first.emptySort <= deposit.emptySort ? first : deposit), null)
+        const id = emptiest ? emptiest.MaterialID : rows[0].id
+
+        this.fallbackFocusId = id
+        this.focusMineralId = id
+      }
     },
 
     retryFailedInputs() {
