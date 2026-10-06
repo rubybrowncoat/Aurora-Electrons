@@ -62,6 +62,7 @@
           <v-tab to="/colony-outlook" nuxt>Colonies</v-tab>
           <v-tab to="/logistics" nuxt>Logistics</v-tab>
           <v-tab to="/finances" nuxt>Finances</v-tab>
+          <v-tab to="/hauling" nuxt>Hauling</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/survey-progress" nuxt>Survey</v-tab>
           <v-tab to="/commanders" nuxt>Commanders</v-tab>
@@ -147,6 +148,9 @@ export default {
         }
         case 'logistics': {
           return 'Logistics'
+        }
+        case 'hauling': {
+          return 'Hauling Planner'
         }
         case 'finances': {
           return 'Finances'
