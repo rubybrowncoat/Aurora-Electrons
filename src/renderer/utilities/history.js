@@ -196,13 +196,20 @@ const readSave = (database) => database.transaction(async (transaction) => {
 // game's history file once. A game that can't be read or written doesn't stop the others (electron-store
 // throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are
 // lost. `onSaved(GameID)` is called as soon as each game's file is written, so views refresh even if a
-// later game fails. Returns { recorded, failed }: how many races were saved, and the games that
-// couldn't be, [{ GameID, error }].
-export const recordHistory = async (database, { onSaved = () => {} } = {}) => {
+// later game fails. `isCurrent()` is asked right before each write: a pass that was superseded (a
+// newer save was loaded while it read) stops there, because mergeGame trims every snapshot at or
+// after its time, which for an older save would erase the newer pass's. Returns { recorded, failed,
+// superseded }: how many races were saved, the games that couldn't be, [{ GameID, error }], and
+// whether the pass was abandoned.
+export const recordHistory = async (database, { onSaved = () => {}, isCurrent = () => true } = {}) => {
   const { read, failed } = await readSave(database)
   let recorded = 0
 
   for (const { GameID, taken, intel } of read) {
+    if (!isCurrent()) {
+      return { recorded, failed, superseded: true }
+    }
+
     if (taken.length) {
       try {
         const store = historyConfig(GameID)
@@ -219,5 +226,5 @@ export const recordHistory = async (database, { onSaved = () => {} } = {}) => {
     }
   }
 
-  return { recorded, failed }
+  return { recorded, failed, superseded: false }
 }
