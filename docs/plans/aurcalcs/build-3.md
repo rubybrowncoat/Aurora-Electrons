@@ -34,7 +34,7 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
    All 46 now trace.
 5. **"Load Mineral Type" sets its own amount.** All 101 such orders (action 178) on the sample carry `MaxItems` tonnes, so a route that only loads named minerals moves the sum of those, capped at capacity, rather than a full hold.
 6. **Loading time matters, and the docs give it.** Without it, short routes look absurd: Lyceum → Tianguan cycles in half a day. The docs (`logistics`, Logistics and Cargo Handling) give the handling time per stop: cargo points × 20 s (colonists × 10 s), divided by the ship's shuttle bays plus one when the colony has a spaceport or cargo shuttle station, times the race's shuttle technology (`FCT_Race.CargoShuttleLoadModifier`). Ships up to 500 t land and need no shuttles. With it, routes are no longer upper bounds in the plan's sense, though they still err long (see caveats).
-7. **History lives in its own file.** Open question 3 is settled as a second electron-store file, `history.json`, beside `config.json`, keyed `game.<GameID>.race.<RaceID>`. Settings stay small, and the history can be cleared or deleted on its own.
+7. **History lives in its own files, one per game.** Open question 3 is settled as an electron-store file per game, `history/game-<GameID>.json` in the app's settings folder beside `config.json`. Settings stay small, a long campaign doesn't slow down a new game's writes, and each game's history can be deleted on its own. (The first version used a single `history.json`; it was never released.)
 8. **The Information page counts shuttle technology twice** (`information.vue` ~261). A class's `CargoShuttleStrength` is already its bays × the bay's strength (Conveyor: 1 bay, 50; Horizon Dawn: 20 bays, 1,000), and the page multiplies it by the race's `CargoShuttleLoadModifier` (50) again. On the sample its loading times come out 50 times too short. Added to the plan's "Found along the way"; not fixed here.
 
 ## Commanders
@@ -134,7 +134,10 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
 
 **Recording** (`plugins/history.js`, `utilities/history.js`):
 
-- Each time the save is opened or changes (the `database` swap the file watcher already triggers), the plugin snapshots every player race in the save (`NPR = 0`, every game), then commits `history/recorded` so an open History page re-reads.
+- Each time the save is opened or changes (the `database` swap the file watcher already triggers), the plugin snapshots every recorded race in the save, in every game, then commits `history/recorded` so an open History page re-reads.
+- Recorded races are player races and NPR empires: `NPR = 0`, or `SpecialNPRID = 0` (`recordsHistory`). Aurora's special factions (Precursors, Invaders, Rakhas, Eldar, Ancients) have no empire to chart and are skipped; their History tab is disabled, and the page says why if it's open when one is picked. NPR history is recorded whether or not spy mode is on, since it can't be rebuilt later, and it's only visible in spy mode, which is the only way to select an NPR.
+- Each game has one file, `history/game-<GameID>.json`, holding `{ gameName, races: { <RaceID>: { raceName, npr, snapshots } } }`. All of a game's races are snapshotted first, then the file is written once (`store.store = …`): electron-store rewrites the whole file on every write, so a per-race write would cost one full rewrite per race.
+- Where it is: a `history` folder inside Electron's userData folder, next to the settings' `config.json`. That's `%APPDATA%\<app name>\history\` on Windows, `~/Library/Application Support/<app name>/history/` on macOS and `~/.config/<app name>/history/` on Linux, where the app name is the packaged product name (`Aurora Electrons`) or the package name (`aurora-electrons-new`), depending on what Electron reports. The History page shows the exact path.
 - A snapshot holds, at `t` (game seconds):
   - population and populated colonies;
   - treasury and annual income;
@@ -146,16 +149,17 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
   - known systems and living commanders.
 
   It's about 500 bytes.
-- Merge rules:
-  - another game name under the same IDs starts over;
-  - a snapshot at a recorded time replaces it;
-  - an earlier time (an older save loaded) drops everything after it, since that future didn't happen.
-- Past 2,000 snapshots per race, the older half is thinned to every other one, so a long campaign keeps its whole span at a coarser grain: about 1 MB per race at the cap.
+- Merge rules (`mergeGame`):
+  - another game name under the same GameID starts the file over;
+  - every race loses its snapshots at or after the save's time, so a snapshot at a recorded time replaces it and an earlier time (an older save loaded) drops everything after it, since that future didn't happen;
+  - a race missing from the save keeps its past, so a destroyed empire's history stays.
+- Past 2,000 snapshots per race, the older half is thinned to every other one, so a long campaign keeps its whole span at a coarser grain: about 1 MB per race at the cap. On the sample, a snapshot takes about 450 ms for the player race and 60 ms for each NPR (measured in Python on the same SQL).
 - A failed snapshot is logged and skipped; the next save tries again.
 
 **Layout.**
 
-- A header with the count and span, a chart/table toggle, CSV export and Clear (with a confirmation).
+- A header with the count and span, where the file is saved, a chart/table toggle, CSV export and Clear (with a confirmation). Clear removes only the selected race.
+- **Rivals**, in spy mode only: one line per recorded race in the game, players first, the selected race drawn thicker, on population, colonies, fleet tonnage, military tonnage, research, known systems or treasury (`historyRivalsMetric`). These are the true numbers, which is why it needs spy mode; Intelligence History (plan item 16) is the fog-of-war counterpart.
 - Tiles: population, treasury, fleet tonnage and research, each with its change since the first snapshot.
 - Line charts over the game year:
   - population and colonies;
@@ -167,21 +171,27 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
   - fuel and MSP.
 - With a single snapshot, the page says history starts here.
 
-**Checks** (Playwright on a scratch copy):
+**Checks** (Playwright on scratch copies):
 
-- Opening the copy recorded 1 snapshot. Five simulated saves 30–90 days apart made 6, with population rising from 15.261 bn to 15.325 bn.
-- Moving the time back 100 days left 5, the later ones dropped. Saving the same time again kept 5.
-- The web shim stored it under its own key (`aurora-electrons:history`), apart from the settings.
-- Clear emptied the record and showed the "starts here" notice.
-- The merge and thinning helpers pass five Node cases: order, replace, rewind, new game, and thinning that keeps the span and the recent half.
+- Player race only: opening the copy recorded 1 snapshot. Five simulated saves 30–90 days apart made 6, with population rising from 15.261 bn to 15.325 bn. Moving the time back 100 days left 5; saving the same time again kept 5. Clear emptied the record.
+- With NPRs: on a copy where the Eldar and Precursors were made ordinary NPRs (`SpecialNPRID` 0):
+  - opening it recorded the player race, the Eldar and the Precursors, and nothing for the 12 special factions;
+  - three simulated saves wrote the game's file three times, once per save, giving 4 snapshots per race;
+  - with spy mode off there's no Rivals chart; with it on, Rivals shows all three races, the selected one thicker, on every metric;
+  - picking the Eldar shows their own history; picking the Ancients disables the History tab and shows the notice;
+  - rewinding 100 days trimmed every race to 3 snapshots; clearing the Eldar left the other two races untouched.
+- The web shim stored it under its own key (`aurora-electrons:history/game-140`), apart from the settings.
+- The merge helpers pass eleven Node cases: per-race order, replace, a race missing from a save, rewind across races, a race emptied by a rewind, a new game, names and NPR flags, which races are recorded (including text booleans), and thinning.
 
 **Caveats.**
 
 - History starts when this version is installed, and only grows while the app is open when Aurora saves.
-- Web mode stores it in localStorage through the shim. Electron's real `history.json` (its path, and electron-store in the renderer with a store name) isn't exercised in web mode.
+- Web mode stores it in localStorage through the shim. Electron's real files (their folder, and electron-store in the renderer with a store folder and name) aren't exercised in web mode.
+- The app creates its electron-store instances in the renderer, but never calls `Store.initRenderer()` in the main process, which electron-store 8's readme says renderer use requires. Settings have presumably worked anyway, so something covers it, but it's worth confirming in Electron that `config.json` and the history files land where expected.
 
 ## Open items
 
 - `information.vue`'s doubled shuttle technology (above).
+- Intelligence History (plan item 16) would record into the same per-game files.
 - The Commanders page could assign governors greedily by importance, as Aurora does, instead of counting overlaps.
 - Hauling could add travel between systems once the jump graph (G2) exists. Each fleet's route already walks its own jumps.

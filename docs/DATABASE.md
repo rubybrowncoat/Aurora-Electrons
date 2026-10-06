@@ -39,7 +39,9 @@ The settings toggle `spyNPR` exposes NPRs in the race picker. That's the only in
 
 ### Races
 
-`FCT_Race.NPR` marks non-player races. A non-zero `SpecialNPRID` marks the special factions. In the sample: 1 is Precursors, 3 is Invaders, 4 is Rakhas, 5 is Eldar, and 6 is Ancients.
+`FCT_Race.NPR` marks non-player races. A non-zero `SpecialNPRID` marks the special factions. In the sample: 1 is Precursors, 3 is Invaders, 4 is Rakhas, 5 is Eldar, and 6 is Ancients. All 14 of the sample's NPRs are special factions, so it has no ordinary NPR empire; test NPR features on a copy with `SpecialNPRID` set to 0 for one of them. Empire History records player races and NPRs with `SpecialNPRID = 0`.
+
+What a race knows about other races is in the `FCT_Alien*` tables, keyed by the viewing race (`ViewRaceID`, `ViewingRaceID` or `DetectRaceID`, depending on the table). Their `Actual*` columns point at the real designs, so never join them for display. `sql-fleet.md` § 7 has the details.
 
 ## Data quirks
 
@@ -131,7 +133,7 @@ Some details:
 
 ## Writes
 
-The app writes to the save in exactly one place: map → **Save Positions**. (Empire History writes its own `history.json`, never the save.) It runs `UPDATE FCT_RaceSysSurvey SET Xcor, Ycor WHERE GameID, RaceID, SystemID` for every node, behind a confirmation dialog. Keep any future write equally explicit, confirmed, and scoped. Test it against the sample or a copy, never a live save.
+The app writes to the save in exactly one place: map → **Save Positions**. (Empire History writes its own files, `history/game-<GameID>.json`, never the save.) It runs `UPDATE FCT_RaceSysSurvey SET Xcor, Ycor WHERE GameID, RaceID, SystemID` for every node, behind a confirmation dialog. Keep any future write equally explicit, confirmed, and scoped. Test it against the sample or a copy, never a live save.
 
 ## Exploring the schema
 

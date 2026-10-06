@@ -60,13 +60,13 @@ Most of this directory is the electron-nuxt template's tooling; treat that part 
 
 If there's no `AuroraDB.db` at the resolved path, `database` stays `null`, the game list is empty, and pages show "Select a race from the left-side menu."
 
-The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race in the save into the history file (`utilities/history.js`, `recordHistory`) and commits `history/recorded`, so an open Empire History page re-reads. A failed snapshot is logged and skipped.
+The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race and NPR empire in the save (`utilities/history.js`, `recordHistory`), writes each game's history file once, and commits `history/recorded`, so an open Empire History page re-reads. A failed snapshot is logged and skipped.
 
 ### Store (`store/`)
 
 | Module | Holds | Lifetime |
 |---|---|---|
-| `index.js` | `config` (electron-store instance), `database`, selected `GameID`/`RaceID`, `StartYear`, `GameTime`, `CivilianShippingLinesActive`; actions `renew`, `changeGame` | session |
+| `index.js` | `config` (electron-store instance), `database`, selected `GameID`/`RaceID` and the race's `RaceNPR`/`RaceSpecialNPRID`, `StartYear`, `GameTime`, `CivilianShippingLinesActive`; getter `historyRecorded`; actions `renew`, `changeGame` | session |
 | `production.js` | Production-recap type filters | session |
 | `tables.js` | Habitability/minerals rows-per-page and sort | session |
 | `log.js` | Log filters per context key | session |
@@ -80,10 +80,10 @@ Anything that must survive a restart goes to electron-store through `this.config
 - Habitability: `habitabilitySystems`, `habitabilityTerraformers`, and the `habitabilityFilter*` keys (`OwnPopulations`, `OtherPopulations`, `Uninhabited`, `NonTerraformable`, `DoneTerraforming`, `WithoutMinerals`).
 - Minerals: `mineralsFilterOrbitalEligibility`.
 - Designed tech: `designedTechCategoryId`, `designedTechFilterObsolete`, `designedTechFilterCivilian`, `designedTechFilterCommercial`.
-- Colony Outlook: `colonyOutlookHorizon`, `colonyOutlookAttentionOnly`. Logistics: `logisticsView`, `logisticsShowIdleLocations`. Finances: `financesWindowDays`. Survey Progress: `surveyShowSurveyed`. Commanders: `commandersType`, `commandersUnassignedOnly`. Empire History: `historyMinerals`.
+- Colony Outlook: `colonyOutlookHorizon`, `colonyOutlookAttentionOnly`. Logistics: `logisticsView`, `logisticsShowIdleLocations`. Finances: `financesWindowDays`. Survey Progress: `surveyShowSurveyed`. Commanders: `commandersType`, `commandersUnassignedOnly`. Empire History: `historyMinerals`, `historyRivalsMetric`.
 - Per race: `game.<GameID>.race.<RaceID>.maintenanceThreshold` and `.maintenanceExclusions`; the Warnings page's idle-fleet choices `.idleFleetsAtColonies` and `.idleFleetExclusions` (fleet IDs); Empire History's `.historyInstallations`.
 
-Empire History keeps its snapshots in a second electron-store file, `history.json` beside `config.json` (`new Config({ name: 'history' })`, through `historyConfig()` in `utilities/history.js`). Each player race has one key, `game.<GameID>.race.<RaceID>`, holding `{ gameName, raceName, snapshots }`. Nothing is written to the save. In web mode the shim keeps it under its own localStorage key, `aurora-electrons:history`.
+Empire History keeps its snapshots in one electron-store file per game, `history/game-<GameID>.json` in the same userData folder as `config.json` (`new Config({ cwd: 'history', name: 'game-<GameID>' })`, through `historyConfig(GameID)` in `utilities/history.js`). A file holds `{ gameName, races: { <RaceID>: { raceName, npr, snapshots } } }` for the game's player races and NPR empires, and is written once per save. Nothing is written to the save. In web mode the shim keeps each file under its own localStorage key, `aurora-electrons:history/game-<GameID>`.
 
 ### Pages
 
@@ -99,7 +99,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 | `/logistics` | Logistics | `pages/logistics.vue` | Fuel: stock in colonies, tankers and ships, refinery and harvester output, Sorium cover, an estimated burn range and burn by class. Maintenance supplies: per maintenance location, stock, production, maintained tonnage against capacity, MSP used, net and how long it lasts; supply ships. |
 | `/finances` | Finances | `pages/finances.vue` | Wealth income and spending by category from the save's year of history: totals, a per-cycle stacked chart with the net, a ranked list and the treasury worked back from today. |
 | `/hauling` | Hauling | `pages/hauling.vue` | Repeating freight routes (fleets on cycling orders): stops, round trip, cycle time with cargo handling, trips, cargo and colonists moved, and fuel burned a year; deliveries by destination; freighter classes with their reach. |
-| `/history` | History | `pages/history.vue` | Empire History: the app's own snapshots of the race, one per save it sees, charted over game time (population, wealth, fleet tonnage, research and exploration, minerals, installations, fuel and MSP), with a table view, CSV export and Clear. |
+| `/history` | History | `pages/history.vue` | Empire History: the app's own snapshots of the race, one per save it sees, charted over game time (population, wealth, fleet tonnage, research and exploration, minerals, installations, fuel and MSP), with a table view, CSV export, Clear and the file's path. In spy mode, a Rivals chart compares every recorded race in the game. The tab is disabled for Aurora's special factions, which aren't recorded. |
 | `/habitability` | Habitability | `pages/habitability.vue` | Colony cost per species and body, plus terraforming plans and their costs, with persistent filters. |
 | `/survey-progress` | Survey | `pages/survey-progress.vue` | Survey work left: a map of known systems coloured by the gravitational and geological survey left, per-system locations and bodies with points, survey fleets with their points a day and what they're doing, and ground-survey sites. |
 | `/commanders` | Commanders | `pages/commanders.vue` | The commander roster (type, rank, age, health risk, post, bonuses, traits) with filters and bonus sorting, and better assignments: governors ranked by the colony's wanted bonuses, officers for terraformers, miners and survey ships, and research leads. |
@@ -128,7 +128,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 - `logistics.js` has refinery and MSP production, maintenance capacity, maintenance locations with their Effective Maintenance Rate, full-power fuel burn and harvester output.
 - `commanders.js` has the post labels (`POSTS`), bonus parsing and formatting, and the better-assignment rules: `governorSuggestions`, `specialistPost` and `shipSuggestions`, `researchMultiplier` and `researchSuggestions`.
 - `hauling.js` has the hauling maths: `walkRoute` (a cycling fleet's legs and round trip), `cycleCargo` (what each trip carries and where), `stopHandling` (cargo-handling time at a stop), `routeYear` and `classYear`.
-- `history.js` has Empire History's storage and recorder: `historyConfig`, `historyKey`, `takeSnapshot`, `recordHistory`, and the pure `mergeSnapshot` and `thinSnapshots` rules.
+- `history.js` has Empire History's storage and recorder: `historyConfig(GameID)`, `recordsHistory` (which races are recorded), `takeSnapshot`, `recordHistory`, and the pure `mergeGame` and `thinSnapshots` rules.
 - `load-tracking.js` has `tracked(key, getter)`, which records each async-computed read's outcome in the page's `loadErrors` (null once it succeeds, the message while it fails), plus `allLoaded` and `joinLabels`. Pages use it to show an error with a Retry button instead of partial numbers while a read fails.
 
 ### Mixins and charts
