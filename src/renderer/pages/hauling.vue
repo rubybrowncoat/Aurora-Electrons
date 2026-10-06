@@ -51,7 +51,7 @@
             <template #[`item.cycleSort`]="{ item }">
               <span v-if="item.year" class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span>
               <span v-else class="text--secondary">—</span>
-              <div v-if="item.blocked.length" class="caption warning--text">Can't load at {{ item.blocked.join(', ') }}: no shuttle bays or station, and too big to land. Left out of the totals.</div>
+              <div v-if="item.blocked.length" class="caption warning--text">Can't load at {{ item.blockedText }}. Left out of the totals.</div>
             </template>
             <template #[`item.tripsSort`]="{ item }">
               <span v-if="item.year">{{ fixed(item.year.trips, 1) }}</span>
@@ -234,6 +234,7 @@ export default {
           stopsText: stops.join(' → '),
           handlingHours: handling.seconds / 3600,
           blocked: handling.blocked,
+          blockedText: handling.blocked.map((stop) => `${stop.place} (${stop.reason === 'crew' ? 'a ship has no crew aboard' : 'no shuttle bays or station, and too big to land'})`).join(', '),
           movedText: moved,
           kmSort: route.km ?? Infinity,
           cycleSort: year ? year.cycleDays : Infinity,
@@ -381,14 +382,14 @@ export default {
       }),
       default: [],
     },
-    // Their ships, with cargo shuttle bays and size in tons (for loading time).
+    // Their ships, with cargo shuttle bays, size in tons and crew (for loading time).
     fleetShips: {
       get: tracked('fleetShips', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Ship.FleetID, FCT_Ship.ShipID, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size * 50 as Tons, coalesce(VIR_Bays.Bays, 0) as Bays from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join (select FCT_ClassComponent.ClassID, sum(FCT_ClassComponent.NumComponent) as Bays from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipDesignComponents.Name like 'Cargo Shuttle Bay%' group by FCT_ClassComponent.ClassID) as VIR_Bays on VIR_Bays.ClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_Ship.FleetID, FCT_Ship.ShipID, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size * 50 as Tons, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, coalesce(VIR_Bays.Bays, 0) as Bays from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join (select FCT_ClassComponent.ClassID, sum(FCT_ClassComponent.NumComponent) as Bays from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipDesignComponents.Name like 'Cargo Shuttle Bay%' group by FCT_ClassComponent.ClassID) as VIR_Bays on VIR_Bays.ClassID = FCT_ShipClass.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },

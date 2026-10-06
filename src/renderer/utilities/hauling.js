@@ -1,6 +1,8 @@
 // Hauling maths for the Hauling Planner: repeating routes walked from their orders, and what they
 // move in a year. Sources and checks: docs/plans/aurcalcs/build-3.md § Hauling Planner.
 
+import { crewFraction } from './minerals'
+
 export const SECONDS_PER_YEAR = 31536000
 
 // Move actions that load or unload cargo, by what they carry.
@@ -130,18 +132,21 @@ export const cycleCargo = (orders, fleet) => {
 // Seconds a fleet spends loading or unloading at one stop: every ship works at once, each taking
 // cargo x 20 s (colonists x 10 s) / handling modifier, where the modifier is its shuttle bays, plus
 // one if the colony has a spaceport or cargo shuttle station, times the race's shuttle technology.
-// Commander, governor and admin Logistics bonuses aren't counted, so this errs long. A ship with
-// no way to load there (no bays, no station, too big to land) sets `blocked`.
-// `ships`: [{ CargoCapacity, ColonistCapacity, Bays, Tons }]; `share`: the part of a full load moved.
+// A ship short of crew takes Class Crew / Current Crew times as long (docs `crew-and-commanders`,
+// v2.6; over-crewed ships aren't faster). Commander, governor and admin Logistics bonuses aren't
+// counted, so this errs long. A ship that can't load there (no crew aboard, or no bays, no station
+// and too big to land) sets `blocked` to why: 'crew' or 'bays'.
+// `ships`: [{ CargoCapacity, ColonistCapacity, Bays, Tons, CurrentCrew, ClassCrew }]; `share`: the
+// part of a full load moved.
 export const stopHandling = (order, ships, shuttleTechnology, share = 1) => {
   const kind = LOADS[order.MoveActionID] || UNLOADS[order.MoveActionID]
 
   if (!kind) {
-    return { seconds: 0, blocked: false }
+    return { seconds: 0, blocked: null }
   }
 
   let seconds = 0
-  let blocked = false
+  let blocked = null
 
   ships.forEach((ship) => {
     const amount = (kind === 'colonists' ? ship.ColonistCapacity : ship.CargoCapacity) * share
@@ -150,15 +155,16 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1) => {
       return
     }
 
+    const crew = crewFraction(ship)
     const bays = ship.Bays + (order.Station ? 1 : 0) || (ship.Tons <= SMALL_CRAFT_TONS ? 1 : 0)
 
-    if (!bays) {
-      blocked = true
+    if (!crew || !bays) {
+      blocked = blocked || (crew ? 'bays' : 'crew')
 
       return
     }
 
-    seconds = Math.max(seconds, (amount * HANDLING_SECONDS[kind]) / (bays * (shuttleTechnology || 1)))
+    seconds = Math.max(seconds, (amount * HANDLING_SECONDS[kind]) / (bays * (shuttleTechnology || 1) * crew))
   })
 
   return { seconds, blocked }
@@ -166,7 +172,7 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1) => {
 
 // Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`),
 // as that part of every ship's capacity. Returns the total `seconds`, the `stops` and the places
-// where some ship `blocked` (as order labels).
+// where some ship can't load, `blocked`: [{ place, reason }].
 export const cycleHandling = (orders, cargo, fleet, ships) => {
   const stops = orders.map((order, index) => {
     const move = cargo.moves[index]
@@ -178,7 +184,7 @@ export const cycleHandling = (orders, cargo, fleet, ships) => {
   return {
     seconds: stops.reduce((sum, stop) => sum + stop.seconds, 0),
     stops,
-    blocked: [...new Set(stops.filter((stop) => stop.blocked).map((stop) => stop.order.label))],
+    blocked: stops.filter((stop) => stop.blocked).map((stop) => ({ place: stop.order.label, reason: stop.blocked })).filter((stop, index, all) => all.findIndex((other) => other.place === stop.place && other.reason === stop.reason) === index),
   }
 }
 
