@@ -15,7 +15,7 @@ const { SERVER_PORT } = require('./config')
 const nuxtConfig = require('./renderer/nuxt.config.js')
 
 const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
-const PORT = Number(process.env.PORT) || SERVER_PORT
+const PORT = SERVER_PORT
 const HOST = 'localhost'
 
 // `yarn install --ignore-scripts`, and any later install that relinks sqlite3,

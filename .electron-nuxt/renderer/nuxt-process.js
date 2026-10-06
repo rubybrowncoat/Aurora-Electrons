@@ -20,8 +20,15 @@ process.on('message', async ({ action, target }) => {
   const generator = new Generator(nuxt, builder)
 
   if (target === 'development') {
-    builder.build().then(() => {
-      nuxt.listen(SERVER_PORT)
+    builder.build().then(() => nuxt.listen(SERVER_PORT)).then(() => {
+      // Nuxt falls back to a random port when SERVER_PORT is taken, but the main process is built
+      // to load SERVER_PORT, so Electron would show whatever else answers there.
+      const { port } = new URL(nuxt.server.listeners[0].url)
+
+      if (port !== String(SERVER_PORT)) {
+        throw new Error(`Port ${SERVER_PORT} is in use (another \`yarn dev\` or \`yarn web\`?). Stop it, or run with PORT=<free port>.`)
+      }
+
       process.send({ status: 'ok' })
     }).catch(err => {
       console.error(err)
