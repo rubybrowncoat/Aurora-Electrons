@@ -103,7 +103,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body's radius / 100 (× 10 for anything but a gas giant) for a geological survey. Time is survey time for the ships already in the system; travel between targets isn't counted.
+            Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body's radius / 100 (× 10 for anything but a gas giant) for a geological survey. Time is survey time for the ships already in the system; travel between targets isn't counted. Fleets with one sensor type work their own survey in parallel; a fleet with both sensors does one target at a time, so its time is shared between the two surveys, in whichever split finishes the system soonest.
           </div>
         </v-card>
 
@@ -181,6 +181,7 @@ import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { surveyDays } from '../utilities/survey-eta'
 
 const INPUT_LABELS = {
   game: 'the game settings',
@@ -304,12 +305,7 @@ export default {
         const fleets = this.fleetRows.filter((fleet) => fleet.SystemID === system.SystemID)
         const gravPoints = Math.max(0, system.Locations - system.LocationsSurveyed) * system.PointsPerLocation
         const geoPoints = system.GeoPoints || 0
-        const geoRate = fleets.reduce((sum, fleet) => sum + fleet.geoRate, 0)
-        const gravRate = fleets.reduce((sum, fleet) => sum + fleet.gravRate, 0)
-        const gravDays = gravPoints ? (gravRate > 0 ? gravPoints / gravRate : null) : 0
-        const geoDays = geoPoints ? (geoRate > 0 ? geoPoints / geoRate : null) : 0
-        // Both surveys run side by side, so the slower one sets the time; unknown if either has no ships.
-        const eta = (gravPoints || geoPoints) && gravDays !== null && geoDays !== null ? Math.max(gravDays, geoDays) : null
+        const eta = gravPoints || geoPoints ? surveyDays(gravPoints, geoPoints, fleets) : null
 
         return {
           ...system,
