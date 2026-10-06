@@ -176,16 +176,24 @@ export default {
       return allLoaded(this.loadErrors, INPUTS) && !!this.treasury
     },
 
-    // The cycle length, measured from the history (the game's construction cycle can differ from 5 days).
-    stepDays() {
-      const times = [...new Set(this.wealth.map((row) => row.TimeUsed))].sort((a, b) => a - b)
-      const gaps = times.slice(1).map((time, index) => time - times[index]).filter((gap) => gap > 0)
+    // Every logged cycle end, the one just before the year included.
+    times() {
+      return [...new Set(this.wealth.map((row) => row.TimeUsed))].sort((a, b) => a - b)
+    },
 
-      return gaps.length ? Math.min(...gaps) / SECONDS_PER_DAY : DEFAULT_STEP_DAYS
+    // The cycle lengths, measured from the history (the game's construction cycle can differ from 5 days, and phases can differ in length).
+    gapDays() {
+      return this.times.slice(1).map((time, index) => (time - this.times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
+    },
+
+    stepDays() {
+      return this.gapDays.length ? Math.min(...this.gapDays) : DEFAULT_STEP_DAYS
     },
 
     stepLabel() {
-      return `${roundToDecimal(this.stepDays, 1)} days`
+      const longest = this.gapDays.length ? Math.max(...this.gapDays) : this.stepDays
+
+      return longest > this.stepDays ? `${roundToDecimal(this.stepDays, 1)} to ${roundToDecimal(longest, 1)} days` : `${roundToDecimal(this.stepDays, 1)} days`
     },
 
     windowRows() {
@@ -203,8 +211,24 @@ export default {
       return [...new Set(this.windowRows.map((row) => row.TimeUsed))].sort((a, b) => a - b)
     },
 
+    // Where the first step's cycle began: the logged end before it, else the gap after it (the first cycle of a save), else the default.
+    firstStart() {
+      if (!this.steps.length) {
+        return null
+      }
+
+      const before = this.times.filter((time) => time < this.steps[0]).pop()
+
+      if (before !== undefined) {
+        return before
+      }
+
+      return this.steps[0] - (this.steps.length > 1 ? this.steps[1] - this.steps[0] : DEFAULT_STEP_DAYS * SECONDS_PER_DAY)
+    },
+
+    // The time the steps actually span, so cycles of different lengths count for what they are.
     coverageDays() {
-      return Math.min(this.windowDays, this.steps.length * this.stepDays)
+      return this.steps.length ? (this.steps[this.steps.length - 1] - this.firstStart) / SECONDS_PER_DAY : 0
     },
 
     coverageText() {
@@ -372,7 +396,7 @@ export default {
 
         return after
       }).reverse()
-      const start = this.steps.length ? this.steps[0] - this.stepDays * SECONDS_PER_DAY : null
+      const start = this.firstStart
 
       return {
         labels: start === null ? [] : [this.date(start), ...this.stepDates],
@@ -458,15 +482,15 @@ export default {
       }),
       default: null,
     },
-    // The last year of wealth flows, one row per use and cycle. `Amount` is always positive; the
-    // use's `Income` flag gives the sign.
+    // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the
+    // window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign.
     wealth: {
       get: tracked('wealth', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed > FCT_Game.GameTime - ${HISTORY_DAYS * SECONDS_PER_DAY} group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
+        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= FCT_Game.GameTime - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
       }),
       default: [],
     },
