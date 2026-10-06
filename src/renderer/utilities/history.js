@@ -153,7 +153,7 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
 
 // Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, taken, intel }] per
 // game, `taken` being [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]:
-// takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, error }]. It all
+// takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. It all
 // happens in one read transaction, so a save written meanwhile can't give one race's snapshot the
 // old save and the next one's the new. In SQLite a read transaction holds a shared lock from its
 // first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads
@@ -185,7 +185,7 @@ const readSave = (database) => database.transaction(async (transaction) => {
 
       read.push({ GameID: Number(GameID), taken, intel })
     } catch (error) {
-      failed.push({ GameID: Number(GameID), error })
+      failed.push({ GameID: Number(GameID), stage: 'read', error })
     }
   }
 
@@ -199,8 +199,8 @@ const readSave = (database) => database.transaction(async (transaction) => {
 // later game fails. `isCurrent()` is asked right before each write: a pass that was superseded (a
 // newer save was loaded while it read) stops there, because mergeGame trims every snapshot at or
 // after its time, which for an older save would erase the newer pass's. Returns { recorded, failed,
-// superseded }: how many races were saved, the games that couldn't be, [{ GameID, error }], and
-// whether the pass was abandoned.
+// superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage:
+// 'read' | 'write', error }], and whether the pass was abandoned.
 export const recordHistory = async (database, { onSaved = () => {}, isCurrent = () => true } = {}) => {
   const { read, failed } = await readSave(database)
   let recorded = 0
@@ -216,7 +216,7 @@ export const recordHistory = async (database, { onSaved = () => {}, isCurrent = 
 
         store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
       } catch (error) {
-        failed.push({ GameID, error })
+        failed.push({ GameID, stage: 'write', error })
 
         continue
       }

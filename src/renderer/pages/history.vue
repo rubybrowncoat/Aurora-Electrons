@@ -25,8 +25,11 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="unsaved" type="warning" outlined dense class="mt-3">
+      <v-alert v-if="failure && failure.stage === 'write'" type="warning" outlined dense class="mt-3">
         The latest snapshot couldn't be written to the history file, so this history has stopped growing: the disk or browser storage may be full, or the file locked. The app tries again at the next save. The console has the details.
+      </v-alert>
+      <v-alert v-else-if="failure" type="warning" outlined dense class="mt-3">
+        The latest save couldn't be read for a snapshot (the game may have been writing it), so this history is missing it. The app tries again at the next save. The console has the details.
       </v-alert>
 
       <v-alert v-if="!snapshots.length" type="info" outlined dense class="mt-3">
@@ -192,9 +195,9 @@ export default {
       return this.gameHistory && this.gameHistory.races ? this.gameHistory.races[this.RaceID] || null : null
     },
 
-    // The recorder couldn't write this game's latest snapshots (see store/history.js).
-    unsaved() {
-      return this.$store.state.history.unsaved.includes(Number(this.GameID))
+    // Why the recorder missed this game's latest snapshots, if it did (see store/history.js).
+    failure() {
+      return this.$store.state.history.failures.find(({ GameID }) => GameID === null || GameID === Number(this.GameID)) || null
     },
 
     filePath() {
