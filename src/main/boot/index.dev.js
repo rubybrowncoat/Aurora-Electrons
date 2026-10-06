@@ -22,7 +22,8 @@ app.on('ready', () => {
   menu.append(refreshButton)
   Menu.setApplicationMenu(menu)
 
-  installExtension(VUEJS_DEVTOOLS)
+  // Downloaded on first use; offline, the app runs without it.
+  installExtension(VUEJS_DEVTOOLS).catch((error) => console.log(`Vue devtools not installed: ${error.message}`))
 })
 
 
