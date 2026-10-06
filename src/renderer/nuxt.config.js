@@ -18,6 +18,7 @@ module.exports = {
     { ssr: true, src: '@/plugins/vuetify.js' },
 
     { ssr: false, src: '@/plugins/database.js' },
+    { ssr: false, src: '@/plugins/history.js' },
   ],
   buildModules: [
     '@nuxt/typescript-build',

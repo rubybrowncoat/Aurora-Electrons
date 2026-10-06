@@ -63,6 +63,7 @@
           <v-tab to="/logistics" nuxt>Logistics</v-tab>
           <v-tab to="/finances" nuxt>Finances</v-tab>
           <v-tab to="/hauling" nuxt>Hauling</v-tab>
+          <v-tab to="/history" nuxt>History</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/survey-progress" nuxt>Survey</v-tab>
           <v-tab to="/commanders" nuxt>Commanders</v-tab>
@@ -151,6 +152,9 @@ export default {
         }
         case 'hauling': {
           return 'Hauling Planner'
+        }
+        case 'history': {
+          return 'Empire History'
         }
         case 'finances': {
           return 'Finances'
