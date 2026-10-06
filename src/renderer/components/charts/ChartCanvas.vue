@@ -24,17 +24,42 @@ const merge = (base, extra) => {
   return result
 }
 
-// A vertical hairline under the pointer (line charts), and labelled vertical
-// markers at fixed x values (`options.plugins.markers`: [{ x, label }]).
+// A vertical hairline under the pointer (line charts), labelled vertical
+// markers at fixed x values (`options.plugins.guides.markers`: [{ x, label }])
+// and labelled dashed horizontal levels at fixed y values
+// (`options.plugins.guides.levels`: [{ y, label, axis = 'y' }]).
 const guides = {
   id: 'guides',
   afterDatasetsDraw (chart, _args, pluginOptions) {
     const { ctx, chartArea, scales } = chart
-    const { color, textColor, crosshair, markers = [] } = pluginOptions
+    const { color, textColor, crosshair, markers = [], levels = [] } = pluginOptions
 
     ctx.save()
     ctx.lineWidth = 1
     ctx.font = '12px Roboto, "Helvetica Neue", Arial, sans-serif'
+
+    levels.forEach((level) => {
+      const scale = scales[level.axis || 'y']
+      const y = scale && scale.getPixelForValue(level.y)
+
+      if (!(y >= chartArea.top && y <= chartArea.bottom)) {
+        return
+      }
+
+      ctx.strokeStyle = color
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      ctx.moveTo(chartArea.left, y)
+      ctx.lineTo(chartArea.right, y)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      if (level.label) {
+        ctx.fillStyle = textColor
+        ctx.textAlign = 'left'
+        ctx.fillText(level.label, chartArea.left + 6, y - 4 < chartArea.top + 12 ? y + 14 : y - 4)
+      }
+    })
 
     markers.forEach((marker) => {
       const x = scales.x.getPixelForValue(marker.x)
@@ -154,7 +179,7 @@ export default {
             boxHeight: 2,
             usePointStyle: false,
           },
-          guides: { color: inkMuted, textColor: inkMuted, crosshair: line, markers: [] },
+          guides: { color: inkMuted, textColor: inkMuted, crosshair: line, markers: [], levels: [] },
         },
       }, this.options)
     },
