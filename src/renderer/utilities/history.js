@@ -6,6 +6,7 @@
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
+import { intelChanged, takeIntel } from './intelligence'
 
 // More than this many snapshots per race and the older half is thinned to every other one, so a
 // long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap).
@@ -15,7 +16,8 @@ const HISTORY_FOLDER = 'history'
 const historyStores = {}
 
 // A game's history file, created on first use. Its contents:
-// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } } }
+// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } },
+//   intel: { [ViewRaceID]: { [AlienRaceID]: { name, snapshots: [...] } } } }
 export const historyConfig = (GameID) => {
   if (!historyStores[GameID]) {
     historyStores[GameID] = new Config({ cwd: HISTORY_FOLDER, name: `game-${GameID}` })
@@ -41,30 +43,63 @@ export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => {
   return result
 }
 
-// Add one save's snapshots to a game's history. `history` is the file's contents (or empty);
-// `races` is [{ RaceID, raceName, npr, snapshot }], all taken at game time `t`.
+// Every record in `records` ({ id: { ..., snapshots } }) without its snapshots at or after `t`;
+// records left empty are dropped.
+const before = (records, t) => {
+  const kept = {}
+
+  Object.entries(records || {}).forEach(([id, record]) => {
+    const snapshots = (record.snapshots || []).filter((snapshot) => snapshot.t < t)
+
+    if (snapshots.length) {
+      kept[id] = { ...record, snapshots }
+    }
+  })
+
+  return kept
+}
+
+// Add one save's snapshots to a game's history. `history` is the file's contents (or empty), and
+// everything was taken at game time `t`:
+// - `races`: [{ RaceID, raceName, npr, snapshot }];
+// - `intel`: { [ViewRaceID]: [{ AlienRaceID, name, snapshot }] }, what each race knows of the others.
+// Rules:
 // - Another game under the same GameID (another name) starts over.
-// - Every race loses its snapshots at or after `t`: an older save reloaded means that future didn't
-//   happen, and a save at a recorded time replaces it.
-// - A race missing from this save keeps its past, so a destroyed empire's history stays.
-export const mergeGame = (history, { gameName, t, races }) => {
-  const merged = {}
-
-  if (history && history.gameName === gameName && history.races) {
-    Object.entries(history.races).forEach(([RaceID, record]) => {
-      const kept = (record.snapshots || []).filter((snapshot) => snapshot.t < t)
-
-      if (kept.length) {
-        merged[RaceID] = { ...record, snapshots: kept }
-      }
-    })
-  }
+// - Every record loses its snapshots at or after `t`: an older save reloaded means that future
+//   didn't happen, and a save at a recorded time replaces it.
+// - A race (or an alien race) missing from this save keeps its past.
+// - Intelligence changes slowly, so its snapshot is kept only when something besides the time changed.
+export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
+  const sameGame = history && history.gameName === gameName
+  const merged = sameGame ? before(history.races, t) : {}
+  const mergedIntel = {}
 
   races.forEach(({ RaceID, raceName, npr, snapshot }) => {
     merged[RaceID] = { raceName, npr, snapshots: thinSnapshots([...(merged[RaceID] ? merged[RaceID].snapshots : []), snapshot]) }
   })
 
-  return { gameName, races: merged }
+  Object.entries(sameGame && history.intel ? history.intel : {}).forEach(([ViewRaceID, aliens]) => {
+    mergedIntel[ViewRaceID] = before(aliens, t)
+  })
+
+  Object.entries(intel).forEach(([ViewRaceID, aliens]) => {
+    const view = (mergedIntel[ViewRaceID] = mergedIntel[ViewRaceID] || {})
+
+    aliens.forEach(({ AlienRaceID, name, snapshot }) => {
+      const snapshots = view[AlienRaceID] ? view[AlienRaceID].snapshots : []
+      const last = snapshots[snapshots.length - 1]
+
+      view[AlienRaceID] = { name, snapshots: !last || intelChanged(last, snapshot) ? thinSnapshots([...snapshots, snapshot]) : snapshots }
+    })
+  })
+
+  Object.keys(mergedIntel).forEach((ViewRaceID) => {
+    if (!Object.keys(mergedIntel[ViewRaceID]).length) {
+      delete mergedIntel[ViewRaceID]
+    }
+  })
+
+  return { gameName, races: merged, intel: mergedIntel }
 }
 
 const sum = (rows, key) => rows.reduce((total, row) => total + (row[key] || 0), 0)
@@ -115,8 +150,8 @@ export const takeSnapshot = async (database, { GameID, RaceID }) => {
   }
 }
 
-// Snapshot every recorded race in the save, writing each game's history file once.
-// Returns how many races were recorded.
+// Snapshot every recorded race in the save, and what each knows of the other races, writing each
+// game's history file once. Returns how many races were recorded.
 export const recordHistory = async (database) => {
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race')
   const games = {}
@@ -128,19 +163,21 @@ export const recordHistory = async (database) => {
 
   for (const [GameID, gameRaces] of Object.entries(games)) {
     const taken = []
+    const intel = {}
 
     for (const race of gameRaces) {
       const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID })
 
       if (result) {
         taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
+        intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID })
       }
     }
 
     if (taken.length) {
       const store = historyConfig(GameID)
 
-      store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken })
+      store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
       recorded += taken.length
     }
   }

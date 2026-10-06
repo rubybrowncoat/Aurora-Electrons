@@ -64,6 +64,7 @@
           <v-tab to="/finances" nuxt>Finances</v-tab>
           <v-tab to="/hauling" nuxt>Hauling</v-tab>
           <v-tab to="/history" nuxt :disabled="!historyRecorded">History</v-tab>
+          <v-tab to="/intelligence" nuxt :disabled="!historyRecorded">Intelligence</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/survey-progress" nuxt>Survey</v-tab>
           <v-tab to="/commanders" nuxt>Commanders</v-tab>
@@ -156,6 +157,9 @@ export default {
         }
         case 'history': {
           return 'Empire History'
+        }
+        case 'intelligence': {
+          return 'Intelligence'
         }
         case 'finances': {
           return 'Finances'
