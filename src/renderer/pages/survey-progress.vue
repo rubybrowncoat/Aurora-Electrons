@@ -174,7 +174,6 @@
 
 <script>
 import { mapGetters } from 'vuex'
-import { sortItems } from 'vuetify/lib/util/helpers'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import { systemBodyName } from '../utilities/aurora'
@@ -498,8 +497,9 @@ export default {
         this.sortDesc = [true]
         this.expanded = [row]
 
-        // The row's page in the order the table will show: unfiltered, sorted as above.
-        const sorted = sortItems(this.visibleSystems.slice(), this.sortBy, this.sortDesc, this.$vuetify.lang.current)
+        // The row's page in the order the table will show: unfiltered, most work left first (the
+        // table's numeric sort is a stable subtraction too, so ties keep the same order).
+        const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
         const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
 
         this.page = target
