@@ -506,11 +506,11 @@ export default {
 
     activity(fleet) {
       const orders = this.orders.filter((order) => order.FleetID === fleet.FleetID)
-      const survey = orders.find((order) => SURVEY_ORDERS.has(order.MoveActionID))
       const standing = this.standingOrders.filter((order) => order.FleetID === fleet.FleetID).map((order) => order.Description)
 
-      if (survey) {
-        return { label: 'Surveying', note: survey.Description, icon: 'mdi-radar', color: 'success' }
+      // The current order (lowest MoveOrder) decides; a survey order further down is still to come.
+      if (orders.length && SURVEY_ORDERS.has(orders[0].MoveActionID)) {
+        return { label: 'Surveying', note: orders[0].Description, icon: 'mdi-radar', color: 'success' }
       } else if (orders.length) {
         return { label: 'Under way', note: orders[0].Description, icon: 'mdi-arrow-right-bold', color: '' }
       } else if (standing.length) {
