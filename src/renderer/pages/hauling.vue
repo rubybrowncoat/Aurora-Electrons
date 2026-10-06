@@ -51,7 +51,7 @@
             <template #[`item.cycleSort`]="{ item }">
               <span v-if="item.year" class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span>
               <span v-else class="text--secondary">—</span>
-              <div v-if="item.blocked.length" class="caption warning--text">No shuttles or station at {{ item.blocked.join(', ') }}</div>
+              <div v-if="item.blocked.length" class="caption warning--text">Can't load at {{ item.blocked.join(', ') }}: no shuttle bays or station, and too big to land. Left out of the totals.</div>
             </template>
             <template #[`item.tripsSort`]="{ item }">
               <span v-if="item.year">{{ fixed(item.year.trips, 1) }}</span>
@@ -59,7 +59,7 @@
             </template>
             <template #[`item.movedSort`]="{ item }">
               <span v-if="item.year && item.movedText" class="text-no-wrap">{{ item.movedText }}</span>
-              <span v-else class="text--secondary">{{ item.year ? 'No cargo loaded' : '—' }}</span>
+              <span v-else class="text--secondary">{{ item.year ? 'No cargo delivered' : '—' }}</span>
             </template>
             <template #[`item.fuelSort`]="{ item }">
               <span v-if="item.year" class="text-no-wrap">{{ litres(item.year.fuel) }}</span>
@@ -222,9 +222,7 @@ export default {
         const cargo = cycleCargo(orders, fleet)
         const ships = this.shipsByFleet[fleet.FleetID] || []
         const handling = cycleHandling(orders, cargo, fleet, ships)
-        const handlingSeconds = handling.seconds
-        const blocked = handling.blocked
-        const year = routeYear(fleet, route, cargo, handlingSeconds + orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
+        const year = routeYear(fleet, route, cargo, handling, orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
         const stops = orders.filter((order) => !order.Jumps).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''
 
@@ -234,8 +232,8 @@ export default {
           cargo,
           year,
           stopsText: stops.join(' → '),
-          handlingHours: handlingSeconds / 3600,
-          blocked,
+          handlingHours: handling.seconds / 3600,
+          blocked: handling.blocked,
           movedText: moved,
           kmSort: route.km ?? Infinity,
           cycleSort: year ? year.cycleDays : Infinity,
@@ -271,8 +269,10 @@ export default {
     },
 
     tiles() {
-      const traced = this.routeRows.filter((row) => row.year)
-      const sum = (key) => traced.reduce((total, row) => total + row.year[key], 0)
+      const counted = this.routeRows.filter((row) => row.year)
+      const untraced = this.routeRows.filter((row) => row.route.km === null).length
+      const blocked = this.routeRows.filter((row) => row.route.km !== null && row.blocked.length).length
+      const sum = (key) => counted.reduce((total, row) => total + row.year[key], 0)
       const cargo = this.classes.reduce((total, shipClass) => total + shipClass.CargoCapacity * shipClass.Ships, 0)
       const colonists = this.classes.reduce((total, shipClass) => total + shipClass.ColonistCapacity * shipClass.Ships, 0)
       const ships = this.classes.reduce((total, shipClass) => total + shipClass.Ships, 0)
@@ -286,8 +286,8 @@ export default {
         {
           label: 'Repeating routes',
           value: `${this.routeRows.length}`,
-          note: traced.length === this.routeRows.length ? 'All traced' : `${traced.length} traced, ${this.routeRows.length - traced.length} can't be`,
-          icon: traced.length === this.routeRows.length ? null : 'mdi-alert',
+          note: counted.length === this.routeRows.length ? 'All traced' : `${counted.length} counted: ${[untraced ? `${untraced} can't be traced` : null, blocked ? `${blocked} can't load` : null].filter(Boolean).join(', ')}`,
+          icon: counted.length === this.routeRows.length ? null : 'mdi-alert',
           iconColor: 'warning',
         },
         {

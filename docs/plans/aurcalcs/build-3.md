@@ -101,15 +101,15 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
 |---|---|
 | Round trip: in-system legs between successive order positions, closing back to the first; a route whose positions jump systems is flagged | Plan § 6, extended to types 12 and 15 |
 | Cycle = round trip / fleet speed + cargo handling + order delays | Fleet speed is the set speed |
-| Handling per stop: the slowest ship's cargo × 20 s (colonists × 10 s) / ((bays + 1 with a spaceport or station) × shuttle technology), where the cargo is what that order moves (its own share of each ship's capacity, from the cargo model below), not a cycle-wide share; ships up to 500 t land; a ship with no way to load is flagged | Docs `logistics` |
+| Handling per stop: the slowest ship's cargo × 20 s (colonists × 10 s) / ((bays + 1 with a spaceport or station) × shuttle technology), where the cargo is what that order moves (its own share of each ship's capacity, from the cargo model below), not a cycle-wide share; ships up to 500 t land; a fleet with a ship that has no way to load at a stop is flagged, shows no cycle or yearly numbers, and is left out of the totals | Docs `logistics` |
 | Cargo follows the orders: each load takes what is asked (a set `MaxItems` for the Mineral Type orders, otherwise all the free space) and each unload empties what the fleet holds, repeated until the hold settles. A cycle's cargo is what its unloads deliver, so load@A, unload@B, load@B, unload@A counts two holds; minerals and installations share the cargo hold, colonists have their own berths. "Load/Unload Minerals to Reserve Level" (165) unloads what the fleet holds, else loads | Sample (above) |
 | Fuel a year = engine power × fuel efficiency (litres an hour) × hours under way | Plan § 6 |
 | Load actions 4, 62, 165, 176, 178, 180, 223; unload actions 6, 63, 96, 165, 177, 179. "Load All Minerals" (62) and "Until Full" (223) fill the hold, assuming the colony has the stock; "Load Mineral Type" (178) and "Load Mineral when X available" (180) carry up to their set amount. The sample's fleets use only 4, 6, 63, 96, 165, 176, 178, 223 | `DIM_MoveAction`; the forum's v1.12 notes for "Until Full" (same as Load All Minerals, repeated until full, reserve levels respected) |
 
 **Layout.**
 
-- Tiles: freighters and colony ships with cargo space and berths, repeating routes (and how many trace), what they move a year, and route fuel a year.
-- A routes table: fleet, stops, round trip, cycle (a tooltip splits moving from handling, and flags a stop the fleet can't load at), trips a year, what it moves a year, fuel a year. Expanding a row lists its legs.
+- Tiles: freighters and colony ships with cargo space and berths, repeating routes (and how many are counted: the rest can't be traced or can't load), what they move a year, and route fuel a year.
+- A routes table: fleet, stops, round trip, cycle (a tooltip splits moving from handling; a fleet that can't load at a stop shows why instead of numbers), trips a year, what it moves a year, fuel a year. Expanding a row lists its legs.
 - Deliveries by destination and cargo kind: each unload is credited with what the fleet holds at that point.
 - Freighter classes: ships, cargo, berths, speed, reach a year and cargo × distance.
 

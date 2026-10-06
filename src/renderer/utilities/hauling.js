@@ -184,14 +184,15 @@ export const cycleHandling = (orders, cargo, fleet, ships) => {
 
 // A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order
 // delays), what it moves, and the fuel its engines burn while moving (litres per hour x hours under
-// way). Refuelling and overhauls aren't counted.
-export const routeYear = (fleet, route, cargo, delaySeconds = 0) => {
-  if (route.km === null || !(fleet.Speed > 0)) {
+// way). Refuelling and overhauls aren't counted. A route that can't be traced, or where a ship can't
+// load (`handling.blocked`), has no year: it would never move its cargo.
+export const routeYear = (fleet, route, cargo, handling, delaySeconds = 0) => {
+  if (route.km === null || !(fleet.Speed > 0) || handling.blocked.length) {
     return null
   }
 
   const movingSeconds = route.km / fleet.Speed
-  const cycleSeconds = movingSeconds + delaySeconds
+  const cycleSeconds = movingSeconds + handling.seconds + delaySeconds
   const trips = cycleSeconds > 0 ? SECONDS_PER_YEAR / cycleSeconds : 0
 
   return {
