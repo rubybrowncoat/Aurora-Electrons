@@ -9,7 +9,7 @@
    - copy or symlink a real save from your Aurora install, or set `headGame` in `src/main/index.js` to read `../AuroraDB.db`.
 
    `AuroraDB*.db` is git-ignored. Never commit a save.
-4. Run `yarn dev`. Nuxt serves the renderer on `:9080`, and Electron opens with devtools. Ctrl/Cmd+E relaunches Electron. The app watches the save, so saving in Aurora, or replacing the file, reloads every view.
+4. Run `yarn dev`. Nuxt serves the renderer on `:9080`, and Electron opens with devtools. Ctrl/Cmd+E relaunches Electron, and closing its window stops `yarn dev`. The app watches the save, so saving in Aurora, or replacing the file, reloads every view. If port 9080 is taken, `yarn dev` stops with an error; free it, or run with `PORT=<free port>`. Dev runs keep their settings and history in `%APPDATA%\Electron` (the unpackaged app's name), apart from the installed app's.
 
 ## Cloud sessions (Claude Code on the web)
 
@@ -47,6 +47,17 @@ Fonts and icons load from Google Fonts and jsDelivr. In the cloud those requests
 `yarn web` stops at startup if sqlite3 can't load, and prints the command that fetches its binary. Any `yarn install` that relinks sqlite3 removes the binary, because `--ignore-scripts` skips its download. If port 9080 is taken (another `yarn web`, or `yarn dev`), Nuxt falls back to a random port. `yarn web` then prints the real URL, which you pass to the smoke test as `BASE_URL`.
 
 Limits: web mode doesn't run main-process code (IPC handlers, storage-path resolution, the window, packaging). Writes still happen: map → Save Positions updates `./AuroraDB.db`. Re-extract the fixture to reset it.
+
+## Electron smoke test
+
+`yarn electron:smoke` drives the real Electron app, so it covers what web mode can't: the main process, the storage-path IPC, electron-store's files, the save watcher, and native sqlite3 inside Electron. It needs the full local install (Electron's binary), not the cloud setup. It's self-contained:
+
+- It builds the development main process into `dist/smoke/main` and serves the renderer from its own Nuxt server on a free port, with its own build folder and Sentry off. A running `yarn dev` or `yarn web` is left alone.
+- It launches Electron through Playwright on a copy of the save, with `--user-data-dir` pointing at a fresh folder. The run folder, `dist/smoke/run`, keeps the save copy and the user data until the next run.
+- It selects the sample race, visits the same pages as `web:smoke`, and saves screenshots. A page fails on console or page errors, main-process errors, failed database calls, or database calls that never go quiet; for those it names the pending, repeated and slowest queries and how long the main thread was blocked.
+- Then it checks the app itself: the save loaded through the storage-path IPC, `config.json` sits in user data, `history/game-<GameID>.json` holds snapshots for the race, and rewriting the save makes the watcher reopen the database and record again without adding snapshots for the same save.
+
+It takes about 90 seconds. `SMOKE_PAGES`, `SMOKE_OUT`, `AURORA_GAME` and `AURORA_RACE` work as in `web:smoke`; `AURORA_DB` picks the save to copy. In Git Bash, prefix route lists with `MSYS_NO_PATHCONV=1`, or Bash rewrites `/habitability` into a Windows path.
 
 ## Making a change
 
@@ -94,7 +105,7 @@ Limits: web mode doesn't run main-process code (IPC handlers, storage-path resol
 
 - **Lint what you touched:** `node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>`. You can add `--fix` for those files only. The repo-wide baseline isn't clean: at the time of writing, `yarn lint` reports 17 errors and 119 warnings. Don't fix unrelated problems, and don't introduce new ones.
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
-- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally you can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
+- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
 
 ## Dependency updates

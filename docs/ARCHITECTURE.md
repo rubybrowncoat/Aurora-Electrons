@@ -22,18 +22,19 @@ Node `>=20.17` (`.nvmrc`: 20) and Yarn 1 are enforced by `.electron-nuxt/check-e
 
 ## Build pipeline (`.electron-nuxt/`)
 
-Most of this directory is the electron-nuxt template's tooling; treat that part as vendored unless a change needs it. `web.js` and `web/` are this project's own.
+Most of this directory is the electron-nuxt template's tooling; treat that part as vendored unless a change needs it. `web.js`, `web/`, `electron-smoke.js`, `smoke-pages.js`, `main-webpack.js` and `kill-tree.js` are this project's own.
 
 - `yarn dev` runs `dev.js` and then `index.js` with `NODE_ENV=development`. It does three things:
-  - webpack builds the main process from `src/main/boot/index.dev.js` into `dist/main/index.js`.
-  - A forked Nuxt process (`renderer/nuxt-process.js`) builds the renderer and serves it at `http://localhost:9080`.
-  - Electron launches, and relaunches whenever the main bundle rebuilds.
+  - webpack builds the main process from `src/main/boot/index.dev.js` into `dist/main/index.js` (config in `main-webpack.js`).
+  - A forked Nuxt process (`renderer/nuxt-process.js`) builds the renderer and serves it at `http://localhost:9080`, or on `PORT`. The main bundle is built to load that port, so the Nuxt process stops `yarn dev` when the port is taken instead of falling back to another one.
+  - Electron launches, and relaunches whenever the main bundle rebuilds. Closing its window stops everything. On Windows, `kill-tree.js` makes that stop use `taskkill`, because the template's ps-tree needs `wmic.exe`, which recent Windows 11 builds lack.
 - `yarn build` runs `build.js` and then `index.js` with `NODE_ENV=production`. It differs from dev in two ways:
   - The main process builds from `src/main/boot/index.prod.js`.
   - Nuxt *generates* static files into `dist/renderer`, which the app serves over a custom `app://` protocol.
   
   electron-builder then packages the app using `builder.config.js`: a Windows portable exe with `splash.bmp`, a Linux deb, and a macOS dmg. It runs with `asar: false` and writes to `build/`.
 - `yarn web` runs `web.js`, which builds the same renderer for a plain browser and uses the shims and database middleware in `web/`. See "Web mode" in `docs/WORKFLOW.md`.
+- `yarn electron:smoke` runs `electron-smoke.js`, which builds the development main process and the renderer itself (under `dist/smoke`, on a free port) and drives the real app through Playwright. See "Electron smoke test" in `docs/WORKFLOW.md`.
 - `renderer/nuxt.config.js` merges the base config into `src/renderer/nuxt.config.js`. The base config sets `srcDir`, the hash router, and the generate dir, plus an `electron-renderer` webpack target with `dependencies` left external.
 
 ## Main process (`src/main/`)
@@ -74,7 +75,7 @@ The `plugins/history.js` plugin (client-only, after the database plugin) also wa
 | `snackbar.js` | Global snackbar | session |
 | `history.js` | `revision`, bumped each time the recorder writes snapshots; `unsaved`, the GameIDs whose latest snapshots couldn't be written | session |
 
-Anything that must survive a restart goes to electron-store through `this.config` instead. That's a `config.json` in Electron's userData directory. Keys in use:
+Anything that must survive a restart goes to electron-store through `this.config` instead. That's a `config.json` in Electron's userData directory. The renderer's stores get that folder from the main process, so `src/main/index.js` calls `Store.initRenderer()`. Before it did, settings landed in conf's fallback folder (`%APPDATA%\electron-store-nodejs\Config` on Windows); a packaged build copies that file into userData once. Keys in use:
 
 - App-wide: `darkMode`, `spyNPR`, `selectedSeparator`.
 - Habitability: `habitabilitySystems`, `habitabilityTerraformers`, and the `habitabilityFilter*` keys (`OwnPopulations`, `OtherPopulations`, `Uninhabited`, `NonTerraformable`, `DoneTerraforming`, `WithoutMinerals`).
@@ -87,7 +88,7 @@ Empire History keeps its snapshots in one electron-store file per game, `history
 
 ### Pages
 
-Tabs are declared in `layouts/default.vue`. Each page also needs a case in that file's `title()`, and its route in the smoke test's page list (`.electron-nuxt/web/smoke.js`).
+Tabs are declared in `layouts/default.vue`. Each page also needs a case in that file's `title()`, and its route in the smoke tests' page list (`.electron-nuxt/smoke-pages.js`).
 
 | Route | Tab | File | Shows |
 |---|---|---|---|

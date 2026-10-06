@@ -16,10 +16,11 @@ Detailed docs:
 
 ```bash
 yarn install    # yarn only (npm is rejected by preinstall). postinstall runs `yarn lint:fix` over src/, so review unrelated diffs
-yarn dev        # Nuxt dev server on :9080 + Electron with devtools; Ctrl/Cmd+E relaunches Electron
+yarn dev        # Nuxt dev server on :9080 (or PORT) + Electron with devtools; Ctrl/Cmd+E relaunches Electron, closing it stops everything
 yarn build      # production build + electron-builder packages into build/
 yarn web        # renderer as a plain browser app on :9080, backed by ./AuroraDB.db (no Electron needed)
 yarn web:smoke  # with `yarn web` running: Chromium visits every page, reports errors, saves screenshots (locally, run `npx playwright install chromium` once)
+yarn electron:smoke  # local only, self-contained: builds and drives the real Electron app on a copy of the save, visits every page, checks settings/history files and the save watcher (~90 s)
 yarn lint       # ESLint over src/ (the baseline is not clean, see below)
 node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>   # lint only what you touched
 ```
@@ -43,9 +44,9 @@ There is no test suite and no CI (`.github/` is git-ignored).
 - The app is read-only toward the save. The single exception is the map's "Save Positions" button (`UPDATE FCT_RaceSysSurvey`). Don't add writes without an explicit request, a confirmation dialog, and testing against a copy.
 - Interpolating `GameID` and `RaceID` (numbers from the DB) into SQL is the existing pattern. Anything a user types must go through Sequelize `replacements` instead.
 - Persistent preferences go through `this.config` (electron-store). Per-game or per-race keys are named `game.<GameID>.race.<RaceID>.<key>`. State that only needs to last for the session goes in a Vuex module under `src/renderer/store/`.
-- A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`, and its route in the default page list of `.electron-nuxt/web/smoke.js`.
+- A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`, and its route in `.electron-nuxt/smoke-pages.js`, the smoke tests' page list.
 - Lint the files you touch and add no new problems. Don't fix unrelated lint, and don't run `yarn lint:fix` on the whole tree.
-- Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Say so when a change depends on those.
+- Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Locally, run `yarn electron:smoke` for changes that touch those, settings or history storage, or the save watcher; it covers everything but packaging. Say so when a change depends on something neither run covers. In Git Bash, prefix route lists with `MSYS_NO_PATHCONV=1`.
 
 ## Commits and PRs
 
