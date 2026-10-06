@@ -56,7 +56,7 @@
               <v-text-field v-model="search" label="Search systems" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
-          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="onSystemClick">
+          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="onSystemClick">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
             </template>
@@ -174,6 +174,7 @@
 
 <script>
 import { mapGetters } from 'vuex'
+import { sortItems } from 'vuetify/lib/util/helpers'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import { systemBodyName } from '../utilities/aurora'
@@ -207,6 +208,8 @@ export default {
       showSurveyed: false,
       search: '',
       expanded: [],
+      page: 1,
+      itemsPerPage: 15,
       selectedSystemId: null,
       sortBy: ['remaining'],
       sortDesc: [true],
@@ -494,7 +497,16 @@ export default {
         this.sortBy = ['remaining']
         this.sortDesc = [true]
         this.expanded = [row]
+
+        // The row's page in the order the table will show: unfiltered, sorted as above.
+        const sorted = sortItems(this.visibleSystems.slice(), this.sortBy, this.sortDesc, this.$vuetify.lang.current)
+        const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
+
+        this.page = target
         this.$nextTick(() => {
+          // The table clamps the page to the pages it has before the cleared search widens the list.
+          this.page = target
+
           const panel = this.$refs.systemsPanel
 
           if (panel && panel.$el) {
