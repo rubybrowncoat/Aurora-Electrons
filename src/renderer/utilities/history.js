@@ -151,8 +151,9 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
   }
 }
 
-// Everything one pass takes from the save: [{ GameID, taken, intel }] per game, `taken` being
-// [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]: takeIntel() }. It all
+// Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, taken, intel }] per
+// game, `taken` being [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]:
+// takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, error }]. It all
 // happens in one read transaction, so a save written meanwhile can't give one race's snapshot the
 // old save and the next one's the new. In SQLite a read transaction holds a shared lock from its
 // first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads
@@ -162,6 +163,7 @@ const readSave = (database) => database.transaction(async (transaction) => {
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
   const games = {}
   const read = []
+  const failed = []
 
   races.filter(recordsHistory).forEach((race) => {
     games[race.GameID] = [...(games[race.GameID] || []), race]
@@ -171,39 +173,49 @@ const readSave = (database) => database.transaction(async (transaction) => {
     const taken = []
     const intel = {}
 
-    for (const race of gameRaces) {
-      const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID }, options)
+    try {
+      for (const race of gameRaces) {
+        const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID }, options)
 
-      if (result) {
-        taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
-        intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID }, options)
+        if (result) {
+          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
+          intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID }, options)
+        }
       }
-    }
 
-    read.push({ GameID: Number(GameID), taken, intel })
+      read.push({ GameID: Number(GameID), taken, intel })
+    } catch (error) {
+      failed.push({ GameID: Number(GameID), error })
+    }
   }
 
-  return read
+  return { read, failed }
 })
 
 // Snapshot every recorded race in the save, and what each knows of the other races, writing each
-// game's history file once. Returns { recorded, failed }: how many races were saved, and the games
-// whose file couldn't be written, [{ GameID, error }] (electron-store throws when it can't write,
-// as does web mode's localStorage when the quota is full). Their snapshots are lost.
-export const recordHistory = async (database) => {
+// game's history file once. A game that can't be read or written doesn't stop the others (electron-store
+// throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are
+// lost. `onSaved(GameID)` is called as soon as each game's file is written, so views refresh even if a
+// later game fails. Returns { recorded, failed }: how many races were saved, and the games that
+// couldn't be, [{ GameID, error }].
+export const recordHistory = async (database, { onSaved = () => {} } = {}) => {
+  const { read, failed } = await readSave(database)
   let recorded = 0
-  const failed = []
 
-  for (const { GameID, taken, intel } of await readSave(database)) {
+  for (const { GameID, taken, intel } of read) {
     if (taken.length) {
       try {
         const store = historyConfig(GameID)
 
         store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
-        recorded += taken.length
       } catch (error) {
         failed.push({ GameID, error })
+
+        continue
       }
+
+      recorded += taken.length
+      onSaved(GameID)
     }
   }
 

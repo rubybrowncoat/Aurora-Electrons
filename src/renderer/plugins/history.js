@@ -7,16 +7,14 @@ export default ({ store }) => {
       return
     }
 
-    recordHistory(database).then(({ recorded, failed }) => {
+    // Open views refresh after each game's file is written, so a game that fails later in the pass
+    // doesn't leave them stale.
+    recordHistory(database, { onSaved: () => store.commit('history/recorded') }).then(({ failed }) => {
       failed.forEach(({ GameID, error }) => {
         console.error(`Empire history: couldn't save game ${GameID}'s snapshots`, error)
       })
 
       store.commit('history/unsaved', failed.map(({ GameID }) => GameID))
-
-      if (recorded) {
-        store.commit('history/recorded')
-      }
     }).catch((error) => {
       console.error('Empire history: snapshot failed', error)
     })
