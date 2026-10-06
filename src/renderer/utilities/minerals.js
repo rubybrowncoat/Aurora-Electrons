@@ -130,36 +130,45 @@ export const yearSteps = (horizon, points = 80) => Array.from({ length: points +
 // One mineral's stockpile over `steps` (years): today's stock, what each deposit still delivers
 // (exactly, from depositStateAt's remaining amounts, so a deposit never gives more than it holds),
 // and every other flow at today's net rate. Mining only slows down, so the level is concave: it
-// crosses zero at most once, and between the first two samples that bracket it.
+// rises while the output beats the net drain, peaks where the two meet, then only falls, and so
+// crosses zero downwards at most once, after the peak. The peak is found on the output directly
+// (not on the samples, which can step over a rise and fall that fit between two of them).
 // `deposits`: [{ deposit, rate (t/yr now), share (of the output that reaches the stockpile) }]
 export const stockProjection = ({ start, otherNet, deposits, steps }) => {
   const initial = deposits.map(({ deposit, rate }) => depositStateAt(deposit, rate, 0).amount)
   const levelAt = (years) => deposits.reduce((sum, { deposit, rate, share }, index) => sum + (initial[index] - depositStateAt(deposit, rate, years).amount) * share, start + otherNet * years)
+  const outputAt = (years) => deposits.reduce((sum, { deposit, rate, share }) => sum + depositStateAt(deposit, rate, years).rate * share, 0)
   const levels = steps.map(levelAt)
-  const output = steps.map((years) => deposits.reduce((sum, { deposit, rate, share }) => sum + depositStateAt(deposit, rate, years).rate * share, 0))
+  const output = steps.map(outputAt)
+  const first = steps[0]
+  const last = steps[steps.length - 1]
   let runOut = null
 
-  if (start <= 0 && output[0] + otherNet < 0) {
-    runOut = 0
-  } else {
-    const index = levels.findIndex((level, i) => i > 0 && level <= 0 && levels[i - 1] > 0)
+  // Bisects [low, high] for where `above` stops holding; `above` must hold at `low`, fail at `high`, and not recover.
+  const bisect = (low, high, above) => {
+    for (let iteration = 0; iteration < 60; iteration++) {
+      const middle = (low + high) / 2
 
-    if (index > 0) {
-      let low = steps[index - 1]
-      let high = steps[index]
-
-      for (let iteration = 0; iteration < 60; iteration++) {
-        const middle = (low + high) / 2
-
-        if (levelAt(middle) > 0) {
-          low = middle
-        } else {
-          high = middle
-        }
+      if (above(middle)) {
+        low = middle
+      } else {
+        high = middle
       }
-
-      runOut = high
     }
+
+    return [low, high]
+  }
+
+  // The level is at its highest where output + otherNet turns from positive to negative.
+  const peak = output[0] + otherNet <= 0 ? first : output[output.length - 1] + otherNet > 0 ? last : bisect(first, last, (years) => outputAt(years) + otherNet > 0)[0]
+
+  if (levelAt(peak) > 0) {
+    if (levels[levels.length - 1] <= 0) {
+      runOut = bisect(peak, last, (years) => levelAt(years) > 0)[1]
+    }
+  } else if (start <= 0 && output[0] + otherNet < 0) {
+    // An empty stockpile that is only drawn down is already out.
+    runOut = 0
   }
 
   return { stock: levels.map((level) => Math.max(0, level)), output, runOut }
