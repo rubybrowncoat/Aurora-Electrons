@@ -89,9 +89,9 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
 - Cycling fleets (`CycleMoves = 1`, not a shipping line) with their set speed and the race's shuttle technology.
 - Their ships' cargo, berths, tonnage and cargo shuttle bays (components named `Cargo Shuttle Bay%`).
 - Their orders in sequence, each with where it sends the fleet and where the fleet is afterwards (both the same for a body):
-  - jump point (1): entry at `DestinationID`, exit at `NewWarpPointID` or the entry's `WPLink`;
+  - jump point (1): entry at `DestinationID`; for a transit (`DIM_MoveAction.TransitOrder > 0`) the exit is at `NewWarpPointID` or the entry's `WPLink`, for any other order (a plain Move to Location) the fleet stays at the entry;
   - body (2, 15): the body's current position;
-  - Lagrange jump (12): from `DestinationID` to `DestinationItemID` in `FCT_LagrangePoint`.
+  - Lagrange point (12): an Intra-system Jump (action 124) goes from `DestinationID` to `DestinationItemID` in `FCT_LagrangePoint`; any other order stays at `DestinationID`.
 
   Each order also carries whether its colony has a spaceport or cargo shuttle station.
 
