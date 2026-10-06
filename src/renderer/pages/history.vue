@@ -2,11 +2,18 @@
   <div>
     <div v-if="!RaceID">Select a race from the left-side menu.</div>
 
+    <v-container v-else-if="!historyRecorded" fluid class="history-page">
+      <v-alert type="info" outlined dense>
+        The app doesn't keep Empire History for this race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas), which have no empire to chart. History is kept for player races and NPR empires.
+      </v-alert>
+    </v-container>
+
     <v-container v-else fluid class="history-page">
       <v-row dense align="center" class="mb-1">
         <v-col class="caption text--secondary">
           <template v-if="snapshots.length">{{ snapshots.length }} {{ snapshots.length === 1 ? 'snapshot' : 'snapshots' }}, {{ snapshots.length > 1 ? `${date(snapshots[0].t)} to ${date(snapshots[snapshots.length - 1].t)}` : date(snapshots[0].t) }}.</template>
-          The app records one each time Aurora saves while it's open, for every player race in the save.
+          The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
+          <span v-if="filePath">Saved in <span class="file-path">{{ filePath }}</span>.</span>
         </v-col>
         <v-col cols="auto">
           <v-btn-toggle v-model="view" mandatory dense>
@@ -36,6 +43,21 @@
         <v-alert v-if="snapshots.length === 1" type="info" outlined dense class="mt-4">
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
+
+        <v-card v-if="view === 'charts' && rivals" class="panel" elevation="1">
+          <div class="panel-head">
+            <span>Rivals <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
+            <span class="legend">
+              <span v-for="series in rivals.data.datasets" :key="series.label" class="legend-item" :class="{ 'font-weight-bold': series.borderWidth === 3 }"><span class="swatch" :style="{ background: series.borderColor }" />{{ series.label }}</span>
+            </span>
+          </div>
+          <div class="panel-body">
+            <v-btn-toggle :value="rivalMetric" mandatory dense class="mb-2 flex-wrap" @change="setRivalMetric">
+              <v-btn v-for="metric in rivalMetrics" :key="metric.value" :value="metric.value" small>{{ metric.text }}</v-btn>
+            </v-btn-toggle>
+            <chart-canvas type="line" :data="rivals.data" :options="rivals.options" :height="280" label="Rivals" />
+          </div>
+        </v-card>
 
         <v-row v-if="view === 'charts'">
           <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="6">
@@ -84,7 +106,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import { gameTime } from '../utilities/aurora'
-import { historyConfig, historyKey } from '../utilities/history'
+import { historyConfig } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 
@@ -109,6 +131,17 @@ const compact = (value) => {
 // Millions of people, in billions from 1,000 M (three decimals, so slow growth still shows).
 const people = (millions) => (Math.abs(millions) >= 1000 ? `${roundToDecimal(millions / 1000, 3)} bn` : `${roundToDecimal(millions, 1)} M`)
 
+// What the Rivals chart can compare.
+const RIVAL_METRICS = [
+  { value: 'population', text: 'Population', pick: (snapshot) => snapshot.population, format: people },
+  { value: 'colonies', text: 'Colonies', pick: (snapshot) => snapshot.colonies, format: (value) => `${roundToDecimal(value, 0)}` },
+  { value: 'fleet', text: 'Fleet tonnage', pick: (snapshot) => (snapshot.militaryTons || 0) + (snapshot.commercialTons || 0), format: (value) => `${compact(value)} t` },
+  { value: 'military', text: 'Military tonnage', pick: (snapshot) => snapshot.militaryTons, format: (value) => `${compact(value)} t` },
+  { value: 'research', text: 'Research', pick: (snapshot) => snapshot.research, format: (value) => `${compact(value)} RP` },
+  { value: 'systems', text: 'Known systems', pick: (snapshot) => snapshot.systems, format: (value) => `${roundToDecimal(value, 0)}` },
+  { value: 'wealth', text: 'Treasury', pick: (snapshot) => snapshot.wealth, format: compact },
+]
+
 export default {
   name: 'HistoryPage',
   components: { ChartCanvas },
@@ -118,12 +151,16 @@ export default {
       confirmClear: false,
       mineralIds: [1, 2, 11],
       installationIds: null,
-      // Bumped when this page clears the history, so `record` re-reads it.
+      rivalMetric: 'population',
+      rivalMetrics: RIVAL_METRICS,
+      // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
+      spyNPR: false,
+      // Bumped when this page clears the history, so `gameHistory` re-reads it.
       cleared: 0,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'historyRecorded']),
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -135,16 +172,24 @@ export default {
       return chartTheme(this.$vuetify.theme.dark)
     },
 
-    // The race's record, re-read whenever the recorder writes (store revision) or this page clears it.
-    record() {
+    // The game's history file, re-read whenever the recorder writes (store revision) or this page clears it.
+    gameHistory() {
       // eslint-disable-next-line no-unused-expressions
       this.$store.state.history.revision + this.cleared
 
-      if (!this.GameID || !this.RaceID) {
+      if (!this.GameID || !this.RaceID || !this.historyRecorded) {
         return null
       }
 
-      return historyConfig().get(historyKey(this.GameID, this.RaceID), null)
+      return historyConfig(this.GameID).store
+    },
+
+    record() {
+      return this.gameHistory && this.gameHistory.races ? this.gameHistory.races[this.RaceID] || null : null
+    },
+
+    filePath() {
+      return this.GameID ? historyConfig(this.GameID).path : ''
     },
 
     snapshots() {
@@ -249,6 +294,36 @@ export default {
       ]
     },
 
+    // Every recorded race in the game on one metric, players first; only in spy mode.
+    rivals() {
+      const races = this.spyNPR && this.gameHistory && this.gameHistory.races ? Object.entries(this.gameHistory.races).filter(([, record]) => record.snapshots && record.snapshots.length).sort(([a, first], [b, second]) => Number(!!first.npr) - Number(!!second.npr) || Number(a) - Number(b)) : []
+
+      if (races.length < 2) {
+        return null
+      }
+
+      const metric = RIVAL_METRICS.find((option) => option.value === this.rivalMetric) || RIVAL_METRICS[0]
+      const palette = this.theme.categorical
+      const datasets = races.map(([RaceID, record], index) => {
+        const selected = Number(RaceID) === Number(this.RaceID)
+        const color = palette[index % palette.length]
+
+        return {
+          label: record.raceName || `Race ${RaceID}`,
+          data: record.snapshots.map((snapshot) => ({ x: this.year(snapshot.t), y: metric.pick(snapshot) || 0 })),
+          borderColor: color,
+          backgroundColor: withAlpha(color, 0.1),
+          borderWidth: selected ? 3 : 1.5,
+          borderDash: index >= palette.length ? [6, 4] : [],
+          pointRadius: record.snapshots.length > 40 ? 0 : 2,
+          pointHoverRadius: 4,
+          tension: 0,
+        }
+      })
+
+      return { data: { datasets }, options: this.options({ y: metric.format }, metric.format) }
+    },
+
     tableHeaders() {
       return [
         { text: 'Date', value: 'date' },
@@ -281,9 +356,13 @@ export default {
       immediate: true,
       handler() {
         this.mineralIds = this.config.get('historyMinerals', [1, 2, 11])
+        this.rivalMetric = this.config.get('historyRivalsMetric', 'population')
         this.installationIds = this.config.get(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, null)
       },
     },
+  },
+  created() {
+    this.spyNPR = this.config.get('spyNPR', false)
   },
   methods: {
     count(value, decimals = 0) {
@@ -295,7 +374,7 @@ export default {
     date(seconds) {
       return gameTime(this.StartYear, seconds).format('YYYY-MM-DD')
     },
-    options(axes) {
+    options(axes, labelFormat = null) {
       const scales = {
         x: { type: 'linear', title: { display: true, text: 'Year' }, ticks: { callback: (value) => `${roundToDecimal(value, 2)}` } },
         y: { ticks: { callback: axes.y } },
@@ -311,7 +390,7 @@ export default {
           tooltip: {
             callbacks: {
               title: (items) => this.date((items[0].parsed.x - (this.StartYear || 0)) * SECONDS_PER_YEAR),
-              label: (item) => `${item.dataset.label}: ${this.count(item.parsed.y, item.parsed.y < 100 ? 1 : 0)}`,
+              label: (item) => `${item.dataset.label}: ${labelFormat ? labelFormat(item.parsed.y) : this.count(item.parsed.y, item.parsed.y < 100 ? 1 : 0)}`,
             },
           },
         },
@@ -325,8 +404,20 @@ export default {
       this.installationIds = ids
       this.config.set(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, ids)
     },
+    setRivalMetric(value) {
+      this.rivalMetric = value
+      this.config.set('historyRivalsMetric', value)
+    },
+    // Remove this race from the game's history file; other races keep theirs.
     clearHistory() {
-      historyConfig().set(historyKey(this.GameID, this.RaceID), null)
+      const store = historyConfig(this.GameID)
+      const history = store.store
+
+      if (history.races && history.races[this.RaceID]) {
+        delete history.races[this.RaceID]
+        store.store = history
+      }
+
       this.cleared++
       this.confirmClear = false
     },
@@ -417,6 +508,11 @@ export default {
 
   td {
     font-variant-numeric: tabular-nums;
+  }
+
+  .file-path {
+    font-family: monospace;
+    overflow-wrap: anywhere;
   }
 }
 </style>

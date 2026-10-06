@@ -1,6 +1,7 @@
-// Web mode stand-in for `electron-store`: dot-path get/set/onDidChange,
-// persisted in localStorage. Each store `name` (default 'config', as in
-// electron-store) gets its own key, like electron-store's separate files.
+// Web mode stand-in for `electron-store`: dot-path get/set/onDidChange and the
+// whole `store`, persisted in localStorage. Each store (`cwd` and `name`,
+// default 'config' as in electron-store) gets its own key, like
+// electron-store's separate files.
 
 const listeners = {}
 
@@ -38,7 +39,16 @@ const setPath = (object, key, value) => {
 
 export default class Store {
   constructor (options = {}) {
-    this.storageKey = `aurora-electrons:${options.name || 'config'}`
+    this.storageKey = `aurora-electrons:${options.cwd ? `${options.cwd}/` : ''}${options.name || 'config'}`
+    this.path = `localStorage ${this.storageKey}`
+  }
+
+  get store () {
+    return read(this.storageKey)
+  }
+
+  set store (value) {
+    write(this.storageKey, value)
   }
 
   get (key, defaultValue) {

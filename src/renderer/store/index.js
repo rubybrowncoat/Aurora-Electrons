@@ -1,6 +1,7 @@
 import Config from 'electron-store'
 
 import { resetDatabase } from '../utilities/database'
+import { recordsHistory } from '../utilities/history'
 
 const configConfiguration = {}
 
@@ -11,6 +12,9 @@ export const state = () => {
 
     GameID: null,
     RaceID: null,
+    // The selected race's kind, for what the app records about it (Empire History).
+    RaceNPR: false,
+    RaceSpecialNPRID: 0,
 
     StartYear: 0,
     GameTime: 0,
@@ -32,6 +36,10 @@ export const getters = {
   },
   RaceID (state) {
     return state.RaceID
+  },
+  // Whether the app keeps Empire History for the selected race (true until a race is picked).
+  historyRecorded (state) {
+    return !state.RaceID || recordsHistory({ NPR: state.RaceNPR, SpecialNPRID: state.RaceSpecialNPRID })
   },
   StartYear (state) {
     return state.StartYear
@@ -59,8 +67,10 @@ export const mutations = {
   setGame (state, { GameID }) {
     state.GameID = GameID
   },
-  setRace (state, { RaceID }) {
+  setRace (state, { RaceID, NPR, SpecialNPRID }) {
     state.RaceID = RaceID
+    state.RaceNPR = NPR || false
+    state.RaceSpecialNPRID = SpecialNPRID || 0
 
     console.log(state)
   },

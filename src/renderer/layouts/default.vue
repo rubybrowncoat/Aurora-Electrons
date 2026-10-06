@@ -63,7 +63,7 @@
           <v-tab to="/logistics" nuxt>Logistics</v-tab>
           <v-tab to="/finances" nuxt>Finances</v-tab>
           <v-tab to="/hauling" nuxt>Hauling</v-tab>
-          <v-tab to="/history" nuxt>History</v-tab>
+          <v-tab to="/history" nuxt :disabled="!historyRecorded">History</v-tab>
           <v-tab to="/habitability" nuxt>Habitability</v-tab>
           <v-tab to="/survey-progress" nuxt>Survey</v-tab>
           <v-tab to="/commanders" nuxt>Commanders</v-tab>
@@ -128,6 +128,7 @@ export default {
 
       'GameID',
       'RaceID',
+      'historyRecorded',
     ]),
 
     title() {

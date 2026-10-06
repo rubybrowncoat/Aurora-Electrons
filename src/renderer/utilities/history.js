@@ -1,26 +1,32 @@
-// Empire History: the app's own record of each player race, one snapshot per game save it sees.
-// Aurora keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is
-// the only way to chart growth. Snapshots are kept per game and race in their own electron-store
-// file (`history.json` beside the settings), never in the save. See docs/plans/aurcalcs/build-3.md.
+// Empire History: the app's own record of each race, one snapshot per game save it sees. Aurora
+// keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is the
+// only way to chart growth. Each game has its own electron-store file, `history/game-<GameID>.json`
+// beside the settings, never the save. See docs/plans/aurcalcs/build-3.md § Empire History.
 
 import Config from 'electron-store'
+
+import { toBoolean, toNumber } from './aurora'
 
 // More than this many snapshots per race and the older half is thinned to every other one, so a
 // long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap).
 export const MAX_SNAPSHOTS = 2000
 
-let historyStore = null
+const HISTORY_FOLDER = 'history'
+const historyStores = {}
 
-// The history file, created on first use.
-export const historyConfig = () => {
-  if (!historyStore) {
-    historyStore = new Config({ name: 'history' })
+// A game's history file, created on first use. Its contents:
+// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } } }
+export const historyConfig = (GameID) => {
+  if (!historyStores[GameID]) {
+    historyStores[GameID] = new Config({ cwd: HISTORY_FOLDER, name: `game-${GameID}` })
   }
 
-  return historyStore
+  return historyStores[GameID]
 }
 
-export const historyKey = (GameID, RaceID) => `game.${GameID}.race.${RaceID}`
+// Player races and NPR empires are recorded. Aurora's special factions (Precursors, Invaders,
+// Rakhas, Eldar, Ancients and the like, `SpecialNPRID` > 0) have no empire to chart.
+export const recordsHistory = ({ NPR, SpecialNPRID }) => !toBoolean(NPR) || !(toNumber(SpecialNPRID) > 0)
 
 // Drop every other snapshot in the older half until the list fits.
 export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => {
@@ -35,14 +41,30 @@ export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => {
   return result
 }
 
-// Add a snapshot to a race's record. A new game under the same IDs (another name) starts over;
-// a snapshot at a time already recorded replaces it; an earlier time (an older save reloaded)
-// drops what came after it, since that future didn't happen.
-export const mergeSnapshot = (record, snapshot, { gameName, raceName }) => {
-  const sameGame = record && record.gameName === gameName
-  const kept = sameGame ? record.snapshots.filter((entry) => entry.t < snapshot.t) : []
+// Add one save's snapshots to a game's history. `history` is the file's contents (or empty);
+// `races` is [{ RaceID, raceName, npr, snapshot }], all taken at game time `t`.
+// - Another game under the same GameID (another name) starts over.
+// - Every race loses its snapshots at or after `t`: an older save reloaded means that future didn't
+//   happen, and a save at a recorded time replaces it.
+// - A race missing from this save keeps its past, so a destroyed empire's history stays.
+export const mergeGame = (history, { gameName, t, races }) => {
+  const merged = {}
 
-  return { gameName, raceName, snapshots: thinSnapshots([...kept, snapshot]) }
+  if (history && history.gameName === gameName && history.races) {
+    Object.entries(history.races).forEach(([RaceID, record]) => {
+      const kept = (record.snapshots || []).filter((snapshot) => snapshot.t < t)
+
+      if (kept.length) {
+        merged[RaceID] = { ...record, snapshots: kept }
+      }
+    })
+  }
+
+  races.forEach(({ RaceID, raceName, npr, snapshot }) => {
+    merged[RaceID] = { raceName, npr, snapshots: thinSnapshots([...(merged[RaceID] ? merged[RaceID].snapshots : []), snapshot]) }
+  })
+
+  return { gameName, races: merged }
 }
 
 const sum = (rows, key) => rows.reduce((total, row) => total + (row[key] || 0), 0)
@@ -93,20 +115,33 @@ export const takeSnapshot = async (database, { GameID, RaceID }) => {
   }
 }
 
-// Snapshot every player race in the save into the history file. Returns how many were recorded.
+// Snapshot every recorded race in the save, writing each game's history file once.
+// Returns how many races were recorded.
 export const recordHistory = async (database) => {
-  const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID from FCT_Race where FCT_Race.NPR = 0')
-  const store = historyConfig()
+  const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race')
+  const games = {}
   let recorded = 0
 
-  for (const { GameID, RaceID } of races) {
-    const taken = await takeSnapshot(database, { GameID, RaceID })
+  races.filter(recordsHistory).forEach((race) => {
+    games[race.GameID] = [...(games[race.GameID] || []), race]
+  })
 
-    if (taken) {
-      const key = historyKey(GameID, RaceID)
+  for (const [GameID, gameRaces] of Object.entries(games)) {
+    const taken = []
 
-      store.set(key, mergeSnapshot(store.get(key, null), taken.snapshot, taken))
-      recorded++
+    for (const race of gameRaces) {
+      const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID })
+
+      if (result) {
+        taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
+      }
+    }
+
+    if (taken.length) {
+      const store = historyConfig(GameID)
+
+      store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken })
+      recorded += taken.length
     }
   }
 
