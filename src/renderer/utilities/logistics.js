@@ -108,12 +108,12 @@ export const harvesterOutput = (ship, adminBonus = 1) => {
 // Why a harvester isn't producing, or null when it is: the deposit has to be known, on a gas
 // giant or super-Jovian, and hold Sorium, and the tanks need room.
 export const harvesterIdleReason = (ship) => {
-  if (!ship.Surveyed) {
-    return 'Not surveyed'
-  }
-
   if (!HARVESTER_BODY_TYPES.includes(ship.BodyTypeID)) {
     return 'Not at a gas giant'
+  }
+
+  if (!ship.Surveyed) {
+    return 'Not surveyed'
   }
 
   if (!(ship.SoriumAmount > 0)) {
