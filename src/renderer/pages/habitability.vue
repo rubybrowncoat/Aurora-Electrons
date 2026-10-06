@@ -2064,10 +2064,6 @@ export default {
         CurrentTemperatureHigh: body.SurfaceTemp * highSwingRatio,
       }
 
-      if (body.SystemBodyID === 2001311) {
-        debugger
-      }
-
       const currentColonyCosts = this.colonyCosts(body)
       newBody.CurrentColonyCostOverall = currentColonyCosts.overall
       newBody.CurrentColonyCostPeriapsis = currentColonyCosts.periapsis
@@ -2301,10 +2297,6 @@ export default {
             }
           }
 
-          if (body.SystemBodyID === 2001311) {
-            debugger
-          }
-
           if (costsWorse) {
             overallCost = currentOverall
             periapsisCost = currentPeriapsis
@@ -2398,10 +2390,6 @@ export default {
       newBody.TotalPopulation = totalPopulation
       newBody.OwnPopulation = ownPopulation
       newBody.OtherPopulation = otherPopulation
-
-      if (newBody.TerraformationPlan && newBody.SystemBodyID === 2001311) {
-        console.log(newBody)
-      }
 
       return newBody
     },
