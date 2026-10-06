@@ -603,13 +603,27 @@ Validated: 561 rows, 0.00 s: `(459995, order 1798, 'Standard Transit', type 1, J
 
 **Purpose.** What the selected race knows about each alien race, recorded over time: first contact, known fleet and losses, known colonies, systems, ground forces and sensors, diplomatic and intelligence points. It reads only the race's own intelligence tables, so it respects fog of war without spy mode.
 
+**Mechanics reference.** [`references/mechanics/intelligence.md`](../../../references/mechanics/intelligence.md), provided by the maintainer for Aurora 2.7.1, decodes the status fields and gives the exact thresholds used below. Where it and the docs archive differ, it wins.
+
 **Data facts (verified on the sample).**
 - Every intelligence table is keyed by the viewing race, under three different column names: `FCT_AlienRace.ViewRaceID`, `FCT_AlienClass.ViewRaceID`, `FCT_AlienShip.ViewRaceID`, `FCT_AlienGroundUnitClass.ViewRaceID`, `FCT_AlienPopulation.ViewingRaceID`, `FCT_AlienRaceSensor.ViewingRaceID`, `FCT_AlienSystem.DetectRaceID`, `FCT_AlienRaceSpecies.DetectRaceID`. Race 784 knows 11 alien races (the Precursors and 10 Rakhas groups), 15 classes, 195 ships, 6 populations, 19 alien-system pairs, 65 ground unit classes and 10 sensors. Each NPR that knows anyone knows only race 784; the Eldar know no one.
 - The save holds the present picture plus some timestamps: `FirstDetected` on races, classes and ships, `LastContactTime` per ship, and `GameTimeDamaged` (set on 80 of the 83 destroyed ships, so close to their time of loss). That's enough to rebuild known ships and losses over time back to first contact; everything else needs recording.
 - `FCT_AlienShip.Destroyed` marks known losses (83 of 195, 82 of them salvaged). `FCT_AlienClass.ShipCount` counts the class's known ships, destroyed included.
-- `FCT_AlienClass.TCS` is the class size in hullspaces (tonnage / 50): it equals the real class's `Size`, rounded, on all 15 classes. Checked through `ActualClassID`, which the page must never use: the `Actual*` columns (`ActualClassID`, `ActualSensor`, `ActualMissile`, `ActualGroundUnitClass`, `ActualUnitClassID`) point at the real designs.
-- Populations are gated by intelligence (docs `intelligence-gathering`): size and installations from 100 points, factories, mines, spaceport and cargo station from 200, refineries, maintenance, refuelling and ordnance stations from 300, research, ground training, HQ and sector command from 500. Points decay about 25% a year without ELINT, and what was learned at the peak stays (`MaxIntelligence`). On the sample all six known populations are at 0 points, so only their thermal and EM signatures are known.
-- `ContactStatus` and `CommStatus` have no lookup table and no documented codes. On the sample, race 784 sees every alien at `ContactStatus` 0 and `CommStatus` 2 (one Rakhas group at 1), with diplomatic points of −101 to −123, below the docs' hostile line of −100. The NPRs see race 784 at 0 and 3. Treat 0 as hostile only together with the points, and confirm the codes in the game's Intelligence window.
+- `FCT_AlienClass.TCS` is the largest observed size in hullspaces (tonnage / 50): it equals the real class's `Size`, rounded, on all 15 classes. Checked through `ActualClassID`, which the page must never use: the `Actual*` columns (`ActualClassID`, `ActualSensor`, `ActualMissile`, `ActualGroundUnitClass`, `ActualUnitClassID`) point at the real designs.
+- Populations are gated by colony intelligence points, with **strict** thresholds: population and installation count above 100; factories, mines, spaceport and cargo station above 200; refineries, maintenance, refuelling and ordnance stations above 300; research labs, ground force construction, naval HQ and sector command above 500. Unobserved, current points decay by the factor 1 − 0.25 × years elapsed. `MaxIntelligence` keeps the peak, and what was unlocked stays visible: the game shows it red once current points drop below the threshold, green while they still exceed it. Facility flags aren't cleared when a facility disappears. On the sample all six known populations are at 0 points, so only their thermal and EM signatures are known.
+- Codes (from the reference):
+  - `ContactStatus`: 0 Hostile, 1 Neutral, 2 Friendly, 3 Allied, 4 Civilian, 5 None, 6 Combat.
+  - `CommStatus`: 0 None, 1 Attempting Communication, 2 Communication Established, 3 Communication Impossible. `CommModifier` is accumulated translation progress, and `CommEstablished` the game time it was established.
+  - `FCT_KnownSpecies.Status`: 0 Discovered, 1 Autopsied, 2 fully known (tentative).
+  - `FCT_AlienClass.EngineType`: 0 None, 1 Military, 2 Commercial, 3 FAC, 4 Survey, 5 Fighter. `AlienClassRole`: 0 Unknown, 1 anti-missile missile, 2 anti-ship missile, 3 and 4 beam roles (tentative).
+  - `FCT_AlienRaceSystemStatus.ProtectionStatusID`: 0 No Protection to 5 Demand Leave With Threat.
+- Diplomatic points have their own thresholds, independent of the codes: −100 hostility boundary, 200 trade treaty, 800 geological treaty and Friendly, 2,400 gravitational treaty, 4,000 Allied, 6,000 technology treaty. NPRs promote above a threshold and demote below it.
+- The sample decoded:
+  - Race 784 sees all 11 aliens as Hostile. 10 are at Communication Established and the newest Rakhas group at Attempting, but `CommEstablished` is 0 on every record, so no establishment time is stored.
+  - Its points are −101 on ten records, the value an attack forces when relations were above it. The Precursors are at −123, which is −101 less the 22 damage they caused; that record also has `FixedRelationship` 1.
+  - The NPRs see race 784 as Hostile and Communication Impossible, the starting state when the viewing race is a special faction. Four Rakhas groups are still at that state's starting −1,000 points; the others fell to between −88,632 and −31.4 million after fighting.
+  - Known species: one, Discovered. Sensors: 5 of 10 above 100 points, so their range and resolution are known (the highest is at 529). Ground unit classes: 40 of 65 past all three 20-observation thresholds (hits, penetrations, kills).
+- `AlienRaceIntelligencePoints` is a spending pool: each time it passes 100, the game spends 100 on one random reward attempt (a technology, survey data, a class summary, a system, sensor intelligence, or another race's relationship). Recorded over time it saw-tooths, and each drop of about 100 is one attempt.
 - The game log keeps about a year (`FCT_GameLog` spans 1.0 year on the sample) and holds no alien event types (147 New Alien Race, 232 New Alien Class, 233 New Alien Ship, 293 New Alien Population, 106 Intelligence Update, 180 Diplomacy) in that year, so it can't stand in for history.
 
 **SQL A: one row per known alien race, the snapshot.**
@@ -622,7 +636,7 @@ select ar.AlienRaceID, ar.AlienRaceName, ar.Abbrev, ar.ContactStatus, ar.CommSta
   (select count(*) from FCT_AlienShip as s where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID and s.Destroyed = 1) as DestroyedShips,
   (select max(s.LastContactTime) from FCT_AlienShip as s where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID) as LastContact,
   (select count(*) from FCT_AlienPopulation as p where p.GameID = ar.GameID and p.ViewingRaceID = ar.ViewRaceID and p.AlienRaceID = ar.AlienRaceID) as KnownPopulations,
-  (select sum(p.PopulationAmount) from FCT_AlienPopulation as p where p.GameID = ar.GameID and p.ViewingRaceID = ar.ViewRaceID and p.AlienRaceID = ar.AlienRaceID and p.MaxIntelligence >= 100) as KnownPopulation,
+  (select sum(p.PopulationAmount) from FCT_AlienPopulation as p where p.GameID = ar.GameID and p.ViewingRaceID = ar.ViewRaceID and p.AlienRaceID = ar.AlienRaceID and p.MaxIntelligence > 100) as KnownPopulation,
   (select count(*) from FCT_AlienSystem as x where x.GameID = ar.GameID and x.DetectRaceID = ar.ViewRaceID and x.AlienRaceID = ar.AlienRaceID) as KnownSystems,
   (select count(*) from FCT_AlienGroundUnitClass as g where g.GameID = ar.GameID and g.ViewRaceID = ar.ViewRaceID and g.AlienRaceID = ar.AlienRaceID) as GroundClasses,
   (select count(*) from FCT_AlienRaceSensor as rs where rs.GameID = ar.GameID and rs.ViewingRaceID = ar.ViewRaceID and rs.AlienRaceID = ar.AlienRaceID) as KnownSensors
@@ -650,13 +664,14 @@ select p.AlienRaceID, p.PopulationID, p.PopulationName, p.AlienPopulationIntelli
 from FCT_AlienPopulation as p
 where p.GameID = ${this.GameID} and p.ViewingRaceID = ${this.RaceID}
 ```
-Validated: 6 rows, 3 ms, all at 0 intelligence. Sample: `(786, 49053, 'Baten Kaitos IV', 0 points, thermal 65, EM 50)`. In JS, show each field only when `MaxIntelligence` reaches its threshold (100/200/300/500); below it the stored 0 means unknown.
+Validated: 6 rows, 3 ms, all at 0 intelligence. Sample: `(786, 49053, 'Baten Kaitos IV', 0 points, thermal 65, EM 50)`. In JS, show each field only when `MaxIntelligence` is above its threshold (100/200/300/500; below it the stored 0 means unknown), and mark it current while `AlienPopulationIntelligencePoints` is still above the threshold, as the game does with green and red.
 
 **Recording.** Same pass and file as Empire History (`utilities/history.js`): for each recorded viewing race, SQL A per save, kept under `intel.<ViewRaceID>.<AlienRaceID>` in `history/game-<GameID>.json` with the same rewind and new-game rules. Intelligence changes slowly, so store a snapshot only when a value other than `t` changed; a chart then holds each value until the next one. About 300 bytes per changed alien race.
 
 **Caveats / open questions.**
-- The status codes above are unconfirmed.
+- The codes come from the reference for 2.7.1. Other versions could differ.
 - Destroyed-ship times are last-damage times, so a ship damaged long before it died would be placed early.
+- Known ships are the hulls the race has tracked, not the alien fleet.
 - A race's knowledge can also shrink (decaying population intelligence), which only recording catches.
 - NPRs' views of other races are recorded the same way and shown only in spy mode.
 

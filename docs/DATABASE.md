@@ -39,9 +39,19 @@ The settings toggle `spyNPR` exposes NPRs in the race picker. That's the only in
 
 ### Races
 
-`FCT_Race.NPR` marks non-player races. A non-zero `SpecialNPRID` marks the special factions. In the sample: 1 is Precursors, 3 is Invaders, 4 is Rakhas, 5 is Eldar, and 6 is Ancients. All 14 of the sample's NPRs are special factions, so it has no ordinary NPR empire; test NPR features on a copy with `SpecialNPRID` set to 0 for one of them. Empire History records player races and NPRs with `SpecialNPRID = 0`.
+`FCT_Race.NPR` marks non-player races. A non-zero `SpecialNPRID` marks the special factions: 1 Precursors, 2 Swarm, 3 Invaders, 4 Rakhas, 5 Eldar, 6 Ancients (the sample has all but the Swarm). All 14 of the sample's NPRs are special factions, so it has no ordinary NPR empire; test NPR features on a copy with `SpecialNPRID` set to 0 for one of them. Empire History records player races and NPRs with `SpecialNPRID = 0`.
 
-What a race knows about other races is in the `FCT_Alien*` tables, keyed by the viewing race (`ViewRaceID`, `ViewingRaceID` or `DetectRaceID`, depending on the table). Their `Actual*` columns point at the real designs, so never join them for display. `sql-fleet.md` § 7 has the details.
+What a race knows about other races is in the `FCT_Alien*` tables, keyed by the viewing race (`ViewRaceID`, `ViewingRaceID` or `DetectRaceID`, depending on the table). Their `Actual*` columns point at the real designs, so never join them for display. Each `FCT_AlienRace` row is one race's view of another; the reverse view is a separate row. `sql-fleet.md` § 7 has the details, and `references/mechanics/intelligence.md` (the maintainer's reference for Aurora 2.7.1) the full mechanics. The codes:
+
+| Field | Codes |
+|---|---|
+| `FCT_AlienRace.ContactStatus` | 0 Hostile, 1 Neutral, 2 Friendly, 3 Allied, 4 Civilian, 5 None, 6 Combat |
+| `FCT_AlienRace.CommStatus` | 0 None, 1 Attempting Communication, 2 Communication Established, 3 Communication Impossible |
+| `FCT_KnownSpecies.Status` | 0 Discovered, 1 Autopsied, 2 fully known (tentative) |
+| `FCT_AlienRaceSystemStatus.ProtectionStatusID` | 0 No Protection, 1 Suggest Leave, 2 Request Leave, 3 Request Leave Urgently, 4 Demand Leave, 5 Demand Leave With Threat |
+| `FCT_AlienClass.EngineType` | 0 None, 1 Military, 2 Commercial, 3 FAC, 4 Survey, 5 Fighter |
+
+Diplomatic points are separate from those codes, with their own lines: −100 hostility, 200 trade treaty, 800 geological treaty and Friendly, 2,400 gravitational treaty, 4,000 Allied, 6,000 technology treaty. The Warnings page's hostile check (`ContactStatus === 0`) and its friendly or allied skip (2, 3) match these codes.
 
 ## Data quirks
 

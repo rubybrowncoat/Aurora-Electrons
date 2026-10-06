@@ -443,22 +443,46 @@ It reads only the selected race's intelligence tables, so it respects fog of war
 - Some timestamps: first detection of each race, class and ship, last contact per ship, and an approximate time of loss for destroyed ships. From these, known ships and losses can be rebuilt back to first contact.
 - Nothing else over time, and the game log keeps only a year. Everything else needs recording.
 
+**Mechanics.** [`references/mechanics/intelligence.md`](../../../references/mechanics/intelligence.md), provided by the maintainer for Aurora 2.7.1, decodes the status fields and gives the exact thresholds. `sql-fleet.md` § 7 applies it to the sample.
+
 **What it shows.**
-- One card per known alien race: first contact, last contact, diplomatic points and treaties, communication, intelligence points, and known systems, populations, ground unit classes and sensors.
-- A known-fleet chart per race: known ships and tonnage alive, and ships destroyed, over time. The part rebuilt from the save's timestamps is drawn separately from the recorded part.
-- Diplomatic and intelligence points over time (recorded only).
-- Known populations with their intelligence level against the docs' thresholds (size and installations at 100 points, factories and mines at 200, refineries and maintenance at 300, research and ground training at 500), showing "unknown" below them.
+- One card per known alien race:
+  - first and last contact;
+  - stance (`ContactStatus`: Hostile, Neutral, Friendly, Allied, and the Civilian, None and Combat classifications) and communication (None, Attempting, Established, Impossible);
+  - treaties, and intelligence points;
+  - known systems, populations, ground unit classes, sensors and species knowledge (Discovered, Autopsied).
+- **Diplomacy over time** (recorded): diplomatic points against the game's lines, drawn as guides:
+  - −100 for hostility;
+  - 200 for a trade treaty;
+  - 800 for a geological treaty and Friendly;
+  - 2,400 for a gravitational treaty;
+  - 4,000 for Allied;
+  - 6,000 for a technology treaty.
+
+  While communication is being attempted, translation progress (`CommModifier`) shows alongside.
+- **Known fleet over time:** known ships and tonnage alive, and ships destroyed. The part rebuilt from the save's timestamps is drawn separately from the recorded part. Classes list their observed engine type and role.
+- **Race intelligence** (recorded): a spending pool that drops by 100 each time it buys a random reward attempt, so each drop is marked as one attempt.
+- **Known populations:** each with its intelligence level against the strict thresholds:
+  - above 100: population and installations;
+  - above 200: factories, mines, spaceport and cargo station;
+  - above 300: refineries, maintenance, refuelling and ordnance stations;
+  - above 500: research, ground training, naval HQ and sector command.
+
+  Fields below their threshold show "unknown". Fields learned at a past peak show as last known, as the game does.
+- Sensors with range and resolution once above 100 points, and ground unit classes with which of the three 20-observation thresholds they've passed.
 
 **Action plan.**
-1. Record it with Empire History, in the same pass and file: SQL A for each recorded race, kept under `intel.<ViewRaceID>.<AlienRaceID>`, with the same rewind and new-game rules. Store a snapshot only when something changed, since intelligence moves slowly.
+1. Record it with Empire History, in the same pass, file and single write: SQL A for each recorded race, kept under `intel.<ViewRaceID>.<AlienRaceID>`, with the same rewind and new-game rules. Store a snapshot only when something changed, since intelligence moves slowly.
 2. Rebuild the known-fleet series from the save's timestamps (SQL B).
-3. Show it as an "Intelligence" view of the History page rather than an 18th tab, unless you'd rather it be a tab.
-4. Never join the `Actual*` columns (`ActualClassID`, `ActualSensor` and the like) to the real tables: they point at the truth.
+3. Its own tab, **Intelligence**, after History (decided). The player race sees its own knowledge. An NPR's view of other races shows only in spy mode, the only way to select an NPR.
+4. Add horizontal guide lines to `ChartCanvas` for the diplomatic thresholds; today it draws vertical markers only.
+5. Never join the `Actual*` columns (`ActualClassID`, `ActualSensor` and the like) to the real tables: they point at the truth.
 
 **Caveats.**
-- The `ContactStatus` and `CommStatus` codes aren't documented. On the sample every alien is at the same codes, with diplomatic points below the docs' hostile line (−100). Confirm them in the game's Intelligence window before naming them.
+- The codes come from the reference for 2.7.1. A save from another version could differ.
 - A destroyed ship's time of loss is its last damage time.
-- The sample's contacts are all special factions (Precursors and Rakhas), and their populations are at 0 intelligence points, so most population fields can only be checked on a real NPR contact.
+- Known ships are the hulls the race has tracked, not the alien fleet.
+- The sample's contacts are all special factions (Precursors and Rakhas), and their populations are at 0 intelligence points. Most population fields, and diplomacy above −100, can only be checked on a real NPR contact.
 
 ## Suggested order
 
@@ -516,4 +540,4 @@ These are existing-code issues the analysis turned up. Each gets its own fix; th
 2. **Navigation:** there are now 17 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling and History after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
 3. ~~**Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?~~ Decided: one electron-store file per game, `history/game-<GameID>.json` in the app's settings folder, written once per save, for player races and NPR empires. The page has a Clear button per race.
 4. **Estimates:** for the formulas that aren't confirmed in game (population growth rate, harvester output, survey rates, add-slipway cost), is an "estimate" label enough, or should those columns wait? Growth now has forum and patch-note support; refinery and MSP output are confirmed by the save's own ledger.
-5. **Intelligence History placement:** a view of the History page, or its own tab?
+5. ~~**Intelligence History placement:** a view of the History page, or its own tab?~~ Its own tab, decided.
