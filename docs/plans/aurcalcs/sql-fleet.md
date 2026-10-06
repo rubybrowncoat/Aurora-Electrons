@@ -1,6 +1,6 @@
 # Fleet, Commander, Finance, Route and Logistics queries: design and validation
 
-Scope: SQL and JS design for six planned Aurora Electrons pages. Finances (§ 1) and the fleet hygiene warnings (§ 3) are built; [`build-2.md`](build-2.md) has the warnings' verdicts and changes. The rest is design only. Every query below was run read-only (`sqlite3` URI `mode=ro`) against the sample save with `GameID` 140 and `RaceID` 784 substituted for `${this.GameID}` and `${this.RaceID}`. Queries that returned 0 rows on the sample were additionally run against a throwaway copy of the save with injected test rows, to prove the logic fires. No views are used; every helper view in the references became an inline subquery or CTE. Query style is the page style: raw SQL in a template literal, run via `this.database.query(sql).then(([items]) => items)`.
+Scope: SQL and JS design for seven planned Aurora Electrons pages (Intelligence History, § 7, was added later). Finances (§ 1) and the fleet hygiene warnings (§ 3) are built; [`build-2.md`](build-2.md) has the warnings' verdicts and changes. The rest is design only. Every query below was run read-only (`sqlite3` URI `mode=ro`) against the sample save with `GameID` 140 and `RaceID` 784 substituted for `${this.GameID}` and `${this.RaceID}`. Queries that returned 0 rows on the sample were additionally run against a throwaway copy of the save with injected test rows, to prove the logic fires. No views are used; every helper view in the references became an inline subquery or CTE. Query style is the page style: raw SQL in a template literal, run via `this.database.query(sql).then(([items]) => items)`.
 
 How to read the validation lines: "sample" means the unmodified sample save. "synthetic" means the scratch copy with injected rows.
 
@@ -599,6 +599,69 @@ Validated: 561 rows, 0.00 s: `(459995, order 1798, 'Standard Transit', type 1, J
 
 ---
 
+## 7. Intelligence History
+
+**Purpose.** What the selected race knows about each alien race, recorded over time: first contact, known fleet and losses, known colonies, systems, ground forces and sensors, diplomatic and intelligence points. It reads only the race's own intelligence tables, so it respects fog of war without spy mode.
+
+**Data facts (verified on the sample).**
+- Every intelligence table is keyed by the viewing race, under three different column names: `FCT_AlienRace.ViewRaceID`, `FCT_AlienClass.ViewRaceID`, `FCT_AlienShip.ViewRaceID`, `FCT_AlienGroundUnitClass.ViewRaceID`, `FCT_AlienPopulation.ViewingRaceID`, `FCT_AlienRaceSensor.ViewingRaceID`, `FCT_AlienSystem.DetectRaceID`, `FCT_AlienRaceSpecies.DetectRaceID`. Race 784 knows 11 alien races (the Precursors and 10 Rakhas groups), 15 classes, 195 ships, 6 populations, 19 alien-system pairs, 65 ground unit classes and 10 sensors. Each NPR that knows anyone knows only race 784; the Eldar know no one.
+- The save holds the present picture plus some timestamps: `FirstDetected` on races, classes and ships, `LastContactTime` per ship, and `GameTimeDamaged` (set on 80 of the 83 destroyed ships, so close to their time of loss). That's enough to rebuild known ships and losses over time back to first contact; everything else needs recording.
+- `FCT_AlienShip.Destroyed` marks known losses (83 of 195, 82 of them salvaged). `FCT_AlienClass.ShipCount` counts the class's known ships, destroyed included.
+- `FCT_AlienClass.TCS` is the class size in hullspaces (tonnage / 50): it equals the real class's `Size`, rounded, on all 15 classes. Checked through `ActualClassID`, which the page must never use: the `Actual*` columns (`ActualClassID`, `ActualSensor`, `ActualMissile`, `ActualGroundUnitClass`, `ActualUnitClassID`) point at the real designs.
+- Populations are gated by intelligence (docs `intelligence-gathering`): size and installations from 100 points, factories, mines, spaceport and cargo station from 200, refineries, maintenance, refuelling and ordnance stations from 300, research, ground training, HQ and sector command from 500. Points decay about 25% a year without ELINT, and what was learned at the peak stays (`MaxIntelligence`). On the sample all six known populations are at 0 points, so only their thermal and EM signatures are known.
+- `ContactStatus` and `CommStatus` have no lookup table and no documented codes. On the sample, race 784 sees every alien at `ContactStatus` 0 and `CommStatus` 2 (one Rakhas group at 1), with diplomatic points of −101 to −123, below the docs' hostile line of −100. The NPRs see race 784 at 0 and 3. Treat 0 as hostile only together with the points, and confirm the codes in the game's Intelligence window.
+- The game log keeps about a year (`FCT_GameLog` spans 1.0 year on the sample) and holds no alien event types (147 New Alien Race, 232 New Alien Class, 233 New Alien Ship, 293 New Alien Population, 106 Intelligence Update, 180 Diplomacy) in that year, so it can't stand in for history.
+
+**SQL A: one row per known alien race, the snapshot.**
+
+```sql
+select ar.AlienRaceID, ar.AlienRaceName, ar.Abbrev, ar.ContactStatus, ar.CommStatus, ar.CommModifier, ar.DiplomaticPoints, ar.AlienRaceIntelligencePoints, ar.DamageCausedByAlienRace, ar.FirstDetected, ar.TradeTreaty + ar.TechTreaty + ar.GeoTreaty + ar.GravTreaty as Treaties,
+  (select count(*) from FCT_AlienClass as ac where ac.GameID = ar.GameID and ac.ViewRaceID = ar.ViewRaceID and ac.AlienRaceID = ar.AlienRaceID) as KnownClasses,
+  (select count(*) from FCT_AlienShip as s where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID and s.Destroyed = 0) as KnownShips,
+  (select sum(ac.TCS) * 50 from FCT_AlienShip as s inner join FCT_AlienClass as ac on ac.AlienClassID = s.AlienClassID where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID and s.Destroyed = 0) as KnownTons,
+  (select count(*) from FCT_AlienShip as s where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID and s.Destroyed = 1) as DestroyedShips,
+  (select max(s.LastContactTime) from FCT_AlienShip as s where s.GameID = ar.GameID and s.ViewRaceID = ar.ViewRaceID and s.AlienRaceID = ar.AlienRaceID) as LastContact,
+  (select count(*) from FCT_AlienPopulation as p where p.GameID = ar.GameID and p.ViewingRaceID = ar.ViewRaceID and p.AlienRaceID = ar.AlienRaceID) as KnownPopulations,
+  (select sum(p.PopulationAmount) from FCT_AlienPopulation as p where p.GameID = ar.GameID and p.ViewingRaceID = ar.ViewRaceID and p.AlienRaceID = ar.AlienRaceID and p.MaxIntelligence >= 100) as KnownPopulation,
+  (select count(*) from FCT_AlienSystem as x where x.GameID = ar.GameID and x.DetectRaceID = ar.ViewRaceID and x.AlienRaceID = ar.AlienRaceID) as KnownSystems,
+  (select count(*) from FCT_AlienGroundUnitClass as g where g.GameID = ar.GameID and g.ViewRaceID = ar.ViewRaceID and g.AlienRaceID = ar.AlienRaceID) as GroundClasses,
+  (select count(*) from FCT_AlienRaceSensor as rs where rs.GameID = ar.GameID and rs.ViewingRaceID = ar.ViewRaceID and rs.AlienRaceID = ar.AlienRaceID) as KnownSensors
+from FCT_AlienRace as ar
+where ar.GameID = ${this.GameID} and ar.ViewRaceID = ${this.RaceID}
+order by ar.FirstDetected
+```
+Validated: 11 rows, 6 ms. Sample: `(786, 'Precursors', 'PRE', status 0, comm 2, points -123, damage caused 22, first detected 144,388,210, 15 classes, 112 ships known alive, 2,548,400 t, 83 destroyed, last contact 9,230,384,635, 2 populations, population unknown, 9 systems, 11 ground classes, 10 sensors)`. The Rakhas groups each have 1 known system and 0–13 ground unit classes, and no ships.
+
+**SQL B: backfill from the save's timestamps.** Known ships by first detection, and losses by last damage.
+
+```sql
+select s.AlienRaceID, s.FirstDetected, s.Destroyed, s.GameTimeDamaged, ac.TCS * 50 as Tons
+from FCT_AlienShip as s
+inner join FCT_AlienClass as ac on ac.AlienClassID = s.AlienClassID
+where s.GameID = ${this.GameID} and s.ViewRaceID = ${this.RaceID}
+order by s.FirstDetected
+```
+Validated: 195 rows, 5 ms. In JS, known alive at time t = ships with `FirstDetected <= t`, less destroyed ones with `GameTimeDamaged <= t` (3 destroyed ships have no damage time: count them as lost at the first recorded snapshot). On the sample, first detections come in eight bursts, from game year 4 (28 ships) to game year 278 (77 ships). The same works for classes from `FCT_AlienClass.FirstDetected` and races from `FCT_AlienRace.FirstDetected`.
+
+**SQL C: known populations with their intelligence level.**
+
+```sql
+select p.AlienRaceID, p.PopulationID, p.PopulationName, p.AlienPopulationIntelligencePoints, p.MaxIntelligence, p.PopulationAmount, p.Installations, p.Mines, p.Factories, p.Refineries, p.MaintenanceFacilities, p.ResearchFacilities, p.GFTF, p.Spaceport, p.CargoStation, p.RefuellingStation, p.OrdnanceTransfer, p.NavalHeadquarters, p.SectorCommand, p.ThermalSignature, p.EMSignature
+from FCT_AlienPopulation as p
+where p.GameID = ${this.GameID} and p.ViewingRaceID = ${this.RaceID}
+```
+Validated: 6 rows, 3 ms, all at 0 intelligence. Sample: `(786, 49053, 'Baten Kaitos IV', 0 points, thermal 65, EM 50)`. In JS, show each field only when `MaxIntelligence` reaches its threshold (100/200/300/500); below it the stored 0 means unknown.
+
+**Recording.** Same pass and file as Empire History (`utilities/history.js`): for each recorded viewing race, SQL A per save, kept under `intel.<ViewRaceID>.<AlienRaceID>` in `history/game-<GameID>.json` with the same rewind and new-game rules. Intelligence changes slowly, so store a snapshot only when a value other than `t` changed; a chart then holds each value until the next one. About 300 bytes per changed alien race.
+
+**Caveats / open questions.**
+- The status codes above are unconfirmed.
+- Destroyed-ship times are last-damage times, so a ship damaged long before it died would be placed early.
+- A race's knowledge can also shrink (decaying population intelligence), which only recording catches.
+- NPRs' views of other races are recorded the same way and shown only in spy mode.
+
+---
+
 ## Summary of validation
 
 | Feature | Queries | Result |
@@ -609,5 +672,6 @@ Validated: 561 rows, 0.00 s: `(459995, order 1798, 'Standard Transit', type 1, J
 | 4 Route finder | nodes, edges, capital, LP nodes | 169 / 358 / 1 / 74 rows; Dijkstra matches Aurora on 109 of 110 stored routes |
 | 5 Lagrange points | one query | 376 rows (74 with LP, 302 without) |
 | 6 Hauling | capacity, cycling fleets, orders | 9 / 46 / 561 rows; 33 of 46 fleets computable (46 of 46 as built, with Lagrange and type-15 orders) |
+| 7 Intelligence History | snapshot per alien race, ship backfill, populations | 11 / 195 / 6 rows; 6, 5 and 3 ms |
 
 Not verified: ~~semantic labels for `CommandType` 8, 9, 10, 11, 15~~ (since confirmed, see [`build-3.md`](build-3.md)) and the scale of `HealthRisk`; the cause of 5 high-mass bodies lacking a Lagrange point row; the units behind `Fleet.Speed` beyond "km/s" (consistent with route times and the workbook).
