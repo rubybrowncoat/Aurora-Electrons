@@ -60,7 +60,7 @@ Most of this directory is the electron-nuxt template's tooling; treat that part 
 
 If there's no `AuroraDB.db` at the resolved path, `database` stays `null`, the game list is empty, and pages show "Select a race from the left-side menu."
 
-The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race and NPR empire in the save, and what each knows of the other races (`utilities/history.js`, `recordHistory`), reading it all in one read transaction so a save written mid-pass can't mix two saves (a rollback-journal save makes the game wait to commit for that moment; web mode's shim has no real transaction), writes each game's history file once, and commits `history/recorded`, so an open Empire History page re-reads. A failed snapshot is logged and skipped.
+The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race and NPR empire in the save, and what each knows of the other races (`utilities/history.js`, `recordHistory`), reading it all in one read transaction so a save written mid-pass can't mix two saves (a rollback-journal save makes the game wait to commit for that moment; web mode's shim has no real transaction), writes each game's history file once, and commits `history/recorded`, so an open Empire History page re-reads. A game whose file can't be written (electron-store and the web shim's whole-store setter both throw) is logged and listed in `history/unsaved`, which the History page shows as a warning until a later pass saves it.
 
 ### Store (`store/`)
 
@@ -72,7 +72,7 @@ The `plugins/history.js` plugin (client-only, after the database plugin) also wa
 | `log.js` | Log filters per context key | session |
 | `engine.js` | Engine-planner inputs | session |
 | `snackbar.js` | Global snackbar | session |
-| `history.js` | `revision`, bumped each time the recorder writes snapshots | session |
+| `history.js` | `revision`, bumped each time the recorder writes snapshots; `unsaved`, the GameIDs whose latest snapshots couldn't be written | session |
 
 Anything that must survive a restart goes to electron-store through `this.config` instead. That's a `config.json` in Electron's userData directory. Keys in use:
 
@@ -129,7 +129,7 @@ Tabs are declared in `layouts/default.vue`. Each page also needs a case in that 
 - `logistics.js` has refinery and MSP production, maintenance capacity, maintenance locations with their Effective Maintenance Rate, full-power fuel burn and harvester output.
 - `commanders.js` has the post labels (`POSTS`), bonus parsing and formatting, and the better-assignment rules: `governorSuggestions`, `specialistPost` and `shipSuggestions`, `researchMultiplier` and `researchSuggestions`.
 - `hauling.js` has the hauling maths: `walkRoute` (a cycling fleet's legs and round trip), `cycleCargo` (what each trip carries and where), `stopHandling` (cargo-handling time at a stop), `routeYear` and `classYear`.
-- `history.js` has Empire History's storage and recorder: `historyConfig(GameID)`, `recordsHistory` (which races are recorded), `takeSnapshot`, `recordHistory`, and the pure `mergeGame` and `thinSnapshots` rules.
+- `history.js` has Empire History's storage and recorder: `historyConfig(GameID)`, `recordsHistory` (which races are recorded), `takeSnapshot`, `recordHistory`, and the pure `mergeGame` and `thinSnapshots` rules. `recordHistory` returns `{ recorded, failed }`.
 - `intelligence.js` has the intelligence codes and labels (stance, communication, species, engine type, class role), the diplomacy lines and standing bands, the colony intelligence levels, the known-races query (`alienRacesSql`), the recorded snapshot (`intelSnapshot`, `intelChanged`, `takeIntel`), the tracked-fleet rebuild and the discovery marks.
 - `load-tracking.js` has `tracked(key, getter)`, which records each async-computed read's state in the page's `loadErrors` (undefined before the first read settles and while a re-read is in flight, null once it succeeds, the message while it fails; a failed read keeps its message while its retry runs), plus `allLoaded` and `joinLabels`. Pages use it to show an error with a Retry button instead of partial numbers while a read fails, and to hold their panels back while any read is being repeated (a race switch, a save reload, a window change), so they never mix a new read with the previous one's value.
 

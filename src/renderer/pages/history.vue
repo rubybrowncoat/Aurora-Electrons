@@ -25,6 +25,10 @@
         </v-col>
       </v-row>
 
+      <v-alert v-if="unsaved" type="warning" outlined dense class="mt-3">
+        The latest snapshot couldn't be written to the history file, so this history has stopped growing: the disk or browser storage may be full, or the file locked. The app tries again at the next save. The console has the details.
+      </v-alert>
+
       <v-alert v-if="!snapshots.length" type="info" outlined dense class="mt-3">
         No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <nuxt-link to="/finances">Finances</nuxt-link>.
       </v-alert>
@@ -186,6 +190,11 @@ export default {
 
     record() {
       return this.gameHistory && this.gameHistory.races ? this.gameHistory.races[this.RaceID] || null : null
+    },
+
+    // The recorder couldn't write this game's latest snapshots (see store/history.js).
+    unsaved() {
+      return this.$store.state.history.unsaved.includes(Number(this.GameID))
     },
 
     filePath() {

@@ -7,7 +7,13 @@ export default ({ store }) => {
       return
     }
 
-    recordHistory(database).then((recorded) => {
+    recordHistory(database).then(({ recorded, failed }) => {
+      failed.forEach(({ GameID, error }) => {
+        console.error(`Empire history: couldn't save game ${GameID}'s snapshots`, error)
+      })
+
+      store.commit('history/unsaved', failed.map(({ GameID }) => GameID))
+
       if (recorded) {
         store.commit('history/recorded')
       }

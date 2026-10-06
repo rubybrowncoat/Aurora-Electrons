@@ -180,25 +180,32 @@ const readSave = (database) => database.transaction(async (transaction) => {
       }
     }
 
-    read.push({ GameID, taken, intel })
+    read.push({ GameID: Number(GameID), taken, intel })
   }
 
   return read
 })
 
 // Snapshot every recorded race in the save, and what each knows of the other races, writing each
-// game's history file once. Returns how many races were recorded.
+// game's history file once. Returns { recorded, failed }: how many races were saved, and the games
+// whose file couldn't be written, [{ GameID, error }] (electron-store throws when it can't write,
+// as does web mode's localStorage when the quota is full). Their snapshots are lost.
 export const recordHistory = async (database) => {
   let recorded = 0
+  const failed = []
 
   for (const { GameID, taken, intel } of await readSave(database)) {
     if (taken.length) {
-      const store = historyConfig(GameID)
+      try {
+        const store = historyConfig(GameID)
 
-      store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
-      recorded += taken.length
+        store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
+        recorded += taken.length
+      } catch (error) {
+        failed.push({ GameID, error })
+      }
     }
   }
 
-  return recorded
+  return { recorded, failed }
 }

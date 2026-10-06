@@ -13,11 +13,15 @@ const read = (storageKey) => {
   }
 }
 
-const write = (storageKey, store) => {
+// Settings writes swallow a failure (storage unavailable: they last for the page only). Whole-store
+// writes, which hold the recorder's history, don't, like electron-store's throw on a failed write.
+const write = (storageKey, store, { strict = false } = {}) => {
   try {
     localStorage.setItem(storageKey, JSON.stringify(store))
   } catch (e) {
-    // Storage unavailable: settings last for the page only.
+    if (strict) {
+      throw e
+    }
   }
 }
 
@@ -48,7 +52,7 @@ export default class Store {
   }
 
   set store (value) {
-    write(this.storageKey, value)
+    write(this.storageKey, value, { strict: true })
   }
 
   get (key, defaultValue) {
