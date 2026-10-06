@@ -52,6 +52,7 @@
               <span v-if="item.year" class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span>
               <span v-else class="text--secondary">—</span>
               <div v-if="item.blocked.length" class="caption warning--text">Can't load at {{ item.blockedText }}. Left out of the totals.</div>
+              <div v-else-if="item.route.km !== null && !(item.Speed > 0)" class="caption warning--text">Not moving. Left out of the totals.</div>
             </template>
             <template #[`item.tripsSort`]="{ item }">
               <span v-if="item.year">{{ fixed(item.year.trips, 1) }}</span>
@@ -276,6 +277,7 @@ export default {
       const counted = this.routeRows.filter((row) => row.year)
       const untraced = this.routeRows.filter((row) => row.route.km === null).length
       const blocked = this.routeRows.filter((row) => row.route.km !== null && row.blocked.length).length
+      const idle = this.routeRows.filter((row) => row.route.km !== null && !row.blocked.length && !(row.Speed > 0)).length
       const sum = (key) => counted.reduce((total, row) => total + row.year[key], 0)
       const cargo = this.classes.reduce((total, shipClass) => total + shipClass.CargoCapacity * shipClass.Ships, 0)
       const colonists = this.classes.reduce((total, shipClass) => total + shipClass.ColonistCapacity * shipClass.Ships, 0)
@@ -290,7 +292,7 @@ export default {
         {
           label: 'Repeating routes',
           value: `${this.routeRows.length}`,
-          note: counted.length === this.routeRows.length ? 'All traced' : `${counted.length} counted: ${[untraced ? `${untraced} can't be traced` : null, blocked ? `${blocked} can't load` : null].filter(Boolean).join(', ')}`,
+          note: counted.length === this.routeRows.length ? 'All traced' : `${counted.length} counted: ${[untraced ? `${untraced} can't be traced` : null, blocked ? `${blocked} can't load` : null, idle ? `${idle} not moving` : null].filter(Boolean).join(', ')}`,
           icon: counted.length === this.routeRows.length ? null : 'mdi-alert',
           iconColor: 'warning',
         },
