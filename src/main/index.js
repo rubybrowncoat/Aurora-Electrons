@@ -1,7 +1,22 @@
 import path from 'path'
-import { promises as fsPromises } from 'fs'
+import fs, { promises as fsPromises } from 'fs'
 
 import { app, dialog, ipcMain } from 'electron'
+import Store from 'electron-store'
+import envPaths from 'env-paths'
+
+// The renderer's electron-store instances get their folder from here. Without it, settings fell
+// back to conf's own default (electron-store-nodejs) and the history files couldn't be written at
+// all. A packaged build carries the settings it kept there over once.
+const settingsPath = path.join(app.getPath('userData'), 'config.json')
+const legacySettingsPath = path.join(envPaths('electron-store', { suffix: 'nodejs' }).config, 'config.json')
+
+if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettingsPath)) {
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+  fs.copyFileSync(legacySettingsPath, settingsPath)
+}
+
+Store.initRenderer()
 
 ipcMain.handle('request-storage-path', async () => {
   const exePath = path.dirname(app.getPath('exe'))

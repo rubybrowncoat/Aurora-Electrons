@@ -186,8 +186,8 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
 **Caveats.**
 
 - History starts when this version is installed, and only grows while the app is open when Aurora saves.
-- Web mode stores it in localStorage through the shim. Electron's real files (their folder, and electron-store in the renderer with a store folder and name) aren't exercised in web mode.
-- The app creates its electron-store instances in the renderer, but never calls `Store.initRenderer()` in the main process, which electron-store 8's readme says renderer use requires. Settings have presumably worked anyway, so something covers it, but it's worth confirming in Electron that `config.json` and the history files land where expected.
+- Web mode stores it in localStorage through the shim, so only `yarn electron:smoke` exercises the real files.
+- Checked in Electron: without `Store.initRenderer()` in the main process, the renderer's stores got no folder. Settings fell back to conf's default (`%APPDATA%\electron-store-nodejs\Config\config.json` on Windows) and every history write failed (`path.join` on an undefined folder). The main process now calls it, so settings and `history/game-<GameID>.json` live in the app's user-data folder, and a packaged build copies the old settings file over once.
 
 ## Open items
 
