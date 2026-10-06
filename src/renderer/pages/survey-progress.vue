@@ -150,7 +150,7 @@
                 <div v-if="item.PopName" class="caption text--secondary">{{ item.PopName }}</div>
               </div>
             </template>
-            <template #[`item.potential`]="{ item }">{{ potentialLabel(item.Potential) }}</template>
+            <template #[`item.Potential`]="{ item }">{{ potentialLabel(item.Potential) }}</template>
             <template #[`item.progressSort`]="{ item }">
               <div class="progress-cell">
                 <div class="meter"><div class="meter-fill" :style="{ width: `${Math.min(1, item.progress) * 100}%`, background: colors.geo }" /></div>
@@ -463,7 +463,7 @@ export default {
     groundHeaders() {
       return [
         { text: 'Body', value: 'name' },
-        { text: 'Potential', value: 'potential' },
+        { text: 'Potential', value: 'Potential' },
         { text: 'Progress', value: 'progressSort' },
         { text: 'Teams (units)', value: 'Units', align: 'end' },
         { text: 'Points / day', value: 'PointsPerDay', align: 'end' },
