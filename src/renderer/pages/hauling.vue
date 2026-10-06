@@ -82,7 +82,7 @@
                 </div>
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
                 <div v-if="item.year" class="caption text--secondary mt-2">Each cycle: {{ fixed(item.year.movingDays, 2) }} days moving and {{ fixed(item.handlingHours, 1) }} hours loading and unloading.</div>
-                <div v-if="item.cargo.capped" class="caption text--secondary mt-2">Loads are capped by the amounts set on its Load Mineral Type orders: {{ tons(item.cargo.perTrip.minerals) }} a trip.</div>
+                <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold: {{ tons(item.cargo.perTrip.minerals + item.cargo.perTrip.installations) }} a trip.</div>
               </td>
             </template>
           </v-data-table>
@@ -127,7 +127,7 @@
 <script>
 import { mapGetters } from 'vuex'
 
-import { classYear, cycleCargo, routeYear, stopHandling, walkRoute } from '../utilities/hauling'
+import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
@@ -221,11 +221,9 @@ export default {
         const route = walkRoute(orders)
         const cargo = cycleCargo(orders, fleet)
         const ships = this.shipsByFleet[fleet.FleetID] || []
-        // Minerals capped by Load Mineral Type amounts take that share of a full load to handle.
-        const share = cargo.capped && fleet.CargoCapacity > 0 ? cargo.perTrip.minerals / fleet.CargoCapacity : 1
-        const handling = orders.map((order) => ({ order, ...stopHandling(order, ships, fleet.ShuttleTechnology, share) }))
-        const handlingSeconds = handling.reduce((sum, stop) => sum + stop.seconds, 0)
-        const blocked = [...new Set(handling.filter((stop) => stop.blocked).map((stop) => placeOf(stop.order)))]
+        const handling = cycleHandling(orders, cargo, fleet, ships)
+        const handlingSeconds = handling.seconds
+        const blocked = handling.blocked
         const year = routeYear(fleet, route, cargo, handlingSeconds + orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
         const stops = orders.filter((order) => !order.Jumps).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''

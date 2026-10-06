@@ -94,7 +94,7 @@ const moveCargo = (order, held, fleet) => {
 // through the orders (a load@A, unload@B, load@B, unload@A cycle delivers two holds), and the first
 // passes warm up the hold, since it may start the cycle full. Returns `moves` (one per order),
 // `perTrip` (tonnes and colonists unloaded in a cycle), `deliveries` (what each unloading colony
-// gets in a cycle) and `capped` (every mineral load has a set amount).
+// gets in a cycle) and `holdShare` (what a cycle delivers in minerals and installations, in holds).
 export const cycleCargo = (orders, fleet) => {
   const held = { minerals: 0, installations: 0, colonists: 0 }
   let moves = []
@@ -122,10 +122,9 @@ export const cycleCargo = (orders, fleet) => {
     }
   })
 
-  const mineralLoads = orders.filter((order) => LOADS[order.MoveActionID] === 'minerals')
-  const capped = mineralLoads.length > 0 && mineralLoads.every((order) => QUANTITY_ACTIONS.has(order.MoveActionID) && order.MaxItems > 0)
+  const holdShare = fleet.CargoCapacity > 0 ? (perTrip.minerals + perTrip.installations) / fleet.CargoCapacity : 0
 
-  return { moves, perTrip, deliveries, capped }
+  return { moves, perTrip, deliveries, holdShare }
 }
 
 // Seconds a fleet spends loading or unloading at one stop: every ship works at once, each taking
@@ -163,6 +162,24 @@ export const stopHandling = (order, ships, shuttleTechnology, share = 1) => {
   })
 
   return { seconds, blocked }
+}
+
+// Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`),
+// as that part of every ship's capacity. Returns the total `seconds`, the `stops` and the places
+// where some ship `blocked` (as order labels).
+export const cycleHandling = (orders, cargo, fleet, ships) => {
+  const stops = orders.map((order, index) => {
+    const move = cargo.moves[index]
+    const capacity = move ? (move.kind === 'colonists' ? fleet.ColonistCapacity : fleet.CargoCapacity) : 0
+
+    return { order, ...stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? move.amount / capacity : 0) }
+  })
+
+  return {
+    seconds: stops.reduce((sum, stop) => sum + stop.seconds, 0),
+    stops,
+    blocked: [...new Set(stops.filter((stop) => stop.blocked).map((stop) => stop.order.label))],
+  }
 }
 
 // A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order
