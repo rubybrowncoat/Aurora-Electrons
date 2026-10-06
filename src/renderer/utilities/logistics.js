@@ -6,7 +6,8 @@ export const MSP_PER_BP = 4
 // A refinery turns 1 t of Sorium into 2,000 L of fuel.
 export const LITRES_PER_TON = 2000
 export const HOURS_PER_YEAR = 8760
-// Minerals behind 1 MSP (docs `maintenance`, confirmed by the mineral ledger).
+// Minerals behind 1 MSP (docs `maintenance`, confirmed by the mineral ledger). `name` is also the
+// colony's stock column; `Deposit<name>` says whether its body holds that mineral.
 export const MSP_MINERALS = [
   { name: 'Duranium', perMsp: 0.1 },
   { name: 'Uridium', perMsp: 0.05 },
@@ -19,6 +20,14 @@ export const refineryOutput = (colony, modifier) => (colony.FuelProdStatus ? col
 
 // MSP/yr the facilities make while production is on, also ledger-checked.
 export const mspProduction = (colony, modifier) => colony.MaintenanceFacilities * colony.MSPProduction * MSP_PER_BP * modifier
+
+// The MSP minerals a colony can't supply: stock under 1 t and no mines on a body that holds the
+// mineral. Mines elsewhere, orbital mining and incoming hauls aren't visible here, so this can
+// flag a colony that is in fact supplied that way.
+export const mspMineralShortfall = (colony) => MSP_MINERALS.filter((mineral) => !(colony[mineral.name] >= 1) && !(colony.Mines > 0 && colony[`Deposit${mineral.name}`] > 0)).map((mineral) => mineral.name)
+
+// MSP/yr actually made: production on and every input mineral on hand or being mined.
+export const mspOutput = (colony, modifier) => (colony.MaintProdStatus && !mspMineralShortfall(colony).length ? mspProduction(colony, modifier) : 0)
 
 // Tons the colony's facilities can maintain (docs `maintenance`, rule 6). Never negative: a
 // bombarded or rioting colony's modifier bottoms out at zero.
@@ -47,7 +56,10 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
     const required = sum(location.fleets, 'AnnualMSP')
     const rate = tons > 0 ? Math.min(1, Math.max(0, capacity / tons)) : 1
     const potential = location.colonies.reduce((total, colony) => total + mspProduction(colony, modifierOf(colony.PopulationID)), 0)
-    const production = location.colonies.reduce((total, colony) => total + (colony.MaintProdStatus ? mspProduction(colony, modifierOf(colony.PopulationID)) : 0), 0)
+    const production = location.colonies.reduce((total, colony) => total + mspOutput(colony, modifierOf(colony.PopulationID)), 0)
+    const starved = location.colonies.filter((colony) => colony.MaintProdStatus && mspMineralShortfall(colony).length)
+    const blocked = starved.reduce((total, colony) => total + mspProduction(colony, modifierOf(colony.PopulationID)), 0)
+    const missing = [...new Set(starved.flatMap(mspMineralShortfall))]
     const stock = sum(location.colonies, 'MaintenanceStockpile')
     const supply = sum(location.fleets, 'SupplyMSP')
     const upkeep = required * rate
@@ -64,6 +76,8 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
       upkeep,
       potential,
       production,
+      blocked,
+      missing,
       stock,
       supply,
       net,
