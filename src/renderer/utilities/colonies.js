@@ -64,41 +64,48 @@ export const workerSplit = (colony, population) => {
   }
 }
 
-// Month-by-month population over `years`, with inbound colonists landed at the start. Growth
-// stops at the infrastructure cap (above it the population shrinks and unrest rises) and fades
-// out toward the body's capacity, shared with any other population on the same body.
-// Returns the monthly series and when each limit is reached (months, or null past the horizon).
-export const projectColony = (colony, { years, inboundColonists = 0, capacity, otherPopulation = 0, infrastructureCap = Infinity }) => {
+// Month-by-month population over `years` for the colonies of one body, with inbound colonists
+// landed at the start. Each member is { colony, inboundColonists, capacity, infrastructureCap }.
+// Growth stops at a colony's infrastructure cap (above it the population shrinks and unrest
+// rises) and fades out toward the body's capacity, which the colonies share: every month each one
+// grows against the body's current total, so populations on the same body crowd each other as they grow.
+// Returns, per member, the monthly series and when each limit is reached (months, or null past the horizon).
+export const projectBody = (members, years) => {
   const months = Math.round(years * MONTHS_PER_YEAR)
-  const series = []
-  let population = colony.Population + inboundColonists
-  let crowdedAt = null
-  let infrastructureAt = population >= infrastructureCap ? 0 : null
+  let populations = members.map(({ colony, inboundColonists = 0 }) => colony.Population + inboundColonists)
+  const results = members.map(({ infrastructureCap = Infinity }, index) => ({ series: [], crowdedAt: null, infrastructureAt: populations[index] >= infrastructureCap ? 0 : null }))
 
   for (let month = 0; month <= months; month++) {
-    series.push(population)
+    const bodyPopulation = populations.reduce((sum, population) => sum + population, 0)
 
-    if ((otherPopulation + population) / capacity >= 1 / 3 && crowdedAt === null) {
-      crowdedAt = month
-    }
+    results.forEach((result, index) => {
+      result.series.push(populations[index])
+
+      if (bodyPopulation / members[index].capacity >= 1 / 3 && result.crowdedAt === null) {
+        result.crowdedAt = month
+      }
+    })
 
     if (month === months) {
       break
     }
 
-    const rate = growthRate(colony, population, otherPopulation + population, capacity)
-    let next = population * (1 + rate) ** (1 / MONTHS_PER_YEAR)
+    populations = members.map(({ colony, capacity, infrastructureCap = Infinity }, index) => {
+      const population = populations[index]
+      const rate = growthRate(colony, population, bodyPopulation, capacity)
+      let next = population * (1 + rate) ** (1 / MONTHS_PER_YEAR)
 
-    if (rate > 0 && next >= infrastructureCap) {
-      next = Math.max(population, infrastructureCap)
+      if (rate > 0 && next >= infrastructureCap) {
+        next = Math.max(population, infrastructureCap)
 
-      if (infrastructureAt === null) {
-        infrastructureAt = month + 1
+        if (results[index].infrastructureAt === null) {
+          results[index].infrastructureAt = month + 1
+        }
       }
-    }
 
-    population = Math.max(0, next)
+      return Math.max(0, next)
+    })
   }
 
-  return { series, final: population, crowdedAt, infrastructureAt }
+  return results.map((result, index) => ({ ...result, final: populations[index] }))
 }

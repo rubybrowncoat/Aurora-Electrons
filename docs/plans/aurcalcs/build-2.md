@@ -56,7 +56,7 @@ A second query gives colonists and installations on board ships whose unload ord
 |---|---|
 | Body capacity: area / Earth's × 12 bn × density, less above 75% water (to 1% at 100%), a fifth if tide-locked (moons exempt, as Habitability does), at least 50,000 | Docs `colonies` |
 | Growth min(10%, 20%/∛pop) × modifiers × crowding − radiation / 40,000 | Estimate, with support (above) |
-| Crowding: 1 up to a third of capacity, linear to 0 at capacity, on the body's total population | Docs `colonies` |
+| Crowding: 1 up to a third of capacity, linear to 0 at capacity, on the body's total population; populations of the race on one body are projected together, each month against the body's current total | Docs `colonies` |
 | Infrastructure per million = `ReqInf` / population; growth stops at the cap (above it the population shrinks) | Game's live value; wiki for the decline |
 | Workers: services min(70%, (pop/1000)^0.25), agriculture 5% + 5% per point of colony cost, the rest can work; needed = installation `Workers` + shipyards | Reproduces stored `Efficiency` for all 39 colonies (max error 0.0006) |
 | Pre-2.6 saves: a low-gravity body counts only low-gravity infrastructure | Plan rule, untested (no such save) |

@@ -146,7 +146,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
-import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, projectColony, workerSplit } from '../utilities/colonies'
+import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, projectBody, workerSplit } from '../utilities/colonies'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
@@ -213,19 +213,26 @@ export default {
     rows() {
       const inbound = Object.fromEntries(this.inbound.map((row) => [row.PopulationID, row]))
 
-      return this.colonies.map((colony) => {
-        const capacity = bodyCapacity(colony)
-        const otherPopulation = Math.max(0, colony.BodyPopulation - colony.Population)
+      const members = this.colonies.map((colony) => {
         const arriving = inbound[colony.PopulationID] || null
-        const inboundColonists = arriving ? arriving.Colonists : 0
         const inboundInfrastructure = arriving ? arriving.Infrastructure : 0
         // Pre-2.6 saves: a low-gravity body counts only low-gravity infrastructure.
         const infrastructure = (colony.LegacyLowGravity ? colony.LGInfrastructure : colony.Infrastructure + colony.LGInfrastructure) + inboundInfrastructure
-        const infrastructureCap = infrastructureCapacity(colony, infrastructure)
-        const options = { years: this.horizon, inboundColonists, capacity, otherPopulation }
-        const projection = projectColony(colony, { ...options, infrastructureCap })
+
+        return { colony, arriving, infrastructure, capacity: bodyCapacity(colony), inboundColonists: arriving ? arriving.Colonists : 0, infrastructureCap: infrastructureCapacity(colony, infrastructure) }
+      })
+      // Populations of the race on one body grow into the same capacity, so they're projected together.
+      const bodies = {}
+
+      members.forEach((member) => (bodies[member.colony.SystemBodyID] = bodies[member.colony.SystemBodyID] || []).push(member))
+
+      return members.map((member) => {
+        const { colony, arriving, infrastructure, capacity, infrastructureCap } = member
+        const group = bodies[colony.SystemBodyID]
+        const otherPopulation = Math.max(0, colony.BodyPopulation - colony.Population)
+        const projection = projectBody(group, this.horizon)[group.indexOf(member)]
         // Unconstrained by infrastructure: what it would take to keep growing.
-        const potential = infrastructureCap === Infinity ? projection : projectColony(colony, { ...options, infrastructureCap: Infinity })
+        const potential = infrastructureCap === Infinity ? projection : projectBody(group.map((other) => (other === member ? { ...other, infrastructureCap: Infinity } : other)), this.horizon)[group.indexOf(member)]
         const perMillion = infrastructurePerMillion(colony)
         const infrastructureNeeded = perMillion ? Math.max(0, Math.ceil(potential.final * perMillion - infrastructure)) : 0
         const workersNow = workerSplit(colony, colony.Population)
