@@ -105,9 +105,10 @@ export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
 const sum = (rows, key) => rows.reduce((total, row) => total + (row[key] || 0), 0)
 
 // One race's state now, compact enough to keep thousands of: population, treasury, stockpiles,
-// ships, installations, research and exploration.
-export const takeSnapshot = async (database, { GameID, RaceID }) => {
-  const query = (sql) => database.query(sql).then(([items]) => items)
+// ships, installations, research and exploration. `options` go to every query (the recorder passes
+// its read transaction).
+export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) => {
+  const query = (sql) => database.query(sql, options).then(([items]) => items)
   const [[race], colonies, ships, installations, [counts]] = await Promise.all([
     query(`select FCT_Game.GameTime, FCT_Game.GameName, FCT_Race.RaceTitle, FCT_Race.WealthPoints, FCT_Race.AnnualWealth from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`),
     query(`select FCT_Population.Population, FCT_Population.FuelStockpile, FCT_Population.MaintenanceStockpile, FCT_Population.Duranium, FCT_Population.Neutronium, FCT_Population.Corbomite, FCT_Population.Tritanium, FCT_Population.Boronide, FCT_Population.Mercassium, FCT_Population.Vendarite, FCT_Population.Sorium, FCT_Population.Uridium, FCT_Population.Corundium, FCT_Population.Gallicite from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
@@ -150,12 +151,17 @@ export const takeSnapshot = async (database, { GameID, RaceID }) => {
   }
 }
 
-// Snapshot every recorded race in the save, and what each knows of the other races, writing each
-// game's history file once. Returns how many races were recorded.
-export const recordHistory = async (database) => {
-  const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race')
+// Everything one pass takes from the save: [{ GameID, taken, intel }] per game, `taken` being
+// [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]: takeIntel() }. It all
+// happens in one read transaction, so a save written meanwhile can't give one race's snapshot the
+// old save and the next one's the new. In SQLite a read transaction holds a shared lock from its
+// first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads
+// are a few dozen small queries, and the history files are written after it ends.
+const readSave = (database) => database.transaction(async (transaction) => {
+  const options = { transaction }
+  const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
   const games = {}
-  let recorded = 0
+  const read = []
 
   races.filter(recordsHistory).forEach((race) => {
     games[race.GameID] = [...(games[race.GameID] || []), race]
@@ -166,14 +172,26 @@ export const recordHistory = async (database) => {
     const intel = {}
 
     for (const race of gameRaces) {
-      const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID })
+      const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID }, options)
 
       if (result) {
         taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
-        intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID })
+        intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID }, options)
       }
     }
 
+    read.push({ GameID, taken, intel })
+  }
+
+  return read
+})
+
+// Snapshot every recorded race in the save, and what each knows of the other races, writing each
+// game's history file once. Returns how many races were recorded.
+export const recordHistory = async (database) => {
+  let recorded = 0
+
+  for (const { GameID, taken, intel } of await readSave(database)) {
     if (taken.length) {
       const store = historyConfig(GameID)
 

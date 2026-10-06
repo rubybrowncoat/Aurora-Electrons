@@ -101,7 +101,10 @@ export const resetDatabase = (storagePath) => {
   const models = {}
 
   return {
-    query: (sql, options = {}) => ready.then(() => request('/query', { sql, options: encode(options) })),
+    // The middleware shares one connection, so a transaction is only a pass-through here: reads in
+    // it aren't a single snapshot, and the `transaction` option never goes over the wire.
+    transaction: (callback) => callback({}),
+    query: (sql, { transaction, ...options } = {}) => ready.then(() => request('/query', { sql, options: encode(options) })),
     models: new Proxy(models, {
       get: (cache, name) => {
         if (typeof name !== 'string') {

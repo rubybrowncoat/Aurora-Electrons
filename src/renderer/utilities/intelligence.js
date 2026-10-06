@@ -155,8 +155,8 @@ export const intelChanged = (previous, next) => Object.keys(next).some((key) => 
 export const treatyNames = (mask) => [[1, 'Trade'], [2, 'Technology'], [4, 'Geological'], [8, 'Gravitational']].filter(([bit]) => mask & bit).map(([, name]) => name)
 
 // One recorded entry per alien race the viewing race knows: [{ AlienRaceID, name, snapshot }].
-export const takeIntel = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(alienRacesSql(GameID, RaceID))
+export const takeIntel = async (database, { GameID, RaceID }, options = {}) => {
+  const [rows] = await database.query(alienRacesSql(GameID, RaceID), options)
 
   return rows.map((row) => ({ AlienRaceID: row.AlienRaceID, name: row.AlienRaceName, snapshot: intelSnapshot(row) }))
 }

@@ -60,7 +60,7 @@ Most of this directory is the electron-nuxt template's tooling; treat that part 
 
 If there's no `AuroraDB.db` at the resolved path, `database` stays `null`, the game list is empty, and pages show "Select a race from the left-side menu."
 
-The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race and NPR empire in the save, and what each knows of the other races (`utilities/history.js`, `recordHistory`), writes each game's history file once, and commits `history/recorded`, so an open Empire History page re-reads. A failed snapshot is logged and skipped.
+The `plugins/history.js` plugin (client-only, after the database plugin) also watches `database`. Each time it changes, it snapshots every player race and NPR empire in the save, and what each knows of the other races (`utilities/history.js`, `recordHistory`), reading it all in one read transaction so a save written mid-pass can't mix two saves (a rollback-journal save makes the game wait to commit for that moment; web mode's shim has no real transaction), writes each game's history file once, and commits `history/recorded`, so an open Empire History page re-reads. A failed snapshot is logged and skipped.
 
 ### Store (`store/`)
 
