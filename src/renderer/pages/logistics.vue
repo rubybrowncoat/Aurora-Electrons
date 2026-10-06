@@ -160,7 +160,10 @@
                 <div v-if="item.supply" class="caption text--secondary text-no-wrap">+{{ count(item.supply) }} on supply ships</div>
               </template>
               <template #[`item.production`]="{ item }">
-                <span v-if="item.production > 0" class="text-no-wrap">{{ count(item.production) }}</span>
+                <template v-if="item.production > 0">
+                  <span class="text-no-wrap">{{ count(item.production) }}</span>
+                  <div v-if="item.blocked > 0" class="caption error--text text-no-wrap" :title="`The ${item.missing.join(', ')} in stock won't last a year at full production, and there are no mines on a deposit of it`">Short of {{ item.missing.join(', ') }} (−{{ count(item.blocked) }})</div>
+                </template>
                 <span v-else-if="item.blocked > 0" class="text-no-wrap error--text" :title="`Facilities are on but the colony has none of the ${item.missing.join(', ')} the MSP needs, and no mines on a deposit of it`">No {{ item.missing.join(', ') }} ({{ count(item.blocked) }})</span>
                 <span v-else-if="item.potential > 0" class="text-no-wrap" :class="item.net < 0 ? 'error--text' : 'text--secondary'">Off ({{ count(item.potential) }})</span>
                 <span v-else class="text--secondary">—</span>
