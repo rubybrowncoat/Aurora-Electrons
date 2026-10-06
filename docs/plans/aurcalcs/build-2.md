@@ -34,7 +34,7 @@ These findings overturn or settle parts of the plan's SQL appendices.
 5. **Survey speed applies to survey ships only** (docs `fleet-movement`: "applied to the survey points produced by survey ships. Everything else remains the same"). The appendix's JS also applied it to ground teams.
 6. **`CommandType` 10 is the science officer.** Every survey ship in the sample has one, and all carry a Survey bonus. Captains apply half their Survey bonus; science officers apply it in full.
 7. **`FCT_ShipClass.CrewQuartersHS` is always 0**, so the crew-quarters warning filters on class crew instead.
-8. **Harvesters stop when their tanks are full.** All nine NPR harvesters in the sample sit at 100%, so their output is zero until they unload.
+8. **Harvesters stop when their tanks are full, and work only at gas giants and super-Jovians with Sorium in them.** All nine NPR harvesters in the sample sit at 100% at a gas giant, so their output is zero until they unload.
 
 ## Colony Outlook
 
@@ -151,7 +151,7 @@ A second query gives colonists and installations on board ships whose unload ord
 **Fuel.**
 
 - Colonies with fuel or refineries: stock, refineries, output, Sorium and how long it lasts, the warning level, and whether ships can refuel or resupply there.
-- Harvesters: deposit data only on surveyed bodies, output with commander, admin (Industrial share) and crew, tanks.
+- Harvesters: deposit data only on surveyed bodies; output only at a gas giant or super-Jovian (BodyTypeID 4 or 5) with Sorium in it, with commander, admin (Industrial share) and crew, tanks.
 - Burn by class: the lifetime duty cycle (distance / (age × top speed)), and ships that moved in the last increment at full power. They give a range, not one number.
 - Fuel held by tankers and other ships.
 - An idle refinery is labelled turned off, out of Sorium, or without workers.

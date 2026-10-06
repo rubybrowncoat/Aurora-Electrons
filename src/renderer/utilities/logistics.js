@@ -13,6 +13,8 @@ export const MSP_MINERALS = [
   { name: 'Uridium', perMsp: 0.05 },
   { name: 'Gallicite', perMsp: 0.1 },
 ]
+// Body types a Sorium harvester can work: FCT_SystemBody.BodyTypeID 4 is a gas giant, 5 a super-Jovian.
+export const HARVESTER_BODY_TYPES = [4, 5]
 
 // L/yr while production is on: refineries x racial rate x the colony's production modifier.
 // Matches the game's mineral ledger (Sorium for fuel refining) on every sample colony.
@@ -98,4 +100,22 @@ export const harvesterOutput = (ship, adminBonus = 1) => {
   const crew = ship.ClassCrew > 0 ? Math.min(1, Math.max(0, ship.CurrentCrew) / ship.ClassCrew) : 1
 
   return ship.Harvesters * ship.FuelProduction * ship.MiningBonus * adminBonus * (ship.SoriumAccessibility || 0) * crew
+}
+
+// Why a harvester isn't producing, or null when it is: the deposit has to be known, on a gas
+// giant or super-Jovian, and hold Sorium, and the tanks need room.
+export const harvesterIdleReason = (ship) => {
+  if (!ship.Surveyed) {
+    return 'Not surveyed'
+  }
+
+  if (!HARVESTER_BODY_TYPES.includes(ship.BodyTypeID)) {
+    return 'Not at a gas giant'
+  }
+
+  if (!(ship.SoriumAmount > 0)) {
+    return 'No Sorium'
+  }
+
+  return ship.FuelCapacity > 0 && ship.Fuel >= ship.FuelCapacity * 0.999 ? 'Tanks full' : null
 }

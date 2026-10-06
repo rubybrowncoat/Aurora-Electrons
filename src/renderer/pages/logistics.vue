@@ -125,8 +125,8 @@
                 </div>
               </template>
               <template #[`item.output`]="{ item }">
-                <span v-if="!item.Surveyed" class="text--secondary">Not surveyed</span>
-                <span v-else-if="item.tanksFull" class="warning--text text-no-wrap">Tanks full</span>
+                <span v-if="item.idleReason === 'Tanks full'" class="warning--text text-no-wrap">Tanks full</span>
+                <span v-else-if="item.idleReason" class="text--secondary text-no-wrap">{{ item.idleReason }}</span>
                 <span v-else class="text-no-wrap">{{ litres(item.output) }}</span>
               </template>
               <template #[`item.SoriumAmount`]="{ item }">{{ item.SoriumAmount === null ? '—' : tons(item.SoriumAmount) }}</template>
@@ -134,7 +134,7 @@
               <template #[`item.tanks`]="{ item }">{{ percent(item.tanks) }}</template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Output uses the Aur_Calcs workbook's rule (each module runs at the racial refinery rate, times the deposit's accessibility, commander and naval-admin Mining bonuses and the share of crew aboard); the wiki gives a different base rate, so treat it as an estimate. A harvester stops when its tanks are full.
+              Output uses the Aur_Calcs workbook's rule (each module runs at the racial refinery rate, times the deposit's accessibility, commander and naval-admin Mining bonuses and the share of crew aboard); the wiki gives a different base rate, so treat it as an estimate. A harvester only works at a gas giant or super-Jovian with Sorium in it, and stops when its tanks are full.
             </div>
           </v-card>
         </template>
@@ -217,7 +217,7 @@ import { chartTheme } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { LITRES_PER_TON, MSP_MINERALS, fullPowerBurn, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
+import { LITRES_PER_TON, MSP_MINERALS, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
@@ -327,12 +327,14 @@ export default {
     harvesterRows() {
       const rows = this.harvesters.map((ship) => {
         const tanksFull = ship.FuelCapacity > 0 && ship.Fuel >= ship.FuelCapacity * 0.999
-        const output = ship.Surveyed && !tanksFull ? harvesterOutput(ship, navalAdminChainBonus(this.navalAdmins, ship.SystemID, ship.NavalAdminCommandID)) : 0
+        const idleReason = harvesterIdleReason(ship)
+        const output = idleReason ? 0 : harvesterOutput(ship, navalAdminChainBonus(this.navalAdmins, ship.SystemID, ship.NavalAdminCommandID))
 
         return {
           ...ship,
           body: ship.SystemBodyID ? (ship.SystemBodyName ? `${ship.SystemName} · ${ship.SystemBodyName}` : systemBodyName(ship, { Name: ship.SystemName })) : `${ship.SystemName}, deep space`,
           output,
+          idleReason,
           tanksFull,
           tanks: ship.FuelCapacity > 0 ? ship.Fuel / ship.FuelCapacity : 0,
         }
@@ -625,7 +627,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.Harvesters, FCT_ShipClass.FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.Harvesters > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.Harvesters, FCT_ShipClass.FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.Harvesters > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
       }),
       default: [],
     },
