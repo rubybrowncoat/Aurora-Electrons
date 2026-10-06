@@ -40,7 +40,9 @@ export const infrastructureCapacity = (colony, infrastructure = colony.Infrastru
 }
 
 // The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density).
-export const colonyCost = (colony) => (colony.ReqInf > 0 && colony.Population > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100) : 0)
+// From Aurora 2.6 a low-gravity body needs twice the infrastructure at the same colony cost (docs
+// `planetary-installations`), and ReqInf holds that factor; a pre-2.6 save has separate LG infrastructure instead.
+export const colonyCost = (colony) => (colony.ReqInf > 0 && colony.Population > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity && !colony.LegacyLowGravity ? 2 : 1)) : 0)
 
 // Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%;
 // agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work.

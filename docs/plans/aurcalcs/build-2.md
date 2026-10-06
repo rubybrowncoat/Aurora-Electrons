@@ -60,6 +60,7 @@ A second query gives colonists and installations on board ships whose unload ord
 | Infrastructure per million = `ReqInf` / population; growth stops at the cap (above it the population shrinks) | Game's live value; wiki for the decline |
 | Workers: services min(70%, (pop/1000)^0.25), agriculture 5% + 5% per point of colony cost, the rest can work; needed = installation `Workers` + shipyards | Reproduces stored `Efficiency` for all 39 colonies (max error 0.0006) |
 | Pre-2.6 saves: a low-gravity body counts only low-gravity infrastructure | Plan rule, untested (no such save) |
+| Low gravity (body gravity below the species' ideal less deviation): from 2.6 `ReqInf` is doubled at the same colony cost, so the colony cost behind the worker split is `ReqInf` / 2 there; a pre-2.6 save has no doubling | Docs `planetary-installations` (v2.6); untested (no low-gravity colony in the sample) |
 
 **Layout.**
 

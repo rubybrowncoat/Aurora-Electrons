@@ -159,7 +159,7 @@ const infraCap = (c, legacyLowGravity = false) => {
 }
 // project monthly: pop += pop * growthRate(...) / 12, bodyPop += same delta; months until pop >= infraCap(c)
 const workers = (c, pop) => { // all in M
-  const cc = c.ReqInf > 0 ? c.ReqInf * c.PopulationDensityModifier / (c.Population * 100) : 0
+  const cc = c.ReqInf > 0 ? c.ReqInf * c.PopulationDensityModifier / (c.Population * 100 * (lowGravity(c) && !c.LegacyLowGravity ? 2 : 1)) : 0 // ReqInf is doubled on low-gravity bodies
   const service = Math.min(0.7, (pop / 1000) ** 0.25), agri = cc * 0.05 + 0.05 // x surface share if orbital pop is ever modelled
   const available = Math.max(0, 1 - service - agri) * pop
   const required = c.InstallationWorkers + c.YardWorkers
@@ -177,7 +177,7 @@ Sample JS results: Phobos infra cap 1,062.6 M vs pop 37.3, growth 2.71%/yr, so i
 - Growth curve and radiation term are workbook-derived (section 0); show growth as an estimate. Easy verification: compare `Population` between two saves of the same game.
 - Inbound colonists use move orders with `MoveActionID` 6/96/177 only; a fleet with several unload orders is counted at each destination (same as the reference view). `FCT_ShipCargo` has no destination of its own.
 - Gravity check uses species `Gravity - GravDev`. The sample DIM table has no Low Gravity Infrastructure row (id 41 in the workbook) because Aurora 2.6 removed it, so I sum `InfrastructureValue`/`LGInfrastructureValue` instead of hard-coding ids 9/41. On a 2.6+ save `LGInfrastructure` is always 0, and a low-gravity colony with 1 M people, `ReqInf` 200 and 200 infrastructure is at its cap of 1 M, not at 0.
-- The LG "x2 on colony cost" in workbook column AH is avoided by using `ReqInf`, the game's live requirement. I could not test an LG colony (none in the sample has CC > 0).
+- The LG "x2 on colony cost" in workbook column AH is avoided for infrastructure by using `ReqInf`, the game's live requirement. The colony cost recovered from `ReqInf` for the worker split is halved on a low-gravity body (2.6+ saves), because `ReqInf` already holds the doubling. I could not test an LG colony (none in the sample has CC > 0).
 
 
 ---
