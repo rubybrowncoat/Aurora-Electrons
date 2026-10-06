@@ -2,15 +2,14 @@
 require('./kill-tree')
 
 const path = require('path')
-const webpack = require('webpack')
 const electron = require('electron')
 
 const { Pipeline, Logger } = require('@xpda-dev/core')
 const { ElectronLauncher } = require('@xpda-dev/electron-launcher')
 const { ElectronBuilder } = require('@xpda-dev/electron-builder')
 const { Webpack } = require('@xpda-dev/webpack-step')
-const resourcesPath = require('./resources-path-provider')
-const { DIST_DIR, MAIN_PROCESS_DIR, SERVER_HOST, SERVER_PORT } = require('./config')
+const { DIST_DIR } = require('./config')
+const mainWebpackConfig = require('./main-webpack')
 const NuxtApp = require('./renderer/NuxtApp')
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -35,21 +34,7 @@ const builder = new ElectronBuilder({
   processArgv: argumentsArray
 })
 
-const webpackConfig = Webpack.getBaseConfig({
-  entry: isDev
-    ? path.join(MAIN_PROCESS_DIR, 'boot/index.dev.js')
-    : path.join(MAIN_PROCESS_DIR, 'boot/index.prod.js'),
-  output: {
-    filename: 'index.js',
-    path: path.join(DIST_DIR, 'main')
-  },
-  plugins: [
-    new webpack.DefinePlugin({
-      'process.resourcesPath': resourcesPath.mainProcess(),
-      'process.env.DEV_SERVER_URL': `'${SERVER_HOST}:${SERVER_PORT}'`
-    })
-  ]
-})
+const webpackConfig = mainWebpackConfig(path.join(DIST_DIR, 'main'))
 
 const webpackMain = new Webpack({
   logger: new Logger('Main', 'olive'),
