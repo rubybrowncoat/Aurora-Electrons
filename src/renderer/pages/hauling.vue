@@ -37,7 +37,7 @@
               </div>
             </template>
             <template #[`item.route`]="{ item }">
-              <div class="caption route-cell">{{ item.stopsText || 'No loading or unloading stops' }}</div>
+              <div class="caption route-cell">{{ item.stopsText || 'No stops, only moves' }}</div>
             </template>
             <template #[`item.kmSort`]="{ item }">
               <span v-if="item.route.km !== null" class="text-no-wrap">{{ gkm(item.route.km) }}</span>
@@ -138,6 +138,8 @@ const INPUT_LABELS = {
   orders: 'their orders',
 }
 const INPUTS = Object.keys(INPUT_LABELS)
+// DIM_MoveAction: "Move to Location".
+const MOVE_TO_LOCATION = 2
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -223,7 +225,8 @@ export default {
         const ships = this.shipsByFleet[fleet.FleetID] || []
         const handling = cycleHandling(orders, cargo, fleet, ships)
         const year = routeYear(fleet, route, cargo, handling, orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
-        const stops = orders.filter((order) => !order.Jumps).map((order) => `${placeOf(order)}: ${order.ActionName}`)
+        // A stop does something where it goes: transits and plain moves only pass through.
+        const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''
 
         return {
