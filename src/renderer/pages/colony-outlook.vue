@@ -230,7 +230,10 @@ export default {
         const { colony, arriving, infrastructure, capacity, infrastructureCap } = member
         const group = bodies[colony.SystemBodyID]
         const otherPopulation = Math.max(0, colony.BodyPopulation - colony.Population)
-        const projection = projectBody(group, this.horizon)[group.indexOf(member)]
+        const projections = projectBody(group, this.horizon)
+        const projection = projections[group.indexOf(member)]
+        // The rest of the body's population, month by month, as it grows alongside this colony.
+        const otherSeries = projection.series.map((_, month) => projections.reduce((sum, other, index) => sum + (group[index] === member ? 0 : other.series[month]), 0))
         // Unconstrained by infrastructure: what it would take to keep growing.
         const potential = infrastructureCap === Infinity ? projection : projectBody(group.map((other) => (other === member ? { ...other, infrastructureCap: Infinity } : other)), this.horizon)[group.indexOf(member)]
         const perMillion = infrastructurePerMillion(colony)
@@ -244,6 +247,7 @@ export default {
           place: stripHtml(populationName(colony)).replace(` — ${colony.PopName}`, ''),
           capacity,
           otherPopulation,
+          otherSeries,
           fill: (otherPopulation + colony.Population) / capacity,
           growth,
           projection,
@@ -430,9 +434,10 @@ export default {
       const color = this.theme.primary
       const points = row.projection.series.map((value, month) => ({ x: month / 12, y: value }))
       const peak = Math.max(...row.projection.series)
-      const ceiling = (label, value, dash) => ({
+      // `values` are monthly, like the projection; a limit at or below zero isn't drawn.
+      const ceiling = (label, values, dash) => ({
         label,
-        data: [{ x: 0, y: value }, { x: this.horizon, y: value }],
+        data: values.map((value, month) => ({ x: month / 12, y: value > 0 ? value : null })),
         borderColor: this.theme.inkMuted,
         borderDash: dash,
         borderWidth: 1,
@@ -443,14 +448,15 @@ export default {
       const datasets = [{ label: 'Population', data: points, borderColor: color, backgroundColor: withAlpha(color, 0.1), fill: 'origin', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 }]
 
       // Only limits near the curve: one far above it would flatten it (the note names it instead).
-      const near = (value) => value > 0 && value !== Infinity && value <= peak * 2
+      // Other populations on the body grow too, so the body's limits for this colony move with them.
+      const near = (values) => values.some((value) => value > 0 && value !== Infinity && value <= peak * 2)
       const limits = [
-        ['Growth slows', row.capacity / 3 - row.otherPopulation, [2, 3]],
-        ['Infrastructure cap', row.infrastructureCap, [6, 4]],
-        ['Body capacity', row.capacity - row.otherPopulation, [10, 4]],
+        ['Growth slows', row.otherSeries.map((other) => row.capacity / 3 - other), [2, 3]],
+        ['Infrastructure cap', row.otherSeries.map(() => row.infrastructureCap), [6, 4]],
+        ['Body capacity', row.otherSeries.map((other) => row.capacity - other), [10, 4]],
       ]
 
-      limits.filter(([, value]) => near(value)).forEach(([label, value, dash]) => datasets.push(ceiling(label, value, dash)))
+      limits.filter(([, values]) => near(values)).forEach(([label, values, dash]) => datasets.push(ceiling(label, values, dash)))
 
       return { datasets }
     },
