@@ -98,7 +98,7 @@
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
                 <template #[`item.amount`]="{ item }">{{ item.kind === 'colonists' ? `${count(item.amount)} people` : tons(item.amount) }}</template>
               </v-data-table>
-              <div class="panel-foot caption text--secondary">A route that unloads at several colonies is split evenly between them.</div>
+              <div class="panel-foot caption text--secondary">Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
             </v-card>
           </v-col>
           <v-col cols="12" lg="6">
@@ -256,16 +256,12 @@ export default {
           return
         }
 
-        row.cargo.kinds.forEach((kind) => {
-          const destinations = row.cargo.destinations.filter((destination) => destination.kind === kind)
+        row.cargo.deliveries.forEach((delivery) => {
+          const key = `${delivery.PopulationID}-${delivery.kind}`
+          const total = (totals[key] = totals[key] || { key, destination: delivery.name, kind: delivery.kind, amount: 0, fleets: new Set() })
 
-          destinations.forEach((destination) => {
-            const key = `${destination.PopulationID}-${kind}`
-            const total = (totals[key] = totals[key] || { key, destination: destination.name, kind, amount: 0, fleets: new Set() })
-
-            total.amount += row.year[kind] / destinations.length
-            total.fleets.add(row.FleetName)
-          })
+          total.amount += row.year.trips * delivery.amount
+          total.fleets.add(row.FleetName)
         })
       })
 

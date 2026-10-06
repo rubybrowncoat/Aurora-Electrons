@@ -6,9 +6,12 @@ export const SECONDS_PER_YEAR = 31536000
 // Move actions that load or unload cargo, by what they carry.
 export const LOADS = { 4: 'colonists', 176: 'installations', 62: 'minerals', 178: 'minerals', 180: 'minerals', 223: 'minerals', 165: 'minerals' }
 export const UNLOADS = { 6: 'colonists', 96: 'installations', 177: 'installations', 63: 'minerals', 179: 'minerals', 165: 'minerals' }
-// "Load Mineral Type" and "Load Mineral when X available" carry up to MaxItems tonnes of one mineral;
-// "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
-const QUANTITY_LOADS = new Set([178, 180])
+// Orders that move up to MaxItems tonnes of one mineral (Load Mineral Type, Unload Mineral Type, Load
+// Mineral when X available); "Load All Minerals" (62) and "...Until Full" (223) take whatever the
+// colony has, up to a full hold.
+const QUANTITY_ACTIONS = new Set([178, 179, 180])
+// Passes over a cycle to settle what the hold carries into it (a hold that fills a little each pass).
+const MAX_PASSES = 200
 // Seconds to load or unload one cargo point or one colonist with one shuttle bay of conventional
 // shuttles (docs `logistics`, Logistics and Cargo Handling).
 const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }
@@ -62,22 +65,67 @@ export const walkRoute = (orders) => {
   return { legs, km: legs.reduce((sum, leg) => sum + leg.km, 0), problem: null }
 }
 
-// What one cycle carries: the cargo kinds loaded, the tonnes or colonists per trip (capacity, or
-// less when every mineral load is a "Load Mineral Type" with a set amount) and where it's unloaded.
-export const cycleCargo = (orders, fleet) => {
-  const loads = orders.filter((order) => LOADS[order.MoveActionID])
-  const kinds = [...new Set(loads.map((order) => LOADS[order.MoveActionID]))]
-  const mineralLoads = loads.filter((order) => LOADS[order.MoveActionID] === 'minerals')
-  const capped = mineralLoads.length > 0 && mineralLoads.every((order) => QUANTITY_LOADS.has(order.MoveActionID) && order.MaxItems > 0)
-  const perTrip = {
-    minerals: kinds.includes('minerals') ? (capped ? Math.min(fleet.CargoCapacity, mineralLoads.reduce((sum, order) => sum + order.MaxItems, 0)) : fleet.CargoCapacity) : 0,
-    installations: kinds.includes('installations') ? fleet.CargoCapacity : 0,
-    colonists: kinds.includes('colonists') ? fleet.ColonistCapacity : 0,
-  }
-  const destinations = orders.filter((order) => UNLOADS[order.MoveActionID] && order.PopulationID > 0).map((order) => ({ PopulationID: order.PopulationID, name: order.PopName || order.label, kind: UNLOADS[order.MoveActionID] }))
-  const sources = loads.filter((order) => order.PopulationID > 0).map((order) => ({ PopulationID: order.PopulationID, name: order.PopName || order.label, kind: LOADS[order.MoveActionID] }))
+// Cargo moved by one order, given what the fleet holds: { kind, direction, amount } or null for an
+// order that doesn't load or unload. Minerals and installations share the cargo hold, colonists have
+// their own berths. "Load Mineral Type" (178), "Load Mineral when X available" (180) and "Unload
+// Mineral Type" (179) move up to MaxItems tonnes; every other order moves all it can: a load fills
+// the free space (assuming the colony has the stock), an unload empties what the fleet holds of that
+// kind. "Load/Unload Minerals to Reserve Level" (165) unloads what the fleet holds and loads when it
+// holds none. MaxItems on installation and colonist orders isn't used: it counts items, not tonnes.
+const moveCargo = (order, held, fleet) => {
+  const id = order.MoveActionID
+  const kind = LOADS[id] || UNLOADS[id]
 
-  return { kinds, capped, perTrip, destinations, sources }
+  if (!kind) {
+    return null
+  }
+
+  const loading = !!LOADS[id] && !(UNLOADS[id] && held[kind] > 0)
+  const limit = QUANTITY_ACTIONS.has(id) && order.MaxItems > 0 ? order.MaxItems : Infinity
+  const space = kind === 'colonists' ? fleet.ColonistCapacity - held.colonists : fleet.CargoCapacity - held.minerals - held.installations
+  const amount = Math.max(0, Math.min(limit, loading ? space : held[kind]))
+
+  held[kind] += loading ? amount : -amount
+
+  return { kind, direction: loading ? 'load' : 'unload', amount }
+}
+
+// What one cycle carries, in the steady state of a fleet that repeats it. The cargo is followed
+// through the orders (a load@A, unload@B, load@B, unload@A cycle delivers two holds), and the first
+// passes warm up the hold, since it may start the cycle full. Returns `moves` (one per order),
+// `perTrip` (tonnes and colonists unloaded in a cycle), `deliveries` (what each unloading colony
+// gets in a cycle) and `capped` (every mineral load has a set amount).
+export const cycleCargo = (orders, fleet) => {
+  const held = { minerals: 0, installations: 0, colonists: 0 }
+  let moves = []
+
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    const before = { ...held }
+
+    moves = orders.map((order) => moveCargo(order, held, fleet))
+
+    if (Object.keys(held).every((kind) => held[kind] === before[kind])) {
+      break
+    }
+  }
+
+  const perTrip = { minerals: 0, installations: 0, colonists: 0 }
+  const deliveries = []
+
+  moves.forEach((move, index) => {
+    if (move && move.direction === 'unload') {
+      perTrip[move.kind] += move.amount
+
+      if (move.amount > 0 && orders[index].PopulationID > 0) {
+        deliveries.push({ PopulationID: orders[index].PopulationID, name: orders[index].PopName || orders[index].label, kind: move.kind, amount: move.amount })
+      }
+    }
+  })
+
+  const mineralLoads = orders.filter((order) => LOADS[order.MoveActionID] === 'minerals')
+  const capped = mineralLoads.length > 0 && mineralLoads.every((order) => QUANTITY_ACTIONS.has(order.MoveActionID) && order.MaxItems > 0)
+
+  return { moves, perTrip, deliveries, capped }
 }
 
 // Seconds a fleet spends loading or unloading at one stop: every ship works at once, each taking
