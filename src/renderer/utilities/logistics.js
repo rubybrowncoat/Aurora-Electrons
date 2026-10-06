@@ -20,8 +20,9 @@ export const refineryOutput = (colony, modifier) => (colony.FuelProdStatus ? col
 // MSP/yr the facilities make while production is on, also ledger-checked.
 export const mspProduction = (colony, modifier) => colony.MaintenanceFacilities * colony.MSPProduction * MSP_PER_BP * modifier
 
-// Tons the colony's facilities can maintain (docs `maintenance`, rule 6).
-export const facilityCapacity = (colony) => colony.MaintenanceFacilities * colony.MaintenanceCapacity * colony.Efficiency * colony.CapacityModifier * colony.EconomicProdModifier
+// Tons the colony's facilities can maintain (docs `maintenance`, rule 6). Never negative: a
+// bombarded or rioting colony's modifier bottoms out at zero.
+export const facilityCapacity = (colony) => Math.max(0, colony.MaintenanceFacilities * colony.MaintenanceCapacity * colony.Efficiency * colony.CapacityModifier * colony.EconomicProdModifier)
 
 const locationKey = (fleet) => (fleet.OrbitBodyID > 0 ? `body-${fleet.OrbitBodyID}` : `space-${fleet.SystemID}-${Math.round(fleet.Xcor)}-${Math.round(fleet.Ycor)}`)
 
@@ -44,7 +45,7 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
     const capacity = surfaceCapacity + moduleCapacity
     const tons = sum(location.fleets, 'MaintainedTons')
     const required = sum(location.fleets, 'AnnualMSP')
-    const rate = tons > 0 ? Math.min(1, capacity / tons) : 1
+    const rate = tons > 0 ? Math.min(1, Math.max(0, capacity / tons)) : 1
     const potential = location.colonies.reduce((total, colony) => total + mspProduction(colony, modifierOf(colony.PopulationID)), 0)
     const production = location.colonies.reduce((total, colony) => total + (colony.MaintProdStatus ? mspProduction(colony, modifierOf(colony.PopulationID)) : 0), 0)
     const stock = sum(location.colonies, 'MaintenanceStockpile')
