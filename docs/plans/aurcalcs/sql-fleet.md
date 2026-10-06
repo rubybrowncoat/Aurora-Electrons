@@ -666,6 +666,8 @@ where p.GameID = ${this.GameID} and p.ViewingRaceID = ${this.RaceID}
 ```
 Validated: 6 rows, 3 ms, all at 0 intelligence. Sample: `(786, 49053, 'Baten Kaitos IV', 0 points, thermal 65, EM 50)`. In JS, show each field only when `MaxIntelligence` is above its threshold (100/200/300/500; below it the stored 0 means unknown), and mark it current while `AlienPopulationIntelligencePoints` is still above the threshold, as the game does with green and red.
 
+**Built** as the Intelligence tab ([`build-4.md`](build-4.md)). SQL A lives in `utilities/intelligence.js` (`alienRacesSql`, with the alien's treaty grants added from its reciprocal record), and the page adds reads for classes (with the weapons seen firing), sensors, ground unit classes, systems and species.
+
 **Recording.** Same pass and file as Empire History (`utilities/history.js`): for each recorded viewing race, SQL A per save, kept under `intel.<ViewRaceID>.<AlienRaceID>` in `history/game-<GameID>.json` with the same rewind and new-game rules. Intelligence changes slowly, so store a snapshot only when a value other than `t` changed; a chart then holds each value until the next one. About 300 bytes per changed alien race.
 
 **Caveats / open questions.**

@@ -5,7 +5,7 @@
 > - Colony Outlook (3), Finances (4), Survey Progress (5), Fuel Balance with Maintenance Budget (6 + 8, one **Logistics** tab) and the fleet hygiene warnings (10). [`build-2.md`](build-2.md) has their analysis, the rules checked against the save and the docs, and what changed from the appendices.
 > - Commanders (9), Hauling Planner (14) and Empire History (12). [`build-3.md`](build-3.md) has the same for them. Empire History now also records NPR empires, one file per game, with a Rivals chart in spy mode.
 >
-> Intelligence History (16) was added to the list afterwards, with its plan and validated SQL.
+> - Intelligence History (16), added to the list afterwards, is built as the **Intelligence** tab. [`build-4.md`](build-4.md) has its analysis and checks.
 >
 > The rest is waiting for prioritisation.
 
@@ -17,6 +17,7 @@ The SQL is in three appendices. Every query there was run read-only against the 
 - [`sql-economy.md`](sql-economy.md): Colony Outlook, Maintenance Budget, Fuel Balance, Shipyard Planner.
 - [`build-2.md`](build-2.md): how the second batch of pages was built, and where it departs from the appendices (maintenance by location, ledger-checked refinery and MSP formulas, crew rules).
 - [`build-3.md`](build-3.md): the third batch (Commanders, Hauling Planner, Empire History): confirmed ship posts, every cycling route traced, cargo handling time, and where history is kept.
+- [`build-4.md`](build-4.md): the Intelligence tab, its codes, recording and checks.
 - [`sql-fleet.md`](sql-fleet.md): Finances, Commanders, Fleet hygiene warnings, Route Finder, Lagrange Points, Hauling Planner, Intelligence History.
 
 All of it follows the app's rules (`CLAUDE.md`):
@@ -61,7 +62,7 @@ Scores:
 | 13 | [Shipyard Planner](#13-shipyard-planner) | Industry | Yards, ShipyardGrowth, QCalc | 3 | 3 | M |
 | 14 | [Hauling Planner](#14-hauling-planner) ✅ | Logistics | Scoop, CyclingFleets, CyclingTotals, HaulCap_src | 3 | 3 | L |
 | 15 | [Lagrange Points](#15-lagrange-points) | Exploration | `AllLagrangePoints_Basic.sql` | 2 | 3 | S |
-| 16 | [Intelligence History](#16-intelligence-history) | Diplomacy | Not in the workbook; the game's Intelligence window, recorded over time | 3 | 4 | M |
+| 16 | [Intelligence History](#16-intelligence-history) ✅ | Diplomacy | Not in the workbook; the game's Intelligence window, recorded over time | 3 | 4 | M |
 
 Intelligence History was added after the ranking; by its scores it sits between 12 and 13.
 
@@ -443,6 +444,8 @@ It reads only the selected race's intelligence tables, so it respects fog of war
 - Some timestamps: first detection of each race, class and ship, last contact per ship, and an approximate time of loss for destroyed ships. From these, known ships and losses can be rebuilt back to first contact.
 - Nothing else over time, and the game log keeps only a year. Everything else needs recording.
 
+**Built** as the Intelligence tab; see [`build-4.md`](build-4.md).
+
 **Mechanics.** [`references/mechanics/intelligence.md`](../../../references/mechanics/intelligence.md), provided by the maintainer for Aurora 2.7.1, decodes the status fields and gives the exact thresholds. `sql-fleet.md` § 7 applies it to the sample.
 
 **What it shows.**
@@ -495,7 +498,7 @@ This is my recommendation for the order to build in, taking the shared groundwor
 5. **G2 jump graph, then Route Finder (11) and Colonization Targets (7).** Survey Progress (5) is built without it; G2 would add travel time to its survey estimates.
 6. ~~**Fuel Balance (6) + Maintenance Budget (8)** as one Logistics page.~~ Built.
 7. ~~**Commanders (9)**~~, **Shipyard Planner (13)**, ~~**Hauling (14)**~~, **Lagrange (15)**, ~~**Empire History (12)**~~. Commanders, Hauling and Empire History are built; see [`build-3.md`](build-3.md).
-8. **Intelligence History (16).** It builds on Empire History's recorder, so it's cheap to add next, and its recording should start early: only the known fleet can be rebuilt afterwards.
+8. ~~**Intelligence History (16).**~~ Built as the Intelligence tab, recording with Empire History; see [`build-4.md`](build-4.md).
 
 ## Not ported
 
@@ -537,7 +540,7 @@ These are existing-code issues the analysis turned up. Each gets its own fix; th
 ## Open questions for you
 
 1. ~~**Charts:** add Chart.js or draw SVG by hand?~~ Chart.js, decided.
-2. **Navigation:** there are now 17 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling and History after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
+2. **Navigation:** there are now 18 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling, History and Intelligence after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
 3. ~~**Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?~~ Decided: one electron-store file per game, `history/game-<GameID>.json` in the app's settings folder, written once per save, for player races and NPR empires. The page has a Clear button per race.
 4. **Estimates:** for the formulas that aren't confirmed in game (population growth rate, harvester output, survey rates, add-slipway cost), is an "estimate" label enough, or should those columns wait? Growth now has forum and patch-note support; refinery and MSP output are confirmed by the save's own ledger.
 5. ~~**Intelligence History placement:** a view of the History page, or its own tab?~~ Its own tab, decided.
