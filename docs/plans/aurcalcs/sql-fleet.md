@@ -290,7 +290,7 @@ where f.GameID = ${this.GameID} and f.RaceID = ${this.RaceID}
   and not exists (select 1 from FCT_MoveOrders as mo where mo.FleetID = f.FleetID)
 order by f.FleetName
 ```
-Location class in JS: `ColonyName` set means parked at own colony; else `OrbitBodyID > 0` means at a body; else `AtJumpPointID` set means at a jump point; else deep space. `ConditionalOrderOne` and `AnchorFleetID` are returned so the UI can grey out fleets that have conditional orders or follow another fleet. Fleets with no ships (8 on the sample) never appear because of the inner join; they are a separate (cosmetic) check.
+Location class in JS: `ColonyName` set means parked at own colony; else `OrbitBodyID > 0` means at a body; else `AtJumpPointID` set means at a jump point; else deep space. `AnchorFleetID` and a conditional-order count are returned (the count is the rows of `FCT_FleetConditionalOrder` for the fleet, as the game has stored them since 2.6; the `ConditionalOrderOne` and `ConditionalOrderTwo` columns on `FCT_Fleet` are legacy and 0 in the sample) so the UI can grey out fleets that have conditional orders or follow another fleet. Fleets with no ships (8 on the sample) never appear because of the inner join; they are a separate (cosmetic) check.
 
 **W2: ships with cargo and no orders.** Cargo types in `FCT_ShipCargo`: 1 colonists, 2 installations, 3 minerals (the references also use 6 for ship components and 7 for ground-related cargo; only 1, 2 and 3 occur on the sample). Excludes civilian fleets (they wait for orders by design) and speed 1 fleets (the sample has 11 immobile one-ship fleets holding millions of colonists or minerals, which is a station function, not a bug). 31 mobile fleets carry cargo on the sample and all have orders.
 
