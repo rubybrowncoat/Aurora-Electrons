@@ -230,6 +230,7 @@ const INPUT_LABELS = {
   orbitalMining: 'orbital mining',
   navalAdmins: 'naval admin commands',
   industrialProjects: 'the industry queue',
+  populationProductionModifiers: 'production modifiers',
 }
 const FORECAST_INPUTS = Object.keys(INPUT_LABELS)
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']

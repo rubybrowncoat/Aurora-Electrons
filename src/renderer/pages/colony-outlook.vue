@@ -153,6 +153,7 @@ import { roundToDecimal, separatedNumber } from '../utilities/math'
 const INPUT_LABELS = {
   colonies: 'the colonies',
   inbound: 'cargo on its way',
+  populationProductionModifiers: 'production modifiers',
 }
 const INPUTS = Object.keys(INPUT_LABELS)
 
