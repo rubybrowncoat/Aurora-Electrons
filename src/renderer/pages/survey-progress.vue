@@ -183,6 +183,7 @@ import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
 const INPUT_LABELS = {
+  game: 'the game settings',
   systems: 'the known systems',
   bodies: 'the unsurveyed bodies',
   links: 'the jump points',
@@ -248,7 +249,7 @@ export default {
     },
 
     ready() {
-      return allLoaded(this.loadErrors, INPUTS) && this.game !== null
+      return allLoaded(this.loadErrors, INPUTS)
     },
 
     surveySpeed() {
