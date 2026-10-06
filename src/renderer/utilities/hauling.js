@@ -4,10 +4,11 @@
 export const SECONDS_PER_YEAR = 31536000
 
 // Move actions that load or unload cargo, by what they carry.
-export const LOADS = { 4: 'colonists', 176: 'installations', 178: 'minerals', 223: 'minerals', 165: 'minerals' }
-export const UNLOADS = { 6: 'colonists', 96: 'installations', 177: 'installations', 63: 'minerals', 165: 'minerals' }
-// "Load Mineral Type" carries up to MaxItems tonnes of one mineral.
-const LOAD_MINERAL_TYPE = 178
+export const LOADS = { 4: 'colonists', 176: 'installations', 62: 'minerals', 178: 'minerals', 180: 'minerals', 223: 'minerals', 165: 'minerals' }
+export const UNLOADS = { 6: 'colonists', 96: 'installations', 177: 'installations', 63: 'minerals', 179: 'minerals', 165: 'minerals' }
+// "Load Mineral Type" and "Load Mineral when X available" carry up to MaxItems tonnes of one mineral;
+// "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
+const QUANTITY_LOADS = new Set([178, 180])
 // Seconds to load or unload one cargo point or one colonist with one shuttle bay of conventional
 // shuttles (docs `logistics`, Logistics and Cargo Handling).
 const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }
@@ -67,7 +68,7 @@ export const cycleCargo = (orders, fleet) => {
   const loads = orders.filter((order) => LOADS[order.MoveActionID])
   const kinds = [...new Set(loads.map((order) => LOADS[order.MoveActionID]))]
   const mineralLoads = loads.filter((order) => LOADS[order.MoveActionID] === 'minerals')
-  const capped = mineralLoads.length > 0 && mineralLoads.every((order) => order.MoveActionID === LOAD_MINERAL_TYPE && order.MaxItems > 0)
+  const capped = mineralLoads.length > 0 && mineralLoads.every((order) => QUANTITY_LOADS.has(order.MoveActionID) && order.MaxItems > 0)
   const perTrip = {
     minerals: kinds.includes('minerals') ? (capped ? Math.min(fleet.CargoCapacity, mineralLoads.reduce((sum, order) => sum + order.MaxItems, 0)) : fleet.CargoCapacity) : 0,
     installations: kinds.includes('installations') ? fleet.CargoCapacity : 0,

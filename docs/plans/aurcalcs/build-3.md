@@ -104,7 +104,7 @@ All SQL was run read-only on the sample save (GameID 140, RaceID 784). The sampl
 | Handling per stop: the slowest ship's cargo × 20 s (colonists × 10 s) / ((bays + 1 with a spaceport or station) × shuttle technology); ships up to 500 t land; a ship with no way to load is flagged | Docs `logistics` |
 | Per trip: capacity for each cargo kind loaded; minerals capped by the summed `MaxItems` when every mineral load is a "Load Mineral Type" | Sample (above) |
 | Fuel a year = engine power × fuel efficiency (litres an hour) × hours under way | Plan § 6 |
-| Load actions 4, 165, 176, 178, 223; unload actions 6, 63, 96, 165, 177 | `DIM_MoveAction` |
+| Load actions 4, 62, 165, 176, 178, 180, 223; unload actions 6, 63, 96, 165, 177, 179. "Load All Minerals" (62) and "Until Full" (223) fill the hold, assuming the colony has the stock; "Load Mineral Type" (178) and "Load Mineral when X available" (180) carry up to their set amount. The sample's fleets use only 4, 6, 63, 96, 165, 176, 178, 223 | `DIM_MoveAction`; the forum's v1.12 notes for "Until Full" (same as Load All Minerals, repeated until full, reserve levels respected) |
 
 **Layout.**
 
