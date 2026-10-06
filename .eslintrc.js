@@ -37,7 +37,8 @@ module.exports = {
     'no-underscore-dangle': 0,
     'space-before-function-paren': 0,
 
-    'no-debugger': process.env.NODE_ENV === 'production' ? 2 : 0,
+    // A debugger statement freezes the app whenever DevTools is open, which `yarn dev` always does.
+    'no-debugger': 2,
 
     'vue/max-attributes-per-line': 'off',
     'vue/multi-word-component-names': 'off',
