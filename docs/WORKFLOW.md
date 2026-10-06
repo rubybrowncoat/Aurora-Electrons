@@ -28,7 +28,7 @@
 - `.electron-nuxt/web.js` builds the Nuxt renderer for a `web` webpack target. Electron bundles nothing from `dependencies`, but web mode bundles all of them.
 - Node and Electron modules are swapped for the shims in `.electron-nuxt/web/shims/`:
   - `electron` answers the `request-storage-path` and `save-png` IPC calls; PNG export becomes a browser download.
-  - `electron-store` persists to `localStorage`.
+  - `electron-store` persists to `localStorage`, one key per store name (`aurora-electrons:config` for settings, `aurora-electrons:history` for Empire History). Clear them in the browser's devtools to start fresh.
   - `chokidar` polls the database file's mtime, so replacing `./AuroraDB.db` still reloads the views.
   - `sequelize` exports only `Op` and `QueryTypes`.
   - `utilities/database.js` is replaced by a proxy that forwards `query()` and read-only `findAll`/`findOne`/`findByPk`/`count`/`findAndCountAll` calls to the dev server.

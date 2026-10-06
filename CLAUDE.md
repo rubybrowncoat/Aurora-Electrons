@@ -1,6 +1,6 @@
 # Aurora Electrons
 
-Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows dashboards the game doesn't have: production recap, warnings, minerals and their outlook, colonies, logistics (fuel and maintenance), finances, habitability, survey progress, transport information, galaxy map, game log, designed tech, and tech tree.
+Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows dashboards the game doesn't have: production recap, warnings, minerals and their outlook, colonies, logistics (fuel and maintenance), finances, hauling routes, empire history (snapshots the app records itself), habitability, survey progress, commanders, transport information, galaxy map, game log, designed tech, and tech tree.
 
 Stack: Electron 16 + Nuxt 2 (SPA, Vue 2, Vuetify 2, Vuex 3), built on the electron-nuxt template. Data comes through Sequelize 6 over sqlite3, mostly as raw SQL. User preferences go to electron-store.
 

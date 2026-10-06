@@ -3,6 +3,7 @@
 > **Status:** built so far:
 > - Mineral Runway (1) and Mining Outlook (2), together as the **Outlook** tab (`pages/mineral-outlook.vue`), with Chart.js for charts (G3) and the shared production mixin (G1, partly).
 > - Colony Outlook (3), Finances (4), Survey Progress (5), Fuel Balance with Maintenance Budget (6 + 8, one **Logistics** tab) and the fleet hygiene warnings (10). [`build-2.md`](build-2.md) has their analysis, the rules checked against the save and the docs, and what changed from the appendices.
+> - Commanders (9), Hauling Planner (14) and Empire History (12). [`build-3.md`](build-3.md) has the same for them.
 >
 > The rest is waiting for prioritisation.
 
@@ -13,6 +14,7 @@ The SQL is in three appendices. Every query there was run read-only against the 
 - [`sql-mining.md`](sql-mining.md): Mining Outlook, Mineral Runway, Colonization Targets, Survey Progress.
 - [`sql-economy.md`](sql-economy.md): Colony Outlook, Maintenance Budget, Fuel Balance, Shipyard Planner.
 - [`build-2.md`](build-2.md): how the second batch of pages was built, and where it departs from the appendices (maintenance by location, ledger-checked refinery and MSP formulas, crew rules).
+- [`build-3.md`](build-3.md): the third batch (Commanders, Hauling Planner, Empire History): confirmed ship posts, every cycling route traced, cargo handling time, and where history is kept.
 - [`sql-fleet.md`](sql-fleet.md): Finances, Commanders, Fleet hygiene warnings, Route Finder, Lagrange Points, Hauling Planner.
 
 All of it follows the app's rules (`CLAUDE.md`):
@@ -50,12 +52,12 @@ Scores:
 | 6 | [Fuel Balance](#6-fuel-balance) ✅ | Logistics | BigPlan, FuelUse, FuelFairies, SorHarv_src | 4 | 4 | M |
 | 7 | [Colonization Targets](#7-colonization-targets) | Colonies | ColTargs, CCOver, TFPlan (2) | 4 | 4 | M |
 | 8 | [Maintenance Budget](#8-maintenance-budget) ✅ | Logistics | Pop (MSP), BigPlan, `ShipSizeAndCostByPopulation.sql` | 4 | 3 | M |
-| 9 | [Commanders](#9-commanders) | Personnel | `Commander List with Bonuses and Traits.sql`, Yearly 26/27 | 4 | 3 | M |
+| 9 | [Commanders](#9-commanders) ✅ | Personnel | `Commander List with Bonuses and Traits.sql`, Yearly 26/27 | 4 | 3 | M |
 | 10 | [Fleet hygiene warnings](#10-fleet-hygiene-warnings) ✅ | Fleet | Yearly checklist queries | 4 | 2 | S |
 | 11 | [Route Finder & Distances](#11-route-finder--distances) | Exploration | JPs, JPRoutes, SysInfo, `dfs.sql` | 3 | 5 | M |
-| 12 | [Empire History](#12-empire-history) | Economy | Yearly | 3 | 5 | L |
+| 12 | [Empire History](#12-empire-history) ✅ | Economy | Yearly | 3 | 5 | L |
 | 13 | [Shipyard Planner](#13-shipyard-planner) | Industry | Yards, ShipyardGrowth, QCalc | 3 | 3 | M |
-| 14 | [Hauling Planner](#14-hauling-planner) | Logistics | Scoop, CyclingFleets, CyclingTotals, HaulCap_src | 3 | 3 | L |
+| 14 | [Hauling Planner](#14-hauling-planner) ✅ | Logistics | Scoop, CyclingFleets, CyclingTotals, HaulCap_src | 3 | 3 | L |
 | 15 | [Lagrange Points](#15-lagrange-points) | Exploration | `AllLagrangePoints_Basic.sql` | 2 | 3 | S |
 
 Sorted by utility, then beauty. My suggested build order is different, because some pages share groundwork; see [Suggested order](#suggested-order).
@@ -305,7 +307,7 @@ It's the data behind the game's own Empire Logistics Summary, which the app does
 4. Age = species `GraduationAge` + years since `CareerStart`. Don't hard-code 21: the sample has a species at 30.
 
 **Caveats.**
-- The labels for secondary ship posts (`CommandType` 8, 9, 10, 11, 15) are inferred.
+- ~~The labels for secondary ship posts (`CommandType` 8, 9, 10, 11, 15) are inferred.~~ Confirmed from the sample: each post's holders all have its bonus and serve with its module ([`build-3.md`](build-3.md)).
 - The `HealthRisk` scale is undocumented, so show the raw value.
 
 ### 10. Fleet hygiene warnings
@@ -362,7 +364,7 @@ The save keeps no history beyond a year of wealth data and a few weeks of the mi
 
 **Action plan.**
 1. On each save change (the file watcher already fires), compute a small snapshot from existing queries: population, workers, tonnage by type, installation counts, treasury and mineral stock.
-2. Store it per game and race. electron-store works but grows; a JSON file per game in the app's data folder is another option. This is open question 3.
+2. Store it per game and race. electron-store works but grows; a JSON file per game in the app's data folder is another option. This is open question 3, settled as a separate `history.json` ([`build-3.md`](build-3.md)).
 3. Multi-series line and area charts over game time (G3).
 
 **Caveats.**
@@ -401,13 +403,13 @@ It also has a what-if for any class at a chosen yard, and a "share of constructi
 
 **Action plan.**
 1. Classes, cycling fleets (`CycleMoves = 1`) and orders with destination coordinates (§ 6).
-2. Walk each fleet's orders to sum the round trip. 33 of the 46 sample fleets compute fully; the rest include Lagrange or other order types.
+2. Walk each fleet's orders to sum the round trip. 33 of the 46 sample fleets compute fully; the rest include Lagrange or other order types. (Built: all 46 trace, with Lagrange jumps and type-15 body orders.)
 3. Later: totals by destination and cargo type (the workbook's CyclingTotals).
 
 **Caveats.**
 - The workbook's demand side (which minerals need moving where, in the Scoop sheet) needs Mining Outlook first.
 - Tractor-and-trailer pairs need more design.
-- The results are upper bounds: they ignore loading time and refuelling.
+- The results are upper bounds: they ignore loading time and refuelling. (Built: loading time is now counted from the docs' cargo-handling rule; refuelling still isn't.)
 
 ### 15. Lagrange Points
 
@@ -431,7 +433,7 @@ This is my recommendation for the order to build in, taking the shared groundwor
 4. ~~**Fleet hygiene warnings (10).**~~ Built; [`build-2.md`](build-2.md) has the per-check verdicts.
 5. **G2 jump graph, then Route Finder (11) and Colonization Targets (7).** Survey Progress (5) is built without it; G2 would add travel time to its survey estimates.
 6. ~~**Fuel Balance (6) + Maintenance Budget (8)** as one Logistics page.~~ Built.
-7. **Commanders (9), Shipyard Planner (13), Hauling (14), Lagrange (15), Empire History (12).**
+7. ~~**Commanders (9)**~~, **Shipyard Planner (13)**, ~~**Hauling (14)**~~, **Lagrange (15)**, ~~**Empire History (12)**~~. Commanders, Hauling and Empire History are built; see [`build-3.md`](build-3.md).
 
 ## Not ported
 
@@ -468,10 +470,11 @@ These are existing-code issues the analysis turned up. Each gets its own fix; th
 5. **The Production page never applies naval admin bonuses** (`index.vue` `navalAdminBonus`). Its range check calls `administration.Systems.has(SystemID)` with a number, but the set holds system objects, so the check always fails and orbital terraformers get no admin bonus. Its range is also wrong once the check is fixed: `adminsWithSystems` walks `NavalAdminCommandLevel` jumps (4,096 on the sample's homeworld) instead of the radius, and the unused `Radius` it computes is one jump short (`floor(log2(level))`, no `+ 1`). It also ignores flag-bridge commands and commander rank. The Outlook page uses its own helpers in `utilities/minerals.js` (`navalAdminRadius`, `navalAdminRequiredRanks`, `navalAdminChainBonus`), and `utilities/naval-admins.js` now loads the commands for any bonus (Outlook, Logistics and Survey use it). G1 should move the Production page onto them, with the Terraforming bonus (9).
 6. ~~**The Warnings page's Populations section ignored free research labs.**~~ **Fixed.** Its `v-if` didn't list `freeResearchLabPopulations`, so a save whose only population warning was idle labs showed nothing.
 7. **Upkeep by assignment (`sql-economy.md` § 2A) isn't what the game charges.** Ships use MSP at their location. Logistics follows the game; see [`build-2.md`](build-2.md).
+8. **The Information page counts shuttle technology twice** (`information.vue` ~261). It multiplies a class's `CargoShuttleStrength`, which is already bays × bay strength, by the race's `CargoShuttleLoadModifier`, so its loading times are 50 times too short on the sample. The Hauling Planner uses bays × the race modifier, per the docs; see [`build-3.md`](build-3.md).
 
 ## Open questions for you
 
 1. ~~**Charts:** add Chart.js or draw SVG by hand?~~ Chart.js, decided.
-2. **Navigation:** there are now 14 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics and Finances after Minerals; Survey after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
-3. **Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?
+2. **Navigation:** there are now 17 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling and History after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
+3. ~~**Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?~~ Built as a second electron-store file, `history.json`, keyed by game and race, with a Clear button on the page. Say if you'd rather it be opt-in.
 4. **Estimates:** for the formulas that aren't confirmed in game (population growth rate, harvester output, survey rates, add-slipway cost), is an "estimate" label enough, or should those columns wait? Growth now has forum and patch-note support; refinery and MSP output are confirmed by the save's own ledger.
