@@ -19,6 +19,7 @@ module.exports = {
 
     { ssr: false, src: '@/plugins/database.js' },
     { ssr: false, src: '@/plugins/history.js' },
+    { ssr: false, src: '@/plugins/navigation.js' },
   ],
   buildModules: [
     '@nuxt/typescript-build',

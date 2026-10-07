@@ -39,4 +39,7 @@ const PAGES = [
   { route: '/settings', section: null, tab: 'Settings', title: 'Settings', icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
 ]
 
-module.exports = { SECTIONS, PAGES }
+const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))
+const pageByRoute = Object.fromEntries(PAGES.map((page) => [page.route, page]))
+
+module.exports = { SECTIONS, PAGES, sectionById, pageByRoute }
