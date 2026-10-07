@@ -1,85 +1,80 @@
 <template>
   <v-app>
-    <v-navigation-drawer v-model="drawer" :mini-variant.sync="mini" app permanent>
-      <v-list-item class="px-2">
-        <!-- <v-list-item-avatar>
-          <v-img src="https://randomuser.me/api/portraits/men/85.jpg"></v-img>
-        </v-list-item-avatar> -->
+    <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
+      <div class="rail__game">
+        <game-switcher :games="games" />
+      </div>
 
-        <v-list-item-icon>
-          <v-icon large>mdi-tooltip-account</v-icon>
-        </v-list-item-icon>
+      <div
+        v-for="section in railSections"
+        :key="section.id"
+        class="rail__item"
+        :class="{ 'rail__item--active': currentSection === section, 'rail__item--peek': flyoutId === section.id }"
+        :style="section.style"
+        role="link"
+        tabindex="0"
+        @click="goSection(section)"
+        @keydown.enter="goSection(section)"
+        @mouseenter="peekSection(section.id)"
+        @mouseleave="leaveRail"
+      >
+        <div class="rail__pill">
+          <v-icon>{{ section.icon }}</v-icon>
+        </div>
+        <div class="rail__label">{{ section.title }}</div>
+      </div>
 
-        <v-list-item-title>Games</v-list-item-title>
+      <div class="rail__spacer" />
 
-        <v-btn icon @click.stop="mini = !mini">
-          <v-icon>mdi-chevron-left</v-icon>
-        </v-btn>
-      </v-list-item>
-      <v-divider />
-
-      <v-list>
-        <v-tooltip v-for="game in games" :key="game.GameID" right>
-          <template #activator="{ on }">
-            <v-list-group prepend-icon="mdi-domain" append-icon :value="game.GameID === GameID" :title="game.GameName" @click="game.Races.length === 1 ? changeGame({ game }) : null" v-on="on">
-              <template #activator>
-                <v-list-item-content>
-                  <v-list-item-title>{{ game.GameName }}</v-list-item-title>
-                  <v-list-item-subtitle>{{ game.DateTime }}</v-list-item-subtitle>
-                </v-list-item-content>
-              </template>
-              <v-list-item v-for="race in game.Races" :key="race.RaceID" :input-value="race.RaceID === RaceID" @click="changeGame({ game, race })">
-                <v-list-item-icon><v-icon>mdi-account-multiple</v-icon></v-list-item-icon>
-                <v-list-item-title>
-                  {{ race.RaceTitle }}
-                </v-list-item-title>
-              </v-list-item>
-            </v-list-group>
-          </template>
-          <span>{{ game.GameName }} ({{ game.StartYear }})</span>
-        </v-tooltip>
-      </v-list>
+      <div class="rail__item" :class="{ 'rail__item--active': page.route === '/settings' }" :style="neutralStyle" role="link" tabindex="0" @click="go('/settings')" @keydown.enter="go('/settings')">
+        <div class="rail__pill">
+          <v-icon>mdi-wrench</v-icon>
+        </div>
+        <div class="rail__label">Settings</div>
+      </div>
     </v-navigation-drawer>
 
-    <v-app-bar app>
-      <v-toolbar-title>{{ title }}</v-toolbar-title>
+    <section-flyout
+      v-if="flyoutSection"
+      :style="flyoutSection.style"
+      :section="flyoutSection"
+      :pages="flyoutSection.pages"
+      :active-route="page.route"
+      :shortcut="railSections.indexOf(flyoutSection) + 1"
+      @go="go"
+      @mouseenter.native="cancelLeave"
+      @mouseleave.native="leaveRail"
+    />
+
+    <v-app-bar app flat height="64" :extension-height="tabs.length > 1 ? 44 : 0" class="app-bar">
+      <history-buttons />
+
+      <div class="breadcrumb ml-3" :style="pageStyle">
+        <template v-if="currentSection">
+          <span class="breadcrumb__section hidden-xs-only" @mouseenter="peekSection(currentSection.id)" @mouseleave="leaveRail">{{ currentSection.title }}</span>
+          <span class="breadcrumb__separator hidden-xs-only">/</span>
+        </template>
+        <span class="breadcrumb__title">{{ page.title }}</span>
+      </div>
+
       <v-spacer />
-      <v-btn icon to="/settings" nuxt>
-        <v-icon>mdi-wrench</v-icon>
-      </v-btn>
+
       <v-btn v-if="$vuetify.theme.dark" icon @click="setDarkMode(false)">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
       <v-btn v-else icon @click="setDarkMode(true)">
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
-      <template #extension>
-        <v-tabs v-model="tab" show-arrows center-active :hide-slider="title === 'Settings'">
-          <v-tab to="/" nuxt>Production</v-tab>
-          <v-tab to="/warnings" nuxt>Warnings</v-tab>
-          <v-tab to="/minerals" nuxt>Minerals</v-tab>
-          <v-tab to="/mineral-outlook" nuxt>Outlook</v-tab>
-          <v-tab to="/colony-outlook" nuxt>Colonies</v-tab>
-          <v-tab to="/logistics" nuxt>Logistics</v-tab>
-          <v-tab to="/finances" nuxt>Finances</v-tab>
-          <v-tab to="/hauling" nuxt>Hauling</v-tab>
-          <v-tab to="/history" nuxt :disabled="!historyRecorded">History</v-tab>
-          <v-tab to="/intelligence" nuxt :disabled="!historyRecorded">Intelligence</v-tab>
-          <v-tab to="/habitability" nuxt>Habitability</v-tab>
-          <v-tab to="/survey-progress" nuxt>Survey</v-tab>
-          <v-tab to="/commanders" nuxt>Commanders</v-tab>
-          <v-tab to="/information" nuxt>Information</v-tab>
-          <v-tab to="/map" nuxt>Map (WIP)</v-tab>
-          <v-tab to="/log" nuxt>Log</v-tab>
-          <v-tab to="/designed-tech" nuxt>Designed Tech (WIP)</v-tab>
-          <v-tab to="/technologies" nuxt>Tech Tree</v-tab>
-          <!-- <v-tab to="/engines" nuxt>Engines (WIP)</v-tab> -->
+
+      <template v-if="tabs.length > 1" #extension>
+        <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
+          <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
 
     <!-- Sizes your content based upon application components -->
-    <v-content>
+    <v-main>
       <v-snackbar v-model="snackbarStatus" :timeout="2000" :color="snackbar.color">
         {{ snackbar.text }}
         <v-btn dark text @click="snackbarStatus = false">
@@ -91,7 +86,7 @@
       <v-container fluid>
         <nuxt />
       </v-container>
-    </v-content>
+    </v-main>
 
     <v-footer app>
       <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
@@ -102,16 +97,24 @@
 <script>
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
+import GameSwitcher from '../components/navigation/GameSwitcher.vue'
+import HistoryButtons from '../components/navigation/HistoryButtons.vue'
+import SectionFlyout from '../components/navigation/SectionFlyout.vue'
+import { sectionStyle } from '../components/navigation/section-style'
+import { PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
+
+const FLYOUT_OPEN_DELAY = 140
+const FLYOUT_CLOSE_DELAY = 220
+
 export default {
   components: {
-    //
+    GameSwitcher,
+    HistoryButtons,
+    SectionFlyout,
   },
   data () {
     return {
-      drawer: true,
-      mini: false,
-
-      tab: null,
+      flyoutId: null,
 
       // WATCHED CONFIG
       spyNPR: false,
@@ -122,79 +125,49 @@ export default {
     ...mapState([
       'snackbar',
     ]),
+    ...mapState('navigation', [
+      'lastInSection',
+    ]),
 
     ...mapGetters([
       'config',
       'database',
 
-      'GameID',
-      'RaceID',
       'historyRecorded',
     ]),
 
-    title() {
-      switch (this.$route.name) {
-        case 'index': {
-          return 'Production Recap'
-        }
-        case 'warnings': {
-          return 'Warnings'
-        }
-        case 'minerals': {
-          return 'Mineral Breakdown'
-        }
-        case 'mineral-outlook': {
-          return 'Mineral Outlook'
-        }
-        case 'colony-outlook': {
-          return 'Colony Outlook'
-        }
-        case 'logistics': {
-          return 'Logistics'
-        }
-        case 'hauling': {
-          return 'Hauling Planner'
-        }
-        case 'history': {
-          return 'Empire History'
-        }
-        case 'intelligence': {
-          return 'Intelligence'
-        }
-        case 'finances': {
-          return 'Finances'
-        }
-        case 'habitability': {
-          return 'Habitability Breakdown'
-        }
-        case 'survey-progress': {
-          return 'Survey Progress'
-        }
-        case 'commanders': {
-          return 'Commanders'
-        }
-        case 'information': {
-          return 'Empire Information'
-        }
-        case 'technologies': {
-          return 'Technology Tree'
-        }
-        case 'map': {
-          return 'Galaxy Map'
-        }
-        case 'settings': {
-          return 'Settings'
-        }
-        case 'log': {
-          return 'Game Log Viewer'
-        }
-        case 'designed-tech': {
-          return 'Designed Technologies'
-        }
-        default: {
-          return 'Default title'
-        }
-      }
+    page () {
+      return pageByRoute[this.$route.path]
+    },
+    currentSection () {
+      return this.railSections.find(({ id }) => id === this.page.section)
+    },
+    tabs () {
+      return this.currentSection ? this.currentSection.pages : []
+    },
+    tabIndex () {
+      return this.tabs.findIndex(({ route }) => route === this.page.route)
+    },
+    neutralStyle () {
+      return sectionStyle(this.$vuetify.theme.dark)
+    },
+    pageStyle () {
+      return this.currentSection ? this.currentSection.style : this.neutralStyle
+    },
+
+    // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have.
+    pages () {
+      return PAGES.filter(({ hidden }) => !hidden).map((page) => ({ ...page, disabled: Boolean(page.requiresHistory && !this.historyRecorded) }))
+    },
+    railSections () {
+      return SECTIONS.map((section) => ({
+        ...section,
+        pages: this.pages.filter(({ section: id }) => id === section.id),
+        style: sectionStyle(this.$vuetify.theme.dark, section),
+      }))
+    },
+    flyoutSection () {
+      return this.railSections.find(({ id }) => id === this.flyoutId)
     },
 
     snackbarStatus: {
@@ -232,11 +205,19 @@ export default {
     if (mutationReturn.unsubscribe) {
       this.unsubscribeSpyNPR = mutationReturn.unsubscribe
     }
+
+    window.addEventListener('keydown', this.onKeydown)
+    window.addEventListener('mouseup', this.onMouseup)
   },
   beforeDestroy () {
     if (this.unsubscribeSpyNPR) {
       this.unsubscribeSpyNPR()
     }
+
+    window.removeEventListener('keydown', this.onKeydown)
+    window.removeEventListener('mouseup', this.onMouseup)
+    clearTimeout(this.peekTimer)
+    clearTimeout(this.leaveTimer)
   },
   methods: {
     ...mapMutations('snackbar', [
@@ -246,13 +227,69 @@ export default {
       'configDidChange',
     ]),
 
-    ...mapActions([
-      'changeGame',
+    ...mapActions('navigation', [
+      'back',
+      'forward',
     ]),
 
     setDarkMode(value) {
       this.$vuetify.theme.dark = value
       this.config.set('darkMode', value)
+    },
+
+    go (path) {
+      this.flyoutId = null
+
+      if (path !== this.$route.fullPath) {
+        this.$router.push(path)
+      }
+    },
+    // Back to the last page used in the section, or its first page.
+    goSection (section) {
+      clearTimeout(this.peekTimer)
+      this.go(this.lastInSection[section.id] || section.pages.find(({ disabled }) => !disabled).route)
+    },
+
+    peekSection (id) {
+      clearTimeout(this.leaveTimer)
+      clearTimeout(this.peekTimer)
+      this.peekTimer = setTimeout(() => {
+        this.flyoutId = id
+      }, this.flyoutId ? 0 : FLYOUT_OPEN_DELAY)
+    },
+    leaveRail () {
+      clearTimeout(this.peekTimer)
+      this.leaveTimer = setTimeout(() => {
+        this.flyoutId = null
+      }, FLYOUT_CLOSE_DELAY)
+    },
+    cancelLeave () {
+      clearTimeout(this.leaveTimer)
+    },
+
+    onKeydown (event) {
+      if (event.altKey && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        this.back()
+      } else if (event.altKey && event.key === 'ArrowRight') {
+        event.preventDefault()
+        this.forward()
+      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[1-7]$/.test(event.key)) {
+        event.preventDefault()
+        this.goSection(this.railSections[Number(event.key) - 1])
+      } else if (event.key === 'Escape') {
+        this.flyoutId = null
+      }
+    },
+    // The mouse's back and forward buttons.
+    onMouseup (event) {
+      if (event.button === 3) {
+        event.preventDefault()
+        this.back()
+      } else if (event.button === 4) {
+        event.preventDefault()
+        this.forward()
+      }
     },
   },
   asyncComputed: {
@@ -283,19 +320,167 @@ export default {
 }
 </script>
 
+<style lang="scss">
+.v-application {
+  --ae-chrome: #f6f7f9;
+  --ae-ink: #212121;
+  --ae-muted: #6a6a6a;
+  --ae-border: #e0e3e8;
+  --ae-hover: rgba(24, 103, 192, .07);
+  --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
+
+  &.theme--light {
+    --ae-bg: #ffffff;
+  }
+
+  &.theme--dark {
+    --ae-bg: #121212;
+    --ae-chrome: #1e1e1e;
+    --ae-ink: #f5f5f5;
+    --ae-muted: #b0b0b0;
+    --ae-border: #333333;
+    --ae-hover: rgba(33, 150, 243, .10);
+  }
+
+  kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--ae-border);
+    border-radius: 4px;
+    box-shadow: none;
+    background: var(--ae-bg);
+    color: var(--ae-muted);
+    font-family: var(--ae-mono);
+    font-size: 11px;
+  }
+}
+</style>
+
 <style lang="scss" scoped>
-.column {
-  padding-bottom: 0;
+.rail {
+  &.v-navigation-drawer {
+    background: var(--ae-chrome) !important;
+  }
+
+  ::v-deep .v-navigation-drawer__content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding-block: 10px;
+  }
 }
 
-.corpus {
-  min-height: calc(100vh - 52px);
-  background: linear-gradient(to right, #ece9e6, #ffffff);
-
-  padding: 30px 50px;
+.rail__game {
+  padding-block: 4px 10px;
 }
 
-.games-menu {
-  padding: 20px 0 20px 20px;
+.rail__spacer {
+  flex: 1;
+}
+
+.rail__item {
+  position: relative;
+  width: 76px;
+  padding-block: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ae-muted);
+
+  .v-icon {
+    color: var(--ae-muted) !important;
+    transition: color .15s ease;
+  }
+}
+
+.rail__pill {
+  width: 56px;
+  height: 32px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  transition: background .15s ease;
+}
+
+.rail__label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+
+.rail__item:hover,
+.rail__item--peek {
+  .rail__pill {
+    background: var(--sc-tint);
+  }
+
+  .v-icon {
+    color: var(--sc) !important;
+  }
+}
+
+.rail__item--active {
+  .rail__pill {
+    background: var(--sc-soft);
+  }
+
+  .rail__label {
+    color: var(--ae-ink);
+  }
+
+  .v-icon {
+    color: var(--sc) !important;
+  }
+}
+
+.app-bar.v-app-bar.v-sheet {
+  background: var(--ae-bg) !important;
+  border-bottom: 1px solid var(--ae-border) !important;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.breadcrumb__section {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--sc);
+}
+
+.breadcrumb__separator {
+  color: var(--ae-muted);
+}
+
+.breadcrumb__title {
+  overflow: hidden;
+  font-size: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ae-ink);
+}
+
+.section-tabs {
+  ::v-deep .v-tab {
+    letter-spacing: .06em;
+  }
+
+  ::v-deep .v-tab--active {
+    color: var(--sc) !important;
+  }
+
+  ::v-deep .v-tabs-slider {
+    background: var(--sc) !important;
+  }
 }
 </style>
