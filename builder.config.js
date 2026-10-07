@@ -47,6 +47,9 @@ const macOS = {
 
 module.exports = {
   asar: false,
+  // sqlite3 ships an N-API prebuilt binary that Electron loads as is. A rebuild at packaging time replaces
+  // node_modules/sqlite3's binary in place, and when another process has it loaded that leaves it missing.
+  npmRebuild: false,
   productName: 'Aurora Electrons',
   appId: 'net.nerdship.aurora.electrons',
   // eslint-disable-next-line no-template-curly-in-string

@@ -8,7 +8,8 @@ const { Pipeline, Logger } = require('@xpda-dev/core')
 const { ElectronLauncher } = require('@xpda-dev/electron-launcher')
 const { ElectronBuilder } = require('@xpda-dev/electron-builder')
 const { Webpack } = require('@xpda-dev/webpack-step')
-const { DIST_DIR } = require('./config')
+const { BUILD_DIR, DIST_DIR, PROJECT_ROOT } = require('./config')
+const { checkInstalled, checkPackaged } = require('./check-native')
 const mainWebpackConfig = require('./main-webpack')
 const NuxtApp = require('./renderer/NuxtApp')
 
@@ -33,6 +34,18 @@ if (!hasConfigArgument(argumentsArray)) argumentsArray.push('--config', 'builder
 const builder = new ElectronBuilder({
   processArgv: argumentsArray
 })
+
+if (!isDev) {
+  checkInstalled(PROJECT_ROOT)
+
+  const packageApp = builder.build.bind(builder)
+
+  builder.build = async () => {
+    await packageApp()
+
+    checkPackaged(BUILD_DIR).forEach((folder) => console.log(`sqlite3 binary present in ${folder}`))
+  }
+}
 
 const webpackConfig = mainWebpackConfig(path.join(DIST_DIR, 'main'))
 

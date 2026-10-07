@@ -119,7 +119,7 @@ Dependabot opens security-update PRs against `master`. Most of them only bump a 
 ## Releasing
 
 1. Bump `version` in `package.json` and commit it, e.g. `👌 0.9.14`.
-2. Run `yarn build`. Artifacts land in `build/` as `aurora-electrons-<version>.<ext>`: a Windows portable exe, a Linux deb, and a macOS dmg.
+2. Run `yarn build`. Artifacts land in `build/` as `aurora-electrons-<version>.<ext>`: a Windows portable exe, a Linux deb, and a macOS dmg. The build fails when sqlite3's `node_sqlite3.node` is missing from `node_modules` or from a package; restore it with the command it prints. Don't run `yarn install` or `npm rebuild` while a `yarn web` or `yarn dev` session has the binary loaded: on Windows that leaves it missing.
 3. Users place the executable in their Aurora folder, next to `AuroraDB.db`.
 
 ## Sample fixture
