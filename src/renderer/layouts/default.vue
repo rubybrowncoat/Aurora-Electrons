@@ -466,6 +466,28 @@ export default {
 </script>
 
 <style lang="scss">
+// Off-canvas parts (a closed drawer parked past the right edge) must not make the window scroll sideways.
+// Content that really is too wide is still reported by the smoke test's layout check.
+.v-main__wrap {
+  overflow-x: clip;
+}
+
+// Tables keep a header on one line and scroll inside their own wrapper when they need more room.
+// Below the 1080p layout (1904 px and up) the cells give up a quarter of their side padding.
+.v-application .v-data-table {
+  th {
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1903px) {
+    > .v-data-table__wrapper > table > thead > tr > th,
+    > .v-data-table__wrapper > table > tbody > tr > td,
+    > .v-data-table__wrapper > table > tfoot > tr > td {
+      padding-inline: 12px;
+    }
+  }
+}
+
 .v-application {
   --ae-chrome: #f6f7f9;
   --ae-ink: #212121;

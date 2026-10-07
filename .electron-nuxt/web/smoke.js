@@ -78,7 +78,7 @@ const LAYOUT_CHECK = () => {
 
   const reported = new Set()
   const clippedBy = (element) => {
-    for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    for (let node = element.parentElement; node && node !== document.body && !node.matches('.v-main__wrap'); node = node.parentElement) {
       const { overflowX } = getComputedStyle(node)
 
       if (overflowX !== 'visible') {
