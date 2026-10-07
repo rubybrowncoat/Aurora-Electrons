@@ -6,6 +6,7 @@
 > - Commanders (9), Hauling Planner (14) and Empire History (12). [`build-3.md`](build-3.md) has the same for them. Empire History now also records NPR empires, one file per game, with a Rivals chart in spy mode.
 >
 > - Intelligence History (16), added to the list afterwards, is built as the **Intelligence** tab. [`build-4.md`](build-4.md) has its analysis and checks.
+> - Colonization Targets (7) is built, merged with Habitability, as the **Colonization Planner** (route `/habitability`, tab Colonization). See its section below.
 >
 > The rest is waiting for prioritisation.
 
@@ -53,7 +54,7 @@ Scores:
 | 4 | [Finances](#4-finances) ✅ | Economy | `Wealth Use.sql`, `WealthUseByTypeByDay.sql` | 4 | 5 | S |
 | 5 | [Survey Progress](#5-survey-progress) ✅ | Exploration | Survey, GrndSurvey | 4 | 5 | M |
 | 6 | [Fuel Balance](#6-fuel-balance) ✅ | Logistics | BigPlan, FuelUse, FuelFairies, SorHarv_src | 4 | 4 | M |
-| 7 | [Colonization Targets](#7-colonization-targets) | Colonies | ColTargs, CCOver, TFPlan (2) | 4 | 4 | M |
+| 7 | [Colonization Targets](#7-colonization-targets) ✅ | Colonies | ColTargs, CCOver, TFPlan (2) | 4 | 4 | M |
 | 8 | [Maintenance Budget](#8-maintenance-budget) ✅ | Logistics | Pop (MSP), BigPlan, `ShipSizeAndCostByPopulation.sql` | 4 | 3 | M |
 | 9 | [Commanders](#9-commanders) ✅ | Personnel | `Commander List with Bonuses and Traits.sql`, Yearly 26/27 | 4 | 3 | M |
 | 10 | [Fleet hygiene warnings](#10-fleet-hygiene-warnings) ✅ | Fleet | Yearly checklist queries | 4 | 2 | S |
@@ -240,6 +241,13 @@ Several pages need the same pieces. Building them once avoids four copies of the
 - It's unknown whether the species production modifier applies to fuel.
 
 ### 7. Colonization Targets
+
+**Built** as the Colonization Planner, which merged with Habitability (`pages/habitability.vue`; the route stayed `/habitability` so saved filters keep working, the planned `/colonization` entry is gone). What it took from this plan: the weighted mineral score (the workbook's weights and the 1 kt floor, editable and stored per race as `game.<GameID>.race.<RaceID>.targetWeights`), civilian mining complex candidates (read from the `cmcMinerals` setting, with the game's other conditions listed), the distance from the capital over charted jump points (G2, as `utilities/jump-graph.js`, with the jump count) and a combined rank. What changed:
+- The rank is per goal (people, minerals or both) and per species, worth = prize / (1 + cost/scale) / (1 + years/scale) / (1 + AU/scale), with the scales editable, because a miner and a settler want different things and the plan's formula ignored terraforming years.
+- The page keeps every body of a known system, as Habitability did, and shows deposits only on bodies the race surveyed. § 3's query inner-joined the survey, which dropped unsurveyed bodies entirely.
+- Colony cost, terraforming and capacity are the game's rules, checked against its source (`docs/DATABASE.md` § Colony cost, capacity and terraforming rules). Habitability's maths had two real errors, now fixed: it ignored the game's terraforming speed (`FCT_Game.TerraformingSpeed`, 10 on the sample, so every terraforming time was ten times too short), and it used the stale saved `BaseTemp` for moons.
+- Other races' colonies come from `FCT_AlienPopulation` (the race's intelligence), not from every population in a known system.
+- Not built: the bubble scatter and the map overlay of the top N. A table with an expandable species comparison answered the question better in the sketches; the scatter would need the same rows and can be added on `rankBodies`.
 
 *Colonies · Utility 4 · Beauty 4 · Effort M · SQL: `sql-mining.md` § 3*
 
