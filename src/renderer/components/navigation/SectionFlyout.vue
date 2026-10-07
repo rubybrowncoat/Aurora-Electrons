@@ -2,25 +2,26 @@
   <div class="section-flyout">
     <div class="section-flyout__head">
       <span class="section-flyout__title">{{ section.title }}</span>
-      <span class="section-flyout__count">{{ pages.length }} pages · Ctrl {{ shortcut }}</span>
+      <span class="section-flyout__count">{{ pages.filter(({ planned }) => !planned).length }} pages · Ctrl {{ shortcut }}</span>
     </div>
 
     <div
       v-for="page in pages"
       :key="page.route"
       class="section-flyout__item"
-      :class="{ 'section-flyout__item--active': page.route === activeRoute, 'section-flyout__item--disabled': page.disabled }"
+      :class="{ 'section-flyout__item--active': page.route === activeRoute, 'section-flyout__item--disabled': page.disabled || page.planned }"
       role="link"
-      :tabindex="page.disabled ? -1 : 0"
-      @click="page.disabled || $emit('go', page.route)"
-      @keydown.enter="page.disabled || $emit('go', page.route)"
+      :tabindex="page.disabled || page.planned ? -1 : 0"
+      @click="page.disabled || page.planned || $emit('go', page.route)"
+      @keydown.enter="page.disabled || page.planned || $emit('go', page.route)"
     >
       <div class="section-flyout__icon">
         <v-icon size="20">{{ page.icon }}</v-icon>
       </div>
       <div class="section-flyout__name">{{ page.title }}</div>
       <div>
-        <v-chip v-if="page.wip" x-small label outlined>WIP</v-chip>
+        <v-chip v-if="page.planned" x-small label>Planned</v-chip>
+        <v-chip v-else-if="page.wip" x-small label outlined>WIP</v-chip>
       </div>
       <div class="section-flyout__blurb">{{ page.blurb }}</div>
       <div v-if="page.peekable" class="section-flyout__peek">
@@ -41,7 +42,7 @@ export default {
       type: Object,
       required: true,
     },
-    // The section's pages, each with a `disabled` flag.
+    // The section's pages, each with a `disabled` flag; `planned` ones are listed but can't be opened.
     pages: {
       type: Array,
       required: true,

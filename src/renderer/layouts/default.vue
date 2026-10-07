@@ -180,7 +180,7 @@ export default {
       return this.railSections.find(({ id }) => id === this.page.section)
     },
     tabs () {
-      return this.currentSection ? this.currentSection.pages : []
+      return this.currentSection ? this.currentSection.pages.filter(({ planned }) => !planned) : []
     },
     tabIndex () {
       return this.tabs.findIndex(({ route }) => route === this.page.route)
@@ -193,16 +193,16 @@ export default {
     },
 
     // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have,
-    // and `peekable` when the flyout shows a live line under it.
+    // `planned` when it has no page yet, and `peekable` when the flyout shows a live line under it.
     pages () {
       return PAGES.filter(({ hidden }) => !hidden).map((page) => {
         const disabled = Boolean(page.requiresHistory && !this.historyRecorded)
 
-        return { ...page, disabled, peekable: !disabled && Boolean(peeks[page.route]) }
+        return { ...page, disabled, peekable: !disabled && !page.planned && Boolean(peeks[page.route]) }
       })
     },
     openPages () {
-      return this.pages.filter(({ disabled }) => !disabled)
+      return this.pages.filter(({ disabled, planned }) => !disabled && !planned)
     },
     railSections () {
       return SECTIONS.map((section) => ({
@@ -308,7 +308,7 @@ export default {
     // Back to the last page used in the section, or its first page.
     goSection (section) {
       clearTimeout(this.peekTimer)
-      this.go(this.lastInSection[section.id] || section.pages.find(({ disabled }) => !disabled).route)
+      this.go(this.lastInSection[section.id] || section.pages.find(({ disabled, planned }) => !disabled && !planned).route)
     },
 
     peekSection (id) {

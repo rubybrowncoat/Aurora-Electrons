@@ -259,7 +259,9 @@ Several pages need the same pieces. Building them once avoids four copies of the
 1. Bodies query (§ 3), merged by `SystemBodyID` into Habitability's `calculatedBodies`, so the colony-cost maths isn't duplicated.
 2. Mineral score: a weighted sum of accessibility over deposits above a minimum amount. The workbook's weights are the defaults; make them editable and store them in `this.config`.
 3. Distance from the capital comes from G2.
-4. Decide whether this is a new page or a "Targets" mode of Habitability (open question 2).
+4. ~~Decide whether this is a new page or a "Targets" mode of Habitability (open question 2).~~ Decided below: it merges with Habitability.
+
+**Decided.** Colonization Targets merges with Habitability into one screen, the **Colonization Planner** (`/colonization`, Colonies section), which replaces Habitability. Habitability stays live until the Planner ships. The navigation registry already lists the Planner as a planned page.
 
 **Decided.** The qualifying minerals are a setting (`cmcMinerals`), defaulting to Duranium or Gallicite as the workbook does (the docs say Duranium only). The Minerals page already marks qualifying bodies; this page should read the same setting.
 
@@ -540,7 +542,7 @@ These are existing-code issues the analysis turned up. Each gets its own fix; th
 ## Open questions for you
 
 1. ~~**Charts:** add Chart.js or draw SVG by hand?~~ Chart.js, decided.
-2. **Navigation:** there are now 18 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling, History and Intelligence after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability?
+2. **Navigation:** there are now 18 tabs (the bar scrolls). The new pages each got a tab, placed by theme: Outlook, Colonies, Logistics, Finances, Hauling, History and Intelligence after Minerals; Survey and Commanders after Habitability. Group them into menus instead? Should Colonization Targets be a tab inside Habitability? Decided: no tab. The two merge into the Colonization Planner, which replaces Habitability (see item 7).
 3. ~~**Empire History storage:** is the app allowed to keep its own per-game snapshot history, and where: electron-store, or a file per game?~~ Decided: one electron-store file per game, `history/game-<GameID>.json` in the app's settings folder, written once per save, for player races and NPR empires. The page has a Clear button per race.
 4. **Estimates:** for the formulas that aren't confirmed in game (population growth rate, harvester output, survey rates, add-slipway cost), is an "estimate" label enough, or should those columns wait? Growth now has forum and patch-note support; refinery and MSP output are confirmed by the save's own ledger.
 5. ~~**Intelligence History placement:** a view of the History page, or its own tab?~~ Its own tab, decided.
