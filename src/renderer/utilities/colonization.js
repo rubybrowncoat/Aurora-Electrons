@@ -155,28 +155,29 @@ export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { 
 }
 
 // One row per body for the table and chart: the best species for it (or the chosen one), its alternatives,
-// and the numbers the columns show. `speciesId` null means the best of all.
+// and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`, so a race
+// with no species (nothing to compare bodies against) gets no rows at all.
 export const rankBodies = (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, cmcIds, systemPopulation }) => {
   const terraformCapacityPerYear = terraformCapacity(rules, terraformers)
 
-  const rows = assessed.map(({ body, byspecies }) => {
+  const rows = assessed.filter(({ byspecies }) => byspecies.length).map(({ body, byspecies }) => {
     const minerals = mineralSummary(body, ranking, cmcIds)
     const distance = distanceOf(body)
     const distanceAU = distance ? distance.km / KM_PER_AU : null
     const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals }))
-    const considered = speciesId ? evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId) : evaluations
-    const [best] = [...considered].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
+    const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
+    const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
 
     return { body, minerals, distance: distance ? { ...distance, au: distanceAU } : null, evaluations, best, cmcSite: cmcSite(body, systemPopulation) }
   })
 
   const settled = (row) => row.body.OwnPopulations.length > 0
-  const top = Math.max(0, ...rows.filter((row) => !settled(row) && row.best).map((row) => row.best.value))
+  const top = Math.max(0, ...rows.filter((row) => !settled(row)).map((row) => row.best.value))
 
   rows.forEach((row) => {
     row.rank = null
     row.settled = settled(row)
-    row.score = !row.settled && row.best && top > 0 ? (100 * row.best.value) / top : null
+    row.score = !row.settled && top > 0 ? (100 * row.best.value) / top : null
   })
 
   const ranked = rows.filter((row) => row.score !== null && row.score > 0).sort((a, b) => b.score - a.score)
