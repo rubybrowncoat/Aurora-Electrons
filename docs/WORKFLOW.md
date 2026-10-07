@@ -98,14 +98,14 @@ It takes about 90 seconds. `SMOKE_PAGES`, `SMOKE_OUT`, `AURORA_GAME` and `AURORA
 
    Scope by `GameID` and `RaceID`, and go through the race-knowledge tables so the page doesn't leak spoilers (`docs/DATABASE.md`). Pass user-entered values as Sequelize `replacements`, never by interpolation.
 4. **Choose where state lives.** If it must survive a restart, use `this.config.get/set` (electron-store). Use `game.<GameID>.race.<RaceID>.<key>` for per-race keys. If it only needs to last the session, use a Vuex module in `src/renderer/store/`.
-5. **For a new page,** add `pages/<name>.vue`, a `<v-tab to="/<name>" nuxt>` entry, and a `title()` case in `layouts/default.vue`.
+5. **For a new page,** add `pages/<name>.vue` and one entry in `PAGES` in `src/renderer/utilities/navigation.js`: `route`, `section` (one of `SECTIONS`, or `null` for a page outside the nav), `tab`, `title`, `icon`, `blurb` and `keywords`. Add `wip: true` for a work in progress, `requiresHistory: true` for a page that needs Empire History, or `hidden: true` to keep it out of the navigation, the palette and the default smoke list. The layout and `smoke-pages.js` pick it up from there.
 6. **For a new column or model,** extend `resetDatabase()` in `utilities/database.js`. Map renamed columns with `field:`, and add associations next to the existing ones.
 
 ## Verifying
 
 - **Lint what you touched:** `node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>`. You can add `--fix` for those files only. The repo-wide baseline isn't clean: at the time of writing, `yarn lint` reports 17 errors and 119 warnings. Don't fix unrelated problems, and don't introduce new ones.
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
-- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
+- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) in the game picker. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
 
 ## Dependency updates
