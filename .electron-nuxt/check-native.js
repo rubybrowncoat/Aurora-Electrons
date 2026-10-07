@@ -38,31 +38,41 @@ const checkInstalled = (projectRoot) => {
   }
 }
 
-// Each unpacked package under `buildDir` (win-unpacked, linux-unpacked, mac/*.app) has it too.
+const subfolders = (folder) => fs.existsSync(folder) ? fs.readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(folder, entry.name)) : []
+
+// The package outputs electron-builder leaves under `buildDir`: win-unpacked, linux-unpacked and their per-arch
+// variants at the top level, and the .app bundles inside mac, mac-arm64, mac-universal and mas*. Each is paired with
+// the folder its app files live in.
+const findPackages = (buildDir) => {
+  const unpacked = subfolders(buildDir).filter((folder) => path.basename(folder).endsWith('-unpacked')).map((folder) => ({ folder, resources: path.join(folder, 'resources') }))
+  const bundles = subfolders(buildDir)
+    .filter((folder) => /^(mac|mas)/.test(path.basename(folder)))
+    .flatMap(subfolders)
+    .filter((folder) => folder.endsWith('.app'))
+    .map((folder) => ({ folder, resources: path.join(folder, 'Contents', 'Resources') }))
+
+  return [...unpacked, ...bundles]
+}
+
+// Every package under `buildDir` has sqlite3 with its binary, in the unpacked app folder or, with an asar, beside it.
 const checkPackaged = (buildDir) => {
-  const packages = []
-
-  const visit = (folder) => {
-    fs.readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isDirectory()).forEach((entry) => {
-      const file = path.join(folder, entry.name)
-
-      if (entry.name === 'sqlite3' && path.basename(folder) === 'node_modules') {
-        packages.push(file)
-      } else if (entry.name !== 'icons') {
-        visit(file)
-      }
-    })
-  }
-
-  visit(buildDir)
+  const packages = findPackages(buildDir)
 
   if (!packages.length) {
-    fail(`No package in ${buildDir} contains sqlite3.`)
+    fail(`No package found in ${buildDir}: expected *-unpacked folders or mac*/*.app bundles.`)
   }
 
-  packages.filter((folder) => !findBinaries(folder).length).forEach((folder) => fail(`${BINARY} is missing from the package at ${folder}, so the app could not open the save.`))
+  return packages.flatMap(({ folder, resources }) => {
+    const modules = ['app', 'app.asar.unpacked'].map((name) => path.join(resources, name, 'node_modules', 'sqlite3')).filter((candidate) => fs.existsSync(candidate))
 
-  return packages
+    if (!modules.length) {
+      fail(`The package at ${folder} has no sqlite3 folder, so the app could not open the save.`)
+    }
+
+    modules.filter((candidate) => !findBinaries(candidate).length).forEach((candidate) => fail(`${BINARY} is missing from the package at ${candidate}, so the app could not open the save.`))
+
+    return modules
+  })
 }
 
 module.exports = { checkInstalled, checkPackaged }
