@@ -239,7 +239,7 @@
                 </template>
                 <span>Qualifies for a civilian mining complex with {{ item.row.minerals.cmc.join(', ') }}. {{ cmcNote(item.row) }}</span>
               </v-tooltip>
-              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block">{{ compactTons(item.row.minerals.total) }}<template v-if="scarceNames(item.row)"> · short of {{ scarceNames(item.row) }}</template></span>
+              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block mineral-note">{{ compactTons(item.row.minerals.total) }}<template v-if="scarceNames(item.row)"> · short of {{ scarceNames(item.row) }}</template></span>
             </div>
             <v-tooltip v-else top>
               <template #activator="{ on }">
@@ -709,8 +709,11 @@ export default {
 
       return `${state.text(row.facts)}${ranked}`
     },
+    // The scarce minerals the body holds, the first two by name.
     scarceNames(row) {
-      return row.minerals.lines.filter((line) => line.value > 0 && line.scarcity.factor > 1).map((line) => line.name).join(', ')
+      const names = row.minerals.lines.filter((line) => line.value > 0 && line.scarcity.factor > 1).map((line) => line.name)
+
+      return `${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2}` : ''}`
     },
     mineralTooltip(row) {
       const lines = row.minerals.lines.filter((line) => line.value > 0).slice(0, 5).map((line) => `${line.name} ${roundToDecimal(line.value, 1)}${line.scarcity.factor > 1 ? ` (x${line.scarcity.factor}, ${line.scarcity.label.toLowerCase()})` : ''}`)
@@ -905,6 +908,11 @@ export default {
 
   .mineral-score {
     font-weight: 500;
+  }
+
+  .mineral-note {
+    max-width: 220px;
+    white-space: normal;
   }
 
   .mineral-high {
