@@ -6,6 +6,9 @@ import { gameTime } from './aurora'
 // A statement that outlives this has stopped being a read and become a stall: every page waits behind it.
 export const QUERY_TIMEOUT_MS = 60000
 
+// How long retiring a database waits for the statement running on it to settle before closing it anyway.
+const RETIRE_SETTLE_MS = 5000
+
 const guards = new WeakMap()
 
 // Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a
@@ -18,11 +21,19 @@ const guardQueries = (sequelize) => {
   const waiting = []
   let running = false
   let retired = false
+  let active = null
 
+  // A connection that is still opening, or already closed, throws "Database is not open" and has nothing to interrupt.
   const interrupt = (everything) => {
     const { connections } = sequelize.connectionManager
 
-    Object.keys(connections).filter((key) => everything || key === 'default').forEach((key) => connections[key].interrupt())
+    Object.keys(connections).filter((key) => everything || key === 'default').forEach((key) => {
+      try {
+        connections[key].interrupt()
+      } catch (error) {
+        // Nothing is running on it to interrupt.
+      }
+    })
   }
 
   const drain = () => {
@@ -50,7 +61,8 @@ const guardQueries = (sequelize) => {
     }, QUERY_TIMEOUT_MS)
 
     running = true
-    query(sql, options).then(resolve, reject).then(finish)
+    active = query(sql, options)
+    active.then(resolve, reject).then(finish)
   }
 
   // Not enumerable: Vue would otherwise make the property reactive, and wrapping it again (the smoke test does) would
@@ -74,12 +86,19 @@ const guardQueries = (sequelize) => {
     },
   })
 
-  guards.set(sequelize, () => {
+  // A statement on a connection that is still opening can't be interrupted, and Sequelize doesn't track that
+  // connection until it has opened, so close() would miss it. Waiting for the statement to settle (interrupted, or
+  // bounded by RETIRE_SETTLE_MS) means the connection is tracked and open by the time it is closed.
+  guards.set(sequelize, async () => {
     retired = true
     waiting.splice(0).forEach(({ reject }) => reject(new Error('The save was reloaded; this read belongs to the old copy')))
     interrupt(true)
 
-    return sequelize.close()
+    if (running && active) {
+      await Promise.race([active.catch(() => {}), new Promise((resolve) => setTimeout(resolve, RETIRE_SETTLE_MS))])
+    }
+
+    await sequelize.close()
   })
 }
 
@@ -89,7 +108,11 @@ export const retireDatabase = async (sequelize) => {
   const retire = sequelize && guards.get(sequelize)
 
   if (retire) {
-    await retire().catch((error) => console.warn('Closing the replaced database failed', error))
+    try {
+      await retire()
+    } catch (error) {
+      console.warn('Closing the replaced database failed', error)
+    }
   }
 }
 
