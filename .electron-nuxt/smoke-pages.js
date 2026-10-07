@@ -1,3 +1,8 @@
-// The routes both smoke tests visit by default: every tab plus settings. The hidden WIP /engines
-// page is opt-in through SMOKE_PAGES.
-module.exports = ['/', '/warnings', '/minerals', '/mineral-outlook', '/colony-outlook', '/logistics', '/finances', '/hauling', '/history', '/intelligence', '/habitability', '/survey-progress', '/commanders', '/information', '/map', '/log', '/designed-tech', '/technologies', '/settings']
+// The routes both smoke tests visit by default: every page in the navigation registry
+// (src/renderer/utilities/navigation.js), settings last. Hidden pages such as /engines are opt-in
+// through SMOKE_PAGES.
+const { PAGES } = require('../src/renderer/utilities/navigation')
+
+const visible = PAGES.filter((page) => !page.hidden)
+
+module.exports = [...visible.filter((page) => page.section), ...visible.filter((page) => !page.section)].map((page) => page.route)

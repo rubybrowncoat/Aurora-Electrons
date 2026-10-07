@@ -1,0 +1,42 @@
+// The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette,
+// titles) and the smoke tests' page list all read from here. Plain CommonJS because
+// `.electron-nuxt/smoke-pages.js` requires it from Node.
+
+// `slot` indexes `chartTheme(dark).categorical` in components/charts/theme.js.
+const SECTIONS = [
+  { id: 'command', title: 'Command', icon: 'mdi-view-dashboard-outline', slot: 0 },
+  { id: 'economy', title: 'Economy', icon: 'mdi-pickaxe', slot: 1 },
+  { id: 'colonies', title: 'Colonies', icon: 'mdi-home-group', slot: 2 },
+  { id: 'logistics', title: 'Logistics', icon: 'mdi-truck-fast-outline', slot: 3 },
+  { id: 'galaxy', title: 'Galaxy', icon: 'mdi-orbit', slot: 6 },
+  { id: 'empire', title: 'Empire', icon: 'mdi-shield-crown-outline', slot: 4 },
+  { id: 'research', title: 'Research', icon: 'mdi-flask-outline', slot: 5 },
+]
+
+// `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the
+// selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or
+// default smoke list. Pages within a section appear in this order.
+const PAGES = [
+  { route: '/', section: 'command', tab: 'Production', title: 'Production Recap', icon: 'mdi-factory', blurb: 'Research, industry, shipyards and training, each with its time left.', keywords: 'research industry shipyard queue terraforming' },
+  { route: '/warnings', section: 'command', tab: 'Warnings', title: 'Warnings', icon: 'mdi-alert-octagon-outline', blurb: 'About 40 checks over contacts, economy, ships, fleets and colonies.', keywords: 'alerts idle fleets damaged ships intruders lifepods' },
+  { route: '/log', section: 'command', tab: 'Log', title: 'Game Log', icon: 'mdi-script-text-outline', blurb: 'The full event log, filtered and coloured by event type.', keywords: 'events' },
+  { route: '/minerals', section: 'economy', tab: 'Minerals', title: 'Mineral Breakdown', icon: 'mdi-diamond-stone', blurb: 'Deposits on surveyed bodies, with CMC and orbital-mining flags.', keywords: 'deposits mining duranium cmc' },
+  { route: '/mineral-outlook', section: 'economy', tab: 'Outlook', title: 'Mineral Outlook', icon: 'mdi-chart-timeline-variant', blurb: 'Stock, output and use per mineral, with years of runway left.', keywords: 'runway depletion forecast' },
+  { route: '/finances', section: 'economy', tab: 'Finances', title: 'Finances', icon: 'mdi-cash-multiple', blurb: 'Wealth income and spending by category over the last year.', keywords: 'wealth money treasury' },
+  { route: '/colony-outlook', section: 'colonies', tab: 'Outlook', title: 'Colony Outlook', icon: 'mdi-city-variant-outline', blurb: 'Growth, capacity and the worker split per colony over a horizon.', keywords: 'population growth workers infrastructure' },
+  { route: '/habitability', section: 'colonies', tab: 'Habitability', title: 'Habitability', icon: 'mdi-earth', blurb: 'Colony cost per species and body, with terraforming plans.', keywords: 'colony cost terraforming species' },
+  { route: '/logistics', section: 'logistics', tab: 'Fuel & MSP', title: 'Fuel & Maintenance', icon: 'mdi-fuel', blurb: 'Fuel stock, burn and Sorium cover; maintenance supply and how long it lasts.', keywords: 'logistics fuel msp sorium refinery harvester tankers fleets ships supply' },
+  { route: '/hauling', section: 'logistics', tab: 'Hauling', title: 'Hauling Planner', icon: 'mdi-transit-connection-variant', blurb: 'Repeating freight routes, cycle times and cargo moved.', keywords: 'freight cargo routes cycling fleets freighters' },
+  { route: '/information', section: 'logistics', tab: 'Transport', title: 'Transport Capacity', icon: 'mdi-swap-horizontal-bold', blurb: 'Freight and colonist capacity, plus civilian work orders.', keywords: 'information civilian shipping colonists' },
+  { route: '/map', section: 'galaxy', tab: 'Map', title: 'Galaxy Map', icon: 'mdi-map-marker-path', blurb: 'Known systems, jump points, sectors and survey state.', wip: true, keywords: 'jump points sectors' },
+  { route: '/survey-progress', section: 'galaxy', tab: 'Survey', title: 'Survey Progress', icon: 'mdi-radar', blurb: 'Survey work left per system, and what survey fleets are doing.', keywords: 'geological gravitational survey fleets ships' },
+  { route: '/intelligence', section: 'galaxy', tab: 'Intelligence', title: 'Intelligence', icon: 'mdi-incognito', blurb: 'What you know of every alien race you have met.', requiresHistory: true, keywords: 'aliens diplomacy treaties' },
+  { route: '/history', section: 'empire', tab: 'History', title: 'Empire History', icon: 'mdi-chart-line', blurb: 'Snapshots the app records each save: population, wealth, fleet, research.', requiresHistory: true, keywords: 'snapshots trends rivals' },
+  { route: '/commanders', section: 'empire', tab: 'Commanders', title: 'Commanders', icon: 'mdi-account-tie', blurb: 'The roster with bonuses, and better assignments for governors and officers.', keywords: 'officers governors scientists' },
+  { route: '/technologies', section: 'research', tab: 'Tech Tree', title: 'Tech Tree', icon: 'mdi-file-tree', blurb: 'The tech tree by field, with researched techs and RP costs.', keywords: 'technologies research' },
+  { route: '/designed-tech', section: 'research', tab: 'Designed', title: 'Designed Tech', icon: 'mdi-atom', blurb: 'Your designed components by category.', wip: true, keywords: 'components engines' },
+  { route: '/engines', section: null, tab: 'Engines', title: 'Engine Planner', icon: 'mdi-engine-outline', blurb: 'Engine design inputs and thrust.', hidden: true, keywords: 'engine thrust' },
+  { route: '/settings', section: null, tab: 'Settings', title: 'Settings', icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
+]
+
+module.exports = { SECTIONS, PAGES }
