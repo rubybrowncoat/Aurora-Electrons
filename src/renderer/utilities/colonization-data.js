@@ -3,6 +3,7 @@
 // colonies only as its intelligence has them (FCT_AlienPopulation). Every query is scoped by GameID and RaceID.
 
 import { climateBaseTemp } from './habitability'
+import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook } from './minerals'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
 
@@ -122,4 +123,55 @@ where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} an
   ])
 
   return { jumpPoints, capital: colonies.find((colony) => colony.Capital) || null, colonies }
+}
+
+const MINERAL_COLUMNS = MINERALS.map((mineral) => mineral.name)
+const sumOf = (table) => MINERAL_COLUMNS.map((name) => `sum(${table}.${name}) as ${name}`).join(', ')
+const byMineralId = (row) => Object.fromEntries(MINERALS.map((mineral) => [mineral.id, (row && row[mineral.name]) || 0]))
+
+// How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets
+// over the year's net loss, from the game's mineral ledger), read once for the Planner. The same reads as the
+// page's, over the last 365 days.
+const LEDGER_DAYS = 365
+
+// The game's mineral ledger (Aurora 2.6 and later) over the last year, summed by mineral and entry type; [] for a
+// save that doesn't have the table.
+const loadLedger = async (database, { GameID, RaceID }) => {
+  const [table] = await rows(database, "select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
+
+  if (!table.Present) {
+    return []
+  }
+
+  return rows(
+    database,
+    `select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick
+from FCT_RaceMineralData
+inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID
+cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${GameID} and VIR_Production.RaceID = ${RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${LEDGER_DAYS * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks
+where FCT_RaceMineralData.GameID = ${GameID} and FCT_RaceMineralData.RaceID = ${RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${LEDGER_DAYS * SECONDS_PER_DAY}
+group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`
+  )
+}
+
+// How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets
+// over the year's net loss, from the game's mineral ledger), read once for the Planner with the page's own reads.
+export const loadMineralOutlook = async (database, ids) => {
+  const { GameID, RaceID } = ids
+  const [[game], [stock], cargo, [packets], ledger] = await Promise.all([
+    rows(database, `select GameTime from FCT_Game where GameID = ${GameID}`),
+    rows(database, `select ${sumOf('FCT_Population')} from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID}`),
+    rows(database, `select FCT_ShipCargo.CargoID as MaterialID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
+    rows(database, `select ${sumOf('FCT_MassDriverPackets')} from FCT_MassDriverPackets where GameID = ${GameID} and RaceID = ${RaceID}`),
+    loadLedger(database, ids),
+  ])
+  const carried = (mineral) => ((cargo.find((row) => row.MaterialID === mineral.id) || {}).Amount || 0) + ((packets && packets[mineral.name]) || 0)
+
+  return mineralOutlook({
+    ledger,
+    gameTime: game ? game.GameTime : 0,
+    windowDays: LEDGER_DAYS,
+    stock: byMineralId(stock),
+    transit: Object.fromEntries(MINERALS.map((mineral) => [mineral.id, carried(mineral)])),
+  })
 }

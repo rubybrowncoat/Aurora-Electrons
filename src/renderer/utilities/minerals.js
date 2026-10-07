@@ -37,6 +37,42 @@ export const cmcMineralIds = (stored) => {
 
 export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount >= CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
+// What the game's own AI makes of a deposit (RaceAIController.CalculateMineralDepsoitValue): accessibility,
+// halved under 10,000 t and raised for a big deposit that is still easy to reach (more than 100,000, 250,000
+// and 1,000,000 t at accessibility above 0.4). Nothing under 2,000 t counts. An NPR seeds a mining colony on a
+// body whose deposits add up to 6 (Helpers.MineralDepositValueThreshold) and adds mines to a colony from 4
+// (Helpers.MinimumMiningDepositValueThreshold).
+export const DEPOSIT_MINIMUM_AMOUNT = 2000
+export const RICH_DEPOSIT_VALUE = 6
+export const WORTH_MINING_VALUE = 4
+
+export const depositValue = (deposit, minimumAmount = DEPOSIT_MINIMUM_AMOUNT) => {
+  if (deposit.Amount < minimumAmount) {
+    return 0
+  }
+
+  const reachable = deposit.Accessibility > 0.4
+  const size = deposit.Amount > 1000000 && reachable ? 2 : deposit.Amount > 250000 && reachable ? 1.5 : deposit.Amount > 100000 && reachable ? 1.25 : deposit.Amount < 10000 ? 0.5 : 1
+
+  return deposit.Accessibility * size
+}
+
+// How short a mineral is for the race, from the runway the Mineral Outlook page shows (its stock and in-transit
+// cargo over its net loss a year). The game's AI scales a deposit the same way by how little its capital holds
+// (x3 under 1,000 t, x2 under 3,000, x1.5 under 5,000); here the runway decides. A mineral that holds or grows
+// counts once, and so does one that lasts a century or more. `years` is the runway a tier covers, up to and
+// excluding it.
+export const CRITICAL_RUNWAY_YEARS = 5
+export const WARNING_RUNWAY_YEARS = 25
+export const SCARCITY = [
+  { id: 'critical', label: 'Critical', years: CRITICAL_RUNWAY_YEARS, factor: 3 },
+  { id: 'short', label: 'Short', years: WARNING_RUNWAY_YEARS, factor: 2 },
+  { id: 'falling', label: 'Running down', years: 100, factor: 1.5 },
+]
+export const NOT_SCARCE = { id: 'ok', label: 'Holding', years: null, factor: 1 }
+
+export const scarcityOf = (runway) => (Number.isFinite(runway) && SCARCITY.find((tier) => runway < tier.years)) || NOT_SCARCE
+
 export const SECONDS_PER_DAY = 86400
 
 // Accessibility never falls below this; the deposit is empty when it gets there.
@@ -213,6 +249,53 @@ export const ledgerCoverageDays = ({ gameTime, firstTime, anchorTime, cycleDays,
   const cycles = Math.floor((firstBack - anchorBack) / cycleDays + 1e-9) + 1
 
   return Math.min(windowDays, anchorBack + cycles * cycleDays)
+}
+
+// The ledger's cycle when it has too few production ticks to measure one (the game's default).
+const DEFAULT_CYCLE_DAYS = 5
+const DAYS_PER_YEAR = 365
+
+const ledgerCoverage = (ledger, gameTime, windowDays) => {
+  if (!ledger.length) {
+    return 0
+  }
+
+  const { ProductionTicks: ticks, FirstTick: firstTick, LastTick: lastTick } = ledger[0]
+
+  return ledgerCoverageDays({
+    gameTime,
+    firstTime: Math.min(...ledger.map((row) => row.FirstTime)),
+    anchorTime: ticks ? lastTick : Math.max(...ledger.map((row) => row.LastTime)),
+    cycleDays: ticks > 1 ? (lastTick - firstTick) / (ticks - 1) / SECONDS_PER_DAY : DEFAULT_CYCLE_DAYS,
+    windowDays,
+  })
+}
+
+// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and
+// salvage) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets.
+// `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick,
+// LastTick } over the last `windowDays`; `stock` and `transit`: { [MaterialID]: tonnes }. Without a ledger (a
+// save before Aurora 2.6) nothing is known and every mineral counts as holding.
+export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit }) => {
+  const coverageDays = ledgerCoverage(ledger, gameTime, windowDays)
+  const perYear = coverageDays ? DAYS_PER_YEAR / coverageDays : 0
+  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: (stock[mineral.id] || 0) + (transit[mineral.id] || 0), produced: 0, used: 0 }]))
+
+  ledger.forEach((row) => {
+    const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)
+
+    if (group && outlook[row.MaterialID]) {
+      outlook[row.MaterialID][group.income ? 'produced' : 'used'] += row.Amount * perYear
+    }
+  })
+
+  Object.values(outlook).forEach((mineral) => {
+    mineral.net = mineral.produced - mineral.used
+    mineral.runway = mineral.net < 0 ? mineral.stock / -mineral.net : null
+    mineral.scarcity = scarcityOf(mineral.runway)
+  })
+
+  return { known: coverageDays > 0, minerals: outlook }
 }
 
 const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
