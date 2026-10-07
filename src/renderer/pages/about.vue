@@ -9,7 +9,7 @@
           </v-card-title>
           <v-card-subtitle class="text-overline">Looking Inwards</v-card-subtitle>
           <v-card-text class="text-body-1">
-            A desktop companion app for the 4X game Aurora (C#). It opens the game's SQLite save, watches it for changes, and shows dashboards the game doesn't have.
+            A desktop companion app for the 4X game Aurora (C#). It opens the game's SQLite save, watches it for changes, and shows its information in new ways, with useful dashboards: plans, forecasts and summaries drawn from the save.
             It covers production, warnings, minerals, colonies, logistics, finances, empire history, intelligence, the galaxy map and the tech tree.
           </v-card-text>
           <v-divider />
