@@ -491,7 +491,7 @@ export default {
       return [
         { text: 'Race', value: 'AlienRaceName', cellClass: 'text-no-wrap' },
         { text: 'Stance', value: 'ContactStatus' },
-        { text: 'Communication', value: 'CommStatus', cellClass: 'text-no-wrap' },
+        { text: 'Communication', value: 'CommStatus' },
         { text: 'Diplomatic points', value: 'DiplomaticPoints', align: 'end' },
         { text: 'First contact', value: 'FirstDetected', cellClass: 'text-no-wrap' },
         { text: 'Last ship contact', value: 'LastContact', cellClass: 'text-no-wrap' },
