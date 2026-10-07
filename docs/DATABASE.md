@@ -104,6 +104,36 @@ Checked against the decompiled game source and the save; the Colonization Planne
 - **Terraforming** (`Population.ProcessTerraforming`, `:1032`; `RecalculateEarthEquivalentAnnualTerraformCapacity`, `:4471`; docs `terraforming`). A colony works on one gas at a time. Its yearly capacity, in atm of an Earth-sized body, is `(FCT_Race.TerraformingRate · output modifier · terraforming installations + orbital module output) · FCT_Game.TerraformingSpeed / 100`, scaled by `511,187,128 / (4 · 3.1416 · Radius²)` for the body, so small bodies terraform faster. The output modifier is the governor's Terraforming bonus (and a quarter of the sector governor's), the colony's efficiency, radiation, stability and political status. Nothing under 0.1 g can be terraformed (`Helpers.MinimumTerraformingGravity`). Water vapour condenses at 0.1 atm a year, evaporates at 4, a hydro extent of 1 % is 1/40 atm, and a liquid hydrosphere holds `AtmosPress · HydroExt / 100 · 0.01` atm of vapour (`Helpers.cs:593-596`). **`TerraformingSpeed` is 10 on the sample**, so terraforming there is a tenth of the racial rate; the old page left it out. The Planner takes a number of terraformers at the racial rate and the game speed, without commander or colony modifiers (a colony that doesn't exist yet has none).
 - **Not modelled:** the output modifier, orbital terraforming modules (fleet modules and the naval admin share), the game's own distance for the map (the Planner uses the route a ship flies), and the civilian mining check's Lagrange-point condition for non-primary stars.
 
+## Colonization Planner ranking
+
+What the Planner calls a valuable body, and what each plan state means. The code is `utilities/colonization.js` (the ranking) and `utilities/colonization-states.js` (the states); a state is defined only in that table, and the page's "Plan states" legend prints it.
+
+**Where the numbers come from.** The decompiled game source (read only) shows what the game itself values:
+
+- The Minerals window colours a body by colony cost: blue under 2, cyan under 3 and brown under 6, each times the race's colonisation skill (`Minerals.cs:782`). The Planner's cost bands are the same 2, 3 and 6, read on the cost before the skill (`raw`), so a race with the cost tech lands in the same band as one without. What a colony really pays is the infrastructure per million people (above), shown beside the band.
+- An NPR values a deposit by `RaceAIController.CalculateMineralDepsoitValue` (`:3902`): nothing under 2,000 t, halved under 10,000 t, times 1.25, 1.5 or 2 for a deposit above 100,000, 250,000 or 1,000,000 t with accessibility above 0.4, times a factor for how little of the mineral its capital holds (3, 2 or 1.5 under 1,000, 3,000 or 5,000 t, down to 0.1 above 400,000 t). It seeds a mining colony on a body whose deposits add up to 6 (`Helpers.MineralDepositValueThreshold`) and adds mines to a colony from 4 (`MinimumMiningDepositValueThreshold`). It dismisses an empty colony of cost 2 or more with nothing to mine (`RemoveValuelessEmptyColonies`) and seeds terraforming colonies where the worst-case cost is under 1.5, falling back to under 2.5.
+- The Planner uses that deposit value, with the race's shortage in place of the capital's stock: the Mineral Outlook's runway (stock plus cargo and packets, over the net loss a year from `FCT_RaceMineralData`, for the last 365 days) gives x3 under 5 years, x2 under 25 and x1.5 under 100, and 1 for a mineral that holds. A save with no ledger (before Aurora 2.6) counts every mineral once. Every mineral has the same base weight (1; the knob stays).
+- Capacity and cost are the rules above; distance is the charted route from the nearest colony of 1 M or more, which is how far a freighter flies to supply it.
+
+**Worth.** For the goal, worth = prize x cost x time x distance. The prize is the people share (`capacity / (capacity + 1,000 M)`), the mining share (`value / (value + 6)`, a civilian mining complex site that meets the game's other conditions adds the bonus to the value) or both added. Each discount is `1 / (1 + x / scale)` with x the raw colony cost (scale 3), the years of terraforming (25) and the AU from the nearest colony (60); a body with no charted route keeps 30 %. The ranking compares settling the body as it is with waiting for its terraforming plan and keeps the better. Only a place to settle (a state with `target`) that holds 50 M or more, or has a deposit value of 4 or more, or is a ready civilian mining complex site, is ranked, and only from 10 % of the best one's worth. The table's default view lists the best targets, from 25 %.
+
+**Plan states**, first match wins. The ranking's best route for the best species decides the terraforming states.
+
+| State | When |
+|---|---|
+| Colony | an own colony with people on the body |
+| Outpost | an own colony with no people |
+| Alien colony | intelligence shows an alien population (`FCT_AlienPopulation`) |
+| Not habitable | no species can live there: too heavy, or a fixed body (gas giants are not loaded) |
+| Mining colony | deposit value of 6 or more on a body that holds under the smallest colony (50 M by default) |
+| Terraform to free | the best route is terraforming and its outcome is Yes: cost 0 at every point of the orbit |
+| Terraform, part free | the best route is terraforming and its outcome is Partial |
+| Terraform to cheaper | the best route is terraforming and the cost falls but stays above 0 |
+| Free colony | raw cost 0: no infrastructure |
+| Cheap, Moderate, Costly, Severe | raw cost under 2, 2 to 3, 3 to 6, 6 or more |
+
+The two example saves have no unsettled body in Free or Cheap: a low-gravity body costs at least 1, and without a breathing gas, enough water or the right temperature a body costs 2 or more.
+
 ## Sequelize models (`src/renderer/utilities/database.js`)
 
 `resetDatabase()` defines 23 models with `timestamps: false`. Several are marked `// INCOMPLETE`, meaning they only map the columns the app needs. Add columns as required.

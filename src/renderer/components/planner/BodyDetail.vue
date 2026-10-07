@@ -1,5 +1,9 @@
 <template>
   <div class="body-detail">
+    <div class="d-flex align-center mb-3">
+      <v-chip small label :color="item.row.state.color" :dark="item.row.state.target" :outlined="!item.row.state.target" class="mr-3 flex-none"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.label }}</v-chip>
+      <span class="text--secondary">{{ item.row.state.text(item.row.facts) }}</span>
+    </div>
     <div class="d-flex align-center flex-wrap mb-3">
       <span class="caption text--secondary mr-3">Species</span>
       <v-btn-toggle :value="shown.species.SpeciesID" mandatory dense @change="(id) => $emit('species', id)">
@@ -36,13 +40,27 @@
           <div v-if="assessment.cost.dangerousGas" class="caption mt-1"><v-icon x-small color="warning">mdi-biohazard</v-icon> {{ assessment.cost.dangerousGas.AtmosGasName }} is above its safe level.</div>
         </v-card>
 
-        <v-card outlined class="pa-3">
+        <v-card outlined class="pa-3 mb-3">
           <div class="overline">What it holds</div>
           <div class="headline">
             <template v-if="plan && afterCapacity !== null && Math.abs(afterCapacity - shown.capacityNow) > 0.005"><span class="text--secondary">{{ people(shown.capacityNow) }}</span> → {{ people(afterCapacity) }}</template>
             <template v-else>{{ people(shown.capacityNow) }}</template>
           </div>
           <div class="caption text--secondary">Infrastructure: {{ infrastructureLine }}. Growth slows past a third of the capacity.</div>
+        </v-card>
+
+        <v-card outlined class="pa-3">
+          <div class="overline">Why it ranks here</div>
+          <template v-if="why">
+            <div class="why-line"><span>People</span><span>{{ why.people }}</span></div>
+            <div class="why-line"><span>Deposits</span><span>{{ why.mining }}</span></div>
+            <div class="why-line why-total"><span>Prize for the goal</span><span>{{ why.prize }}</span></div>
+            <div class="why-line"><span>× colony cost {{ cost(shown.raw) }}</span><span>{{ why.cost }}</span></div>
+            <div class="why-line"><span>× {{ years(shown.years) }} to terraform</span><span>{{ why.time }}</span></div>
+            <div class="why-line"><span>× {{ distanceText }}</span><span>{{ why.distance }}</span></div>
+            <div class="caption text--secondary mt-1">{{ rankText }}</div>
+          </template>
+          <div v-else class="caption text--secondary">No species of yours can live here, so there is nothing to rank.</div>
         </v-card>
       </v-col>
 
@@ -105,12 +123,13 @@
         <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by this race yet. Ground survey potential: {{ groundSurvey }}.</div>
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
-          <v-chip v-for="deposit in deposits" :key="deposit.MaterialID" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.Amount < ranking.minimumDeposit }">
-            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.Amount) }} · {{ round(deposit.Accessibility, 2) }}
+          <v-chip v-for="deposit in deposits" :key="deposit.id" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.value <= 0 }">
+            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.amount) }} · {{ round(deposit.accessibility, 2) }} → {{ round(deposit.value, 1) }}<span v-if="deposit.scarcity.factor > 1" class="ml-1 scarce">×{{ deposit.scarcity.factor }} {{ deposit.scarcity.label.toLowerCase() }}</span>
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
-        <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ round(item.row.distance.au, 1) }} AU from the nearest colony over {{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}.</div>
+        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short you are of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
+        <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ distanceLine }}</div>
       </v-col>
     </v-row>
   </div>
@@ -120,7 +139,7 @@
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
-import { MINERALS, compact } from '../../utilities/minerals'
+import { compact } from '../../utilities/minerals'
 import { OUTCOMES, planYears } from '../../utilities/terraforming'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
@@ -135,7 +154,6 @@ export default {
     terraformCapacity: { type: Number, required: true },
     rules: { type: Object, required: true },
     separator: { type: String, default: "'" },
-    ranking: { type: Object, required: true },
   },
   computed: {
     assessment() {
@@ -214,9 +232,37 @@ export default {
     },
 
     deposits() {
-      return [...this.item.body.Minerals]
-        .map((deposit) => ({ ...deposit, name: MINERALS.find((mineral) => mineral.id === deposit.MaterialID).name }))
-        .sort((a, b) => b.Accessibility * (this.ranking.weights[b.MaterialID] || 0) - a.Accessibility * (this.ranking.weights[a.MaterialID] || 0))
+      return this.item.row.minerals.lines
+    },
+    why() {
+      const { parts } = this.shown
+
+      if (!parts) {
+        return null
+      }
+
+      const fixed = (value) => roundToDecimal(value, 2).toString()
+
+      return { people: fixed(parts.people), mining: fixed(parts.mining), prize: fixed(parts.prize), cost: fixed(parts.cost), time: fixed(parts.time), distance: fixed(parts.distance) }
+    },
+    distanceText() {
+      const { distance } = this.item.row
+
+      return distance ? `${roundToDecimal(distance.au, 1)} AU from the nearest colony` : 'no charted route'
+    },
+    rankText() {
+      const { row } = this.item
+      const score = row.score === null || !(this.item.best.value > 0) ? '' : ` ${roundToDecimal((this.shown.value * row.score) / this.item.best.value, 0)}% of the best target's worth.`
+
+      return `Worth ${roundToDecimal(this.shown.value, 3)} for ${this.shown.species.SpeciesName}${this.shown.strategy === 'terraform' ? ' after terraforming' : ', settled as it is'}.${row.rank ? ` Rank ${row.rank}.` : ''}${score}`
+    },
+    distanceLine() {
+      const { distance, capitalDistance } = this.item.row
+      const jumps = (count) => `${count} ${count === 1 ? 'jump' : 'jumps'}`
+      const from = distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'the nearest colony'
+      const capital = capitalDistance && !(distance.from && distance.from.Capital) ? ` The capital is ${roundToDecimal(capitalDistance.au, 1)} AU and ${jumps(capitalDistance.jumps)} away.` : ''
+
+      return `${roundToDecimal(distance.au, 1)} AU from ${from} over ${jumps(distance.jumps)}, by the charted route.${capital}`
     },
     cmcLine() {
       const { cmcSite } = this.item.row
@@ -305,6 +351,29 @@ export default {
     display: inline-flex;
     align-items: center;
     font-weight: 500;
+  }
+
+  .why-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 22px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .why-total {
+    border-top: 1px solid rgba(128, 128, 128, 0.35);
+    font-weight: 500;
+  }
+
+  .scarce {
+    font-weight: 500;
+    color: var(--sc, #1baf7a);
+  }
+
+  .flex-none {
+    flex: none;
   }
 
   .target-copy-btn {
