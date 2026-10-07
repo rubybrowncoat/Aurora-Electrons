@@ -97,9 +97,13 @@ where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`
 
 export const loadGases = (database) => rows(database, 'select GasID, Name, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel from DIM_Gases')
 
-// The jump points the race has charted in systems it knows, and its capital's place, for travel distances.
+// A colony supplies the next one from this many millions of people up (the Planner's "nearest colony").
+export const SUPPLY_BASE_MILLIONS = 1
+
+// The jump points the race has charted in systems it knows, and the places travel is measured from: its capital,
+// and every colony of at least `SUPPLY_BASE_MILLIONS` (the capital among them), with the body's place.
 export const loadRoutes = async (database, { GameID, RaceID }) => {
-  const [jumpPoints, capitals] = await Promise.all([
+  const [jumpPoints, colonies] = await Promise.all([
     rows(
       database,
       `select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.JumpGateRaceID, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.IgnoreForDistance
@@ -110,12 +114,12 @@ where FCT_JumpPoint.GameID = ${GameID}`
     ),
     rows(
       database,
-      `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor
+      `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Capital, FCT_Population.Population, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor
 from FCT_Population
 inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID
-where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Capital = 1`
+where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Capital = 1 or FCT_Population.Population >= ${SUPPLY_BASE_MILLIONS})`
     ),
   ])
 
-  return { jumpPoints, capital: capitals[0] || null }
+  return { jumpPoints, capital: colonies.find((colony) => colony.Capital) || null, colonies }
 }

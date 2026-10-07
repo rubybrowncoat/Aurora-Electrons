@@ -110,7 +110,7 @@
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
-        <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ round(item.row.distance.au, 1) }} AU from the capital over {{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}.</div>
+        <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ round(item.row.distance.au, 1) }} AU from the nearest colony over {{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}.</div>
       </v-col>
     </v-row>
   </div>

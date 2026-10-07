@@ -386,8 +386,9 @@ export default {
     systemPopulation() {
       return populationBySystem(this.bodies)
     },
+    // Travel is measured from the nearest sizeable colony (the capital among them).
     distanceOf() {
-      return buildDistanceMap(this.routes.jumpPoints, this.routes.capital)
+      return buildDistanceMap(this.routes.jumpPoints, this.routes.colonies)
     },
 
     // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
@@ -686,12 +687,12 @@ export default {
     routes: {
       get: tracked('routes', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return { jumpPoints: [], capital: null }
+          return { jumpPoints: [], capital: null, colonies: [] }
         }
 
         return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
-      default: { jumpPoints: [], capital: null },
+      default: { jumpPoints: [], capital: null, colonies: [] },
     },
   },
 }
