@@ -473,7 +473,7 @@ export default {
 }
 
 // Tables keep a header on one line and scroll inside their own wrapper when they need more room.
-// Below the 1080p layout (1904 px and up) the cells give up a quarter of their side padding.
+// Below the 1080p layout (1904 px and up) the cells give up more than a third of their side padding.
 .v-application .v-data-table {
   th {
     white-space: nowrap;
@@ -483,7 +483,7 @@ export default {
     > .v-data-table__wrapper > table > thead > tr > th,
     > .v-data-table__wrapper > table > tbody > tr > td,
     > .v-data-table__wrapper > table > tfoot > tr > td {
-      padding-inline: 12px;
+      padding-inline: 10px;
     }
   }
 }
