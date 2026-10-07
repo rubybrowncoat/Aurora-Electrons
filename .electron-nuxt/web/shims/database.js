@@ -94,6 +94,9 @@ const makeModel = (ready, name, scopes = []) => {
   return model
 }
 
+// The dev server owns the real database, and keeps it across saves.
+export const retireDatabase = async () => {}
+
 export const resetDatabase = (storagePath) => {
   console.log('## [web] RESETTING ON', storagePath)
 

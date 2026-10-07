@@ -3,6 +3,89 @@ import { Model, Sequelize } from 'sequelize'
 
 import { gameTime } from './aurora'
 
+// A statement that outlives this has stopped being a read and become a stall: every page waits behind it.
+export const QUERY_TIMEOUT_MS = 60000
+
+const guards = new WeakMap()
+
+// Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a
+// time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a
+// statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is
+// running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. Transaction
+// queries have a connection of their own and pass straight through.
+const guardQueries = (sequelize) => {
+  const query = sequelize.query.bind(sequelize)
+  const waiting = []
+  let running = false
+  let retired = false
+
+  const interrupt = (everything) => {
+    const { connections } = sequelize.connectionManager
+
+    Object.keys(connections).filter((key) => everything || key === 'default').forEach((key) => connections[key].interrupt())
+  }
+
+  const drain = () => {
+    if (running || !waiting.length) {
+      return
+    }
+
+    const { sql, options, resolve, reject } = waiting.shift()
+    const finish = () => {
+      clearTimeout(timer)
+      running = false
+      drain()
+    }
+    const timer = setTimeout(() => {
+      interrupt(false)
+      reject(new Error(`The save took longer than ${QUERY_TIMEOUT_MS / 1000} s to answer and the read was stopped: ${String(sql).replace(/\s+/g, ' ').slice(0, 120)}`))
+      finish()
+    }, QUERY_TIMEOUT_MS)
+
+    running = true
+    query(sql, options).then(resolve, reject).then(finish)
+  }
+
+  // Not enumerable: Vue would otherwise make the property reactive, and wrapping it again (the smoke test does) would
+  // count as the store state being mutated outside a mutation.
+  Object.defineProperty(sequelize, 'query', {
+    configurable: true,
+    writable: true,
+    value: (sql, options) => {
+      if (options && options.transaction) {
+        return query(sql, options)
+      }
+
+      if (retired) {
+        return Promise.reject(new Error('The save was reloaded; this read belongs to the old copy'))
+      }
+
+      return new Promise((resolve, reject) => {
+        waiting.push({ sql, options, resolve, reject })
+        drain()
+      })
+    },
+  })
+
+  guards.set(sequelize, () => {
+    retired = true
+    waiting.splice(0).forEach(({ reject }) => reject(new Error('The save was reloaded; this read belongs to the old copy')))
+    interrupt(true)
+
+    return sequelize.close()
+  })
+}
+
+// Drop a database the app has replaced: its waiting reads are rejected, the statements running on it are interrupted
+// and its connections closed, so the old copy neither keeps working nor holds the file. Never rejects.
+export const retireDatabase = async (sequelize) => {
+  const retire = sequelize && guards.get(sequelize)
+
+  if (retire) {
+    await retire().catch((error) => console.warn('Closing the replaced database failed', error))
+  }
+}
+
 export const resetDatabase = (storagePath) => {
   console.log('## RESETTING ON', storagePath)
 
@@ -12,6 +95,8 @@ export const resetDatabase = (storagePath) => {
 
     storage: storagePath,
   })
+
+  guardQueries(sequelize)
 
   class Game extends Model {}
   Game.init({ // INCOMPLETE

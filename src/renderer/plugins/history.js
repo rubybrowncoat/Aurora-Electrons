@@ -24,12 +24,15 @@ export default ({ store }) => {
         store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
       }
     }).catch((error) => {
+      // A newer save replaced this one and stopped its reads.
+      if (mine !== generation) {
+        return
+      }
+
       console.error('Empire history: snapshot failed', error)
 
       // The save couldn't be read at all (the game may have been writing it): no game was recorded.
-      if (mine === generation) {
-        store.commit('history/failures', [{ GameID: null, stage: 'read' }])
-      }
+      store.commit('history/failures', [{ GameID: null, stage: 'read' }])
     })
   })
 }

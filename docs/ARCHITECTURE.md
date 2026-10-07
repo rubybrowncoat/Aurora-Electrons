@@ -56,7 +56,7 @@ Most of this directory is the electron-nuxt template's tooling; treat that part 
 ### Data flow
 
 1. The `plugins/database.js` plugin is client-only. It asks the main process for the storage path, then watches that file with chokidar (`awaitWriteFinish`).
-2. When the file is added or changes, it dispatches the root `renew` action. That action calls `resetDatabase(storagePath)` from `utilities/database.js`, which builds a **new** Sequelize instance with every model and association, and stores it as `database`.
+2. When the file is added or changes, it dispatches the root `renew` action. That action calls `resetDatabase(storagePath)` from `utilities/database.js`, which builds a **new** Sequelize instance with every model and association, and stores it as `database`. The instance it replaces is retired (`retireDatabase`): its waiting reads are rejected, the statement running on it is interrupted, and its connections close, so the old copy neither keeps working nor holds the file.
 3. Every page reads data in `asyncComputed` getters that depend on `database`, `GameID`, and `RaceID`. Saving the game in Aurora therefore swaps the `database` instance and refreshes every open view automatically.
 4. The layout loads the empire list with `loadEmpires` (`utilities/empires.js`: one query, every game's races with the capital, its system and the colony count). `components/navigation/EmpireList.vue` shows it, in the rail's Empires flyout and, until a race is selected, in the "Pick a game" panel the layout shows instead of the page. Each race row has an avatar (its flag from `read-flag`, else its initials on a `color-hash` colour), its title, a kind chip and a details line. The chip is Player (outlined), NPR (an ordinary NPR empire, `SpecialNPRID` 0, filled neutral) or the special faction's name from `SPECIAL_NPR_NAMES` in `utilities/aurora.js` (red, skull icon). The list shows only player races unless the `spyNPR` setting is on. Clicking a game header with a single race selects that race. Otherwise the user picks a row, and `changeGame` sets `GameID`, `RaceID`, `StartYear`, `GameTime`, and `CivilianShippingLinesActive`.
 
@@ -134,6 +134,7 @@ Section colours come from the chart palette (`components/navigation/section-styl
 ### Utilities (`utilities/`)
 
 - `database.js` has `resetDatabase(storagePath)`, which holds every Sequelize model and association. See `docs/DATABASE.md`.
+  - Each instance has one SQLite connection, which runs one statement at a time, so one slow statement holds every page's reads behind it. `resetDatabase` therefore queues the instance's queries itself and, past `QUERY_TIMEOUT_MS` (60 s), interrupts the running statement and rejects it with a message that names the query. Transaction queries (the history recorder's) have their own connection and bypass the queue. A page must still keep its queries cheap: the timeout bounds a stall, it doesn't make a slow query fast.
 - `aurora.js` has the game-domain helpers:
   - `gameTime(startYear, seconds)` returns a UTC dayjs date.
   - `systemBodyName`, `modelSystemBodyName`, `starName`, and `populationName` build names the way Aurora does.

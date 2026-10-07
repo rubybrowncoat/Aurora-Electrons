@@ -1,6 +1,6 @@
 import Config from 'electron-store'
 
-import { resetDatabase } from '../utilities/database'
+import { resetDatabase, retireDatabase } from '../utilities/database'
 import { recordsHistory } from '../utilities/history'
 
 const configConfiguration = {}
@@ -90,10 +90,16 @@ export const actions = {
     })
   },
 
-  renew ({ commit }, { storagePath }) {
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or
+  // running on it can't hold the app up.
+  renew ({ commit, state }, { storagePath }) {
+    const previous = state.database
+
     commit('replaceDatabase', {
       database: resetDatabase(storagePath),
     })
+
+    return retireDatabase(previous)
   },
 
   changeGame ({ commit }, { game, race = null }) {
