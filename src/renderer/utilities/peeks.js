@@ -182,13 +182,17 @@ export const peeks = {
   },
 
   '/technologies': async ({ database, GameID, RaceID, separator }) => {
-    const { Total, Researched } = await row(database, `select count(*) as Total, sum(case when VIR_Researched.TechID is not null then 1 else 0 end) as Researched from FCT_TechSystem
-      left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID
-      left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = DIM_TechType.FieldID
-      left join (select distinct TechID from FCT_RaceTech where GameID = ${GameID} and RaceID = ${RaceID}) as VIR_Researched on VIR_Researched.TechID = FCT_TechSystem.TechSystemID
-      where FCT_TechSystem.GameID = 0 and DIM_ResearchField.DoNotDisplay != 1`)
+    const { Available, Running } = await row(database, `select count(*) as Available, (select count(*) from FCT_ResearchProject where GameID = ${GameID} and RaceID = ${RaceID}) as Running from FCT_TechSystem
+      inner join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID
+      inner join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = DIM_TechType.FieldID
+      where FCT_TechSystem.GameID = 0 and DIM_ResearchField.DoNotDisplay != 1 and FCT_TechSystem.RuinOnly = 0 and FCT_TechSystem.RaceID in (0, ${RaceID})
+        and (FCT_TechSystem.Prerequisite1 = 0 or FCT_TechSystem.Prerequisite1 in (select TechID from FCT_RaceTech where GameID = ${GameID} and RaceID = ${RaceID}))
+        and (FCT_TechSystem.Prerequisite2 = 0 or FCT_TechSystem.Prerequisite2 in (select TechID from FCT_RaceTech where GameID = ${GameID} and RaceID = ${RaceID}))
+        and FCT_TechSystem.TechSystemID not in (select TechID from FCT_RaceTech where GameID = ${GameID} and RaceID = ${RaceID})
+        and FCT_TechSystem.TechSystemID not in (select TechID from FCT_ResearchProject where GameID = ${GameID} and RaceID = ${RaceID})
+        and FCT_TechSystem.TechSystemID not in (select TechSystemID from FCT_ResearchQueue inner join FCT_Population on FCT_Population.PopulationID = FCT_ResearchQueue.PopulationID where FCT_ResearchQueue.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID})`)
 
-    return `${separatedNumber(Researched || 0, separator)} / ${separatedNumber(Total, separator)} researched`
+    return `${separatedNumber(Available, separator)} to research now, ${separatedNumber(Running, separator)} running`
   },
 
   '/designed-tech': async ({ database, GameID, RaceID, separator }) => {

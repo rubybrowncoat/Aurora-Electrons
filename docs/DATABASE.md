@@ -151,8 +151,20 @@ Some details:
 | Map | FCT_RaceSysSurvey, FCT_System, FCT_JumpPoint, FCT_RaceJumpPointSurvey, FCT_SurveyLocation, FCT_RaceSurveyLocation, FCT_SystemBodySurveys, FCT_SectorCommand, FCT_AlienRace, DIM_KnownSystems; SystemView: Star, StarType, SystemBody, SystemBodyName |
 | Log | FCT_GameLog, DIM_EventType, FCT_EventColour |
 | Designed Tech | FCT_TechSystem, FCT_RaceTech, FCT_ShipDesignComponents, DIM_ComponentType, DIM_ResearchCategories, FCT_Species, DIM_Gases |
-| Tech Tree | FCT_TechSystem, FCT_RaceTech, DIM_TechType, DIM_ResearchField |
+| Tech Tree | FCT_TechSystem, DIM_TechType, DIM_ResearchField, FCT_RaceTech, FCT_ResearchProject, FCT_ResearchQueue, FCT_PausedResearch, FCT_EligibleProjects (absent from older saves), FCT_Commander(+Bonuses), FCT_Population(+Installations), DIM_PlanetaryInstallation, FCT_Species, FCT_SystemBody, DIM_PopPoliticalStatus, FCT_AncientConstruct, FCT_Race, FCT_Game |
 | Settings | FCT_ShipClass, FCT_HullDescription |
+
+## Research
+
+How the game decides what a race can research (decompiled `Population.PopulateResearchableTechnologiesListView`), and where the save keeps it. The Tech Tree page implements this in `utilities/research.js`.
+
+- **Catalogue:** `FCT_TechSystem` with `GameID = 0` is the static catalogue (1,407 techs in the sample). Rows with the game's `GameID` are race-designed components (`RaceID` set); they belong to Designed Tech and are not research projects. A tech's field comes from its type: `DIM_TechType.FieldID` to `DIM_ResearchField`. Field 10, Component Creation, has `DoNotDisplay = 1` (an integer; the other fields hold the text `'FALSE'`, so use `toBoolean`).
+- **Researchable by a race** when: not `RuinOnly`; `RaceID` is 0, the race's, or listed in `FCT_EligibleProjects`; `Prerequisite1` and `Prerequisite2` are each 0 or researched; and it is not researched, running or queued. A prerequisite id with no tech row (seven static techs point at id 1) makes the tech unresearchable. `NoTechScan`, `StartingSystem`, `ConventionalSystem` and `AutomaticResearch` do not filter the list.
+- **Researched:** `FCT_RaceTech(GameID, RaceID, TechID, Obsolete)`. Completing a tech also grants every `AutomaticResearch` tech whose `Prerequisite1` it is, and tech treaties and `DIM_TechType.DistributeLowerTech` can hand techs to other races, so a race can hold techs it never paid for. Conventional starts must research Trans-Newtonian Technology (id 27434) first.
+- **Projects:** `FCT_ResearchProject` (`ResearchPointsRequired` is the RP left, `Facilities` the labs, `ResSpecID` the project's field, `Pause`, `AssignNew`); the scientist is the `FCT_Commander` with `CommandType = 7` and `CommandID = ProjectID`. **Queue:** `FCT_ResearchQueue(PopulationID, TechSystemID, CurrentProjectID, ResearchOrder)`; an entry hangs off a running project, not a colony, and the race comes only through `PopulationID`. **Banked points:** `FCT_PausedResearch(RaceID, TechSystemID, PointsAccumulated)`, which also holds points from salvaged components.
+- **RP a year** of a project: labs x colony output per lab x scientist multiplier x construct bonuses. Output per lab is species `ResearchRateModifier` x `FCT_Race.Research` x `EconomicProdModifier` x colony `Efficiency` x (1 - radiation / 10000) x (1 - unrest / 100) x political status `ProductionMod` x `FCT_Game.ResearchSpeed` / 100. The scientist multiplier is the Research bonus (commander bonus 3), or 4 x bonus - 3 when the scientist's `ResSpecID` is the project's field. An active `FCT_AncientConstruct` of the project's field on the colony's body multiplies by its `ResearchBonus`, and each active construct on a populated body of the race adds a tenth of its bonus above 1 to its field. Research Admin (bonus 27) caps the labs on a project. Labs are `FCT_PopulationInstallations` of the installation with `DIM_PlanetaryInstallation.ResearchValue > 0`.
+- **Landing time:** RP left / RP a year; a queued tech starts when the one before it lands, at the same labs and scientist, paying its cost less banked points at the queued tech's own field rate.
+- **Not modelled:** NPR research (`DesignPhilosophyTechProgression`, `TechGroupEnum`, `TechProgressionCategoryEnum`: NPRs pool RP and complete the next tech of a type, they run no projects) and research prototypes (`FCT_ShipDesignComponents.Prototype`).
 
 ## Writes
 
