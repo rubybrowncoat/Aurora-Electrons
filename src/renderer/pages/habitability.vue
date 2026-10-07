@@ -30,71 +30,7 @@
             </template>
           </v-text-field>
         </div>
-        <div class="tool tool--actions">
-          <div class="tool__buttons">
-            <v-menu offset-y :close-on-content-click="false">
-              <template #activator="{ on, attrs }">
-                <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-filter-variant</v-icon>Filters<span v-if="activeFilterCount">&nbsp;({{ activeFilterCount }})</span></v-btn>
-              </template>
-              <v-list dense>
-                <v-list-item v-for="filter in filterOptions" :key="filter.key">
-                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
-                </v-list-item>
-                <v-divider class="my-1" />
-                <v-list-item>
-                  <v-btn text small @click="resetFilters">Reset Filters</v-btn>
-                </v-list-item>
-              </v-list>
-            </v-menu>
-            <v-menu offset-y left :close-on-content-click="false" max-width="520">
-              <template #activator="{ on, attrs }">
-                <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon>Ranking</v-btn>
-              </template>
-              <v-card class="pa-4 planner-menu">
-                <div class="subtitle-2 mb-1">How targets are ranked</div>
-                <div class="caption text--secondary mb-3">
-                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before your colonisation tech, so the scale means the same for every race), years of terraforming, and AU from your nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
-                </div>
-                <v-row dense>
-                  <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
-                    <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
-                  </v-col>
-                </v-row>
-                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short you are of that mineral.</div>
-                <v-row dense>
-                  <v-col v-for="mineral in minerals" :key="mineral.id" cols="6" sm="4">
-                    <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" :hint="scarcityHint(mineral.id)" persistent-hint dense outlined @change="(value) => setWeight(mineral.id, value)" />
-                  </v-col>
-                </v-row>
-                <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
-              </v-card>
-            </v-menu>
-            <v-menu offset-y left :close-on-content-click="false" max-width="640">
-              <template #activator="{ on, attrs }">
-                <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon>Plan states</v-btn>
-              </template>
-              <v-card class="pa-4 planner-menu">
-                <div class="subtitle-2 mb-1">What each plan state means</div>
-                <div class="caption text--secondary mb-3">
-                  The Plan column says what it takes to settle a body. Colony cost bands are read before your colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what you actually pay. Click a state to show only those bodies.
-                </div>
-                <div v-for="group in stateGroups" :key="group.group" class="mb-2">
-                  <div class="overline">{{ group.group }}</div>
-                  <div v-for="state in group.states" :key="state.id" class="legend-row" :class="{ 'legend-row--on': stateFilter.includes(state.id) }" @click="toggleStateFilter(state.id)">
-                    <v-chip small label :color="state.color" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
-                    <span class="legend-rule">{{ state.rule }}</span>
-                    <span class="legend-count">{{ separatedNumber(stateCounts[state.id] || 0, separator) }}</span>
-                  </div>
-                </div>
-                <v-btn v-if="stateFilter.length" text small @click="stateFilter = []">Show all states</v-btn>
-              </v-card>
-            </v-menu>
-          </div>
-        </div>
-      </div>
-
-      <v-row dense align="center" class="mt-1">
-        <v-col cols="12">
+        <div class="tool tool--systems">
           <div class="tool__label caption text--secondary">Active systems</div>
           <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
             <template #selection="{ item, index }">
@@ -122,7 +58,71 @@
               <v-divider class="mt-2" />
             </template>
           </v-autocomplete>
-        </v-col>
+        </div>
+        <div class="tool tool--actions">
+          <div class="tool__buttons">
+            <v-menu offset-y :close-on-content-click="false">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Filters" v-bind="attrs" v-on="on"><v-icon small left>mdi-filter-variant</v-icon><span class="tool__btn-label">Filters</span><span v-if="activeFilterCount">&nbsp;({{ activeFilterCount }})</span></v-btn>
+              </template>
+              <v-list dense>
+                <v-list-item v-for="filter in filterOptions" :key="filter.key">
+                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
+                </v-list-item>
+                <v-divider class="my-1" />
+                <v-list-item>
+                  <v-btn text small @click="resetFilters">Reset Filters</v-btn>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="520">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Ranking" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon><span class="tool__btn-label">Ranking</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu">
+                <div class="subtitle-2 mb-1">How targets are ranked</div>
+                <div class="caption text--secondary mb-3">
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before your colonisation tech, so the scale means the same for every race), years of terraforming, and AU from your nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                </div>
+                <v-row dense>
+                  <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
+                    <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
+                  </v-col>
+                </v-row>
+                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short you are of that mineral.</div>
+                <v-row dense>
+                  <v-col v-for="mineral in minerals" :key="mineral.id" cols="6" sm="4">
+                    <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" :hint="scarcityHint(mineral.id)" persistent-hint dense outlined @change="(value) => setWeight(mineral.id, value)" />
+                  </v-col>
+                </v-row>
+                <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
+              </v-card>
+            </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="640">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Plan states" v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon><span class="tool__btn-label">Plan states</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu">
+                <div class="subtitle-2 mb-1">What each plan state means</div>
+                <div class="caption text--secondary mb-3">
+                  The Plan column says what it takes to settle a body. Colony cost bands are read before your colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what you actually pay. Click a state to show only those bodies.
+                </div>
+                <div v-for="group in stateGroups" :key="group.group" class="mb-2">
+                  <div class="overline">{{ group.group }}</div>
+                  <div v-for="state in group.states" :key="state.id" class="legend-row" :class="{ 'legend-row--on': stateFilter.includes(state.id) }" @click="toggleStateFilter(state.id)">
+                    <v-chip small label :color="state.color" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
+                    <span class="legend-rule">{{ state.rule }}</span>
+                    <span class="legend-count">{{ separatedNumber(stateCounts[state.id] || 0, separator) }}</span>
+                  </div>
+                </div>
+                <v-btn v-if="stateFilter.length" text small @click="stateFilter = []">Show all states</v-btn>
+              </v-card>
+            </v-menu>
+          </div>
+        </div>
+      </div>
+
+      <v-row dense align="center" class="mt-1">
         <v-col cols="12" class="d-flex align-center flex-wrap view-row">
           <v-btn-toggle v-model="view" mandatory dense class="mr-4" @change="(value) => config.set('habitabilityView', value)">
             <v-tooltip v-for="option in viewOptions" :key="option.id" bottom max-width="300">
@@ -308,6 +308,8 @@ const INPUTS = Object.keys(INPUT_LABELS)
 const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
 const GROUND_SURVEY = { 0: 'Completed', 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const NO_RANK = 1e12
+// Rows per page before the user picks one: 10 fit a 1080 px window, 15 a window of 1200 px or more.
+const DEFAULT_ROWS = 10
 const DEFAULT_RULES = () => ({ ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
 // The filters the page has always kept, by the config key that carries them.
@@ -616,7 +618,7 @@ export default {
     const { tables } = this.$store.state
 
     if (tables) {
-      this.itemsPerPage = tables.habitabilityItemsPerPage || 10
+      this.itemsPerPage = tables.habitabilityItemsPerPage > DEFAULT_ROWS ? tables.habitabilityItemsPerPage : this.rowsToFit()
 
       if (Array.isArray(tables.habitabilitySortBy) && tables.habitabilitySortBy.length) {
         this.sortBy = [...tables.habitabilitySortBy]
@@ -693,6 +695,9 @@ export default {
 
     years(value) {
       return !Number.isFinite(value) ? 'never' : value < 0.1 ? '< 0.1 y' : `${separatedNumber(roundToDecimal(value, 1), this.separator)} y`
+    },
+    rowsToFit() {
+      return typeof window !== 'undefined' && window.innerHeight >= 1200 ? 15 : DEFAULT_ROWS
     },
     toggleStateFilter(id) {
       this.stateFilter = this.stateFilter.includes(id) ? this.stateFilter.filter((one) => one !== id) : [...this.stateFilter, id]
@@ -828,13 +833,34 @@ export default {
     line-height: 18px;
   }
 
+  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is
+  // left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
   .tool--species {
-    flex: 1 1 220px;
-    max-width: 320px;
+    flex: 0 1 260px;
+    min-width: 180px;
   }
 
   .tool--terraformers {
-    flex: 0 0 150px;
+    flex: 0 0 130px;
+  }
+
+  .tool--systems {
+    flex: 1 1 240px;
+  }
+
+  @media (max-width: 1499px) {
+    .tool__btn-label {
+      display: none;
+    }
+
+    .tool__buttons .v-btn {
+      min-width: 40px !important;
+      padding: 0 12px !important;
+    }
+
+    .tool__buttons .v-btn .v-icon--left {
+      margin-right: 0;
+    }
   }
 
   .tool--actions {
@@ -901,6 +927,9 @@ export default {
 }
 
 .planner-menu {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+
   .legend-row {
     display: grid;
     grid-template-columns: 150px 1fr 52px;
