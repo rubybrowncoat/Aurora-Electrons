@@ -4,7 +4,7 @@
   `yarn web` without touching theirs. Then launches Electron through Playwright on a copy of the
   save and a fresh user-data folder, so your save, settings and history are never touched.
   Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path
-  IPC, the electron-store files in user data (settings and Empire History), and the save watcher
+  IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher
   reloading the database. Database calls run in the renderer, so they're counted by wrapping the
   Sequelize instance.
 
@@ -33,6 +33,9 @@ const PAGE_TIMEOUT_MS = 90000
 // devtools extension the dev boot opens and installs, which log from devtools:// pages and
 // Electron's sandbox (the app's own window isn't sandboxed).
 const MAIN_NOISE = [/Debugger (listening|attached|ending)/, /For help, see/, /DevTools listening/, /ExtensionLoadWarning/, /Permission 'scripting'/, /trace-warnings/, /source: devtools:\/\//, /source: node:electron\/js2c\/sandbox_bundle/]
+
+// A 1x1 PNG.
+const FLAG_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -168,6 +171,11 @@ const run = async () => {
   fs.mkdirSync(work, { recursive: true })
   fs.copyFileSync(SAVE, save)
   fs.mkdirSync(OUT, { recursive: true })
+
+  // A race flag beside the save, and a look-alike one level up that a flag name must never reach.
+  fs.mkdirSync(path.join(work, 'Flags'))
+  fs.writeFileSync(path.join(work, 'Flags', 'smoke-flag.png'), FLAG_PNG)
+  fs.writeFileSync(path.join(work, 'secret.png'), FLAG_PNG)
 
   console.log(`Building the main process and the renderer (port ${port})...`)
 
@@ -316,6 +324,10 @@ const run = async () => {
 
   check('storage path IPC', GameID !== null, GameID !== null ? `loaded ${save}` : 'no game loaded')
   check('settings in user data', path.dirname(settingsPath) === userData, settingsPath)
+
+  const [found, missing, escaped, escapedBackslash, notAName] = await page.evaluate(() => Promise.all(['smoke-flag.png', 'missing-flag.png', '../secret.png', '..\\secret.png', null].map((name) => window.require('electron').ipcRenderer.invoke('read-flag', name))))
+
+  check('flag IPC', found === `data:image/png;base64,${FLAG_PNG.toString('base64')}` && missing === null && escaped === null && escapedBackslash === null && notAName === null, `found ${String(found).slice(0, 24)}..., missing ${missing}, dotdot ${escaped}, backslash ${escapedBackslash}, null ${notAName}`)
 
   const historyPath = path.join(userData, 'history', `game-${GameID}.json`)
   const readHistory = () => (fs.existsSync(historyPath) ? JSON.parse(fs.readFileSync(historyPath, 'utf8')) : null)
