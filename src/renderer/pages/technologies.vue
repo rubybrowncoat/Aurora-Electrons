@@ -129,7 +129,7 @@ export default {
 
     // Everything the views read, worked out once per read of the save.
     research() {
-      if (!this.ready) {
+      if (!this.ready || !this.catalogue.fields.length || !this.game) {
         return null
       }
 
