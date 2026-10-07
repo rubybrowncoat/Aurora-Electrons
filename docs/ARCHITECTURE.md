@@ -105,6 +105,16 @@ Empire History keeps its snapshots in one electron-store file per game, `history
 - Window shortcuts: Ctrl/Cmd+K, Alt+Left and Alt+Right, Ctrl/Cmd+1 to 7 for the sections, and the mouse's back and forward buttons.
 - A 36 px footer. While the navigation history has at most one entry (the page the app started on) its left side reads "Aurora Electrons - Looking Inwards". From the first navigation on, `PageTrail` replaces it with a cross-fade (none under `prefers-reduced-motion`): the history entries around the current one as small chips (a section-coloured dot and the page's tab label, the current one filled, forward ones dashed). Clicking a chip jumps to it through the store's `jump`. The trail never wraps: the oldest chips clip behind a fade and it scrolls so the current chip stays in view.
 
+### Layout
+
+Every page follows one window-size rule, and `yarn web:smoke` with `SMOKE_VIEWPORTS` checks it (`docs/WORKFLOW.md`).
+
+- **1280 x 720 is the minimum.** Everything is usable: no clipped text, no sideways page scroll, no overlapping controls, tables that need more room scroll inside their own container, and charts stay legible. It may be denser and stacked.
+- **1920 x 1080 is the comfortable layout.** Content sits side by side where that helps, with no cramped columns.
+- **Above 1080p** (2560 x 1440 and wider) there is no third layout. The 1080p layout widens to fill the window, with no `max-width` islands.
+
+The chrome takes 80 px (rail) on the left, 64 px (108 px with section tabs) on top and 36 px (footer) at the bottom. In Vuetify terms 1280 is `lg` (1264 to 1903) and 1920 is `xl` (1904 and up), so pages pick their grid with `cols`, `sm`, `md`, `lg` and `xl` on `v-col`, and the 1080p layout is the `xl` one. Don't set fixed widths on cells or `max-width` on a page; let columns share the row and let `min-width` plus an own scroll container handle the narrow end.
+
 Section colours come from the chart palette (`components/navigation/section-style.js` turns a section into the `--sc`, `--sc-soft` and `--sc-tint` custom properties).
 
 | Route | Section | Tab | File | Shows |

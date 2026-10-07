@@ -9,6 +9,12 @@
   defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-smoke),
   SMOKE_PAGES (comma-separated routes, default every tab plus settings; the
   hidden WIP /engines page is opt-in).
+  SMOKE_VIEWPORTS (comma-separated WIDTHxHEIGHT sizes, for example
+  1280x720,1920x1080,2560x1440) turns on the layout check: every page is
+  visited at every size, screenshots are named <page>-<size>.png, and each page
+  reports layout problems at each size (see LAYOUT_CHECK below). SMOKE_THEME=dark
+  runs that check in the dark theme, and SMOKE_FULLPAGE=1 saves the whole scrolled
+  page instead of the visible window. Without SMOKE_VIEWPORTS the run is unchanged.
   External requests the network blocks (fonts, CDNs) are reported as notes,
   not failures.
  */
@@ -23,8 +29,134 @@ const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-smoke')
 const PAGES = process.env.SMOKE_PAGES ? process.env.SMOKE_PAGES.split(',') : require('../smoke-pages')
 
+const VIEWPORTS = process.env.SMOKE_VIEWPORTS
+  ? process.env.SMOKE_VIEWPORTS.split(',').map((size) => {
+    const [width, height] = size.trim().toLowerCase().split('x').map(Number)
+
+    if (!(width > 0 && height > 0)) {
+      throw new Error(`SMOKE_VIEWPORTS: "${size}" is not WIDTHxHEIGHT`)
+    }
+
+    return { width, height, label: `${width}x${height}` }
+  })
+  : null
+const DARK = process.env.SMOKE_THEME === 'dark'
+
 const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
+
+/*
+  LAYOUT_CHECK runs in the page and returns what it can see of the window-size rule (docs/ARCHITECTURE.md, Layout):
+  - overflow: the document, the body or .v-main scrolls sideways.
+  - wide: an element in the content reaches past the window edge and no ancestor scrolls it.
+  - clipped: an element with overflow hidden holds text wider than itself and doesn't ellipsise it.
+  - small chart: a canvas under 240 x 120 px.
+  - tight: a short label (a header, button, chip, tab or label of at most 24 characters) that wraps onto a second line.
+  - island: from 1904 px up, the content stops short of 80% of the width, so the layout isn't filling the window.
+  Also lists the containers that scroll sideways on their own, as information, never a problem.
+ */
+const LAYOUT_CHECK = () => {
+  const root = document.documentElement
+  const main = document.querySelector('.v-main')
+  const container = main ? main.querySelector('.container') || main : document.body
+  const width = root.clientWidth
+  const problems = []
+  const scrolls = new Set()
+  const describe = (element) => {
+    const text = (element.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 30)
+
+    return `${element.tagName.toLowerCase()}${element.className && typeof element.className === 'string' ? `.${element.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''}${text ? ` "${text}"` : ''}`
+  }
+
+  if (root.scrollWidth > width) {
+    problems.push(`overflow: page scrolls sideways (document ${root.scrollWidth} > ${width})`)
+  }
+
+  if (main && main.scrollWidth > main.clientWidth) {
+    problems.push(`overflow: .v-main scrolls sideways (${main.scrollWidth} > ${main.clientWidth})`)
+  }
+
+  const reported = new Set()
+  const clippedBy = (element) => {
+    for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+      const { overflowX } = getComputedStyle(node)
+
+      if (overflowX !== 'visible') {
+        return node
+      }
+    }
+
+    return null
+  }
+
+  container.querySelectorAll('*').forEach((element) => {
+    const style = getComputedStyle(element)
+
+    if (style.display === 'none' || style.visibility === 'hidden' || element.closest('.v-menu__content, .v-overlay, .v-tooltip__content, [aria-hidden="true"]')) {
+      return
+    }
+
+    const rect = element.getBoundingClientRect()
+
+    if (rect.width === 0 && rect.height === 0) {
+      return
+    }
+
+    if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+      if (element.scrollWidth > element.clientWidth + 1) {
+        scrolls.add(describe(element).replace(/ ".*"$/, ''))
+      }
+    }
+
+    if ((rect.right > width + 1 || rect.left < -1) && !clippedBy(element) && ![...reported].some((wide) => wide.contains(element))) {
+      reported.add(element)
+      problems.push(`wide: ${describe(element)} spans ${Math.round(rect.left)} to ${Math.round(rect.right)} of ${width}`)
+    }
+
+    if (style.overflowX === 'hidden' && element.scrollWidth > element.clientWidth + 1 && element.clientWidth > 0 && style.textOverflow !== 'ellipsis' && !element.closest('.v-tabs, .v-slide-group, .v-data-table__wrapper, canvas') && (element.innerText || '').trim()) {
+      problems.push(`clipped: ${describe(element)} holds ${element.scrollWidth} px in ${element.clientWidth}`)
+    }
+
+    const text = (element.innerText || '').trim()
+
+    if (text && text.length <= 24 && !text.includes('\n') && element.matches('th, label, .v-btn__content, .v-chip__content, .v-tab, .v-label, .v-list-item__title')) {
+      const range = document.createRange()
+
+      range.selectNodeContents(element)
+
+      const tops = [...range.getClientRects()].filter((box) => box.width > 0).map((box) => box.top)
+
+      if (tops.length > 1 && Math.max(...tops) - Math.min(...tops) > parseFloat(style.fontSize) * 0.8) {
+        problems.push(`tight: "${text}" wraps (${Math.round(rect.width)} px wide)`)
+      }
+    }
+
+    if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0) {
+      problems.push(`small chart: canvas ${Math.round(rect.width)} x ${Math.round(rect.height)}`)
+    }
+  })
+
+  if (width >= 1904) {
+    let right = 0
+
+    container.querySelectorAll('*').forEach((element) => {
+      const style = getComputedStyle(element)
+      const ownText = [...element.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim())
+      const drawn = ownText || ['canvas', 'svg', 'img'].includes(element.tagName.toLowerCase()) || style.boxShadow !== 'none' || style.borderRightWidth !== '0px' || style.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      const rect = element.getBoundingClientRect()
+
+      if (drawn && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && !element.closest('.v-menu__content, .v-overlay')) {
+        right = Math.max(right, rect.right)
+      }
+    })
+
+    if (right < width * 0.8) {
+      problems.push(`island: content ends at ${Math.round(right)} of ${width}`)
+    }
+  }
+
+  return { problems: [...new Set(problems)], scrolls: [...scrolls] }
+}
 
 const run = async () => {
   const browser = await chromium.launch()
@@ -111,24 +243,37 @@ const run = async () => {
   const setupProblems = problems
   const results = []
 
-  for (const route of PAGES) {
-    problems = []
-    lastActivity = Date.now()
+  if (DARK) {
+    await page.evaluate(() => { window.$nuxt.$vuetify.theme.dark = true })
+  }
 
-    await page.evaluate((target) => window.$nuxt.$router.push(target), route)
-    await settle()
+  for (const viewport of VIEWPORTS || [null]) {
+    if (viewport) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await page.waitForTimeout(500)
+    }
 
-    const name = route === '/' ? 'production' : route.slice(1)
-    const screenshot = path.join(OUT, `${name}.png`)
+    for (const route of PAGES) {
+      problems = []
+      lastActivity = Date.now()
 
-    await page.screenshot({ path: screenshot })
+      await page.evaluate((target) => window.$nuxt.$router.push(target), route)
+      await settle()
 
-    const stats = await page.evaluate(() => ({
-      rows: document.querySelectorAll('.v-data-table tbody tr').length,
-      text: document.querySelector('.v-main, .v-content') ? document.querySelector('.v-main, .v-content').innerText.length : 0,
-    }))
+      const name = route === '/' ? 'production' : route.slice(1)
+      const suffix = viewport ? `-${viewport.label}${DARK ? '-dark' : ''}` : ''
+      const screenshot = path.join(OUT, `${name}${suffix}.png`)
 
-    results.push({ route, ...stats, problems, screenshot })
+      await page.screenshot({ path: screenshot, fullPage: Boolean(viewport && process.env.SMOKE_FULLPAGE) })
+
+      const stats = await page.evaluate(() => ({
+        rows: document.querySelectorAll('.v-data-table tbody tr').length,
+        text: document.querySelector('.v-main, .v-content') ? document.querySelector('.v-main, .v-content').innerText.length : 0,
+      }))
+      const layout = viewport ? await page.evaluate(LAYOUT_CHECK) : { problems: [], scrolls: [] }
+
+      results.push({ route, viewport, ...stats, problems, layout, screenshot })
+    }
   }
 
   await browser.close()
@@ -140,12 +285,28 @@ const run = async () => {
     setupProblems.forEach((problem) => console.log(`  ${problem}`))
   }
 
-  results.forEach(({ route, rows, text, problems: pageProblems, screenshot }) => {
-    console.log(`${pageProblems.length ? 'FAIL' : 'ok  '} ${route.padEnd(15)} rows=${String(rows).padEnd(5)} text=${String(text).padEnd(7)} ${screenshot}`)
+  results.forEach(({ route, viewport, rows, text, problems: pageProblems, layout, screenshot }) => {
+    const status = pageProblems.length ? 'FAIL' : layout.problems.length ? 'LAYOUT' : 'ok'
+
+    console.log(`${status.padEnd(6)} ${route.padEnd(15)} ${viewport ? `${viewport.label.padEnd(10)} ` : ''}rows=${String(rows).padEnd(5)} text=${String(text).padEnd(7)} ${screenshot}`)
     pageProblems.slice(0, 5).forEach((problem) => console.log(`       ${problem.slice(0, 300)}`))
+    layout.problems.slice(0, 12).forEach((problem) => console.log(`       layout ${problem.slice(0, 300)}`))
+    layout.scrolls.forEach((scroll) => console.log(`       scrolls inside ${scroll.slice(0, 200)}`))
   })
 
-  process.exitCode = setupProblems.length || results.some((result) => result.problems.length) ? 1 : 0
+  if (VIEWPORTS) {
+    console.log(`
+layout problems per page${DARK ? ' (dark)' : ''}:`)
+    console.log(`${'route'.padEnd(18)}${VIEWPORTS.map(({ label }) => label.padStart(11)).join('')}`)
+
+    PAGES.forEach((route) => {
+      const counts = VIEWPORTS.map((viewport) => results.find((result) => result.route === route && result.viewport === viewport).layout.problems.length)
+
+      console.log(`${route.padEnd(18)}${counts.map((count) => String(count).padStart(11)).join('')}`)
+    })
+  }
+
+  process.exitCode = setupProblems.length || results.some((result) => result.problems.length || result.layout.problems.length) ? 1 : 0
 }
 
 run().catch((error) => {

@@ -41,6 +41,7 @@ With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright, a 
 - `SMOKE_PAGES=/,/map` limits the run to those routes. Add `/engines` to include the hidden WIP page.
 - `SMOKE_OUT=dir` sets where screenshots go. The default is a temporary directory.
 - `AURORA_GAME` and `AURORA_RACE` select a different game and race.
+- `SMOKE_VIEWPORTS=1280x720,1920x1080,2560x1440` checks the window-size rule (`docs/ARCHITECTURE.md`, Layout). It visits every page at every size, saves `<page>-<size>.png` and reports layout problems per page and size: `overflow` (the document or `.v-main` scrolls sideways), `wide` (an element reaches past the window edge with no scroll container around it), `clipped` (hidden overflow cuts text off), `small chart` (a canvas under 240 x 120 px), `tight` (a short header, button, chip or label wraps onto a second line) and `island` (from 1904 px up, the content stops short of 80% of the width). It also lists the containers that scroll sideways on their own, which isn't a problem. A page with a layout problem prints `LAYOUT` and the run exits 1, and a table at the end counts the problems per page and size. `SMOKE_THEME=dark` runs it in the dark theme and `SMOKE_FULLPAGE=1` saves the whole scrolled page instead of the visible window. Without `SMOKE_VIEWPORTS` the run is unchanged (one 1600 x 1000 window, no layout check).
 
 Fonts and icons load from Google Fonts and jsDelivr. In the cloud those requests can fail, and the script reports them as notes rather than failures.
 
