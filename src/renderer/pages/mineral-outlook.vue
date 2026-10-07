@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <v-container v-else fluid class="mineral-outlook">
+    <v-container fluid class="mineral-outlook">
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Ledger window</span>

@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <v-container v-else-if="!historyRecorded" fluid class="history-page">
+    <v-container v-if="!historyRecorded" fluid class="history-page">
       <v-alert type="info" outlined dense>
         The app doesn't keep Empire History for this race. It's one of Aurora's special factions (such as the Precursors, Invaders or Rakhas), which have no empire to chart. History is kept for player races and NPR empires.
       </v-alert>

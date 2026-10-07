@@ -13,161 +13,158 @@
       :class="{ dark: $vuetify.theme.dark }"
     />
     <div :class="{ 'cytoscape-navigator': true, dark: $vuetify.theme.dark }" />
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-    <template v-else>
-      <v-navigation-drawer v-model="isOptionsDrawerOpen" absolute temporary right width="300">
-        <v-list dense>
-          <v-subheader style="font-size: 1.25rem; font-weight: 500">
-            Map Options
-            <v-btn icon class="ml-auto" @click.stop="isOptionsDrawerOpen = false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-          </v-subheader>
+    <v-navigation-drawer v-model="isOptionsDrawerOpen" absolute temporary right width="300">
+      <v-list dense>
+        <v-subheader style="font-size: 1.25rem; font-weight: 500">
+          Map Options
+          <v-btn icon class="ml-auto" @click.stop="isOptionsDrawerOpen = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-subheader>
 
-          <v-divider />
+        <v-divider />
+
+        <v-list-item>
+          <v-list-item-title>Connection Distance</v-list-item-title>
+        </v-list-item>
+        <v-list-item-group v-model="distanceSelection" mandatory color="indigo">
+          <v-list-item v-for="option in distanceOptions" :key="option.value" :value="option.value">
+            <v-list-item-icon>
+              <v-icon class="mr-1">{{ option.icon }}</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>{{ option.label }}</v-list-item-title>
+            </v-list-item-content>
+          </v-list-item>
+        </v-list-item-group>
+
+        <v-divider />
+
+        <v-list-item>
+          <v-list-item-title>Survey Type</v-list-item-title>
+        </v-list-item>
+        <v-list-item-group v-model="systemViewOption" mandatory color="indigo">
+          <v-list-item>
+            <v-list-item-icon>
+              <v-icon class="mr-1">mdi-satellite</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>Geological</v-list-item-title>
+            </v-list-item-content>
+          </v-list-item>
 
           <v-list-item>
-            <v-list-item-title>Connection Distance</v-list-item-title>
+            <v-list-item-icon>
+              <v-icon class="mr-1">mdi-link-box-variant</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>Gravitational</v-list-item-title>
+            </v-list-item-content>
           </v-list-item>
-          <v-list-item-group v-model="distanceSelection" mandatory color="indigo">
-            <v-list-item v-for="option in distanceOptions" :key="option.value" :value="option.value">
-              <v-list-item-icon>
-                <v-icon class="mr-1">{{ option.icon }}</v-icon>
-              </v-list-item-icon>
-              <v-list-item-content>
-                <v-list-item-title>{{ option.label }}</v-list-item-title>
-              </v-list-item-content>
-            </v-list-item>
-          </v-list-item-group>
+        </v-list-item-group>
 
-          <v-divider />
+        <v-divider />
 
-          <v-list-item>
-            <v-list-item-title>Survey Type</v-list-item-title>
+        <v-list-item>
+          <v-list-item-title>Grouping</v-list-item-title>
+        </v-list-item>
+        <v-list-item-group v-model="groupingSelection" mandatory color="indigo">
+          <v-list-item v-for="option in groupingOptions" :key="option.value" :value="option.value">
+            <v-list-item-icon>
+              <v-icon class="mr-1">{{ option.icon }}</v-icon>
+            </v-list-item-icon>
+            <v-list-item-content>
+              <v-list-item-title>{{ option.label }}</v-list-item-title>
+            </v-list-item-content>
           </v-list-item>
-          <v-list-item-group v-model="systemViewOption" mandatory color="indigo">
-            <v-list-item>
-              <v-list-item-icon>
-                <v-icon class="mr-1">mdi-satellite</v-icon>
-              </v-list-item-icon>
-              <v-list-item-content>
-                <v-list-item-title>Geological</v-list-item-title>
-              </v-list-item-content>
-            </v-list-item>
+        </v-list-item-group>
+      </v-list>
+    </v-navigation-drawer>
 
-            <v-list-item>
-              <v-list-item-icon>
-                <v-icon class="mr-1">mdi-link-box-variant</v-icon>
-              </v-list-item-icon>
-              <v-list-item-content>
-                <v-list-item-title>Gravitational</v-list-item-title>
-              </v-list-item-content>
-            </v-list-item>
-          </v-list-item-group>
+    <v-container fluid>
+      <v-row justify="start" no-gutters>
+        <v-col cols="11">
+          <v-btn icon outlined color="primary" :disabled="!mapElements.nodes.length || layoutInProgress" @click="focusHomeSystem">
+            <v-icon>mdi-crosshairs-gps</v-icon>
+          </v-btn>
 
-          <v-divider />
+          <v-btn icon outlined color="primary" :disabled="!mapElements.nodes.length || layoutInProgress" @click="fitView">
+            <v-icon>mdi-fit-to-screen</v-icon>
+          </v-btn>
 
-          <v-list-item>
-            <v-list-item-title>Grouping</v-list-item-title>
-          </v-list-item>
-          <v-list-item-group v-model="groupingSelection" mandatory color="indigo">
-            <v-list-item v-for="option in groupingOptions" :key="option.value" :value="option.value">
-              <v-list-item-icon>
-                <v-icon class="mr-1">{{ option.icon }}</v-icon>
-              </v-list-item-icon>
-              <v-list-item-content>
-                <v-list-item-title>{{ option.label }}</v-list-item-title>
-              </v-list-item-content>
-            </v-list-item>
-          </v-list-item-group>
-        </v-list>
-      </v-navigation-drawer>
+          <v-tooltip v-if="!respectGalacticDistances" bottom>
+            <template #activator="{ on, attrs }">
+              <v-btn color="light-green lighten-1" fab x-small :disabled="!mapElements.nodes.length || !mapElements.links.length || layoutInProgress" v-bind="attrs" @click="applyForces" v-on="on">
+                <v-icon>mdi-arrow-expand-all</v-icon>
+              </v-btn>
+            </template>
+            <span>Relational Forces Layout</span>
+          </v-tooltip>
 
-      <v-container fluid>
-        <v-row justify="start" no-gutters>
-          <v-col cols="11">
-            <v-btn icon outlined color="primary" :disabled="!mapElements.nodes.length || layoutInProgress" @click="focusHomeSystem">
-              <v-icon>mdi-crosshairs-gps</v-icon>
-            </v-btn>
+          <v-tooltip v-if="!groupingSelection" bottom>
+            <template #activator="{ on, attrs }">
+              <v-btn color="deep-purple darken-1" :dark="!(!mapElements.nodes.length || !mapElements.links.length || layoutInProgress)" fab x-small :disabled="!mapElements.nodes.length || !mapElements.links.length || layoutInProgress" v-bind="attrs" @click="scramble" v-on="on">
+                <v-icon>mdi-creation</v-icon>
+              </v-btn>
+            </template>
+            <span>Scramble and Separate Layout</span>
+          </v-tooltip>
 
-            <v-btn icon outlined color="primary" :disabled="!mapElements.nodes.length || layoutInProgress" @click="fitView">
-              <v-icon>mdi-fit-to-screen</v-icon>
-            </v-btn>
+          <v-btn color="teal accent-4" :disabled="!mapElements.nodes.length || layoutInProgress" @click="applySavedPositions"> Apply Database Positions </v-btn>
+          <v-dialog v-model="isSaveDialogOpen" max-width="360" persistent>
+            <template #activator="{ on, attrs }">
+              <v-btn color="orange dark" v-bind="attrs" :disabled="!mapElements.nodes.length || layoutInProgress" v-on="on"> Save Positions </v-btn>
+            </template>
+            <v-card v-if="isSavingPositions" color="orange darken-1">
+              <v-card-text>
+                <div class="pt-3 overline white--text">Saving positions to the database...</div>
+                <v-progress-linear :value="(executedQueries / totalQueries) * 100" color="white" class="mb-0" />
+              </v-card-text>
+            </v-card>
+            <v-card v-else>
+              <v-card-title class="headline">Save System Positions</v-card-title>
+              <v-card-text> Are you sure you want to save the current system positions? This will overwrite the saved positions in your game database. </v-card-text>
+              <v-card-actions>
+                <v-spacer />
+                <v-btn text @click="isSaveDialogOpen = false">Cancel</v-btn>
+                <v-btn color="green darken-1" @click="savePositions">Save</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
 
-            <v-tooltip v-if="!respectGalacticDistances" bottom>
-              <template #activator="{ on, attrs }">
-                <v-btn color="light-green lighten-1" fab x-small :disabled="!mapElements.nodes.length || !mapElements.links.length || layoutInProgress" v-bind="attrs" @click="applyForces" v-on="on">
-                  <v-icon>mdi-arrow-expand-all</v-icon>
-                </v-btn>
-              </template>
-              <span>Relational Forces Layout</span>
-            </v-tooltip>
-
-            <v-tooltip v-if="!groupingSelection" bottom>
-              <template #activator="{ on, attrs }">
-                <v-btn color="deep-purple darken-1" :dark="!(!mapElements.nodes.length || !mapElements.links.length || layoutInProgress)" fab x-small :disabled="!mapElements.nodes.length || !mapElements.links.length || layoutInProgress" v-bind="attrs" @click="scramble" v-on="on">
-                  <v-icon>mdi-creation</v-icon>
-                </v-btn>
-              </template>
-              <span>Scramble and Separate Layout</span>
-            </v-tooltip>
-
-            <v-btn color="teal accent-4" :disabled="!mapElements.nodes.length || layoutInProgress" @click="applySavedPositions"> Apply Database Positions </v-btn>
-            <v-dialog v-model="isSaveDialogOpen" max-width="360" persistent>
-              <template #activator="{ on, attrs }">
-                <v-btn color="orange dark" v-bind="attrs" :disabled="!mapElements.nodes.length || layoutInProgress" v-on="on"> Save Positions </v-btn>
-              </template>
-              <v-card v-if="isSavingPositions" color="orange darken-1">
-                <v-card-text>
-                  <div class="pt-3 overline white--text">Saving positions to the database...</div>
-                  <v-progress-linear :value="(executedQueries / totalQueries) * 100" color="white" class="mb-0" />
-                </v-card-text>
-              </v-card>
-              <v-card v-else>
-                <v-card-title class="headline">Save System Positions</v-card-title>
-                <v-card-text> Are you sure you want to save the current system positions? This will overwrite the saved positions in your game database. </v-card-text>
-                <v-card-actions>
-                  <v-spacer />
-                  <v-btn text @click="isSaveDialogOpen = false">Cancel</v-btn>
-                  <v-btn color="green darken-1" @click="savePositions">Save</v-btn>
-                </v-card-actions>
-              </v-card>
-            </v-dialog>
-
-            <v-tooltip v-if="layoutInProgress" bottom>
-              <template #activator="{ on, attrs }">
-                <v-btn class="ml-2" color="red darken-1" :dark="layoutInProgress" fab x-small :disabled="!layoutInProgress" v-bind="attrs" @click="stopLayout" v-on="on">
-                  <v-icon>mdi-stop</v-icon>
-                </v-btn>
-              </template>
-              <span>Stop Prematurely</span>
-            </v-tooltip>
-          </v-col>
-          <v-col class="d-flex justify-end">
-            <v-btn icon :disabled="!mapElements.nodes.length || layoutInProgress" @click="exportPng">
-              <v-icon>mdi-camera</v-icon>
-            </v-btn>
-            <v-btn icon @click.stop="isOptionsDrawerOpen = !isOptionsDrawerOpen">
-              <v-icon>mdi-cog</v-icon>
-            </v-btn>
-          </v-col>
-        </v-row>
-      </v-container>
-      <v-dialog v-model="isSystemDialogOpen" fullscreen hide-overlay transition="dialog-bottom-transition">
-        <v-card>
-          <v-toolbar dark color="primary">
-            <v-btn icon dark @click="isSystemDialogOpen = false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-            <v-toolbar-title>System Details</v-toolbar-title>
-            <v-spacer />
-          </v-toolbar>
-          <v-card-text v-if="isSystemDialogOpen">
-            <system-view v-if="systemId" :system-id="systemId" @jump="setSystem" />
-          </v-card-text>
-        </v-card>
-      </v-dialog>
-    </template>
+          <v-tooltip v-if="layoutInProgress" bottom>
+            <template #activator="{ on, attrs }">
+              <v-btn class="ml-2" color="red darken-1" :dark="layoutInProgress" fab x-small :disabled="!layoutInProgress" v-bind="attrs" @click="stopLayout" v-on="on">
+                <v-icon>mdi-stop</v-icon>
+              </v-btn>
+            </template>
+            <span>Stop Prematurely</span>
+          </v-tooltip>
+        </v-col>
+        <v-col class="d-flex justify-end">
+          <v-btn icon :disabled="!mapElements.nodes.length || layoutInProgress" @click="exportPng">
+            <v-icon>mdi-camera</v-icon>
+          </v-btn>
+          <v-btn icon @click.stop="isOptionsDrawerOpen = !isOptionsDrawerOpen">
+            <v-icon>mdi-cog</v-icon>
+          </v-btn>
+        </v-col>
+      </v-row>
+    </v-container>
+    <v-dialog v-model="isSystemDialogOpen" fullscreen hide-overlay transition="dialog-bottom-transition">
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark @click="isSystemDialogOpen = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title>System Details</v-toolbar-title>
+          <v-spacer />
+        </v-toolbar>
+        <v-card-text v-if="isSystemDialogOpen">
+          <system-view v-if="systemId" :system-id="systemId" @jump="setSystem" />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 

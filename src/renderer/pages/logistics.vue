@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <v-container v-else fluid class="logistics-page">
+    <v-container fluid class="logistics-page">
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <v-btn-toggle v-model="view" mandatory dense @change="(value) => config.set('logisticsView', value)">

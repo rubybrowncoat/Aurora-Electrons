@@ -1,7 +1,5 @@
 <template>
   <div class="recap-container">
-    <div v-if="!GameID">Select a race from the left-side menu.</div>
-
     <v-container v-if="RaceID" fluid>
       <v-row justify="start">
         <v-col cols="12">

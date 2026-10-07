@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID" class="mb-5">Select a race from the left-side menu to highlight researched technologies.</div>
-
-    <v-container v-else fluid>
+    <v-container fluid>
       <v-row justify="start">
         <v-col cols="12">
           <v-btn-toggle v-model="selectedFields" class="d-block" :color="$vuetify.theme.dark ? 'purple lighten-3' : 'deep-purple accent-3'" tile dense group multiple borderless>

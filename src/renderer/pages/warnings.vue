@@ -1,8 +1,6 @@
 <template>
   <div class="fill-height">
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <div v-else>
+    <div>
       <v-container fluid>
         <v-row v-if="intruders.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Contacts </v-col>

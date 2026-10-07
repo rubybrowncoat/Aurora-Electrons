@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <div v-else>
+    <div>
       <v-container fluid>
         <v-row justify="start">
           <v-col>

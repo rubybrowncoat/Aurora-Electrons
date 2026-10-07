@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <v-container v-else fluid class="commanders-page">
+    <v-container fluid class="commanders-page">
       <v-alert v-if="failedInputs.length" type="error" outlined dense>
         Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
         <template #append>
