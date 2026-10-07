@@ -197,6 +197,25 @@ export const buildLines = (graph, info, visible = () => true) => {
   }).sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// The techs `visible` accepts, grouped by field and then by status: Map(fieldId -> { done: [], active: [], ... }).
+export const groupTechs = (graph, info, visible = () => true) => {
+  const fields = new Map()
+
+  graph.techs.forEach((tech) => {
+    if (!visible(tech)) {
+      return
+    }
+
+    if (!fields.has(tech.fieldId)) {
+      fields.set(tech.fieldId, { [DONE]: [], [ACTIVE]: [], [QUEUED]: [], [AVAILABLE]: [], [LOCKED]: [], [BLOCKED]: [] })
+    }
+
+    fields.get(tech.fieldId)[info.get(tech.id).status].push(tech)
+  })
+
+  return fields
+}
+
 // Counts by status for the techs `visible` accepts.
 export const countStatuses = (graph, info, visible = () => true) => {
   const counts = { [DONE]: 0, [ACTIVE]: 0, [QUEUED]: 0, [AVAILABLE]: 0, [LOCKED]: 0, [BLOCKED]: 0 }
