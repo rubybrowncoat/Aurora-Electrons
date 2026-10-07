@@ -79,7 +79,7 @@
       <template #foot><kbd>Esc</kbd> close</template>
     </flyout-panel>
 
-    <v-app-bar app flat height="64" extension-height="44" :extended="tabs.length > 1" class="app-bar">
+    <v-app-bar app flat height="64" extension-height="44" :extended="showTabs" class="app-bar">
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
@@ -105,7 +105,7 @@
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
 
-      <template v-if="tabs.length > 1" #extension>
+      <template v-if="showTabs" #extension>
         <v-tabs class="section-tabs" :style="pageStyle" :value="pickingFirst ? -1 : tabIndex" show-arrows height="44">
           <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
         </v-tabs>
@@ -236,6 +236,10 @@ export default {
     // Until a game and race are picked, the picker stands in for every page that shows a race's data.
     pickingFirst () {
       return !this.RaceID && needsRace(this.$route.path)
+    },
+
+    showTabs () {
+      return !this.pickingFirst && this.tabs.length > 1
     },
 
     // Every page that appears in the navigation, flagged `disabled` when it shows a race's data and none is picked yet or it needs
