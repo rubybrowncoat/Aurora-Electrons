@@ -22,6 +22,32 @@ const guardQueries = (sequelize) => {
   let running = false
   let retired = false
   let active = null
+  const opening = new Set()
+  const { connectionManager } = sequelize
+  const getConnection = connectionManager.getConnection.bind(connectionManager)
+
+  // Sequelize caches a connection before it has opened and keeps it when the open fails. Left there, the failed handle
+  // would answer every later read (each waiting out QUERY_TIMEOUT_MS) and close() would wait on it forever.
+  Object.defineProperty(connectionManager, 'getConnection', {
+    configurable: true,
+    writable: true,
+    value: (options) => {
+      const before = new Set(Object.values(connectionManager.connections))
+      const attempt = getConnection(options)
+      const created = Object.entries(connectionManager.connections).find(([, handle]) => !before.has(handle))
+
+      opening.add(attempt)
+      attempt.then(() => opening.delete(attempt), () => {
+        opening.delete(attempt)
+
+        if (created && connectionManager.connections[created[0]] === created[1]) {
+          delete connectionManager.connections[created[0]]
+        }
+      })
+
+      return attempt
+    },
+  })
 
   // A connection that is still opening, or already closed, throws "Database is not open" and has nothing to interrupt.
   const interrupt = (everything) => {
@@ -86,19 +112,24 @@ const guardQueries = (sequelize) => {
     },
   })
 
-  // A statement on a connection that is still opening can't be interrupted, and Sequelize doesn't track that
-  // connection until it has opened, so close() would miss it. Waiting for the statement to settle (interrupted, or
-  // bounded by RETIRE_SETTLE_MS) means the connection is tracked and open by the time it is closed.
+  // sqlite3 runs a close only after the open before it succeeds, and a statement on a connection that is still opening
+  // can't be interrupted. So retiring first lets the opens and the running statement settle (an open that fails drops
+  // its handle above), then closes; each wait is bounded by RETIRE_SETTLE_MS so retiring can't hang.
   guards.set(sequelize, async () => {
     retired = true
     waiting.splice(0).forEach(({ reject }) => reject(new Error('The save was reloaded; this read belongs to the old copy')))
     interrupt(true)
 
-    if (running && active) {
-      await Promise.race([active.catch(() => {}), new Promise((resolve) => setTimeout(resolve, RETIRE_SETTLE_MS))])
+    const bounded = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timed out'), RETIRE_SETTLE_MS))])
+    const settling = [...opening, ...(running && active ? [active] : [])].map((promise) => promise.catch(() => {}))
+
+    if (settling.length) {
+      await bounded(Promise.all(settling))
     }
 
-    await sequelize.close()
+    if (await bounded(sequelize.close()) === 'timed out') {
+      console.warn(`The replaced database didn't close within ${RETIRE_SETTLE_MS / 1000} s`)
+    }
   })
 }
 
