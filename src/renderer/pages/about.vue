@@ -89,6 +89,10 @@
             <div class="font-weight-medium mt-3">Empire History</div>
             <div class="path" :class="{ 'path--missing': !historyPath }">{{ historyPath || 'Not available in this mode' }}</div>
             <div class="text--secondary mt-1">One file per game, named <code>game-&lt;GameID&gt;.json</code>.</div>
+            <template v-if="historyFile">
+              <div class="text--secondary mt-1">The open game's file:</div>
+              <div class="path">{{ historyFile }}</div>
+            </template>
           </v-card-text>
         </v-card>
       </v-col>
@@ -190,14 +194,14 @@ export default {
     settingsPath () {
       return (this.config && this.config.path) || ''
     },
+    // The open game's history file, once a game is picked.
+    historyFile () {
+      return this.GameID ? historyConfig(this.GameID).path || '' : ''
+    },
     // The folder the history files live in: the open game's file locates it, else it sits beside the settings.
     historyPath () {
-      if (this.GameID) {
-        const { path } = historyConfig(this.GameID)
-
-        if (path) {
-          return folderOf(path)
-        }
+      if (this.historyFile) {
+        return folderOf(this.historyFile)
       }
 
       return this.settingsPath ? `${folderOf(this.settingsPath)}/history` : ''

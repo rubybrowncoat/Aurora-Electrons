@@ -11,7 +11,6 @@
         <v-col class="caption text--secondary">
           <template v-if="snapshots.length">{{ snapshots.length }} {{ snapshots.length === 1 ? 'snapshot' : 'snapshots' }}, {{ snapshots.length > 1 ? `${date(snapshots[0].t)} to ${date(snapshots[snapshots.length - 1].t)}` : date(snapshots[0].t) }}.</template>
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
-          <span v-if="filePath">Saved in <span class="file-path">{{ filePath }}</span>.</span>
         </v-col>
         <v-col cols="auto">
           <v-btn-toggle v-model="view" mandatory dense>
@@ -196,10 +195,6 @@ export default {
     // Why the recorder missed this game's latest snapshots, if it did (see store/history.js).
     failure() {
       return this.$store.state.history.failures.find(({ GameID }) => GameID === null || GameID === Number(this.GameID)) || null
-    },
-
-    filePath() {
-      return this.GameID ? historyConfig(this.GameID).path : ''
     },
 
     snapshots() {
@@ -518,11 +513,6 @@ export default {
 
   td {
     font-variant-numeric: tabular-nums;
-  }
-
-  .file-path {
-    font-family: monospace;
-    overflow-wrap: anywhere;
   }
 }
 </style>
