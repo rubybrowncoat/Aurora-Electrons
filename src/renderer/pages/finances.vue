@@ -482,13 +482,15 @@ export default {
     },
     // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the
     // window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign.
+    // The game's time is a scalar subquery of its own: reading it from the outer `FCT_Game` join made the cycle lookup re-run for every ledger
+    // row (over two minutes at 50 000 rows, against 0.1 s now), and the stalled read held the connection for every page.
     wealth: {
       get: tracked('wealth', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= FCT_Game.GameTime - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
+        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
       }),
       default: [],
     },
