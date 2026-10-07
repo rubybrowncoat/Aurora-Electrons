@@ -67,7 +67,7 @@
                 <v-list-item-title>Forum thread</v-list-item-title>
                 <v-list-item-subtitle>
                   <external-link v-if="forumUrl" :href="forumUrl" class="forum-link" />
-                  <span v-else class="forum-soon">Forum thread: coming soon</span>
+                  <span v-else class="forum-soon">Coming soon</span>
                 </v-list-item-subtitle>
               </v-list-item-content>
             </v-list-item>
