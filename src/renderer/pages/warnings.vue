@@ -1,7 +1,7 @@
 <template>
   <div class="fill-height">
     <div>
-      <v-container fluid>
+      <v-container fluid class="warnings-page">
         <v-row v-if="intruders.length" class="mb-5" justify="start">
           <v-col cols="12" class="display-1"> Contacts </v-col>
           <v-col cols="12">
@@ -1986,4 +1986,18 @@ export default {
 }
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss">
+// The 1080p layout puts the warning groups in two columns; each group keeps to its own row, so opening a panel moves nothing else.
+@media (min-width: 1904px) {
+  .warnings-page {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: 24px;
+
+    > .row {
+      margin: 0;
+    }
+  }
+}
+</style>
