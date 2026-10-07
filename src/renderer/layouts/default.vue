@@ -615,6 +615,8 @@ export default {
   cursor: pointer;
   font-size: 14px;
   color: var(--ae-muted);
+  white-space: nowrap;
+  flex: none;
   background: var(--ae-bg);
 
   &:hover {
