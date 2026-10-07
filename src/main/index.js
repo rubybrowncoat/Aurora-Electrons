@@ -27,13 +27,13 @@ if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettin
 
 Store.initRenderer()
 
-ipcMain.handle('request-storage-path', async () => {
+const storagePath = () => {
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.includes('MacOS')
 
   const headGame = process.env.NODE_ENV === 'development' && false
 
-  const storagePath = app.isPackaged
+  return app.isPackaged
     ? isMac
       ? path.join(exePath, '../../../', 'AuroraDB.db')
       : process.env.PORTABLE_EXECUTABLE_DIR
@@ -42,8 +42,37 @@ ipcMain.handle('request-storage-path', async () => {
     : headGame
       ? path.join('../', 'AuroraDB.db')
       : 'AuroraDB.db'
+}
 
-  return storagePath
+ipcMain.handle('request-storage-path', async () => storagePath())
+
+const FLAG_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp' }
+
+// A race's flag from Aurora's `Flags` folder, beside the save, as a data URL; null when it is missing or unreadable.
+// The name comes from the save, so only its base name is used and it never leaves that folder. On a case-sensitive
+// file system, a name that differs only in case still matches.
+ipcMain.handle('read-flag', async (_event, name) => {
+  const file = typeof name === 'string' ? path.basename(name) : ''
+  const type = FLAG_TYPES[path.extname(file).toLowerCase()]
+
+  if (!type) {
+    return null
+  }
+
+  try {
+    const folder = path.join(path.dirname(storagePath()), 'Flags')
+    let data = await fsPromises.readFile(path.join(folder, file)).catch(() => null)
+
+    if (!data) {
+      const match = (await fsPromises.readdir(folder)).find((entry) => entry.toLowerCase() === file.toLowerCase())
+
+      data = match ? await fsPromises.readFile(path.join(folder, match)) : null
+    }
+
+    return data ? `data:${type};base64,${data.toString('base64')}` : null
+  } catch (error) {
+    return null
+  }
 })
 
 ipcMain.handle('save-png', (_event, imageData, filePath) => {

@@ -1,8 +1,19 @@
 <template>
   <v-app>
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
-      <div class="rail__game">
-        <game-switcher :games="games" />
+      <div
+        class="rail__empire"
+        :class="{ 'rail__empire--peek': flyoutId === EMPIRES_ID }"
+        :style="neutralStyle"
+        role="button"
+        tabindex="0"
+        @click="toggleEmpires"
+        @keydown.enter="toggleEmpires"
+        @mouseenter="peekSection(EMPIRES_ID)"
+        @mouseleave="leaveRail"
+      >
+        <empire-avatar :race="selectedRace" :size="40" />
+        <div class="rail__label">Empires</div>
       </div>
 
       <div
@@ -46,6 +57,20 @@
       @mouseenter.native="cancelLeave"
       @mouseleave.native="leaveRail"
     />
+
+    <flyout-panel
+      v-if="flyoutId === EMPIRES_ID"
+      class="empire-flyout"
+      :style="neutralStyle"
+      title="Empires"
+      :meta="`${raceCount} ${raceCount === 1 ? 'empire' : 'empires'}`"
+      :width="380"
+      @mouseenter.native="cancelLeave"
+      @mouseleave.native="leaveRail"
+    >
+      <empire-list :games="games" @pick="flyoutId = null" />
+      <template #foot><kbd>Esc</kbd> close</template>
+    </flyout-panel>
 
     <v-app-bar app flat height="64" extension-height="44" class="app-bar">
       <history-buttons />
@@ -99,9 +124,9 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <v-card v-if="!RaceID && $route.path !== '/settings'" class="game-picker mx-auto mt-12" max-width="420" outlined>
+        <v-card v-if="!RaceID && $route.path !== '/settings'" class="game-picker mx-auto mt-12" :style="neutralStyle" max-width="480" outlined>
           <v-card-title>Pick a game</v-card-title>
-          <game-list v-if="games.length" :games="games" />
+          <empire-list v-if="games.length" :games="games" class="pb-2 px-2" />
           <v-card-text v-else-if="$asyncComputed.games.state === 'success'">No games found in the save.</v-card-text>
         </v-card>
         <nuxt v-else />
@@ -125,23 +150,29 @@
 import { shell } from 'electron'
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
-import GameList from '../components/navigation/GameList.vue'
-import GameSwitcher from '../components/navigation/GameSwitcher.vue'
+import EmpireAvatar from '../components/navigation/EmpireAvatar.vue'
+import EmpireList from '../components/navigation/EmpireList.vue'
+import FlyoutPanel from '../components/navigation/FlyoutPanel.vue'
 import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
 import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
+import { loadEmpires } from '../utilities/empires'
 import { FORUM_URL, PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
+
+// The flyout id of the rail's Empires entry; the others are section ids.
+const EMPIRES_ID = 'empires'
 
 const FLYOUT_OPEN_DELAY = 140
 const FLYOUT_CLOSE_DELAY = 220
 
 export default {
   components: {
-    GameList,
-    GameSwitcher,
+    EmpireAvatar,
+    EmpireList,
+    FlyoutPanel,
     HistoryButtons,
     PagePalette,
     PageTrail,
@@ -149,6 +180,7 @@ export default {
   },
   data () {
     return {
+      EMPIRES_ID,
       forumUrl: FORUM_URL,
 
       flyoutId: null,
@@ -177,6 +209,7 @@ export default {
       'config',
       'database',
 
+      'GameID',
       'RaceID',
       'historyRecorded',
     ]),
@@ -221,6 +254,14 @@ export default {
     },
     flyoutSection () {
       return this.railSections.find(({ id }) => id === this.flyoutId)
+    },
+    selectedRace () {
+      const game = this.games.find(({ GameID }) => GameID === this.GameID)
+
+      return (game && game.Races.find(({ RaceID }) => RaceID === this.RaceID)) || null
+    },
+    raceCount () {
+      return this.games.reduce((count, { Races }) => count + Races.length, 0)
     },
 
     snackbarStatus: {
@@ -319,6 +360,12 @@ export default {
       this.go(this.lastInSection[section.id] || section.pages.find(({ disabled, planned }) => !disabled && !planned).route)
     },
 
+    // A click opens the Empires flyout at once (hover opens it after a short delay) or closes it again.
+    toggleEmpires () {
+      clearTimeout(this.peekTimer)
+      this.flyoutId = this.flyoutId === EMPIRES_ID ? null : EMPIRES_ID
+    },
+
     peekSection (id) {
       clearTimeout(this.leaveTimer)
       clearTimeout(this.peekTimer)
@@ -377,24 +424,11 @@ export default {
   asyncComputed: {
     games: {
       async get () {
-        if (!this.database || !this.database.models.Game) {
+        if (!this.database) {
           return []
         }
 
-        const games = await this.database.models.Game.findAll({
-          include: [{
-            model: this.database.models.Race,
-            ...(this.spyNPR
-              ? null
-              : {
-                  where: {
-                    NPR: false,
-                  },
-                }),
-          }],
-        })
-
-        return games
+        return loadEmpires(this.database, this.spyNPR)
       },
       default: [],
     },
@@ -456,8 +490,28 @@ export default {
   }
 }
 
-.rail__game {
-  padding-block: 4px 10px;
+.rail__empire {
+  width: 76px;
+  margin-bottom: 8px;
+  padding-block: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ae-muted);
+
+  .empire-avatar {
+    transition: box-shadow .15s ease;
+  }
+
+  &:hover,
+  &--peek {
+    .empire-avatar {
+      box-shadow: 0 0 0 2px var(--ae-chrome), 0 0 0 4px var(--sc);
+    }
+  }
 }
 
 .rail__spacer {

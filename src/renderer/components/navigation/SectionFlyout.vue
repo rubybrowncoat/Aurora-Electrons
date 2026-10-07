@@ -1,10 +1,5 @@
 <template>
-  <div class="section-flyout">
-    <div class="section-flyout__head">
-      <span class="section-flyout__title">{{ section.title }}</span>
-      <span class="section-flyout__count">{{ pages.filter(({ planned }) => !planned).length }} pages · Ctrl {{ shortcut }}</span>
-    </div>
-
+  <flyout-panel class="section-flyout" :title="section.title" :meta="`${pages.filter(({ planned }) => !planned).length} pages · Ctrl ${shortcut}`">
     <div
       v-for="page in pages"
       :key="page.route"
@@ -31,12 +26,17 @@
       </div>
     </div>
 
-    <div class="section-flyout__foot"><kbd>Ctrl K</kbd> search every page <kbd>Alt ←</kbd> back</div>
-  </div>
+    <template #foot><kbd>Ctrl K</kbd> search every page <kbd>Alt ←</kbd> back</template>
+  </flyout-panel>
 </template>
 
 <script>
+import FlyoutPanel from './FlyoutPanel.vue'
+
 export default {
+  components: {
+    FlyoutPanel,
+  },
   props: {
     section: {
       type: Object,
@@ -66,64 +66,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.section-flyout {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 80px;
-  z-index: 7;
-  width: 330px;
-  max-width: calc(100vw - 96px);
-  padding: 18px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  background: var(--ae-chrome);
-  border-right: 1px solid var(--ae-border);
-  box-shadow: 8px 0 24px rgba(0, 0, 0, .12);
-  animation: fly-in .14s ease-out;
-}
-
-@keyframes fly-in {
-  from {
-    transform: translateX(-12px);
-    opacity: .4;
-  }
-
-  to {
-    transform: none;
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .section-flyout {
-    animation: none;
-  }
-}
-
-.section-flyout__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 0 10px 10px;
-}
-
-.section-flyout__title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--sc);
-}
-
-.section-flyout__count {
-  font-family: var(--ae-mono);
-  font-size: 11px;
-  color: var(--ae-muted);
-}
-
 .section-flyout__item {
   display: grid;
   grid-template-columns: 36px 1fr auto;
@@ -191,16 +133,5 @@ export default {
 
 .peek-fade-enter {
   opacity: 0;
-}
-
-.section-flyout__foot {
-  margin-top: auto;
-  padding: 12px 10px 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--ae-muted);
 }
 </style>
