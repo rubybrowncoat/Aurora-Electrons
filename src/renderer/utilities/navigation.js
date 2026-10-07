@@ -43,9 +43,10 @@ const PAGES = [
   { route: '/designed-tech', section: 'research', tab: 'Designed', title: 'Designed Tech', icon: 'mdi-atom', blurb: 'Your designed components by category.', wip: true, keywords: 'components engines' },
   { route: '/engines', section: null, tab: 'Engines', title: 'Engine Planner', icon: 'mdi-engine-outline', blurb: 'Engine design inputs and thrust.', hidden: true, keywords: 'engine thrust' },
   { route: '/settings', section: null, tab: 'Settings', title: 'Settings', icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
+  { route: '/about', section: null, tab: 'About', title: 'About', icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
 ]
 
-// Paste the forum thread URL for updates and feedback here. The footer shows its link only while this is set.
+// Paste the forum thread URL for updates and feedback here. The About page links to it while this is set, and says "coming soon" while it is empty.
 const FORUM_URL = ''
 
 const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))

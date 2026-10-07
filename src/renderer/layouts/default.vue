@@ -43,6 +43,13 @@
         </div>
         <div class="rail__label">Settings</div>
       </div>
+
+      <div class="rail__item" :class="{ 'rail__item--active': page.route === '/about' }" :style="neutralStyle" role="link" tabindex="0" @click="go('/about')" @keydown.enter="go('/about')">
+        <div class="rail__pill">
+          <v-icon>mdi-information-outline</v-icon>
+        </div>
+        <div class="rail__label">About</div>
+      </div>
     </v-navigation-drawer>
 
     <section-flyout
