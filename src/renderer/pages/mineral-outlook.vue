@@ -32,24 +32,60 @@
 
       <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
       <template v-if="forecastReady">
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
+        <v-row dense class="mt-2">
+          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" md="3">
             <v-card class="stat-tile" elevation="1">
               <div class="caption text--secondary">{{ tile.label }}</div>
               <div class="stat-value">
                 <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
               </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
+              <div class="stat-note caption text--secondary" :title="tile.note">{{ tile.note }}</div>
             </v-card>
           </v-col>
         </v-row>
 
+        <v-card v-if="focusRow" class="panel" elevation="1">
+          <div class="panel-head">
+            <span>{{ focusRow.name }} outlook</span>
+            <span class="d-flex align-center flex-wrap">
+              <v-chip small class="mr-2">
+                <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
+              </v-chip>
+              <v-chip small class="mr-3">{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
+              <v-btn small outlined @click="flowsOpen = true"><v-icon small left>mdi-chart-bar</v-icon>Sources and uses</v-btn>
+            </span>
+          </div>
+          <div class="panel-body">
+            <div class="figures">
+              <div v-for="figure in focusFigures" :key="figure.label" class="figure">
+                <div class="caption text--secondary">{{ figure.label }}</div>
+                <div class="figure-value text-no-wrap">
+                  <v-icon v-if="figure.icon" small :color="figure.iconColor">{{ figure.icon }}</v-icon>
+                  {{ figure.value }}
+                </div>
+              </div>
+            </div>
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <div class="chart-title">Projected stockpile</div>
+                <chart-canvas type="line" :data="stockChart" :options="stockOptions" :height="210" :label="`Projected ${focusRow.name} stockpile over ${horizon} years`" />
+              </v-col>
+              <v-col cols="12" md="6">
+                <div class="chart-title">Projected mining output</div>
+                <chart-canvas type="line" :data="outputChart" :options="outputOptions" :height="210" :label="`Projected ${focusRow.name} mining output over ${horizon} years`" />
+              </v-col>
+            </v-row>
+            <div class="caption text--secondary">
+              Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
+            </div>
+          </div>
+        </v-card>
         <v-card class="panel" elevation="1">
           <div class="panel-head">
             <span>Mineral runway</span>
             <v-chip small>{{ coverageLabel }}</v-chip>
           </div>
-          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
+          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
             <template #[`item.name`]="{ item }">
               <span class="font-weight-medium">{{ item.name }}</span>
             </template>
@@ -80,7 +116,7 @@
               <span :class="{ 'text--secondary': !item.queue }">{{ tons(item.queue) }}</span>
             </template>
             <template #[`item.trend`]="{ item }">
-              <v-sparkline v-if="item.trend.length > 1" :value="item.trend" :color="theme.inkMuted" :line-width="2" :padding="4" :smooth="2" height="36" width="120" class="trend" />
+              <v-sparkline v-if="item.trend.length > 1" :value="item.trend" :color="theme.inkMuted" :line-width="2" :padding="3" :smooth="2" height="24" width="120" class="trend" />
               <span v-else class="text--secondary">—</span>
             </template>
           </v-data-table>
@@ -90,54 +126,33 @@
           </div>
         </v-card>
 
-        <v-card class="panel" elevation="1">
-          <div class="panel-head">
-            <span>Where minerals come from and go</span>
-            <v-btn-toggle v-model="flowsView" mandatory dense>
-              <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
-              <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
-            </v-btn-toggle>
-          </div>
-          <div class="panel-body">
-            <template v-if="flowsView === 'chart'">
-              <div class="legend">
-                <span v-for="group in presentFlowGroups" :key="group.key" class="legend-item">
-                  <span class="swatch" :style="{ background: flowColor(group.key) }" />{{ group.label }}
-                </span>
-              </div>
-              <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
-              <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
-            </template>
-            <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" disable-pagination hide-default-footer dense />
-          </div>
-        </v-card>
-
-        <v-card v-if="focusRow" class="panel" elevation="1">
-          <div class="panel-head">
-            <span>{{ focusRow.name }} outlook</span>
-            <span>
-              <v-chip small class="mr-2">
-                <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
-              </v-chip>
-              <v-chip small>{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
-            </span>
-          </div>
-          <div class="panel-body">
-            <v-row>
-              <v-col cols="12" md="6">
-                <div class="chart-title">Projected stockpile</div>
-                <chart-canvas type="line" :data="stockChart" :options="stockOptions" :height="240" :label="`Projected ${focusRow.name} stockpile over ${horizon} years`" />
-              </v-col>
-              <v-col cols="12" md="6">
-                <div class="chart-title">Projected mining output</div>
-                <chart-canvas type="line" :data="outputChart" :options="outputOptions" :height="240" :label="`Projected ${focusRow.name} mining output over ${horizon} years`" />
-              </v-col>
-            </v-row>
-            <div class="caption text--secondary">
-              Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
+        <v-dialog v-model="flowsOpen" max-width="960" scrollable content-class="mineral-outlook">
+          <v-card>
+            <div class="panel-head">
+              <span>Where minerals come from and go</span>
+              <span class="d-flex align-center">
+                <v-btn-toggle v-model="flowsView" mandatory dense>
+                  <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
+                  <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
+                </v-btn-toggle>
+                <v-btn icon class="ml-2" aria-label="Close" @click="flowsOpen = false"><v-icon>mdi-close</v-icon></v-btn>
+              </span>
             </div>
-          </div>
-        </v-card>
+            <v-divider />
+            <v-card-text class="pt-4">
+              <template v-if="flowsView === 'chart'">
+                <div class="legend">
+                  <span v-for="group in presentFlowGroups" :key="group.key" class="legend-item">
+                    <span class="swatch" :style="{ background: flowColor(group.key) }" />{{ group.label }}
+                  </span>
+                </div>
+                <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
+                <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
+              </template>
+              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
+            </v-card-text>
+          </v-card>
+        </v-dialog>
       </template>
 
       <v-card v-if="depositsReady" class="panel" elevation="1">
@@ -254,6 +269,7 @@ export default {
       focusMineralId: null,
       fallbackFocusId: null,
       flowsView: 'chart',
+      flowsOpen: false,
       allDeposits: false,
       onlyEmptying: false,
       expandedDeposits: [],
@@ -450,6 +466,25 @@ export default {
 
     focusRow() {
       return this.mineralRows.find((row) => row.id === this.focusMineralId)
+    },
+
+    // The selected mineral's row of the runway table, as the figures above its charts.
+    focusFigures() {
+      const row = this.focusRow
+
+      if (!row) {
+        return []
+      }
+
+      return [
+        { label: 'Stockpile (t)', value: this.tons(row.stock) },
+        { label: 'In transit (t)', value: this.tons(row.transit) },
+        { label: 'Produced / yr', value: this.tons(row.produced) },
+        { label: 'Used / yr', value: this.tons(row.used) },
+        { label: 'Net / yr', value: this.signedTons(row.net), icon: row.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up', iconColor: row.net < 0 ? 'error' : 'success' },
+        { label: 'Runway', value: this.runwayLabel(row), icon: this.statusIcon(row.status), iconColor: this.statusColor(row.status) },
+        { label: 'Industry queue (12 mo)', value: this.tons(row.queue) },
+      ]
     },
 
     focusDeposits() {
@@ -1029,19 +1064,43 @@ export default {
   }
 
   .stat-tile {
-    padding: 16px;
+    padding: 10px 16px;
     height: 100%;
   }
 
   .stat-value {
-    font-size: 24px;
-    line-height: 32px;
+    font-size: 20px;
+    line-height: 28px;
     font-weight: 400;
-    margin: 4px 0;
+    margin: 2px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .stat-note {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1.3;
   }
 
   .panel {
-    margin-top: 20px;
+    margin-top: 16px;
+  }
+
+  .figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 32px;
+    margin-bottom: 12px;
+  }
+
+  .figure-value {
+    font-size: 18px;
+    line-height: 26px;
+    font-variant-numeric: tabular-nums;
   }
 
   .panel-head {
@@ -1050,13 +1109,13 @@ export default {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 12px 24px;
+    padding: 8px 24px;
     font-size: 16px;
     line-height: 28px;
   }
 
   .panel-body {
-    padding: 0 24px 16px;
+    padding: 0 24px 12px;
   }
 
   .panel-foot {
