@@ -31,7 +31,14 @@ const guardQueries = (sequelize) => {
     }
 
     const { sql, options, resolve, reject } = waiting.shift()
+    let finished = false
+    // A timed-out statement still settles once interrupted; only the first finish may hand the queue on.
     const finish = () => {
+      if (finished) {
+        return
+      }
+
+      finished = true
       clearTimeout(timer)
       running = false
       drain()
