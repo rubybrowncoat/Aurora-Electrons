@@ -1,7 +1,7 @@
 <template>
   <v-container fluid class="about">
     <v-row>
-      <v-col cols="12" lg="8" xl="6">
+      <v-col cols="12" lg="8">
         <v-card outlined height="100%">
           <v-card-title class="align-baseline">
             <span class="display-1">Aurora Electrons</span>
@@ -32,7 +32,7 @@
         </v-card>
       </v-col>
 
-      <v-col cols="12" lg="4" xl="3">
+      <v-col cols="12" lg="4">
         <v-card outlined height="100%">
           <v-card-title class="subtitle-1">Built with</v-card-title>
           <v-card-text>
@@ -123,7 +123,7 @@
     </v-row>
 
     <v-row>
-      <v-col cols="12" xl="8">
+      <v-col cols="12">
         <v-card outlined>
           <v-card-title class="subtitle-1">Contribute</v-card-title>
           <v-card-text class="pb-0">Pull requests and issues are welcome. The short version:</v-card-text>
