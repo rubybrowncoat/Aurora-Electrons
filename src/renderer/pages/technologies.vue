@@ -186,11 +186,11 @@ export default {
   asyncComputed: {
     researchedTechnologies: {
       async get () {
-        if (!this.database || !this.GameID) {
+        if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceTech.TechID, FCT_Race.RaceID, FCT_Race.RaceTitle from FCT_RaceTech join FCT_Race on FCT_Race.GameID = FCT_RaceTech.GameID and FCT_Race.NPR = 0 and FCT_RaceTech.RaceID = FCT_Race.RaceID where FCT_RaceTech.GameID = ${this.GameID}`).then(([items]) => {
+        return await this.database.query(`select FCT_RaceTech.TechID from FCT_RaceTech where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Researched Technologies', items)
 
           return items
