@@ -77,15 +77,6 @@ export const peeks = {
     return `${counted(Events, separator, 'event', 'events')} in ${PEEK_WINDOW_DAYS} days`
   },
 
-  // Every body of a known system the Colonization Planner lists (planets, moons, asteroids and comets, no gas giants).
-  '/habitability': async ({ database, GameID, RaceID, separator }) => {
-    const { Bodies, Systems } = await row(database, `select count(*) as Bodies, count(distinct FCT_SystemBody.SystemID) as Systems from FCT_SystemBody
-      where FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5)
-        and FCT_SystemBody.SystemID in (select FCT_RaceSysSurvey.SystemID from FCT_RaceSysSurvey where FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID})`)
-
-    return `${counted(Bodies, separator, 'body', 'bodies')} in ${counted(Systems, separator, 'system', 'systems')}`
-  },
-
   '/minerals': async ({ database, GameID, RaceID, separator }) => {
     const { Bodies, Systems } = await row(database, `select count(distinct FCT_SystemBody.SystemBodyID) as Bodies, count(distinct FCT_SystemBody.SystemID) as Systems from FCT_MineralDeposit
       inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID
