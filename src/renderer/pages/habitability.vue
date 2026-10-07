@@ -1,12 +1,13 @@
 <template>
   <div>
     <v-container fluid class="planner-page">
-      <v-row dense align="center">
-        <v-col cols="12" sm="6" md="3">
-          <v-select v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" label="Species" dense outlined hide-details />
-        </v-col>
-        <v-col cols="auto">
-          <div class="caption text--secondary">Goal</div>
+      <div class="toolbar">
+        <div class="tool tool--species">
+          <div class="tool__label caption text--secondary">Species</div>
+          <v-select v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" aria-label="Species" dense outlined hide-details />
+        </div>
+        <div class="tool">
+          <div class="tool__label caption text--secondary">Goal</div>
           <v-btn-toggle v-model="goal" mandatory dense @change="(value) => config.set('habitabilityGoal', value)">
             <v-tooltip v-for="option in goals" :key="option.id" bottom>
               <template #activator="{ on }">
@@ -15,51 +16,65 @@
               <span>{{ option.hint }}</span>
             </v-tooltip>
           </v-btn-toggle>
-        </v-col>
-        <v-col cols="6" sm="3" md="2">
-          <v-text-field v-model.number="terraformers" type="number" min="1" label="Terraformers" :hint="terraformerHint" persistent-hint :rules="[rules.required, rules.positive]" dense outlined @change="config.set('habitabilityTerraformers', terraformers)" />
-        </v-col>
-        <v-col cols="auto">
-          <v-menu offset-y :close-on-content-click="false">
-            <template #activator="{ on, attrs }">
-              <v-btn outlined v-bind="attrs" v-on="on">Filters<span v-if="activeFilterCount">&nbsp;({{ activeFilterCount }})</span></v-btn>
+        </div>
+        <div class="tool tool--terraformers">
+          <div class="tool__label caption text--secondary">Terraformers</div>
+          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto" @change="config.set('habitabilityTerraformers', terraformers)">
+            <template #append>
+              <v-tooltip bottom max-width="260">
+                <template #activator="{ on }">
+                  <v-icon small v-on="on">mdi-information-outline</v-icon>
+                </template>
+                <span>Terraforming: {{ terraformerHint }}</span>
+              </v-tooltip>
             </template>
-            <v-list dense>
-              <v-list-item v-for="filter in filterOptions" :key="filter.key">
-                <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
-              </v-list-item>
-              <v-divider class="my-1" />
-              <v-list-item>
-                <v-btn text small @click="resetFilters">Reset Filters</v-btn>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-        </v-col>
-        <v-col cols="auto">
-          <v-menu offset-y :close-on-content-click="false" max-width="420">
-            <template #activator="{ on, attrs }">
-              <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon>Ranking</v-btn>
-            </template>
-            <v-card class="pa-4">
-              <div class="subtitle-2 mb-1">How targets are ranked</div>
-              <div class="caption text--secondary mb-3">A target's worth is its prize (people held, mineral score, or both) divided down by colony cost, years of terraforming and distance. Each divisor halves the worth at the scale you set.</div>
-              <v-row dense>
-                <v-col v-for="field in rankingFields" :key="field.key" cols="6">
-                  <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
-                </v-col>
-              </v-row>
-              <div class="caption text--secondary mt-2 mb-1">Mineral weights (a point of accessibility is worth this much)</div>
-              <v-row dense>
-                <v-col v-for="mineral in minerals" :key="mineral.id" cols="4">
-                  <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" dense outlined hide-details @change="(value) => setWeight(mineral.id, value)" />
-                </v-col>
-              </v-row>
-              <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
-            </v-card>
-          </v-menu>
-        </v-col>
+          </v-text-field>
+        </div>
+        <div class="tool tool--actions">
+          <div class="tool__buttons">
+            <v-menu offset-y :close-on-content-click="false">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-filter-variant</v-icon>Filters<span v-if="activeFilterCount">&nbsp;({{ activeFilterCount }})</span></v-btn>
+              </template>
+              <v-list dense>
+                <v-list-item v-for="filter in filterOptions" :key="filter.key">
+                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
+                </v-list-item>
+                <v-divider class="my-1" />
+                <v-list-item>
+                  <v-btn text small @click="resetFilters">Reset Filters</v-btn>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+            <v-menu offset-y :close-on-content-click="false" max-width="420">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon>Ranking</v-btn>
+              </template>
+              <v-card class="pa-4">
+                <div class="subtitle-2 mb-1">How targets are ranked</div>
+                <div class="caption text--secondary mb-3">A target's worth is its prize (people held, mineral score, or both) divided down by colony cost, years of terraforming and distance. Each divisor halves the worth at the scale you set.</div>
+                <v-row dense>
+                  <v-col v-for="field in rankingFields" :key="field.key" cols="6">
+                    <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
+                  </v-col>
+                </v-row>
+                <div class="caption text--secondary mt-2 mb-1">Mineral weights (a point of accessibility is worth this much)</div>
+                <v-row dense>
+                  <v-col v-for="mineral in minerals" :key="mineral.id" cols="4">
+                    <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" dense outlined hide-details @change="(value) => setWeight(mineral.id, value)" />
+                  </v-col>
+                </v-row>
+                <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
+              </v-card>
+            </v-menu>
+          </div>
+        </div>
+      </div>
+
+      <v-row dense align="center" class="mt-1">
         <v-col cols="12">
-          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple dense hide-details @change="config.set('habitabilitySystems', systems)">
+          <div class="tool__label caption text--secondary">Active systems</div>
+          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
             <template #selection="{ item, index }">
               <v-chip v-if="systems.length === systemNames.length && !index" small label>All {{ systemNames.length }} systems</v-chip>
               <v-chip v-else-if="systems.length !== systemNames.length && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
@@ -87,7 +102,7 @@
           </v-autocomplete>
         </v-col>
         <v-col cols="12" class="d-flex align-center flex-wrap">
-          <span class="caption text--secondary mr-3">Show</span>
+          <span class="tool__label caption text--secondary mr-3">Show</span>
           <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on" @change="config.set('habitabilityBodyClasses', bodyClasses)">
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
@@ -684,6 +699,46 @@ export default {
 
 <style lang="scss">
 .planner-page {
+  // One density for the controls above the table: every field, toggle and button is 40 px tall, each field has its label above it in the same caption style, and the buttons, which carry their own label, sit on the fields' bottom edge.
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 16px;
+  }
+
+  .tool {
+    min-width: 0;
+  }
+
+  .tool__label {
+    height: 18px;
+    line-height: 18px;
+  }
+
+  .tool--species {
+    flex: 1 1 220px;
+    max-width: 320px;
+  }
+
+  .tool--terraformers {
+    flex: 0 0 150px;
+  }
+
+  .tool--actions {
+    align-self: flex-end;
+  }
+
+  .tool__buttons {
+    display: flex;
+    gap: 8px;
+  }
+
+  .toolbar .v-btn-toggle .v-btn,
+  .tool__buttons .v-btn {
+    height: 40px !important;
+  }
+
   .rank-cell {
     display: flex;
     align-items: center;
