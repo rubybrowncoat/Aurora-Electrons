@@ -44,7 +44,7 @@
           </v-col>
         </v-row>
         <v-row justify="start">
-          <v-col cols="12">
+          <v-col cols="12" lg="6">
             <v-slider
               :value="maintenanceThreshold"
               min="10"
@@ -56,7 +56,7 @@
               @change="setMaintenanceThreshold"
             />
           </v-col>
-          <v-col cols="12">
+          <v-col cols="12" lg="6">
             <v-autocomplete v-model="maintenanceExclusions" :items="shipClasses" label="Excluded Ship Classes" item-text="ClassName" item-value="ShipClassID" multiple small-chips deletable-chips clearable @change="setMaintenanceExclusions" />
           </v-col>
         </v-row>
