@@ -59,6 +59,12 @@
 
       <v-spacer />
 
+      <div class="search-button" role="button" tabindex="0" @click="openPalette" @keydown.enter="openPalette">
+        <v-icon small>mdi-magnify</v-icon>
+        <span class="hidden-xs-only">Go to page</span>
+        <kbd class="hidden-xs-only">Ctrl K</kbd>
+      </div>
+
       <v-btn v-if="$vuetify.theme.dark" icon @click="setDarkMode(false)">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
@@ -72,6 +78,8 @@
         </v-tabs>
       </template>
     </v-app-bar>
+
+    <page-palette v-model="paletteOpen" :pages="openPages" @go="go" />
 
     <!-- Sizes your content based upon application components -->
     <v-main>
@@ -99,6 +107,7 @@ import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import GameSwitcher from '../components/navigation/GameSwitcher.vue'
 import HistoryButtons from '../components/navigation/HistoryButtons.vue'
+import PagePalette from '../components/navigation/PagePalette.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
@@ -110,11 +119,13 @@ export default {
   components: {
     GameSwitcher,
     HistoryButtons,
+    PagePalette,
     SectionFlyout,
   },
   data () {
     return {
       flyoutId: null,
+      paletteOpen: false,
 
       // WATCHED CONFIG
       spyNPR: false,
@@ -158,6 +169,9 @@ export default {
     // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have.
     pages () {
       return PAGES.filter(({ hidden }) => !hidden).map((page) => ({ ...page, disabled: Boolean(page.requiresHistory && !this.historyRecorded) }))
+    },
+    openPages () {
+      return this.pages.filter(({ disabled }) => !disabled)
     },
     railSections () {
       return SECTIONS.map((section) => ({
@@ -239,6 +253,7 @@ export default {
 
     go (path) {
       this.flyoutId = null
+      this.paletteOpen = false
 
       if (path !== this.$route.fullPath) {
         this.$router.push(path)
@@ -267,8 +282,16 @@ export default {
       clearTimeout(this.leaveTimer)
     },
 
+    openPalette () {
+      this.flyoutId = null
+      this.paletteOpen = true
+    },
+
     onKeydown (event) {
-      if (event.altKey && event.key === 'ArrowLeft') {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        this.openPalette()
+      } else if (event.altKey && event.key === 'ArrowLeft') {
         event.preventDefault()
         this.back()
       } else if (event.altKey && event.key === 'ArrowRight') {
@@ -326,6 +349,7 @@ export default {
   --ae-ink: #212121;
   --ae-muted: #6a6a6a;
   --ae-border: #e0e3e8;
+  --ae-primary: #1867c0;
   --ae-hover: rgba(24, 103, 192, .07);
   --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
 
@@ -339,10 +363,13 @@ export default {
     --ae-ink: #f5f5f5;
     --ae-muted: #b0b0b0;
     --ae-border: #333333;
+    --ae-primary: #2196f3;
     --ae-hover: rgba(33, 150, 243, .10);
   }
 
-  kbd {
+  // Both theme classes, to outrank Vuetify's own kbd styling.
+  &.theme--light kbd,
+  &.theme--dark kbd {
     padding: 1px 6px;
     border: 1px solid var(--ae-border);
     border-radius: 4px;
@@ -439,6 +466,25 @@ export default {
 .app-bar.v-app-bar.v-sheet {
   background: var(--ae-bg) !important;
   border-bottom: 1px solid var(--ae-border) !important;
+}
+
+.search-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding-inline: 12px;
+  border: 1px solid var(--ae-border);
+  border-radius: 18px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ae-muted);
+  background: var(--ae-bg);
+
+  &:hover {
+    border-color: var(--ae-primary);
+    color: var(--ae-ink);
+  }
 }
 
 .breadcrumb {
