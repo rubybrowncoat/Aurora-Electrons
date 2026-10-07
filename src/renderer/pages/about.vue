@@ -36,7 +36,9 @@
         <v-card outlined height="100%">
           <v-card-title class="subtitle-1">Built with</v-card-title>
           <v-card-text>
-            <v-chip v-for="item in stack" :key="item" class="mr-2 mb-2" small label outlined>{{ item }}</v-chip>
+            <external-link v-for="item in stack" :key="item.name" :href="item.href" class="stack-link mr-2 mb-2">
+              <v-chip small label outlined link>{{ item.name }}</v-chip>
+            </external-link>
           </v-card-text>
         </v-card>
       </v-col>
@@ -170,7 +172,18 @@ export default {
       authorUrl: 'https://github.com/rubybrowncoat',
       auroraForumUrl: 'https://aurora4x.com/',
 
-      stack: ['Electron 16', 'Nuxt 2', 'Vue 2', 'Vuetify 2', 'Vuex 3', 'Sequelize 6 over SQLite', 'Chart.js 4', 'Cytoscape 3', 'PixiJS 6'],
+      stack: [
+        { name: 'Electron 16', href: 'https://www.electronjs.org/' },
+        { name: 'Nuxt 2', href: 'https://v2.nuxt.com/' },
+        { name: 'Vue 2', href: 'https://v2.vuejs.org/' },
+        { name: 'Vuetify 2', href: 'https://v2.vuetifyjs.com/' },
+        { name: 'Vuex 3', href: 'https://v3.vuex.vuejs.org/' },
+        { name: 'Sequelize 6', href: 'https://sequelize.org/' },
+        { name: 'SQLite', href: 'https://www.sqlite.org/' },
+        { name: 'Chart.js 4', href: 'https://www.chartjs.org/' },
+        { name: 'Cytoscape.js 3', href: 'https://js.cytoscape.org/' },
+        { name: 'PixiJS 6', href: 'https://pixijs.com/' },
+      ],
 
       // Each step is a list of text and `{ code }` parts.
       steps: [
@@ -221,6 +234,19 @@ export default {
 .path--missing {
   font-family: inherit;
   font-style: italic;
+}
+
+.stack-link {
+  display: inline-block;
+
+  &:hover {
+    text-decoration: none;
+  }
+
+  .v-chip:hover {
+    border-color: var(--ae-primary);
+    color: var(--ae-primary);
+  }
 }
 
 .steps__text {
