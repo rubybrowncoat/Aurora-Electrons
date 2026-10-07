@@ -91,7 +91,7 @@
         </v-card>
 
         <v-row>
-          <v-col cols="12" lg="6">
+          <v-col cols="12" xl="6">
             <v-card class="panel" elevation="1">
               <div class="panel-head"><span>Deliveries by destination</span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
@@ -100,7 +100,7 @@
               <div class="panel-foot caption text--secondary">Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
             </v-card>
           </v-col>
-          <v-col cols="12" lg="6">
+          <v-col cols="12" xl="6">
             <v-card class="panel" elevation="1">
               <div class="panel-head"><span>Freighter classes</span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
