@@ -109,7 +109,7 @@ Several pages need the same pieces. Building them once avoids four copies of the
 2. Add stock, ships' cargo (`CargoTypeID = 3`) and mass-driver packets in flight (§ 2a).
 3. Queue demand: project the mineral costs of `FCT_IndustrialProjects`, capped at one year, adding queued items until the year is used (§ 2b). Reuse the construction-capacity helpers from G1.
 4. Fallback for pre-2.6 saves without a ledger: production from Mining Outlook's rates, consumption from queue demand only.
-5. Add a page with a `<v-tab>` and a `title()` case, or a tab inside Minerals (open question 2).
+5. Add a page and its `PAGES` entry in `utilities/navigation.js`, or a section inside Minerals (open question 2).
 
 **Caveats.** The ledger keeps only recent history (about 40 days in the sample), so the chart shows the recent trend. Totals are annualised from it.
 
@@ -269,7 +269,7 @@ Several pages need the same pieces. Building them once avoids four copies of the
 3. Distance from the capital comes from G2.
 4. ~~Decide whether this is a new page or a "Targets" mode of Habitability (open question 2).~~ Decided below: it merges with Habitability.
 
-**Decided.** Colonization Targets merges with Habitability into one screen, the **Colonization Planner** (`/colonization`, Colonies section), which replaces Habitability. Habitability stays live until the Planner ships. The navigation registry already lists the Planner as a planned page.
+**Decided.** Colonization Targets merges with Habitability into one screen, the **Colonization Planner** (`/habitability`, Colonies section), which replaces Habitability. It is built; see above.
 
 **Decided.** The qualifying minerals are a setting (`cmcMinerals`), defaulting to Duranium or Gallicite as the workbook does (the docs say Duranium only). The Minerals page already marks qualifying bodies; this page should read the same setting.
 

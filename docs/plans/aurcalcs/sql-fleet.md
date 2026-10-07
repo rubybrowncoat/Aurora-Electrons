@@ -240,7 +240,7 @@ Validated: F 36 rows, 0.02 s (Gaia 16, Eden 13, Discoverer 2, Hermes [GEO] 3, He
 
 JS: for each specialist ship, candidates = pool rows with `Level >= ship.RankRequired` (auto-assignment picks exactly the required level; allow >= for manual use), `CommandType = 0` or a secondary post (8, 9, 10, 11, 15; Aurora treats those officers as available), and the relevant bonus above the current commander's (null = 1.0). On the sample no idle officer at level >= required beats an assigned specialist (the only idle Terraforming officers, 1,073 of them, are level 1), so show "candidates below required rank" as a separate greyed group that needs a promotion.
 
-**Reuse.** `index.vue:808-826` already joins `FCT_Commander` to `FCT_CommanderBonuses` for naval admin and terraformer maths; copy its join style. Existing lookups: DATABASE.md "Commander bonus rules" (sector governors give a quarter of their bonuses; naval admin commands pass 25% of Mining/Terraforming). The page needs a `<v-tab>` and a `title()` case in layouts/default.vue.
+**Reuse.** `index.vue:808-826` already joins `FCT_Commander` to `FCT_CommanderBonuses` for naval admin and terraformer maths; copy its join style. Existing lookups: DATABASE.md "Commander bonus rules" (sector governors give a quarter of their bonuses; naval admin commands pass 25% of Mining/Terraforming). The page needs a `pages/<name>.vue` and one `PAGES` entry in `utilities/navigation.js`.
 
 **Caveats / open questions.**
 - ~~Codes 8, 9, 10, 11, 15 labels are inferred (see cross-cutting section).~~ Confirmed from the sample's bonuses and modules ([`build-3.md`](build-3.md)).
