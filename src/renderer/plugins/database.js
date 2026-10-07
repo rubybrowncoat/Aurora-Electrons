@@ -25,6 +25,8 @@ export default ({ store }) => {
   ipcRenderer.invoke('request-storage-path').then((storagePath) => {
     console.log('Returned storage path:', storagePath)
 
+    store.commit('setSavePath', { savePath: storagePath })
+
     const watcher = chokidar.watch(storagePath, {
       persistent: true,
       awaitWriteFinish: true,

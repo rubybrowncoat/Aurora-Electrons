@@ -9,6 +9,9 @@ export const state = () => {
   return {
     config: new Config(configConfiguration),
     database: null,
+    // Where the save is expected, and why it couldn't be opened (null while it can).
+    savePath: null,
+    databaseError: null,
 
     GameID: null,
     RaceID: null,
@@ -29,6 +32,12 @@ export const getters = {
   },
   database (state) {
     return state.database
+  },
+  savePath (state) {
+    return state.savePath
+  },
+  databaseError (state) {
+    return state.databaseError
   },
 
   GameID (state) {
@@ -63,6 +72,12 @@ export const mutations = {
   replaceDatabase (state, { database }) {
     state.database = database
   },
+  setSavePath (state, { savePath }) {
+    state.savePath = savePath
+  },
+  setDatabaseError (state, { message }) {
+    state.databaseError = message
+  },
 
   setGame (state, { GameID }) {
     state.GameID = GameID
@@ -94,10 +109,20 @@ export const actions = {
   // running on it can't hold the app up.
   renew ({ commit, state }, { storagePath }) {
     const previous = state.database
+    let database = null
+    let message = null
 
-    commit('replaceDatabase', {
-      database: resetDatabase(storagePath),
-    })
+    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on
+    // as if the save held no games.
+    try {
+      database = resetDatabase(storagePath)
+    } catch (error) {
+      console.error(`Couldn't open ${storagePath}`, error)
+      message = error.message.split(/\r?\n/)[0]
+    }
+
+    commit('replaceDatabase', { database })
+    commit('setDatabaseError', { message })
 
     return retireDatabase(previous)
   },

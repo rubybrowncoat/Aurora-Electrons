@@ -128,6 +128,9 @@
         <v-card v-if="pickingFirst" class="game-picker mx-auto mt-12" :style="neutralStyle" max-width="480" outlined>
           <v-card-title>Pick a game</v-card-title>
           <empire-list v-if="games.length" :games="games" class="pb-2 px-2" />
+          <v-alert v-else-if="databaseError" type="error" text class="mx-4">Couldn't open the save: {{ databaseError }}</v-alert>
+          <v-alert v-else-if="gamesError" type="error" text class="mx-4">Couldn't read the save: {{ gamesError }}. The game may be saving; the list reads it again when it changes.</v-alert>
+          <v-card-text v-else-if="!database">Waiting for the save{{ savePath ? ` at ${savePath}` : '' }}. It is read from there and loaded again whenever it changes.</v-card-text>
           <v-card-text v-else-if="$asyncComputed.games.state === 'success'">No games found in the save.</v-card-text>
         </v-card>
         <nuxt v-else />
@@ -181,6 +184,9 @@ export default {
       flyoutId: null,
       paletteOpen: false,
 
+      // Why the empire list couldn't be read (the plugin's own state isn't reactive), null while it can.
+      gamesError: null,
+
       // WATCHED CONFIG
       spyNPR: false,
       unsubscribeSpyNPR: null,
@@ -204,6 +210,8 @@ export default {
     ...mapGetters([
       'config',
       'database',
+      'savePath',
+      'databaseError',
 
       'GameID',
       'RaceID',
@@ -439,7 +447,17 @@ export default {
           return []
         }
 
-        return loadEmpires(this.database, this.spyNPR)
+        try {
+          const games = await loadEmpires(this.database, this.spyNPR)
+
+          this.gamesError = null
+
+          return games
+        } catch (error) {
+          this.gamesError = error.message
+
+          throw error
+        }
       },
       default: [],
     },
