@@ -31,7 +31,7 @@
             <v-progress-linear v-if="loadingEvents" indeterminate color="yellow darken-2" />
             <v-virtual-scroll
               :items="filteredLogEvents" item-height="64" bench="5" :style="{
-                height: 'calc(100vh - 362px)',
+                height: 'calc(100vh - 350px)',
               }"
             >
               <template #default="{ item: event }">

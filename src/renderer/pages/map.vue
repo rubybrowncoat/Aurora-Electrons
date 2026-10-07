@@ -7,7 +7,7 @@
         top: '12px',
         left: '12px',
         width: 'calc(100% - 24px)',
-        height: 'calc(100vh - 112px - 44px - 24px)',
+        height: 'calc(100vh - 108px - 36px - 24px)',
         zIndex: 0,
       }"
       :class="{ dark: $vuetify.theme.dark }"

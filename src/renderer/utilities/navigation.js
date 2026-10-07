@@ -39,7 +39,10 @@ const PAGES = [
   { route: '/settings', section: null, tab: 'Settings', title: 'Settings', icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
 ]
 
+// Paste the forum thread URL for updates and feedback here. The footer shows its link only while this is set.
+const FORUM_URL = ''
+
 const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))
 const pageByRoute = Object.fromEntries(PAGES.map((page) => [page.route, page]))
 
-module.exports = { SECTIONS, PAGES, sectionById, pageByRoute }
+module.exports = { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute }

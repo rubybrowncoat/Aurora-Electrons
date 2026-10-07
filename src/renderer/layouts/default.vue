@@ -101,13 +101,21 @@
       </v-container>
     </v-main>
 
-    <v-footer app>
+    <v-footer app inset height="36" class="app-footer">
       <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
+      <template v-if="forumUrl">
+        <v-spacer />
+        <a class="app-footer__link" :href="forumUrl" @click.prevent="openForum">
+          <v-icon small>mdi-forum-outline</v-icon>
+          Updates &amp; feedback
+        </a>
+      </template>
     </v-footer>
   </v-app>
 </template>
 
 <script>
+import { shell } from 'electron'
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import GameList from '../components/navigation/GameList.vue'
@@ -116,7 +124,7 @@ import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
-import { PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
+import { FORUM_URL, PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
 
 const FLYOUT_OPEN_DELAY = 140
 const FLYOUT_CLOSE_DELAY = 220
@@ -131,6 +139,8 @@ export default {
   },
   data () {
     return {
+      forumUrl: FORUM_URL,
+
       flyoutId: null,
       paletteOpen: false,
 
@@ -288,6 +298,11 @@ export default {
     },
     cancelLeave () {
       clearTimeout(this.leaveTimer)
+    },
+
+    // A plain link would open a new app window in Electron, so hand it to the system browser.
+    openForum () {
+      shell.openExternal(this.forumUrl)
     },
 
     openPalette () {
@@ -474,6 +489,28 @@ export default {
 .app-bar.v-app-bar.v-sheet {
   background: var(--ae-bg) !important;
   border-bottom: 1px solid var(--ae-border) !important;
+}
+
+.app-footer.v-footer {
+  background: var(--ae-chrome) !important;
+  border-top: 1px solid var(--ae-border) !important;
+}
+
+.app-footer__link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--ae-muted);
+
+  &:hover {
+    color: var(--ae-primary);
+  }
+
+  .v-icon {
+    color: inherit;
+  }
 }
 
 .search-button {

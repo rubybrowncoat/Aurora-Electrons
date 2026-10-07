@@ -28,6 +28,10 @@ export const ipcRenderer = {
   },
 }
 
+export const shell = {
+  openExternal: (url) => window.open(url, '_blank', 'noopener'),
+}
+
 export const remote = {}
 
-export default { ipcRenderer, remote }
+export default { ipcRenderer, remote, shell }
