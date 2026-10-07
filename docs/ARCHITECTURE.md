@@ -48,7 +48,7 @@ Most of this directory is the electron-nuxt template's tooling; treat that part 
     In practice, users drop the exe into their Aurora folder.
   - `save-png` opens a save dialog and writes the base64 PNG that the map exports.
   - `read-flag` returns a race's flag as a data URL, or `null` when it is missing or unreadable. Aurora keeps its flags in a `Flags` folder beside `AuroraDB.db`, and `FCT_Race.FlagPic` holds the file name. The handler reads `path.join(path.dirname(<storage path>), 'Flags', path.basename(name))`, so a name from the save never leaves that folder, and only image extensions are served. It tries the exact name, then a case-insensitive match. A `file://` image would be blocked in a packaged build, hence the data URL. Dev mode has no `Flags` folder (its save is the repo's `AuroraDB.db`), and web mode's shim answers `null`, so both show initials.
-- `mainWindow.js` and `BrowserWinHandler.js` create a 1200×800 window with `nodeIntegration: true` and `contextIsolation: false`, so the renderer `require`s Node modules (sqlite3, chokidar, electron-store) directly. `webSecurity` is enabled only in production.
+- `mainWindow.js` and `BrowserWinHandler.js` create a 1280×800 window (the layout rule's minimum width) with `nodeIntegration: true` and `contextIsolation: false`, so the renderer `require`s Node modules (sqlite3, chokidar, electron-store) directly. `webSecurity` is enabled only in production.
 - `boot/index.dev.js` opens devtools, installs Vue devtools, and adds a "Relaunch electron" menu item (Ctrl/Cmd+E). `boot/index.prod.js` registers the `app://` protocol and removes the menu.
 
 ## Renderer (`src/renderer/`)
