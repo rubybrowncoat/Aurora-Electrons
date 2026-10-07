@@ -23,7 +23,6 @@
         <template v-else>
           <div class="caption text--secondary mb-2">
             Only what this race has observed: tracked ships aren't the alien fleet, and a colony's details show once intelligence on it is high enough. History is recorded each time Aurora saves while the app is open, when something has changed.
-            <span v-if="filePath">Saved in <span class="file-path">{{ filePath }}</span>.</span>
           </div>
 
           <v-row>
@@ -337,10 +336,6 @@ export default {
       const past = this.recorded.filter((snapshot) => snapshot.t < now.t)
 
       return [...past, now]
-    },
-
-    filePath() {
-      return this.GameID ? historyConfig(this.GameID).path : ''
     },
 
     tiles() {
@@ -772,11 +767,6 @@ export default {
   .stale-value {
     font-style: italic;
     opacity: 0.7;
-  }
-
-  .file-path {
-    font-family: monospace;
-    overflow-wrap: anywhere;
   }
 
   td {
