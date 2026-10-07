@@ -43,7 +43,7 @@
         </span>
       </div>
       <div ref="graph" class="graph" role="img" :aria-label="`Prerequisites of ${tech.name}`" />
-      <div class="panel-foot caption text--secondary">An arrow runs from a prerequisite to what it unlocks. The leftmost researched squares are what you already hold; click any square to look at that technology. Scroll to zoom, drag to move.</div>
+      <div class="panel-foot caption text--secondary">An arrow runs from a prerequisite to what it unlocks. The leftmost researched boxes are what you already hold; click any box to look at that technology. Scroll to zoom, drag to move.</div>
     </v-card>
 
     <v-row v-if="tech">
