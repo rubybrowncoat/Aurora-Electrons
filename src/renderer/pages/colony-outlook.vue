@@ -323,6 +323,7 @@ export default {
       ]
     },
 
+    // Nothing is on its way to most colonies most of the time, and an all-empty column is the first thing to give up when the window is narrow.
     headers() {
       return [
         { text: 'Colony', value: 'name' },
@@ -332,7 +333,7 @@ export default {
         { text: 'Infrastructure', value: 'infrastructureSort' },
         { text: 'Workers now', value: 'workersSort' },
         { text: `In ${this.horizon} y`, value: 'futureSort', align: 'end' },
-        { text: 'On its way', value: 'inboundSort' },
+        ...(this.rows.some((row) => row.inbound) ? [{ text: 'On its way', value: 'inboundSort' }] : []),
         { text: '', value: 'data-table-expand' },
       ]
     },
@@ -597,9 +598,18 @@ function percent(fraction, decimals) {
     font-variant-numeric: tabular-nums;
   }
 
+  .colony-table {
+    td:first-child,
+    th:first-child {
+      min-width: 180px;
+    }
+  }
+
   .meter {
     position: relative;
-    flex: 0 0 72px;
+    flex: 1 1 72px;
+    min-width: 48px;
+    max-width: 240px;
     height: 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.08);
@@ -630,7 +640,9 @@ function percent(fraction, decimals) {
 
   .worker-bar {
     display: flex;
-    flex: 0 0 120px;
+    flex: 1 1 120px;
+    min-width: 64px;
+    max-width: 360px;
     height: 10px;
     border-radius: 2px;
     overflow: hidden;
