@@ -723,7 +723,8 @@ export default {
   .survey-map {
     display: block;
     width: 100%;
-    height: 600px;
+    // 480 px at 1280 x 720, 780 at 1080p, and it keeps growing to 1000 so a 1440p window isn't left with a small map in the middle.
+    height: clamp(480px, calc(100vh - 300px), 1000px);
   }
 
   .map-node {
