@@ -37,11 +37,10 @@ export const cmcMineralIds = (stored) => {
 
 export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount >= CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
-// What the game's own AI makes of a deposit (RaceAIController.CalculateMineralDepsoitValue): accessibility,
+// What the game's own AI makes of a deposit: accessibility,
 // halved under 10,000 t and raised for a big deposit that is still easy to reach (more than 100,000, 250,000
 // and 1,000,000 t at accessibility above 0.4). Nothing under 2,000 t counts. An NPR seeds a mining colony on a
-// body whose deposits add up to 6 (Helpers.MineralDepositValueThreshold) and adds mines to a colony from 4
-// (Helpers.MinimumMiningDepositValueThreshold).
+// body whose deposits add up to 6 and adds mines to a colony from 4.
 export const DEPOSIT_MINIMUM_AMOUNT = 2000
 export const RICH_DEPOSIT_VALUE = 6
 export const WORTH_MINING_VALUE = 4

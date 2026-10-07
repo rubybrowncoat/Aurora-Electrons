@@ -34,7 +34,7 @@ Every read takes 8 ms or less on the sample. No `Actual*` column, alien `ShipID`
 | Rule | Source |
 |---|---|
 | Stance (`ContactStatus` 0–6) and communication (`CommStatus` 0–3) labels; species knowledge, engine type and class role codes | Reference |
-| Class roles are labelled by the rule that sets them (launchers of size 4 or more, smaller launchers, beams needing more than twice their recharge rate in power, other beams), not by the game's tentative names | Reference |
+| Class roles are labelled by the rule that sets them (launchers of size 4 or more, smaller launchers, beams needing more than twice their recharge rate in power, other beams), because the role names themselves are uncertain | Reference |
 | Diplomatic points against the lines where treaties and statuses change: −100, 200, 800, 2,400, 4,000, 6,000; standing worded with the game's report bands (at war, negative, neutral, positive, friendly, allied) | Reference |
 | A colony field shows once `MaxIntelligence` is **above** its threshold (100, 200, 300, 500), and is marked last-known while current points are no longer above it | Reference |
 | Sensor range and resolution show above 100 points; each ground unit counter reveals something at 20 | Reference |

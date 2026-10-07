@@ -2,7 +2,7 @@
 
 # Aurora C# intelligence mechanics and numeric values
 
-This reference covers alien intelligence, diplomatic contact, communication, electronic intelligence (ELINT), prisoners, species knowledge, ship and ground-force observation, territorial messages, and technology acquired through contact or capture. It describes the local `version/2.7.1` checkout, inspected on 6 October 2026 at commit `096bb4e`. Exact comparisons describe the decompiled implementation; entries labelled tentative retain uncertain symbol meanings.
+This reference covers alien intelligence, diplomatic contact, communication, electronic intelligence (ELINT), prisoners, species knowledge, ship and ground-force observation, territorial messages, and technology acquired through contact or capture. It describes Aurora C# 2.7.1. Some names and values are uncertain, and those entries are marked as uncertain.
 
 The central distinction is between a **contact classification**, a **communication state**, **diplomatic points**, and **intelligence points**. These are separate quantities. Numeric code 2 in `ContactStatus` means Friendly; code 2 in `CommStatus` means Communication Established.
 
@@ -10,7 +10,7 @@ Each `FCT_AlienRace` record belongs to a viewing race. A record with `ViewRaceID
 
 The database status fields decode as follows.
 
-| `FCT_AlienRace.ContactStatus` | Enum name | Meaning |
+| `FCT_AlienRace.ContactStatus` | Name | Meaning |
 | ---: | --- | --- |
 | 0 | Hostile | Hostile diplomatic/contact classification |
 | 1 | Neutral | Neutral diplomatic classification |
@@ -20,24 +20,24 @@ The database status fields decode as follows.
 | 5 | None | No associated/known diplomatic classification |
 | 6 | Combat | Additional combat contact/event classification; outside ordinary diplomatic progression |
 
-`Contact.GetContactStatus()` returns None when no contact race or corresponding alien-race record exists.
+The contact status is None when no contact race or corresponding alien-race record exists.
 
-| `FCT_AlienRace.CommStatus` | Enum name | Display description |
+| `FCT_AlienRace.CommStatus` | Name | Display description |
 | ---: | --- | --- |
 | 0 | None | No Communication |
-| 1 | AttemptingCommunication | Attempting Communication |
-| 2 | CommunicationEstablished | Communication Established |
-| 3 | CommunicationImpossible | Communication Impossible |
+| 1 | Attempting | Attempting Communication |
+| 2 | Established | Communication Established |
+| 3 | Impossible | Communication Impossible |
 
-`CommModifier` is accumulated translation progress, not a percentage or another status code. `CommEstablished` is the game time of establishment. `Contact.GetCommunicationStatus()` returns Impossible when the race/record is missing, so that helper's fallback does not prove a translation attempt failed.
+`CommModifier` is accumulated translation progress, not a percentage or another status code. `CommEstablished` is the game time of establishment. Communication status is reported as Impossible when the race or record is missing, so that fallback does not prove a translation attempt failed.
 
 New contact records have several possible starting states.
 
 | Creation case | Contact status | Communication | Initial diplomatic points |
 | --- | --- | --- | ---: |
 | Ordinary foreign contact by a standard race with primary-species Xenophobia other than 100 | Neutral | Attempting | 0 |
-| Own race, within that standard-race creation branch | Allied | Established | 10000 |
-| Another race with the same capital body, within that branch | Neutral | Established | 40 |
+| Own race, among standard-race contacts | Allied | Established | 10000 |
+| Another race with the same capital body, among standard-race contacts | Neutral | Established | 40 |
 | Hostile first-contact roll succeeds for an NPR | Hostile | Attempting | -1000 |
 | Viewing race is special, or its primary species has Xenophobia 100 | Hostile | Impossible | -1000 |
 | Full-intelligence bootstrap | Neutral | Established | 0 |
@@ -79,7 +79,7 @@ Grants received from the other race also improve the record holder's opinion, us
 | Friendly status | 100 |
 | Allied status | 200 |
 
-When the diplomacy mission value is zero, positive points move toward zero by `X*y`; negative points move toward zero by `(100-X)*y`, clamped at zero. This runs after the grant contributions, within the established-communication update path.
+When the diplomacy mission value is zero, positive points move toward zero by `X*y`; negative points move toward zero by `(100-X)*y`, clamped at zero. This runs after the grant contributions, once communication is established.
 
 Communication attempts run during the construction-cycle strategic update. Each attempt uses the following score:
 
@@ -91,11 +91,11 @@ R += 20 if both races have the same primary Species object
 
 `d100` means an integer roll from 1 through 100. The attempting record must have state 1. The reciprocal record must exist and have state 1 or 2; a reciprocal None or Impossible stalls the attempt. Missing mutual current contact also prevents a roll.
 
-Let `M = 1 + CommunicationsBonus` for the best qualifying commander. When there is no positive qualifying bonus, the code uses `M = 0.5` for positive progress. The commander's bonus changes the progress award, not the score `R`.
+Let `M = 1 + CommunicationsBonus` for the best qualifying commander. When no commander has a positive qualifying bonus, `M = 0.5` for positive progress. The commander's bonus changes the progress award, not the score `R`.
 
 | Score R | Outcome | Change to CommModifier |
 | --- | --- | ---: |
-| R >= 100 | Communication established | Establishment path; no progress delta |
+| R >= 100 | Communication established | Established (see below); no progress change |
 | 90 < R < 100 | Significant progress | +10*M |
 | 80 < R <= 90 | Moderate progress | +5*M |
 | 70 < R <= 80 | Minor progress | +3*M |
@@ -118,7 +118,7 @@ Sensor IP gain = elapsed subpulse seconds / 86400 * (1 + IntelligenceBonus)
 
 Sensor intelligence is shared for the same actual emitting sensor component in the viewing race's sensor catalogue. Each sensor record accumulates at most once per game timestamp. The first ELINT source in range is used; sources are deduplicated, and only the strongest ELINT strength is retained at identical coordinates. Multiple observing ships do not add parallel awards to that same sensor record in one timestamp.
 
-At `Sensor IP >= 100`, crossing from below 100 records the actual sensor resolution and range and emits the classification event. `AlienRaceSensor.GetDisplayName()` and the Intelligence screen's detailed sensor listing require `IP > 100`; at exactly 100 they can still show GPS, the emission product `Strength*Resolution`. Full class revelation sets each active sensor's IP to 500. A random race-intelligence sensor reward adds 200.
+At `Sensor IP >= 100`, crossing from below 100 records the actual sensor resolution and range and emits the classification event. The sensor's displayed name and the Intelligence screen's detailed sensor listing require `IP > 100`; at exactly 100 they can still show GPS, the emission product `Strength*Resolution`. Full class revelation sets each active sensor's IP to 500. A random race-intelligence sensor reward adds 200.
 
 For a colony's species Xenophobia `Xp`, and Intelligence multiplier `I = 1 + bonus`:
 
@@ -129,7 +129,7 @@ colony IP gain = base colony gain otherwise
 race IP contribution = base colony gain * min(1, TotalPopulation/100)
 ```
 
-Population is measured in millions, so the race contribution reaches full strength at 100 million inhabitants. The general race-IP gain method divides its input by five before communication is established. Thus both colony and race intelligence from this source are reduced to 20% before translation. Each colony record receives one accumulation per timestamp.
+Population is measured in millions, so the race contribution reaches full strength at 100 million inhabitants. Race IP gains are divided by five before communication is established. Both colony and race intelligence from this source are therefore reduced to 20% before translation. Each colony record receives one accumulation per timestamp.
 
 Colony information unlocks at the following **strict** thresholds.
 
@@ -142,9 +142,9 @@ Colony information unlocks at the following **strict** thresholds.
 
 The total-installation count includes installations with unit Cost >6. Factories combine construction, ordnance, and fighter factories. Mines combine mines, automated mines, and civilian mining complexes.
 
-Unobserved colonies' current IP decays each increment by the multiplier `1 - 0.25*elapsedYears`. This is a proportional deduction per elapsed interval, not a fixed point loss. `MaxIntelligence` preserves the highest previous IP value. Previously unlocked information remains visible after decay, with red text when current IP no longer exceeds its threshold and green text while current IP still qualifies. Saved facility-presence flags are set when observed present; this refresh routine does not clear them when an installation disappears.
+Unobserved colonies' current IP decays each increment by the multiplier `1 - 0.25*elapsedYears`. This is a proportional deduction per elapsed interval, not a fixed point loss. `MaxIntelligence` preserves the highest previous IP value. Previously unlocked information remains visible after decay, with red text when current IP no longer exceeds its threshold and green text while current IP still qualifies. Saved facility-presence flags are set when observed present; refreshing does not clear them when an installation disappears.
 
-Race intelligence is a spending pool for random discoveries. When `AlienRaceIntelligencePoints > 100`, one gain call subtracts 100 and tries to grant a reward. The code uses a single `if`, so one large gain can trigger only one reward in that call. It makes up to three `d7` selections, stopping at the first eligible result. Points are spent even if none of those three selections succeeds.
+Race intelligence is a spending pool for random discoveries. When `AlienRaceIntelligencePoints > 100`, one gain subtracts 100 and tries to grant a reward. One large gain triggers only one reward. The game makes up to three `d7` selections, stopping at the first eligible result. Points are spent even if none of those three selections succeeds.
 
 | d7 | Possible race-intelligence reward |
 | ---: | --- |
@@ -160,9 +160,9 @@ The seven selections have equal chance per roll, but successful rewards need not
 
 Prisoner interrogation requires established communication. Player interrogation runs at an imperial population of at least one million inhabitants with positive effective Naval Headquarters capacity. An NPR population of that size can use capacity one as a fallback.
 
-Enlisted interrogation has nominal capacity `floor(5000 * effective NHQ capacity * elapsedYears)` prisoners per update. Each processed prisoner provides 0.1 race IP before the relationship adjustment below. Groups are ordered by contact-status code, then unprocessed count descending. In the decompiled branch where a group exceeds remaining capacity, the capacity variable is not exhausted afterward; multiple large groups can therefore exceed that nominal aggregate capacity.
+Enlisted interrogation has nominal capacity `floor(5000 * effective NHQ capacity * elapsedYears)` prisoners per update. Each processed prisoner provides 0.1 race IP before the relationship adjustment below. Groups are ordered by contact-status code, then unprocessed count descending. When a group exceeds the remaining capacity, that capacity is not used up afterward; multiple large groups can therefore exceed that nominal aggregate capacity.
 
-For an unprocessed prisoner commander of rank level `r`, the literal implementation is:
+For an unprocessed prisoner commander of rank level `r`, the chance is:
 
 ```text
 C = NHQ capacity * 200 * elapsedYears * (Determination + Xenophobia)/(50*r)
@@ -170,7 +170,7 @@ interrogation succeeds if d100 < C
 raw commander IP = d((r+1)^3) + d((r+1)^3)
 ```
 
-Successful interrogation marks the commander Processed. The raw award ranges from 2 to `2*(r+1)^3`. In this formula, higher Determination/Xenophobia increases the computed chance; this is the implementation's expression.
+Successful interrogation marks the commander Processed. The raw award ranges from 2 to `2*(r+1)^3`. In this formula, higher Determination/Xenophobia increases the computed chance; this is how the game computes it.
 
 | Record holder's contact status | Enlisted and commander IP adjustment |
 | --- | --- |
@@ -182,11 +182,11 @@ Successful interrogation marks the commander Processed. The raw award ranges fro
 
 Species knowledge uses its own codes in `FCT_KnownSpecies.Status`.
 
-| Code | Enum name | Meaning |
+| Code | Name | Meaning |
 | ---: | --- | --- |
 | 0 | Discovered | Species identified; environmental tolerances shown as Unknown |
 | 1 | Autopsied | Environmental tolerances available |
-| 2 | FullyKnown_Tentative | Higher internal knowledge state; name remains tentative; the environmental panel treats it as known |
+| 2 | Fully known (uncertain) | Higher knowledge state; its exact meaning is uncertain; the environmental panel treats it as known |
 
 First recording an alien species creates a species-specific Alien Autopsy research project costing 1000 RP. Completing that project sets its status to Autopsied. Known tolerances include gravity, temperature, oxygen partial pressure, and maximum atmospheric pressure. Rescuing alien lifepods records species discovery and reveals the portrait; taking a population also records species knowledge.
 
@@ -207,21 +207,21 @@ Ship intelligence distinguishes observed class capabilities from individual hull
 
 Individual `FCT_AlienShip` records retain name, class, speed, first detection, last contact time/system/coordinates, shield/armour/penetrating damage, total damage, damage time, and Destroyed/Salvaged flags. A known ship count represents tracked hulls, not the race's complete fleet.
 
-Observed weapon amount is derived from `shots / shotsPerWeapon`. Recorded range and quantity increase when a larger value is observed. `ROF` starts at zero and records a smaller nonzero interval between observation timestamps when the condition qualifies; it is measured in game seconds. The method initializes `LastFired` on first discovery, but its existing-record path does not advance that timestamp. Consequently, treat this stored ROF as an observation artefact rather than a guaranteed true reload time. The class-level PD hit ratio is `TotalEnergyPDHits / TotalEnergyPDShots`; observing PD also flags known classes of ships in the same fleet as having missile defence.
+Observed weapon amount is derived from `shots / shotsPerWeapon`. Recorded range and quantity increase when a larger value is observed. `ROF` starts at zero and records a smaller nonzero interval between observation timestamps when the condition qualifies; it is measured in game seconds. `LastFired` is set when a class is first observed and isn't updated afterwards. Consequently, treat this stored ROF as an observation artefact rather than a guaranteed true reload time. The class-level PD hit ratio is `TotalEnergyPDHits / TotalEnergyPDShots`; observing PD also flags known classes of ships in the same fleet as having missile defence.
 
-Alien-class combat-role codes are retained with the decompiler's uncertainty.
+Alien-class combat-role codes. The meanings of some codes are uncertain.
 
 | `FCT_AlienClass.AlienClassRole` | Name |
 | ---: | --- |
 | 0 | Unknown |
-| 1 | AntiMissileMissile |
-| 2 | AntiShipMissile |
-| 3 | FastBeam_Tentative |
-| 4 | SlowBeam_Tentative |
-| 5 | Unknown_Value5 |
-| 6 | Unknown_Value6 |
+| 1 | Anti-missile missile |
+| 2 | Anti-ship missile |
+| 3 | Fast beam (uncertain) |
+| 4 | Slow beam (uncertain) |
+| 5 | Unknown (code 5) |
+| 6 | Unknown (code 6) |
 
-For a newly observed missile launcher, the implementation selects code 1 when component Size >=4, otherwise code 2 if the role is still Unknown. For a newly observed beam weapon, it selects code 3 when `PowerRequirement > 2*RechargeRate`, otherwise code 4 if the role is Unknown. These predicates are more reliable than interpreting the tentative names as confirmed tactical descriptions.
+For a newly observed missile launcher, the game assigns code 1 when component Size >=4, otherwise code 2 if the role is still Unknown. For a newly observed beam weapon, it assigns code 3 when the weapon's power requirement exceeds twice its recharge rate, otherwise code 4 if the role is Unknown. These conditions are more reliable than interpreting the uncertain names as confirmed tactical descriptions.
 
 Ground-unit intelligence has three independent observation counters. Crossing each counter's threshold produces its corresponding classification.
 
@@ -231,7 +231,7 @@ Ground-unit intelligence has three independent observation counters. Crossing ea
 | Armour penetrations observed | 20 | Armour strength |
 | Units destroyed observed | 20 | Hit-point value |
 
-`RecordCombatObservations` also calls weapon revelation without a 20-observation requirement. The first such revelation provides shots, penetration, and damage for weapon-bearing components.
+Combat observations also reveal weapon information without a 20-observation requirement. The first such revelation provides shots, penetration, and damage for weapon-bearing components.
 
 Ground-combat force estimates improve with consecutive rounds. Let `n` be the consecutive-combat-round count:
 
@@ -241,7 +241,7 @@ Q = 1 + d(E)/100
 estimate = true unit count * Q, or true unit count / Q, chosen randomly
 ```
 
-The displayed error ranges are 200% after one round, 100% after two, 50% after four, 20% after ten, and 10% after twenty. The estimate is multiplicative, so a 200% label corresponds to a possible factor of up to 3 or down to 1/3, not a symmetric plus/minus 200% count. Known classes are listed individually; unknown classes are pooled. `RollDie(0)` returns zero if rounding eventually makes E zero.
+The displayed error ranges are 200% after one round, 100% after two, 50% after four, 20% after ten, and 10% after twenty. The estimate is multiplicative, so a 200% label corresponds to a possible factor of up to 3 or down to 1/3, not a symmetric plus/minus 200% count. Known classes are listed individually; unknown classes are pooled. If rounding makes E zero, the roll is zero.
 
 Technology can also arrive through treaties, salvage, and conquest.
 
@@ -254,11 +254,11 @@ Technology can also arrive through treaties, salvage, and conquest.
 | Random race-IP technology reward | Complete an eligible unknown generic technology whose prerequisites are already satisfied |
 | Wreck technology data | Research points = integer truncation of eligible technology cost * recovered percentage/100 |
 | Conquered standard-race population, technology capture enabled | For each eligible unknown generic scannable technology, `d100 <= researchLabCount` completes it |
-| Transfer to ImperialPopulation, technology capture enabled | Transfers all eligible unknown generic scannable technologies in the inspected transfer path |
+| Transfer to an imperial population, technology capture enabled | Transfers all eligible unknown generic scannable technologies |
 
 Survey treaties distribute new results for systems already known to the recipient. Gravitational sharing marks the survey location and charts its jump points; geological sharing marks the body as surveyed.
 
-Wreck technology generation begins when `d200 <= class Size` in HS. Each generated data entry carries `d20`, or 1-20%, research information; further generation rolls use d128 against a repeatedly halved threshold. Salvage excludes `NoTechScan` entries and generally chooses the cheapest unknown nonautomatic, non-ruin-only technology in the same category with cost no greater than the recovered technology. Command-and-control data has a separate direct selection path. Player salvage research is held aboard ship and downloaded in a system with an owned population having at least one effective research facility, unless HoldTechData is set. The decompiled generator includes an anomalous `randomTechSystem == null && randomTechSystem.AutomaticResearch` condition; these generation rules should not be read as a guarantee of a usable reward.
+Wreck technology generation begins when `d200 <= class Size` in HS. Each generated data entry carries `d20`, or 1-20%, research information; further generation rolls use d128 against a repeatedly halved threshold. Salvage excludes `NoTechScan` entries and generally chooses the cheapest unknown nonautomatic, non-ruin-only technology in the same category with cost no greater than the recovered technology. Command-and-control data is selected separately. Player salvage research is held aboard ship and downloaded in a system with an owned population having at least one effective research facility, unless HoldTechData is set. The automatic-research check in this generation contains an apparent anomaly, so these rules should not be read as a guarantee of a usable reward.
 
 Territorial protection is another coded field, stored per viewing race, alien race, and system in `FCT_AlienRaceSystemStatus.ProtectionStatusID`.
 
@@ -280,15 +280,15 @@ penalty = sqrt(effective detected ship tonnage + 10*detected colony EM)
           * system multiplier * relationship multiplier * NPR Xenophobia/100
 ```
 
-| Internal SystemValue code/name | Base system multiplier in this routine |
+| System value code and name | Base system multiplier |
 | --- | ---: |
 | 0 None | No valued-system intrusion processing |
-| 1 Insignificant_Tentative | No valued-system intrusion processing |
+| 1 Insignificant (uncertain) | No valued-system intrusion processing |
 | 2 Low | No valued-system intrusion processing |
 | 3 Medium | 2.5 |
 | 4 High | 5 |
 | 5 Extreme | 10 |
-| 6 OtherRace_Tentative | 20 |
+| 6 Other race (uncertain) | 20 |
 
 Friendly halves the multiplier; negative diplomatic points double it. Allied contacts are skipped. Friendly contacts are also skipped below High system value, and fixed relationships are skipped. Shipping-line ships are excluded when the NPR grants Trade Access. Nonmilitary ships with no known weapons count at 10% tonnage. One known unarmed diplomatic ship can receive a 10000-ton allowance where the system value is below Extreme or the observing NPR knows only one system. Positive effective ship tonnage below 1000 is raised to 1000; positive colony EM below 100 is raised to 100.
 
@@ -296,7 +296,7 @@ Let `T` be the resulting threat multiplier and `h = (DiplomaticPoints + 100)/thi
 
 When a player sends a protection claim affecting an NPR's valued system, the immediate diplomatic penalty is `2 * ProtectionCode^2 * InternalSystemValue^2 * NPR Xenophobia/100`. A permanent-presence signature below `1000 * NPR Xenophobia/100` causes rejection for inadequate presence. Other claims are assessed against system connectivity/value, relative military power, population signatures, and the NPR's Xenophobia, Militancy, and Determination. This is a contextual comparison, not a fixed diplomatic-point threshold for acceptance.
 
-Attacks alter diplomatic points through the following implementation paths.
+Attacks alter diplomatic points as follows.
 
 | Attack consequence | Point deduction |
 | --- | --- |
@@ -304,25 +304,25 @@ Attacks alter diplomatic points through the following implementation paths.
 | Ship armour hit | 0.25 * damage per hit |
 | Ship penetrating hit | 1 * damage per hit |
 | Attack on an NPR ship whose main function is Diplomacy | Multiply the ship penalties by 3 |
-| Nonship helper used for bombardment/shipyards | 0.25 * total hits * damage per hit |
-| Ground units destroyed in ground combat | The call subtracts cumulative destroyed unit size/100 |
+| Attack on a non-ship target (bombardment, shipyards) | 0.25 * total hits * damage per hit |
+| Ground units destroyed in ground combat | Subtracts cumulative destroyed unit size/100 |
 
-The ship helper forces points to -101 when its post-damage value is above -101; for an NPR diplomatic ship that forced value is -303. The nonship helper similarly forces -101. A separate shipyard path can additionally subtract resolved damage and force hostility. Ground-combat calls force points below -100 when necessary, and the inspected loop uses a cumulative destroyed-size value on successive hits. Thus a single universal damage-to-diplomacy formula would misdescribe this checkout.
+Damaging a ship forces points to -101 when the post-damage value is above -101; for an NPR diplomatic ship that forced value is -303. Damaging a non-ship target similarly forces -101. A separate shipyard case can additionally subtract resolved damage and force hostility. Ground combat forces points below -100 when necessary, and uses a cumulative destroyed-size value on successive hits. Thus a single universal damage-to-diplomacy formula would misdescribe this version.
 
 The remaining contact and intelligence codes are useful for database readers.
 
 | Field/type | Numeric mapping |
 | --- | --- |
-| `FCT_Contacts.ContactMethod` | 1 ActiveSensor_Tentative; 2 Thermal; 3 EM_Or_Emission; 4 Shield; 5 Transponder; 6 Environmental_Tentative |
-| `FCT_Contacts.ContactType` | 0 None; 1 Ship; 3 Salvo; 4 Population; 9 Packet; 12 GroundUnit; 14 STOGroundUnit; 16 Shipyard; 17 Explosion; 18 EWImpact; 19 SecondaryPower; 20 SecondaryMg; 22 WayPoint |
-| ContactFreshnessState, runtime | 0 Current; 1 Partial; 2 Lost |
+| `FCT_Contacts.ContactMethod` | 1 Active sensor (uncertain); 2 Thermal; 3 EM or emission; 4 Shield; 5 Transponder; 6 Environmental (uncertain) |
+| `FCT_Contacts.ContactType` | 0 None; 1 Ship; 3 Salvo; 4 Population; 9 Packet; 12 Ground unit; 14 STO ground unit; 16 Shipyard; 17 Explosion; 18 EW impact; 19 Secondary power; 20 Secondary Mg; 22 Waypoint |
+| Contact freshness (not saved) | 0 Current; 1 Partial; 2 Lost |
 | `FCT_AlienClass.EngineType` | 0 None; 1 Military; 2 Commercial; 3 FAC; 4 Survey; 5 Fighter |
 | Jammer type | 0 None; 1 Sensor; 2 FireControl; 3 Missile |
 | Transponder mode | 0 Off; 1 Friendly; 2 All |
 | Special race type | 0 Standard; 1 Precursors; 2 Swarm; 3 Invaders; 4 Rakhas; 5 Eldar; 6 Ancients |
 | Racial personality selector | 0 Xenophobia; 1 Translation; 2 Militancy; 3 Determination |
 
-Contact-method names require context: the inspected colony EM-detection path uses method 4 (Shield) for a population EM signature. Ship freshness is computed from its constituent contact tracks: stale tracks with no current tracks produce Lost; a mixture produces Partial; otherwise the code defaults to Current.
+Contact-method names require context: colony EM detection records a population EM signature as method 4 (Shield). Ship freshness is computed from its constituent contact tracks: stale tracks with no current tracks produce Lost; a mixture produces Partial; otherwise it is Current.
 
 The relevant modules and commander bonuses have their own IDs and base values.
 
@@ -337,7 +337,7 @@ The relevant modules and commander bonuses have their own IDs and base values.
 | Communications commander bonus | 22 | Percentage multiplier; catalogue maximum 1.5 = +50% |
 | Intelligence commander bonus | 23 | Percentage multiplier; catalogue maximum 1.5 = +50% |
 
-The bonus API returns multipliers: 1.2 means +20%, and the default for an absent percentage bonus is 1. The catalogue maximum is a database definition, not a claim that every possible loaded or edited value is runtime-clamped.
+Commander bonuses are multipliers: 1.2 means +20%, and the default for an absent percentage bonus is 1. The catalogue maximum is a database definition, not a claim that every possible loaded or edited value is clamped during play.
 
 | ELINT strength | Research cost RP | Module size HS | Module cost BP | Crew |
 | ---: | ---: | ---: | ---: | ---: |
@@ -347,9 +347,9 @@ The bonus API returns multipliers: 1.2 means +20%, and the default for an absent
 | 11 | 15000 | 10 | 220 | 15 |
 | 14 | 30000 | 10 | 280 | 15 |
 
-These are the five generic ELINT technologies/components in the local export. Strength affects interception range, while the accumulation formula above supplies the point rate.
+These are the five generic ELINT technologies/components in the exported catalogue. Strength affects interception range, while the accumulation formula above supplies the point rate.
 
-Racial personality queries return Xenophobia 100 and Translation -25 for special races. In the inspected standard-race implementation, a population-total check occurs before accumulation and therefore uses a primary-species fallback; when no imperial species is available it returns 50. The later population-weighted branch is marked unreachable in the source. Keep this in mind when applying formulas to multi-species empires.
+Racial personality values are Xenophobia 100 and Translation -25 for special races. For standard races, a population-total check occurs before accumulation and therefore uses a primary-species fallback; when no imperial species is available the value is 50. A later population-weighted calculation is never reached. Keep this in mind when applying formulas to multi-species empires.
 
 The persisted intelligence tables divide information by observer and subject.
 
@@ -372,23 +372,23 @@ The persisted intelligence tables divide information by observer and subject.
 | `FCT_RaceGroundCombat` | ConsecutiveCombatRounds used by force estimates |
 | `FCT_ShipTechData` | Research data held aboard ships |
 
-Scope queries by `GameID` and the appropriate viewing/detecting race field. Restrict player intelligence queries to these observer-specific records: joins through ActualClassID, ActualSensor, ShipID, or PopulationID can expose actual capabilities beyond the observations. `FCT_AlienPopulation.GFTF` is the persisted field loaded into `GroundForceConstructionComplexes`.
+Scope queries by `GameID` and the appropriate viewing/detecting race field. Restrict player intelligence queries to these observer-specific records: joins through ActualClassID, ActualSensor, ShipID, or PopulationID can expose actual capabilities beyond the observations. `FCT_AlienPopulation.GFTF` holds the ground force construction complex count.
 
-Boolean flags generally decode as 0 false and 1 true. `RealClassNames`, `RandomNameOrder`, and `FixedRelationship` are integer flags in the class; RandomNameOrder defaults to 1. `RealClassNames` and naming-theme choices govern identification/display, not an additional IP tier. FirstDetected, LastContactTime, CommEstablished, and related timestamps are game-time seconds; a game year is 31536000 seconds and a day is 86400 seconds. Sizes in HS convert at 50 tons per HS; observed speed is km/s and weapon/sensor range is km.
+Boolean flags generally decode as 0 false and 1 true. `RealClassNames`, `RandomNameOrder`, and `FixedRelationship` are integer flags; RandomNameOrder defaults to 1. `RealClassNames` and naming-theme choices govern identification/display, not an additional IP tier. FirstDetected, LastContactTime, CommEstablished, and related timestamps are game-time seconds; a game year is 31536000 seconds and a day is 86400 seconds. Sizes in HS convert at 50 tons per HS; observed speed is km/s and weapon/sensor range is km.
 
-For event-log readers, the relevant event IDs are:
+For event-log readers, the relevant event IDs, with their `DIM_EventType.Description`, are:
 
 | Event type | ID |
 | --- | ---: |
 | Communication | 55 |
-| IntelligenceUpdate | 106 |
-| NewAlienRace | 147 |
-| SuccessfulEspionage | 157 |
+| Intelligence Update | 106 |
+| New Alien Race | 147 |
+| Successful Espionage | 157 |
 | Diplomacy | 180 |
-| GroundCombatIntelligence | 314 |
-| AlienCommunication | 315 |
-| InterrogationUpdate | 367 |
+| Ground Combat Intelligence | 314 |
+| Alien Communication | 315 |
+| Interrogation Update | 367 |
 
 These are event-type IDs, separate from UI event categories: Intelligence is category 15 and Diplomacy category 19.
 
-The [documentation archive](https://aurora4x-docs.vercel.app/#current) is an external companion reference. The [September 2020 C# manual](https://dokk.org/library/aurora_csharp_unofficial_manual_v0.1.4) corroborates mutual contact, the diplomacy formula, and reduced translation progress without a qualified commander. This reference's precise enums, boundaries, and anomalous branches belong to the local 2.7.1 source branch; a historical description or the archive's current label does not establish identical implementation behavior.
+The [documentation archive](https://aurora4x-docs.vercel.app/#current) is an external companion reference. The [September 2020 C# manual](https://dokk.org/library/aurora_csharp_unofficial_manual_v0.1.4) corroborates mutual contact, the diplomacy formula, and reduced translation progress without a qualified commander. This reference's precise codes, boundaries, and anomalies describe version 2.7.1; a historical description or the archive's current label does not establish identical behaviour.

@@ -614,8 +614,8 @@ Validated: 561 rows, 0.00 s: `(459995, order 1798, 'Standard Transit', type 1, J
 - Codes (from the reference):
   - `ContactStatus`: 0 Hostile, 1 Neutral, 2 Friendly, 3 Allied, 4 Civilian, 5 None, 6 Combat.
   - `CommStatus`: 0 None, 1 Attempting Communication, 2 Communication Established, 3 Communication Impossible. `CommModifier` is accumulated translation progress, and `CommEstablished` the game time it was established.
-  - `FCT_KnownSpecies.Status`: 0 Discovered, 1 Autopsied, 2 fully known (tentative).
-  - `FCT_AlienClass.EngineType`: 0 None, 1 Military, 2 Commercial, 3 FAC, 4 Survey, 5 Fighter. `AlienClassRole`: 0 Unknown, 1 anti-missile missile, 2 anti-ship missile, 3 and 4 beam roles (tentative).
+  - `FCT_KnownSpecies.Status`: 0 Discovered, 1 Autopsied, 2 fully known (uncertain).
+  - `FCT_AlienClass.EngineType`: 0 None, 1 Military, 2 Commercial, 3 FAC, 4 Survey, 5 Fighter. `AlienClassRole`: 0 Unknown, 1 anti-missile missile, 2 anti-ship missile, 3 and 4 beam roles (uncertain).
   - `FCT_AlienRaceSystemStatus.ProtectionStatusID`: 0 No Protection to 5 Demand Leave With Threat.
 - Diplomatic points have their own thresholds, independent of the codes: −100 hostility boundary, 200 trade treaty, 800 geological treaty and Friendly, 2,400 gravitational treaty, 4,000 Allied, 6,000 technology treaty. NPRs promote above a threshold and demote below it.
 - The sample decoded:

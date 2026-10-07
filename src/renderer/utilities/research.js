@@ -2,7 +2,7 @@
 //
 // The game lists a project as researchable when its field matches, it is not ruin-only, it belongs to
 // nobody or to the race (or the race made it eligible), its prerequisites are researched, and it is not
-// researched, running or queued (Population.PopulateResearchableTechnologiesListView). A prerequisite id
+// researched, running or queued. A prerequisite id
 // that has no tech row can never be researched, so a tech that needs one is out of reach for good.
 // `evaluateResearch` computes that once for every tech, with the path to it, so the page only reads.
 
@@ -304,7 +304,7 @@ export const researchMultiplier = (bonus, specialised) => (specialised ? 4 * bon
 // `constructs` has one row per populated colony on a construct, as the game counts them.
 export const fieldBonuses = (constructs) => constructs.reduce((bonuses, row) => ({ ...bonuses, [row.FieldID]: (bonuses[row.FieldID] || 1) + (row.ResearchBonus - 1) / 10 }), {})
 
-// RP a year the project's labs make on a tech of `fieldId` (Population.RefreshResearchProjectsListView).
+// RP a year the project's labs make on a tech of `fieldId`, as the game's research list shows it.
 // A project with no scientist makes none.
 export const annualResearchPoints = (project, fieldId, bonuses = {}) => {
   if (!project.CommanderID) {

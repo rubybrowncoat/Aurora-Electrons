@@ -33,8 +33,8 @@ export const SPECIES_STATUS = { 0: 'Discovered', 1: 'Autopsied', 2: 'Fully known
 // FCT_AlienClass.EngineType
 export const ENGINE_TYPES = { 0: 'Unknown', 1: 'Military', 2: 'Commercial', 3: 'FAC', 4: 'Survey', 5: 'Fighter' }
 
-// FCT_AlienClass.AlienClassRole, labelled by the rule that sets it rather than the game's tentative
-// names: 1 for a launcher of size 4 or more, 2 for a smaller one, 3 for a beam whose power need is
+// FCT_AlienClass.AlienClassRole, labelled by the rule that sets it, since the role names themselves are
+// uncertain: 1 for a launcher of size 4 or more, 2 for a smaller one, 3 for a beam whose power need is
 // more than twice its recharge rate, 4 for any other beam.
 export const CLASS_ROLES = { 0: 'Unknown', 1: 'Large missiles', 2: 'Small missiles', 3: 'Slow-recharge beams', 4: 'Fast-recharge beams', 5: 'Unknown', 6: 'Unknown' }
 

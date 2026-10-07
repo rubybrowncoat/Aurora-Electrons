@@ -1,6 +1,6 @@
 // Terraforming plans: which gases to add or remove to make a body liveable for a species, how much work
 // that is, and what the body costs afterwards. The game terraforms one gas at a time per colony, adding or
-// removing atm at the colony's capacity scaled by the body's surface area (Population.ProcessTerraforming),
+// removing atm at the colony's capacity scaled by the body's surface area,
 // so a plan's work is the sum over its gases. See docs/DATABASE.md § Terraforming.
 //
 // The plan itself is the page's long-standing heuristic (a target atmosphere that centres the species'
@@ -10,7 +10,7 @@
 import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, hydrosphereAtTemperature, infrastructurePerMillion, orbitOf } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
-// Water vapour condenses at this many atm a year and evaporates at this many (Helpers.cs:593); a hydro
+// Water vapour condenses at this many atm a year and evaporates at this many; a hydro
 // extent of 1 % is 1/40 atm of vapour.
 export const CONDENSATION_RATE = 0.1
 export const EVAPORATION_RATE = 4

@@ -1,7 +1,7 @@
 // Travel distance from the nearest of some origins (the capital, or every sizeable colony) over the jump points
 // the race has charted. A jump costs no distance; the legs inside a system do, in a straight line from jump
 // point to jump point. Distances follow the shortest route in kilometres, and the jump count is the count on
-// that route (the game's own map distance, Game.PopulateMapDistancesFromSelectedSystem, goes by fewest jumps
+// that route (the game's own map distance goes by fewest jumps
 // first and measures from the system centre, which is not what a freighter flies).
 
 export const KM_PER_AU = 149600000

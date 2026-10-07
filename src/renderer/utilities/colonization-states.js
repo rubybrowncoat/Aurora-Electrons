@@ -8,7 +8,7 @@
 //   - whether any species can live there, and what a colony costs now against after terraforming;
 //   - whether its deposits are rich enough for a mining colony, whatever people could do there.
 // Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown
-// under 6 times the race's colonisation skill (Minerals.cs:782), so they are read on the cost before the skill
+// under 6 times the race's colonisation skill, so they are read on the cost before the skill
 // (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really
 // pays is the infrastructure per million people, shown beside the band.
 

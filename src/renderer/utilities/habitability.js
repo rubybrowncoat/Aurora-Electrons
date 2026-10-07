@@ -1,6 +1,6 @@
-// What a body costs a species to live on, from the game's own rules: SystemBody.CalculateColonyCost,
-// CalculateColonyCostAtOrbitalDistance and CalculateSurfaceTemperatureAtOrbitalDistance, checked against
-// the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony cost).
+// What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of
+// its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony
+// cost).
 //
 // A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock,
 // BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, ParentOrbitalDistance,
@@ -13,11 +13,11 @@ export const BODY_TYPE = { GAS_GIANT: 4, SUPERJOVIAN: 5 }
 export const HYDROSPHERE = { NONE: 1, VAPOUR: 2, LIQUID: 3, ICE_SHEET: 4 }
 export const GAS = { WATER_VAPOUR: 5 }
 
-// A gas above this share of the atmosphere is too much of a good thing (Helpers.MaxBreathableAtmosphericGasAmount).
+// A gas above this share of the atmosphere is too much of a good thing.
 export const MAX_BREATHABLE_PERCENT = 30
-// Terraforming and atmosphere retention need at least this gravity (Helpers.MinimumTerraformingGravity).
+// Terraforming and atmosphere retention need at least this gravity.
 export const MINIMUM_TERRAFORMING_GRAVITY = 0.1
-// Infrastructure a low-gravity colony needs per unit of colony cost (Helpers.LowGravityPenaltyMultiplier).
+// Infrastructure a low-gravity colony needs per unit of colony cost.
 export const LOW_GRAVITY_INFRASTRUCTURE = 2
 
 const ICE_SHEET_ALBEDO_STEP = 0.0015
@@ -33,7 +33,7 @@ export const FACTORS = [
   { key: 'gravity', label: 'Gravity' },
 ]
 
-// FCT_Species with the ranges the game derives from it (Game.cs:19197).
+// FCT_Species with the ranges the game derives from it.
 export const speciesLimits = (species) => ({
   ...species,
   MinimumTemperature: species.IdealTemperature - species.TemperatureDeviation,
@@ -48,8 +48,7 @@ export const speciesLimits = (species) => ({
 export const equilibriumTemperature = (distance, luminosity) => Math.max(255 / Math.sqrt(distance / Math.sqrt(luminosity)), 4)
 
 // The base temperature the game works with, which is not the saved BaseTemp column. The game works it out
-// again from where a body is now (SystemBody.InitialiseOrbitalParameters, :2111) and a moon takes its
-// planet's (Star.cs:430); the column is only written when a body changes, so it is stale for most eccentric
+// again from where a body is now and a moon takes its planet's; the column is only written when a body changes, so it is stale for most eccentric
 // orbits. The saved SurfaceTemp follows the recomputed value on every planet, asteroid, comet and moon of
 // the sample and of three other saves (docs/DATABASE.md § Colony cost). Needs DistanceToParent, the star's
 // luminosity and, for a moon, the parent's DistanceToParent.
@@ -60,11 +59,11 @@ const round4 = (value) => Math.round(value * 10000) / 10000
 export const hydrosphereAtTemperature = (temperature) => (temperature > WATER_BOILING_KELVIN ? HYDROSPHERE.VAPOUR : temperature > WATER_FREEZING_KELVIN ? HYDROSPHERE.LIQUID : HYDROSPHERE.ICE_SHEET)
 
 // A gas is frozen out below its boiling point. A saved body carries the game's flag; a body that doesn't
-// exist yet (a terraforming target) gets the rule the game applies after every change (UpdateAtmosPress).
+// exist yet (a terraforming target) gets the rule the game applies after every change.
 const frozenOut = (gas, temperature, planned) => (planned ? temperature < gas.BoilingPoint : !!gas.FrozenOut)
 
 // The surface temperature the body would settle at `distance` AU from its star, with its present
-// atmosphere (SystemBody.cs:2528). It reads the stored BaseTemp: the game never recomputes it from the
+// atmosphere. It reads the stored BaseTemp: the game never recomputes it from the
 // moving orbit, so the ratio of surface to base temperature is the atmosphere's alone.
 export const temperatureAtDistance = (body, distance) => {
   const equilibrium = equilibriumTemperature(distance, body.StarLuminosity)
@@ -236,6 +235,6 @@ export const limitingFactor = (factors) => {
   return first && first.value > 0 ? first : null
 }
 
-// Infrastructure per million people at a colony cost (Population.cs:8614). A low-gravity colony needs
+// Infrastructure per million people at a colony cost. A low-gravity colony needs
 // twice as much. The game does this in decimals, so float noise is rounded off before the ceiling.
 export const infrastructurePerMillion = (cost, species, lowGravity) => Math.ceil(Number(((cost * 100 * (lowGravity ? LOW_GRAVITY_INFRASTRUCTURE : 1)) / species.PopulationDensityModifier).toFixed(6)))

@@ -28,7 +28,7 @@ export const GOALS = [
 ]
 
 // What a point of a mineral's deposit value is worth before the race's scarcity of it. The game's own AI weighs
-// every mineral alike (RaceAIController.CalculateMineralDepsoitValue), and so does the Planner: scarcity, not a
+// every mineral alike, and so does the Planner: scarcity, not a
 // fixed table, says which are wanted.
 export const DEFAULT_MINERAL_WEIGHTS = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, 1]))
 
