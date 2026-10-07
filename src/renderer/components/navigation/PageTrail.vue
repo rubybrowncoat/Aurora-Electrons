@@ -1,6 +1,5 @@
 <template>
   <div ref="root" class="trail">
-    <span v-if="showLabel" ref="label" class="trail__label"><v-icon small>mdi-history</v-icon>Trail</span>
     <div ref="scroller" class="trail__scroller" :class="{ 'trail__scroller--clipped': clipped }">
       <div ref="chips" class="trail__chips">
         <template v-for="(step, position) in steps">
@@ -29,16 +28,10 @@ import { mapActions, mapGetters, mapState } from 'vuex'
 import { sectionById, pageByRoute } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
-// The label's width until it has been measured, and the gap between it and the chips.
-const LABEL_WIDTH = 72
-const LABEL_GAP = 8
-
 export default {
   data () {
     return {
-      showLabel: true,
       clipped: false,
-      labelWidth: LABEL_WIDTH,
     }
   },
   computed: {
@@ -75,26 +68,19 @@ export default {
       'jump',
     ]),
 
-    // Hide the label when the chips and the label together don't fit, then keep the current chip in view: the
-    // trail scrolls to its end, or just far enough back to show the current chip when forward entries fill the room.
+    // Keep the current chip in view: the trail scrolls to its end, or just far enough back to show the current chip
+    // when forward entries fill the room. The oldest chips are the ones that clip.
     refresh () {
-      const { root, label, scroller, chips } = this.$refs
+      const { scroller, chips } = this.$refs
 
-      if (label) {
-        this.labelWidth = label.offsetWidth
+      this.clipped = chips.offsetWidth > scroller.clientWidth
+      scroller.scrollLeft = scroller.scrollWidth
+
+      const current = chips.querySelector('.trail__step--now')
+
+      if (current && current.offsetLeft < scroller.scrollLeft) {
+        scroller.scrollLeft = Math.max(0, current.offsetLeft - 8)
       }
-
-      this.showLabel = chips.offsetWidth + this.labelWidth + LABEL_GAP <= root.clientWidth
-      this.$nextTick(() => {
-        this.clipped = chips.offsetWidth > scroller.clientWidth
-        scroller.scrollLeft = scroller.scrollWidth
-
-        const current = chips.querySelector('.trail__step--now')
-
-        if (current && current.offsetLeft < scroller.scrollLeft) {
-          scroller.scrollLeft = Math.max(0, current.offsetLeft - 8)
-        }
-      })
     },
   },
 }
@@ -103,27 +89,9 @@ export default {
 <style lang="scss" scoped>
 .trail {
   display: flex;
-  flex: 1 1 0;
   align-items: center;
-  gap: 8px;
-  min-width: 140px;
+  min-width: 0;
   height: 100%;
-}
-
-.trail__label {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--ae-muted);
-
-  .v-icon {
-    color: inherit;
-  }
 }
 
 .trail__scroller {
@@ -138,36 +106,39 @@ export default {
 }
 
 .trail__scroller--clipped {
-  mask-image: linear-gradient(to right, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 14px);
 }
 
 .trail__chips {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   width: max-content;
-  padding-inline: 8px;
+  padding-inline: 2px;
 }
 
 .trail__separator {
   flex: none;
   color: var(--ae-muted) !important;
+  opacity: .6;
 }
 
 .trail__step {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding-inline: 10px;
+  gap: 5px;
+  height: 22px;
+  padding-inline: 8px;
   border: 1px solid var(--ae-border);
-  border-radius: 13px;
-  font-size: 12px;
+  border-radius: 11px;
+  font-size: 11px;
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
   color: var(--ae-ink);
+  transition: border-color .15s ease, background .15s ease;
 
   &:hover {
     border-color: var(--sc);

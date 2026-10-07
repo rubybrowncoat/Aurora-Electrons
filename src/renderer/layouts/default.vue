@@ -72,7 +72,7 @@
       <template #foot><kbd>Esc</kbd> close</template>
     </flyout-panel>
 
-    <v-app-bar app flat height="64" extension-height="44" class="app-bar">
+    <v-app-bar app flat height="64" extension-height="44" :extended="tabs.length > 1" class="app-bar">
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
@@ -98,16 +98,10 @@
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
 
-      <template #extension>
-        <div class="bar-extension" :style="pageStyle">
-          <template v-if="tabs.length > 1">
-            <v-tabs class="section-tabs" :value="tabIndex" show-arrows height="44">
-              <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
-            </v-tabs>
-            <div class="bar-extension__divider" />
-          </template>
-          <page-trail />
-        </div>
+      <template v-if="tabs.length > 1" #extension>
+        <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
+          <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
+        </v-tabs>
       </template>
     </v-app-bar>
 
@@ -134,20 +128,15 @@
     </v-main>
 
     <v-footer app inset height="36" class="app-footer">
-      <div class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
-      <template v-if="forumUrl">
-        <v-spacer />
-        <a class="app-footer__link" :href="forumUrl" @click.prevent="openForum">
-          <v-icon small>mdi-forum-outline</v-icon>
-          Updates &amp; feedback
-        </a>
-      </template>
+      <transition name="footer-swap" mode="out-in">
+        <page-trail v-if="hasMoved" key="trail" class="app-footer__trail" :style="pageStyle" />
+        <div v-else key="tagline" class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
+      </transition>
     </v-footer>
   </v-app>
 </template>
 
 <script>
-import { shell } from 'electron'
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import EmpireAvatar from '../components/navigation/EmpireAvatar.vue'
@@ -159,7 +148,7 @@ import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { loadEmpires } from '../utilities/empires'
-import { FORUM_URL, PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
+import { PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
 // The flyout id of the rail's Empires entry; the others are section ids.
@@ -181,7 +170,6 @@ export default {
   data () {
     return {
       EMPIRES_ID,
-      forumUrl: FORUM_URL,
 
       flyoutId: null,
       paletteOpen: false,
@@ -197,6 +185,7 @@ export default {
     ]),
     ...mapState('navigation', [
       'lastInSection',
+      'entries',
     ]),
     ...mapState('history', {
       historyRevision: 'revision',
@@ -214,6 +203,10 @@ export default {
       'historyRecorded',
     ]),
 
+    // The trail replaces the tagline once a page beyond the one the app started on has been opened.
+    hasMoved () {
+      return this.entries.length > 1
+    },
     page () {
       return pageByRoute[this.$route.path]
     },
@@ -381,11 +374,6 @@ export default {
     },
     cancelLeave () {
       clearTimeout(this.leaveTimer)
-    },
-
-    // A plain link would open a new app window in Electron, so hand it to the system browser.
-    openForum () {
-      shell.openExternal(this.forumUrl)
     },
 
     openPalette () {
@@ -586,20 +574,26 @@ export default {
   border-top: 1px solid var(--ae-border) !important;
 }
 
-.app-footer__link {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  text-decoration: none;
-  color: var(--ae-muted);
+.app-footer ::v-deep .overline,
+.app-footer__trail {
+  flex: 1 1 0;
+  min-width: 0;
+}
 
-  &:hover {
-    color: var(--ae-primary);
-  }
+.footer-swap-enter-active,
+.footer-swap-leave-active {
+  transition: opacity .18s ease;
+}
 
-  .v-icon {
-    color: inherit;
+.footer-swap-enter,
+.footer-swap-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footer-swap-enter-active,
+  .footer-swap-leave-active {
+    transition: none;
   }
 }
 
@@ -651,28 +645,7 @@ export default {
   color: var(--ae-ink);
 }
 
-.bar-extension {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-  height: 44px;
-  margin-block: -4px;
-}
-
-.bar-extension__divider {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  margin-inline: 8px;
-  background: var(--ae-border);
-}
-
 .section-tabs {
-  flex: 0 1 auto;
-  min-width: 0;
-  width: auto;
-
   ::v-deep .v-tab {
     letter-spacing: .06em;
   }
