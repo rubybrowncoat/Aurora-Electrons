@@ -104,7 +104,9 @@ const LAYOUT_CHECK = () => {
 
     if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
       if (element.scrollWidth > element.clientWidth + 1) {
-        scrolls.add(describe(element).replace(/ ".*"$/, ''))
+        const card = element.closest('.v-card')
+
+        scrolls.add(`${describe(element).replace(/ ".*"$/, '')} (${element.scrollWidth} in ${element.clientWidth} px)${card ? ` in "${card.innerText.trim().split('\n')[0].slice(0, 30)}"` : ''}`)
       }
     }
 
