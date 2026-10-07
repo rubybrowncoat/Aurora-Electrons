@@ -258,12 +258,15 @@ const run = async () => {
     // The dev server can reload the page while it finishes loading, so wait for a loaded save.
     await page.waitForFunction(() => window.$nuxt && window.$nuxt.$store && window.$nuxt.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    await page.locator('.v-navigation-drawer').getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+    // The picker shows until a race is chosen. A game with one race selects on click; otherwise the race is next.
+    const picker = page.locator('.game-picker')
 
-    const raceItem = page.locator('.v-navigation-drawer .v-list-group__items').getByText(RACE, { exact: true })
+    await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+
+    const raceItem = picker.getByText(RACE, { exact: true })
 
     if (await raceItem.count()) {
-      await raceItem.first().click()
+      await raceItem.last().click()
     }
 
     await settle()

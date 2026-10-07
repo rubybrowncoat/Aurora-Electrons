@@ -92,7 +92,12 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <nuxt />
+        <v-card v-if="!RaceID && $route.path !== '/settings'" class="game-picker mx-auto mt-12" max-width="420" outlined>
+          <v-card-title>Pick a game</v-card-title>
+          <game-list v-if="games.length" :games="games" />
+          <v-card-text v-else-if="$asyncComputed.games.state === 'success'">No games found in the save.</v-card-text>
+        </v-card>
+        <nuxt v-else />
       </v-container>
     </v-main>
 
@@ -105,6 +110,7 @@
 <script>
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
+import GameList from '../components/navigation/GameList.vue'
 import GameSwitcher from '../components/navigation/GameSwitcher.vue'
 import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
@@ -117,6 +123,7 @@ const FLYOUT_CLOSE_DELAY = 220
 
 export default {
   components: {
+    GameList,
     GameSwitcher,
     HistoryButtons,
     PagePalette,
@@ -144,6 +151,7 @@ export default {
       'config',
       'database',
 
+      'RaceID',
       'historyRecorded',
     ]),
 
