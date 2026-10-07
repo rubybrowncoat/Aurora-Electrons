@@ -23,6 +23,11 @@
         <v-chip v-if="page.wip" x-small label outlined>WIP</v-chip>
       </div>
       <div class="section-flyout__blurb">{{ page.blurb }}</div>
+      <div v-if="page.peekable" class="section-flyout__peek">
+        <transition name="peek-fade">
+          <span v-if="peeks[page.route]">{{ peeks[page.route] }}</span>
+        </transition>
+      </div>
     </div>
 
     <div class="section-flyout__foot"><kbd>Ctrl K</kbd> search every page <kbd>Alt ←</kbd> back</div>
@@ -49,6 +54,11 @@ export default {
     shortcut: {
       type: Number,
       required: true,
+    },
+    // route -> the live line under a `peekable` page, once it has loaded.
+    peeks: {
+      type: Object,
+      default: () => ({}),
     },
   },
 }
@@ -161,6 +171,25 @@ export default {
   font-size: 12px;
   line-height: 1.4;
   color: var(--ae-muted);
+}
+
+.section-flyout__peek {
+  grid-column: 2 / 4;
+  min-height: 16px;
+  padding-top: 4px;
+  font-family: var(--ae-mono);
+  font-size: 11px;
+  line-height: 12px;
+  color: var(--ae-ink);
+  opacity: .8;
+}
+
+.peek-fade-enter-active {
+  transition: opacity .25s ease;
+}
+
+.peek-fade-enter {
+  opacity: 0;
 }
 
 .section-flyout__foot {

@@ -1,6 +1,8 @@
 // Colony maths for the Colony Outlook page: body capacity, population growth, infrastructure and
 // the worker split. Sources and checks: docs/plans/aurcalcs/build-2.md § Colony Outlook.
 
+import { roundToDecimal } from './math'
+
 const EARTH_SURFACE_AREA = 511187128
 // Millions of people an Earth-sized body holds (docs `colonies`, Population Capacity).
 const EARTH_CAPACITY = 12000
@@ -108,4 +110,21 @@ export const projectBody = (members, years) => {
   }
 
   return results.map((result, index) => ({ ...result, final: populations[index] }))
+}
+
+// Millions of people, at a readable precision.
+export const people = (millions) => {
+  const value = Math.abs(millions || 0)
+
+  if (value === 0) {
+    return '0'
+  } else if (value >= 1000) {
+    return `${roundToDecimal(millions / 1000, 2)} bn`
+  } else if (value >= 10) {
+    return `${roundToDecimal(millions, 1)} M`
+  } else if (value >= 1) {
+    return `${roundToDecimal(millions, 2)} M`
+  }
+
+  return `${roundToDecimal(millions * 1000, 0)} k`
 }

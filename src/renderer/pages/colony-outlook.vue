@@ -146,7 +146,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
-import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, projectBody, workerSplit } from '../utilities/colonies'
+import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
@@ -521,23 +521,6 @@ export default {
       default: [],
     },
   },
-}
-
-// Millions of people, at a readable precision.
-function people(millions) {
-  const value = Math.abs(millions || 0)
-
-  if (value === 0) {
-    return '0'
-  } else if (value >= 1000) {
-    return `${roundToDecimal(millions / 1000, 2)} bn`
-  } else if (value >= 10) {
-    return `${roundToDecimal(millions, 1)} M`
-  } else if (value >= 1) {
-    return `${roundToDecimal(millions, 2)} M`
-  }
-
-  return `${roundToDecimal(millions * 1000, 0)} k`
 }
 
 function percent(fraction, decimals) {

@@ -220,7 +220,7 @@ import { chartTheme } from '../components/charts/theme'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { LITRES_PER_TON, MSP_MINERALS, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
+import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
@@ -239,20 +239,6 @@ const INPUTS = Object.keys(INPUT_LABELS)
 const BURN_CLASSES = 12
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
-
-const compact = (value) => {
-  const size = Math.abs(value)
-
-  if (size >= 1e9) {
-    return `${roundToDecimal(value / 1e9, 2)} bn`
-  } else if (size >= 1e6) {
-    return `${roundToDecimal(value / 1e6, 1)} M`
-  } else if (size >= 1e3) {
-    return `${roundToDecimal(value / 1e3, 1)} k`
-  }
-
-  return `${roundToDecimal(value, 0)}`
-}
 
 export default {
   name: 'LogisticsPage',

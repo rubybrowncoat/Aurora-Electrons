@@ -2,6 +2,8 @@
 // game's mineral ledger and the industrial queue's demand. Validated against
 // the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
+import { roundToDecimal } from './math'
+
 export const MINERALS = [
   { id: 1, name: 'Duranium' },
   { id: 2, name: 'Neutronium' },
@@ -368,4 +370,19 @@ export const navalAdminChainBonus = (admins, systemId, commandId) => {
   }
 
   return bonus
+}
+
+// Tons at a readable precision: 47.3 Mt, 307 kt.
+export const compact = (value) => {
+  const size = Math.abs(value)
+
+  if (size >= 1e9) {
+    return `${roundToDecimal(value / 1e9, 1)} Gt`
+  } else if (size >= 1e6) {
+    return `${roundToDecimal(value / 1e6, 1)} Mt`
+  } else if (size >= 1e3) {
+    return `${roundToDecimal(value / 1e3, 1)} kt`
+  }
+
+  return `${roundToDecimal(value, 0)} t`
 }

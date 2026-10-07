@@ -1,6 +1,8 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks:
 // docs/plans/aurcalcs/build-2.md § Logistics.
 
+import { roundToDecimal } from './math'
+
 // The racial "Maintenance Production Rate" is BP per facility per year; 1 MSP is 0.25 BP.
 export const MSP_PER_BP = 4
 // A refinery turns 1 t of Sorium into 2,000 L of fuel.
@@ -121,4 +123,19 @@ export const harvesterIdleReason = (ship) => {
   }
 
   return ship.FuelCapacity > 0 && ship.Fuel >= ship.FuelCapacity * 0.999 ? 'Tanks full' : null
+}
+
+// Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
+export const compact = (value) => {
+  const size = Math.abs(value)
+
+  if (size >= 1e9) {
+    return `${roundToDecimal(value / 1e9, 2)} bn`
+  } else if (size >= 1e6) {
+    return `${roundToDecimal(value / 1e6, 1)} M`
+  } else if (size >= 1e3) {
+    return `${roundToDecimal(value / 1e3, 1)} k`
+  }
+
+  return `${roundToDecimal(value, 0)}`
 }

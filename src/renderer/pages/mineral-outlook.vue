@@ -212,7 +212,7 @@ import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { joinLabels, tracked } from '../utilities/load-tracking'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, orbitalRate, stockProjection, surfaceRate, yearSteps } from '../utilities/minerals'
+import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, orbitalRate, stockProjection, surfaceRate, yearSteps } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
 const BUCKET_DAYS = 5
@@ -237,20 +237,6 @@ const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
-
-const compact = (value) => {
-  const size = Math.abs(value)
-
-  if (size >= 1e9) {
-    return `${roundToDecimal(value / 1e9, 1)} Gt`
-  } else if (size >= 1e6) {
-    return `${roundToDecimal(value / 1e6, 1)} Mt`
-  } else if (size >= 1e3) {
-    return `${roundToDecimal(value / 1e3, 1)} kt`
-  }
-
-  return `${roundToDecimal(value, 0)} t`
-}
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 

@@ -22,6 +22,11 @@ export const separatedNumber = (number, separator = '\'') => {
   return number.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, separator)
 }
 
+// The character behind the "Thousands Separator" setting's name (`selectedSeparator`, default 'Tick').
+export const thousandsSeparator = (name = 'Tick') => {
+  return name === 'Tick' ? '\'' : name === 'Comma' ? ',' : name === 'Dash' ? '-' : name === 'Space' ? ' ' : ''
+}
+
 // Scaler
 // Anchors (x -> y)
 const X = [0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00, 3.50, 4.00, 4.50, 5.00, 6.00, 7.00, 8.00]

@@ -41,6 +41,7 @@
       :pages="flyoutSection.pages"
       :active-route="page.route"
       :shortcut="railSections.indexOf(flyoutSection) + 1"
+      :peeks="peekLines"
       @go="go"
       @mouseenter.native="cancelLeave"
       @mouseleave.native="leaveRail"
@@ -125,6 +126,7 @@ import PagePalette from '../components/navigation/PagePalette.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { FORUM_URL, PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
+import { peeks } from '../utilities/peeks'
 
 const FLYOUT_OPEN_DELAY = 140
 const FLYOUT_CLOSE_DELAY = 220
@@ -156,6 +158,12 @@ export default {
     ...mapState('navigation', [
       'lastInSection',
     ]),
+    ...mapState('history', {
+      historyRevision: 'revision',
+    }),
+    ...mapState('peeks', {
+      peekLines: 'lines',
+    }),
 
     ...mapGetters([
       'config',
@@ -184,9 +192,14 @@ export default {
       return this.currentSection ? this.currentSection.style : this.neutralStyle
     },
 
-    // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have.
+    // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have,
+    // and `peekable` when the flyout shows a live line under it.
     pages () {
-      return PAGES.filter(({ hidden }) => !hidden).map((page) => ({ ...page, disabled: Boolean(page.requiresHistory && !this.historyRecorded) }))
+      return PAGES.filter(({ hidden }) => !hidden).map((page) => {
+        const disabled = Boolean(page.requiresHistory && !this.historyRecorded)
+
+        return { ...page, disabled, peekable: !disabled && Boolean(peeks[page.route]) }
+      })
     },
     openPages () {
       return this.pages.filter(({ disabled }) => !disabled)
@@ -218,6 +231,12 @@ export default {
         this.spyNPR = config.get('spyNPR', false)
       },
     },
+
+    // The flyout's lines load when it opens, and again when the save, the race or the history file changes under it.
+    flyoutId: 'loadFlyoutPeeks',
+    database: 'loadFlyoutPeeks',
+    RaceID: 'loadFlyoutPeeks',
+    historyRevision: 'loadFlyoutPeeks',
   },
   created() {
     this.$vuetify.theme.dark = this.config.get('darkMode', false)
@@ -263,6 +282,15 @@ export default {
       'back',
       'forward',
     ]),
+    ...mapActions('peeks', {
+      loadPeeks: 'load',
+    }),
+
+    loadFlyoutPeeks () {
+      if (this.flyoutSection) {
+        this.loadPeeks(this.flyoutSection.pages.filter(({ peekable }) => peekable).map(({ route }) => route))
+      }
+    },
 
     setDarkMode(value) {
       this.$vuetify.theme.dark = value
