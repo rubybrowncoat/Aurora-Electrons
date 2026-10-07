@@ -1,6 +1,9 @@
 import { pageByRoute } from '../utilities/navigation'
 
 const HISTORY_MENU_LENGTH = 12
+// How many entries the app bar's trail shows before and after the current page.
+const TRAIL_BEHIND = 7
+const TRAIL_AHEAD = 3
 
 // The pages visited this session, as the browser's back/forward list would keep them, plus the last
 // page used in each section. `entries` holds full paths. `pending` is the entry index a back,
@@ -37,6 +40,12 @@ export const getters = {
   },
   forwardEntries (state) {
     return walk(state, 1)
+  },
+  // The entries around the current one, as the trail shows them: [{ index, path }].
+  trail (state) {
+    const from = Math.max(0, state.index - TRAIL_BEHIND)
+
+    return state.entries.slice(from, state.index + TRAIL_AHEAD + 1).map((path, offset) => ({ index: from + offset, path }))
   },
   // Distinct pages visited before the current one, most recent first.
   recents (state) {

@@ -47,7 +47,7 @@
       @mouseleave.native="leaveRail"
     />
 
-    <v-app-bar app flat height="64" :extension-height="tabs.length > 1 ? 44 : 0" class="app-bar">
+    <v-app-bar app flat height="64" extension-height="44" class="app-bar">
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
@@ -73,10 +73,16 @@
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
 
-      <template v-if="tabs.length > 1" #extension>
-        <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
-          <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
-        </v-tabs>
+      <template #extension>
+        <div class="bar-extension" :style="pageStyle">
+          <template v-if="tabs.length > 1">
+            <v-tabs class="section-tabs" :value="tabIndex" show-arrows height="44">
+              <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
+            </v-tabs>
+            <div class="bar-extension__divider" />
+          </template>
+          <page-trail />
+        </div>
       </template>
     </v-app-bar>
 
@@ -123,6 +129,7 @@ import GameList from '../components/navigation/GameList.vue'
 import GameSwitcher from '../components/navigation/GameSwitcher.vue'
 import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
+import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { FORUM_URL, PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
@@ -137,6 +144,7 @@ export default {
     GameSwitcher,
     HistoryButtons,
     PagePalette,
+    PageTrail,
     SectionFlyout,
   },
   data () {
@@ -589,7 +597,28 @@ export default {
   color: var(--ae-ink);
 }
 
+.bar-extension {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  margin-block: -4px;
+}
+
+.bar-extension__divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin-inline: 8px;
+  background: var(--ae-border);
+}
+
 .section-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+
   ::v-deep .v-tab {
     letter-spacing: .06em;
   }
