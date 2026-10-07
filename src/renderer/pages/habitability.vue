@@ -59,7 +59,12 @@
           </v-menu>
         </v-col>
         <v-col cols="12">
-          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips dense hide-details @change="config.set('habitabilitySystems', systems)">
+          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple dense hide-details @change="config.set('habitabilitySystems', systems)">
+            <template #selection="{ item, index }">
+              <v-chip v-if="systems.length === systemNames.length && !index" small label>All {{ systemNames.length }} systems</v-chip>
+              <v-chip v-else-if="systems.length !== systemNames.length && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
+              <span v-else-if="systems.length !== systemNames.length && index === 8" class="caption text--secondary ml-1">+{{ systems.length - 8 }} more</span>
+            </template>
             <template #prepend-item>
               <v-list-item ripple @click="toggleSystems">
                 <v-list-item-action>
@@ -87,7 +92,7 @@
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
           <v-spacer />
-          <span class="caption text--secondary">{{ summaryLine }}</span>
+          <span class="caption text--secondary summary-line">{{ summaryLine }}</span>
         </v-col>
         <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
           <v-row dense>
@@ -185,7 +190,7 @@
                 </template>
                 <span>Qualifies for a civilian mining complex with {{ item.row.minerals.cmc.join(', ') }}. {{ cmcNote(item.row) }}</span>
               </v-tooltip>
-              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block">{{ compactTons(item.row.minerals.total) }} t</span>
+              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block">{{ compactTons(item.row.minerals.total) }}</span>
             </div>
             <v-tooltip v-else top>
               <template #activator="{ on }">
@@ -541,6 +546,10 @@ export default {
 
     toggleSystems() {
       this.systems = this.systems.length === this.systemNames.length ? [] : this.systemNames.map((system) => system.SystemID)
+      this.config.set('habitabilitySystems', this.systems)
+    },
+    removeSystem(id) {
+      this.systems = this.systems.filter((systemId) => systemId !== id)
       this.config.set('habitabilitySystems', this.systems)
     },
     selectSystems(ids) {

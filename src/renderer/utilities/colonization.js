@@ -130,7 +130,7 @@ const worth = (goal, ranking, { capacity, cost, years, distanceAU, minerals }) =
 // worth is highest settling as the body is, or waiting for terraforming.
 export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals }) => {
   if (!assessment.cost.colonisable) {
-    return { species, assessment, value: 0, strategy: 'none', years: null, cost: null, capacity: 0, infrastructure: null }
+    return { species, assessment, capacityNow, capacityAfter, value: 0, strategy: 'none', years: null, cost: null, capacity: 0, infrastructure: null }
   }
 
   const now = { strategy: 'now', years: 0, cost: assessment.cost.worst, capacity: capacityNow, lowGravity: assessment.cost.lowGravity }
@@ -147,6 +147,8 @@ export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { 
   return {
     species,
     assessment,
+    capacityNow,
+    capacityAfter,
     ...best,
     infrastructure: infrastructurePerMillion(best.cost, species, best.lowGravity),
   }

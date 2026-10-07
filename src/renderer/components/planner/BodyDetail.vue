@@ -8,7 +8,7 @@
           <v-icon v-if="evaluation.species.SpeciesID === item.best.species.SpeciesID && item.best.strategy !== 'none'" x-small right title="Best for the goal">mdi-star</v-icon>
         </v-btn>
       </v-btn-toggle>
-      <v-chip v-if="assessment.cost.colonisable" small label class="ml-3" :color="outcome.color" outlined>{{ outcome.label }}</v-chip>
+      <v-chip v-if="assessment.cost.colonisable" small label class="ml-3" :color="outcome.color" outlined>{{ plan ? `Terraformed: ${outcome.label}` : outcome.label }}</v-chip>
       <span v-if="assessment.cost.colonisable" class="caption text--secondary ml-2">{{ outcome.description }}</span>
     </div>
 
@@ -106,7 +106,7 @@
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
           <v-chip v-for="deposit in deposits" :key="deposit.MaterialID" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.Amount < ranking.minimumDeposit }">
-            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.Amount) }} t · {{ round(deposit.Accessibility, 2) }}
+            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.Amount) }} · {{ round(deposit.Accessibility, 2) }}
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
