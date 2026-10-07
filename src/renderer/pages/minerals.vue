@@ -1,7 +1,5 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
     <div v-if="bodyGroups">
       <v-container fluid>
         <v-row justify="start">
@@ -57,7 +55,7 @@
           <v-col cols="12">
             <v-row>
               <v-col class="pr-2">
-                <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
+                <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips>
                   <template #prepend-item>
                     <v-list-item ripple @click="toggleSystems">
                       <v-list-item-action>
@@ -95,7 +93,7 @@
                     </v-list-item>
                     <v-divider class="mt-2" />
                   </template>
-                </v-select>
+                </v-autocomplete>
               </v-col>
               <v-col cols="auto" class="d-flex align-center">
                 <v-menu offset-y :close-on-content-click="false">
@@ -186,6 +184,12 @@
               </template>
               <template #[`item.SystemBodyOrder`]="{ item }">
                 {{ systemBodyName(item) }}
+                <v-tooltip v-if="cmcQualifyingMinerals(item).length" top max-width="360">
+                  <template #activator="{ on }">
+                    <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
+                  </template>
+                  <span>Qualifies for a civilian mining complex: {{ cmcQualifyingMinerals(item).join(', ') }} (10,000 t+ at accessibility 0.7+). The game also needs a populated system and a body under 80 AU from its star; change the minerals in Settings.</span>
+                </v-tooltip>
               </template>
               <template #[`item.GroundMineralSurvey`]="{ item }">
                 <v-tooltip top>
@@ -260,6 +264,7 @@ import _intersectionBy from 'lodash/intersectionBy'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName } from '../utilities/aurora'
 import { areSetsEqual } from '../utilities/generic'
+import { CMC_CONFIG_KEY, MINERALS, cmcMineralIds, qualifiesForCmc } from '../utilities/minerals'
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -370,6 +375,10 @@ export default {
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
+    cmcMineralNames() {
+      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY)).map((id) => MINERALS.find((mineral) => mineral.id === id).name)
+    },
+
     itemsPerPageOptions() {
       return [10, 15, 30, 50, 100]
     },
@@ -464,7 +473,7 @@ export default {
 
           return names
         }, {})
-      )
+      ).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
     },
 
     preFilteredBodyGroups() {
@@ -689,6 +698,10 @@ export default {
 
     systemBodyName,
 
+    cmcQualifyingMinerals(body) {
+      return this.cmcMineralNames.filter((name) => qualifiesForCmc(body[name]))
+    },
+
     areSetsEqual,
 
     addFilter() {
@@ -791,7 +804,7 @@ export default {
           return []
         }
 
-        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID left join FCT_Race on FCT_Race.RaceID = FCT_SystemBodySurveys.RaceID and FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
+        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Minerals', items)
 
           return items

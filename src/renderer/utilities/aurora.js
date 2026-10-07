@@ -107,3 +107,13 @@ export const toBoolean = (v) => {
   if (typeof v === 'string') return ['1', 'TRUE', 'YES'].includes(v.trim().toUpperCase())
   return false
 }
+
+// `FCT_Race.SpecialNPRID`: the special factions the game controls (0 is a player race or an ordinary NPR empire).
+export const SPECIAL_NPR_NAMES = {
+  1: 'Precursors',
+  2: 'Swarm',
+  3: 'Invaders',
+  4: 'Rakhas',
+  5: 'Eldar',
+  6: 'Ancients',
+}

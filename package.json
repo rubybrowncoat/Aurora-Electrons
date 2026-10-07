@@ -1,6 +1,6 @@
 {
   "name": "aurora-electrons-new",
-  "version": "0.9.14",
+  "version": "0.10.1",
   "description": "Aurora Electrons",
   "main": "./dist/main/index.js",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "node .electron-nuxt/build.js",
     "web": "node .electron-nuxt/web.js",
     "web:smoke": "node .electron-nuxt/web/smoke.js",
+    "electron:smoke": "node .electron-nuxt/electron-smoke.js",
     "lint": "node_modules/.bin/eslint --ext .js,.vue,.ts -f ./node_modules/eslint-friendly-formatter ./src",
     "lint:fix": "yarn lint --fix",
     "preinstall": "node .electron-nuxt/check-engines.js",
@@ -51,6 +52,7 @@
   },
   "dependencies": {
     "@timohausmann/quadtree-js": "^1.2.6",
+    "chart.js": "^4.5.1",
     "chokidar": "^4.0.3",
     "color-hash": "^2.0.2",
     "cytoscape": "^3.33.1",
@@ -64,6 +66,7 @@
     "d3-interpolate": "^2.0.1",
     "dayjs": "^1.11.18",
     "electron-store": "^8.2.0",
+    "env-paths": "^2.2.1",
     "lodash": "^4.17.21",
     "pixi-viewport": "^4.35.0",
     "pixi.js": "^6.5.10",

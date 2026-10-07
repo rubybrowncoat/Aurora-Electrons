@@ -1,648 +1,353 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <div v-else>
-      <v-container fluid>
-        <v-row justify="start">
-          <v-col>
-            <v-autocomplete v-model="selectedSpeciesId" :items="species" :item-text="(item) => `${item.SpeciesName} (${separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator)} M)`" item-value="SpeciesID" label="Species" auto-select-first dense solo />
-          </v-col>
-          <v-col cols="4">
-            <v-text-field v-model.number="terraformers" type="number" min="10" placeholder="40" :hint="`Terraformers at ${selectedSpecies.TerraformingRate} rate`" :rules="[rules.required, rules.positive]" persistent-hint dense solo @change="config.set('habitabilityTerraformers', terraformers)" />
-          </v-col>
-          <v-col cols="auto">
-            <div class="d-flex align-center flex-wrap">
-              <v-menu offset-y :close-on-content-click="false">
-                <template #activator="{ on, attrs }">
-                  <v-btn outlined v-bind="attrs" v-on="on">
-                    Filters<span v-if="activeFilterCount"> ({{ activeFilterCount }})</span>
-                  </v-btn>
+    <v-container fluid class="planner-page">
+      <div class="toolbar">
+        <div class="tool tool--species">
+          <div class="tool__label caption text--secondary">Species</div>
+          <v-select v-model="selectedSpeciesId" :items="speciesItems" item-text="text" item-value="value" aria-label="Species" dense outlined hide-details />
+        </div>
+        <div class="tool">
+          <div class="tool__label caption text--secondary">Goal</div>
+          <v-btn-toggle v-model="goal" mandatory dense @change="(value) => config.set('habitabilityGoal', value)">
+            <v-tooltip v-for="option in goals" :key="option.id" bottom>
+              <template #activator="{ on }">
+                <v-btn :value="option.id" small v-on="on"><v-icon small left>{{ option.icon }}</v-icon>{{ option.label }}</v-btn>
+              </template>
+              <span>{{ option.hint }}</span>
+            </v-tooltip>
+          </v-btn-toggle>
+        </div>
+        <div class="tool tool--terraformers">
+          <div class="tool__label caption text--secondary">Terraformers</div>
+          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto" @change="config.set('habitabilityTerraformers', terraformers)">
+            <template #append>
+              <v-tooltip bottom max-width="260">
+                <template #activator="{ on }">
+                  <v-icon small v-on="on">mdi-information-outline</v-icon>
                 </template>
+                <span>Terraforming: {{ terraformerHint }}</span>
+              </v-tooltip>
+            </template>
+          </v-text-field>
+        </div>
+        <div class="tool tool--systems">
+          <div class="tool__label caption text--secondary">Active systems</div>
+          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
+            <template #selection="{ item, index }">
+              <v-chip v-if="systems.length === systemNames.length && !index" small label>All {{ systemNames.length }} systems</v-chip>
+              <v-chip v-else-if="systems.length !== systemNames.length && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
+              <span v-else-if="systems.length !== systemNames.length && index === 8" class="caption text--secondary ml-1">+{{ systems.length - 8 }} more</span>
+            </template>
+            <template #prepend-item>
+              <v-list-item ripple @click="toggleSystems">
+                <v-list-item-action>
+                  <v-icon>{{ systems.length > 0 ? (systems.length == systemNames.length ? 'mdi-emoticon-outline' : 'mdi-emoticon-happy-outline') : 'mdi-emoticon-sad-outline' }}</v-icon>
+                </v-list-item-action>
+                <v-list-item-content>
+                  <v-list-item-title>Select All</v-list-item-title>
+                </v-list-item-content>
+              </v-list-item>
+              <v-list-item v-for="preset in systemPresets" :key="preset.key" ripple :input-value="areSetsEqual(new Set(systems), new Set(preset.ids))" @click="selectSystems(preset.ids)">
+                <v-list-item-action>
+                  <v-icon>{{ preset.icon }}</v-icon>
+                </v-list-item-action>
+                <v-list-item-content>
+                  <v-list-item-title>{{ preset.label }}</v-list-item-title>
+                </v-list-item-content>
+              </v-list-item>
+              <v-divider class="mt-2" />
+            </template>
+          </v-autocomplete>
+        </div>
+        <div class="tool tool--actions">
+          <div class="tool__buttons">
+            <v-menu offset-y :close-on-content-click="false">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Filters" v-bind="attrs" v-on="on"><v-icon small left>mdi-filter-variant</v-icon><span class="tool__btn-label">Filters</span><span v-if="activeFilterCount">&nbsp;({{ activeFilterCount }})</span></v-btn>
+              </template>
+              <v-list dense>
+                <v-list-item v-for="filter in filterOptions" :key="filter.key">
+                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
+                </v-list-item>
+                <v-divider class="my-1" />
+                <v-list-item>
+                  <v-btn text small @click="resetFilters">Reset Filters</v-btn>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="520">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Ranking" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon><span class="tool__btn-label">Ranking</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu">
+                <div class="subtitle-2 mb-1">How targets are ranked</div>
+                <div class="caption text--secondary mb-3">
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before your colonisation tech, so the scale means the same for every race), years of terraforming, and AU from your nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                </div>
+                <v-row dense>
+                  <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
+                    <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
+                  </v-col>
+                </v-row>
+                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short you are of that mineral.</div>
+                <v-row dense>
+                  <v-col v-for="mineral in minerals" :key="mineral.id" cols="6" sm="4">
+                    <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" :hint="scarcityHint(mineral.id)" persistent-hint dense outlined @change="(value) => setWeight(mineral.id, value)" />
+                  </v-col>
+                </v-row>
+                <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
+              </v-card>
+            </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="640">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Plan states" v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon><span class="tool__btn-label">Plan states</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu">
+                <div class="subtitle-2 mb-1">What each plan state means</div>
+                <div class="caption text--secondary mb-3">
+                  The Plan column says what it takes to settle a body. Colony cost bands are read before your colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what you actually pay. Click a state to show only those bodies.
+                </div>
+                <div v-for="group in stateGroups" :key="group.group" class="mb-2">
+                  <div class="overline">{{ group.group }}</div>
+                  <div v-for="state in group.states" :key="state.id" class="legend-row" :class="{ 'legend-row--on': stateFilter.includes(state.id) }" @click="toggleStateFilter(state.id)">
+                    <v-chip small label :color="state.color" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
+                    <span class="legend-rule">{{ state.rule }}</span>
+                    <span class="legend-count">{{ separatedNumber(stateCounts[state.id] || 0, separator) }}</span>
+                  </div>
+                </div>
+                <v-btn v-if="stateFilter.length" text small @click="stateFilter = []">Show all states</v-btn>
+              </v-card>
+            </v-menu>
+          </div>
+        </div>
+      </div>
 
-                <v-list dense>
-                  <v-list-item>
-                    <v-checkbox v-model="filterNonTerraformable" label="Hide Non-Terraformable" dense hide-details @change="config.set('habitabilityFilterNonTerraformable', filterNonTerraformable)" />
-                  </v-list-item>
-                  <v-list-item>
-                    <v-checkbox v-model="filterWithoutMinerals" label="Hide Without Minerals" dense hide-details @change="config.set('habitabilityFilterWithoutMinerals', filterWithoutMinerals)" />
-                  </v-list-item>
+      <v-row dense align="center" class="mt-1">
+        <v-col cols="12" class="d-flex align-center flex-wrap view-row">
+          <v-btn-toggle v-model="view" mandatory dense class="mr-4" @change="(value) => config.set('habitabilityView', value)">
+            <v-tooltip v-for="option in viewOptions" :key="option.id" bottom max-width="300">
+              <template #activator="{ on }">
+                <v-btn :value="option.id" small v-on="on">{{ option.label }}<span class="view-count">{{ separatedNumber(viewCounts[option.id], separator) }}</span></v-btn>
+              </template>
+              <span>{{ option.hint }}</span>
+            </v-tooltip>
+          </v-btn-toggle>
+          <span class="tool__label caption text--secondary mr-3">Show</span>
+          <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on" @change="config.set('habitabilityBodyClasses', bodyClasses)">
+            <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
+          </v-chip-group>
+          <v-chip v-for="id in stateFilter" :key="id" small label close :color="stateById[id].color" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
+          <v-spacer />
+          <span class="caption text--secondary summary-line">{{ summaryLine }}</span>
+        </v-col>
+        <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
+          <v-row dense>
+            <v-col cols="auto">
+              <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
+              <v-btn :to="{ path: 'minerals', query: { bodies: JSON.stringify(selectedBodies.map(bodyReference)) } }" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
+              <v-btn class="d-block mt-4" style="width: 100%" small outlined @click="clearSelection">Clear Selection</v-btn>
+            </v-col>
+            <v-col>
+              <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => deselect(body)">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
+            </v-col>
+          </v-row>
+        </v-col>
+      </v-row>
 
-                  <v-divider class="my-1" />
+      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
+        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
+        <template #append>
+          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
+        </template>
+      </v-alert>
+      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <v-alert v-else-if="!speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
-                  <v-list-item>
-                    <v-checkbox v-model="filterOwnPopulations" label="Hide Own Populations" dense hide-details @change="config.set('habitabilityFilterOwnPopulations', filterOwnPopulations)" />
-                  </v-list-item>
-                  <v-list-item>
-                    <v-checkbox v-model="filterOtherPopulations" label="Hide Other Populations" dense hide-details @change="config.set('habitabilityFilterOtherPopulations', filterOtherPopulations)" />
-                  </v-list-item>
+      <v-card v-if="ready && speciesRows.length" class="mt-3" elevation="2">
+        <v-data-table :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
+            <td class="text-no-wrap">
+              <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+              <v-btn v-else icon small @click.stop="select(item.body)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
+              <v-btn icon small @click.stop="expand(!isExpanded)"><v-icon>{{ isExpanded ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon></v-btn>
+            </td>
+          </template>
 
-                  <v-divider class="my-1" />
-
-                  <v-list-item>
-                    <v-checkbox v-model="filterDoneTerraforming" label="Hide Terraformed" dense hide-details @change="config.set('habitabilityFilterDoneTerraforming', filterDoneTerraforming)" />
-                  </v-list-item>
-                  <v-list-item>
-                    <v-checkbox v-model="filterUninhabited" label="Hide Uninhabited" dense hide-details @change="config.set('habitabilityFilterUninhabited', filterUninhabited)" />
-                  </v-list-item>
-
-                  <v-divider class="my-1" />
-
-                  <v-list-item>
-                    <v-btn
-                      text
-                      small
-                      @click="
-                        filterNonTerraformable = false
-                        filterWithoutMinerals = false
-                        filterOwnPopulations = false
-                        filterOtherPopulations = false
-                        filterDoneTerraforming = false
-                        filterUninhabited = false
-
-                        config.set('habitabilityFilterNonTerraformable', filterNonTerraformable)
-                        config.set('habitabilityFilterWithoutMinerals', filterWithoutMinerals)
-                        config.set('habitabilityFilterOwnPopulations', filterOwnPopulations)
-                        config.set('habitabilityFilterOtherPopulations', filterOtherPopulations)
-                        config.set('habitabilityFilterDoneTerraforming', filterDoneTerraforming)
-                        config.set('habitabilityFilterUninhabited', filterUninhabited)
-                      "
-                    >
-                      Reset Filters
-                    </v-btn>
-                  </v-list-item>
-                </v-list>
-              </v-menu>
+          <template #[`item.sortRank`]="{ item }">
+            <div v-if="item.row.rank" class="rank-cell">
+              <span class="rank-number">{{ item.row.rank }}</span>
+              <span class="score-meter" :title="`Worth ${roundToDecimal(item.row.score, 0)}% of the best target`"><i :style="{ width: `${item.row.score}%` }" /></span>
             </div>
-          </v-col>
-          <v-col cols="12">
-            <v-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" label="Active Systems" item-text="SystemName" item-value="SystemID" multiple small-chips deletable-chips @change="config.set('habitabilitySystems', systems)">
-              <template #prepend-item>
-                <v-list-item ripple @click="toggleSystems">
-                  <v-list-item-action>
-                    <v-icon>
-                      {{ systems.length > 0 ? (systems.length == systemNames.length ? 'mdi-emoticon-outline' : 'mdi-emoticon-happy-outline') : 'mdi-emoticon-sad-outline' }}
-                    </v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select All</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="unrestrictedSystems.length && unrestrictedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(unrestrictedSystemsIds))" @click="selectUnrestrictedSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-billiards-rack</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Unrestricted Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="colonizedSystems.length && colonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(colonizedSystemsIds))" @click="selectOurSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-city-variant-outline</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Colonized Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-list-item v-if="inhabitedColonizedSystems.length && inhabitedColonizedSystems.length !== systemNames.length" ripple :input-value="areSetsEqual(new Set(systems), new Set(inhabitedColonizedSystemsIds))" @click="selectOurInhabitedSystems">
-                  <v-list-item-action>
-                    <v-icon>mdi-account-multiple-outline</v-icon>
-                  </v-list-item-action>
-                  <v-list-item-content>
-                    <v-list-item-title>Select Inhabited Systems</v-list-item-title>
-                  </v-list-item-content>
-                </v-list-item>
-                <v-divider class="mt-2" />
+            <span v-else class="caption text--secondary">{{ item.row.settled ? 'Yours' : '' }}</span>
+          </template>
+
+          <template #[`item.bodyOrder`]="{ item }">
+            <div class="py-1">
+              <div class="font-weight-medium text-no-wrap">{{ item.body.SystemName }} {{ systemBodyName(item.body) }}</div>
+              <div class="caption text--secondary">
+                {{ bodyClassNames[item.body.BodyClass] }}<span v-if="item.body.Banned"> · banned</span>
+              </div>
+            </div>
+          </template>
+
+          <template #[`item.speciesName`]="{ item }">
+            <span v-if="item.best.strategy === 'none'" class="text--secondary">-</span>
+            <span v-else>{{ item.best.species.SpeciesName }}</span>
+          </template>
+
+          <template #[`item.stateOrder`]="{ item }">
+            <v-tooltip top max-width="360">
+              <template #activator="{ on }">
+                <v-chip small label :color="item.row.state.color" :dark="item.row.state.target" :outlined="!item.row.state.target" class="plan-chip" v-on="on"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.chip(item.row.facts) }}</v-chip>
               </template>
-            </v-select>
-          </v-col>
-          <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
-            <v-row>
-              <v-col cols="auto">
-                <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Habitability</v-btn>
-                <v-btn
-                  :to="{
-                    path: 'minerals',
-                    query: {
-                      bodies: JSON.stringify(
-                        selectedBodies.map((selection) => ({
-                          SystemBodyID: selection.SystemBodyID,
-                          SystemBodyName: selection.SystemBodyName,
-                          SystemName: selection.SystemName,
-                          BodyClass: selection.BodyClass,
-                          Component: selection.Component,
-                          PlanetNumber: selection.PlanetNumber,
-                          OrbitNumber: selection.OrbitNumber,
-                        }))
-                      ),
-                    },
-                  }"
-                  style="width: 100%"
-                  small
-                  outlined
-                >
-                  Isolate in Minerals
-                </v-btn>
+              <span>{{ stateTooltip(item.row) }}</span>
+            </v-tooltip>
+          </template>
 
-                <v-btn
-                  class="d-block mt-4"
-                  style="width: 100%"
-                  small
-                  outlined
-                  @click="
-                    selectedBodies = []
-                    filterBySelectedBodies = false
-                  "
-                >
-                  Clear Selection
-                </v-btn>
-              </v-col>
-              <v-col>
-                <v-chip v-for="body of selectedBodies" :key="body.SystemBodyID" class="mr-2 mb-2" small label outlined close @click:close="() => (selectedBodies = selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID))">{{ body.SystemName }} {{ systemBodyName(body) }}</v-chip>
-              </v-col>
-            </v-row>
-          </v-col>
-          <v-col cols="12">
-            <v-data-table class="elevation-2" :headers="headers" :items="filteredCalculatedBodies" item-key="SystemBodyID" :expanded.sync="expandedRows" :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" :show-expand="true" @click:row="(data, { expand, isExpanded, item }) => item.Terraformable && item.TerraformationTime > 0 && expand(!isExpanded)">
-              <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
-                <td style="white-space: nowrap">
-                  <v-btn v-if="selectedBodies.find((selection) => selection.SystemBodyID === item.SystemBodyID)" color="red" icon @click.stop="() => (selectedBodies = selectedBodies.filter((selection) => selection.SystemBodyID !== item.SystemBodyID))"><v-icon>mdi-playlist-remove</v-icon></v-btn>
-                  <v-btn v-else icon @click.stop="() => selectedBodies.push(item)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
-
-                  <template v-if="item.Terraformable && item.TerraformationTime > 0">
-                    <v-btn v-if="isExpanded" icon @click.stop="expand(false)"><v-icon>mdi-arrow-expand-up</v-icon></v-btn>
-                    <v-btn v-else icon @click.stop="expand(true)"><v-icon>mdi-arrow-expand-vertical</v-icon></v-btn>
-                  </template>
-                </td>
-              </template>
-              <template #expanded-item="{ item }">
-                <td v-if="item.TerraformationPlan" :colspan="headers.length + 1" class="px-4 py-3">
-                  <v-container fluid>
-                    <v-row justify="start">
-                      <v-col cols="12" md="8">
-                        <v-list-item>
-                          <v-list-item-content>
-                            <v-list-item-title>
-                              <h2>Rough Terraforming Blueprint</h2>
-                            </v-list-item-title>
-
-                            <v-list-item-subtitle>
-                              Albedo:
-                              <template v-if="item.TerraformationPlan && typeof item.TerraformationPlan.TargetAlbedo === 'number'">
-                                {{ roundToDecimal(item.TerraformationPlan.TargetAlbedo, 3) }}
-                                <span v-if="Math.abs((item.TerraformationPlan.TargetAlbedo || 0) - item.OriginalAlbedo) >= 0.001"> (from {{ roundToDecimal(item.OriginalAlbedo, 3) }}) </span>
-                              </template>
-                              <template v-else>
-                                {{ roundToDecimal(item.OriginalAlbedo, 3) }}
-                              </template>
-                            </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-
-                        <template v-if="item.TerraformationPlan.Toxics.length">
-                          <v-list-item v-for="toxic of item.TerraformationPlan.Toxics" :key="toxic.AtmosGasID" two-line>
-                            <v-list-item-content>
-                              <v-list-item-title class="text-wrap">
-                                Set {{ toxic.AtmosGasName }} to
-                                <span class="target-value">
-                                  0
-                                  <v-tooltip top>
-                                    <template #activator="{ on, attrs }">
-                                      <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(0)">
-                                        <v-icon x-small>mdi-content-copy</v-icon>
-                                      </v-btn>
-                                    </template>
-                                    <span>Copy value</span>
-                                  </v-tooltip>
-                                </span>
-                                maximum atm.
-                              </v-list-item-title>
-                              <v-list-item-subtitle> This is going to take about {{ roundToDecimal(toxic.RemovalTime, 1) }} years. </v-list-item-subtitle>
-                            </v-list-item-content>
-                          </v-list-item>
-                        </template>
-
-                        <v-list-item v-if="item.TerraformationPlan.WaterVapourTime" two-line>
-                          <v-list-item-content>
-                            <v-list-item-title class="text-wrap">
-                              <template v-if="item.TerraformationPlan.WaterVapour > 0">
-                                Set Water Vapour to
-                                <span class="target-value">
-                                  {{ roundToDecimal(item.TerraformationPlan.WaterVapour, 3) }}
-                                  <v-tooltip top>
-                                    <template #activator="{ on, attrs }">
-                                      <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.WaterVapour)">
-                                        <v-icon x-small>mdi-content-copy</v-icon>
-                                      </v-btn>
-                                    </template>
-                                    <span>Copy value</span>
-                                  </v-tooltip>
-                                </span>
-                                maximum atm.
-                              </template>
-                              <span v-else>
-                                Set Water Vapour to
-                                <span class="target-value">
-                                  {{ roundToDecimal(item.TerraformationPlan.WaterVapour, 3) }}
-                                  <v-tooltip top>
-                                    <template #activator="{ on, attrs }">
-                                      <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.WaterVapour)">
-                                        <v-icon x-small>mdi-content-copy</v-icon>
-                                      </v-btn>
-                                    </template>
-                                    <span>Copy value</span>
-                                  </v-tooltip>
-                                </span>
-                                maximum atm.
-                              </span>
-                            </v-list-item-title>
-                            <v-list-item-subtitle>
-                              This is going to take about {{ roundToDecimal(item.TerraformationPlan.WaterVapourTime, 2) }} years.
-                              <template v-if="item.TerraformationPlan.HydroExtTime && item.TerraformationPlan.HydroExtTime > 0.1">
-                                <br />
-                                Then wait {{ roundToDecimal(item.TerraformationPlan.HydroExtTime, 2) }} years for natural {{ item.TerraformationPlan.WaterVapourProcess === 'Evaporate' ? 'evaporation' : 'condensation' }} to adjust hydrosphere to {{ roundToDecimal(item.TargetHydroExt, 1) }}%.
-                              </template>
-                            </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-
-                        <v-list-item v-if="item.TerraformationPlan.BreathableTime" two-line>
-                          <v-list-item-content>
-                            <v-list-item-title class="text-wrap">
-                              Set {{ item.TerraformationPlan.BreathableName }} to
-                              <span class="target-value">
-                                {{ roundToDecimal(item.TerraformationPlan.Breathable, 3) }}
-                                <v-tooltip top>
-                                  <template #activator="{ on, attrs }">
-                                    <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.Breathable)">
-                                      <v-icon x-small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                  </template>
-                                  <span>Copy value</span>
-                                </v-tooltip>
-                              </span>
-                              maximum atm.
-                            </v-list-item-title>
-                            <v-list-item-subtitle> This is going to take about {{ roundToDecimal(item.TerraformationPlan.BreathableTime, 2) }} years. </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-
-                        <v-list-item v-if="item.TerraformationPlan.GreenhouseTime" two-line>
-                          <v-list-item-content>
-                            <v-list-item-title class="text-wrap">
-                              Set {{ item.TerraformationPlan.GreenhouseName }} to
-                              <span class="target-value">
-                                {{ roundToDecimal(item.TerraformationPlan.Greenhouse - item.TerraformationPlan.GreenhouseSideContributions, 3) }}
-                                <v-tooltip top>
-                                  <template #activator="{ on, attrs }">
-                                    <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.Greenhouse - item.TerraformationPlan.GreenhouseSideContributions)">
-                                      <v-icon x-small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                  </template>
-                                  <span>Copy value</span>
-                                </v-tooltip>
-                              </span>
-                              maximum atm.
-                            </v-list-item-title>
-                            <v-list-item-subtitle> This is going to take about {{ roundToDecimal(item.TerraformationPlan.GreenhouseTime, 2) }} years. </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-
-                        <v-list-item v-if="item.TerraformationPlan.AntiGreenhouseTime" two-line>
-                          <v-list-item-content>
-                            <v-list-item-title class="text-wrap">
-                              Set {{ item.TerraformationPlan.AntiGreenhouseName }} to
-                              <span class="target-value">
-                                {{ roundToDecimal(item.TerraformationPlan.AntiGreenhouse - item.TerraformationPlan.AntiGreenhouseSideContributions, 3) }}
-                                <v-tooltip top>
-                                  <template #activator="{ on, attrs }">
-                                    <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.AntiGreenhouse - item.TerraformationPlan.AntiGreenhouseSideContributions)">
-                                      <v-icon x-small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                  </template>
-                                  <span>Copy value</span>
-                                </v-tooltip>
-                              </span>
-                              maximum atm.
-                            </v-list-item-title>
-                            <v-list-item-subtitle> This is going to take about {{ roundToDecimal(item.TerraformationPlan.AntiGreenhouseTime, 2) }} years. </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-
-                        <v-list-item v-if="item.TerraformationPlan.NeutralTime" two-line>
-                          <v-list-item-content>
-                            <v-list-item-title class="text-wrap">
-                              Set {{ item.TerraformationPlan.NeutralName }} to
-                              <span class="target-value">
-                                {{ roundToDecimal(item.TerraformationPlan.Neutral - item.TerraformationPlan.NeutralSideContributions, 3) }}
-                                <v-tooltip top>
-                                  <template #activator="{ on, attrs }">
-                                    <v-btn icon x-small class="target-copy-btn" v-bind="attrs" v-on="on" @click.stop="copyAtmosphereValue(item.TerraformationPlan.Neutral - item.TerraformationPlan.NeutralSideContributions)">
-                                      <v-icon x-small>mdi-content-copy</v-icon>
-                                    </v-btn>
-                                  </template>
-                                  <span>Copy value</span>
-                                </v-tooltip>
-                              </span>
-                              maximum atm.
-                            </v-list-item-title>
-                            <v-list-item-subtitle> This is going to take about {{ roundToDecimal(item.TerraformationPlan.NeutralTime, 2) }} years. </v-list-item-subtitle>
-                          </v-list-item-content>
-                        </v-list-item>
-                      </v-col>
-                      <v-col cols="12" md="4">
-                        <v-row dense>
-                          <v-col cols="12" sm="6">
-                            <v-card outlined class="mb-3">
-                              <v-list-item three-line>
-                                <v-list-item-content>
-                                  <div class="overline">ATMOSPHERIC PRESSURE</div>
-                                  <v-list-item-title class="headline mb-1"> {{ roundToDecimal(item.TerraformedAtmosphere, 2) }} atm </v-list-item-title>
-                                  <v-list-item-subtitle>From: {{ roundToDecimal(item.StartingAtmosphere, 2) }}</v-list-item-subtitle>
-                                </v-list-item-content>
-                              </v-list-item>
-                            </v-card>
-                          </v-col>
-                          <v-col v-if="item.CurrentColonyCostOverall != null || item.PlannedColonyCostOverall != null" cols="12" sm="6">
-                            <v-card outlined class="mb-3">
-                              <v-list-item three-line>
-                                <v-list-item-content>
-                                  <div class="overline">COLONY COST</div>
-                                  <v-list-item-title class="headline mb-1">
-                                    <template v-if="item.PlannedColonyCostOverall != null && item.PlannedColonyCostPeriapsis != null && item.PlannedColonyCostApoapsis != null">
-                                      <span v-if="item.PlannedColonyCostOverall === item.PlannedColonyCostPeriapsis && item.PlannedColonyCostOverall === item.PlannedColonyCostApoapsis">
-                                        {{ roundToDecimal(item.PlannedColonyCostOverall, 2) }}
-                                      </span>
-                                      <span v-else-if="item.PlannedColonyCostPeriapsis === item.PlannedColonyCostApoapsis"> {{ roundToDecimal(item.PlannedColonyCostOverall, 2) }} ({{ roundToDecimal(item.PlannedColonyCostPeriapsis, 2) }}) </span>
-                                      <span v-else> {{ roundToDecimal(item.PlannedColonyCostOverall, 2) }} ({{ roundToDecimal(Math.min(item.PlannedColonyCostPeriapsis, item.PlannedColonyCostApoapsis), 2) }} — {{ roundToDecimal(Math.max(item.PlannedColonyCostPeriapsis, item.PlannedColonyCostApoapsis), 2) }}) </span>
-                                    </template>
-                                    <template v-else> N/A </template>
-                                  </v-list-item-title>
-                                  <v-list-item-subtitle>
-                                    <template v-if="item.CurrentColonyCostOverall != null && item.CurrentColonyCostPeriapsis != null && item.CurrentColonyCostApoapsis != null">
-                                      <span v-if="item.CurrentColonyCostOverall === item.CurrentColonyCostPeriapsis && item.CurrentColonyCostOverall === item.CurrentColonyCostApoapsis"> Current: {{ roundToDecimal(item.CurrentColonyCostOverall, 2) }} </span>
-                                      <span v-else> Current: {{ roundToDecimal(item.CurrentColonyCostOverall, 2) }} ({{ roundToDecimal(Math.min(item.CurrentColonyCostPeriapsis, item.CurrentColonyCostApoapsis), 2) }} — {{ roundToDecimal(Math.max(item.CurrentColonyCostPeriapsis, item.CurrentColonyCostApoapsis), 2) }}) </span>
-                                    </template>
-                                    <template v-else> Current: N/A </template>
-                                  </v-list-item-subtitle>
-                                </v-list-item-content>
-                              </v-list-item>
-                            </v-card>
-                          </v-col>
-                          <v-col cols="12" sm="6">
-                            <v-card outlined class="mb-3">
-                              <v-list-item three-line>
-                                <v-list-item-content>
-                                  <div class="overline">BREATHABLE PRESSURE</div>
-                                  <v-list-item-title class="headline mb-1"> {{ roundToDecimal(item.TerraformationPlan.Breathable, 2) }} atm </v-list-item-title>
-                                  <v-list-item-subtitle>From: {{ roundToDecimal(item.TerraformationPlan.BreathableStart, 2) }} ({{ item.TerraformationPlan.BreathableName }})</v-list-item-subtitle>
-                                </v-list-item-content>
-                              </v-list-item>
-                            </v-card>
-                          </v-col>
-                          <v-col cols="12" sm="6">
-                            <v-card outlined class="mb-3">
-                              <v-list-item three-line>
-                                <v-list-item-content>
-                                  <div class="overline">SURFACE TEMPERATURE</div>
-                                  <v-list-item-title class="headline mb-1">
-                                    <template v-if="item.TerraformedTemperatureLow && Math.abs(item.TerraformedTemperatureHigh - item.TerraformedTemperatureLow) > 0.01"> {{ roundToDecimal(item.TerraformedTemperatureLow - 273, 2) }} °C — {{ roundToDecimal(item.TerraformedTemperatureHigh - 273, 2) }} °C </template>
-                                    <template v-else> {{ roundToDecimal((item.TerraformedSurfaceTemperature || item.TerraformedTemperatureLow || item.TerraformedTemperatureHigh) - 273, 2) }} °C </template>
-                                  </v-list-item-title>
-                                  <v-list-item-subtitle>
-                                    <template v-if="item.CurrentTemperatureLow && Math.abs(item.CurrentTemperatureHigh - item.CurrentTemperatureLow) > 0.01"> From: {{ roundToDecimal(item.CurrentTemperatureLow - 273, 2) }} °C — {{ roundToDecimal(item.CurrentTemperatureHigh - 273, 2) }} °C </template>
-                                    <template v-else> From: {{ roundToDecimal(item.SurfaceTemp - 273, 2) }} °C </template>
-                                  </v-list-item-subtitle>
-                                </v-list-item-content>
-                              </v-list-item>
-                            </v-card>
-                          </v-col>
-                          <v-col cols="12" sm="6">
-                            <v-card outlined>
-                              <v-list-item three-line>
-                                <v-list-item-content>
-                                  <div class="overline">HYDROGRAPHIC EXTENT</div>
-                                  <v-list-item-title class="headline mb-1">
-                                    <template v-if="typeof item.TargetHydroExt === 'number' && Math.abs((item.TargetHydroExt || item.HydroExt) - item.HydroExt) >= 0.1"> {{ roundToDecimal(item.HydroExt, 1) }}% → {{ roundToDecimal(item.TargetHydroExt, 1) }}% </template>
-                                    <template v-else> {{ roundToDecimal(item.TargetHydroExt != null ? item.TargetHydroExt : item.HydroExt, 1) }}% </template>
-                                  </v-list-item-title>
-                                  <v-list-item-subtitle v-if="Math.abs(item.HydroExtChange || 0) >= 0.1"> Change of {{ item.HydroExtChange > 0 ? '+' : '' }}{{ roundToDecimal(item.HydroExtChange, 1) }} pts expected </v-list-item-subtitle>
-                                  <v-list-item-subtitle v-else> Minimal change expected </v-list-item-subtitle>
-                                </v-list-item-content>
-                              </v-list-item>
-                            </v-card>
-                          </v-col>
-                        </v-row>
-                      </v-col>
-                    </v-row>
-                  </v-container>
-                </td>
-              </template>
-              <template #[`item.SystemBodyOrder`]="{ item }">
-                {{ systemBodyName(item) }}
-              </template>
-              <template #[`item.GroundMineralSurvey`]="{ item }">
-                <v-tooltip top>
-                  <template #activator="{ on }">
-                    <span v-if="item.GroundMineralSurvey" v-on="on">M{{ item.GroundMineralSurvey }}</span>
-                    <span v-else v-on="on">❌</span>
-                  </template>
-
-                  <span>{{ GroundMineralSurveyMap[item.GroundMineralSurvey] }}</span>
-                </v-tooltip>
-              </template>
-              <template #[`item.CurrentColonyCostOverall`]="{ item }">
-                <span v-if="item.CurrentColonyCostOverall != null && item.CurrentColonyCostPeriapsis != null && item.CurrentColonyCostApoapsis != null">
-                  <span v-if="item.CurrentColonyCostOverall === item.CurrentColonyCostPeriapsis && item.CurrentColonyCostOverall === item.CurrentColonyCostApoapsis">
-                    {{ roundToDecimal(item.CurrentColonyCostOverall, 2) }}
+          <template #[`item.costValue`]="{ item }">
+            <template v-if="item.best.strategy !== 'none'">
+              <v-tooltip top>
+                <template #activator="{ on }">
+                  <span class="text-no-wrap" v-on="on">
+                    <template v-if="item.best.strategy === 'terraform'"><span class="text--secondary">{{ costText(item.best.assessment.cost.worst) }}</span> → </template>{{ costText(item.best.cost) }}<span v-if="item.best.lowGravity" class="caption"> LG</span>
                   </span>
-                  <span v-else-if="item.CurrentColonyCostPeriapsis === item.CurrentColonyCostApoapsis">
-                    {{ roundToDecimal(item.CurrentColonyCostOverall, 2) }}
-                  </span>
-                  <span v-else> {{ roundToDecimal(Math.min(item.CurrentColonyCostPeriapsis, item.CurrentColonyCostApoapsis), 2) }}–{{ roundToDecimal(Math.max(item.CurrentColonyCostPeriapsis, item.CurrentColonyCostApoapsis), 2) }} </span>
-                </span>
-                <span v-else>N/A</span>
-              </template>
-              <template #[`item.MaximumPopulation`]="{ item }">
-                <v-tooltip v-if="item.Populations.length" top>
-                  <template #activator="{ on }">
-                    <span
-                      :class="{
-                        'green--text text--lighten-1 font-weight-bold': item.OwnPopulation && !item.OtherPopulation,
-                        'red--text text--darken-3 font-weight-bold': !item.OwnPopulation && item.OtherPopulation,
-                        'orange--text font-weight-bold': item.OwnPopulation && item.OtherPopulation,
-                      }"
-                      v-on="on"
-                    >
-                      <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.TotalPopulation, 2), separator) }}</span> / <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
-                    </span>
-                  </template>
+                </template>
+                <span>{{ costTooltip(item.best) }}</span>
+              </v-tooltip>
+            </template>
+            <span v-else class="text--secondary">N/A</span>
+          </template>
 
-                  <span v-if="item.OwnPopulation && item.OtherPopulation"> Mixed Population </span>
-                  <span v-else-if="item.OwnPopulation"> Own Population </span>
-                  <span v-else> Alien Population </span>
-                </v-tooltip>
-                <span v-else>{{ separatedNumber(roundToDecimal(item.MaximumPopulation, 2), separator) }}</span>
+          <template #[`item.capacityValue`]="{ item }">
+            <span v-if="item.best.strategy !== 'none'" class="text-no-wrap">{{ people(item.best.capacity) }}</span>
+            <span v-else class="text--secondary">-</span>
+          </template>
+
+          <template #[`item.mineralValue`]="{ item }">
+            <div v-if="item.row.minerals.surveyed" class="text-no-wrap">
+              <v-tooltip v-if="item.row.minerals.deposits" top max-width="360">
+                <template #activator="{ on }">
+                  <span class="mineral-score" :class="{ 'mineral-high': item.row.minerals.rich }" v-on="on">{{ roundToDecimal(item.row.minerals.value, 1) }}</span>
+                </template>
+                <span>{{ mineralTooltip(item.row) }}</span>
+              </v-tooltip>
+              <span v-else class="text--secondary">None</span>
+              <v-chip v-if="item.row.minerals.rich" x-small label color="amber darken-3" dark class="ml-1 px-1">Rich</v-chip>
+              <v-tooltip v-if="item.row.minerals.cmc.length" top max-width="340">
+                <template #activator="{ on }">
+                  <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
+                </template>
+                <span>Qualifies for a civilian mining complex with {{ item.row.minerals.cmc.join(', ') }}. {{ cmcNote(item.row) }}</span>
+              </v-tooltip>
+              <span v-if="item.row.minerals.deposits" class="caption text--secondary d-block mineral-note">{{ compactTons(item.row.minerals.total) }}<template v-if="scarceNames(item.row)"> · short of {{ scarceNames(item.row) }}</template></span>
+            </div>
+            <v-tooltip v-else top>
+              <template #activator="{ on }">
+                <span class="orange--text" v-on="on">Unsurveyed</span>
               </template>
-              <template #[`item.MaximumPopulationAtOptimalHydro`]="{ item }">
-                <span v-if="item.MaximumPopulationAtOptimalHydro === item.MaximumPopulation" class="green--text text--lighten-1 font-weight-bold"> Optimal </span>
-                <span v-else>
-                  {{ separatedNumber(roundToDecimal(item.MaximumPopulationAtOptimalHydro, 2), separator) }}
-                </span>
+              <span>{{ groundSurveyText(item.body) }}</span>
+            </v-tooltip>
+          </template>
+
+          <template #[`item.distanceValue`]="{ item }">
+            <v-tooltip v-if="item.row.distance" top max-width="320">
+              <template #activator="{ on }">
+                <span class="text-no-wrap" v-on="on">{{ roundToDecimal(item.row.distance.au, 1) }} AU<span class="caption text--secondary d-block">{{ item.row.distance.jumps }} {{ item.row.distance.jumps === 1 ? 'jump' : 'jumps' }}</span></span>
               </template>
-              <template #[`item.PlannedColonyCostMetric`]="{ item }">
-                <v-tooltip v-if="item.PlannedColonyCostOverall != null && item.TerraformationTime > 0" top>
-                  <template #activator="{ on, attrs }">
-                    <span
-                      :class="{
-                        'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
-                        'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
-                        'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
-                        'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited'),
-                        'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
-                        'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
-                      }"
-                      v-bind="attrs"
-                      v-on="on"
-                    >
-                      {{ item.TerraformableStatus }}
-                    </span>
-                  </template>
-                  <span>Planned Colony Cost: {{ roundToDecimal(item.PlannedColonyCostMetric, 2) }}</span>
-                </v-tooltip>
-                <span
-                  v-else
-                  :class="{
-                    'green--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes'),
-                    'light-blue--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Partial'),
-                    'teal--text text--lighten-1 font-weight-bold': item.TerraformableStatus.startsWith('Near'),
-                    'orange--text font-weight-bold': item.TerraformableStatus.startsWith('Limited'),
-                    'deep-orange--text darken-1 font-weight-bold': item.TerraformableStatus.startsWith('Insufficient'),
-                    'red--text text--darken-3 font-weight-bold': item.TerraformableStatus.startsWith('No'),
-                  }"
-                >
-                  {{ item.TerraformableStatus }}
-                </span>
+              <span>{{ distanceTooltip(item.row) }}</span>
+            </v-tooltip>
+            <span v-else class="text--secondary">No route</span>
+          </template>
+
+          <template #[`header.sortRank`]="{ header }">
+            <v-tooltip top max-width="320">
+              <template #activator="{ on }">
+                <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
               </template>
-              <template #[`item.TerraformationTime`]="{ item }">
-                <span v-if="item.TerraformationTime > 0">
-                  {{ separatedNumber(roundToDecimal(item.TerraformationTime, 1), separator) }}
-                </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('No')" class="red--text text--darken-3 font-weight-bold"> Impossible </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Done') || item.TerraformableStatus.startsWith('Yes')" class="green--text text--lighten-1 font-weight-bold"> Done </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Partial')" class="light-blue--text text--lighten-1 font-weight-bold"> Done </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Near')" class="teal--text text--lighten-1 font-weight-bold"> Done </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Limited')" class="orange--text font-weight-bold"> Done </span>
-                <span v-else-if="item.TerraformableStatus.startsWith('Insufficient') || item.TerraformableStatus.includes('(LG)')" class="deep-orange--text darken-1 font-weight-bold"> Done </span>
-                <span v-else class="red--text text--darken-3 font-weight-bold">Impossible</span>
-              </template>
-              <template #[`item.MiningPotential`]="{ item }">
-                <span
-                  v-if="item.Minerals.length"
-                  :class="{
-                    'green--text text--lighten-1 font-weight-bold title': item.MiningPotential >= 7.5,
-                    'red--text text--darken-3 font-weight-bold': item.MiningPotential <= 3,
-                  }"
-                  >{{ roundToDecimal(item.MiningPotential, 1) }}</span
-                >
-                <span v-else class="orange--text font-weight-bold">N/A</span>
-              </template>
-              <template #[`header.MiningPotential`]="{ header }">
-                <v-tooltip top>
-                  <template #activator="{ on }">
-                    <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
-                  </template>
-                  <span>Potential calculated for available minerals on the body.</span>
-                </v-tooltip>
-              </template>
-              <template #[`item.TotalMiningAmount`]="{ item }">
-                <span v-if="!item.BodySurveyed" class="orange--text font-weight-bold"> Unsurveyed </span>
-                <span v-else>
-                  <span class="text-no-wrap">{{ separatedNumber(roundToDecimal(item.TotalMiningAmount), separator) }}</span>
-                </span>
-              </template>
-            </v-data-table>
-          </v-col>
-        </v-row>
-      </v-container>
-    </div>
+              <span>Targets are ranked for the chosen goal. The bar is each target's worth against the best one. Colonies, alien colonies, bodies no species can live on and bodies too small to be worth the trip are not ranked.</span>
+            </v-tooltip>
+          </template>
+
+          <template #expanded-item="{ item }">
+            <td :colspan="headers.length + 1" class="px-4 py-3 planner-detail">
+              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :rules="raceRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
+            </td>
+          </template>
+        </v-data-table>
+      </v-card>
+    </v-container>
   </div>
 </template>
 
 <script>
 import { mapGetters } from 'vuex'
 
-import _partition from 'lodash/partition'
-import _intersectionBy from 'lodash/intersectionBy'
-import _clamp from 'lodash/clamp'
-
-import { separatedNumber, roundToDecimal } from '../utilities/math'
-import { systemBodyName } from '../utilities/aurora'
+import BodyDetail from '../components/planner/BodyDetail.vue'
 import { areSetsEqual } from '../utilities/generic'
+import { systemBodyName } from '../utilities/aurora'
+import { people } from '../utilities/colonies'
+import { assessBodies, BEST_TARGET_SCORE, GOALS, normaliseRanking, NO_OUTLOOK, populationBySystem, rankBodies } from '../utilities/colonization'
+import { loadBodies, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
+import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
+import { buildDistanceMap } from '../utilities/jump-graph'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
+import { CMC_CONFIG_KEY, MINERALS, cmcMineralIds, compact as compactTons } from '../utilities/minerals'
+import { terraformCapacity } from '../utilities/terraforming'
 
-const MaterialMap = {
-  // 0: 'Nothing',
-  1: 'Duranium',
-  2: 'Neutronium',
-  3: 'Corbomite',
-  4: 'Tritanium',
-  5: 'Boronide',
-  6: 'Mercassium',
-  7: 'Vendarite',
-  8: 'Sorium',
-  9: 'Uridium',
-  10: 'Corundium',
-  11: 'Gallicite',
+const INPUT_LABELS = {
+  bodies: 'the bodies of known systems',
+  species: 'the species',
+  raceRules: 'the race rules',
+  gases: 'the gases',
+  routes: 'the jump routes',
+  outlook: 'the mineral outlook',
 }
+const INPUTS = Object.keys(INPUT_LABELS)
 
-const GroundMineralSurveyMap = {
-  0: 'Completed',
-  1: 'Minimal',
-  2: 'Low',
-  3: 'Good',
-  4: 'High',
-  5: 'Excellent',
-}
+const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
+const GROUND_SURVEY = { 0: 'Completed', 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
+const NO_RANK = 1e12
+// Rows per page before the user picks one: 10 fit a 1080 px window, 15 a window of 1200 px or more.
+const DEFAULT_ROWS = 10
+const DEFAULT_RULES = () => ({ ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
-const BodyClass = {
-  0: 'None',
-  1: 'Planet',
-  2: 'Moon',
-  3: 'Asteroid',
-  4: 'JumpPoint',
-  5: 'Comet',
-  6: 'LagrangePoint',
-  7: 'Wormhole',
-}
+// The filters the page has always kept, by the config key that carries them.
+const FILTERS = [
+  { key: 'nonTerraformable', config: 'habitabilityFilterNonTerraformable', label: 'Hide Non-Terraformable' },
+  { key: 'withoutMinerals', config: 'habitabilityFilterWithoutMinerals', label: 'Hide Without Minerals' },
+  { key: 'ownPopulations', config: 'habitabilityFilterOwnPopulations', label: 'Hide Own Populations' },
+  { key: 'otherPopulations', config: 'habitabilityFilterOtherPopulations', label: 'Hide Other Populations' },
+  { key: 'doneTerraforming', config: 'habitabilityFilterDoneTerraforming', label: 'Hide Terraformed' },
+  { key: 'uninhabited', config: 'habitabilityFilterUninhabited', label: 'Hide Uninhabited' },
+]
 
-// const Hydrosphere = {
-//   1: 'None',
-//   2: 'Vapour',
-//   3: 'Liquid',
-//   4: 'Ice Sheet',
-// }
+const RANKING_FIELDS = [
+  { key: 'minimumPeople', label: 'Smallest colony (M)', hint: 'Under this a body is only a target for its deposits' },
+  { key: 'minimumDeposit', label: 'Minimum deposit (t)', hint: 'Smaller deposits are worth nothing' },
+  { key: 'cmcBonus', label: 'CMC bonus', hint: 'Deposit value a civilian complex site adds' },
+  { key: 'costScale', label: 'Colony cost scale', hint: 'Worth halves at this cost, before your tech' },
+  { key: 'yearsScale', label: 'Terraforming years scale', hint: 'Worth halves after this many years' },
+  { key: 'distanceScale', label: 'Distance scale (AU)', hint: 'Worth halves at this distance from a colony' },
+]
 
-const maxBreathablePercentage = 30
-const earthSurfaceArea = 511187128
-// const kmPerAU = 149600000
-const baseMaxPop = 12000
+// Which bodies the table lists. A body is in the first view that its rank and plan state fit.
+const VIEWS = [
+  { id: 'best', label: 'Best targets', hint: `Places to settle next that are worth at least ${BEST_TARGET_SCORE}% of the best one`, has: (row) => !!row.rank && row.score >= BEST_TARGET_SCORE },
+  { id: 'ranked', label: 'All ranked', hint: 'Every ranked place to settle, from the best down', has: (row) => !!row.rank },
+  { id: 'colonies', label: 'Colonies', hint: 'Bodies where you already have a colony or outpost', has: (row) => row.settled },
+  { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
+]
 
 export default {
-  components: {},
+  components: { BodyDetail },
   asyncData({ route }) {
     if (route.query.bodies) {
-      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
+      const selectedBodies = JSON.parse(route.query.bodies)
 
-      return {
-        selectedBodies,
-        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
-      }
+      return { selectedBodies, filterBySelectedBodies: !!selectedBodies.length }
     } else if (route.query.systems) {
-      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
-
-      return {
-        systems,
-      }
+      return { systems: route.query.systems.split(',').map((id) => parseInt(id, 10)) }
     }
 
     return {}
@@ -650,2016 +355,616 @@ export default {
   data() {
     return {
       selectedSpeciesId: null,
+      goal: 'both',
+      view: 'best',
+      stateFilter: [],
       terraformers: 10,
-
-      filterNonTerraformable: false,
-      filterWithoutMinerals: false,
-      filterOwnPopulations: false,
-      filterOtherPopulations: false,
-      filterDoneTerraforming: false,
-      filterUninhabited: false,
+      filters: Object.fromEntries(FILTERS.map((filter) => [filter.key, false])),
+      bodyClasses: [1, 2, 3, 5],
 
       itemsPerPage: 10,
-      sortBy: [],
-      expandedRows: [],
+      sortBy: ['sortRank'],
       sortDescending: [false],
+      expandedRows: [],
+      detailSpecies: {},
 
       systems: [],
-
       selectedBodies: [],
       filterBySelectedBodies: false,
 
-      //
+      ranking: normaliseRanking(null),
+      loadErrors: {},
 
       rules: {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
-        integer: (value) => Number(value) === Number.parseInt(value) || 'Must be a whole number.',
       },
     }
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
-    itemsPerPageOptions() {
-      return [10, 15, 30, 50, 100]
-    },
+    goals: () => GOALS,
+    viewOptions: () => VIEWS,
+    stateGroups: () => STATE_GROUPS,
+    stateById: () => STATE_BY_ID,
+    bestScore: () => BEST_TARGET_SCORE,
+    minerals: () => MINERALS,
+    filterOptions: () => FILTERS,
+    rankingFields: () => RANKING_FIELDS,
+    bodyClassNames: () => BODY_CLASS_NAMES,
+    bodyClassOptions: () => Object.entries(BODY_CLASS_NAMES).map(([value, text]) => ({ value: Number(value), text: `${text}s` })),
+    itemsPerPageOptions: () => [10, 15, 30, 50, 100],
+    compactTons: () => compactTons,
 
     separator() {
-      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
+      return thousandsSeparator(this.config.get('selectedSeparator', 'Tick'))
+    },
 
-      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
+    rankingKey() {
+      return `game.${this.GameID}.race.${this.RaceID}.targetWeights`
+    },
+
+    failedInputs() {
+      return INPUTS.filter((key) => this.loadErrors[key])
+    },
+    failedInputsText() {
+      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
+    },
+    ready() {
+      return allLoaded(this.loadErrors, INPUTS)
     },
 
     activeFilterCount() {
-      return [this.filterNonTerraformable, this.filterWithoutMinerals, this.filterOwnPopulations, this.filterOtherPopulations, this.filterDoneTerraforming, this.filterUninhabited].filter(Boolean).length
+      return FILTERS.filter((filter) => this.filters[filter.key]).length
     },
 
-    selectedSpecies() {
-      const extant = this.species.find((species) => species.SpeciesID === this.selectedSpeciesId)
-
-      return extant || {}
+    speciesRows() {
+      return this.ready ? this.species : []
     },
-    rawTerraformingPower() {
-      return this.selectedSpecies.TerraformingRate * this.terraformers
+    speciesItems() {
+      return [{ text: 'Best of all species', value: null }, ...this.speciesRows.map((species) => ({ text: `${species.SpeciesName} (${separatedNumber(roundToDecimal(species.TotalPopulation, 2), this.separator)} M)`, value: species.SpeciesID }))]
+    },
+    // The chosen species, or null (best of all) when it isn't one of the race's any more.
+    activeSpeciesId() {
+      return this.speciesRows.some((species) => species.SpeciesID === this.selectedSpeciesId) ? this.selectedSpeciesId : null
+    },
+    terraformCapacityPerYear() {
+      return terraformCapacity(this.raceRules, this.terraformers > 0 ? this.terraformers : 0)
+    },
+    terraformerHint() {
+      const { TerraformingRate, TerraformingSpeed } = this.raceRules
+
+      return `${TerraformingRate} atm a year each${TerraformingSpeed === 100 ? '' : `, at ${TerraformingSpeed}% game speed`}`
     },
 
-    filteredCalculatedBodies() {
-      return this.calculatedBodies.filter((body) => {
-        const inScope = this.filterBySelectedBodies ? !!this.selectedBodies.find((s) => s.SystemBodyID === body.SystemBodyID) : this.systems.includes(body.SystemID)
-
-        const hideNonTerraformableOk = this.filterNonTerraformable ? body.Terraformable : true
-        const hideWithoutMineralsOk = this.filterWithoutMinerals ? body.TotalMiningAmount > 0 : true
-        const hideOwnPopulationOk = this.filterOwnPopulations ? !body.OwnPopulation || body.OtherPopulation : true
-        const hideOtherPopulationOk = this.filterOtherPopulations ? !body.OtherPopulation || body.OwnPopulation : true
-        const hideDoneTerraformingOk = this.filterDoneTerraforming ? body.TerraformationTime > 0 : true
-        const hideUninhabitedOk = this.filterUninhabited ? body.TotalPopulation > 0 : true
-
-        return inScope && hideNonTerraformableOk && hideWithoutMineralsOk && hideOwnPopulationOk && hideOtherPopulationOk && hideDoneTerraformingOk && hideUninhabitedOk
-      })
+    cmcIds() {
+      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY))
     },
-    calculatedBodies() {
-      return this.selectedSpecies.SpeciesID ? this.bodies.filter((body) => body.Gravity <= this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation).map(this._bodyMap) : []
+    systemPopulation() {
+      return populationBySystem(this.bodies)
+    },
+    // Travel is measured from the nearest sizeable colony (the capital among them), and from the capital alone.
+    distanceOf() {
+      return buildDistanceMap(this.routes.jumpPoints, this.routes.colonies)
+    },
+    capitalDistanceOf() {
+      return buildDistanceMap(this.routes.jumpPoints, this.routes.capital ? [this.routes.capital] : [])
+    },
+
+    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
+    assessed() {
+      return this.ready ? assessBodies(this.bodies, this.species, this.raceRules, (id) => this.gases.find((gas) => gas.GasID === id)) : []
+    },
+    rows() {
+      return rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcIds: this.cmcIds, systemPopulation: this.systemPopulation, outlook: this.outlook })
     },
 
     systemNames() {
-      if (!this.bodies || !this.bodies.length) {
-        return []
-      }
+      const names = new Map()
 
-      return Object.values(
-        this.bodies.reduce((names, item) => {
-          if (!names[item.SystemID]) {
-            names[item.SystemID] = {
-              SystemID: item.SystemID,
-              SystemName: item.SystemName,
-            }
-          }
+      this.bodies.forEach((body) => names.set(body.SystemID, body.SystemName))
 
-          return names
-        }, {})
-      )
+      return [...names].map(([SystemID, SystemName]) => ({ SystemID, SystemName })).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
+    },
+    systemPresets() {
+      const systemIds = new Set(this.systemNames.map((system) => system.SystemID))
+      const restricted = new Set(this.bodies.filter((body) => body.MilitaryRestrictedSystem).map((body) => body.SystemID))
+      const colonised = new Set(this.bodies.filter((body) => body.OwnPopulations.length).map((body) => body.SystemID))
+      const inhabited = new Set(this.bodies.filter((body) => body.OwnPopulations.some((population) => population.Population)).map((body) => body.SystemID))
+      const presets = [
+        { key: 'unrestricted', label: 'Select Unrestricted Systems', icon: 'mdi-billiards-rack', ids: [...systemIds].filter((id) => !restricted.has(id)) },
+        { key: 'colonised', label: 'Select Colonized Systems', icon: 'mdi-city-variant-outline', ids: [...colonised] },
+        { key: 'inhabited', label: 'Select Inhabited Systems', icon: 'mdi-account-multiple-outline', ids: [...inhabited] },
+      ]
+
+      return presets.filter((preset) => preset.ids.length && preset.ids.length !== systemIds.size)
     },
 
-    MaterialMap() {
-      return MaterialMap
+    // The bodies of the chosen systems and body classes, or just the isolated ones.
+    scopedRows() {
+      const scope = this.filterBySelectedBodies ? new Set(this.selectedBodies.map((body) => body.SystemBodyID)) : null
+      const systems = new Set(this.systems)
+      const classes = new Set(this.bodyClasses)
+
+      return this.rows.filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
     },
-    GroundMineralSurveyMap() {
-      return GroundMineralSurveyMap
+    viewCounts() {
+      return Object.fromEntries(VIEWS.map((view) => [view.id, this.scopedRows.filter(view.has).length]))
     },
-    BodyClass() {
-      return BodyClass
+    stateCounts() {
+      const counts = {}
+
+      this.scopedRows.forEach((row) => {
+        counts[row.state.id] = (counts[row.state.id] || 0) + 1
+      })
+
+      return counts
+    },
+
+    filteredRows() {
+      const { filters } = this
+      const view = VIEWS.find((option) => option.id === this.view) || VIEWS[0]
+      const states = new Set(this.stateFilter)
+
+      return this.scopedRows.filter((row) => {
+        const { body, best } = row
+        const alienPopulation = body.AlienPopulations.reduce((total, population) => total + population.PopulationAmount, 0)
+
+        return (
+          (this.filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) &&
+          !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) &&
+          !(filters.withoutMinerals && !(row.minerals.total > 0)) &&
+          !(filters.ownPopulations && body.OwnPopulations.length) &&
+          !(filters.otherPopulations && body.AlienPopulations.length) &&
+          !(filters.doneTerraforming && !best.assessment.plan) &&
+          !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
+        )
+      })
+    },
+
+    summaryLine() {
+      const count = (value, one, many) => `${separatedNumber(value, this.separator)} ${value === 1 ? one : many}`
+
+      return `${count(this.bodies.length, 'body', 'bodies')} in ${count(this.systemNames.length, 'system', 'systems')} · ${separatedNumber(this.filteredRows.length, this.separator)} shown`
+    },
+
+    // Flat items for the table: the columns sort on plain fields.
+    tableItems() {
+      return this.filteredRows.map((row) => ({
+        id: row.body.SystemBodyID,
+        row,
+        body: row.body,
+        best: row.best,
+        sortRank: row.rank || NO_RANK - (row.best.strategy === 'none' ? 0 : row.best.capacity),
+        stateOrder: PLAN_STATES.indexOf(row.state),
+        bodyOrder: `${row.body.SystemName} ${row.body.SystemBodyOrder}`,
+        speciesName: row.best.strategy === 'none' ? '' : row.best.species.SpeciesName,
+        costValue: row.best.strategy === 'none' ? NO_RANK : row.best.cost,
+        capacityValue: row.best.strategy === 'none' ? 0 : row.best.capacity,
+        mineralValue: row.minerals.surveyed ? row.minerals.value : -1,
+        distanceValue: row.distance ? row.distance.au : NO_RANK,
+      }))
     },
 
     headers() {
-      const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
-
       return [
-        {
-          text: 'System',
-          value: 'SystemName',
-          divider: true,
-        },
-        {
-          text: 'Body',
-          value: 'SystemBodyOrder',
-          divider: true,
-          sort: collator.compare,
-        },
-        {
-          text: 'Ground',
-          value: 'GroundMineralSurvey',
-          divider: true,
-          align: 'center',
-        },
-        {
-          text: 'Current Cost',
-          value: 'CurrentColonyCostOverall',
-          divider: true,
-          align: 'center',
-        },
-        {
-          text: 'Max Population (M)',
-          value: 'MaximumPopulation',
-          divider: true,
-        },
-        {
-          text: 'Optimal Max (M)',
-          value: 'MaximumPopulationAtOptimalHydro',
-          divider: true,
-        },
-        {
-          text: 'Terraformable',
-          value: 'PlannedColonyCostMetric',
-          divider: true,
-          align: 'center',
-        },
-        {
-          text: 'Time (Y)',
-          value: 'TerraformationTime',
-          divider: true,
-          align: 'center',
-          sort: (alpha, beta) => (alpha === -Infinity ? (this.sortDescending[0] ? -1 : 1) : beta === -Infinity ? (this.sortDescending[0] ? 1 : -1) : alpha - beta),
-        },
-        {
-          text: 'Potential',
-          value: 'MiningPotential',
-          divider: true,
-          align: 'center',
-        },
-        {
-          text: 'Total Minerals (T)',
-          value: 'TotalMiningAmount',
-          divider: true,
-        },
+        { text: '#', value: 'sortRank', divider: true },
+        { text: 'Body', value: 'bodyOrder', divider: true, sort: new Intl.Collator('en', { numeric: true, sensitivity: 'base' }).compare },
+        { text: 'Species', value: 'speciesName', divider: true },
+        { text: 'Plan', value: 'stateOrder', divider: true },
+        { text: 'Colony Cost', value: 'costValue', divider: true },
+        { text: 'Holds', value: 'capacityValue', divider: true },
+        { text: 'Minerals', value: 'mineralValue', divider: true },
+        { text: 'Distance', value: 'distanceValue' },
       ]
-    },
-
-    unrestrictedSystems() {
-      return _intersectionBy(
-        this.surveyedSystems.filter((system) => system.RaceSystemSurveys.every((raceSystem) => !raceSystem.MilitaryRestrictedSystem)),
-        this.systemNames,
-        'SystemID'
-      )
-    },
-    unrestrictedSystemsIds() {
-      return this.unrestrictedSystems.map((system) => system.SystemID)
-    },
-    colonizedSystems() {
-      return _intersectionBy(
-        this.surveyedSystems.filter((system) => system.Populations.length),
-        this.systemNames,
-        'SystemID'
-      )
-    },
-    colonizedSystemsIds() {
-      return this.colonizedSystems.map((system) => system.SystemID)
-    },
-    inhabitedColonizedSystems() {
-      return this.colonizedSystems.filter((system) => system.InhabitedColonies)
-    },
-    inhabitedColonizedSystemsIds() {
-      return this.inhabitedColonizedSystems.map((system) => system.SystemID)
     },
   },
   watch: {
-    itemsPerPage: {
-      handler(newValue) {
-        console.log('[Habitability] itemsPerPage changed:', newValue)
-        this.$store.commit('tables/setHabitabilityItemsPerPage', newValue)
-      },
+    itemsPerPage(value) {
+      this.$store.commit('tables/setHabitabilityItemsPerPage', value)
     },
     sortBy: {
       deep: true,
-      handler(newValue) {
-        console.log('[Habitability] sortBy changed:', newValue)
-        this.$store.commit('tables/setHabitabilitySortBy', newValue)
+      handler(value) {
+        this.$store.commit('tables/setHabitabilitySortBy', value)
       },
     },
     sortDescending: {
       deep: true,
-      handler(newValue) {
-        console.log('[Habitability] sortDescending changed:', newValue)
-        this.$store.commit('tables/setHabitabilitySortDescending', newValue)
-        console.log('[Habitability] store after commit:', this.$store.state.tables.habitabilitySortDescending)
+      handler(value) {
+        this.$store.commit('tables/setHabitabilitySortDescending', value)
       },
     },
     systemNames: {
       immediate: true,
-      handler(newNames) {
-        if (newNames) {
-          if (!this.systems.length) {
-            this.systems = newNames.map((system) => system.SystemID)
-          }
+      handler(names) {
+        if (names.length && !this.systems.length) {
+          this.systems = names.map((system) => system.SystemID)
         }
       },
     },
-    RaceID: {
+    rankingKey: {
       immediate: true,
-      handler(newRaceID, oldRaceID) {
-        if (oldRaceID) {
-          this.config.set('habitabilitySystems', [])
-          this.systems = []
-        }
+      handler() {
+        this.ranking = normaliseRanking(this.GameID && this.RaceID ? this.config.get(this.rankingKey) : null)
       },
+    },
+    RaceID(_newRaceID, oldRaceID) {
+      if (oldRaceID) {
+        this.config.set('habitabilitySystems', [])
+        this.systems = []
+        this.selectedSpeciesId = null
+        this.detailSpecies = {}
+      }
     },
   },
   created() {
     this.terraformers = this.config.get('habitabilityTerraformers', 10)
+    this.goal = GOALS.some((option) => option.id === this.config.get('habitabilityGoal')) ? this.config.get('habitabilityGoal') : 'both'
+    this.view = VIEWS.some((option) => option.id === this.config.get('habitabilityView')) ? this.config.get('habitabilityView') : 'best'
+    FILTERS.forEach((filter) => (this.filters[filter.key] = !!this.config.get(filter.config, false)))
 
-    this.filterNonTerraformable = this.config.get('habitabilityFilterNonTerraformable', false)
-    this.filterWithoutMinerals = this.config.get('habitabilityFilterWithoutMinerals', false)
-    this.filterOwnPopulations = this.config.get('habitabilityFilterOwnPopulations', false)
-    this.filterOtherPopulations = this.config.get('habitabilityFilterOtherPopulations', false)
-    this.filterDoneTerraforming = this.config.get('habitabilityFilterDoneTerraforming', false)
-    this.filterUninhabited = this.config.get('habitabilityFilterUninhabited', false)
+    const classes = this.config.get('habitabilityBodyClasses')
+
+    if (Array.isArray(classes)) {
+      this.bodyClasses = classes.filter((value) => BODY_CLASS_NAMES[value])
+    }
 
     if (!this.systems.length) {
       this.systems = this.config.get('habitabilitySystems', this.systems)
     }
 
-    // Initialize table settings from store
-    if (this.$store.state.tables) {
-      this.itemsPerPage = this.$store.state.tables.habitabilityItemsPerPage || 10
-      this.sortBy = Array.isArray(this.$store.state.tables.habitabilitySortBy) ? [...this.$store.state.tables.habitabilitySortBy] : []
-      this.sortDescending = Array.isArray(this.$store.state.tables.habitabilitySortDescending) ? [...this.$store.state.tables.habitabilitySortDescending] : [false]
-      console.log('[Habitability] Initialized from store - itemsPerPage:', this.itemsPerPage, 'sortBy:', this.sortBy, 'sortDescending:', this.sortDescending)
+    const { tables } = this.$store.state
+
+    if (tables) {
+      this.itemsPerPage = tables.habitabilityItemsPerPage > DEFAULT_ROWS ? tables.habitabilityItemsPerPage : this.rowsToFit()
+
+      if (Array.isArray(tables.habitabilitySortBy) && tables.habitabilitySortBy.length) {
+        this.sortBy = [...tables.habitabilitySortBy]
+        this.sortDescending = Array.isArray(tables.habitabilitySortDescending) ? [...tables.habitabilitySortDescending] : [false]
+      }
     }
   },
-  mounted() {
-    //
-  },
   methods: {
-    separatedNumber,
+    areSetsEqual,
+    people,
     roundToDecimal,
-
+    separatedNumber,
     systemBodyName,
 
-    getGasInfo(gasId) {
-      if (!gasId || !this.gases || !this.gases.length) {
-        return null
-      }
-      return this.gases.find((gas) => gas.GasID === gasId) || null
-    },
-
-    areSetsEqual,
-    copyAtmosphereValue(value, decimals = 3) {
-      let normalized = Number.isFinite(value) ? this.roundToDecimal(value, decimals) : 0
-      if (!Number.isFinite(normalized)) {
-        normalized = 0
-      }
-      const text = `${normalized}`
-
-      const fallbackCopy = () => {
-        if (typeof document === 'undefined') {
-          return
-        }
-        const textArea = document.createElement('textarea')
-        textArea.value = text
-        textArea.setAttribute('readonly', '')
-        textArea.style.position = 'absolute'
-        textArea.style.left = '-9999px'
-        document.body.appendChild(textArea)
-        textArea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textArea)
-      }
-
-      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => fallbackCopy())
-      } else {
-        fallbackCopy()
-      }
+    resetFilters() {
+      FILTERS.forEach((filter) => {
+        this.filters[filter.key] = false
+        this.config.set(filter.config, false)
+      })
     },
 
     toggleSystems() {
-      if (this.systems.length === this.systemNames.length) {
-        this.systems = []
-      } else {
-        this.systems = this.systemNames.map((system) => system.SystemID)
-      }
-
+      this.systems = this.systems.length === this.systemNames.length ? [] : this.systemNames.map((system) => system.SystemID)
+      this.config.set('habitabilitySystems', this.systems)
+    },
+    removeSystem(id) {
+      this.systems = this.systems.filter((systemId) => systemId !== id)
+      this.config.set('habitabilitySystems', this.systems)
+    },
+    selectSystems(ids) {
+      this.systems = ids
       this.config.set('habitabilitySystems', this.systems)
     },
 
-    selectOurSystems() {
-      this.systems = this.colonizedSystems.map((system) => system.SystemID)
-
-      this.config.set('habitabilitySystems', this.systems)
+    setRanking(key, value) {
+      this.ranking = normaliseRanking({ ...this.ranking, [key]: value === '' ? null : Number(value) })
+      this.config.set(this.rankingKey, this.ranking)
     },
-    selectOurInhabitedSystems() {
-      this.systems = this.inhabitedColonizedSystems.map((system) => system.SystemID)
-
-      this.config.set('habitabilitySystems', this.systems)
+    setWeight(id, value) {
+      this.ranking = normaliseRanking({ ...this.ranking, weights: { ...this.ranking.weights, [id]: value === '' ? null : Number(value) } })
+      this.config.set(this.rankingKey, this.ranking)
     },
-    selectUnrestrictedSystems() {
-      this.systems = this.unrestrictedSystems.map((system) => system.SystemID)
-
-      this.config.set('habitabilitySystems', this.systems)
+    resetRanking() {
+      this.ranking = normaliseRanking(null)
+      this.config.set(this.rankingKey, null)
     },
 
-    hydrosphereAtTemperature(temperature) {
-      if (temperature <= 369) {
-        if (temperature <= 245) {
-          return 4 // Ice Sheet
-        }
-
-        return 3 // Liquid
-      }
-
-      return 2 // Vapour
+    isSelected(body) {
+      return this.selectedBodies.some((selection) => selection.SystemBodyID === body.SystemBodyID)
+    },
+    select(body) {
+      this.selectedBodies.push(this.bodyReference(body))
+    },
+    deselect(body) {
+      this.selectedBodies = this.selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID)
+    },
+    clearSelection() {
+      this.selectedBodies = []
+      this.filterBySelectedBodies = false
+    },
+    bodyReference(body) {
+      return { SystemBodyID: body.SystemBodyID, SystemBodyName: body.SystemBodyName, SystemName: body.SystemName, BodyClass: body.BodyClass, Component: body.Component, PlanetNumber: body.PlanetNumber, OrbitNumber: body.OrbitNumber }
     },
 
-    determineHydrosphereState(surfaceTemp, totalPressure) {
-      if (!Number.isFinite(totalPressure) || totalPressure <= 0) {
-        return 1
-      }
+    // The evaluation the detail panel shows: the species picked there, else the row's best.
+    shownEvaluation(item) {
+      const picked = this.detailSpecies[item.id]
 
-      if (totalPressure < 0.006 && surfaceTemp > 245) {
-        return 1
-      }
-
-      if (surfaceTemp > 369) {
-        return 2
-      }
-
-      if (surfaceTemp > 245) {
-        return 3
-      }
-
-      return 4
+      return (picked && item.row.evaluations.find((evaluation) => evaluation.species.SpeciesID === picked)) || item.best
+    },
+    speciesChoices(item) {
+      return item.row.evaluations
     },
 
-    calculateTargetHydroExt(currentHydroExt, projectedHydroId) {
-      // Primary objective: Reach HydroExt >= 20 to avoid colony cost penalty
-      // Secondary objective: Optimize for maximum population
+    years(value) {
+      return !Number.isFinite(value) ? 'never' : value < 0.1 ? '< 0.1 y' : `${separatedNumber(roundToDecimal(value, 1), this.separator)} y`
+    },
+    rowsToFit() {
+      return typeof window !== 'undefined' && window.innerHeight >= 1200 ? 15 : DEFAULT_ROWS
+    },
+    toggleStateFilter(id) {
+      this.stateFilter = this.stateFilter.includes(id) ? this.stateFilter.filter((one) => one !== id) : [...this.stateFilter, id]
+    },
+    // What the state says for this body, then how the ranking reads it.
+    stateTooltip(row) {
+      const { state, best } = row
+      const ranked = row.rank ? ` Ranked ${row.rank} of the targets, ${best.strategy === 'terraform' ? `after ${this.years(best.years)} of terraforming` : 'settled as it is'}.` : state.target ? ' Not ranked: too small or poor to be worth the trip (see Ranking).' : ''
 
-      // If below 20, prioritize reaching at least 20 to eliminate colony cost
-      if (currentHydroExt < 20) {
-        return 20
+      return `${state.text(row.facts)}${ranked}`
+    },
+    // The scarce minerals the body holds, the first two by name.
+    scarceNames(row) {
+      const names = row.minerals.lines.filter((line) => line.value > 0 && line.scarcity.factor > 1).map((line) => line.name)
+
+      return `${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2}` : ''}`
+    },
+    mineralTooltip(row) {
+      const lines = row.minerals.lines.filter((line) => line.value > 0).slice(0, 5).map((line) => `${line.name} ${roundToDecimal(line.value, 1)}${line.scarcity.factor > 1 ? ` (x${line.scarcity.factor}, ${line.scarcity.label.toLowerCase()})` : ''}`)
+
+      return `Deposit value ${roundToDecimal(row.minerals.value, 1)}, rich from 6: ${lines.join(', ') || 'no deposit worth counting'}.`
+    },
+    distanceTooltip(row) {
+      const { distance, capitalDistance } = row
+      const capital = capitalDistance && distance.from && !distance.from.Capital ? ` The capital is ${roundToDecimal(capitalDistance.au, 1)} AU and ${capitalDistance.jumps} ${capitalDistance.jumps === 1 ? 'jump' : 'jumps'} away.` : ''
+
+      return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'your nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
+    },
+    scarcityHint(id) {
+      const mineral = this.outlook.minerals[id]
+
+      if (!this.outlook.known) {
+        return 'No ledger in this save'
       }
 
-      // Once at or above 20, optimize for population based on hydrosphere type
-      if (projectedHydroId === 3) {
-        // Liquid water - target 50-75% range for optimal population
-        // Population modifier: hydroExt > 75 reduces population by (100-hydroExt)/25
-        if (currentHydroExt < 50) {
-          // Gradually increase toward optimal range (60% is ideal)
-          return Math.min(60, Math.max(20, currentHydroExt + 10))
-        } else if (currentHydroExt > 75) {
-          // Reduce directly to 75% to avoid population penalty
-          // No need for gradual reduction since evaporation handles this naturally
-          return 75
-        }
-        // Already in optimal range (50-75%)
-        return _clamp(currentHydroExt, 50, 75)
-      } else if (projectedHydroId === 4) {
-        // Ice sheet - no population penalty above 20%, maintain at least 20
-        // Since ice doesn't have the >75% penalty, can maintain higher if already there
-        return Math.max(currentHydroExt, 20)
-      } else if (projectedHydroId === 2) {
-        // Vapor - want to increase to eventually form liquid for better habitability
-        return Math.min(100, Math.max(20, currentHydroExt + 10))
-      }
+      return mineral && mineral.scarcity.factor > 1 ? `x${mineral.scarcity.factor}: ${mineral.scarcity.label.toLowerCase()}, ${this.years(mineral.runway)}` : 'Not short'
+    },
+    costText(value) {
+      return value === null || value === undefined ? 'N/A' : roundToDecimal(value, 2).toString()
+    },
+    costTooltip(evaluation) {
+      const { cost } = evaluation.assessment
 
-      // No hydrosphere (HydroID 1) - try to reach at least 20 if possible
-      return Math.max(currentHydroExt, 20)
+      return `Now ${this.costText(cost.current)}, at periapsis ${this.costText(cost.periapsis)}, at apoapsis ${this.costText(cost.apoapsis)}. The worst of them counts.`
+    },
+    cmcNote(row) {
+      const missing = [!row.cmcSite.populatedSystem && 'an own colony of 10 M in the system', !row.cmcSite.nearStar && 'a body under 80 AU from its star', !row.cmcSite.notBanned && 'a body that is not banned', !row.cmcSite.uncolonised && 'a body with no colony yet'].filter(Boolean)
+
+      return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
+    },
+    groundSurveyText(body) {
+      return `No geological survey by this race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
     },
 
-    targetWaterForState(hydroId, hydroExtent, totalPressure) {
-      if (!Number.isFinite(hydroExtent) || hydroExtent < 0) {
-        return 0
-      }
-
-      // For liquid hydrosphere (HydroID 3), use relative humidity formula
-      if (hydroId === 3) {
-        return Math.max(totalPressure, 0) * (hydroExtent / 100) * 0.01
-      }
-
-      return 0
-    },
-
-    adjustAlbedoForHydrosphere(baseAlbedo, previousHydroId, predictedHydroId, hydroExtent) {
-      if (predictedHydroId === previousHydroId) {
-        return baseAlbedo
-      }
-
-      let adjusted = baseAlbedo
-
-      if (previousHydroId !== 4) {
-        if (predictedHydroId === 4) {
-          adjusted -= hydroExtent * 0.0015
-        }
-      } else {
-        adjusted += hydroExtent * 0.0015
-      }
-
-      if (!Number.isFinite(adjusted) || adjusted <= 0) {
-        return baseAlbedo
-      }
-
-      return adjusted
-    },
-
-    computeAtmosphereMultipliers(totalPressure, greenhousePressure, antiPressure, dustTerm = 0) {
-      const safeTotal = Math.max(totalPressure, 0)
-      let greenhouseMultiplier = 1 + safeTotal / 10 + Math.max(greenhousePressure, 0)
-      if (greenhouseMultiplier > 3) {
-        greenhouseMultiplier = 3
-      }
-
-      let antiMultiplier = 1 + Math.max(dustTerm, 0) + Math.max(antiPressure, 0)
-      if (antiMultiplier > 3) {
-        antiMultiplier = 3
-      }
-
-      return { greenhouseMultiplier, antiMultiplier }
-    },
-
-    calculateSurfaceTemperatureAtOrbitalDistance(body, distanceAU) {
-      if (!body || !Array.isArray(body.Atmosphere) || !Number.isFinite(distanceAU) || distanceAU <= 0) {
-        return null
-      }
-
-      // Retry
-      let equilibriumTemperature = 255 / Math.sqrt(distanceAU / Math.sqrt(body.StarLuminosity))
-      if (equilibriumTemperature < 4) {
-        equilibriumTemperature = 4
-      }
-
-      const temperatureRatio = body.SurfaceTemp / (body.BaseTemp * body.Albedo)
-      const greenhouseThresholdTemperature = equilibriumTemperature * body.Albedo * temperatureRatio
-
-      let greenhouseMultiplier = 1
-      let antiGreenhouseMultipler = 1
-
-      if (body.Atmosphere.length > 0) {
-        let greenhouseAtm = 0
-        let antiGreenhouseAtm = 0
-
-        body.Atmosphere.forEach((gas) => {
-          if (greenhouseThresholdTemperature >= gas.BoilingPoint) {
-            if (gas.GHGas) {
-              greenhouseAtm += gas.GasAtm
-            }
-
-            if (gas.AntiGHGas) {
-              antiGreenhouseAtm += gas.GasAtm
-            }
-          }
-        })
-
-        greenhouseMultiplier = 1 + body.AtmosPress / 10 + greenhouseAtm
-        if (greenhouseMultiplier > 3) {
-          greenhouseMultiplier = 3
-        }
-
-        antiGreenhouseMultipler = 1 + body.DustLevel / 20000 + antiGreenhouseAtm
-        if (antiGreenhouseMultipler > 3) {
-          antiGreenhouseMultipler = 3
-        }
-      }
-
-      let predictedSurfaceTemperature = (equilibriumTemperature * greenhouseMultiplier * body.Albedo) / antiGreenhouseMultipler
-      if (predictedSurfaceTemperature < 1) {
-        predictedSurfaceTemperature = 1
-      }
-
-      if (body.HydroExt > 0) {
-        const previousHydrosphere = body.HydroID
-        const predictedHydrosphere = this.hydrosphereAtTemperature(predictedSurfaceTemperature)
-
-        if (previousHydrosphere !== predictedHydrosphere) {
-          let adjustedAlbedo = body.Albedo
-
-          if (previousHydrosphere !== 4) {
-            if (predictedHydrosphere === 4) {
-              adjustedAlbedo -= body.HydroExt * 0.0015
-            }
-          } else {
-            adjustedAlbedo += body.HydroExt * 0.0015
-          }
-          predictedSurfaceTemperature = (equilibriumTemperature * greenhouseMultiplier * adjustedAlbedo) / antiGreenhouseMultipler
-          if (predictedSurfaceTemperature < 1) {
-            predictedSurfaceTemperature = 1
-          }
-        }
-      }
-
-      return predictedSurfaceTemperature
-    },
-
-    colonyCostAtDistance(body, distanceAU) {
-      if (!body || !this.selectedSpecies || !this.selectedSpecies.SpeciesID) {
-        return null
-      }
-
-      if (body.FixedBody || body.BodyTypeID === 4 || body.BodyTypeID === 5) {
-        return -1
-      }
-
-      const species = this.selectedSpecies
-
-      let surfaceTemperature = body.SurfaceTemp
-      if (body.Eccentricity > 0 || body.BodyClass === 2) {
-        surfaceTemperature = this.calculateSurfaceTemperatureAtOrbitalDistance(body, distanceAU)
-      }
-
-      let colonyCost = 0
-
-      if (surfaceTemperature >= species.MinimumTemperature) {
-        if (surfaceTemperature > species.MaximumTemperature) {
-          colonyCost = Math.abs(species.MaximumTemperature - surfaceTemperature) / species.TemperatureDeviation
-        }
-      } else {
-        colonyCost = Math.abs(species.MinimumTemperature - surfaceTemperature) / species.TemperatureDeviation
-      }
-
-      if (body.TidalLock && BodyClass[body.BodyClass] !== 'Moon') {
-        colonyCost /= 5
-      }
-
-      let pressureMinimumCost = 0
-      if (body.AtmosPress > species.MaximumPressure) {
-        pressureMinimumCost = body.AtmosPress / species.MaximumPressure
-        if (pressureMinimumCost < 2) {
-          pressureMinimumCost = 2
-        }
-      }
-
-      if (colonyCost < pressureMinimumCost) {
-        colonyCost = pressureMinimumCost
-      }
-
-      let maxDangerousRating = 0
-      body.Atmosphere.forEach((gas) => {
-        // Check if gas is frozen out at this temperature
-        const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && surfaceTemperature < gas.BoilingPoint)
-
-        if (gas.Dangerous > maxDangerousRating && gas.AtmosGasID !== species.BreatheID && !isFrozenOut) {
-          const requiredPartialPressure = gas.DangerousLevel / 10000
-          if (gas.AtmosGasAmount > requiredPartialPressure) {
-            maxDangerousRating = gas.Dangerous
-          }
-        }
-      })
-
-      const dangerousGasMinimumCost = maxDangerousRating
-      if (colonyCost < dangerousGasMinimumCost) {
-        colonyCost = dangerousGasMinimumCost
-      }
-
-      if (Math.round(colonyCost * 10000) / 10000 < 2) {
-        const breathableGasPressure = body.Atmosphere.reduce((total, gas) => {
-          if (gas.AtmosGasID === species.BreatheID) {
-            // Check if gas is frozen out at this temperature
-            const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && surfaceTemperature < gas.BoilingPoint)
-            if (!isFrozenOut) {
-              return total + gas.GasAtm
-            }
-          }
-
-          return total
-        }, 0)
-        const breathableGasAmount = body.Atmosphere.reduce((total, gas) => {
-          if (gas.AtmosGasID === species.BreatheID) {
-            // Check if gas is frozen out at this temperature
-            const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && surfaceTemperature < gas.BoilingPoint)
-            if (!isFrozenOut) {
-              return total + gas.AtmosGasAmount
-            }
-          }
-
-          return total
-        }, 0)
-
-        if (breathableGasPressure < species.MinimumBreathablePressure || breathableGasPressure > species.MaximumBreathablePressure) {
-          colonyCost = 2
-        } else if (breathableGasAmount > maxBreathablePercentage) {
-          colonyCost = 2
-        }
-      }
-
-      if (body.HydroExt < 20) {
-        const hydrosphereMinimumCost = (20 - body.HydroExt) / 10
-        if (colonyCost < hydrosphereMinimumCost) {
-          colonyCost = hydrosphereMinimumCost
-        }
-      }
-
-      if (body.Gravity < species.MinimumGravity && colonyCost < 1) {
-        colonyCost = 1
-      }
-
-      return (Math.round(colonyCost * 10000) / 10000) * this.race.ColonizationSkill
-    },
-
-    colonyCosts(body) {
-      if (!body || !this.selectedSpecies || !this.selectedSpecies.SpeciesID) {
-        return {
-          overall: null,
-          periapsis: null,
-          apoapsis: null,
-        }
-      }
-
-      const isMoon = BodyClass[body.BodyClass] === 'Moon'
-      const orbitalDistance = isMoon ? body.ParentOrbitalDistance : body.OrbitalDistance
-      const orbitalEccentricity = isMoon ? body.ParentEccentricity : body.Eccentricity
-
-      const species = this.selectedSpecies
-
-      const periapsisDistance = orbitalDistance * (1 - orbitalEccentricity)
-      const apoapsisDistance = orbitalDistance * (1 + orbitalEccentricity)
-
-      let colonyCost = 0
-      let currentCC = 0
-      let periapsisCC = 0
-      let apoapsisCC = 0
-
-      let temperatureMinimumCost = 0
-
-      if (body.BodyTypeID === 4 || body.BodyTypeID === 5 || body.Gravity > species.MaximumGravity || body.FixedBody) {
-        return {
-          overall: -1,
-          periapsis: -1,
-          apoapsis: -1,
-        }
-      } else {
-        let maxDangerousRating = 0
-        body.Atmosphere.forEach((gas) => {
-          // Check if gas is frozen out at this temperature
-          const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && body.SurfaceTemp < gas.BoilingPoint)
-
-          if (gas.Dangerous > maxDangerousRating && gas.AtmosGasID !== species.BreatheID && !isFrozenOut) {
-            const requiredPartialPressure = gas.DangerousLevel / 10000
-            if (gas.AtmosGasAmount > requiredPartialPressure) {
-              maxDangerousRating = gas.Dangerous
-            }
-          }
-        })
-
-        colonyCost = maxDangerousRating
-
-        //
-        if (body.SurfaceTemp >= species.MinimumTemperature) {
-          if (body.SurfaceTemp > species.MaximumTemperature) {
-            temperatureMinimumCost = Math.abs(species.MaximumTemperature - body.SurfaceTemp) / species.TemperatureDeviation
-          }
-        } else {
-          temperatureMinimumCost = Math.abs(species.MinimumTemperature - body.SurfaceTemp) / species.TemperatureDeviation
-        }
-
-        if (body.TidalLock && BodyClass[body.BodyClass] !== 'Moon') {
-          temperatureMinimumCost /= 5
-        }
-
-        if (colonyCost < temperatureMinimumCost) {
-          colonyCost = temperatureMinimumCost
-        }
-
-        //
-        let pressureMinimumCost = 0
-        if (body.AtmosPress > species.MaximumPressure) {
-          pressureMinimumCost = body.AtmosPress / species.MaximumPressure
-          if (pressureMinimumCost < 2) {
-            pressureMinimumCost = 2
-          }
-        }
-
-        if (colonyCost < pressureMinimumCost) {
-          colonyCost = pressureMinimumCost
-        }
-
-        //
-        if (Math.round(colonyCost * 10000) / 10000 < 2) {
-          const breathableGasPressure = body.Atmosphere.reduce((total, gas) => {
-            if (gas.AtmosGasID === species.BreatheID) {
-              // Check if gas is frozen out at this temperature
-              const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && body.SurfaceTemp < gas.BoilingPoint)
-              if (!isFrozenOut) {
-                return total + gas.GasAtm
-              }
-            }
-
-            return total
-          }, 0)
-          const breathableGasAmount = body.Atmosphere.reduce((total, gas) => {
-            if (gas.AtmosGasID === species.BreatheID) {
-              // Check if gas is frozen out at this temperature
-              const isFrozenOut = gas.FrozenOut || (Number.isFinite(gas.BoilingPoint) && body.SurfaceTemp < gas.BoilingPoint)
-              if (!isFrozenOut) {
-                return total + gas.AtmosGasAmount
-              }
-            }
-
-            return total
-          }, 0)
-
-          if (breathableGasPressure < species.MinimumBreathablePressure || breathableGasPressure > species.MaximumBreathablePressure) {
-            colonyCost = 2
-          } else if (breathableGasAmount > maxBreathablePercentage) {
-            colonyCost = 2
-          }
-        }
-
-        //
-        if (body.HydroExt < 20) {
-          const hydrosphereMinimumCost = (20 - body.HydroExt) / 10
-          if (colonyCost < hydrosphereMinimumCost) {
-            colonyCost = hydrosphereMinimumCost
-          }
-        }
-
-        //
-        if (body.Gravity < species.MinimumGravity && colonyCost < 1) {
-          colonyCost = 1
-        }
-
-        currentCC = (Math.round(colonyCost * 10000) / 10000) * this.race.ColonizationSkill
-      }
-
-      if (currentCC <= -1 || (orbitalEccentricity <= 0 && !isMoon)) {
-        return {
-          overall: currentCC,
-          periapsis: currentCC,
-          apoapsis: currentCC,
-        }
-      } else {
-        periapsisCC = this.colonyCostAtDistance(body, periapsisDistance)
-        apoapsisCC = this.colonyCostAtDistance(body, apoapsisDistance)
-
-        return {
-          overall: currentCC,
-          periapsis: periapsisCC,
-          apoapsis: apoapsisCC,
-        }
-      }
-    },
-
-    makeTerraformationPlan(body) {
-      // Terraforming information we know upfront
-      // - HydroID is determined by SurfaceTemp
-      //   - HydroID 1 -> None, when AtmosPress = 0 or (AtmosPress < 0.006 and SurfaceTemp > 245K)
-      //   - HydroID 2 -> Vapour, when SurfaceTemp > 369K and AtmosPress >= 0.006
-      //   - HydroID 3 -> Liquid, when 245K < SurfaceTemp <= 369K and AtmosPress >= 0.006
-      //   - HydroID 4 -> Ice Sheet, when SurfaceTemp <= 245K and AtmosPress >= 0.006
-      // - There is a target atmospheric water vapour level that changes over time approaching the following formula: body.AtmosPress * (body.HydroExt / 100) * 0.01
-      // - A non liquid HydroID will target a water vapour pressure of HydroExt / 40
-      // - Bodies with a SurfaceTemp below 369K condense water vapour to HydroExt to reach the target level, all bodies with an HydroExt above 0 evaporate water vapour to reach the target level
-      // - Evaporating and condensing water vapour changes to HydroExt with a ratio of 40 times the pressure change
-      // - Changes in atmospheric composition and temperature will lead to changes in HydroExt and Albedo, that might affect the final values
-      // - A perfect terraformation is not possible if the species temperature range can't be made to overlap completely with the body's terraformed temperature range
-      if (!body || !Array.isArray(body.Atmosphere) || !this.selectedSpecies || !this.selectedSpecies.SpeciesID) {
-        return null
-      }
-
-      const species = this.selectedSpecies
-      const tolerance = 1e-4
-      const determineHydrosphere = this.determineHydrosphereState
-      const targetWaterForState = this.targetWaterForState
-      const adjustAlbedoForHydrosphere = this.adjustAlbedoForHydrosphere
-      const computeMultipliers = this.computeAtmosphereMultipliers
-
-      const localSurfaceArea = 4 * Math.PI * Math.pow(body.Radius, 2)
-      const localTerraformingPower = localSurfaceArea > 0 ? (earthSurfaceArea / localSurfaceArea) * this.rawTerraformingPower : 0
-      if (!Number.isFinite(localTerraformingPower) || localTerraformingPower <= 0) {
-        return null
-      }
-
-      const computeTerraformingTime = (delta, rate, fallback = 0) => {
-        const magnitude = Math.abs(delta)
-        if (magnitude < tolerance) {
-          return 0
-        }
-
-        const effectiveRate = rate > 0 ? rate : fallback
-        if (!effectiveRate || !Number.isFinite(effectiveRate)) {
-          return Number.POSITIVE_INFINITY
-        }
-
-        return magnitude / effectiveRate
-      }
-
-      const computeSwingRatios = (distance, eccentricity) => {
-        let low = 1
-        let high = 1
-
-        if (Number.isFinite(distance) && distance > 0 && Number.isFinite(eccentricity) && eccentricity > 0) {
-          const apoDistance = distance * (1 + eccentricity)
-          if (apoDistance > 0) {
-            low = Math.min(1, Math.sqrt(distance / apoDistance))
-          }
-
-          const periDistance = distance * (1 - eccentricity)
-          if (periDistance > 0) {
-            high = Math.max(1, Math.sqrt(distance / periDistance))
-          }
-        }
-
-        return { low, high }
-      }
-
-      const isMoon = BodyClass[body.BodyClass] === 'Moon'
-      const orbitalDistance = isMoon ? body.ParentOrbitalDistance : body.OrbitalDistance
-      const orbitalEccentricity = isMoon ? body.ParentEccentricity : body.Eccentricity
-      const { low: lowSwingRatio, high: highSwingRatio } = computeSwingRatios(orbitalDistance, orbitalEccentricity)
-
-      const atmosphereSummary = body.Atmosphere.reduce(
-        (summary, gas) => {
-          const pressure = Number.isFinite(gas.GasAtm) ? gas.GasAtm : 0
-          summary.totalPressure += pressure
-
-          if (gas.AtmosGasID === species.BreatheID) {
-            summary.breathablePressure += pressure
-            summary.breathableGas = gas
-          } else if (gas.Dangerous) {
-            summary.toxicPressure += pressure
-            summary.toxics.push(gas)
-          } else if (gas.AtmosGasID === 5) {
-            summary.waterVapourPressure += pressure
-            summary.waterVapourGas = gas
-          } else if (gas.GHGas) {
-            summary.greenhousePressure += pressure
-            summary.greenhouses.push(gas)
-          } else if (gas.AntiGHGas) {
-            summary.antiGreenhousePressure += pressure
-            summary.antiGreenhouses.push(gas)
-          } else {
-            summary.neutralPressure += pressure
-            summary.neutrals.push(gas)
-          }
-
-          return summary
-        },
-        {
-          breathablePressure: 0,
-          breathableGas: null,
-          toxicPressure: 0,
-          toxics: [],
-          greenhousePressure: 0,
-          greenhouses: [],
-          antiGreenhousePressure: 0,
-          antiGreenhouses: [],
-          waterVapourPressure: 0,
-          waterVapourGas: null,
-          neutralPressure: 0,
-          neutrals: [],
-          totalPressure: 0,
-        }
-      )
-
-      const greenhouseSideContributions = atmosphereSummary.greenhouses.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
-      const antiGreenhouseSideContributions = atmosphereSummary.antiGreenhouses.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
-      const neutralSideContributions = atmosphereSummary.neutrals.slice(1).reduce((total, gas) => total + (gas.GasAtm || 0), 0)
-
-      const breathableRangeMin = Math.max(0, species.IdealBreathePressure - species.BreathePressureDeviation)
-      const breathableRangeMax = species.IdealBreathePressure + species.BreathePressureDeviation
-      const currentBreathablePressure = Math.max(atmosphereSummary.breathablePressure, 0)
-      let targetBreathablePressure
-      if (currentBreathablePressure >= breathableRangeMin - tolerance && currentBreathablePressure <= breathableRangeMax + tolerance) {
-        targetBreathablePressure = _clamp(currentBreathablePressure, breathableRangeMin, breathableRangeMax)
-      } else {
-        const distanceToMin = Math.abs(currentBreathablePressure - breathableRangeMin)
-        const distanceToMax = Math.abs(currentBreathablePressure - breathableRangeMax)
-        targetBreathablePressure = distanceToMin <= distanceToMax ? breathableRangeMin : breathableRangeMax
-      }
-      targetBreathablePressure = _clamp(targetBreathablePressure, breathableRangeMin, breathableRangeMax)
-
-      const speciesMinTemperature = species.IdealTemperature - species.TemperatureDeviation
-      const speciesMaxTemperature = species.IdealTemperature + species.TemperatureDeviation
-      const minAllowedMeanTemperature = speciesMinTemperature / (lowSwingRatio || 1)
-      const maxAllowedMeanTemperature = speciesMaxTemperature / (highSwingRatio || 1)
-
-      // If the orbital eccentricity makes it impossible to fit both perihelion and aphelion
-      // within the species' temperature range, target the best compromise temperature
-      let targetMeanTemperature
-      let isPartialSolution = false
-
-      if (minAllowedMeanTemperature > maxAllowedMeanTemperature) {
-        // Can't perfectly satisfy temperature at both orbital extremes
-        // Target the midpoint to minimize total colony cost
-        targetMeanTemperature = (minAllowedMeanTemperature + maxAllowedMeanTemperature) / 2
-        isPartialSolution = true
-      } else {
-        // Can achieve perfect habitability
-        targetMeanTemperature = _clamp(species.IdealTemperature, minAllowedMeanTemperature, maxAllowedMeanTemperature)
-      }
-
-      // Determine which gases to use for greenhouse, anti-greenhouse, and neutral
-      // Prefer existing gases on the planet when possible
-      const greenhouseGasId = atmosphereSummary.greenhouses.length ? atmosphereSummary.greenhouses[0].AtmosGasID : 20 // Aestusium
-      const greenhouseName = atmosphereSummary.greenhouses.length ? atmosphereSummary.greenhouses[0].AtmosGasName : 'Aestusium'
-      const antiGreenhouseGasId = atmosphereSummary.antiGreenhouses.length ? atmosphereSummary.antiGreenhouses[0].AtmosGasID : 22 // Frigusium
-      const antiGreenhouseName = atmosphereSummary.antiGreenhouses.length ? atmosphereSummary.antiGreenhouses[0].AtmosGasName : 'Frigusium'
-      const neutralGasId = atmosphereSummary.neutrals.length ? atmosphereSummary.neutrals[0].AtmosGasID : 7 // Nitrogen
-      const neutralName = atmosphereSummary.neutrals.length ? atmosphereSummary.neutrals[0].AtmosGasName : 'Nitrogen'
-
-      // Collect all side contribution gases (non-primary gases) to preserve them
-      const greenhouseSideGases = atmosphereSummary.greenhouses.slice(1)
-      const antiGreenhouseSideGases = atmosphereSummary.antiGreenhouses.slice(1)
-      const neutralSideGases = atmosphereSummary.neutrals.slice(1)
-
-      const toxicsPlan = atmosphereSummary.toxics.map((gas) => ({
-        AtmosGasID: gas.AtmosGasID,
-        AtmosGasName: gas.AtmosGasName,
-        GasAtm: gas.GasAtm,
-        RemovalTime: computeTerraformingTime(gas.GasAtm, localTerraformingPower),
-      }))
-
-      const dustTerm = Math.max(Number.isFinite(body.DustLevel) ? body.DustLevel : 0, 0) / 20000
-
-      const computeRatio = (totalPressure, greenhousePressure, antiPressure) => {
-        const { greenhouseMultiplier, antiMultiplier } = computeMultipliers(totalPressure, greenhousePressure, antiPressure, dustTerm)
-        return greenhouseMultiplier / (antiMultiplier || 1)
-      }
-
-      const solveForAlbedo = (albedo) => {
-        const baseTemperatureReference = Math.max(body.BaseTemp * albedo, 1)
-        if (!Number.isFinite(baseTemperatureReference) || baseTemperatureReference <= 0) {
-          return null
-        }
-
-        const targetRatio = targetMeanTemperature / baseTemperatureReference
-
-        let finalWater = Math.min(Math.max(atmosphereSummary.waterVapourPressure, 0), species.MaximumPressure)
-        const baseNeutralMain = Math.max(atmosphereSummary.neutralPressure - neutralSideContributions, 0)
-        let finalNeutralMain = Math.min(baseNeutralMain, Math.max(species.MaximumPressure - neutralSideContributions, 0))
-        if (!Number.isFinite(finalNeutralMain) || finalNeutralMain < 0) {
-          finalNeutralMain = 0
-        }
-        let totalNeutral = finalNeutralMain + neutralSideContributions
-        let finalGreenhouse = Math.max(atmosphereSummary.greenhousePressure, greenhouseSideContributions)
-        let finalAnti = Math.max(atmosphereSummary.antiGreenhousePressure, antiGreenhouseSideContributions)
-        let finalTotal = Math.max(atmosphereSummary.totalPressure, 0)
-        let finalRatio = targetRatio
-        let finalSurfaceTemperature = targetMeanTemperature
-        let projectedHydroId = body.HydroID
-        let targetHydroExt = body.HydroExt
-
-        for (let iteration = 0; iteration < 32; iteration += 1) {
-          const previousNeutralMain = finalNeutralMain
-          const previousWater = finalWater
-
-          const nonNeutralSum = targetBreathablePressure + finalWater + finalGreenhouse + finalAnti
-          const minimumNeutralTotal = Math.max(neutralSideContributions, targetBreathablePressure > 0 ? targetBreathablePressure / 0.3 - nonNeutralSum : neutralSideContributions)
-          const maximumNeutralTotal = Math.max(neutralSideContributions, species.MaximumPressure - nonNeutralSum)
-
-          if (minimumNeutralTotal > maximumNeutralTotal + tolerance) {
-            return null
-          }
-
-          const minimumNeutralMain = Math.max(0, minimumNeutralTotal - neutralSideContributions)
-          const maximumNeutralMain = Math.max(0, maximumNeutralTotal - neutralSideContributions)
-
-          finalNeutralMain = _clamp(minimumNeutralMain, 0, maximumNeutralMain)
-          totalNeutral = finalNeutralMain + neutralSideContributions
-
-          finalTotal = nonNeutralSum + totalNeutral
-          finalRatio = computeRatio(finalTotal, finalGreenhouse, finalAnti)
-          finalSurfaceTemperature = finalRatio * baseTemperatureReference
-          projectedHydroId = determineHydrosphere(finalSurfaceTemperature, finalTotal)
-
-          // Calculate target HydroExt based on projected hydrosphere state
-          targetHydroExt = this.calculateTargetHydroExt(body.HydroExt, projectedHydroId)
-
-          const desiredWater = targetWaterForState(projectedHydroId, targetHydroExt, finalTotal)
-          finalWater = Math.min(Math.max(desiredWater, 0), species.MaximumPressure)
-
-          const ratioError = finalRatio - targetRatio
-          const neutralChange = Math.abs(finalNeutralMain - previousNeutralMain)
-          const waterChange = Math.abs(finalWater - previousWater)
-
-          if (Math.abs(ratioError) < tolerance && neutralChange < tolerance && waterChange < tolerance) {
-            break
-          }
-
-          if (Math.abs(ratioError) >= tolerance) {
-            if (ratioError > 0) {
-              const greenhouseAdjustable = Math.max(finalGreenhouse - greenhouseSideContributions, 0)
-              if (greenhouseAdjustable > tolerance) {
-                const scale = targetRatio / finalRatio
-                const newGreenhouse = greenhouseSideContributions + greenhouseAdjustable * scale
-                // Cap greenhouse contribution so that ghM = 1 + totalPressure/10 + ghAtm doesn't exceed 3
-                const maxGreenhouseAtm = Math.max(0, 2 - finalTotal / 10)
-                finalGreenhouse = Math.min(newGreenhouse, maxGreenhouseAtm)
-              } else {
-                const antiCapacity = Math.max(0, species.MaximumPressure - finalTotal)
-                if (antiCapacity <= tolerance) {
-                  return null
-                }
-                const antiDelta = Math.min(Math.max(ratioError, tolerance), antiCapacity)
-                // Cap anti-greenhouse contribution so that aghM = 1 + dustTerm + aghAtm doesn't exceed 3
-                const maxAntiGreenhouseAtm = Math.max(0, 2 - dustTerm)
-                const constrainedAntiDelta = Math.min(antiDelta, maxAntiGreenhouseAtm - finalAnti)
-                if (constrainedAntiDelta > 0) {
-                  finalAnti += constrainedAntiDelta
-                }
-              }
-            } else {
-              const antiAdjustable = Math.max(finalAnti - antiGreenhouseSideContributions, 0)
-              if (antiAdjustable > tolerance) {
-                const scale = targetRatio / finalRatio
-                const newAnti = antiGreenhouseSideContributions + antiAdjustable * scale
-                // Cap anti-greenhouse contribution so that aghM = 1 + dustTerm + aghAtm doesn't exceed 3
-                const maxAntiGreenhouseAtm = Math.max(0, 2 - dustTerm)
-                finalAnti = Math.min(newAnti, maxAntiGreenhouseAtm)
-              } else {
-                const greenhouseCapacity = Math.max(0, species.MaximumPressure - finalTotal)
-                if (greenhouseCapacity <= tolerance) {
-                  return null
-                }
-                const greenhouseDelta = Math.min(Math.max(-ratioError, tolerance), greenhouseCapacity)
-                // Cap greenhouse contribution so that ghM = 1 + totalPressure/10 + ghAtm doesn't exceed 3
-                const maxGreenhouseAtm = Math.max(0, 2 - finalTotal / 10)
-                const constrainedGreenhouseDelta = Math.min(greenhouseDelta, maxGreenhouseAtm - finalGreenhouse)
-                if (constrainedGreenhouseDelta > 0) {
-                  finalGreenhouse += constrainedGreenhouseDelta
-                }
-              }
-            }
-          }
-        }
-
-        const nonNeutralSum = targetBreathablePressure + finalWater + finalGreenhouse + finalAnti
-        const minimumNeutralFinalTotal = Math.max(neutralSideContributions, targetBreathablePressure > 0 ? targetBreathablePressure / 0.3 - nonNeutralSum : neutralSideContributions)
-        const maximumNeutralFinalTotal = Math.max(neutralSideContributions, species.MaximumPressure - nonNeutralSum)
-
-        if (minimumNeutralFinalTotal > maximumNeutralFinalTotal + tolerance) {
-          return null
-        }
-
-        const minimumNeutralFinalMain = Math.max(0, minimumNeutralFinalTotal - neutralSideContributions)
-        const maximumNeutralFinalMain = Math.max(0, maximumNeutralFinalTotal - neutralSideContributions)
-
-        finalNeutralMain = _clamp(minimumNeutralFinalMain, 0, maximumNeutralFinalMain)
-        totalNeutral = finalNeutralMain + neutralSideContributions
-        finalTotal = nonNeutralSum + totalNeutral
-        finalRatio = computeRatio(finalTotal, finalGreenhouse, finalAnti)
-        finalSurfaceTemperature = finalRatio * baseTemperatureReference
-        projectedHydroId = determineHydrosphere(finalSurfaceTemperature, finalTotal)
-
-        // Calculate target HydroExt and resulting water vapour adjustments
-        targetHydroExt = this.calculateTargetHydroExt(body.HydroExt, projectedHydroId)
-
-        // Calculate equilibrium water vapour for the target HydroExt
-        const equilibriumWaterForTarget = targetWaterForState(projectedHydroId, targetHydroExt, finalTotal)
-
-        // To reach target HydroExt, we need to account for condensation
-        // HydroExt change = (water vapour condensed) × 40
-        // Water condensed = (initial water - equilibrium water)
-        // So: HydroExt increase needed = (finalWater - equilibrium) × 40
-        // Therefore: finalWater = equilibrium + (HydroExt increase / 40)
-
-        const hydroExtIncrease = targetHydroExt - body.HydroExt
-        let targetWater = equilibriumWaterForTarget
-
-        if (hydroExtIncrease > 0) {
-          // Need to increase HydroExt through condensation
-          // Add extra water that will condense to reach target
-          targetWater = equilibriumWaterForTarget + hydroExtIncrease / 40
-        }
-
-        // Set water vapour to reach the target HydroExt
-        if (targetWater >= 0 && targetWater <= species.MaximumPressure) {
-          const newTotal = targetBreathablePressure + targetWater + finalGreenhouse + finalAnti + totalNeutral
-          if (newTotal <= species.MaximumPressure + tolerance) {
-            finalWater = targetWater
-          }
-        }
-
-        // The final HydroExt will be the target after condensation
-        const finalHydroExtent = targetHydroExt
-        const finalTemperatureLow = finalSurfaceTemperature * (lowSwingRatio || 1)
-        const finalTemperatureHigh = finalSurfaceTemperature * (highSwingRatio || 1)
-
-        // Check if temperatures are out of range
-        const tempOutOfRange = finalTemperatureLow < speciesMinTemperature - 0.5 || finalTemperatureHigh > speciesMaxTemperature + 0.5
-
-        // If the body cannot reach perfect habitability but we have a valid plan, offer it as a partial solution
-        if (tempOutOfRange && !isPartialSolution) {
-          // Mark as partial solution - body can be improved but won't reach perfect habitability
-          isPartialSolution = true
-        }
-
-        // For non-partial solutions, reject if temperatures still out of range
-        // For partial solutions, allow it and let the user decide if the improvement is worth it
-        if (!isPartialSolution && tempOutOfRange) {
-          return null
-        }
-
-        const waterVapourDelta = finalWater - atmosphereSummary.waterVapourPressure
-        const breathableDelta = targetBreathablePressure - atmosphereSummary.breathablePressure
-        const greenhouseDelta = finalGreenhouse - atmosphereSummary.greenhousePressure
-        const antiGreenhouseDelta = finalAnti - atmosphereSummary.antiGreenhousePressure
-        const neutralDelta = totalNeutral - atmosphereSummary.neutralPressure
-
-        const waterVapourTime = computeTerraformingTime(waterVapourDelta, localTerraformingPower, 0.1)
-        const breathableTime = computeTerraformingTime(breathableDelta, localTerraformingPower)
-        const toxicTime = computeTerraformingTime(atmosphereSummary.toxicPressure, localTerraformingPower)
-        const greenhouseTime = computeTerraformingTime(greenhouseDelta, localTerraformingPower)
-        const antiGreenhouseTime = computeTerraformingTime(antiGreenhouseDelta, localTerraformingPower)
-        const neutralTime = computeTerraformingTime(neutralDelta, localTerraformingPower)
-
-        // Determine water vapour process and estimate time for HydroExt changes
-        // Note: Condensation/evaporation happens naturally in the game at different rates
-        // Condensation: 0.1 atm/year, Evaporation: 4.0 atm/year
-        const hydroExtChange = finalHydroExtent - body.HydroExt
-        let waterVapourProcess = 'Stable'
-        let hydroExtTime = 0
-
-        // Game constants for condensation/evaporation
-        const condensationRatePerYear = 0.1 // atm/year
-        const evaporationRatePerYear = 4.0 // atm/year
-
-        if (Math.abs(hydroExtChange) > 0.1) {
-          if (hydroExtChange > 0) {
-            // Need to INCREASE HydroExt through condensation
-            // We're setting water above equilibrium, which will condense
-            const equilibriumWater = targetWaterForState(projectedHydroId, targetHydroExt, finalTotal)
-            const waterToCondense = finalWater - equilibriumWater
-
-            if (waterToCondense > tolerance) {
-              waterVapourProcess = 'Condense'
-              // Time = water to condense / condensation rate
-              hydroExtTime = waterToCondense / condensationRatePerYear
-            }
-          } else {
-            // Need to DECREASE HydroExt through evaporation
-            // HydroExt decreases as water evaporates from hydrosphere into atmosphere
-            // Total water that needs to evaporate = HydroExt change / 40
-            const waterToEvaporate = Math.abs(hydroExtChange) / 40
-
-            if (waterToEvaporate > tolerance) {
-              waterVapourProcess = 'Evaporate'
-              // Time = water to evaporate from hydrosphere / evaporation rate
-              hydroExtTime = waterToEvaporate / evaporationRatePerYear
-            }
-          }
-        }
-
-        return {
-          plan: {
-            WaterVapourStart: atmosphereSummary.waterVapourPressure,
-            WaterVapour: Math.max(finalWater, 0),
-            WaterVapourTime: waterVapourTime,
-            WaterVapourChange: waterVapourDelta,
-            WaterVapourProcess: waterVapourProcess,
-            WaterVapourGas: atmosphereSummary.waterVapourGas,
-            HydroExtTime: hydroExtTime,
-
-            BreathableStart: atmosphereSummary.breathablePressure,
-            Breathable: targetBreathablePressure,
-            BreathableTime: breathableTime,
-            BreathableName: species.BreatheName,
-            BreathableGas: atmosphereSummary.breathableGas,
-
-            ToxicStart: atmosphereSummary.toxicPressure,
-            Toxic: 0,
-            ToxicTime: toxicTime,
-            Toxics: toxicsPlan,
-
-            GreenhouseStart: atmosphereSummary.greenhousePressure,
-            Greenhouse: finalGreenhouse,
-            GreenhouseGasId: greenhouseGasId,
-            GreenhouseName: greenhouseName,
-            GreenhouseSideContributions: greenhouseSideContributions,
-            GreenhouseSideGases: greenhouseSideGases,
-            GreenhouseTime: greenhouseTime,
-
-            AntiGreenhouseStart: atmosphereSummary.antiGreenhousePressure,
-            AntiGreenhouse: finalAnti,
-            AntiGreenhouseGasId: antiGreenhouseGasId,
-            AntiGreenhouseName: antiGreenhouseName,
-            AntiGreenhouseSideContributions: antiGreenhouseSideContributions,
-            AntiGreenhouseSideGases: antiGreenhouseSideGases,
-            AntiGreenhouseTime: antiGreenhouseTime,
-
-            NeutralStart: atmosphereSummary.neutralPressure,
-            Neutral: totalNeutral,
-            NeutralGasId: neutralGasId,
-            NeutralName: neutralName,
-            NeutralSideContributions: neutralSideContributions,
-            NeutralSideGases: neutralSideGases,
-            NeutralTime: neutralTime,
-
-            TargetTotalPressure: finalTotal,
-            TargetMeanTemperature: finalSurfaceTemperature,
-            TargetTemperatureLow: finalTemperatureLow,
-            TargetTemperatureHigh: finalTemperatureHigh,
-
-            TargetHydroID: projectedHydroId,
-            TargetHydroExt: finalHydroExtent,
-            HydroExtChange: hydroExtChange,
-            TargetAlbedo: albedo,
-            AlbedoChange: albedo - body.OriginalAlbedo,
-            IsPartialSolution: isPartialSolution,
-          },
-        }
-      }
-
-      let effectiveAlbedo = body.Albedo
-      let solution = solveForAlbedo(effectiveAlbedo)
-
-      if (!solution) {
-        return null
-      }
-
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const adjustedAlbedo = adjustAlbedoForHydrosphere(body.Albedo, body.HydroID, solution.plan.TargetHydroID, body.HydroExt)
-        if (Math.abs(adjustedAlbedo - effectiveAlbedo) < 1e-3) {
-          break
-        }
-
-        effectiveAlbedo = adjustedAlbedo
-        const recalculated = solveForAlbedo(effectiveAlbedo)
-        if (!recalculated) {
-          break
-        }
-        solution = recalculated
-      }
-
-      if (solution?.plan) {
-        solution.plan.TargetAlbedo = effectiveAlbedo
-        solution.plan.AlbedoChange = effectiveAlbedo - body.OriginalAlbedo
-
-        // Check if this plan improves colony cost - if not, try to find a cost-optimized temperature
-        const currentColonyCosts = this.colonyCosts(body)
-        const plannedColonyCosts = this.colonyCosts({
-          ...body,
-          SurfaceTemp: solution.plan.TargetMeanTemperature,
-          Albedo: solution.plan.TargetAlbedo,
-          AtmosPress: solution.plan.TargetTotalPressure,
-          HydroExt: solution.plan.TargetHydroExt,
-          HydroID: solution.plan.TargetHydroID,
-          Atmosphere: [], // Placeholder - we'll calculate it properly if needed
-        })
-
-        // If the plan worsens colony cost, try to find better temperature
-        if (plannedColonyCosts.overall > currentColonyCosts.overall || plannedColonyCosts.periapsis > currentColonyCosts.periapsis || plannedColonyCosts.apoapsis > currentColonyCosts.apoapsis) {
-          // Try to find temperature that minimizes colony cost instead
-          let bestTemperature = targetMeanTemperature
-          let bestCost = Math.max(plannedColonyCosts.overall ?? Infinity, plannedColonyCosts.periapsis ?? Infinity, plannedColonyCosts.apoapsis ?? Infinity)
-          let improvedWithinConstraints = false
-
-          // First, sample temperatures across the valid range to find one that improves cost
-          const tempSamples = 10
-          const tempStep = (maxAllowedMeanTemperature - minAllowedMeanTemperature) / tempSamples
-          for (let i = 0; i <= tempSamples; i += 1) {
-            const testTemp = minAllowedMeanTemperature + tempStep * i
-            const testSolution = solveForAlbedo(effectiveAlbedo)
-
-            if (testSolution?.plan) {
-              // Manually set temperature for cost comparison
-              testSolution.plan.TargetMeanTemperature = testTemp
-
-              const testColonyCosts = this.colonyCosts({
-                ...body,
-                SurfaceTemp: testTemp,
-                Albedo: effectiveAlbedo,
-                AtmosPress: testSolution.plan.TargetTotalPressure,
-                HydroExt: testSolution.plan.TargetHydroExt,
-                HydroID: testSolution.plan.TargetHydroID,
-                Atmosphere: [],
-              })
-
-              const testCost = Math.max(testColonyCosts.overall ?? Infinity, testColonyCosts.periapsis ?? Infinity, testColonyCosts.apoapsis ?? Infinity)
-
-              // Track if this improves over current (not just over plan)
-              const improvesOverCurrent = testCost < Math.max(currentColonyCosts.overall ?? Infinity, currentColonyCosts.periapsis ?? Infinity, currentColonyCosts.apoapsis ?? Infinity)
-
-              if (testCost < bestCost) {
-                bestCost = testCost
-                bestTemperature = testTemp
-                if (improvesOverCurrent) {
-                  improvedWithinConstraints = true
-                }
-              }
-            }
-          }
-
-          // If no improvement within constraints, try extended temperature range as last resort
-          if (!improvedWithinConstraints) {
-            const currentCost = Math.max(currentColonyCosts.overall ?? Infinity, currentColonyCosts.periapsis ?? Infinity, currentColonyCosts.apoapsis ?? Infinity)
-
-            // Extend search range beyond species limits
-            const extendedMinTemp = speciesMinTemperature * 0.5 // Try cooler
-            const extendedMaxTemp = speciesMaxTemperature * 1.5 // Try hotter
-            const extendedStep = (extendedMaxTemp - extendedMinTemp) / 20
-
-            for (let i = 0; i <= 20; i += 1) {
-              const testTemp = extendedMinTemp + extendedStep * i
-              const testSolution = solveForAlbedo(effectiveAlbedo)
-
-              if (testSolution?.plan) {
-                testSolution.plan.TargetMeanTemperature = testTemp
-
-                const testColonyCosts = this.colonyCosts({
-                  ...body,
-                  SurfaceTemp: testTemp,
-                  Albedo: effectiveAlbedo,
-                  AtmosPress: testSolution.plan.TargetTotalPressure,
-                  HydroExt: testSolution.plan.TargetHydroExt,
-                  HydroID: testSolution.plan.TargetHydroID,
-                  Atmosphere: [],
-                })
-
-                const testCost = Math.max(testColonyCosts.overall ?? Infinity, testColonyCosts.periapsis ?? Infinity, testColonyCosts.apoapsis ?? Infinity)
-
-                if (testCost < bestCost && testCost < currentCost) {
-                  bestCost = testCost
-                  bestTemperature = testTemp
-                }
-              }
-            }
-          }
-
-          // If we found a better temperature, use it
-          if (bestCost < Math.max(plannedColonyCosts.overall ?? Infinity, plannedColonyCosts.periapsis ?? Infinity, plannedColonyCosts.apoapsis ?? Infinity)) {
-            targetMeanTemperature = bestTemperature
-            // Re-solve with the new target temperature
-            effectiveAlbedo = body.Albedo
-            solution = solveForAlbedo(effectiveAlbedo)
-            if (solution?.plan) {
-              solution.plan.TargetAlbedo = effectiveAlbedo
-              solution.plan.AlbedoChange = effectiveAlbedo - body.OriginalAlbedo
-            }
-          }
-        }
-      }
-
-      return solution.plan
-    },
-
-    _bodyMap(body) {
-      const species = this.selectedSpecies || {}
-
-      const isMoon = BodyClass[body.BodyClass] === 'Moon'
-      const orbitalDistance = isMoon ? body.ParentOrbitalDistance : body.OrbitalDistance
-      const orbitalEccentricity = isMoon ? body.ParentEccentricity : body.Eccentricity
-      let lowSwingRatio = 1
-      let highSwingRatio = 1
-
-      if (Number.isFinite(orbitalDistance) && orbitalDistance > 0 && Number.isFinite(orbitalEccentricity) && orbitalEccentricity > 0) {
-        const apoDistance = orbitalDistance * (1 + orbitalEccentricity)
-        if (apoDistance > 0) {
-          lowSwingRatio = Math.sqrt(orbitalDistance / apoDistance)
-        }
-
-        const periDistance = orbitalDistance * (1 - orbitalEccentricity)
-        if (periDistance > 0) {
-          highSwingRatio = Math.sqrt(orbitalDistance / periDistance)
-        } else if (orbitalEccentricity < 1) {
-          // Extremely small perihelion; approximate using a minimal distance.
-          highSwingRatio = Math.sqrt(orbitalDistance / (orbitalDistance * 0.0001))
-        }
-      }
-
-      if (!Number.isFinite(lowSwingRatio) || lowSwingRatio <= 0) {
-        lowSwingRatio = 1
-      } else if (lowSwingRatio > 1) {
-        lowSwingRatio = 1
-      }
-
-      if (!Number.isFinite(highSwingRatio) || highSwingRatio < 1) {
-        highSwingRatio = 1
-      }
-
-      const localSurfaceArea = 4 * Math.PI * Math.pow(body.Radius, 2)
-
-      // MAXIMUM POPULATION
-      const tidalModifier = body.TidalLock && BodyClass[body.BodyClass] !== 'Moon' ? 5 : 1
-      const hydroModifier = body.HydroExt > 75 ? Math.max((100 - body.HydroExt) / 25, 0.01) : 1
-
-      const maxPopPreModifiers = (localSurfaceArea / earthSurfaceArea) * baseMaxPop * this.selectedSpecies.PopulationDensityModifier
-
-      const newBody = {
-        ...body,
-
-        LowGravity: body.Gravity < this.selectedSpecies.IdealGravity - this.selectedSpecies.GravityDeviation,
-
-        MaximumPopulation: Math.max((maxPopPreModifiers * hydroModifier) / tidalModifier, 0.05),
-        MaximumPopulationAtOptimalHydro: Math.max(maxPopPreModifiers / tidalModifier, 0.05),
-        CurrentTemperatureLow: body.SurfaceTemp * lowSwingRatio,
-        CurrentTemperatureHigh: body.SurfaceTemp * highSwingRatio,
-      }
-
-      if (body.SystemBodyID === 2001311) {
-        debugger
-      }
-
-      const currentColonyCosts = this.colonyCosts(body)
-      newBody.CurrentColonyCostOverall = currentColonyCosts.overall
-      newBody.CurrentColonyCostPeriapsis = currentColonyCosts.periapsis
-      newBody.CurrentColonyCostApoapsis = currentColonyCosts.apoapsis
-
-      const atmosphereSummary = body.Atmosphere.reduce(
-        (aggregate, gas) => {
-          const gasPressure = gas.GasAtm || 0
-
-          aggregate.totalPressure += gasPressure
-
-          if (gas.AtmosGasID === this.selectedSpecies.BreatheID) {
-            aggregate.breathablePressure += gasPressure
-          } else if (gas.Dangerous) {
-            aggregate.toxicPressure += gasPressure
-          }
-
-          return aggregate
-        },
-        {
-          totalPressure: 0,
-          breathablePressure: 0,
-          toxicPressure: 0,
-        }
-      )
-
-      const tolerance = 1e-4
-      const speciesGravityMin = this.selectedSpecies.IdealGravity - this.selectedSpecies.GravityDeviation
-      const speciesGravityMax = this.selectedSpecies.IdealGravity + this.selectedSpecies.GravityDeviation
-      const gravityLow = body.Gravity < speciesGravityMin
-      const gravityNegligible = body.Gravity < 0.1
-      const gravityHigh = body.Gravity > speciesGravityMax
-      const gravityOk = !gravityLow && !gravityHigh
-
-      const speciesTempMin = this.selectedSpecies.IdealTemperature - this.selectedSpecies.TemperatureDeviation
-      const speciesTempMax = this.selectedSpecies.IdealTemperature + this.selectedSpecies.TemperatureDeviation
-      const temperatureOk = newBody.CurrentTemperatureLow >= speciesTempMin && newBody.CurrentTemperatureHigh <= speciesTempMax
-
-      const breathableMin = Math.max(0, this.selectedSpecies.IdealBreathePressure - this.selectedSpecies.BreathePressureDeviation)
-      const breathableMax = this.selectedSpecies.IdealBreathePressure + this.selectedSpecies.BreathePressureDeviation
-      const breathableOk = atmosphereSummary.breathablePressure >= breathableMin - tolerance && atmosphereSummary.breathablePressure <= breathableMax + tolerance
-
-      const pressureOk = atmosphereSummary.totalPressure <= this.selectedSpecies.MaximumPressure + tolerance
-      const toxicOk = atmosphereSummary.toxicPressure <= tolerance
-
-      const currentLiveable = gravityOk && temperatureOk && breathableOk && pressureOk && toxicOk
-
-      newBody.Liveable = currentLiveable
-      newBody.StartingAtmosphere = atmosphereSummary.totalPressure
-      newBody.TerraformationPlan = null
-      newBody.TerraformationTime = -Infinity
-      newBody.TerraformedAtmosphere = atmosphereSummary.totalPressure
-      newBody.TerraformedSurfaceTemperature = body.SurfaceTemp
-      newBody.TerraformedTemperatureLow = newBody.CurrentTemperatureLow
-      newBody.TerraformedTemperatureHigh = newBody.CurrentTemperatureHigh
-      newBody.TargetHydroExt = body.HydroExt
-      newBody.TargetHydroID = body.HydroID
-      newBody.HydroExtChange = 0
-
-      let terraformable = false
-      let terraformableStatus = 'No'
-
-      if (currentLiveable) {
-        terraformable = true
-        terraformableStatus = 'Done'
-        newBody.TerraformationTime = 0
-      } else if (!gravityHigh && !gravityNegligible) {
-        const newTerraformationPlan = this.makeTerraformationPlan(body)
-
-        if (newTerraformationPlan) {
-          newBody.TerraformationPlan = newTerraformationPlan
-          newBody.TerraformationTime = newTerraformationPlan.WaterVapourTime + newTerraformationPlan.BreathableTime + newTerraformationPlan.ToxicTime + newTerraformationPlan.GreenhouseTime + newTerraformationPlan.AntiGreenhouseTime + newTerraformationPlan.NeutralTime
-          newBody.TerraformedAtmosphere = newTerraformationPlan.TargetTotalPressure
-          newBody.TerraformedSurfaceTemperature = newTerraformationPlan.TargetMeanTemperature
-          newBody.TerraformedTemperatureLow = newTerraformationPlan.TargetTemperatureLow
-          newBody.TerraformedTemperatureHigh = newTerraformationPlan.TargetTemperatureHigh
-
-          const plannedHydroExt = Number.isFinite(newTerraformationPlan.TargetHydroExt) ? newTerraformationPlan.TargetHydroExt : body.HydroExt
-          newBody.TargetHydroExt = plannedHydroExt
-          newBody.TargetHydroID = newTerraformationPlan.TargetHydroID
-          newBody.HydroExtChange = plannedHydroExt - body.HydroExt
-
-          const plannedAtmosphere = []
-          const pushGas = (gasId, amount, existingGas = null) => {
-            if (!Number.isFinite(amount) || amount <= 0 || !gasId) {
-              return
-            }
-
-            // Try to get gas info from the database
-            const gasInfo = this.getGasInfo(gasId)
-
-            // If we have existing gas information from the atmosphere, use it as a base
-            // Otherwise use the database info or defaults
-            const gasData = existingGas || gasInfo
-
-            plannedAtmosphere.push({
-              AtmosGasID: gasId,
-              AtmosGasName: gasData?.AtmosGasName || gasData?.Name || 'Unknown',
-              GasAtm: amount,
-              AtmosGasAmount: amount,
-              BoilingPoint: gasData?.BoilingPoint || 0,
-              GHGas: gasData?.GHGas || 0,
-              AntiGHGas: gasData?.AntiGHGas || 0,
-              Dangerous: gasData?.Dangerous || 0,
-              DangerousLevel: gasData?.DangerousLevel || 0,
-              FrozenOut: false,
-            })
-          }
-
-          // Add breathable gas
-          pushGas(species.BreatheID, newTerraformationPlan.Breathable, newTerraformationPlan.BreathableGas)
-
-          // Add water vapour
-          pushGas(5, newTerraformationPlan.WaterVapour, newTerraformationPlan.WaterVapourGas)
-
-          // Add main greenhouse gas
-          const mainGreenhouseAmount = newTerraformationPlan.Greenhouse - newTerraformationPlan.GreenhouseSideContributions
-          pushGas(newTerraformationPlan.GreenhouseGasId, mainGreenhouseAmount)
-
-          // Add side greenhouse gases (preserve existing)
-          if (newTerraformationPlan.GreenhouseSideGases && newTerraformationPlan.GreenhouseSideGases.length) {
-            for (const gas of newTerraformationPlan.GreenhouseSideGases) {
-              pushGas(gas.AtmosGasID, gas.GasAtm, gas)
-            }
-          }
-
-          // Add main anti-greenhouse gas
-          const mainAntiGreenhouseAmount = newTerraformationPlan.AntiGreenhouse - newTerraformationPlan.AntiGreenhouseSideContributions
-          pushGas(newTerraformationPlan.AntiGreenhouseGasId, mainAntiGreenhouseAmount)
-
-          // Add side anti-greenhouse gases (preserve existing)
-          if (newTerraformationPlan.AntiGreenhouseSideGases && newTerraformationPlan.AntiGreenhouseSideGases.length) {
-            for (const gas of newTerraformationPlan.AntiGreenhouseSideGases) {
-              pushGas(gas.AtmosGasID, gas.GasAtm, gas)
-            }
-          }
-
-          // Add main neutral gas
-          const mainNeutralAmount = newTerraformationPlan.Neutral - newTerraformationPlan.NeutralSideContributions
-          pushGas(newTerraformationPlan.NeutralGasId, mainNeutralAmount)
-
-          // Add side neutral gases (preserve existing)
-          if (newTerraformationPlan.NeutralSideGases && newTerraformationPlan.NeutralSideGases.length) {
-            for (const gas of newTerraformationPlan.NeutralSideGases) {
-              pushGas(gas.AtmosGasID, gas.GasAtm, gas)
-            }
-          }
-
-          // Update Surface Temperature
-          let ghAtm = 0
-          let aghAtm = 0
-          for (const gas of plannedAtmosphere) {
-            if (!gas.FrozenOut) {
-              if (gas.GHGas) {
-                ghAtm += gas.GasAtm
-              } else if (gas.AntiGHGas) {
-                aghAtm += gas.GasAtm
-              }
-            }
-          }
-
-          let ghM = 1 + newTerraformationPlan.TargetTotalPressure / 10 + ghAtm
-          if (ghM > 3) {
-            ghM = 3
-          }
-
-          let aghM = 1 + body.DustLevel / 20000 + aghAtm
-          if (aghM > 3) {
-            aghM = 3
-          }
-
-          newTerraformationPlan.TargetSurfaceTemp = (body.BaseTemp * ghM * newTerraformationPlan.TargetAlbedo) / aghM
-          if (newTerraformationPlan.TargetSurfaceTemp < 1) {
-            newTerraformationPlan.TargetSurfaceTemp = 1
-          }
-
-          //
-          const plannedColonyCosts = this.colonyCosts({
-            ...newBody,
-            SurfaceTemp: newTerraformationPlan.TargetSurfaceTemp,
-            Albedo: newTerraformationPlan.TargetAlbedo,
-            AtmosPress: newTerraformationPlan.TargetTotalPressure,
-            HydroExt: plannedHydroExt,
-            HydroID: newTerraformationPlan.TargetHydroID,
-            Atmosphere: plannedAtmosphere,
-          })
-
-          let overallCost = plannedColonyCosts.overall
-          let periapsisCost = plannedColonyCosts.periapsis
-          let apoapsisCost = plannedColonyCosts.apoapsis
-
-          // Optimization: If planned colony cost equals current cost, only remove toxics
-          // No point in adjusting atmosphere if it doesn't improve habitability
-          const currentOverall = newBody.CurrentColonyCostOverall
-          const currentPeriapsis = newBody.CurrentColonyCostPeriapsis
-          const currentApoapsis = newBody.CurrentColonyCostApoapsis
-
-          const costsAreEqual = Math.abs(overallCost - currentOverall) < 0.01 && Math.abs(periapsisCost - currentPeriapsis) < 0.01 && Math.abs(apoapsisCost - currentApoapsis) < 0.01
-
-          // Reject plans that worsen colony cost - terraforming should improve habitability, not make it worse
-          const costsWorse = overallCost > currentOverall && periapsisCost > currentPeriapsis && apoapsisCost > currentApoapsis
-
-          if (costsWorse) {
-            // Plan would make colony cost worse - don't terraform
-            newBody.TerraformationPlan = null
-            newBody.TerraformationTime = -Infinity
-            terraformable = false
-            terraformableStatus = 'No'
-          } else if (costsAreEqual) {
-            if (newTerraformationPlan.ToxicTime > 0) {
-              // Only keep toxic removal, skip all other atmospheric adjustments
-              newTerraformationPlan.WaterVapour = newTerraformationPlan.WaterVapourStart
-              newTerraformationPlan.WaterVapourTime = 0
-              newTerraformationPlan.WaterVapourChange = 0
-              newTerraformationPlan.Breathable = newTerraformationPlan.BreathableStart
-              newTerraformationPlan.BreathableTime = 0
-              newTerraformationPlan.Greenhouse = newTerraformationPlan.GreenhouseStart
-              newTerraformationPlan.GreenhouseTime = 0
-              newTerraformationPlan.AntiGreenhouse = newTerraformationPlan.AntiGreenhouseStart
-              newTerraformationPlan.AntiGreenhouseTime = 0
-              newTerraformationPlan.Neutral = newTerraformationPlan.NeutralStart
-              newTerraformationPlan.NeutralTime = 0
-
-              // Recalculate total time (only toxics now)
-              newBody.TerraformationTime = newTerraformationPlan.ToxicTime
-            } else {
-              // No toxics and colony cost won't improve - nothing to terraform
-              // Clear the plan so it shows as already optimal
-              newBody.TerraformationPlan = null
-              newBody.TerraformationTime = 0
-            }
-          }
-
-          if (body.SystemBodyID === 2001311) {
-            debugger
-          }
-
-          if (costsWorse) {
-            overallCost = currentOverall
-            periapsisCost = currentPeriapsis
-            apoapsisCost = currentApoapsis
-          }
-
-          if (Number.isFinite(overallCost) && Number.isFinite(periapsisCost) && Number.isFinite(apoapsisCost) && overallCost >= 0 && periapsisCost >= 0 && apoapsisCost >= 0) {
-            terraformable = true
-
-            if (overallCost === 0 && periapsisCost === 0 && apoapsisCost === 0 && !gravityLow) {
-              terraformableStatus = 'Yes'
-            } else if (overallCost === 0 || periapsisCost === 0 || apoapsisCost === 0) {
-              terraformableStatus = 'Partial'
-            } else if (overallCost < 2 && periapsisCost < 2 && apoapsisCost < 2) {
-              terraformableStatus = 'Near'
-            } else if (overallCost < 4 && periapsisCost < 4 && apoapsisCost < 4) {
-              terraformableStatus = 'Limited'
-            } else {
-              terraformableStatus = 'Insufficient'
-            }
-          } else {
-            terraformable = false
-            terraformableStatus = 'No'
-          }
-
-          newBody.PlannedColonyCostOverall = overallCost
-          newBody.PlannedColonyCostPeriapsis = periapsisCost
-          newBody.PlannedColonyCostApoapsis = apoapsisCost
-        }
-      }
-
-      if (gravityHigh) {
-        terraformable = false
-        terraformableStatus = 'No (HG)'
-      }
-
-      if (gravityNegligible) {
-        terraformable = false
-        terraformableStatus = 'No (LG)'
-      }
-
-      if (gravityLow && !gravityNegligible) {
-        if (terraformableStatus === 'Yes') {
-          terraformableStatus = 'Partial'
-        }
-
-        terraformableStatus = `${terraformableStatus} (LG)`
-      }
-
-      newBody.Terraformable = terraformable && !terraformableStatus.startsWith('No')
-      newBody.TerraformableStatus = terraformableStatus
-
-      newBody.PlannedColonyCostMetric = terraformable && newBody.TerraformationTime > 0 ? Math.max(newBody.PlannedColonyCostOverall, newBody.PlannedColonyCostPeriapsis, newBody.PlannedColonyCostApoapsis) : terraformable ? 25000 + Math.max(newBody.CurrentColonyCostOverall, newBody.CurrentColonyCostPeriapsis, newBody.CurrentColonyCostApoapsis) : Infinity
-
-      // MINERALS
-      const [miningPotential, totalMiningAmount] = body.Minerals.reduce(
-        ([potential, amount], mineral) => {
-          potential += Math.atan(Math.pow(mineral.Amount / 20000, Math.cos((Math.PI / 2) * mineral.Accessibility - Math.PI / 2)) * (0.5 - Math.cos(Math.PI * mineral.Accessibility) / 2))
-          amount += mineral.Amount
-
-          return [potential, amount]
-        },
-        [0, 0]
-      )
-
-      newBody.MiningPotential = body.Minerals.length && (miningPotential * 10) / ((Math.PI / 2) * body.Minerals.length)
-      newBody.TotalMiningAmount = totalMiningAmount
-
-      // EXTANT POPULATIONS
-      const { totalPopulation, ownPopulation, otherPopulation } = body.Populations.reduce(
-        (aggregate, population) => {
-          aggregate.totalPopulation += population.Population
-
-          const ownExtant = this.species.find((species) => species.SpeciesID === population.SpeciesID)
-
-          if (ownExtant) {
-            aggregate.ownPopulation = true
-          } else {
-            aggregate.otherPopulation = true
-          }
-
-          return aggregate
-        },
-        {
-          totalPopulation: 0,
-          ownPopulation: false,
-          otherPopulation: false,
-        }
-      )
-
-      newBody.TotalPopulation = totalPopulation
-      newBody.OwnPopulation = ownPopulation
-      newBody.OtherPopulation = otherPopulation
-
-      if (newBody.TerraformationPlan && newBody.SystemBodyID === 2001311) {
-        console.log(newBody)
-      }
-
-      return newBody
+    retryFailedInputs() {
+      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
     },
   },
   asyncComputed: {
-    race: {
-      async get() {
-        if (!this.database || !this.RaceID) {
-          return {}
-        }
-
-        const race = await this.database.models.Race.findOne({
-          where: {
-            RaceID: this.RaceID,
-          },
-        }).then((race) => {
-          console.log('Loaded race:', race.toJSON())
-          return race
-        })
-
-        return race
-      },
-      default: {},
-    },
     bodies: {
-      async get() {
-        if (!this.database || !this.GameID) {
+      get: tracked('bodies', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const bodies = await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.ParentBodyType, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.TrojanAsteroid, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.RadiationLevel, FCT_SystemBody.DustLevel, FCT_Star.Component, FCT_Star.Luminosity as StarLuminosity, FCT_Star.Xcor as StarXcor, FCT_Star.Ycor as StarYcor, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID, FCT_Population.Population, FCT_Population.SpeciesID, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, CAST(CASE WHEN FCT_SystemBodySurveys.SystemBodyID IS NULL THEN 0 ELSE 1 END AS BIT) AS BodySurveyed, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.BoilingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel, DIM_Gases.Name as AtmosGasName, FCT_SystemBody.DistanceToParent, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.EccentricityDirection, FCT_SystemBody.FixedBody, ParentBody.OrbitalDistance as ParentOrbitalDistance, ParentBody.Eccentricity as ParentEccentricity from FCT_SystemBody left join FCT_Population on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID left join FCT_SystemBodySurveys on FCT_SystemBody.SystemBodyID = FCT_SystemBodySurveys.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_MineralDeposit on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID and FCT_SystemBodySurveys.SystemBodyID = FCT_MineralDeposit.SystemBodyID left join FCT_AtmosphericGas on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID left join DIM_Gases on FCT_AtmosphericGas.AtmosGasID = DIM_Gases.GasID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_SystemBody as ParentBody on FCT_SystemBody.ParentBodyID = ParentBody.SystemBodyID and FCT_SystemBody.ParentBodyType = 1 where FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5) and FCT_SystemBody.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} order by FCT_SystemBody.SystemBodyID asc`).then(([items]) => {
-          const bodyPops = {}
-          const bodyMats = {}
-          const bodyAtmos = {}
-
-          return Object.values(
-            items.reduce((aggregate, item) => {
-              if (!aggregate[item.SystemBodyID]) {
-                aggregate[item.SystemBodyID] = {
-                  SystemBodyID: item.SystemBodyID,
-                  ParentBodyID: item.ParentBodyID,
-                  ParentBodyType: item.ParentBodyType,
-                  SystemBodyName: item.SystemBodyName,
-                  SystemName: item.SystemName,
-                  SystemID: item.SystemID,
-                  StarID: item.StarID,
-                  RuinID: item.RuinID,
-                  RuinRaceID: item.RuinRaceID,
-                  BodyClass: item.BodyClass,
-                  BodyTypeID: item.BodyTypeID,
-                  TrojanAsteroid: item.TrojanAsteroid,
-                  Component: item.Component,
-                  PlanetNumber: item.PlanetNumber,
-                  OrbitNumber: item.OrbitNumber,
-                  SystemBodyOrder: `${item.Component}-${item.PlanetNumber}-${item.OrbitNumber}`,
-                  GroundMineralSurvey: item.GroundMineralSurvey,
-                  BodySurveyed: item.BodySurveyed,
-
-                  OrbitalDistance: item.OrbitalDistance,
-                  ParentOrbitalDistance: item.ParentOrbitalDistance,
-                  Eccentricity: item.Eccentricity,
-                  ParentEccentricity: item.ParentEccentricity,
-                  EccentricityDirection: item.EccentricityDirection,
-                  FixedBody: item.FixedBody,
-
-                  OriginalSurfaceTemp: item.SurfaceTemp,
-                  OriginalAlbedo: item.Albedo,
-
-                  Radius: item.Radius,
-                  Gravity: item.Gravity,
-                  BaseTemp: item.BaseTemp,
-                  SurfaceTemp: item.SurfaceTemp,
-                  HydroID: item.HydroID,
-                  HydroExt: item.HydroExt,
-                  Albedo: item.Albedo,
-                  AtmosPress: item.AtmosPress,
-                  RadiationLevel: item.RadiationLevel,
-                  DustLevel: item.DustLevel,
-                  TidalLock: item.TidalLock,
-
-                  StarLuminosity: item.StarLuminosity,
-                  StarXcor: item.StarXcor,
-                  StarYcor: item.StarYcor,
-
-                  Populations: [],
-                  Minerals: [],
-                  Atmosphere: [],
-                }
-
-                if (BodyClass[item.BodyClass] === 'Planet' || BodyClass[item.BodyClass] === 'Comet' || (BodyClass[item.BodyClass] === 'Asteroid' && item.TrojanAsteroid === 0)) {
-                  aggregate[item.SystemBodyID].BaseTemp = Math.max(255 / Math.sqrt(item.DistanceToParent / Math.sqrt(item.StarLuminosity)), 4)
-                }
-              }
-
-              if (!bodyPops[item.SystemBodyID]) {
-                bodyPops[item.SystemBodyID] = []
-              }
-
-              if (!bodyMats[item.SystemBodyID]) {
-                bodyMats[item.SystemBodyID] = []
-              }
-
-              if (!bodyAtmos[item.SystemBodyID]) {
-                bodyAtmos[item.SystemBodyID] = []
-              }
-
-              if (item.PopulationID && !bodyPops[item.SystemBodyID].includes(item.PopulationID)) {
-                bodyPops[item.SystemBodyID].push(item.PopulationID)
-
-                aggregate[item.SystemBodyID].Populations.push({
-                  PopulationID: item.PopulationID,
-                  Population: item.Population,
-                  SpeciesID: item.SpeciesID,
-                })
-              }
-
-              if (item.MaterialID && !bodyMats[item.SystemBodyID].includes(item.MaterialID)) {
-                bodyMats[item.SystemBodyID].push(item.MaterialID)
-
-                aggregate[item.SystemBodyID].Minerals.push({
-                  MaterialID: item.MaterialID,
-                  MaterialName: this.MaterialMap[item.MaterialID],
-                  Amount: item.Amount,
-                  Accessibility: item.Accessibility,
-                  HalfOriginalAmount: item.HalfOriginalAmount,
-                  OriginalAcc: item.OriginalAcc,
-                })
-              }
-
-              if (item.AtmosGasID && !bodyAtmos[item.SystemBodyID].includes(item.AtmosGasID)) {
-                bodyAtmos[item.SystemBodyID].push(item.AtmosGasID)
-
-                aggregate[item.SystemBodyID].Atmosphere.push({
-                  AtmosGasID: item.AtmosGasID,
-                  AtmosGasName: item.AtmosGasName,
-                  AtmosGasAmount: item.AtmosGasAmount,
-                  GasAtm: item.GasAtm,
-                  FrozenOut: item.FrozenOut,
-                  BoilingPoint: item.BoilingPoint,
-                  GHGas: item.GHGas,
-                  AntiGHGas: item.AntiGHGas,
-                  Dangerous: item.Dangerous,
-                  DangerousLevel: item.DangerousLevel,
-                })
-              }
-
-              return aggregate
-            }, {})
-          )
-        })
-
-        console.log('### BODIES', bodies)
-
-        return bodies
-      },
+        return loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
       default: [],
     },
     species: {
-      async get() {
-        if (!this.database || !this.GameID) {
+      get: tracked('species', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        const species = await this.database.query(`select FCT_Population.SpeciesID, FCT_Species.SpeciesName, sum(FCT_Population.Population) as TotalPopulation, FCT_Race.TerraformingRate, FCT_Species.BreatheID, DIM_Gases.Name as BreatheName, FCT_Species.Oxygen as IdealBreathePressure, FCT_Species.OxyDev as BreathePressureDeviation, FCT_Species.PressMax as MaximumPressure, FCT_Species.Temperature as IdealTemperature, FCT_Species.TempDev as TemperatureDeviation, FCT_Species.Gravity as IdealGravity, FCT_Species.GravDev as GravityDeviation, FCT_Species.PopulationDensityModifier from FCT_Population left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join FCT_Species on FCT_Population.SpeciesID = FCT_Species.SpeciesID left join DIM_Gases on FCT_Species.BreatheID = DIM_Gases.GasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SpeciesID`).then(([items]) => {
-          const species = items.map((item) => {
-            return {
-              ...item,
-
-              MinimumTemperature: item.IdealTemperature - item.TemperatureDeviation,
-              MaximumTemperature: item.IdealTemperature + item.TemperatureDeviation,
-              MinimumBreathablePressure: Math.max(0, item.IdealBreathePressure - item.BreathePressureDeviation),
-              MaximumBreathablePressure: item.IdealBreathePressure + item.BreathePressureDeviation,
-              MinimumGravity: Math.max(0, item.IdealGravity - item.GravityDeviation),
-              MaximumGravity: item.IdealGravity + item.GravityDeviation,
-            }
-          })
-
-          return species
-        })
-
-        if (species.length) {
-          this.selectedSpeciesId = species[0].SpeciesID
-        }
-
-        return species
-      },
+        return loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
       default: [],
     },
-    surveyedSystems: {
-      async get() {
-        if (!this.database || !this.GameID) {
-          return []
+    raceRules: {
+      get: tracked('raceRules', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return DEFAULT_RULES()
         }
 
-        const systems = await this.database.models.System.findAll({
-          where: {
-            GameID: this.GameID,
-          },
-
-          include: [
-            {
-              required: true,
-              model: this.database.models.RaceSystemSurvey,
-              where: {
-                RaceID: this.RaceID,
-              },
-            },
-            {
-              required: false,
-              model: this.database.models.Population,
-              where: {
-                RaceID: this.RaceID,
-              },
-            },
-          ],
-        }).then((items) => {
-          return items.map((item) => {
-            const [inhabitedColonies] = _partition(item.Populations, (population) => population.Population)
-
-            return {
-              ...item.toJSON(),
-
-              InhabitedColonies: inhabitedColonies.length,
-            }
-          })
-        })
-
-        return systems
-      },
-      default: [],
+        return loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: DEFAULT_RULES(),
     },
     gases: {
-      async get() {
-        if (!this.database || !this.GameID) {
-          return []
+      get: tracked('gases', async function () {
+        return this.database ? loadGases(this.database) : []
+      }),
+      default: [],
+    },
+    routes: {
+      get: tracked('routes', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { jumpPoints: [], capital: null, colonies: [] }
         }
 
-        const gases = await this.database.query('SELECT GasID, Name, Symbol, Weight, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel FROM DIM_Gases').then(([items]) => {
-          return items
-        })
+        return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: { jumpPoints: [], capital: null, colonies: [] },
+    },
+    outlook: {
+      get: tracked('outlook', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_OUTLOOK
+        }
 
-        return gases
-      },
-      default: [],
+        return loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_OUTLOOK,
     },
   },
 }
 </script>
 
-<style lang="scss" scoped>
-.target-value {
-  display: inline-flex;
-  align-items: center;
-  .target-copy-btn {
-    margin-left: 4px;
-    height: 20px;
-    width: 20px;
-    min-width: 20px;
+<style lang="scss">
+.planner-page {
+  // One density for the controls above the table: every field, toggle and button is 40 px tall, each field has its label above it in the same caption style, and the buttons, which carry their own label, sit on the fields' bottom edge.
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 16px;
+  }
+
+  .tool {
+    min-width: 0;
+  }
+
+  .tool__label {
+    height: 18px;
+    line-height: 18px;
+  }
+
+  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is
+  // left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
+  .tool--species {
+    flex: 0 1 260px;
+    min-width: 180px;
+  }
+
+  .tool--terraformers {
+    flex: 0 0 130px;
+  }
+
+  .tool--systems {
+    flex: 1 1 240px;
+  }
+
+  @media (max-width: 1499px) {
+    .tool__btn-label {
+      display: none;
+    }
+
+    .tool__buttons .v-btn {
+      min-width: 40px !important;
+      padding: 0 12px !important;
+    }
+
+    .tool__buttons .v-btn .v-icon--left {
+      margin-right: 0;
+    }
+  }
+
+  .tool--actions {
+    align-self: flex-end;
+  }
+
+  .tool__buttons {
+    display: flex;
+    gap: 8px;
+  }
+
+  .toolbar .v-btn-toggle .v-btn,
+  .tool__buttons .v-btn {
+    height: 40px !important;
+  }
+
+  .rank-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .rank-number {
+    min-width: 28px;
+    font-weight: 500;
+  }
+
+  .score-meter {
+    display: inline-block;
+    width: 56px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(128, 128, 128, 0.25);
+    overflow: hidden;
+
+    i {
+      display: block;
+      height: 100%;
+      background: var(--sc, #1baf7a);
+    }
+  }
+
+  .mineral-score {
+    font-weight: 500;
+  }
+
+  .mineral-note {
+    max-width: 220px;
+    white-space: normal;
+  }
+
+  .mineral-high {
+    color: var(--sc, #1baf7a);
+  }
+
+  .view-count {
+    margin-left: 6px;
+    opacity: 0.65;
+    font-weight: 400;
+  }
+
+  .class-chip-on {
+    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+  }
+
+  tr.v-data-table__expanded__content {
+    box-shadow: none;
+  }
+}
+
+.planner-menu {
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+
+  .legend-row {
+    display: grid;
+    grid-template-columns: 150px 1fr 52px;
+    align-items: start;
+    gap: 4px 12px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(128, 128, 128, 0.12);
+    }
+  }
+
+  .legend-row--on {
+    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+  }
+
+  .legend-rule {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .legend-count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    line-height: 24px;
   }
 }
 </style>

@@ -1,8 +1,6 @@
 <template>
   <div>
-    <div v-if="!RaceID">Select a race from the left-side menu.</div>
-
-    <div v-else>
+    <div>
       <v-container fluid>
         <v-row justify="start">
           <v-col cols="12">
@@ -10,7 +8,7 @@
               Transportation
             </div>
           </v-col>
-          <v-col cols="12">
+          <v-col cols="12" lg="6">
             <v-slider
               v-model="distance"
               min="1"
@@ -19,6 +17,9 @@
               thumb-label
               persistent-hint
             />
+          </v-col>
+          <v-col cols="12" lg="6">
+            <v-autocomplete v-model="fleets" :items="fleetNames" label="Specific Military Fleets" item-text="FleetName" item-value="FleetID" clearable multiple small-chips deletable-chips />
           </v-col>
           <template v-if="CivilianShippingLinesActive">
             <v-col cols="12" md="6">
@@ -38,9 +39,6 @@
               </v-card>
             </v-col>
           </template>
-          <v-col cols="12">
-            <v-autocomplete v-model="fleets" :items="fleetNames" label="Specific Military Fleets" item-text="FleetName" item-value="FleetID" clearable multiple small-chips deletable-chips />
-          </v-col>
           <v-col cols="12" md="6">
             <v-card>
               <v-card-text class="pb-0">Military Freight Capacity</v-card-text>

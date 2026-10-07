@@ -15,7 +15,7 @@ const { SERVER_PORT } = require('./config')
 const nuxtConfig = require('./renderer/nuxt.config.js')
 
 const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
-const PORT = Number(process.env.PORT) || SERVER_PORT
+const PORT = SERVER_PORT
 const HOST = 'localhost'
 
 // `yarn install --ignore-scripts`, and any later install that relinks sqlite3,
@@ -47,6 +47,10 @@ nuxtConfig.build.extend = function (config, ctx) {
   // strict `.mjs` handling (pixi's ESM builds import from CommonJS).
   config.module.rules.push({ test: /\.mjs$/, include: /node_modules/, type: 'javascript/auto' })
 }
+
+// Electron loads Chart.js through Node, which reads its static class fields;
+// webpack 4 can't parse them, so the web bundle transpiles it.
+nuxtConfig.build.transpile = [...(nuxtConfig.build.transpile || []), 'chart.js', '@kurkle/color']
 
 const databaseMiddleware = require('./web/database-middleware')
 

@@ -1,5 +1,15 @@
 /* eslint no-param-reassign: 0 */
 process.env.BABEL_ENV = 'renderer'
+
+// @nuxt/telemetry loads node-fetch 2, whose whatwg-url 5 requires Node's core `punycode`, and Node 21+ warns (DEP0040) about it.
+// No release of either avoids it, so drop that one warning in whichever process loads this config
+// (`yarn dev`'s forked Nuxt process, `yarn web`, `yarn electron:smoke`); every other warning still prints.
+const { emitWarning } = process
+process.emitWarning = function (warning, ...args) {
+  const [type, code] = args
+  if ((typeof type === 'object' && type !== null ? type.code : code) === 'DEP0040') return
+  return emitWarning.call(this, warning, ...args)
+}
 const isProduction = process.env.NODE_ENV === 'production'
 const isDev = process.env.NODE_ENV === 'development'
 const path = require('path')

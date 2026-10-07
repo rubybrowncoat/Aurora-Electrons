@@ -14,6 +14,10 @@ export const ipcRenderer = {
       case 'request-storage-path': {
         return Promise.resolve('AuroraDB.db')
       }
+      case 'read-flag': {
+        // Web mode has no Aurora folder beside the save, so every race shows its initials.
+        return Promise.resolve(null)
+      }
       case 'save-png': {
         const [imageData, filePath] = args
 
@@ -28,6 +32,10 @@ export const ipcRenderer = {
   },
 }
 
+export const shell = {
+  openExternal: (url) => window.open(url, '_blank', 'noopener'),
+}
+
 export const remote = {}
 
-export default { ipcRenderer, remote }
+export default { ipcRenderer, remote, shell }

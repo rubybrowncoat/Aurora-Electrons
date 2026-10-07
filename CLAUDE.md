@@ -1,6 +1,6 @@
 # Aurora Electrons
 
-Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows dashboards the game doesn't have: production recap, warnings, minerals, habitability, logistics, galaxy map, game log, designed tech, and tech tree.
+Desktop companion app for the 4X game **Aurora (C#)**. It opens the game's SQLite save (`AuroraDB.db`), watches it for changes, and shows its information in new ways, with useful dashboards: plans, forecasts and summaries drawn from the save. Pages cover production recap, warnings, minerals and their outlook, colonies, logistics (fuel and maintenance), finances, hauling routes, empire history (snapshots the app records itself), intelligence on alien races, habitability, survey progress, commanders, transport information, galaxy map, game log, designed tech, and tech tree.
 
 Stack: Electron 16 + Nuxt 2 (SPA, Vue 2, Vuetify 2, Vuex 3), built on the electron-nuxt template. Data comes through Sequelize 6 over sqlite3, mostly as raw SQL. User preferences go to electron-store.
 
@@ -9,15 +9,18 @@ Detailed docs:
 - `docs/ARCHITECTURE.md`: processes, build pipeline, store, pages, and utilities.
 - `docs/DATABASE.md`: the Aurora save schema, scoping rules, data quirks, and which page reads what.
 - `docs/WORKFLOW.md`: setup, making and verifying changes, releases, and commits.
+- `docs/plans/aurcalcs/`: the ranked plan for new pages ported from the Aur_Calcs workbook, with validated SQL appendices.
+- `references/`: the Aur_Calcs workbook and a community SQL collection, kept as feature references, plus `mechanics/` notes on game rules (intelligence and diplomacy codes and thresholds). Many of the queries write to the save; never run them on a real one.
 
 ## Commands
 
 ```bash
 yarn install    # yarn only (npm is rejected by preinstall). postinstall runs `yarn lint:fix` over src/, so review unrelated diffs
-yarn dev        # Nuxt dev server on :9080 + Electron with devtools; Ctrl/Cmd+E relaunches Electron
+yarn dev        # Nuxt dev server on :9080 (or PORT) + Electron with devtools; Ctrl/Cmd+E relaunches Electron, closing it stops everything
 yarn build      # production build + electron-builder packages into build/
 yarn web        # renderer as a plain browser app on :9080, backed by ./AuroraDB.db (no Electron needed)
 yarn web:smoke  # with `yarn web` running: Chromium visits every page, reports errors, saves screenshots (locally, run `npx playwright install chromium` once)
+yarn electron:smoke  # local only, self-contained: builds and drives the real Electron app on a copy of the save, visits every page, checks settings/history files and the save watcher (~90 s)
 yarn lint       # ESLint over src/ (the baseline is not clean, see below)
 node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>   # lint only what you touched
 ```
@@ -41,9 +44,10 @@ There is no test suite and no CI (`.github/` is git-ignored).
 - The app is read-only toward the save. The single exception is the map's "Save Positions" button (`UPDATE FCT_RaceSysSurvey`). Don't add writes without an explicit request, a confirmation dialog, and testing against a copy.
 - Interpolating `GameID` and `RaceID` (numbers from the DB) into SQL is the existing pattern. Anything a user types must go through Sequelize `replacements` instead.
 - Persistent preferences go through `this.config` (electron-store). Per-game or per-race keys are named `game.<GameID>.race.<RaceID>.<key>`. State that only needs to last for the session goes in a Vuex module under `src/renderer/store/`.
-- A new page needs a `<v-tab>` plus a `title()` case in `src/renderer/layouts/default.vue`.
+- A new page needs `pages/<name>.vue` and one entry in the page registry, `src/renderer/utilities/navigation.js` (section, tab label, title, icon, blurb, keywords). The rail, flyout, section tabs, trail, breadcrumb title, Ctrl+K palette and the smoke tests' page list (`.electron-nuxt/smoke-pages.js`) all read from it, so nothing else needs editing. A page announced before it exists is a `planned: true` entry with no page file. To give a page a live line under its name in the section flyout, add its route to `src/renderer/utilities/peeks.js` (a few cheap queries scoped by `GameID` and `RaceID`; leave the route out for no line). Race flags are read through the main process (`read-flag` IPC), never with a `file://` URL.
+- Every page follows the window-size rule: usable at 1280 x 720 (the minimum, may be denser), comfortable at 1920 x 1080, and wider windows get the 1080p layout stretched to fill, with no fixed max-width. Check it with `SMOKE_VIEWPORTS=1280x720,1920x1080,2560x1440 yarn web:smoke` (`docs/ARCHITECTURE.md`, Layout).
 - Lint the files you touch and add no new problems. Don't fix unrelated lint, and don't run `yarn lint:fix` on the whole tree.
-- Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Say so when a change depends on those.
+- Verify UI changes in web mode: run `yarn web` in the background, then `yarn web:smoke` (or `SMOKE_PAGES=/minerals yarn web:smoke`), and look at the screenshots. Web mode swaps Electron, electron-store, and chokidar for shims under `.electron-nuxt/web/`, so it doesn't exercise main-process code (IPC, storage paths, packaging). Locally, run `yarn electron:smoke` for changes that touch those, settings or history storage, or the save watcher; it covers everything but packaging. Say so when a change depends on something neither run covers. In Git Bash, prefix route lists with `MSYS_NO_PATHCONV=1`.
 
 ## Commits and PRs
 

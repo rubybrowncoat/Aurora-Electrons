@@ -1,6 +1,7 @@
 import Config from 'electron-store'
 
-import { resetDatabase } from '../utilities/database'
+import { resetDatabase, retireDatabase } from '../utilities/database'
+import { recordsHistory } from '../utilities/history'
 
 const configConfiguration = {}
 
@@ -8,9 +9,15 @@ export const state = () => {
   return {
     config: new Config(configConfiguration),
     database: null,
+    // Where the save is expected, and why it couldn't be opened (null while it can).
+    savePath: null,
+    databaseError: null,
 
     GameID: null,
     RaceID: null,
+    // The selected race's kind, for what the app records about it (Empire History).
+    RaceNPR: false,
+    RaceSpecialNPRID: 0,
 
     StartYear: 0,
     GameTime: 0,
@@ -26,12 +33,22 @@ export const getters = {
   database (state) {
     return state.database
   },
+  savePath (state) {
+    return state.savePath
+  },
+  databaseError (state) {
+    return state.databaseError
+  },
 
   GameID (state) {
     return state.GameID
   },
   RaceID (state) {
     return state.RaceID
+  },
+  // Whether the app keeps Empire History for the selected race (true until a race is picked).
+  historyRecorded (state) {
+    return !state.RaceID || recordsHistory({ NPR: state.RaceNPR, SpecialNPRID: state.RaceSpecialNPRID })
   },
   StartYear (state) {
     return state.StartYear
@@ -55,12 +72,20 @@ export const mutations = {
   replaceDatabase (state, { database }) {
     state.database = database
   },
+  setSavePath (state, { savePath }) {
+    state.savePath = savePath
+  },
+  setDatabaseError (state, { message }) {
+    state.databaseError = message
+  },
 
   setGame (state, { GameID }) {
     state.GameID = GameID
   },
-  setRace (state, { RaceID }) {
+  setRace (state, { RaceID, NPR, SpecialNPRID }) {
     state.RaceID = RaceID
+    state.RaceNPR = NPR || false
+    state.RaceSpecialNPRID = SpecialNPRID || 0
 
     console.log(state)
   },
@@ -80,10 +105,26 @@ export const actions = {
     })
   },
 
-  renew ({ commit }, { storagePath }) {
-    commit('replaceDatabase', {
-      database: resetDatabase(storagePath),
-    })
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or
+  // running on it can't hold the app up.
+  renew ({ commit, state }, { storagePath }) {
+    const previous = state.database
+    let database = null
+    let message = null
+
+    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on
+    // as if the save held no games.
+    try {
+      database = resetDatabase(storagePath)
+    } catch (error) {
+      console.error(`Couldn't open ${storagePath}`, error)
+      message = error.message.split(/\r?\n/)[0]
+    }
+
+    commit('replaceDatabase', { database })
+    commit('setDatabaseError', { message })
+
+    return retireDatabase(previous)
   },
 
   changeGame ({ commit }, { game, race = null }) {

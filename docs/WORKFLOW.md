@@ -9,7 +9,7 @@
    - copy or symlink a real save from your Aurora install, or set `headGame` in `src/main/index.js` to read `../AuroraDB.db`.
 
    `AuroraDB*.db` is git-ignored. Never commit a save.
-4. Run `yarn dev`. Nuxt serves the renderer on `:9080`, and Electron opens with devtools. Ctrl/Cmd+E relaunches Electron. The app watches the save, so saving in Aurora, or replacing the file, reloads every view.
+4. Run `yarn dev`. Nuxt serves the renderer on `:9080`, and Electron opens with devtools. Ctrl/Cmd+E relaunches Electron, and closing its window stops `yarn dev`. The app watches the save, so saving in Aurora, or replacing the file, reloads every view. If port 9080 is taken, `yarn dev` stops with an error; free it, or run with `PORT=<free port>`. Dev runs keep their settings and history in `%APPDATA%\Electron` (the unpackaged app's name), apart from the installed app's.
 
 ## Cloud sessions (Claude Code on the web)
 
@@ -28,24 +28,37 @@
 - `.electron-nuxt/web.js` builds the Nuxt renderer for a `web` webpack target. Electron bundles nothing from `dependencies`, but web mode bundles all of them.
 - Node and Electron modules are swapped for the shims in `.electron-nuxt/web/shims/`:
   - `electron` answers the `request-storage-path` and `save-png` IPC calls; PNG export becomes a browser download.
-  - `electron-store` persists to `localStorage`.
+  - `electron-store` persists to `localStorage`, one key per store (`aurora-electrons:config` for settings, `aurora-electrons:history/game-<GameID>` for each game's Empire History). Clear them in the browser's devtools to start fresh.
   - `chokidar` polls the database file's mtime, so replacing `./AuroraDB.db` still reloads the views.
   - `sequelize` exports only `Op` and `QueryTypes`.
   - `utilities/database.js` is replaced by a proxy that forwards `query()` and read-only `findAll`/`findOne`/`findByPk`/`count`/`findAndCountAll` calls to the dev server.
 - `.electron-nuxt/web/database-middleware.js` handles those calls at `/__aurora-db/*`. It runs the **real** models from `src/renderer/utilities/database.js` against `./AuroraDB.db`; set `AURORA_DB=path/to/save.db` to use another file. Because it executes raw SQL, the server listens on localhost only, and the middleware answers only the web-mode page. Requests need a `localhost` Host header, a same-origin Origin, a JSON body, and the per-run token from the page's `aurora-web-token` meta tag, sent as `X-Aurora-Web-Token`. To call it with curl, read the token from the page first.
 - Sentry is disabled in web mode, and so is Nuxt's `/__open-in-editor` dev endpoint, which would otherwise answer any origin.
+- Web mode transpiles `chart.js` (and `@kurkle/color`), because webpack 4 can't parse their static class fields. Electron loads them through Node, which can.
 
 With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright, a pinned dev dependency. Locally, run `npx playwright install chromium` once to download the browser; cloud containers already provide it. It selects the sample race, visits every tab plus settings, prints `ok`/`FAIL` per page with console errors, page errors, and failed database calls, and saves a screenshot of each page. You can configure it with these environment variables:
 
 - `SMOKE_PAGES=/,/map` limits the run to those routes. Add `/engines` to include the hidden WIP page.
 - `SMOKE_OUT=dir` sets where screenshots go. The default is a temporary directory.
 - `AURORA_GAME` and `AURORA_RACE` select a different game and race.
+- `SMOKE_VIEWPORTS=1280x720,1920x1080,2560x1440` checks the window-size rule (`docs/ARCHITECTURE.md`, Layout). It visits every page at every size, saves `<page>-<size>.png` and reports layout problems per page and size: `overflow` (the document or `.v-main` scrolls sideways), `wide` (an element reaches past the window edge with no scroll container around it), `clipped` (hidden overflow cuts text off), `small chart` (a canvas under 240 x 120 px), `tight` (a short header, button, chip or label wraps onto a second line) and `island` (from 1904 px up, the content stops short of 80% of the width). It also lists the containers that scroll sideways on their own, which isn't a problem. A page with a layout problem prints `LAYOUT` and the run exits 1, and a table at the end counts the problems per page and size. `SMOKE_THEME=dark` runs it in the dark theme and `SMOKE_FULLPAGE=1` saves the whole scrolled page instead of the visible window. Without `SMOKE_VIEWPORTS` the run is unchanged (one 1600 x 1000 window, no layout check).
 
 Fonts and icons load from Google Fonts and jsDelivr. In the cloud those requests can fail, and the script reports them as notes rather than failures.
 
 `yarn web` stops at startup if sqlite3 can't load, and prints the command that fetches its binary. Any `yarn install` that relinks sqlite3 removes the binary, because `--ignore-scripts` skips its download. If port 9080 is taken (another `yarn web`, or `yarn dev`), Nuxt falls back to a random port. `yarn web` then prints the real URL, which you pass to the smoke test as `BASE_URL`.
 
 Limits: web mode doesn't run main-process code (IPC handlers, storage-path resolution, the window, packaging). Writes still happen: map → Save Positions updates `./AuroraDB.db`. Re-extract the fixture to reset it.
+
+## Electron smoke test
+
+`yarn electron:smoke` drives the real Electron app, so it covers what web mode can't: the main process, the storage-path IPC, electron-store's files, the save watcher, and native sqlite3 inside Electron. It needs the full local install (Electron's binary), not the cloud setup. It's self-contained:
+
+- It builds the development main process into `dist/smoke/main` and serves the renderer from its own Nuxt server on a free port, with its own build folder and Sentry off. A running `yarn dev` or `yarn web` is left alone.
+- It launches Electron through Playwright on a copy of the save, with `--user-data-dir` pointing at a fresh folder. The run folder, `dist/smoke/run`, keeps the save copy and the user data until the next run.
+- It selects the sample race, visits the same pages as `web:smoke`, and saves screenshots. A page fails on console or page errors, main-process errors, failed database calls, or database calls that never go quiet; for those it names the pending, repeated and slowest queries and how long the main thread was blocked.
+- Then it checks the app itself: the save loaded through the storage-path IPC, the `read-flag` IPC returns a flag from a `Flags` folder beside the save and refuses names that point outside it, `config.json` sits in user data, `history/game-<GameID>.json` holds snapshots for the race, and rewriting the save makes the watcher reopen the database and record again without adding snapshots for the same save.
+
+It takes about 90 seconds. `SMOKE_PAGES`, `SMOKE_OUT`, `AURORA_GAME` and `AURORA_RACE` work as in `web:smoke`; `AURORA_DB` picks the save to copy. In Git Bash, prefix route lists with `MSYS_NO_PATHCONV=1`, or Bash rewrites `/habitability` into a Windows path.
 
 ## Making a change
 
@@ -86,14 +99,14 @@ Limits: web mode doesn't run main-process code (IPC handlers, storage-path resol
 
    Scope by `GameID` and `RaceID`, and go through the race-knowledge tables so the page doesn't leak spoilers (`docs/DATABASE.md`). Pass user-entered values as Sequelize `replacements`, never by interpolation.
 4. **Choose where state lives.** If it must survive a restart, use `this.config.get/set` (electron-store). Use `game.<GameID>.race.<RaceID>.<key>` for per-race keys. If it only needs to last the session, use a Vuex module in `src/renderer/store/`.
-5. **For a new page,** add `pages/<name>.vue`, a `<v-tab to="/<name>" nuxt>` entry, and a `title()` case in `layouts/default.vue`.
+5. **For a new page,** add `pages/<name>.vue` and one entry in `PAGES` in `src/renderer/utilities/navigation.js`: `route`, `section` (one of `SECTIONS`, or `null` for a page outside the nav), `tab`, `title`, `icon`, `blurb` and `keywords`. Add `wip: true` for a work in progress, `requiresHistory: true` for a page that needs Empire History, or `hidden: true` to keep it out of the navigation, the palette and the default smoke list. The layout and `smoke-pages.js` pick it up from there.
 6. **For a new column or model,** extend `resetDatabase()` in `utilities/database.js`. Map renamed columns with `field:`, and add associations next to the existing ones.
 
 ## Verifying
 
 - **Lint what you touched:** `node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>`. You can add `--fix` for those files only. The repo-wide baseline isn't clean: at the time of writing, `yarn lint` reports 17 errors and 119 warnings. Don't fix unrelated problems, and don't introduce new ones.
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
-- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally you can also use `yarn dev` and select "Aurelian Empire" (race 784) in the sidebar. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
+- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) in the game picker. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
 
 ## Dependency updates
@@ -107,7 +120,7 @@ Dependabot opens security-update PRs against `master`. Most of them only bump a 
 ## Releasing
 
 1. Bump `version` in `package.json` and commit it, e.g. `👌 0.9.14`.
-2. Run `yarn build`. Artifacts land in `build/` as `aurora-electrons-<version>.<ext>`: a Windows portable exe, a Linux deb, and a macOS dmg.
+2. Run `yarn build`. Artifacts land in `build/` as `aurora-electrons-<version>.<ext>`: a Windows portable exe, a Linux deb, and a macOS dmg. The build fails when sqlite3's `node_sqlite3.node` is missing from `node_modules` or from a package; restore it with the command it prints. Don't run `yarn install` or `npm rebuild` while a `yarn web` or `yarn dev` session has the binary loaded: on Windows that leaves it missing.
 3. Users place the executable in their Aurora folder, next to `AuroraDB.db`.
 
 ## Sample fixture
