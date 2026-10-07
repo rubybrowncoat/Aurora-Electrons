@@ -115,7 +115,7 @@ export default {
   align-items: center;
   gap: 2px;
   width: max-content;
-  padding-inline: 2px;
+  padding-inline: 0 2px;
 }
 
 .trail__separator {

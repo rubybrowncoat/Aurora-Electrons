@@ -685,7 +685,11 @@ export default {
   border-bottom: 1px solid var(--ae-border) !important;
 }
 
+// Same side padding as the page's container, and no block padding: Vuetify's 6 px leaves less height than the
+// tagline's line box, which then hangs below the centre while the trail stays centred.
 .app-footer.v-footer {
+  padding-block: 0;
+  padding-inline: 12px;
   background: var(--ae-chrome) !important;
   border-top: 1px solid var(--ae-border) !important;
 }
