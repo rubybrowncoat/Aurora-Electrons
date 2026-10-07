@@ -3,7 +3,7 @@
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
       <div
         class="rail__empire"
-        :class="{ 'rail__empire--peek': flyoutId === EMPIRES_ID }"
+        :class="{ 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID }"
         :style="neutralStyle"
         role="button"
         tabindex="0"
@@ -20,13 +20,13 @@
         v-for="section in railSections"
         :key="section.id"
         class="rail__item"
-        :class="{ 'rail__item--active': currentSection === section, 'rail__item--peek': flyoutId === section.id }"
+        :class="{ 'rail__item--active': RaceID && currentSection === section, 'rail__item--peek': flyoutId === section.id, 'rail__item--disabled': !RaceID }"
         :style="section.style"
         role="link"
-        tabindex="0"
+        :tabindex="RaceID ? 0 : -1"
         @click="goSection(section)"
         @keydown.enter="goSection(section)"
-        @mouseenter="peekSection(section.id)"
+        @mouseenter="RaceID && peekSection(section.id)"
         @mouseleave="leaveRail"
       >
         <div class="rail__pill">
@@ -83,11 +83,11 @@
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
-        <template v-if="currentSection">
-          <span class="breadcrumb__section hidden-xs-only" @mouseenter="peekSection(currentSection.id)" @mouseleave="leaveRail">{{ currentSection.title }}</span>
+        <template v-if="currentSection && !pickingFirst">
+          <span class="breadcrumb__section hidden-xs-only" @mouseenter="RaceID && peekSection(currentSection.id)" @mouseleave="leaveRail">{{ currentSection.title }}</span>
           <span class="breadcrumb__separator hidden-xs-only">/</span>
         </template>
-        <span class="breadcrumb__title">{{ page.title }}</span>
+        <span class="breadcrumb__title">{{ pickingFirst ? 'Pick a game' : page.title }}</span>
       </div>
 
       <v-spacer />
@@ -106,13 +106,13 @@
       </v-btn>
 
       <template v-if="tabs.length > 1" #extension>
-        <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
+        <v-tabs class="section-tabs" :style="pageStyle" :value="pickingFirst ? -1 : tabIndex" show-arrows height="44">
           <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
         </v-tabs>
       </template>
     </v-app-bar>
 
-    <page-palette v-model="paletteOpen" :pages="openPages" @go="go" />
+    <page-palette v-model="paletteOpen" :pages="openPages" :locked="!RaceID" @go="go" />
 
     <!-- Sizes your content based upon application components -->
     <v-main>
@@ -125,7 +125,7 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <v-card v-if="!RaceID && $route.path !== '/settings'" class="game-picker mx-auto mt-12" :style="neutralStyle" max-width="480" outlined>
+        <v-card v-if="pickingFirst" class="game-picker mx-auto mt-12" :style="neutralStyle" max-width="480" outlined>
           <v-card-title>Pick a game</v-card-title>
           <empire-list v-if="games.length" :games="games" class="pb-2 px-2" />
           <v-card-text v-else-if="$asyncComputed.games.state === 'success'">No games found in the save.</v-card-text>
@@ -155,7 +155,7 @@ import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { loadEmpires } from '../utilities/empires'
-import { PAGES, SECTIONS, pageByRoute } from '../utilities/navigation'
+import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
 // The flyout id of the rail's Empires entry; the others are section ids.
@@ -233,11 +233,16 @@ export default {
       return this.currentSection ? this.currentSection.style : this.neutralStyle
     },
 
-    // Every page that appears in the navigation, flagged `disabled` when it needs Empire History the race doesn't have,
-    // `planned` when it has no page yet, and `peekable` when the flyout shows a live line under it.
+    // Until a game and race are picked, the picker stands in for every page that shows a race's data.
+    pickingFirst () {
+      return !this.RaceID && needsRace(this.$route.path)
+    },
+
+    // Every page that appears in the navigation, flagged `disabled` when it shows a race's data and none is picked yet or it needs
+    // Empire History the race doesn't have, `planned` when it has no page yet, and `peekable` when the flyout shows a live line under it.
     pages () {
       return PAGES.filter(({ hidden }) => !hidden).map((page) => {
-        const disabled = Boolean(page.requiresHistory && !this.historyRecorded)
+        const disabled = (!this.RaceID && needsRace(page.route)) || Boolean(page.requiresHistory && !this.historyRecorded)
 
         return { ...page, disabled, peekable: !disabled && !page.planned && Boolean(peeks[page.route]) }
       })
@@ -354,9 +359,16 @@ export default {
         this.$router.push(path)
       }
     },
-    // Back to the last page used in the section, or its first page.
+    // Back to the last page used in the section, or its first page. Until a race is picked, point at the empire list instead.
     goSection (section) {
       clearTimeout(this.peekTimer)
+
+      if (!this.RaceID) {
+        this.flyoutId = EMPIRES_ID
+
+        return
+      }
+
       this.go(this.lastInSection[section.id] || section.pages.find(({ disabled, planned }) => !disabled && !planned).route)
     },
 
@@ -509,6 +521,54 @@ export default {
   }
 }
 
+.rail__empire--invite {
+  position: relative;
+  color: var(--ae-ink);
+
+  .rail__label {
+    font-weight: 700;
+    color: var(--ae-primary);
+  }
+
+  .empire-avatar {
+    box-shadow: 0 0 0 2px var(--ae-chrome), 0 0 0 4px var(--ae-primary);
+  }
+
+  // A ring that grows off the avatar and fades, once every couple of seconds.
+  &::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 18px;
+    width: 40px;
+    height: 40px;
+    border: 2px solid var(--ae-primary);
+    border-radius: 4px;
+    opacity: 0;
+    pointer-events: none;
+    animation: invite-pulse 2.4s ease-out infinite;
+  }
+}
+
+@keyframes invite-pulse {
+  0% {
+    opacity: .7;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail__empire--invite::before {
+    animation: none;
+  }
+}
+
 .rail__spacer {
   flex: 1;
 }
@@ -546,7 +606,12 @@ export default {
   letter-spacing: .02em;
 }
 
-.rail__item:hover,
+.rail__item--disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.rail__item:not(.rail__item--disabled):hover,
 .rail__item--peek {
   .rail__pill {
     background: var(--sc-tint);

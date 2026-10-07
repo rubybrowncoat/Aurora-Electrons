@@ -15,7 +15,8 @@ const SECTIONS = [
 
 // `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the
 // selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or
-// default smoke list. `planned` pages have no page file yet: the section flyout lists them dimmed with a
+// default smoke list. `noRace` pages (Settings, About) work before a game and race are picked; every other page
+// shows the selected race's data, so it can't be opened until one is. `planned` pages have no page file yet: the section flyout lists them dimmed with a
 // "Planned" chip, and they are never navigable and appear in no tabs, palette, history or smoke list.
 // Pages within a section appear in this order.
 const PAGES = [
@@ -41,8 +42,8 @@ const PAGES = [
   { route: '/technologies', section: 'research', tab: 'Tech Tree', title: 'Tech Tree', icon: 'mdi-file-tree', blurb: 'What to research next: available techs by field, tech lines, prerequisite paths and when projects land.', keywords: 'technologies research projects prerequisites queue' },
   { route: '/designed-tech', section: 'research', tab: 'Designed', title: 'Designed Tech', icon: 'mdi-atom', blurb: 'Your designed components by category.', wip: true, keywords: 'components engines' },
   { route: '/engines', section: null, tab: 'Engines', title: 'Engine Planner', icon: 'mdi-engine-outline', blurb: 'Engine design inputs and thrust.', hidden: true, keywords: 'engine thrust' },
-  { route: '/settings', section: null, tab: 'Settings', title: 'Settings', icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
-  { route: '/about', section: null, tab: 'About', title: 'About', icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
+  { route: '/settings', section: null, tab: 'Settings', title: 'Settings', noRace: true, icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
+  { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
 ]
 
 // Paste the forum thread URL for updates and feedback here. The About page links to it while this is set, and says "coming soon" while it is empty.
@@ -51,4 +52,11 @@ const FORUM_URL = ''
 const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))
 const pageByRoute = Object.fromEntries(PAGES.map((page) => [page.route, page]))
 
-module.exports = { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute }
+// Whether a path (a route with or without a query) shows a race's data, so it waits until a game and race are picked.
+const needsRace = (path) => {
+  const page = pageByRoute[path.split('?')[0]]
+
+  return !(page && page.noRace)
+}
+
+module.exports = { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }

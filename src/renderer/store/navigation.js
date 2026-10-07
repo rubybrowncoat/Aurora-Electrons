@@ -1,4 +1,4 @@
-import { pageByRoute } from '../utilities/navigation'
+import { needsRace, pageByRoute } from '../utilities/navigation'
 
 const HISTORY_MENU_LENGTH = 12
 // How many entries the app bar's trail shows before and after the current page.
@@ -17,35 +17,39 @@ export const state = () => {
   }
 }
 
-const walk = (state, step) => {
+const walk = (state, step, reachable) => {
   const list = []
 
   for (let index = state.index + step; index >= 0 && index < state.entries.length && list.length < HISTORY_MENU_LENGTH; index += step) {
-    list.push({ index, path: state.entries[index] })
+    list.push({ index, path: state.entries[index], disabled: !reachable(state.entries[index]) })
   }
 
   return list
 }
 
 export const getters = {
+  // Whether a path can be opened: the pages that show a race's data wait until a race is picked.
+  reachable (_state, _getters, _rootState, rootGetters) {
+    return (path) => Boolean(rootGetters.RaceID) || !needsRace(path)
+  },
   canBack (state) {
     return state.index > 0
   },
   canForward (state) {
     return state.index < state.entries.length - 1
   },
-  // Nearest first.
-  backEntries (state) {
-    return walk(state, -1)
+  // Nearest first. `disabled` entries are pages that can't be opened yet.
+  backEntries (state, getters) {
+    return walk(state, -1, getters.reachable)
   },
-  forwardEntries (state) {
-    return walk(state, 1)
+  forwardEntries (state, getters) {
+    return walk(state, 1, getters.reachable)
   },
-  // The entries around the current one, as the trail shows them: [{ index, path }].
-  trail (state) {
+  // The entries around the current one, as the trail shows them: [{ index, path, disabled }].
+  trail (state, getters) {
     const from = Math.max(0, state.index - TRAIL_BEHIND)
 
-    return state.entries.slice(from, state.index + TRAIL_AHEAD + 1).map((path, offset) => ({ index: from + offset, path }))
+    return state.entries.slice(from, state.index + TRAIL_AHEAD + 1).map((path, offset) => ({ index: from + offset, path, disabled: !getters.reachable(path) }))
   },
   // Distinct pages visited before the current one, most recent first.
   recents (state) {
@@ -93,8 +97,8 @@ export const mutations = {
 }
 
 export const actions = {
-  jump ({ state, commit }, target) {
-    if (target === state.index || !state.entries[target]) {
+  jump ({ state, getters, commit }, target) {
+    if (target === state.index || !state.entries[target] || !getters.reachable(state.entries[target])) {
       return
     }
 

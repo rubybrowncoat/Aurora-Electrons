@@ -27,6 +27,7 @@
           </div>
         </template>
         <div v-if="!rows.length" class="page-palette__empty">No page matches “{{ query }}”.</div>
+        <div v-if="locked" class="page-palette__locked"><v-icon x-small>mdi-lock-outline</v-icon> Pick a game and an empire to open the other pages.</div>
       </div>
 
       <div class="page-palette__foot">
@@ -76,6 +77,11 @@ export default {
     pages: {
       type: Array,
       required: true,
+    },
+    // No race is picked yet, so most pages are left out.
+    locked: {
+      type: Boolean,
+      default: false,
     },
   },
   data () {
@@ -223,6 +229,12 @@ export default {
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--sc);
+}
+
+.page-palette__locked {
+  padding: 10px 16px 4px;
+  font-size: 12px;
+  color: var(--ae-muted);
 }
 
 .page-palette__empty {

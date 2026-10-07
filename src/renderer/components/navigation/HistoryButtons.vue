@@ -2,7 +2,7 @@
   <div class="history-buttons">
     <v-tooltip v-for="direction in directions" :key="direction.key" bottom open-delay="300" :disabled="menu.open">
       <template #activator="{ on, attrs }">
-        <v-btn icon :disabled="!direction.entries.length" v-bind="attrs" v-on="on" @click="jump(direction.entries[0].index)" @contextmenu.prevent="openMenu($event, direction.key)">
+        <v-btn icon :disabled="!direction.entries.length || direction.entries[0].disabled" v-bind="attrs" v-on="on" @click="jump(direction.entries[0].index)" @contextmenu.prevent="openMenu($event, direction.key)">
           <v-icon>{{ direction.icon }}</v-icon>
         </v-btn>
       </template>
@@ -12,7 +12,7 @@
     <v-menu v-model="menu.open" :position-x="menu.x" :position-y="menu.y" absolute offset-y>
       <v-list dense min-width="240">
         <v-subheader>{{ menu.direction === 'back' ? 'Back to' : 'Forward to' }}</v-subheader>
-        <v-list-item v-for="entry in menuEntries" :key="entry.index" @click="jump(entry.index)">
+        <v-list-item v-for="entry in menuEntries" :key="entry.index" :disabled="entry.disabled" @click="jump(entry.index)">
           <v-list-item-icon class="mr-3">
             <v-icon small :style="entry.style" class="history-buttons__icon">{{ entry.icon }}</v-icon>
           </v-list-item-icon>
@@ -57,15 +57,17 @@ export default {
     ]),
 
     describe (entries) {
-      return entries.map(({ index, path }) => {
+      return entries.map(({ index, path, disabled }) => {
         const page = pageByRoute[path.split('?')[0]]
 
-        return { index, title: page.title, icon: page.icon, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]) }
+        return { index, disabled, title: page.title, icon: page.icon, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]) }
       })
     },
 
     openMenu (event, direction) {
-      if (!this.directions.find(({ key }) => key === direction).entries.length) {
+      const [nearest] = this.directions.find(({ key }) => key === direction).entries
+
+      if (!nearest || nearest.disabled) {
         return
       }
 
