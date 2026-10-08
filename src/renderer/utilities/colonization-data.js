@@ -131,12 +131,13 @@ where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`
 
 // What the game asks of the race before it founds a civilian mining complex (Game.ProcessNewCivilianMiningColonyCreation):
 // complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system
-// the millions of people in the race's largest colony there (for colonization.js `cmcSite`).
+// the millions of people in the race's largest colony there (for colonization.js `cmcSite`). Saves before 2.7 have no
+// FCT_Game.AllowCMC, hence `FCT_Game.*`: the game founded complexes in every game then.
 export const loadCmcRules = async (database, { GameID, RaceID }) => {
   const [[race], colonies] = await Promise.all([
     rows(
       database,
-      `select FCT_Game.AllowCMC, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
+      `select FCT_Game.*, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
 from FCT_Game
 where FCT_Game.GameID = ${GameID}`
     ),
@@ -144,7 +145,7 @@ where FCT_Game.GameID = ${GameID}`
   ])
 
   return {
-    allowed: !!race && race.AllowCMC === 1,
+    allowed: !!race && (race.AllowCMC === undefined || race.AllowCMC === 1),
     shipyard: !!race && race.Shipyards > 0,
     settledColonies: race ? race.SettledColonies : 0,
     largestColony: Object.fromEntries(colonies.map((colony) => [colony.SystemID, colony.Largest])),
