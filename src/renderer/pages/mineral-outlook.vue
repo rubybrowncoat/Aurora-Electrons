@@ -723,6 +723,13 @@ export default {
     this.horizon = this.config.get('mineralOutlookHorizon', 50)
     this.allDeposits = this.config.get('mineralOutlookAllDeposits', false)
     this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
+
+    // `?mineral=<MaterialID>` (Production's "Short of" links) opens on that mineral, and the user's pick is kept.
+    const linkedMineral = MINERALS.find((mineral) => mineral.id === Number(this.$route.query.mineral))
+
+    if (linkedMineral) {
+      this.focusMineralId = linkedMineral.id
+    }
   },
   methods: {
     // Focus the mineral that runs out first, once the forecast can say which. The deposits panel

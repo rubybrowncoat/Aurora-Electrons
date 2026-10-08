@@ -42,7 +42,8 @@ export const peeks = {
             inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID
             inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID
             where FCT_PopulationInstallations.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID <> 0 and not (FCT_Population.TerraformStatus <> 0 and coalesce(FCT_Population.MaxAtm, 0) = 0))) as Jobs,
-      (select count(*) from FCT_IndustrialProjects where GameID = ${GameID} and RaceID = ${RaceID} and coalesce(Queue, 0) = 0 and Pause = 1)
+      (select count(*) from FCT_ResearchProject where GameID = ${GameID} and RaceID = ${RaceID} and Pause = 1)
+      + (select count(*) from FCT_IndustrialProjects where GameID = ${GameID} and RaceID = ${RaceID} and coalesce(Queue, 0) = 0 and Pause = 1)
       + (select count(*) from FCT_ShipyardTask where GameID = ${GameID} and RaceID = ${RaceID} and Paused = 1)
       + (select count(*) from FCT_Shipyard where GameID = ${GameID} and RaceID = ${RaceID} and TaskType <> 0 and PauseActivity = 1) as Paused`)
 
