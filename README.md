@@ -2,6 +2,8 @@
 
 #### Build Setup
 
+Requires Node 22.12 or newer (`.nvmrc` pins 24, so `nvm use 24` works) and Yarn 1.
+
 ``` bash
 # install dependencies
 yarn install
