@@ -5,6 +5,7 @@
 import groupBy from 'lodash/groupBy'
 import { cmcStarInReach } from './colonization'
 import { climateBaseTemp } from './habitability'
+import { loadJumpPoints } from './jump-graph'
 import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
 import { loadNavalAdmins } from './naval-admins'
@@ -159,14 +160,7 @@ export const SUPPLY_BASE_MILLIONS = 1
 // and every colony of at least `SUPPLY_BASE_MILLIONS` (the capital among them), with the body's place.
 export const loadRoutes = async (database, { GameID, RaceID }) => {
   const [jumpPoints, colonies] = await Promise.all([
-    rows(
-      database,
-      `select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_JumpPoint.JumpGateRaceID, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.IgnoreForDistance
-from FCT_JumpPoint
-inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
-inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_JumpPoint.GameID
-where FCT_JumpPoint.GameID = ${GameID}`
-    ),
+    loadJumpPoints(database, { GameID, RaceID }),
     rows(
       database,
       `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Capital, FCT_Population.Population, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor

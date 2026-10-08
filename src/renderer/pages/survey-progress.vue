@@ -31,17 +31,7 @@
             </span>
           </div>
           <div class="panel-body">
-            <svg class="survey-map" :viewBox="map.viewBox" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Known systems coloured by the survey work left">
-              <g :stroke="theme.border" :stroke-width="map.unit * 0.9">
-                <line v-for="link in map.links" :key="link.key" :x1="link.x1" :y1="link.y1" :x2="link.x2" :y2="link.y2" />
-              </g>
-              <g v-for="node in map.nodes" :key="node.SystemID" class="map-node" @click="selectSystem(node.SystemID)">
-                <title>{{ node.title }}</title>
-                <circle :cx="node.x" :cy="node.y" :r="node.r" :fill="node.color" :stroke="node.SystemID === selectedSystemId ? theme.primary : theme.surface" :stroke-width="map.unit * (node.SystemID === selectedSystemId ? 3 : 1)" />
-                <circle v-if="node.ships" :cx="node.x" :cy="node.y" :r="node.r + map.unit * 4" fill="none" :stroke="theme.ink" :stroke-width="map.unit * 1.5" />
-                <text v-if="node.label" :x="node.x" :y="node.y - node.r - map.unit * 5" :font-size="map.unit * 11" text-anchor="middle" :fill="theme.ink">{{ node.Name }}</text>
-              </g>
-            </svg>
+            <system-map :systems="mapNodes" :links="links" :selected="selectedSystemId" aria-label="Known systems coloured by the survey work left" @select="selectSystem" />
             <div class="caption text--secondary">Positions as on the game's galactic map. Size shows the survey points left; click a system for its details below.</div>
           </div>
         </v-card>
@@ -174,9 +164,11 @@
 import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import SystemMap from '../components/exploration/SystemMap.vue'
+import countFormat from '../mixins/count-format'
 import { systemBodyName } from '../utilities/aurora'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { roundToDecimal } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { surveyDays } from '../utilities/survey-eta'
@@ -200,6 +192,8 @@ const SURVEY_ORDERS = new Set([9, 12])
 
 export default {
   name: 'SurveyProgressPage',
+  components: { SystemMap },
+  mixins: [countFormat],
   data() {
     return {
       showSurveyed: false,
@@ -215,12 +209,6 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
-
-    separator() {
-      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
-
-      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-    },
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -331,55 +319,22 @@ export default {
       return this.systemRows.filter((system) => (this.showSurveyed || system.remaining > 0 || system.SystemID === this.selectedSystemId) && (!search || system.Name.toLowerCase().includes(search)))
     },
 
-    map() {
-      const systems = this.systemRows.filter((system) => system.Xcor !== null && system.Ycor !== null)
+    // Surveyed systems first, so the ones with work left draw on top.
+    mapNodes() {
+      const maxRemaining = Math.max(...this.systemRows.map((system) => system.remaining), 1)
 
-      if (!systems.length) {
-        return { viewBox: '0 0 100 100', unit: 1, nodes: [], links: [] }
-      }
-
-      const xs = systems.map((system) => system.Xcor)
-      const ys = systems.map((system) => system.Ycor)
-      const width = Math.max(...xs) - Math.min(...xs) || 100
-      const height = Math.max(...ys) - Math.min(...ys) || 100
-      // About one screen pixel in map units (the map is drawn up to ~1100 x 600 px), so strokes
-      // and labels keep their size whatever the galaxy's extent.
-      const unit = Math.max(width / 1100, height / 560)
-      const pad = unit * 30
-      const maxRemaining = Math.max(...systems.map((system) => system.remaining), 1)
-      const byId = Object.fromEntries(systems.map((system) => [system.SystemID, system]))
-      const nodes = systems.map((system) => {
+      return this.systemRows.map((system) => {
         const status = system.gravPoints && system.geoPoints ? 'both' : system.gravPoints ? 'grav' : system.geoPoints ? 'geo' : 'done'
 
         return {
           ...system,
-          x: system.Xcor,
-          y: system.Ycor,
-          r: unit * (system.remaining ? 5 + 9 * Math.sqrt(system.remaining / maxRemaining) : 3.5),
+          size: system.remaining ? 5 + 9 * Math.sqrt(system.remaining / maxRemaining) : 3.5,
           color: this.colors[status],
-          ships: system.shipsHere,
+          ring: system.shipsHere ? this.theme.ink : null,
           label: system.remaining > 0 || system.shipsHere > 0,
           title: `${system.Name}: ${system.remaining ? `${this.count(system.remaining)} survey points left` : 'fully surveyed'}${system.shipsHere ? `, ${system.fleetsHere.join(', ')}` : ''}`,
         }
-      })
-      const seen = new Set()
-      const links = []
-
-      this.links.forEach((link) => {
-        const key = [link.SystemID, link.DestinationID].sort((a, b) => a - b).join('-')
-        const from = byId[link.SystemID]
-        const to = byId[link.DestinationID]
-
-        if (from && to && !seen.has(key)) {
-          seen.add(key)
-          links.push({ key, x1: from.Xcor, y1: from.Ycor, x2: to.Xcor, y2: to.Ycor })
-        }
-      })
-
-      // Surveyed systems first, so the ones with work left draw on top.
-      nodes.sort((a, b) => a.remaining - b.remaining)
-
-      return { viewBox: `${Math.min(...xs) - pad} ${Math.min(...ys) - pad} ${width + 2 * pad} ${height + 2 * pad}`, unit, nodes, links }
+      }).sort((a, b) => a.remaining - b.remaining)
     },
 
     groundRows() {
@@ -533,22 +488,8 @@ export default {
     potentialLabel(value) {
       return POTENTIAL[value] || '—'
     },
-    count(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
-    },
     fixed(value, decimals) {
       return roundToDecimal(value, decimals).toFixed(decimals)
-    },
-    duration(days) {
-      if (days < 1) {
-        return `${Math.max(1, Math.round(days * 24))} h`
-      } else if (days < 60) {
-        return `${roundToDecimal(days, 1)} d`
-      } else if (days < 730) {
-        return `${roundToDecimal(days / 30.4, 1)} mo`
-      }
-
-      return `${roundToDecimal(days / 365, 1)} y`
     },
   },
   asyncComputed: {
@@ -718,22 +659,6 @@ export default {
   .dot-ring {
     background: transparent;
     border: 2px solid;
-  }
-
-  .survey-map {
-    display: block;
-    width: 100%;
-    // 480 px at 1280 x 720, 780 at 1080p, and it keeps growing to 1000 so a 1440p window isn't left with a small map in the middle.
-    height: clamp(480px, calc(100vh - 300px), 1000px);
-  }
-
-  .map-node {
-    cursor: pointer;
-  }
-
-  .map-node text {
-    pointer-events: none;
-    font-family: Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
 
   td {
