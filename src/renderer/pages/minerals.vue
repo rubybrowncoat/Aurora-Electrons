@@ -184,11 +184,17 @@
               </template>
               <template #[`item.SystemBodyOrder`]="{ item }">
                 {{ systemBodyName(item) }}
-                <v-tooltip v-if="cmcQualifyingMinerals(item).length" top max-width="360">
+                <v-tooltip v-if="cmcByBody[item.SystemBodyID]" top max-width="360">
+                  <template #activator="{ on }">
+                    <v-chip x-small label color="teal darken-1" dark class="ml-1 px-1" v-on="on"><v-icon x-small left>mdi-pickaxe</v-icon>CMC ×{{ cmcByBody[item.SystemBodyID].complexes }}</v-chip>
+                  </template>
+                  <span>{{ cmcColonyText(cmcByBody[item.SystemBodyID]) }}</span>
+                </v-tooltip>
+                <v-tooltip v-else-if="cmcAllowed && cmcQualifyingMinerals(item).length" top max-width="360">
                   <template #activator="{ on }">
                     <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
                   </template>
-                  <span>Qualifies for a civilian mining complex: {{ cmcQualifyingMinerals(item).join(', ') }} (10,000 t+ at accessibility 0.7+). The game also needs a populated system and a body under 80 AU from its star; change the minerals in Settings.</span>
+                  <span>Could host a civilian mining complex: more than 10,000 t of {{ cmcQualifyingMinerals(item).join(' and ') }} at accessibility 0.7 or better, and the body is close enough to its star. The game founds one only if one of your colonies in the system has over 10 M people, the body has no colony (one of yours with only orbital miners is fine) and isn't banned, and its star is in reach (a companion star within 80 AU of what it orbits, or linked by Lagrange points). It then rolls 1 in 3 for each such body, richest first. The Colonization Planner checks every condition per body.</span>
                 </v-tooltip>
               </template>
               <template #[`item.GroundMineralSurvey`]="{ item }">
@@ -202,27 +208,27 @@
                 </v-tooltip>
               </template>
               <template #[`item.Potential`]="{ item }">
-                <v-tooltip top>
+                <v-tooltip top max-width="360">
                   <template #activator="{ on }">
                     <span
                       :class="{
-                        'green--text text--lighten-1 font-weight-bold title': item.Potential >= (Math.PI / 2) * materialCount * 0.75,
-                        'red--text text--darken-3 font-weight-bold': item.Potential <= (Math.PI / 2) * materialCount * 0.3,
+                        'green--text text--lighten-1 font-weight-bold title': item.Potential >= 7.5,
+                        'red--text text--darken-3 font-weight-bold': item.Potential <= 3,
                       }"
                       v-on="on"
-                      >{{ roundToDecimal((item.Potential * 10) / ((Math.PI / 2) * materialCount)) }}</span
+                      >{{ roundToDecimal(item.Potential, 1) }}</span
                     >
                   </template>
 
-                  <span>{{ roundToDecimal(item.Potential, 3) }}</span>
+                  <span>{{ potentialSummary(item) }}</span>
                 </v-tooltip>
               </template>
               <template #[`header.Potential`]="{ header }">
-                <v-tooltip top>
+                <v-tooltip top max-width="400">
                   <template #activator="{ on }">
                     <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
                   </template>
-                  <span>Potential calculated for all listed minerals, including empty columns.</span>
+                  <span>How well the body covers the minerals selected in Filters, from 0 to 10. Each mineral scores 0 to 10 from its amount and accessibility, and the column is their average, so a mineral the body lacks counts as 0. A mineral scores 5 with 20,000 t at accessibility 1 and about 8 with 100,000 t at 0.7; at accessibility 0.1 it stays under 1 however large. Green from 7.5, red at 3 or less. Hover a value for its minerals.</span>
                 </v-tooltip>
               </template>
               <template v-for="material in materials" #[`item.${material}`]="{ item }">
@@ -264,7 +270,10 @@ import _intersectionBy from 'lodash/intersectionBy'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName } from '../utilities/aurora'
 import { areSetsEqual } from '../utilities/generic'
-import { CMC_CONFIG_KEY, MINERALS, cmcMineralIds, qualifiesForCmc } from '../utilities/minerals'
+import { cmcBodyInReach } from '../utilities/colonization'
+import { CMC_MINERAL_IDS, MINERALS, depositPotential, qualifiesForCmc } from '../utilities/minerals'
+
+const CMC_MINERAL_NAMES = CMC_MINERAL_IDS.map((id) => MINERALS.find((mineral) => mineral.id === id).name)
 
 const MaterialMap = {
   // 0: 'Nothing',
@@ -375,8 +384,17 @@ export default {
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
-    cmcMineralNames() {
-      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY)).map((id) => MINERALS.find((mineral) => mineral.id === id).name)
+    // The race's civilian mining complexes by body: { [SystemBodyID]: { complexes, names, purchased } }.
+    cmcByBody() {
+      return this.cmcColonies.reduce((bodies, colony) => {
+        const body = (bodies[colony.SystemBodyID] = bodies[colony.SystemBodyID] || { complexes: 0, names: [], purchased: false })
+
+        body.complexes += colony.Complexes
+        body.names.push(colony.PopName)
+        body.purchased = body.purchased || !!colony.PurchaseCivilianMinerals
+
+        return bodies
+      }, {})
     },
 
     itemsPerPageOptions() {
@@ -413,7 +431,11 @@ export default {
             OrbitNumber: item.OrbitNumber,
 
             BodyClass: item.BodyClass,
+            BodyTypeID: item.BodyTypeID,
             SystemBodyType: item.BodyTypeID,
+            OrbitalDistance: item.OrbitalDistance,
+            Eccentricity: item.Eccentricity,
+            ParentOrbitalDistance: item.ParentOrbitalDistance,
 
             GroundMineralSurvey: item.GroundMineralSurvey,
             Radius: item.Radius,
@@ -438,7 +460,7 @@ export default {
             const material = body[materialId]
 
             if (material) {
-              potential += Math.atan(Math.pow(material.Amount / 20000, Math.cos((Math.PI / 2) * material.Accessibility - Math.PI / 2)) * (0.5 - Math.cos(Math.PI * material.Accessibility) / 2))
+              potential += depositPotential(material)
               amount += material.Amount
               accessibility += material.Accessibility
             }
@@ -451,7 +473,8 @@ export default {
         return {
           ...body,
 
-          Potential: totalPotential,
+          // The average over every listed mineral, absent ones at 0.
+          Potential: this.materials.length ? totalPotential / this.materials.length : 0,
           TotalAmount: totalAmount,
           TotalAccessibility: totalAccessibility,
         }
@@ -544,10 +567,6 @@ export default {
     orbitalEligibilityLabel() {
       const active = this.orbitalEligibilityOptions.find((option) => option.value === this.filterOrbitalEligibility)
       return active ? active.text : ''
-    },
-
-    materialCount() {
-      return Object.keys(this.materials).length
     },
 
     headers() {
@@ -698,8 +717,21 @@ export default {
 
     systemBodyName,
 
+    // The minerals that would draw a civilian mining complex, on a body near enough to its star and not a gas giant.
     cmcQualifyingMinerals(body) {
-      return this.cmcMineralNames.filter((name) => qualifiesForCmc(body[name]))
+      return cmcBodyInReach(body) ? CMC_MINERAL_NAMES.filter((name) => qualifiesForCmc(body[name])) : []
+    },
+
+    cmcColonyText({ complexes, names, purchased }) {
+      return `${names.join(' and ')} ${names.length > 1 ? 'run' : 'runs'} ${complexes} civilian mining ${complexes === 1 ? 'complex' : 'complexes'} here. ${purchased ? 'You buy their minerals.' : 'You tax them; their minerals don\'t reach your stockpile.'}`
+    },
+
+    potentialSummary(body) {
+      const present = this.materials.filter((name) => body[name])
+      const scores = present.map((name) => `${name} ${roundToDecimal(depositPotential(body[name]), 1)}`).join(', ')
+      const absent = this.materials.length - present.length
+
+      return `${roundToDecimal(body.Potential, 1)} of 10, the average over ${this.materials.length} minerals: ${scores || 'no deposits'}${absent ? `, ${absent} absent at 0` : ''}.`
     },
 
     areSetsEqual,
@@ -776,6 +808,31 @@ export default {
     },
   },
   asyncComputed: {
+    // Whether the game founds civilian mining complexes at all (FCT_Game.AllowCMC).
+    cmcAllowed: {
+      async get() {
+        if (!this.database || !this.GameID) {
+          return false
+        }
+
+        const [[game]] = await this.database.query(`select AllowCMC from FCT_Game where GameID = ${this.GameID}`)
+
+        return !!game && game.AllowCMC === 1
+      },
+      default: false,
+    },
+    cmcColonies: {
+      async get() {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        const [items] = await this.database.query(`select FCT_Population.SystemBodyID, FCT_Population.PopName, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, FCT_PopulationInstallations.Amount as Complexes from FCT_PopulationInstallations inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_PopulationInstallations.PlanetaryInstallationID = 39 and FCT_PopulationInstallations.Amount > 0`)
+
+        return items
+      },
+      default: [],
+    },
     race: {
       async get() {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -804,7 +861,7 @@ export default {
           return []
         }
 
-        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
+        const minerals = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.StarID, FCT_SystemBody.RuinID, FCT_SystemBody.RuinRaceID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit join FCT_RaceSysSurvey on FCT_SystemBody.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_RaceSysSurvey.RaceID = FCT_SystemBodyName.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID where FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID}) and FCT_MineralDeposit.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => {
           console.log('Minerals', items)
 
           return items

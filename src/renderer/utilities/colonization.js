@@ -17,7 +17,7 @@
 import { bodyCapacity } from './colonies'
 import { STATE_BY_ID, routeFacts, stateOf } from './colonization-states'
 import { KM_PER_AU } from './jump-graph'
-import { DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, NOT_SCARCE, depositValue, qualifiesForCmc } from './minerals'
+import { CMC_MINERAL_IDS, DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, NOT_SCARCE, depositValue, qualifiesForCmc } from './minerals'
 import { assessTerraforming, planYears, terraformCapacity } from './terraforming'
 import { infrastructurePerMillion, limitingFactor, speciesLimits } from './habitability'
 
@@ -51,8 +51,9 @@ const NO_ROUTE_FACTOR = 0.3
 // A target is ranked from this share of the best one's worth. From `BEST_TARGET_SCORE` it is a best target.
 export const MINIMUM_TARGET_SCORE = 10
 export const BEST_TARGET_SCORE = 25
-const CMC_MAX_STAR_DISTANCE_AU = 80
-const CMC_MIN_SYSTEM_POPULATION = 10
+const CMC_REACH_AU = 80
+const CMC_MIN_COLONY_POPULATION = 10
+const GAS_GIANT_TYPES = [4, 5]
 
 export const NO_OUTLOOK = { known: false, minerals: {} }
 
@@ -82,9 +83,9 @@ export const normaliseRanking = (stored) => {
 
 // What a body's deposits are worth to this race: each deposit by the game's own value (accessibility, raised for
 // a big easy one, halved for a small one), times the mineral's weight and the race's scarcity of it
-// (`outlook`, from minerals.js `mineralOutlook`). Civilian mining complex candidates per the Minerals page's rule
-// and setting.
-export const mineralSummary = (body, ranking, cmcIds, outlook = NO_OUTLOOK) => {
+// (`outlook`, from minerals.js `mineralOutlook`). Civilian mining complex candidates per the game's deposit rule
+// (minerals.js `qualifiesForCmc`).
+export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
   const lines = body.Minerals.map((deposit) => {
     const mineral = MINERALS.find((candidate) => candidate.id === deposit.MaterialID)
     const scarcity = (outlook.minerals[deposit.MaterialID] || {}).scarcity || NOT_SCARCE
@@ -93,7 +94,7 @@ export const mineralSummary = (body, ranking, cmcIds, outlook = NO_OUTLOOK) => {
     return { id: mineral.id, name: mineral.name, amount: deposit.Amount, accessibility: deposit.Accessibility, base, scarcity, value: base * (ranking.weights[mineral.id] || 0) * scarcity.factor }
   }).sort((a, b) => b.value - a.value || b.amount - a.amount)
   const value = lines.reduce((total, line) => total + line.value, 0)
-  const cmc = body.Minerals.filter((deposit) => cmcIds.includes(deposit.MaterialID) && qualifiesForCmc(deposit)).map((deposit) => MINERALS.find((mineral) => mineral.id === deposit.MaterialID).name)
+  const cmc = body.Minerals.filter((deposit) => CMC_MINERAL_IDS.includes(deposit.MaterialID) && qualifiesForCmc(deposit)).map((deposit) => MINERALS.find((mineral) => mineral.id === deposit.MaterialID).name)
 
   return {
     surveyed: !!body.BodySurveyed,
@@ -107,29 +108,80 @@ export const mineralSummary = (body, ranking, cmcIds, outlook = NO_OUTLOOK) => {
   }
 }
 
-// The AU between a body and its star (a moon's star distance is its parent's).
-export const starDistance = (body) => (body.BodyClass === 2 ? body.ParentOrbitalDistance : body.OrbitalDistance)
+// Whether the game counts a body as near enough to its star for a civilian mining complex
+// (SystemBody.IsWithinApoapsisDistance(80, false)): an asteroid, comet or planet that is not a gas giant needs its
+// farthest point under 80 AU; a moon goes by its planet's orbital distance.
+export const cmcBodyInReach = (body) => {
+  if (body.BodyClass === 2) {
+    return body.ParentOrbitalDistance < CMC_REACH_AU
+  }
 
-// What the game also wants of a civilian mining complex site, beyond the deposit (docs, C# Civilian Mining Check):
-// an own colony in the system with 10 M people, a body within 80 AU of its star, no ban and no colony yet.
-export const cmcSite = (body, systemPopulation) => ({
-  populatedSystem: (systemPopulation[body.SystemID] || 0) >= CMC_MIN_SYSTEM_POPULATION,
-  nearStar: starDistance(body) < CMC_MAX_STAR_DISTANCE_AU,
+  if (body.BodyClass === 1 && GAS_GIANT_TYPES.includes(body.BodyTypeID)) {
+    return false
+  }
+
+  return [1, 3, 5].includes(body.BodyClass) && body.OrbitalDistance * (1 + (body.Eccentricity || 0)) < CMC_REACH_AU
+}
+
+// Whether the game lets a body of this star host a civilian mining complex (Star.CheckNearbyLagrangePoints(80)).
+// The primary star always does. A companion does when it, or for a companion of a companion the star it circles,
+// keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU
+// and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its
+// Lagrange points with their star's OrbitingComponent and their planet's apoapsis.
+export const cmcStarInReach = (star, stars, lagrangePoints) => {
+  if (star.Component === 1) {
+    return true
+  }
+
+  const near = (point) => point.PlanetApoapsis < CMC_REACH_AU
+  const primaryLink = lagrangePoints.some((point) => point.StarOrbitingComponent === 0 && near(point))
+  const linked = (starIds) => primaryLink && lagrangePoints.some((point) => starIds.includes(point.StarID) && near(point))
+
+  if (star.OrbitingComponent === 1) {
+    return star.Apoapsis < CMC_REACH_AU || linked([star.StarID])
+  }
+
+  const circled = stars.find((other) => other.Component === star.OrbitingComponent)
+
+  return !!circled && (circled.Apoapsis < CMC_REACH_AU || linked([star.StarID, circled.StarID]))
+}
+
+// Before the race's rules load, no body is a ready site.
+export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
+
+// What the game also wants for a civilian mining complex, beyond the deposit (Game.ProcessNewCivilianMiningColonyCreation
+// and TryEstablishCivilianMiningColony). Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes
+// switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the
+// race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
+// A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count
+// (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
+export const cmcSite = (body, rules) => ({
+  allowed: rules.allowed,
+  shipyard: rules.shipyard,
+  settledColonies: rules.settledColonies > 1,
+  populatedSystem: (rules.largestColony[body.SystemID] || 0) > CMC_MIN_COLONY_POPULATION,
+  nearStar: cmcBodyInReach(body),
+  starInReach: !!body.CmcStarInReach,
   notBanned: !body.Banned,
-  uncolonised: !body.OwnPopulations.length,
+  uncolonised: !body.AlienPopulations.length && body.OwnPopulations.every((population) => !population.BlocksCmc),
 })
 
-// Own millions of people per system.
-export const populationBySystem = (bodies) => {
-  const totals = {}
+const CMC_NEEDS = {
+  allowed: 'civilian mining complexes switched on for the game',
+  shipyard: 'a shipyard',
+  settledColonies: 'more than one colony with people or infrastructure',
+  populatedSystem: 'one of your colonies in the system with over 10 M people',
+  nearStar: 'a body under 80 AU from its star at its farthest (a moon: its planet\'s orbit), and not a gas giant',
+  starInReach: 'a star the game counts as in reach (a companion within 80 AU of what it orbits, or linked by Lagrange points within 80 AU)',
+  notBanned: 'a body that is not banned',
+  uncolonised: 'a body with no colony on it (yours with only orbital miners is fine)',
+}
 
-  bodies.forEach((body) => {
-    body.OwnPopulations.forEach((population) => {
-      totals[body.SystemID] = (totals[body.SystemID] || 0) + population.Population
-    })
-  })
+// The site's unmet conditions as one sentence.
+export const cmcNote = (site) => {
+  const missing = Object.keys(CMC_NEEDS).filter((key) => !site[key]).map((key) => CMC_NEEDS[key])
 
-  return totals
+  return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
 }
 
 // Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan
@@ -202,15 +254,16 @@ const sumPeople = (populations) => populations.reduce((total, population) => tot
 // One row per body for the table and chart: the best species for it (or the chosen one), its alternatives, its
 // plan state, and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`,
 // so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from
-// the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook.
-export const rankBodies = (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcIds, systemPopulation, outlook = NO_OUTLOOK }) => {
+// the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook;
+// `cmcRules` is what `cmcSite` needs of the race.
+export const rankBodies = (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
   const terraformCapacityPerYear = terraformCapacity(rules, terraformers)
 
   const rows = assessed
     .filter(({ byspecies }) => byspecies.length)
     .map(({ body, byspecies }) => {
-      const minerals = mineralSummary(body, ranking, cmcIds, outlook)
-      const site = cmcSite(body, systemPopulation)
+      const minerals = mineralSummary(body, ranking, outlook)
+      const site = cmcSite(body, cmcRules)
       const cmcReady = minerals.cmc.length > 0 && Object.values(site).every(Boolean)
       const distance = distanceOf(body)
       const distanceAU = distance ? distance.km / KM_PER_AU : null

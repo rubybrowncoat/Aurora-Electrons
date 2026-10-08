@@ -21,14 +21,6 @@
           <v-text-field v-model="exampleString" label="Example Number" :hint="separatedNumber(exampleString, thousandsSeparator)" solo persistent-hint dense type="number" />
         </v-col>
       </v-row>
-      <v-row justify="start">
-        <v-col cols="12" md="8">
-          <v-select v-model="cmcMinerals" :items="minerals" item-text="name" item-value="id" placeholder="No mineral qualifies" hint="Civilian mining complexes: a body qualifies with at least 10,000 t of one of these minerals at accessibility 0.7 or better. Marked on the Minerals page." multiple small-chips deletable-chips solo persistent-hint dense @change="setCmcMinerals" />
-        </v-col>
-        <v-col v-if="!isCmcDefault" cols="auto" class="d-flex align-center">
-          <v-btn x-small outlined @click="resetCmcMinerals">Reset to Duranium and Gallicite</v-btn>
-        </v-col>
-      </v-row>
     </v-container>
 
     <div v-if="RaceID">
@@ -69,7 +61,6 @@
 import { mapGetters } from 'vuex'
 
 import { separatedNumber } from '../utilities/math'
-import { CMC_CONFIG_KEY, CMC_DEFAULT_MINERAL_IDS, MINERALS, cmcMineralIds } from '../utilities/minerals'
 
 export default {
   components: {},
@@ -81,9 +72,6 @@ export default {
       selectedSeparator: 'Tick',
       thousandsSeparator: '\'',
       exampleString: '1234567890.1234',
-
-      minerals: MINERALS,
-      cmcMinerals: [...CMC_DEFAULT_MINERAL_IDS],
 
       maintenanceThreshold: 0,
       maintenanceExclusions: [],
@@ -103,16 +91,6 @@ export default {
 
       this.selectedSeparator = value
       this.thousandsSeparator = value === 'Tick' ? '\'' : value === 'Comma' ? ',' : value === 'Dash' ? '-' : value === 'Space' ? ' ' : ''
-    },
-    setCmcMinerals (value) {
-      const ids = cmcMineralIds(value).sort((a, b) => a - b)
-
-      this.config.set(CMC_CONFIG_KEY, ids)
-
-      this.cmcMinerals = ids
-    },
-    resetCmcMinerals () {
-      this.setCmcMinerals([...CMC_DEFAULT_MINERAL_IDS])
     },
 
     // MAINTENANCE
@@ -149,12 +127,6 @@ export default {
     },
     storedSelectedSeparator () {
       return this.config.get('selectedSeparator', 'Tick')
-    },
-    storedCmcMinerals () {
-      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY))
-    },
-    isCmcDefault () {
-      return this.cmcMinerals.length === CMC_DEFAULT_MINERAL_IDS.length && CMC_DEFAULT_MINERAL_IDS.every((id) => this.cmcMinerals.includes(id))
     },
 
     // MAINTENANCE
@@ -198,12 +170,6 @@ export default {
       handler (selectedSeparator) {
         this.selectedSeparator = selectedSeparator
         this.thousandsSeparator = selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-      },
-    },
-    storedCmcMinerals: {
-      immediate: true,
-      handler (cmcMinerals) {
-        this.cmcMinerals = cmcMinerals
       },
     },
     storedMaintenanceThreshold: {

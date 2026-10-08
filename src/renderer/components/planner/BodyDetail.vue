@@ -138,6 +138,7 @@
 <script>
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
+import { cmcNote } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
 import { OUTCOMES, planYears } from '../../utilities/terraforming'
@@ -265,10 +266,7 @@ export default {
       return `${roundToDecimal(distance.au, 1)} AU from ${from} over ${jumps(distance.jumps)}, by the charted route.${capital}`
     },
     cmcLine() {
-      const { cmcSite } = this.item.row
-      const missing = [!cmcSite.populatedSystem && 'an own colony of 10 M in the system', !cmcSite.nearStar && 'a body under 80 AU from its star', !cmcSite.notBanned && 'a body that is not banned', !cmcSite.uncolonised && 'a body with no colony yet'].filter(Boolean)
-
-      return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
+      return cmcNote(this.item.row.cmcSite)
     },
   },
   methods: {

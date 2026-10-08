@@ -121,7 +121,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
             Click a row to see its outlook.
           </div>
         </v-card>
@@ -225,7 +225,8 @@ import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { joinLabels, tracked } from '../utilities/load-tracking'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, navalAdminChainBonus, orbitalRate, stockProjection, surfaceRate, yearSteps } from '../utilities/minerals'
+import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
+import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
 const BUCKET_DAYS = 5
@@ -348,6 +349,11 @@ export default {
       return this.coverageDays ? 365 / this.coverageDays : 0
     },
 
+    // Mining the ledger leaves out (colonies shipping their civilian complexes' output by mass driver), t/yr.
+    unlogged() {
+      return unloggedMining({ surface: this.surfaceMining, orbital: this.orbitalMining, navalAdmins: this.navalAdmins })
+    },
+
     // { [MaterialID]: { [groupKey]: t/yr } }
     flowsByMineral() {
       const flows = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, 0]))]))
@@ -361,6 +367,12 @@ export default {
 
         if (group && flows[row.MaterialID]) {
           flows[row.MaterialID][group.key] += row.Amount * this.perYear
+        }
+      })
+
+      Object.entries(this.unlogged).forEach(([materialId, rate]) => {
+        if (flows[materialId]) {
+          flows[materialId].mining += rate
         }
       })
 
@@ -401,8 +413,7 @@ export default {
       })
 
       this.orbitalMining.forEach((row) => {
-        const tooLarge = row.MaximumOrbitalMiningDiameter > 0 && row.Diameter > row.MaximumOrbitalMiningDiameter
-        const rate = tooLarge ? 0 : orbitalRate(row, navalAdminChainBonus(this.navalAdmins, row.SystemID, row.NavalAdminCommandID))
+        const rate = orbitalMinerRate(row, this.navalAdmins)
 
         add(row, { name: row.ShipName, kind: 'orbital', rate, delivered: rate })
       })
@@ -525,7 +536,7 @@ export default {
         {
           label: 'Mined per year',
           value: this.tons(minedPerYear),
-          note: this.hasLedger ? 'From the ledger, all minerals' : 'From your mines, all minerals',
+          note: !this.hasLedger ? 'From your mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
         },
       ]
     },
@@ -824,11 +835,13 @@ export default {
       })
 
       const buckets = Math.ceil(this.coverageDays / BUCKET_DAYS)
+      // The mining the ledger leaves out, at today's rate, as if it had run the whole time.
+      const unlogged = ((this.unlogged[materialId] || 0) * BUCKET_DAYS) / 365
       const points = [current]
       let level = current
 
       for (let bucket = 0; bucket < buckets; bucket++) {
-        level -= nets[bucket] || 0
+        level -= (nets[bucket] || 0) + unlogged
         points.unshift(level)
       }
 
@@ -1018,7 +1031,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Radius * 2 as Diameter, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, VIR_Mines.MineCount, VIR_Mines.OwnedMineCount, VIR_Mines.ManualMineCount, FCT_Race.MineProduction, coalesce(VIR_Governor.BonusValue, 1) as GovernorBonus, 1 + (coalesce(VIR_Sector.BonusValue, 1) - 1) * 0.25 as SectorBonus, FCT_Population.Efficiency, (1 - FCT_SystemBody.RadiationLevel / 10000) as RadiationModifier, (1 - FCT_Population.UnrestPoints / 100) as StabilityModifier, DIM_PopPoliticalStatus.ProductionMod as PoliticalModifier, FCT_Race.EconomicProdModifier from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Population.RaceID and FCT_SystemBodySurveys.GameID = FCT_Population.GameID inner join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID inner join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue) as MineCount, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID = 39 and VIR_Owner.PurchaseCivilianMinerals = 0 then 0 else FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue end) as OwnedMineCount, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID in (7, 38, 48) then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as ManualMineCount from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID inner join FCT_Population as VIR_Owner on VIR_Owner.PopulationID = FCT_PopulationInstallations.PopID where FCT_PopulationInstallations.GameID = ${this.GameID} and DIM_PlanetaryInstallation.MiningProductionValue > 0 and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Mines on VIR_Mines.PopID = FCT_Population.PopulationID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 3 and FCT_Commander.CommandID <> 0) as VIR_Governor on VIR_Governor.CommandID = FCT_Population.PopulationID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 4 and FCT_Commander.CommandID <> 0) as VIR_Sector on VIR_Sector.CommandID = FCT_RaceSysSurvey.SectorID and FCT_RaceSysSurvey.SectorID <> 0 where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
       }),
       default: [],
     },
@@ -1028,7 +1041,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MiningModules, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.Radius * 2 as Diameter, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, coalesce(VIR_Commander.BonusValue, 1) as CommanderBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID inner join FCT_Population on FCT_Population.PopulationID = FCT_Fleet.AssignedPopulationID and FCT_Population.SystemBodyID = FCT_Fleet.OrbitBodyID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID inner join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
       }),
       default: [],
     },

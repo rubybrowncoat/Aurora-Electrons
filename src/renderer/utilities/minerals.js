@@ -18,24 +18,25 @@ export const MINERALS = [
   { id: 11, name: 'Gallicite' },
 ]
 
-// A body can host a civilian mining complex with at least 10,000 t of a qualifying
-// mineral at accessibility 0.7 or better. The docs name Duranium only, the Aur_Calcs
-// workbook adds Gallicite; the qualifying minerals are a setting (`cmcMinerals`).
-export const CMC_CONFIG_KEY = 'cmcMinerals'
-export const CMC_DEFAULT_MINERAL_IDS = [1, 11]
-export const CMC_MIN_AMOUNT = 10000
-export const CMC_MIN_ACCESSIBILITY = 0.7
+// A civilian mining complex can be founded on a body with more than 10,000 t of Duranium or Gallicite at
+// accessibility 0.7 or better (the game's TryEstablishCivilianMiningColony). The site's other conditions are
+// in colonization.js `cmcSite`.
+export const CMC_MINERAL_IDS = [1, 11]
+const CMC_MIN_AMOUNT = 10000
+const CMC_MIN_ACCESSIBILITY = 0.7
 
-// The stored setting, kept to known mineral IDs; anything else falls back to the default.
-export const cmcMineralIds = (stored) => {
-  if (!Array.isArray(stored)) {
-    return [...CMC_DEFAULT_MINERAL_IDS]
-  }
+export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount > CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
-  return stored.map(Number).filter((id) => MINERALS.some((mineral) => mineral.id === id))
+// The Minerals page's mining potential of one deposit, 0 to 10. With r = sin(π/2 · accessibility), it is
+// atan((Amount / 20,000 t)^r · r²) scaled from [0, π/2) to [0, 10): 20,000 t at accessibility 1 scores 5,
+// 100,000 t at 0.7 about 8, and a deposit at 0.1 never passes 1 however large.
+const POTENTIAL_REFERENCE_AMOUNT = 20000
+
+export const depositPotential = (deposit) => {
+  const reach = Math.sin((Math.PI / 2) * deposit.Accessibility)
+
+  return (Math.atan(Math.pow(deposit.Amount / POTENTIAL_REFERENCE_AMOUNT, reach) * reach * reach) / (Math.PI / 2)) * 10
 }
-
-export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount >= CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
 // What the game's own AI makes of a deposit: accessibility,
 // halved under 10,000 t and raised for a big deposit that is still easy to reach (more than 100,000, 250,000
@@ -79,13 +80,17 @@ export const ACCESSIBILITY_FLOOR = 0.1
 // Forecasts past this are shown as "endless" (the sample's homeworld deposits run for millions of years).
 export const ENDLESS_YEARS = 10000
 
-// Manned installations scale with the colony's efficiency; automated ones don't.
-// t/yr at the deposit's current accessibility. `owned` drops civilian complexes the race doesn't buy from.
-export const surfaceRate = (row, owned = true) => {
-  const mines = owned ? row.OwnedMineCount : row.MineCount
-  const modifier = row.RadiationModifier * row.StabilityModifier * (row.PoliticalModifier ?? 1) * row.EconomicProdModifier
+// t/yr at the deposit's current accessibility, as the game's RecalculateMiningProductionTotals has it: each kind
+// of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political
+// status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector
+// commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
+const whole = (capacity) => Math.floor(capacity + 1e-9)
 
-  return (row.ManualMineCount * row.Efficiency + (mines - row.ManualMineCount)) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * modifier
+export const surfaceRate = (row, owned = true) => {
+  const manned = whole(row.ManualMineCount) * row.Efficiency * row.StabilityModifier * (row.PoliticalModifier ?? 1)
+  const civilian = owned && !row.PurchaseCivilianMinerals ? 0 : whole(row.CivilianMineCount)
+
+  return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
 // A ship short of crew runs its mining modules at Current Crew / Class Crew (docs:
@@ -94,6 +99,26 @@ export const crewFraction = (row) => (row.ClassCrew > 0 ? Math.min(1, Math.max(0
 
 // The workbook's orbital formula, plus the crew rule; unverified, the sample has no player orbital miners.
 export const orbitalRate = (row, adminBonus = 1) => row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crewFraction(row) * row.Accessibility
+
+// t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine
+// from orbit.
+export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
+
+// Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its
+// civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records
+// nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver
+// transfer, which isn't income.
+export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
+  const totals = {}
+  const add = (row, rate) => {
+    totals[row.MaterialID] = (totals[row.MaterialID] || 0) + rate
+  }
+
+  surface.filter((row) => row.MassDriverExport).forEach((row) => add(row, surfaceRate(row)))
+  orbital.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalMinerRate(row, navalAdmins)))
+
+  return totals
+}
 
 const declineShape = (deposit) => {
   const { Amount: amount, Accessibility: accessibility, HalfOriginalAmount: half, OriginalAcc: original } = deposit
@@ -271,14 +296,15 @@ const ledgerCoverage = (ledger, gameTime, windowDays) => {
 }
 
 // Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and
-// salvage) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets.
-// `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick,
-// LastTick } over the last `windowDays`; `stock` and `transit`: { [MaterialID]: tonnes }. Without a ledger (a
-// save before Aurora 2.6) nothing is known and every mineral counts as holding.
-export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit }) => {
+// salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the
+// net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime,
+// LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and
+// `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }. Without a ledger (a save before Aurora 2.6)
+// nothing is known and every mineral counts as holding.
+export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit, unlogged = {} }) => {
   const coverageDays = ledgerCoverage(ledger, gameTime, windowDays)
   const perYear = coverageDays ? DAYS_PER_YEAR / coverageDays : 0
-  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: (stock[mineral.id] || 0) + (transit[mineral.id] || 0), produced: 0, used: 0 }]))
+  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: (stock[mineral.id] || 0) + (transit[mineral.id] || 0), produced: coverageDays ? unlogged[mineral.id] || 0 : 0, used: 0 }]))
 
   ledger.forEach((row) => {
     const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)

@@ -286,19 +286,20 @@ import BodyDetail from '../components/planner/BodyDetail.vue'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
-import { assessBodies, BEST_TARGET_SCORE, GOALS, normaliseRanking, NO_OUTLOOK, populationBySystem, rankBodies } from '../utilities/colonization'
-import { loadBodies, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
+import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies } from '../utilities/colonization'
+import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
-import { CMC_CONFIG_KEY, MINERALS, cmcMineralIds, compact as compactTons } from '../utilities/minerals'
+import { MINERALS, compact as compactTons } from '../utilities/minerals'
 import { terraformCapacity } from '../utilities/terraforming'
 
 const INPUT_LABELS = {
   bodies: 'the bodies of known systems',
   species: 'the species',
   raceRules: 'the race rules',
+  cmcRules: 'the civilian mining rules',
   gases: 'the gases',
   routes: 'the jump routes',
   outlook: 'the mineral outlook',
@@ -443,12 +444,6 @@ export default {
       return `${TerraformingRate} atm a year each${TerraformingSpeed === 100 ? '' : `, at ${TerraformingSpeed}% game speed`}`
     },
 
-    cmcIds() {
-      return cmcMineralIds(this.config.get(CMC_CONFIG_KEY))
-    },
-    systemPopulation() {
-      return populationBySystem(this.bodies)
-    },
     // Travel is measured from the nearest sizeable colony (the capital among them), and from the capital alone.
     distanceOf() {
       return buildDistanceMap(this.routes.jumpPoints, this.routes.colonies)
@@ -462,7 +457,7 @@ export default {
       return this.ready ? assessBodies(this.bodies, this.species, this.raceRules, (id) => this.gases.find((gas) => gas.GasID === id)) : []
     },
     rows() {
-      return rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcIds: this.cmcIds, systemPopulation: this.systemPopulation, outlook: this.outlook })
+      return rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules: this.cmcRules, outlook: this.outlook })
     },
 
     systemNames() {
@@ -749,9 +744,7 @@ export default {
       return `Now ${this.costText(cost.current)}, at periapsis ${this.costText(cost.periapsis)}, at apoapsis ${this.costText(cost.apoapsis)}. The worst of them counts.`
     },
     cmcNote(row) {
-      const missing = [!row.cmcSite.populatedSystem && 'an own colony of 10 M in the system', !row.cmcSite.nearStar && 'a body under 80 AU from its star', !row.cmcSite.notBanned && 'a body that is not banned', !row.cmcSite.uncolonised && 'a body with no colony yet'].filter(Boolean)
-
-      return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
+      return cmcNote(row.cmcSite)
     },
     groundSurveyText(body) {
       return `No geological survey by this race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
@@ -791,6 +784,16 @@ export default {
         return loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: DEFAULT_RULES(),
+    },
+    cmcRules: {
+      get: tracked('cmcRules', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_CMC_RULES
+        }
+
+        return loadCmcRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_CMC_RULES,
     },
     gases: {
       get: tracked('gases', async function () {

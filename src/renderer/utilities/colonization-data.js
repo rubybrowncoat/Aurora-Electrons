@@ -2,18 +2,25 @@
 // (FCT_RaceSysSurvey), deposits only where it has surveyed the body (FCT_SystemBodySurveys), other races'
 // colonies only as its intelligence has them (FCT_AlienPopulation). Every query is scoped by GameID and RaceID.
 
+import groupBy from 'lodash/groupBy'
+import { cmcStarInReach } from './colonization'
 import { climateBaseTemp } from './habitability'
-import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook } from './minerals'
+import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
+import { orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
+import { loadNavalAdmins } from './naval-admins'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
 
 // Every colonisable-looking body of a known system, with the atmosphere, the deposits of a surveyed body
-// and the colonies on it. Gas giants and jump points never appear; asteroids and comets do.
+// and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets
+// `CmcStarInReach` (colonization.js `cmcStarInReach` for its star), and each own colony `BlocksCmc`: whether the
+// game would keep a civilian mining complex off its body (people, automated mines, complexes or ex-complexes, or
+// no orbital miners of the race assigned to it there; Game.TryEstablishCivilianMiningColony).
 export const loadBodies = async (database, { GameID, RaceID }) => {
-  const [bodies, gases, deposits, own, alien] = await Promise.all([
+  const [bodies, gases, deposits, own, alien, stars, lagrangePoints] = await Promise.all([
     rows(
       database,
-      `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.DustLevel, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.DistanceToParent, FCT_SystemBody.Eccentricity, FCT_SystemBody.FixedBody, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.Component, FCT_Star.Luminosity as StarLuminosity, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_SystemBodyName.Name as SystemBodyName, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.Eccentricity as ParentEccentricity, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as BodySurveyed, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned
+      `select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.StarID, FCT_SystemBody.ParentBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.Radius, FCT_SystemBody.Gravity, FCT_SystemBody.BaseTemp, FCT_SystemBody.SurfaceTemp, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.Albedo, FCT_SystemBody.AtmosPress, FCT_SystemBody.TidalLock, FCT_SystemBody.DustLevel, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.DistanceToParent, FCT_SystemBody.Eccentricity, FCT_SystemBody.FixedBody, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_Star.Component, FCT_Star.Luminosity as StarLuminosity, FCT_RaceSysSurvey.Name as SystemName, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_SystemBodyName.Name as SystemBodyName, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, VIR_Parent.DistanceToParent as ParentDistanceToParent, VIR_Parent.Eccentricity as ParentEccentricity, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as BodySurveyed, case when FCT_BannedBodies.SystemBodyID is null then 0 else 1 end as Banned
 from FCT_SystemBody
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_SystemBody.GameID
 inner join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
@@ -37,7 +44,12 @@ from FCT_MineralDeposit
 inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_MineralDeposit.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${RaceID}
 where FCT_MineralDeposit.GameID = ${GameID}`
     ),
-    rows(database, `select PopulationID, SystemBodyID, SpeciesID, Population, PopName from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID}`),
+    rows(
+      database,
+      `select FCT_Population.PopulationID, FCT_Population.SystemBodyID, FCT_Population.SpeciesID, FCT_Population.Population, FCT_Population.PopName, case when FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID in (12, 39, 52) and FCT_PopulationInstallations.Amount > 0) or not exists (select 1 from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 where FCT_Fleet.RaceID = FCT_Population.RaceID and FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Fleet.AssignedPopulationID in (FCT_Population.PopulationID, 0)) then 1 else 0 end as BlocksCmc
+from FCT_Population
+where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`
+    ),
     rows(
       database,
       `select FCT_AlienPopulation.PopulationID, FCT_Population.SystemBodyID, FCT_AlienPopulation.AlienRaceID, FCT_AlienPopulation.PopulationAmount
@@ -45,8 +57,27 @@ from FCT_AlienPopulation
 inner join FCT_Population on FCT_Population.PopulationID = FCT_AlienPopulation.PopulationID
 where FCT_AlienPopulation.GameID = ${GameID} and FCT_AlienPopulation.ViewingRaceID = ${RaceID}`
     ),
+    rows(
+      database,
+      `select FCT_Star.StarID, FCT_Star.SystemID, FCT_Star.Component, FCT_Star.OrbitingComponent, FCT_Star.OrbitalDistance * (1 + FCT_Star.Eccentricity) as Apoapsis
+from FCT_Star
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Star.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_Star.GameID
+where FCT_Star.GameID = ${GameID}`
+    ),
+    rows(
+      database,
+      `select FCT_LagrangePoint.SystemID, FCT_LagrangePoint.StarID, FCT_Star.OrbitingComponent as StarOrbitingComponent, FCT_SystemBody.OrbitalDistance * (1 + FCT_SystemBody.Eccentricity) as PlanetApoapsis
+from FCT_LagrangePoint
+inner join FCT_Star on FCT_Star.StarID = FCT_LagrangePoint.StarID
+inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_LagrangePoint.GameID
+where FCT_LagrangePoint.GameID = ${GameID}`
+    ),
   ])
 
+  const starsBySystem = groupBy(stars, 'SystemID')
+  const pointsBySystem = groupBy(lagrangePoints, 'SystemID')
+  const starInReach = new Map(stars.map((star) => [star.StarID, cmcStarInReach(star, starsBySystem[star.SystemID], pointsBySystem[star.SystemID] || [])]))
   const byId = new Map()
 
   bodies.forEach((body) => {
@@ -61,6 +92,7 @@ where FCT_AlienPopulation.GameID = ${GameID} and FCT_AlienPopulation.ViewingRace
       Minerals: [],
       OwnPopulations: [],
       AlienPopulations: [],
+      CmcStarInReach: !!starInReach.get(body.StarID),
     })
   })
 
@@ -95,6 +127,28 @@ from FCT_Race
 inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID
 where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`
   ).then(([row]) => row || { ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
+
+// What the game asks of the race before it founds a civilian mining complex (Game.ProcessNewCivilianMiningColonyCreation):
+// complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system
+// the millions of people in the race's largest colony there (for colonization.js `cmcSite`).
+export const loadCmcRules = async (database, { GameID, RaceID }) => {
+  const [[race], colonies] = await Promise.all([
+    rows(
+      database,
+      `select FCT_Game.AllowCMC, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
+from FCT_Game
+where FCT_Game.GameID = ${GameID}`
+    ),
+    rows(database, `select SystemID, max(Population) as Largest from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID} group by SystemID`),
+  ])
+
+  return {
+    allowed: !!race && race.AllowCMC === 1,
+    shipyard: !!race && race.Shipyards > 0,
+    settledColonies: race ? race.SettledColonies : 0,
+    largestColony: Object.fromEntries(colonies.map((colony) => [colony.SystemID, colony.Largest])),
+  }
+}
 
 export const loadGases = (database) => rows(database, 'select GasID, Name, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel from DIM_Gases')
 
@@ -155,15 +209,19 @@ group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`
 }
 
 // How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets
-// over the year's net loss, from the game's mineral ledger), read once for the Planner with the page's own reads.
+// over the year's net loss, from the game's mineral ledger and the mining it leaves out), read once for the
+// Planner with the page's own reads.
 export const loadMineralOutlook = async (database, ids) => {
   const { GameID, RaceID } = ids
-  const [[game], [stock], cargo, [packets], ledger] = await Promise.all([
+  const [[game], [stock], cargo, [packets], ledger, surface, orbital, navalAdmins] = await Promise.all([
     rows(database, `select GameTime from FCT_Game where GameID = ${GameID}`),
     rows(database, `select ${sumOf('FCT_Population')} from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID}`),
     rows(database, `select FCT_ShipCargo.CargoID as MaterialID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
     rows(database, `select ${sumOf('FCT_MassDriverPackets')} from FCT_MassDriverPackets where GameID = ${GameID} and RaceID = ${RaceID}`),
     loadLedger(database, ids),
+    rows(database, surfaceMiningQuery(ids)),
+    rows(database, orbitalMiningQuery(ids)),
+    loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial' }),
   ])
   const carried = (mineral) => ((cargo.find((row) => row.MaterialID === mineral.id) || {}).Amount || 0) + ((packets && packets[mineral.name]) || 0)
 
@@ -173,5 +231,6 @@ export const loadMineralOutlook = async (database, ids) => {
     windowDays: LEDGER_DAYS,
     stock: byMineralId(stock),
     transit: Object.fromEntries(MINERALS.map((mineral) => [mineral.id, carried(mineral)])),
+    unlogged: unloggedMining({ surface, orbital, navalAdmins }),
   })
 }
