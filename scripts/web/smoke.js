@@ -246,7 +246,7 @@ const run = async () => {
   const results = []
 
   if (DARK) {
-    await page.evaluate(() => { window.$nuxt.$vuetify.theme.dark = true })
+    await page.evaluate(() => { window.$app.$vuetify.theme.dark = true })
   }
 
   for (const viewport of VIEWPORTS || [null]) {
@@ -259,7 +259,7 @@ const run = async () => {
       problems = []
       lastActivity = Date.now()
 
-      await page.evaluate((target) => window.$nuxt.$router.push(target), route)
+      await page.evaluate((target) => window.$app.$router.push(target), route)
       await settle()
 
       const name = route === '/' ? 'empires' : route.slice(1)

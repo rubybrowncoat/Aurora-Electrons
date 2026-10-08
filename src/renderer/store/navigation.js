@@ -116,7 +116,7 @@ export const actions = {
     }
 
     commit('expect', target)
-    // Nuxt's router returns no promise, so a push that aborts reports through the callback.
+    // The app's router returns no promise (app/router.js), so a push that aborts reports through the callback.
     this.$router.push(state.entries[target], () => {}, () => commit('expect', null))
   },
   back ({ state, dispatch }) {

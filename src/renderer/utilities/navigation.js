@@ -1,6 +1,5 @@
 // The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette,
-// titles) and the smoke tests' page list all read from here. Plain CommonJS because
-// `.electron-nuxt/smoke-pages.js` requires it from Node.
+// titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
 
 // `slot` indexes `chartTheme(dark).categorical` in components/charts/theme.js.
 const SECTIONS = [
@@ -60,4 +59,4 @@ const needsRace = (path) => {
   return !(page && page.noRace)
 }
 
-module.exports = { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }
+export { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }

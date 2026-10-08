@@ -307,29 +307,26 @@ const baseFilter = {
   selectedAmount: null,
 }
 
+// The bodies or systems another page (the map) sent along in the query, over the defaults in data().
+const selectionFromQuery = (query) => {
+  if (query.bodies) {
+    const selectedBodies = JSON.parse(query.bodies)
+
+    return {
+      selectedBodies,
+      filterBySelectedBodies: !!selectedBodies.length,
+    }
+  } else if (query.systems) {
+    return {
+      systems: query.systems.split(',').map((id) => parseInt(id, 10)),
+    }
+  }
+
+  return {}
+}
+
 export default {
   components: {},
-  asyncData({ route }) {
-    console.log('minerals asyncData', route)
-
-    if (route.query.bodies) {
-      const selectedBodies = route.query.bodies ? JSON.parse(route.query.bodies) : []
-
-      return {
-        selectedBodies,
-        filterBySelectedBodies: !!(route.query.bodies && selectedBodies.length),
-      }
-    } else if (route.query.systems) {
-      const systems = route.query.systems.split(',').map((id) => parseInt(id, 10))
-      console.log('asyncData systems', systems)
-
-      return {
-        systems,
-      }
-    }
-
-    return {}
-  },
   data() {
     return {
       filterMaterials: ['Any', 'All Present', 'All', ...Object.values(MaterialMap)],
@@ -370,6 +367,9 @@ export default {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
       },
+
+      // Bodies or systems the map sent along in the query.
+      ...selectionFromQuery(this.$route.query),
     }
   },
   computed: {

@@ -5,6 +5,9 @@ import { app, dialog, ipcMain } from 'electron'
 import Store from 'electron-store'
 import envPaths from 'env-paths'
 
+import './boot'
+import './mainWindow'
+
 // The renderer's electron-store instances get their folder from here. Without it, settings fell
 // back to conf's own default (electron-store-nodejs) and the history files couldn't be written at
 // all. A packaged build carries the settings it kept there over once. Other apps with the same
@@ -99,6 +102,3 @@ app.on('window-all-closed', function () {
   // to stay active until the user quits explicitly with Cmd + Q
   if (process.platform !== 'darwin') app.quit()
 })
-
-// Load here all startup windows
-require('./mainWindow')

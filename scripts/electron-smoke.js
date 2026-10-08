@@ -1,8 +1,9 @@
 /*
-  Smoke test for the Electron app. Builds the development main process and serves the renderer
-  itself (under dist/smoke, on a free port, Sentry off), so it runs alongside `yarn dev` or
-  `yarn web` without touching theirs. Then launches Electron through Playwright on a copy of the
-  save and a fresh user-data folder, so your save, settings and history are never touched.
+  Smoke test for the Electron app (`yarn electron:smoke`, through run-vite.js). Builds the app
+  with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it
+  runs alongside `yarn dev`, `yarn web` or a packaged build without touching theirs, and loads the
+  renderer over app:// as the package does. Then launches Electron through Playwright on a copy of
+  the save and a fresh user-data folder, so your save, settings and history are never touched.
   Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path
   IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher
   reloading the database. Database calls run in the renderer, so they're counted by wrapping the
@@ -10,16 +11,14 @@
 
   Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample
   defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES
-  (comma-separated routes, default the list in smoke-pages.js), PORT (renderer server, default a
-  free one).
+  (comma-separated routes, default the list in smoke-pages.js).
  */
-process.env.NODE_ENV = 'development'
-
 const os = require('os')
 const fs = require('fs')
-const net = require('net')
 const path = require('path')
 const { execFileSync } = require('child_process')
+
+const PROJECT_ROOT = path.resolve(__dirname, '..')
 
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
 const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
@@ -29,10 +28,8 @@ const PAGES = process.env.SMOKE_PAGES ? process.env.SMOKE_PAGES.split(',') : req
 const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
 
-// Main-process output that isn't a problem: the inspector banner, and the DevTools window and Vue
-// devtools extension the dev boot opens and installs, which log from devtools:// pages and
-// Electron's sandbox (the app's own window isn't sandboxed).
-const MAIN_NOISE = [/Debugger (listening|attached|ending)/, /For help, see/, /DevTools listening/, /ExtensionLoadWarning/, /Permission 'scripting'/, /trace-warnings/, /source: devtools:\/\//, /source: node:electron\/js2c\/sandbox_bundle/]
+// Main-process output that isn't a problem: the inspector and remote-debugging banners Playwright's launch causes.
+const MAIN_NOISE = [/Debugger (listening|attached|ending)/, /For help, see/, /DevTools listening/, /trace-warnings/]
 
 // A 1x1 PNG.
 const FLAG_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -95,74 +92,18 @@ const instrument = () => {
     }
   }
 
-  window.$nuxt.$store.watch((state) => state.database, wrap, { immediate: true })
-}
-
-const freePort = () => new Promise((resolve, reject) => {
-  const server = net.createServer()
-
-  server.once('error', reject)
-  server.listen(0, 'localhost', () => {
-    const { port } = server.address()
-
-    server.close(() => resolve(port))
-  })
-})
-
-const buildMain = (outputPath) => {
-  const webpack = require('webpack')
-  const config = require('./main-webpack')(outputPath)
-
-  config.mode = 'development'
-  config.node = { __filename: true, __dirname: true }
-
-  return new Promise((resolve, reject) => webpack(config).run((error, stats) => {
-    if (error || stats.hasErrors()) {
-      reject(error || new Error(stats.toString('errors-only')))
-    } else {
-      resolve(path.join(outputPath, 'index.js'))
-    }
-  }))
-}
-
-const serveRenderer = async (buildDir, port) => {
-  const { Nuxt, Builder } = require('nuxt')
-  const nuxtConfig = require('./renderer/nuxt.config.js')
-
-  // Its own build folder: `yarn dev` and `yarn web` share src/renderer/.nuxt.
-  nuxtConfig.buildDir = buildDir
-  nuxtConfig.build = { ...nuxtConfig.build, quiet: true }
-  // Keep test sessions out of the Sentry project.
-  nuxtConfig.sentry = { ...nuxtConfig.sentry, disabled: true }
-
-  const nuxt = new Nuxt(nuxtConfig)
-
-  await nuxt.ready()
-  await new Builder(nuxt).build()
-  await nuxt.listen(port, 'localhost')
-
-  if (new URL(nuxt.server.listeners[0].url).port !== String(port)) {
-    await nuxt.close()
-    throw new Error(`Port ${port} is in use.`)
-  }
-
-  return nuxt
+  window.$app.$store.watch((state) => state.database, wrap, { immediate: true })
 }
 
 const run = async () => {
-  const port = Number(process.env.PORT) || await freePort()
-
-  // The main bundle loads the renderer from SERVER_PORT, which config reads from PORT.
-  process.env.PORT = String(port)
-
-  const { PROJECT_ROOT, DIST_DIR } = require('./config')
   const { _electron } = require('playwright')
   const electronPath = require('electron')
+  const { build } = await import('electron-vite')
   const SAVE = path.resolve(process.env.AURORA_DB || path.join(PROJECT_ROOT, 'AuroraDB.db'))
 
-  // Under the project, so the renderer's Node requires find node_modules from the main script.
+  // Under the project, so the preload's requires (sequelize) find node_modules.
   // The run folder (the save copy and user data) is kept until the next run for inspection.
-  const builds = path.join(DIST_DIR, 'smoke')
+  const builds = path.join(PROJECT_ROOT, 'out', 'smoke')
   const work = path.join(builds, 'run')
   const userData = path.join(work, 'user-data')
   const save = path.join(work, 'AuroraDB.db')
@@ -177,15 +118,20 @@ const run = async () => {
   fs.writeFileSync(path.join(work, 'Flags', 'smoke-flag.png'), FLAG_PNG)
   fs.writeFileSync(path.join(work, 'secret.png'), FLAG_PNG)
 
-  console.log(`Building the main process and the renderer (port ${port})...`)
+  console.log('Building the app...')
 
-  const [entry, nuxt] = await Promise.all([buildMain(path.join(builds, 'main')), serveRenderer(path.join(builds, 'nuxt'), port)])
+  await build({ mode: 'smoke', logLevel: 'warn', build: { outDir: builds } })
+
+  // Without the dev server's address, the app loads the built renderer.
+  const env = { ...process.env }
+
+  delete env.ELECTRON_RENDERER_URL
 
   const app = await _electron.launch({
     executablePath: electronPath,
-    args: [entry, `--user-data-dir=${userData}`],
+    args: [path.join(builds, 'main', 'index.js'), `--user-data-dir=${userData}`],
     cwd: work,
-    env: { ...process.env, NODE_ENV: 'development' },
+    env,
   })
 
   launched = app
@@ -200,7 +146,7 @@ const run = async () => {
     const started = Date.now()
 
     while (Date.now() - started < PAGE_TIMEOUT_MS) {
-      const found = app.windows().find((candidate) => candidate.url().startsWith('http'))
+      const found = app.windows().find((candidate) => candidate.url().startsWith('app://'))
 
       if (found) {
         return found
@@ -263,8 +209,7 @@ const run = async () => {
   }
 
   try {
-    // The dev server can reload the page while it finishes loading, so wait for a loaded save.
-    await page.waitForFunction(() => window.$nuxt && window.$nuxt.$store && window.$nuxt.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
+    await page.waitForFunction(() => window.$app && window.$app.$store && window.$app.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
     // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
     const picker = page.locator('.game-picker')
@@ -296,7 +241,7 @@ const run = async () => {
 
     await page.evaluate((target) => {
       Object.assign(window.__smoke, { counts: {}, done: [], blockedMs: 0 })
-      window.$nuxt.$router.push(target)
+      window.$app.$router.push(target)
     }, route)
     await wait(250)
     await settle()
@@ -317,7 +262,7 @@ const run = async () => {
   problems = []
 
   const { GameID, RaceID, settingsPath, revision } = await page.evaluate(() => {
-    const { state } = window.$nuxt.$store
+    const { state } = window.$app.$store
 
     return { GameID: state.GameID, RaceID: state.RaceID, settingsPath: state.config.path, revision: state.history.revision }
   })
@@ -325,7 +270,7 @@ const run = async () => {
   check('storage path IPC', GameID !== null, GameID !== null ? `loaded ${save}` : 'no game loaded')
   check('settings in user data', path.dirname(settingsPath) === userData, settingsPath)
 
-  const [found, missing, escaped, escapedBackslash, notAName] = await page.evaluate(() => Promise.all(['smoke-flag.png', 'missing-flag.png', '../secret.png', '..\\secret.png', null].map((name) => window.require('electron').ipcRenderer.invoke('read-flag', name))))
+  const [found, missing, escaped, escapedBackslash, notAName] = await page.evaluate(() => Promise.all(['smoke-flag.png', 'missing-flag.png', '../secret.png', '..\\secret.png', null].map((name) => window.__aurora.electron.ipcRenderer.invoke('read-flag', name))))
 
   check('flag IPC', found === `data:image/png;base64,${FLAG_PNG.toString('base64')}` && missing === null && escaped === null && escapedBackslash === null && notAName === null, `found ${String(found).slice(0, 24)}..., missing ${missing}, dotdot ${escaped}, backslash ${escapedBackslash}, null ${notAName}`)
 
@@ -344,11 +289,11 @@ const run = async () => {
   try {
     await page.waitForFunction((count) => window.__smoke.databases > count, databases, { timeout: 30000 })
     await settle()
-    await page.waitForFunction((count) => window.$nuxt.$store.state.history.revision > count, revision, { timeout: 30000 })
+    await page.waitForFunction((count) => window.$app.$store.state.history.revision > count, revision, { timeout: 30000 })
 
     const after = readHistory()
 
-    check('save watcher reloads', true, `database reopened, history revision ${revision} -> ${await page.evaluate(() => window.$nuxt.$store.state.history.revision)}`)
+    check('save watcher reloads', true, `database reopened, history revision ${revision} -> ${await page.evaluate(() => window.$app.$store.state.history.revision)}`)
     check('same save, same history', snapshotCount(after) === snapshotCount(before), `${snapshotCount(before)} -> ${snapshotCount(after)} snapshots`)
   } catch (error) {
     check('save watcher reloads', false, error.message.split('\n')[0])
@@ -359,7 +304,6 @@ const run = async () => {
   const reloadProblems = problems
 
   await stopTree(app)
-  await nuxt.close()
 
   if (setupProblems.length) {
     console.log('setup:')
@@ -379,7 +323,6 @@ const run = async () => {
   process.exitCode = setupProblems.length || reloadProblems.length || results.some((result) => result.problems.length) || checks.some((result) => !result.ok) ? 1 : 0
 }
 
-// Nuxt's dev watchers would keep the process alive.
 run().then(() => process.exit(process.exitCode), async (error) => {
   console.error(error)
 

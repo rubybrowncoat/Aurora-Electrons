@@ -339,19 +339,21 @@ const VIEWS = [
   { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
 ]
 
+// The bodies or systems another page (the map) sent along in the query, over the defaults in data().
+const selectionFromQuery = (query) => {
+  if (query.bodies) {
+    const selectedBodies = JSON.parse(query.bodies)
+
+    return { selectedBodies, filterBySelectedBodies: !!selectedBodies.length }
+  } else if (query.systems) {
+    return { systems: query.systems.split(',').map((id) => parseInt(id, 10)) }
+  }
+
+  return {}
+}
+
 export default {
   components: { BodyDetail },
-  asyncData({ route }) {
-    if (route.query.bodies) {
-      const selectedBodies = JSON.parse(route.query.bodies)
-
-      return { selectedBodies, filterBySelectedBodies: !!selectedBodies.length }
-    } else if (route.query.systems) {
-      return { systems: route.query.systems.split(',').map((id) => parseInt(id, 10)) }
-    }
-
-    return {}
-  },
   data() {
     return {
       selectedSpeciesId: null,
@@ -379,6 +381,9 @@ export default {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
       },
+
+      // Bodies or systems the map sent along in the query.
+      ...selectionFromQuery(this.$route.query),
     }
   },
   computed: {

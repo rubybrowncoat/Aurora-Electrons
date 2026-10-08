@@ -30,7 +30,7 @@
       </v-alert>
 
       <v-alert v-if="!snapshots.length" type="info" outlined dense class="mt-3">
-        No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <nuxt-link to="/finances">Finances</nuxt-link>.
+        No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <router-link to="/finances">Finances</router-link>.
       </v-alert>
 
       <template v-else>

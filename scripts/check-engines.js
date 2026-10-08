@@ -14,7 +14,7 @@ function checkNodeVersion(){
   if(compare(requiredMinVersion, installedVersion) === 1){
 
     console.log(FG_RED);
-    console.log(`\tYou are running version v${installedVersion} of Node.js, which is not supported by Electron-nuxt.`);
+    console.log(`\tYou are running version v${installedVersion} of Node.js, which is not supported by Aurora Electrons.`);
     console.log(`\tThe official Node.js version that is supported is ${requiredMinVersion} or greater.`);
     console.log(RESET);
     console.log('\n\tPlease visit https://nodejs.org/en/ to find instructions on how to update Node.js.\n')
@@ -29,7 +29,7 @@ function disallowNpm() {
   if(!execPath.includes('yarn')){
 
     console.log(FG_RED);
-    console.log(`\tElectron-nuxt supports only Yarn package manager.`);
+    console.log(`\tAurora Electrons supports only Yarn package manager.`);
     console.log(RESET);
     console.log('\n\tPlease visit https://legacy.yarnpkg.com/en/docs/install to find instructions on how to install Yarn.\n')
 

@@ -57,23 +57,13 @@ module.exports = {
   directories: {
     output: 'build',
   },
-  // default files: https://www.electron.build/configuration/contents
+  // default files: https://www.electron.build/configuration/contents. The dependencies in package.json (the
+  // modules electron-vite leaves external) are added on their own. out/smoke is the smoke test's build.
   files: [
     'package.json',
-    {
-      from: 'dist/main/',
-      to: 'dist/main/',
-    },
-    {
-      from: 'dist/renderer',
-      to: 'dist/renderer/',
-    },
-  ],
-  extraResources: [
-    {
-      from: 'src/extraResources/',
-      to: '',
-    },
+    'out/main/**',
+    'out/preload/**',
+    'out/renderer/**',
   ],
   ...windowsOS,
   ...linuxOS,
