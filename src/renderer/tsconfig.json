@@ -25,7 +25,7 @@
       ]
     },
     "types": [
-      "@nuxt/types"
+      "vite/client"
     ]
   }
 }

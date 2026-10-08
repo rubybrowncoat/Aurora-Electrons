@@ -3,7 +3,9 @@ const ICONS_DIR = 'build/icons/'
 const windowsOS = {
   win: {
     icon: ICONS_DIR + 'win-icon.ico',
-    publisherName: 'nerdship',
+    signtoolOptions: {
+      publisherName: 'nerdship',
+    },
     target: 'portable',
   },
 
@@ -46,7 +48,10 @@ const macOS = {
 }
 
 module.exports = {
-  asar: false,
+  // One archive instead of thousands of loose files: the portable exe extracts itself to a temp folder on every
+  // launch, and that extraction was most of its startup time. Native binaries (sqlite3's) are unpacked beside it
+  // into app.asar.unpacked, where Electron loads them from.
+  asar: true,
   // sqlite3 ships an N-API prebuilt binary that Electron loads as is. A rebuild at packaging time replaces
   // node_modules/sqlite3's binary in place, and when another process has it loaded that leaves it missing.
   npmRebuild: false,
@@ -57,23 +62,13 @@ module.exports = {
   directories: {
     output: 'build',
   },
-  // default files: https://www.electron.build/configuration/contents
+  // default files: https://www.electron.build/configuration/contents. The dependencies in package.json (the
+  // modules electron-vite leaves external) are added on their own. out/smoke is the smoke test's build.
   files: [
     'package.json',
-    {
-      from: 'dist/main/',
-      to: 'dist/main/',
-    },
-    {
-      from: 'dist/renderer',
-      to: 'dist/renderer/',
-    },
-  ],
-  extraResources: [
-    {
-      from: 'src/extraResources/',
-      to: '',
-    },
+    'out/main/**',
+    'out/preload/**',
+    'out/renderer/**',
   ],
   ...windowsOS,
   ...linuxOS,

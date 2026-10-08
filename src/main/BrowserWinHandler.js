@@ -1,9 +1,9 @@
 /* eslint-disable */
+import path from 'path'
 import { EventEmitter } from 'events'
 import { BrowserWindow, app } from 'electron'
-const DEV_SERVER_URL = process.env.DEV_SERVER_URL
-const isProduction = process.env.NODE_ENV === 'production'
-const isDev = process.env.NODE_ENV === 'development'
+
+import { RENDERER_URL } from './boot'
 
 export default class BrowserWinHandler {
   /**
@@ -41,9 +41,13 @@ export default class BrowserWinHandler {
         ...this.options,
         webPreferences: {
           ...this.options.webPreferences,
-          webSecurity: isProduction, // disable on dev to allow loading local resources
-          nodeIntegration: true, // allow loading modules via the require () function
-          contextIsolation: false, // https://github.com/electron/electron/issues/18037#issuecomment-806320028
+          // The renderer reaches Node only through src/preload/index.js, which shares its JavaScript world
+          // (no context isolation) to hand over Sequelize, chokidar and electron-store as they are, and needs
+          // the sandbox off to load them.
+          preload: path.join(__dirname, '..', 'preload', 'index.js'),
+          nodeIntegration: false,
+          contextIsolation: false,
+          sandbox: false,
         }
       }
     )
@@ -76,8 +80,7 @@ export default class BrowserWinHandler {
 
   async loadPage(pagePath) {
     if (!this.browserWindow) return Promise.reject(new Error('The page could not be loaded before win \'created\' event'))
-    const serverUrl = isDev ? DEV_SERVER_URL : 'app://./index.html'
-    const fullPath = serverUrl + '#' + pagePath;
+    const fullPath = RENDERER_URL + '#' + pagePath;
     await this.browserWindow.loadURL(fullPath)
   }
 

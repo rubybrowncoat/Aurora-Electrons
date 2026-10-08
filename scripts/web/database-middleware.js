@@ -12,11 +12,8 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { Model } = require('sequelize')
-const jiti = require('jiti')(__filename)
-const { PROJECT_ROOT, RENDERER_PROCESS_DIR } = require('../config')
 
-const { resetDatabase } = jiti(path.join(RENDERER_PROCESS_DIR, 'utilities/database.js'))
-
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
 const STORAGE_PATH = path.resolve(PROJECT_ROOT, process.env.AURORA_DB || 'AuroraDB.db')
 const MODEL_METHODS = new Set(['findAll', 'findOne', 'findByPk', 'count', 'findAndCountAll'])
 const INSTANCE_INTERNALS = new Set(['dataValues', '_previousDataValues', 'uniqno', '_changed', '_options', 'isNewRecord'])
@@ -31,6 +28,7 @@ class HttpError extends Error {
   }
 }
 
+let loadDatabaseModule = null
 let database = null
 let opening = null
 
@@ -39,6 +37,8 @@ const open = () => {
     if (database) {
       await database.close()
     }
+
+    const { resetDatabase } = await loadDatabaseModule()
 
     database = resetDatabase(STORAGE_PATH)
     database.options.logging = false
@@ -215,4 +215,12 @@ const handleDatabase = async (req, res) => {
   }
 }
 
-module.exports = { TOKEN, TOKEN_HEADER, guardHost, handleDatabase }
+// The handler for /__aurora-db. `load` imports src/renderer/utilities/database.js: web.js has Vite load it, which
+// resolves its imports the way the renderer build does.
+const databaseHandler = (load) => {
+  loadDatabaseModule = load
+
+  return handleDatabase
+}
+
+module.exports = { TOKEN, TOKEN_HEADER, guardHost, databaseHandler }

@@ -125,7 +125,7 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <nuxt />
+        <router-view :key="$route.path" />
       </v-container>
     </v-main>
 

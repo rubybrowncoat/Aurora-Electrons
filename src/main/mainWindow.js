@@ -3,10 +3,6 @@ import BrowserWinHandler from './BrowserWinHandler'
 const winHandler = new BrowserWinHandler({
   height: 800,
   width: 1280,
-
-  webPreferences: {
-    enableRemoteModule: true,
-  },
 })
 
 winHandler.onCreated((_browserWindow) => {

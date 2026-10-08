@@ -129,7 +129,7 @@
           </v-data-table>
           <div class="panel-foot caption text--secondary">
             Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. Colonies short of workers today are also on the
-            <nuxt-link to="/warnings">Warnings</nuxt-link> page.
+            <router-link to="/warnings">Warnings</router-link> page.
           </div>
         </v-card>
       </template>

@@ -19,6 +19,6 @@ fi
 yarn install --frozen-lockfile --ignore-scripts --ignore-engines 1>&2
 
 # Web mode (`yarn web`) runs Sequelize in Node, so fetch sqlite3's prebuilt Node binary.
-if ! ls node_modules/sqlite3/lib/binding/*/node_sqlite3.node >/dev/null 2>&1; then
-  (cd node_modules/sqlite3 && ../.bin/node-pre-gyp install --fallback-to-build=false) 1>&2
+if ! ls node_modules/sqlite3/build/Release/node_sqlite3.node >/dev/null 2>&1; then
+  (cd node_modules/sqlite3 && ../.bin/prebuild-install -r napi) 1>&2
 fi

@@ -1,6 +1,5 @@
-.nuxt
+out
 .github/
-dist
 build/*
 !build/icons
 node_modules

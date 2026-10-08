@@ -1,6 +1,5 @@
 // The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette,
-// titles) and the smoke tests' page list all read from here. Plain CommonJS because
-// `.electron-nuxt/smoke-pages.js` requires it from Node.
+// titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
 
 // `slot` indexes `chartTheme(dark).categorical` in components/charts/theme.js.
 const SECTIONS = [
@@ -47,8 +46,8 @@ const PAGES = [
   { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
 ]
 
-// Paste the forum thread URL for updates and feedback here. The About page links to it while this is set, and says "coming soon" while it is empty.
-const FORUM_URL = ''
+// The forum thread for updates and feedback. The About page links to it while this is set, and says "coming soon" while it is empty.
+const FORUM_URL = 'https://aurora4x.com/t/aurora-electrons-looking-inwards-v0-9-14/1177'
 
 const sectionById = Object.fromEntries(SECTIONS.map((section) => [section.id, section]))
 const pageByRoute = Object.fromEntries(PAGES.map((page) => [page.route, page]))
@@ -60,4 +59,4 @@ const needsRace = (path) => {
   return !(page && page.noRace)
 }
 
-module.exports = { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }
+export { SECTIONS, PAGES, FORUM_URL, sectionById, pageByRoute, needsRace }
