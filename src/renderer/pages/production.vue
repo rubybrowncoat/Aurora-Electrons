@@ -191,7 +191,8 @@ import countFormat from '../mixins/count-format'
 import productionModifiers from '../mixins/production-modifiers'
 import { gameTime, populationName } from '../utilities/aurora'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { MINERALS } from '../utilities/minerals'
+import { MINERALS, navalAdminChainBonus } from '../utilities/minerals'
+import { loadNavalAdmins } from '../utilities/naval-admins'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -202,8 +203,7 @@ const INPUT_LABELS = {
   shipyards: 'the shipyard activities',
   trainings: 'the ground unit training',
   terraforms: 'the terraforming',
-  navalAdministrations: 'the naval admin commands',
-  raceSystems: 'the known systems',
+  navalAdmins: 'the naval admin commands',
 }
 const INPUTS = Object.keys(INPUT_LABELS)
 
@@ -492,34 +492,6 @@ export default {
       return Object.fromEntries(this.colonyFacilities.map((colony) => [colony.PopulationID, colony]))
     },
 
-    adminsWithSystems() {
-      if (!Object.values(this.raceSystems).length) {
-        return {}
-      }
-
-      return this.navalAdministrations.reduce((map, navalAdministration) => {
-        if (!this.raceSystems[navalAdministration.SystemID] || navalAdministration.NavalAdminCommandLevel === 0) {
-          return map
-        }
-
-        map[navalAdministration.NavalAdminCommandID] = {
-          ...navalAdministration,
-
-          Systems: new Array(navalAdministration.NavalAdminCommandLevel).fill(null).reduce((aggregate) => {
-            const systemArray = [...aggregate]
-
-            systemArray.forEach((system) => {
-              system.Neighbors.forEach(aggregate.add, aggregate)
-            })
-
-            return aggregate
-          }, new Set([this.raceSystems[navalAdministration.SystemID]])),
-        }
-
-        return map
-      }, {})
-    },
-
     // Each research project, then its queue: a queued tech starts when the one ahead finishes, with the same labs.
     researchJobs() {
       const { projects, queues } = this.researches
@@ -721,8 +693,9 @@ export default {
           }
         }
 
+        // Orbital terraformers get their admin command chain's Terraforming bonus at the Industrial share.
         if (terraform.ParentCommandID) {
-          map[terraform.PopulationID].orbitalCapacity += this.terraformingRate(terraform.PopulationID) * this.navalAdminBonus(terraform.SystemID, terraform.ParentCommandID) * terraform.Terraformers
+          map[terraform.PopulationID].orbitalCapacity += this.terraformingRate(terraform.PopulationID) * navalAdminChainBonus(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID) * terraform.Terraformers
         } else {
           map[terraform.PopulationID].planetaryCapacity += this.populationTerraformingRate(terraform.PopulationID) * terraform.Terraformers
         }
@@ -1177,20 +1150,6 @@ export default {
 
       return periods * periodDays
     },
-
-    navalAdminBonus(SystemID, NavalAdminCommandID) {
-      if (!this.adminsWithSystems || !Object.values(this.adminsWithSystems).length) {
-        return 1
-      }
-
-      const administration = this.adminsWithSystems[NavalAdminCommandID]
-
-      if (!administration || !administration.Systems.has(SystemID) || !administration.BonusValue) {
-        return 1
-      }
-
-      return (1 + (administration.BonusValue - 1) * administration.Industrial) * this.navalAdminBonus(SystemID, administration.ParentCommandID)
-    },
   },
   asyncComputed: {
     // Per colony: research facilities and those projects use, GFCCs, and slipways and those tasks take.
@@ -1274,21 +1233,16 @@ export default {
       }),
       default: [],
     },
-    navalAdministrations: {
-      get: tracked('navalAdministrations', async function () {
+    // Naval admin commands with their Terraforming bonus, for orbital terraformers.
+    navalAdmins: {
+      get: tracked('navalAdmins', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return []
+          return {}
         }
 
-        const [rows] = await this.database.query(`select FCT_NavalAdminCommand.NavalAdminCommandID, FCT_NavalAdminCommand.PopulationID, FCT_Population.SystemID, FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.NavalHeadquartersValue as NavalAdminCommandLevel, FCT_CommanderBonuses.BonusValue, DIM_NavalAdminCommandType.Radius, DIM_NavalAdminCommandType.Industrial from FCT_NavalAdminCommand inner join FCT_PopulationInstallations on FCT_PopulationInstallations.PopID = FCT_NavalAdminCommand.PopulationID left join FCT_Population on FCT_NavalAdminCommand.PopulationID = FCT_Population.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID left join DIM_NavalAdminCommandType on FCT_NavalAdminCommand.AdminCommandTypeID = DIM_NavalAdminCommandType.CommandTypeID left join FCT_Commander on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 and FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_NavalAdminCommand.GameID = ${this.GameID} and FCT_NavalAdminCommand.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.NavalHeadquartersValue > 0`)
-
-        return rows.map((row) => ({
-          ...row,
-
-          Radius: row.Radius * Math.floor(Math.log(row.NavalAdminCommandLevel) / Math.log(2)),
-        }))
+        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 9, share: 'Industrial' })
       }),
-      default: [],
+      default: {},
     },
     terraforms: {
       get: tracked('terraforms', async function () {
@@ -1307,40 +1261,6 @@ export default {
         ]
       }),
       default: [],
-    },
-    raceSystems: {
-      get: tracked('raceSystems', async function () {
-        if (!this.database || !this.GameID || !this.RaceID) {
-          return {}
-        }
-
-        const [systemRows] = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`)
-
-        const systems = systemRows.reduce((map, item) => {
-          map[item.SystemID] = {
-            SystemID: String(item.SystemID),
-            Name: item.Name,
-
-            Neighbors: new Set(),
-          }
-
-          return map
-        }, {})
-
-        const [jumpPoints] = await this.database.query(`select FCT_JumpPoint.*, VIR_Destination.SystemID as DestinationID, FCT_RaceSysSurvey.Name, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_JumpPoint as VIR_Destination on FCT_JumpPoint.WPLink = VIR_Destination.WarpPointID left join FCT_Race on FCT_JumpPoint.GameID = FCT_Race.GameID left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID where FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1`)
-
-        jumpPoints.forEach((item) => {
-          const origin = systems[item.SystemID]
-          const destination = systems[item.DestinationID]
-
-          if (origin && destination) {
-            origin.Neighbors.add(destination)
-          }
-        })
-
-        return systems
-      }),
-      default: {},
     },
   },
 }
