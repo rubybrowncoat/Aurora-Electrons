@@ -50,14 +50,6 @@
                     <v-text-field v-model.number="minAmount" type="number" min="0" label="Tonnes from" dense outlined hide-details clearable @change="(value) => saveSetting('mineralsMinAmount', Number(value) > 0 ? Number(value) : null)" />
                   </v-col>
                 </v-row>
-                <v-checkbox v-if="edited.deposits || includeEdited" v-model="includeEdited" dense hide-details @change="(value) => saveSetting('mineralsIncludeEdited', !!value)">
-                  <template #label>
-                    <div>
-                      <div class="body-2">Count edited deposits</div>
-                      <div class="caption text--secondary">{{ count(edited.deposits) }} deposits on {{ count(edited.bodies) }} bodies hold 999 billion t or more, an amount only the game's editor sets. They stay out of every total and list unless counted.</div>
-                    </div>
-                  </template>
-                </v-checkbox>
                 <v-btn v-if="activeOptionCount" text small class="mt-3" @click="resetOptions">Reset options</v-btn>
               </v-card>
             </v-menu>
@@ -379,10 +371,6 @@ const INPUTS = Object.keys(INPUT_LABELS)
 const MINERAL_NAMES = MINERALS.map((mineral) => mineral.name)
 const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: 'Ve', 8: 'So', 9: 'Ur', 10: 'Cr', 11: 'Ga' }
 
-// Deposits this large were typed into the game's editor (SystemBody.ApplyMineralDepositTextBoxValues); survey
-// generation scales with the body and never makes them.
-const EDITED_AMOUNT = 9.99e11
-
 // Helpers.MassDriverCapacityPerInstallation: tonnes a year per mass driver.
 const MASS_DRIVER_TONS = 5000
 
@@ -478,7 +466,6 @@ export default {
       orbital: 'all',
       minAccessibility: 0,
       minAmount: null,
-      includeEdited: false,
       search: '',
       colonySearch: '',
       // Systems the map or a click on this page's map picked, or bodies the Colonization Planner sent.
@@ -553,7 +540,7 @@ export default {
     },
 
     activeOptionCount() {
-      return [this.orbital !== 'all', this.minAccessibility > 0, this.minAmount > 0, this.includeEdited].filter(Boolean).length
+      return [this.orbital !== 'all', this.minAccessibility > 0, this.minAmount > 0].filter(Boolean).length
     },
 
     coloniesById() {
@@ -638,7 +625,6 @@ export default {
           Accessibility: row.Accessibility,
           HalfOriginalAmount: row.HalfOriginalAmount,
           OriginalAcc: row.OriginalAcc,
-          edited: row.Amount >= EDITED_AMOUNT,
         }
       })
 
@@ -673,12 +659,6 @@ export default {
           distance: this.distanceTo(row),
         }
       })
-    },
-
-    edited() {
-      const bodies = this.bodies.filter((body) => body.depositList.some((deposit) => deposit.edited))
-
-      return { bodies: bodies.length, deposits: bodies.reduce((total, body) => total + body.depositList.filter((deposit) => deposit.edited).length, 0) }
     },
 
     bodiesPassingOrbital() {
@@ -791,7 +771,7 @@ export default {
           label: `${this.focus ? this.focus.name : 'Minerals'} in the ground`,
           value: compact(sum(rows, 'amount')),
           title: `${this.count(sum(rows, 'amount'))} t`,
-          note: `${this.counted(sum(rows, 'deposits'), 'deposit', 'deposits')} on ${this.counted(bodyIds.size, 'body', 'bodies')} in ${this.counted(systemIds.size, 'system', 'systems')}${this.edited.deposits && !this.includeEdited ? `; ${this.count(this.edited.deposits)} edited left out` : ''}`,
+          note: `${this.counted(sum(rows, 'deposits'), 'deposit', 'deposits')} on ${this.counted(bodyIds.size, 'body', 'bodies')} in ${this.counted(systemIds.size, 'system', 'systems')}`,
         },
         {
           label: 'Best untapped site',
@@ -1091,7 +1071,6 @@ export default {
         this.orbital = ORBITAL_OPTIONS.some((option) => option.value === orbital) ? orbital : 'all'
         this.minAccessibility = this.config.get(`${this.settingsPrefix}.mineralsMinAccessibility`, 0)
         this.minAmount = this.config.get(`${this.settingsPrefix}.mineralsMinAmount`, null)
-        this.includeEdited = this.config.get(`${this.settingsPrefix}.mineralsIncludeEdited`, false)
 
         if (previous) {
           this.clearSelection()
@@ -1140,11 +1119,9 @@ export default {
       this.orbital = 'all'
       this.minAccessibility = 0
       this.minAmount = null
-      this.includeEdited = false
       this.config.set('mineralsFilterOrbitalEligibility', 'all')
       this.saveSetting('mineralsMinAccessibility', 0)
       this.saveSetting('mineralsMinAmount', null)
-      this.saveSetting('mineralsIncludeEdited', false)
     },
 
     clearSelection() {
@@ -1171,7 +1148,7 @@ export default {
     },
 
     passesDeposit(deposit) {
-      return (this.includeEdited || !deposit.edited) && deposit.Accessibility >= this.minAccessibility && (!(this.minAmount > 0) || deposit.Amount >= this.minAmount)
+      return deposit.Accessibility >= this.minAccessibility && (!(this.minAmount > 0) || deposit.Amount >= this.minAmount)
     },
 
     mineralName(id) {
@@ -1192,9 +1169,7 @@ export default {
 
     // Accessibility holds down to half the original amount, then falls with what is left (Population.cs).
     depletionText(deposit, long = false) {
-      if (deposit.edited) {
-        return 'Set in the editor'
-      } else if (!(deposit.HalfOriginalAmount > 0)) {
+      if (!(deposit.HalfOriginalAmount > 0)) {
         return ''
       } else if (deposit.Amount >= deposit.HalfOriginalAmount) {
         return long ? `Holds for ${compact(deposit.Amount - deposit.HalfOriginalAmount)} more, then falls toward ${ACCESSIBILITY_FLOOR}` : `holds for ${compact(deposit.Amount - deposit.HalfOriginalAmount)}`

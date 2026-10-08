@@ -480,11 +480,13 @@ export const navalAdminChainBonus = (admins, systemId, commandId) => {
   return bonus
 }
 
-// Tons at a readable precision: 47.3 Mt, 307 kt.
+// Tons at a readable precision: 47.3 Mt, 307 kt. Teratonnes only come from deposits set in the game's editor.
 export const compact = (value) => {
   const size = Math.abs(value)
 
-  if (size >= 1e9) {
+  if (size >= 1e12) {
+    return `${roundToDecimal(value / 1e12, 1)} Tt`
+  } else if (size >= 1e9) {
     return `${roundToDecimal(value / 1e9, 1)} Gt`
   } else if (size >= 1e6) {
     return `${roundToDecimal(value / 1e6, 1)} Mt`
