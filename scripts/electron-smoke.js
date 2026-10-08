@@ -211,15 +211,14 @@ const run = async () => {
   try {
     await page.waitForFunction(() => window.$app && window.$app.$store && window.$app.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
+    // The app opens on the Empires page. A game with one race selects on click, and so does a race titled like its
+    // game, which the first click lands on; otherwise the race is next.
     const picker = page.locator('.game-picker')
 
     await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
 
-    const raceItem = picker.getByText(RACE, { exact: true })
-
-    if (await raceItem.count()) {
-      await raceItem.last().click()
+    if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+      await picker.getByText(RACE, { exact: true }).last().click()
     }
 
     await settle()
