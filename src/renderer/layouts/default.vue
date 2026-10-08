@@ -414,7 +414,7 @@ export default {
       } else if (event.altKey && event.key === 'ArrowRight') {
         event.preventDefault()
         this.forward()
-      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[1-7]$/.test(event.key)) {
+      } else if ((event.ctrlKey || event.metaKey) && !event.altKey && /^[1-9]$/.test(event.key) && Number(event.key) <= this.railSections.length) {
         event.preventDefault()
         this.goSection(this.railSections[Number(event.key) - 1])
       } else if (event.key === 'Escape') {
@@ -623,6 +623,17 @@ export default {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: .02em;
+}
+
+// Eight sections, Settings and About take 750 px; a window under 780 px tall tightens them so About still shows at 720.
+@media (max-height: 779px) {
+  .rail__item {
+    padding-block: 3px;
+  }
+
+  .rail__empire {
+    margin-bottom: 4px;
+  }
 }
 
 .rail__item--disabled {

@@ -148,6 +148,23 @@ export const peeks = {
     return `${counted(Unsurveyed, separator, 'system', 'systems')} to survey`
   },
 
+  '/routes': async ({ database, GameID, RaceID, separator }) => {
+    const { JumpPoints, Gates } = await row(database, `select count(*) as JumpPoints, coalesce(sum(case when FCT_JumpPoint.JumpGateStrength > 0 then 1 else 0 end), 0) as Gates from FCT_JumpPoint
+      inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 and FCT_RaceJumpPointSurvey.Explored = 1
+      inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+      where FCT_JumpPoint.GameID = ${GameID}`)
+
+    return `${counted(JumpPoints, separator, 'explored jump point', 'explored jump points')}, ${counted(Gates, separator, 'gate', 'gates')}`
+  },
+
+  '/lagrange': async ({ database, GameID, RaceID, separator }) => {
+    const { Points, Systems } = await row(database, `select count(*) as Points, count(distinct FCT_LagrangePoint.SystemID) as Systems from FCT_LagrangePoint
+      inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+      where FCT_LagrangePoint.GameID = ${GameID}`)
+
+    return `${counted(Points, separator, 'stable point', 'stable points')} in ${counted(Systems, separator, 'system', 'systems')}`
+  },
+
   // Special factions have no Intelligence page.
   '/intelligence': async ({ database, GameID, RaceID, historyRecorded }) => {
     if (!historyRecorded) {
