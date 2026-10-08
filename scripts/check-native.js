@@ -10,7 +10,7 @@ const path = require('path')
 
 const BINARY = 'node_sqlite3.node'
 
-// Every sqlite3 binary under `root`, the folders it holds them in being lib/binding/<platform>.
+// Every sqlite3 binary under `root`, which keeps it in build/Release.
 const findBinaries = (root, found = []) => {
   fs.readdirSync(root, { withFileTypes: true }).forEach((entry) => {
     const file = path.join(root, entry.name)
@@ -26,12 +26,12 @@ const findBinaries = (root, found = []) => {
 }
 
 const fail = (message) => {
-  throw new Error(`${message}\n\tRestore it with: (cd node_modules/sqlite3 && ../.bin/node-pre-gyp install --fallback-to-build=false)`)
+  throw new Error(`${message}\n\tRestore it with: (cd node_modules/sqlite3 && ../.bin/prebuild-install -r napi)`)
 }
 
 // node_modules/sqlite3 has its binary, before packaging copies it.
 const checkInstalled = (projectRoot) => {
-  const binding = path.join(projectRoot, 'node_modules', 'sqlite3', 'lib', 'binding')
+  const binding = path.join(projectRoot, 'node_modules', 'sqlite3', 'build')
 
   if (!fs.existsSync(binding) || !findBinaries(binding).length) {
     fail(`${BINARY} is missing from ${binding}, so the packaged app could not open the save.`)

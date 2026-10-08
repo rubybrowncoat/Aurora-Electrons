@@ -173,7 +173,7 @@ export default {
       auroraForumUrl: 'https://aurora4x.com/',
 
       stack: [
-        { name: 'Electron 16', href: 'https://www.electronjs.org/' },
+        { name: 'Electron 44', href: 'https://www.electronjs.org/' },
         { name: 'Vite 7', href: 'https://vite.dev/' },
         { name: 'Vue 2', href: 'https://v2.vuejs.org/' },
         { name: 'Vuetify 2', href: 'https://v2.vuetifyjs.com/' },

@@ -17,7 +17,7 @@ const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
 try {
   require('sqlite3')
 } catch (error) {
-  console.error(`[web] sqlite3 can't load (${error.message.split('\n')[0]}). Fetch its prebuilt binary with:\n  (cd node_modules/sqlite3 && ../.bin/node-pre-gyp install --fallback-to-build=false)`)
+  console.error(`[web] sqlite3 can't load (${error.message.split('\n')[0]}). Fetch its prebuilt binary with:\n  (cd node_modules/sqlite3 && ../.bin/prebuild-install -r napi)`)
   process.exit(1)
 }
 

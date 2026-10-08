@@ -16,14 +16,12 @@ export default defineConfig({
   main: {
     resolve,
     build: {
-      target: 'node16',
       // Only `yarn dev` loads it (src/main/boot.js), from node_modules; packages leave it out.
       externalizeDeps: { include: ['electron-devtools-installer'] },
     },
   },
   preload: {
     resolve,
-    build: { target: 'node16' },
   },
   renderer: rendererConfig({
     modules: {
@@ -38,6 +36,5 @@ export default defineConfig({
       port: Number(process.env.PORT) || 9080,
       strictPort: true,
     },
-    build: { target: 'chrome96' },
   }),
 })

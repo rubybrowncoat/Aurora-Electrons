@@ -1,7 +1,7 @@
 import path from 'path'
-import { URL } from 'url'
+import { URL, pathToFileURL } from 'url'
 
-import { app, Menu, protocol } from 'electron'
+import { app, Menu, net, protocol } from 'electron'
 
 // Set by `yarn dev` (electron-vite) to its dev server. Without it, the renderer is the build in out/renderer, served
 // through the app:// scheme.
@@ -17,10 +17,9 @@ if (DEV_SERVER_URL) {
   })
 
   app.once('ready', () => {
-    // Downloaded on first use; offline, the app runs without it. The import hands over the CommonJS exports object
-    // as `default`, and the installer's own default export is in it.
+    // Downloaded on first use; offline, the app runs without it.
     import('electron-devtools-installer')
-      .then(({ default: { default: installExtension, VUEJS_DEVTOOLS } }) => installExtension(VUEJS_DEVTOOLS))
+      .then(({ installExtension, VUEJS_DEVTOOLS }) => installExtension(VUEJS_DEVTOOLS))
       .catch((error) => console.log(`Vue devtools not installed: ${error.message}`))
   })
 } else {
@@ -28,10 +27,8 @@ if (DEV_SERVER_URL) {
   protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: { secure: true, standard: true } }])
 
   app.once('ready', () => {
-    protocol.registerFileProtocol(APP_SCHEME, (request, callback) => {
-      // eslint-disable-next-line node/no-callback-literal -- Electron's protocol callback takes the response, not an error.
-      callback({ path: path.join(RENDERER_DIR, path.normalize(new URL(request.url).pathname)) })
-    })
+    // The URL's path is already resolved, so it stays inside RENDERER_DIR (which may be inside app.asar).
+    protocol.handle(APP_SCHEME, (request) => net.fetch(pathToFileURL(path.join(RENDERER_DIR, new URL(request.url).pathname)).toString()))
 
     Menu.setApplicationMenu(null)
   })
