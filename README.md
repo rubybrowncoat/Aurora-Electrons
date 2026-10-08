@@ -2,23 +2,23 @@
 
 #### Build Setup
 
-Requires Node 22.12 or newer (`.nvmrc` pins 24, so `nvm use 24` works) and Yarn 1.
+Requires Node 22.12 or newer (`.nvmrc` pins 24, so `nvm use 24` works) and [Bun](https://bun.com) as the package manager. The scripts still run on Node.
 
 ``` bash
 # install dependencies
-yarn install
+bun install
 
 # serve app with hot reload
-yarn dev
+bun run dev
 
 # build electron application for production
-yarn build
+bun run build
 
 # serve the renderer in a browser for testing, without Electron
-yarn web
+bun run web
 
 # lint all JS/Vue component files in `src/`
-yarn lint
+bun run lint
 
 ```
 

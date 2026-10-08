@@ -1,5 +1,5 @@
 // Builds the main process (src/main), the preload script (src/preload) and the renderer (src/renderer) into out/.
-// `yarn dev` serves the renderer from Vite's dev server instead, on PORT (default 9080). Both run through
+// `bun run dev` serves the renderer from Vite's dev server instead, on PORT (default 9080). Both run through
 // scripts/run-vite.js, which picks the directory Vite works from.
 import path from 'path'
 
@@ -16,7 +16,7 @@ export default defineConfig({
   main: {
     resolve,
     build: {
-      // Only `yarn dev` loads it (src/main/boot.js), from node_modules; packages leave it out.
+      // Only `bun run dev` loads it (src/main/boot.js), from node_modules; packages leave it out.
       externalizeDeps: { include: ['electron-devtools-installer'] },
     },
   },

@@ -1,7 +1,7 @@
 /*
-  Smoke test for the Electron app (`yarn electron:smoke`, through run-vite.js). Builds the app
+  Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app
   with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it
-  runs alongside `yarn dev`, `yarn web` or a packaged build without touching theirs, and loads the
+  runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the
   renderer over app:// as the package does. Then launches Electron through Playwright on a copy of
   the save and a fresh user-data folder, so your save, settings and history are never touched.
   Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path

@@ -37,7 +37,7 @@ module.exports = {
     'no-underscore-dangle': 0,
     'space-before-function-paren': 0,
 
-    // A debugger statement freezes the app whenever DevTools is open, which `yarn dev` always does.
+    // A debugger statement freezes the app whenever DevTools is open, which `bun run dev` always does.
     'no-debugger': 2,
 
     'vue/max-attributes-per-line': 'off',

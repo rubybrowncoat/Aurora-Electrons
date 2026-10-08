@@ -1,6 +1,6 @@
 /*
-  Smoke test for web mode (`yarn web` must be running). Needs Playwright's
-  Chromium: run `npx playwright install chromium` once locally; cloud
+  Smoke test for web mode (`bun run web` must be running). Needs Playwright's
+  Chromium: run `bunx playwright install chromium` once locally; cloud
   containers already provide it through PLAYWRIGHT_BROWSERS_PATH.
   Selects a game/race, visits every page, and reports console errors, page
   errors, failed database calls, and a screenshot per page.

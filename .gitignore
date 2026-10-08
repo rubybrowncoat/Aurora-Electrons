@@ -1,5 +1,6 @@
 out
-.github/
+.github/*
+!.github/dependabot.yml
 build/*
 !build/icons
 node_modules

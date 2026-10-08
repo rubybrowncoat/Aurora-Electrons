@@ -5,14 +5,14 @@
   Sequelize models against ./AuroraDB.db (override with AURORA_DB).
   The middleware executes raw SQL, so the server listens on localhost only and
   the middleware answers only the page (see web/database-middleware.js).
-  Run through run-vite.js (`yarn web`).
+  Run through run-vite.js (`bun run web`).
 */
 const path = require('path')
 
 const PORT = Number(process.env.PORT) || 9080
 const SHIMS_DIR = path.join(__dirname, 'web', 'shims')
 
-// `yarn install --ignore-scripts`, and any later install that relinks sqlite3,
+// `bun install --ignore-scripts`, and any later install that relinks sqlite3,
 // leaves it without its native binary; every database call would then fail.
 try {
   require('sqlite3')
@@ -53,7 +53,7 @@ const main = async () => {
     },
     configFile: false,
     mode: 'development',
-    // Its own cache, so `yarn web` and `yarn dev` can run side by side.
+    // Its own cache, so `bun run web` and `bun run dev` can run side by side.
     cacheDir: path.join(__dirname, '..', 'node_modules', '.vite-web'),
     server: { port: PORT, host: 'localhost' },
   })
@@ -68,7 +68,7 @@ const main = async () => {
   console.log(`[web] Renderer ready at ${url}`)
 
   if (new URL(url).port !== String(PORT)) {
-    console.warn(`[web] Port ${PORT} is in use (another \`yarn web\` or \`yarn dev\`?). Point the smoke test here with BASE_URL=${url}`)
+    console.warn(`[web] Port ${PORT} is in use (another \`bun run web\` or \`bun run dev\`?). Point the smoke test here with BASE_URL=${url}`)
   }
 }
 

@@ -10,10 +10,11 @@
     "web:smoke": "node scripts/web/smoke.js",
     "electron:smoke": "node scripts/run-vite.js scripts/electron-smoke.js",
     "lint": "node_modules/.bin/eslint --ext .js,.vue,.ts -f ./node_modules/eslint-friendly-formatter ./src",
-    "lint:fix": "yarn lint --fix",
+    "lint:fix": "bun run lint --fix",
     "preinstall": "node scripts/check-engines.js",
-    "postinstall": "electron-builder install-app-deps & yarn lint:fix"
+    "postinstall": "electron-builder install-app-deps"
   },
+  "packageManager": "bun@1.4.2",
   "keywords": [],
   "author": "Matsor Browncoat <prunkstation@gmail.com>",
   "license": "MIT",

@@ -23,15 +23,17 @@ function checkNodeVersion(){
   }
 }
 
-//https://github.com/yarnpkg/yarn/issues/5063
-function disallowNpm() {
-  const execPath = process.env.npm_execpath;
-  if(!execPath.includes('yarn')){
+// Installs and scripts must go through bun: it reads bun.lock. Under `bun install` and `bun run`,
+// npm_config_user_agent starts with `bun/` and npm_execpath is the bun executable.
+function disallowOtherPackageManagers() {
+  const userAgent = process.env.npm_config_user_agent || '';
+  const execPath = process.env.npm_execpath || '';
+  if(!userAgent.startsWith('bun/') && !/bun(\.exe)?$/i.test(execPath)){
 
     console.log(FG_RED);
-    console.log(`\tAurora Electrons supports only Yarn package manager.`);
+    console.log(`\tAurora Electrons supports only the Bun package manager.`);
     console.log(RESET);
-    console.log('\n\tPlease visit https://legacy.yarnpkg.com/en/docs/install to find instructions on how to install Yarn.\n')
+    console.log('\n\tPlease visit https://bun.com/docs/installation to find instructions on how to install Bun.\n')
 
     throw new Error('Invalid package manager');
   }
@@ -80,7 +82,7 @@ function compare(a, b) {
 
 try{
   checkNodeVersion();
-  disallowNpm();
+  disallowOtherPackageManagers();
   // https://stackoverflow.com/questions/6398196/detect-if-called-through-require-or-directly-by-command-line
   if (require.main === module) process.exit(0);
 }catch (e) {

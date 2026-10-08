@@ -1,5 +1,5 @@
-// `yarn build`: electron-vite builds out/, then electron-builder packages it into build/. Arguments go to
-// electron-builder (`yarn build --linux`); builder.config.js is its config unless one is given.
+// `bun run build`: electron-vite builds out/, then electron-builder packages it into build/. Arguments go to
+// electron-builder (`bun run build --linux`); builder.config.js is its config unless one is given.
 require('./check-engines')
 
 const path = require('path')

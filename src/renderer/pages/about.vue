@@ -188,10 +188,10 @@ export default {
       // Each step is a list of text and `{ code }` parts.
       steps: [
         ['Fork the repository on GitHub and clone your fork.'],
-        ['Install with ', { code: 'yarn install' }, ' (yarn only, npm is rejected).'],
+        ['Install with ', { code: 'bun install' }, ' (bun only, other package managers are rejected).'],
         ['Put a save at ', { code: './AuroraDB.db' }, ', or unzip the sample with ', { code: 'unzip fixtures/AuroraDB.zip' }, '.'],
-        ['Run ', { code: 'yarn dev' }, ' for the app, or ', { code: 'yarn web' }, ' for the renderer in a browser.'],
-        ['With ', { code: 'yarn web' }, ' running, check every page with ', { code: 'yarn web:smoke' }, '.'],
+        ['Run ', { code: 'bun run dev' }, ' for the app, or ', { code: 'bun run web' }, ' for the renderer in a browser.'],
+        ['With ', { code: 'bun run web' }, ' running, check every page with ', { code: 'bun run web:smoke' }, '.'],
         ['Lint only the files you touched. The repo-wide baseline is not clean.'],
         ['Commit as ', { code: '<gitmoji> Summary description' }, ', capitalized, with no trailing period.'],
         ['Open a pull request.'],
