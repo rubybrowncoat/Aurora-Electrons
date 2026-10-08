@@ -3,9 +3,6 @@ export const state = () => {
     habitabilityItemsPerPage: 10,
     habitabilitySortBy: [],
     habitabilitySortDescending: [false],
-    mineralsItemsPerPage: 10,
-    mineralsSortBy: [],
-    mineralsSortDescending: [false],
   }
 }
 
@@ -19,15 +16,6 @@ export const mutations = {
   setHabitabilitySortDescending (state, value) {
     state.habitabilitySortDescending = Array.isArray(value) ? [...value] : value
   },
-  setMineralsItemsPerPage (state, value) {
-    state.mineralsItemsPerPage = value
-  },
-  setMineralsSortBy (state, value) {
-    state.mineralsSortBy = Array.isArray(value) ? [...value] : value
-  },
-  setMineralsSortDescending (state, value) {
-    state.mineralsSortDescending = Array.isArray(value) ? [...value] : value
-  },
 }
 
 export const actions = {
@@ -35,10 +23,5 @@ export const actions = {
     commit('setHabitabilityItemsPerPage', 10)
     commit('setHabitabilitySortBy', [])
     commit('setHabitabilitySortDescending', [false])
-  },
-  resetMineralsTableSettings ({ commit }) {
-    commit('setMineralsItemsPerPage', 10)
-    commit('setMineralsSortBy', [])
-    commit('setMineralsSortDescending', [false])
   },
 }
