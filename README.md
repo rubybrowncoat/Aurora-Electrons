@@ -24,8 +24,6 @@ yarn lint
 
 The app reads `AuroraDB.db` from the project root in development. A sample save lives in `fixtures/AuroraDB.zip` (`unzip fixtures/AuroraDB.zip`).
 
-Development docs: [CLAUDE.md](CLAUDE.md) (conventions and commit style), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/WORKFLOW.md](docs/WORKFLOW.md).
-
 # Contributions
 
 If you want to contribute, Pull Requests and Issues are welcome.
