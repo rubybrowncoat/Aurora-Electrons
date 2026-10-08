@@ -10,11 +10,17 @@ const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 // The jump points the race has charted in systems it knows, with its own flags on them. Only explored ones
 // (`Explored`) can be travelled: the far side of the rest is unknown. `JumpGateStrength` > 0 is a gate, which
 // ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out.
-export const loadJumpPoints = (database, { GameID, RaceID }) => database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.MilitaryRestricted
+// Older saves have no `MilitaryRestricted` column, so it reads 0 there.
+export const loadJumpPoints = async (database, { GameID, RaceID }) => {
+  const [[column]] = await database.query("select count(*) as Present from pragma_table_info('FCT_RaceJumpPointSurvey') where name = 'MilitaryRestricted'")
+  const [rows] = await database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, ${column.Present ? 'FCT_RaceJumpPointSurvey.MilitaryRestricted' : '0 as MilitaryRestricted'}
 from FCT_JumpPoint
 inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_JumpPoint.GameID
-where FCT_JumpPoint.GameID = ${GameID}`).then(([rows]) => rows)
+where FCT_JumpPoint.GameID = ${GameID}`)
+
+  return rows
+}
 
 // One { SystemID, DestinationID } per charted jump point whose far side is charted too, for SystemMap.
 export const jumpLinks = (jumpPoints) => {
