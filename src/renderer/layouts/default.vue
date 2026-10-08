@@ -3,13 +3,13 @@
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
       <div
         class="rail__empire"
-        :class="{ 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID }"
+        :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }"
         :style="neutralStyle"
-        role="button"
+        role="link"
         tabindex="0"
-        @click="toggleEmpires"
-        @keydown.enter="toggleEmpires"
-        @mouseenter="peekSection(EMPIRES_ID)"
+        @click="goEmpires"
+        @keydown.enter="goEmpires"
+        @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)"
         @mouseleave="leaveRail"
       >
         <empire-avatar :race="selectedRace" :size="40" />
@@ -66,7 +66,7 @@
     />
 
     <flyout-panel
-      v-if="flyoutId === EMPIRES_ID"
+      v-if="flyoutId === EMPIRES_ID && !onEmpiresPage"
       class="empire-flyout"
       :style="neutralStyle"
       title="Empires"
@@ -83,11 +83,11 @@
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
-        <template v-if="currentSection && !pickingFirst">
+        <template v-if="currentSection">
           <span class="breadcrumb__section hidden-xs-only" @mouseenter="RaceID && peekSection(currentSection.id)" @mouseleave="leaveRail">{{ currentSection.title }}</span>
           <span class="breadcrumb__separator hidden-xs-only">/</span>
         </template>
-        <span class="breadcrumb__title">{{ pickingFirst ? 'Pick a game' : page.title }}</span>
+        <span class="breadcrumb__title">{{ page.title }}</span>
       </div>
 
       <v-spacer />
@@ -106,7 +106,7 @@
       </v-btn>
 
       <template v-if="showTabs" #extension>
-        <v-tabs class="section-tabs" :style="pageStyle" :value="pickingFirst ? -1 : tabIndex" show-arrows height="44">
+        <v-tabs class="section-tabs" :style="pageStyle" :value="tabIndex" show-arrows height="44">
           <v-tab v-for="tab in tabs" :key="tab.route" :disabled="tab.disabled" @click="go(tab.route)">{{ tab.tab }}</v-tab>
         </v-tabs>
       </template>
@@ -125,15 +125,7 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <v-card v-if="pickingFirst" class="game-picker mx-auto mt-12" :style="neutralStyle" max-width="480" outlined>
-          <v-card-title>Pick a game</v-card-title>
-          <empire-list v-if="games.length" :games="games" class="pb-2 px-2" />
-          <v-alert v-else-if="databaseError" type="error" text class="mx-4">Couldn't open the save: {{ databaseError }}</v-alert>
-          <v-alert v-else-if="gamesError" type="error" text class="mx-4">Couldn't read the save: {{ gamesError }}. The game may be saving; the list reads it again when it changes.</v-alert>
-          <v-card-text v-else-if="!database">Waiting for the save{{ savePath ? ` at ${savePath}` : '' }}. It is read from there and loaded again whenever it changes.</v-card-text>
-          <v-card-text v-else-if="$asyncComputed.games.state === 'success'">No games found in the save.</v-card-text>
-        </v-card>
-        <nuxt v-else />
+        <nuxt />
       </v-container>
     </v-main>
 
@@ -157,7 +149,6 @@ import PagePalette from '../components/navigation/PagePalette.vue'
 import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
-import { loadEmpires } from '../utilities/empires'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -184,9 +175,6 @@ export default {
       flyoutId: null,
       paletteOpen: false,
 
-      // Why the empire list couldn't be read (the plugin's own state isn't reactive), null while it can.
-      gamesError: null,
-
       // WATCHED CONFIG
       spyNPR: false,
       unsubscribeSpyNPR: null,
@@ -195,6 +183,9 @@ export default {
   computed: {
     ...mapState([
       'snackbar',
+    ]),
+    ...mapState('empires', [
+      'games',
     ]),
     ...mapState('navigation', [
       'lastInSection',
@@ -210,8 +201,6 @@ export default {
     ...mapGetters([
       'config',
       'database',
-      'savePath',
-      'databaseError',
 
       'GameID',
       'RaceID',
@@ -228,6 +217,9 @@ export default {
     currentSection () {
       return this.railSections.find(({ id }) => id === this.page.section)
     },
+    onEmpiresPage () {
+      return this.page.route === '/'
+    },
     tabs () {
       return this.currentSection ? this.currentSection.pages.filter(({ planned }) => !planned) : []
     },
@@ -241,13 +233,8 @@ export default {
       return this.currentSection ? this.currentSection.style : this.neutralStyle
     },
 
-    // Until a game and race are picked, the picker stands in for every page that shows a race's data.
-    pickingFirst () {
-      return !this.RaceID && needsRace(this.$route.path)
-    },
-
     showTabs () {
-      return !this.pickingFirst && this.tabs.length > 1
+      return this.tabs.length > 1
     },
 
     // Every page that appears in the navigation, flagged `disabled` when it shows a race's data and none is picked yet or it needs
@@ -299,13 +286,16 @@ export default {
     },
 
     // The flyout's lines load when it opens, and again when the save, the race or the history file changes under it.
+    // The empire list is read again when the save or the NPR setting changes.
     flyoutId: 'loadFlyoutPeeks',
-    database: 'loadFlyoutPeeks',
+    database: ['loadFlyoutPeeks', 'loadEmpires'],
     RaceID: 'loadFlyoutPeeks',
     historyRevision: 'loadFlyoutPeeks',
+    spyNPR: 'loadEmpires',
   },
   created() {
     this.$vuetify.theme.dark = this.config.get('darkMode', false)
+    this.loadEmpires()
   },
   mounted() {
     // CONFIG CHANGE SUBSCRIPTION
@@ -351,6 +341,9 @@ export default {
     ...mapActions('peeks', {
       loadPeeks: 'load',
     }),
+    ...mapActions('empires', {
+      loadEmpires: 'load',
+    }),
 
     loadFlyoutPeeks () {
       if (this.flyoutSection) {
@@ -371,23 +364,22 @@ export default {
         this.$router.push(path)
       }
     },
-    // Back to the last page used in the section, or its first page. Until a race is picked, point at the empire list instead.
+    // Back to the last page used in the section, or its first page. Until a race is picked, to the Empires page instead.
     goSection (section) {
-      clearTimeout(this.peekTimer)
-
       if (!this.RaceID) {
-        this.flyoutId = EMPIRES_ID
+        this.goEmpires()
 
         return
       }
 
+      clearTimeout(this.peekTimer)
       this.go(this.lastInSection[section.id] || section.pages.find(({ disabled, planned }) => !disabled && !planned).route)
     },
 
-    // A click opens the Empires flyout at once (hover opens it after a short delay) or closes it again.
-    toggleEmpires () {
+    // The Empires page. Hovering the entry anywhere else opens the empire list as a flyout, which switches race in place.
+    goEmpires () {
       clearTimeout(this.peekTimer)
-      this.flyoutId = this.flyoutId === EMPIRES_ID ? null : EMPIRES_ID
+      this.go('/')
     },
 
     peekSection (id) {
@@ -438,28 +430,6 @@ export default {
         event.preventDefault()
         this.forward()
       }
-    },
-  },
-  asyncComputed: {
-    games: {
-      async get () {
-        if (!this.database) {
-          return []
-        }
-
-        try {
-          const games = await loadEmpires(this.database, this.spyNPR)
-
-          this.gamesError = null
-
-          return games
-        } catch (error) {
-          this.gamesError = error.message
-
-          throw error
-        }
-      },
-      default: [],
     },
   },
 }
@@ -558,10 +528,15 @@ export default {
   }
 
   &:hover,
-  &--peek {
+  &--peek,
+  &--active {
     .empire-avatar {
       box-shadow: 0 0 0 2px var(--ae-chrome), 0 0 0 4px var(--sc);
     }
+  }
+
+  &--active .rail__label {
+    color: var(--ae-ink);
   }
 }
 

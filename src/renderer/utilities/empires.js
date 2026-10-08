@@ -1,5 +1,5 @@
 // The empires the app can open: every game's races, each with its kind and a line about its capital and colonies.
-// Used by the rail's Empires flyout and the first-run picker.
+// Read into the `empires` store for the rail's Empires entry and flyout and the Empires page.
 
 import { SPECIAL_NPR_NAMES, gameTime, toBoolean, toNumber } from './aurora'
 import { people } from './colonies'

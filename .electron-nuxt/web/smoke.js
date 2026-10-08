@@ -229,7 +229,7 @@ const run = async () => {
   fs.mkdirSync(OUT, { recursive: true })
 
   await page.goto(BASE_URL)
-  // The picker shows until a race is chosen. A game with one race selects on click; otherwise the race is next.
+  // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
   const picker = page.locator('.game-picker')
 
   await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
@@ -262,7 +262,7 @@ const run = async () => {
       await page.evaluate((target) => window.$nuxt.$router.push(target), route)
       await settle()
 
-      const name = route === '/' ? 'production' : route.slice(1)
+      const name = route === '/' ? 'empires' : route.slice(1)
       const suffix = viewport ? `-${viewport.label}${DARK ? '-dark' : ''}` : ''
       const screenshot = path.join(OUT, `${name}${suffix}.png`)
 

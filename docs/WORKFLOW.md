@@ -38,7 +38,7 @@
 
 With `yarn web` running, `yarn web:smoke` drives Chromium through Playwright, a pinned dev dependency. Locally, run `npx playwright install chromium` once to download the browser; cloud containers already provide it. It selects the sample race, visits every tab plus settings, prints `ok`/`FAIL` per page with console errors, page errors, and failed database calls, and saves a screenshot of each page. You can configure it with these environment variables:
 
-- `SMOKE_PAGES=/,/map` limits the run to those routes. Add `/engines` to include the hidden WIP page.
+- `SMOKE_PAGES=/production,/map` limits the run to those routes. Add `/engines` to include the hidden WIP page.
 - `SMOKE_OUT=dir` sets where screenshots go. The default is a temporary directory.
 - `AURORA_GAME` and `AURORA_RACE` select a different game and race.
 - `SMOKE_VIEWPORTS=1280x720,1920x1080,2560x1440` checks the window-size rule (`docs/ARCHITECTURE.md`, Layout). It visits every page at every size, saves `<page>-<size>.png` and reports layout problems per page and size: `overflow` (the document or `.v-main` scrolls sideways), `wide` (an element reaches past the window edge with no scroll container around it), `clipped` (hidden overflow cuts text off), `small chart` (a canvas under 240 x 120 px), `tight` (a short header, button, chip or label wraps onto a second line) and `island` (from 1904 px up, the content stops short of 80% of the width). It also lists the containers that scroll sideways on their own, which isn't a problem. A page with a layout problem prints `LAYOUT` and the run exits 1, and a table at the end counts the problems per page and size. `SMOKE_THEME=dark` runs it in the dark theme and `SMOKE_FULLPAGE=1` saves the whole scrolled page instead of the visible window. Without `SMOKE_VIEWPORTS` the run is unchanged (one 1600 x 1000 window, no layout check).
@@ -106,7 +106,7 @@ It takes about 90 seconds. `SMOKE_PAGES`, `SMOKE_OUT`, `AURORA_GAME` and `AURORA
 
 - **Lint what you touched:** `node_modules/.bin/eslint --ext .js,.vue -f ./node_modules/eslint-friendly-formatter <files>`. You can add `--fix` for those files only. The repo-wide baseline isn't clean: at the time of writing, `yarn lint` reports 17 errors and 119 warnings. Don't fix unrelated problems, and don't introduce new ones.
 - **SQL:** run the final query against the sample, as above, and sanity-check the counts.
-- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) in the game picker. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
+- **UI:** run `yarn web` (in the background), then `yarn web:smoke`, and look at the screenshots. Locally, also run `yarn electron:smoke` when a change touches the main process, settings or history storage, the save watcher, or anything that differs between Electron and the web shims. You can also use `yarn dev` and select "Aurelian Empire" (race 784) on the Empires page. Some sample tables are empty (see `docs/DATABASE.md`), so research, shipyard-task, and training views will be blank.
 - There is no automated test suite and no CI.
 
 ## Dependency updates

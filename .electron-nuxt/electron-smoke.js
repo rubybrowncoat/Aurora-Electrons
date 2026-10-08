@@ -266,7 +266,7 @@ const run = async () => {
     // The dev server can reload the page while it finishes loading, so wait for a loaded save.
     await page.waitForFunction(() => window.$nuxt && window.$nuxt.$store && window.$nuxt.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    // The picker shows until a race is chosen. A game with one race selects on click; otherwise the race is next.
+    // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
     const picker = page.locator('.game-picker')
 
     await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
@@ -301,7 +301,7 @@ const run = async () => {
     await wait(250)
     await settle()
 
-    const name = route === '/' ? 'production' : route.slice(1)
+    const name = route === '/' ? 'empires' : route.slice(1)
     const screenshot = path.join(OUT, `${name}.png`)
 
     await page.screenshot({ path: screenshot })

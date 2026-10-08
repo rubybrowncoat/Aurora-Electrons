@@ -9,24 +9,26 @@
       >
         {{ game.GameName }} · {{ game.date }}
       </div>
-      <div
-        v-for="race in game.Races"
-        :key="`race-${race.RaceID}`"
-        class="empire-list__race"
-        :class="{ 'empire-list__race--active': game.GameID === GameID && race.RaceID === RaceID }"
-        role="link"
-        tabindex="0"
-        @click="pick(game, race)"
-        @keydown.enter="pick(game, race)"
-      >
-        <empire-avatar :race="race" :size="36" class="empire-list__avatar" />
-        <div class="empire-list__title">{{ race.RaceTitle }}</div>
-        <div>
-          <v-chip v-if="race.kind.type === 'player'" x-small label outlined color="primary" data-kind="player">{{ race.kind.label }}</v-chip>
-          <v-chip v-else-if="race.kind.type === 'npr'" x-small label data-kind="npr">{{ race.kind.label }}</v-chip>
-          <v-chip v-else x-small label dark color="error" data-kind="special"><v-icon x-small left>mdi-skull-outline</v-icon>{{ race.kind.label }}</v-chip>
+      <div :key="`races-${game.GameID}`" class="empire-list__races">
+        <div
+          v-for="race in game.Races"
+          :key="`race-${race.RaceID}`"
+          class="empire-list__race"
+          :class="{ 'empire-list__race--active': game.GameID === GameID && race.RaceID === RaceID }"
+          role="link"
+          tabindex="0"
+          @click="pick(game, race)"
+          @keydown.enter="pick(game, race)"
+        >
+          <empire-avatar :race="race" :size="36" class="empire-list__avatar" />
+          <div class="empire-list__title">{{ race.RaceTitle }}</div>
+          <div>
+            <v-chip v-if="race.kind.type === 'player'" x-small label outlined color="primary" data-kind="player">{{ race.kind.label }}</v-chip>
+            <v-chip v-else-if="race.kind.type === 'npr'" x-small label data-kind="npr">{{ race.kind.label }}</v-chip>
+            <v-chip v-else x-small label dark color="error" data-kind="special"><v-icon x-small left>mdi-skull-outline</v-icon>{{ race.kind.label }}</v-chip>
+          </div>
+          <div class="empire-list__details">{{ details(race) }}</div>
         </div>
-        <div class="empire-list__details">{{ details(race) }}</div>
       </div>
     </template>
   </div>
@@ -39,8 +41,9 @@ import { empireDetails } from '../../utilities/empires'
 import { thousandsSeparator } from '../../utilities/math'
 import EmpireAvatar from './EmpireAvatar.vue'
 
-// Every game with its races: the flyout from the rail's Empires entry and the first-run picker. Picking a race
-// selects it (a game with one race can be picked from its header). Coloured by `--sc` / `--sc-soft` of whoever styles it.
+// Every game with its races: the flyout from the rail's Empires entry and the Empires page. Picking a race selects it
+// (a game with one race can be picked from its header). A game's races take as many columns as fit, one in the flyout.
+// Coloured by `--sc` / `--sc-soft` of whoever styles it.
 export default {
   components: {
     EmpireAvatar,
@@ -90,6 +93,12 @@ export default {
 
 .empire-list__game--pick {
   cursor: pointer;
+}
+
+.empire-list__races {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  column-gap: 8px;
 }
 
 .empire-list__race {

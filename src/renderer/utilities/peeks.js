@@ -24,7 +24,7 @@ const plural = (count, one, many) => (count === 1 ? one : many)
 const counted = (count, separator, one, many) => `${separatedNumber(count, separator)} ${plural(count, one, many)}`
 
 export const peeks = {
-  '/': async ({ database, GameID, RaceID, separator }) => {
+  '/production': async ({ database, GameID, RaceID, separator }) => {
     const { Jobs, Paused } = await row(database, `select
       (select count(*) from FCT_ResearchProject where GameID = ${GameID} and RaceID = ${RaceID})
       + (select count(*) from FCT_IndustrialProjects where GameID = ${GameID} and RaceID = ${RaceID} and coalesce(Queue, 0) = 0)

@@ -15,12 +15,12 @@ const SECTIONS = [
 
 // `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the
 // selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or
-// default smoke list. `noRace` pages (Settings, About) work before a game and race are picked; every other page
+// default smoke list. `noRace` pages (Empires, Settings, About) work before a game and race are picked; every other page
 // shows the selected race's data, so it can't be opened until one is. `planned` pages have no page file yet: the section flyout lists them dimmed with a
 // "Planned" chip, and they are never navigable and appear in no tabs, palette, history or smoke list.
-// Pages within a section appear in this order.
+// Pages within a section appear in this order. `/`, the Empires page, is where the app starts.
 const PAGES = [
-  { route: '/', section: 'command', tab: 'Production', title: 'Production Recap', icon: 'mdi-factory', blurb: 'Research, industry, shipyards and training, each with its time left.', keywords: 'research industry shipyard queue terraforming' },
+  { route: '/production', section: 'command', tab: 'Production', title: 'Production Recap', icon: 'mdi-factory', blurb: 'Research, industry, shipyards and training, each with its time left.', keywords: 'research industry shipyard queue terraforming' },
   { route: '/warnings', section: 'command', tab: 'Warnings', title: 'Warnings', icon: 'mdi-alert-octagon-outline', blurb: 'About 40 checks over contacts, economy, ships, fleets and colonies.', keywords: 'alerts idle fleets damaged ships intruders lifepods' },
   { route: '/log', section: 'command', tab: 'Log', title: 'Game Log', icon: 'mdi-script-text-outline', blurb: 'The full event log, filtered and coloured by event type.', keywords: 'events' },
   { route: '/minerals', section: 'economy', tab: 'Minerals', title: 'Mineral Breakdown', icon: 'mdi-diamond-stone', blurb: 'Deposits on surveyed bodies, with CMC and orbital-mining flags.', keywords: 'deposits mining duranium cmc' },
@@ -42,6 +42,7 @@ const PAGES = [
   { route: '/technologies', section: 'research', tab: 'Tech Tree', title: 'Tech Tree', icon: 'mdi-file-tree', blurb: 'What to research next: available techs by field, tech lines, prerequisite paths and when projects land.', keywords: 'technologies research projects prerequisites queue' },
   { route: '/designed-tech', section: 'research', tab: 'Designed', title: 'Designed Tech', icon: 'mdi-atom', blurb: 'Your designed components by category.', wip: true, keywords: 'components engines' },
   { route: '/engines', section: null, tab: 'Engines', title: 'Engine Planner', icon: 'mdi-engine-outline', blurb: 'Engine design inputs and thrust.', hidden: true, keywords: 'engine thrust' },
+  { route: '/', section: null, tab: 'Empires', title: 'Empires', noRace: true, icon: 'mdi-flag-variant-outline', blurb: 'Every game in the save and its empires: pick the one the other pages show.', keywords: 'games races pick select switch' },
   { route: '/settings', section: null, tab: 'Settings', title: 'Settings', noRace: true, icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
   { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
 ]

@@ -164,7 +164,7 @@ Some details:
 
 | Page | Main tables |
 |---|---|
-| Production (`index.vue`) | FCT_ResearchProject/Queue, FCT_IndustrialProjects, FCT_ShipyardTask, FCT_Shipyard, FCT_GroundUnitTraining, FCT_Population(+Installations), FCT_Commander(+Bonuses), FCT_NavalAdminCommand, FCT_AncientConstruct, FCT_AtmosphericGas, FCT_JumpPoint, FCT_RaceJumpPointSurvey |
+| Production (`production.vue`) | FCT_ResearchProject/Queue, FCT_IndustrialProjects, FCT_ShipyardTask, FCT_Shipyard, FCT_GroundUnitTraining, FCT_Population(+Installations), FCT_Commander(+Bonuses), FCT_NavalAdminCommand, FCT_AncientConstruct, FCT_AtmosphericGas, FCT_JumpPoint, FCT_RaceJumpPointSurvey |
 | Warnings | Models above + FCT_Ship, FCT_ShipClass, FCT_ClassComponent, FCT_ShipDesignComponents, FCT_DamagedComponent, FCT_ArmourDamage, FCT_FireControlAssignment, FCT_Lifepods, FCT_Wrecks, FCT_MineralDeposit, FCT_SectorCommand, FCT_MoveOrders, FCT_ShipCargo, FCT_FleetStandingOrder, FCT_RaceTech, FCT_ResearchQueue |
 | Minerals | FCT_MineralDeposit, FCT_SystemBody, FCT_SystemBodySurveys, FCT_RaceSysSurvey, DIM_KnownSystems |
 | Mineral Outlook | FCT_RaceMineralData, DIM_MineralDataType, FCT_MineralDeposit, FCT_Population, FCT_PopulationInstallations, DIM_PlanetaryInstallation, FCT_ShipCargo, FCT_MassDriverPackets, FCT_IndustrialProjects, FCT_Ship, FCT_ShipClass, FCT_Fleet, FCT_NavalAdminCommand, FCT_Commander, FCT_CommanderBonuses, FCT_SystemBodySurveys |

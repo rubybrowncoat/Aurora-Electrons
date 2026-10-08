@@ -6,7 +6,8 @@ const TRAIL_BEHIND = 7
 const TRAIL_AHEAD = 3
 
 // The pages visited this session, as the browser's back/forward list would keep them, plus the last
-// page used in each section. `entries` holds full paths. `pending` is the entry index a back,
+// page used in each section and `lastRacePage`, the last one that showed a race's data, which the Empires page
+// opens after a pick. `entries` holds full paths. `pending` is the entry index a back,
 // forward or jump is navigating to, so `settle` can tell it from a fresh visit.
 export const state = () => {
   return {
@@ -14,6 +15,7 @@ export const state = () => {
     index: -1,
     pending: null,
     lastInSection: {},
+    lastRacePage: null,
   }
 }
 
@@ -64,6 +66,10 @@ const remember = (state, path) => {
 
   if (page && page.section) {
     state.lastInSection = { ...state.lastInSection, [page.section]: path }
+  }
+
+  if (page && !page.noRace) {
+    state.lastRacePage = path
   }
 }
 

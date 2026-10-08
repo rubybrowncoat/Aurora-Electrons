@@ -119,7 +119,7 @@ export const shipSuggestions = (ships, officers) => {
 }
 
 // A scientist's research multiplier: in their own field the bonus counts four times (1.15 -> 1.60),
-// outside it once (index.vue's rule; the docs: changing field cuts the bonus by 75%).
+// outside it once (production.vue's rule; the docs: changing field cuts the bonus by 75%).
 export const researchMultiplier = (bonus, inField) => (inField ? 4 * (bonus || 1) - 3 : bonus || 1)
 
 // Research projects where an unassigned scientist of the project's field, able to run its labs

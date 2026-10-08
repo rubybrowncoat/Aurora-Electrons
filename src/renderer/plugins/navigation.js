@@ -1,12 +1,10 @@
 import { needsRace } from '../utilities/navigation'
 
-// Feeds every route change into the navigation history store (store/navigation.js), and keeps the pages that show
-// a race's data closed until a game and race are picked. The page the app starts on stays: the layout shows the picker over it.
+// Feeds every route change into the navigation history store (store/navigation.js), and sends the pages that show
+// a race's data to the Empires page until a game and race are picked, the page the app starts on included.
 export default ({ app, store }) => {
-  app.router.beforeEach((to, from, next) => {
-    const starting = from.name === null
-
-    next(starting || store.getters.RaceID || !needsRace(to.path) ? undefined : false)
+  app.router.beforeEach((to, _from, next) => {
+    next(store.getters.RaceID || !needsRace(to.path) ? undefined : '/')
   })
 
   app.router.afterEach((to) => {
