@@ -6,6 +6,7 @@
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
+import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 
 // More than this many snapshots per race and the older half is thinned to every other one, so a
@@ -114,7 +115,7 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
     query(`select FCT_Population.Population, FCT_Population.FuelStockpile, FCT_Population.MaintenanceStockpile, FCT_Population.Duranium, FCT_Population.Neutronium, FCT_Population.Corbomite, FCT_Population.Tritanium, FCT_Population.Boronide, FCT_Population.Mercassium, FCT_Population.Vendarite, FCT_Population.Sorium, FCT_Population.Uridium, FCT_Population.Corundium, FCT_Population.Gallicite from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}`),
     query(`select FCT_ShipClass.Commercial, count(*) as Ships, sum(FCT_ShipClass.Size * 50) as Tons from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_ShipClass.Commercial`),
     query(`select FCT_PopulationInstallations.PlanetaryInstallationID as ID, sum(FCT_PopulationInstallations.Amount) as Amount from FCT_PopulationInstallations inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PlanetaryInstallationID`),
-    query(`select (select sum(FCT_TechSystem.DevelopCost) from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = ${GameID} and FCT_RaceTech.RaceID = ${RaceID}) as Research, (select count(*) from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}) as Systems, (select count(*) from FCT_Commander where FCT_Commander.GameID = ${GameID} and FCT_Commander.RaceID = ${RaceID} and FCT_Commander.Deceased = 0) as Commanders`),
+    query(`select (select sum(FCT_TechSystem.DevelopCost) from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = ${GameID} and FCT_RaceTech.RaceID = ${RaceID}) as Research, (select count(*) from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}) as Systems, (select count(*) from FCT_Commander where FCT_Commander.GameID = ${GameID} and FCT_Commander.RaceID = ${RaceID} and ${SERVING_COMMANDER}) as Commanders`),
   ])
 
   if (!race) {

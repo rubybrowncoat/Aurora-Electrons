@@ -176,6 +176,65 @@
             Age is the species' graduation age plus the years since the commander's career began. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
           </div>
         </v-card>
+
+        <v-card class="panel" elevation="1">
+          <div class="panel-head">
+            <span>Former commanders</span>
+            <v-btn-toggle :value="formerGroup" mandatory dense @change="(value) => (formerView = value)">
+              <v-btn v-for="group in formerGroups" :key="group.value" :value="group.value" :disabled="!group.count" small>{{ group.text }} ({{ count(group.count) }})</v-btn>
+            </v-btn-toggle>
+          </div>
+          <v-data-table v-if="formerShown.length" :key="formerGroup === 'held' ? 'held' : 'own'" :headers="formerHeaders" :items="formerShown" item-key="CommanderID" :show-expand="formerGroup !== 'held'" :sort-by="formerGroup === 'held' ? 'raceName' : 'lastTime'" :sort-desc="formerGroup !== 'held'" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 50, -1] }" class="roster-table">
+            <template #[`item.Name`]="{ item }">
+              <div class="py-2">
+                <span class="font-weight-medium">{{ item.Name }}</span>
+                <v-icon v-if="item.StoryCharacter" small class="ml-1" title="Story character">mdi-book-open-variant</v-icon>
+                <div class="caption text--secondary">{{ item.typeLabel }}</div>
+              </div>
+            </template>
+            <template #[`item.rankLabel`]="{ item }">
+              <span :title="item.RankName">{{ item.rankLabel }}</span>
+            </template>
+            <template #[`item.statusLabel`]="{ item }">
+              <div>{{ item.statusLabel }}</div>
+              <div v-if="item.statusNote" class="caption text--secondary">{{ item.statusNote }}</div>
+            </template>
+            <template #[`item.lastTime`]="{ item }">
+              <template v-if="item.lastDate">
+                <div>{{ item.lastDate }}</div>
+                <div class="caption text--secondary">{{ item.lastText }}</div>
+              </template>
+              <span v-else class="text--secondary">—</span>
+            </template>
+            <template #[`item.kills`]="{ item }">
+              <span v-if="item.kills" :title="`${count(item.KillTonnageMilitary)} t military, ${count(item.KillTonnageCommercial)} t commercial`">{{ count(item.kills) }}</span>
+              <span v-else class="text--secondary">—</span>
+            </template>
+            <template #[`item.MedalCount`]="{ item }">
+              <span v-if="item.MedalCount" :title="item.Medals">{{ item.MedalCount }}</span>
+              <span v-else class="text--secondary">—</span>
+            </template>
+            <template #[`item.bonusList`]="{ item }">
+              <span v-for="bonus in item.bonusList" :key="bonus.id" class="bonus-chip" :title="bonus.description">{{ bonus.abbrev }} {{ bonus.text }}</span>
+            </template>
+            <template #[`item.Processed`]="{ item }">
+              {{ item.Processed ? 'Yes' : 'Not yet' }}
+            </template>
+            <template v-if="formerGroup !== 'held'" #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="py-3">
+                <div v-if="item.Notes" class="mb-2"><span class="text--secondary">Notes:</span> {{ item.Notes }}</div>
+                <div v-for="(entry, index) in item.history" :key="index" class="career-line">
+                  <span class="text--secondary career-date">{{ date(entry.GameTime) }}</span>{{ entry.HistoryText }}
+                </div>
+                <div v-if="!item.history.length" class="text--secondary">The save holds no career record for this commander.</div>
+              </td>
+            </template>
+          </v-data-table>
+          <div v-else class="panel-body caption text--secondary">No commander of this race is a prisoner, retired or dead in the save, and the race holds no prisoners.</div>
+          <div class="panel-foot caption text--secondary">
+            The game deletes a commander who retires or dies when the game is saved, unless you press Retain for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as your race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -184,7 +243,8 @@
 <script>
 import { mapGetters } from 'vuex'
 
-import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, formatBonus, governorSuggestions, parseBonuses, researchSuggestions, shipSuggestions } from '../utilities/commanders'
+import { gameTime } from '../utilities/aurora'
+import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RETIRE_STATUSES, SERVING_COMMANDER, formatBonus, formerKind, governorSuggestions, parseBonuses, researchSuggestions, shipSuggestions } from '../utilities/commanders'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
@@ -195,10 +255,20 @@ const INPUT_LABELS = {
   colonies: 'the colonies',
   ships: 'the specialist ships',
   projects: 'the research projects',
+  former: 'the former commanders',
+  formerHistory: 'their careers',
+  held: 'the prisoners held',
 }
 const INPUTS = Object.keys(INPUT_LABELS)
 // Chips shown per commander in the roster; the rest are in the tooltip-free count.
 const ROSTER_BONUSES = 6
+const SECONDS_PER_YEAR = 31536000
+const FORMER_GROUPS = [
+  { value: 'prisoner', text: 'Prisoners' },
+  { value: 'retired', text: 'Retired' },
+  { value: 'dead', text: 'Dead' },
+  { value: 'held', text: 'Held by us' },
+]
 
 export default {
   name: 'CommandersPage',
@@ -212,11 +282,12 @@ export default {
       suggestionView: 'governors',
       rosterSortBy: [],
       rosterSortDesc: [],
+      formerView: 'prisoner',
       loadErrors: {},
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear']),
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -344,15 +415,90 @@ export default {
         rankLabel: person.RankAbbrev || (person.CommanderType === 3 ? person.FieldName || 'Scientist' : 'Administrator'),
         rankSort: person.RankLevel || 0,
         selectedBonus: this.bonusId === null ? null : person.bonuses[this.bonusId] ?? null,
-        bonusList: Object.entries(person.bonuses).map(([id, value]) => ({ id: Number(id), value })).sort((a, b) => this.bonusWeight(b) - this.bonusWeight(a)).slice(0, ROSTER_BONUSES).map((bonus) => ({
-          id: bonus.id,
-          abbrev: (this.bonusTypeById[bonus.id] || {}).BonusAbbrev || `#${bonus.id}`,
-          description: (this.bonusTypeById[bonus.id] || {}).Description || `Bonus ${bonus.id}`,
-          text: formatBonus(bonus.id, bonus.value),
-        })),
+        bonusList: this.topBonuses(person.bonuses),
         traitNames: person.traitIds.map((id) => this.traitById[id]).filter(Boolean),
         traitCount: person.traitIds.length,
       }))
+    },
+
+    // The race's former commanders with their status, captor, last career record and age; the dead
+    // age only to their last record.
+    formerRows() {
+      return this.former.map((person) => {
+        const kind = formerKind(person)
+        const history = this.formerHistory[person.CommanderID] || []
+        const last = history[0] || null
+        const until = kind === 'dead' && last ? last.GameTime : person.GameTime
+        const status = (RETIRE_STATUSES[person.RetireStatus] || {}).label
+
+        return {
+          ...person,
+          kind,
+          history,
+          typeLabel: (COMMANDER_TYPES.find((type) => type.id === person.CommanderType) || {}).label || '',
+          rankLabel: person.RankAbbrev || (person.CommanderType === 3 ? person.FieldName || 'Scientist' : 'Administrator'),
+          statusLabel: kind === 'prisoner' ? `Prisoner${person.CaptorID ? ` of ${person.CaptorName || 'an unknown race'}` : ''}` : status || 'Retired',
+          statusNote: kind !== 'prisoner' && person.Prisoner ? 'While a prisoner' : '',
+          age: roundToDecimal(person.GraduationAge + (until - person.CareerStart) / SECONDS_PER_YEAR, 1),
+          lastTime: last ? last.GameTime : -1,
+          lastDate: last ? this.date(last.GameTime) : '',
+          lastText: last ? last.HistoryText : '',
+          kills: (person.KillTonnageMilitary || 0) + (person.KillTonnageCommercial || 0),
+          bonusList: this.topBonuses(parseBonuses(person.Bonuses)),
+        }
+      })
+    },
+
+    heldRows() {
+      return this.held.map((person) => ({
+        ...person,
+        typeLabel: (COMMANDER_TYPES.find((type) => type.id === person.CommanderType) || {}).label || '',
+        raceName: person.AlienRaceName || 'Unknown race',
+        heldAt: person.ShipName ? `Aboard ${person.ShipName}` : `At ${person.PopName}`,
+      }))
+    },
+
+    formerGroups() {
+      const counts = { prisoner: 0, retired: 0, dead: 0, held: this.heldRows.length }
+
+      this.formerRows.forEach((person) => counts[person.kind]++)
+
+      return FORMER_GROUPS.map((group) => ({ ...group, count: counts[group.value] }))
+    },
+
+    // The chosen group, or the first with anyone in it when the chosen one is empty.
+    formerGroup() {
+      const chosen = this.formerGroups.find((group) => group.value === this.formerView)
+
+      return chosen.count ? chosen.value : (this.formerGroups.find((group) => group.count) || chosen).value
+    },
+
+    formerShown() {
+      return this.formerGroup === 'held' ? this.heldRows : this.formerRows.filter((person) => person.kind === this.formerGroup)
+    },
+
+    formerHeaders() {
+      if (this.formerGroup === 'held') {
+        return [
+          { text: 'Name', value: 'Name' },
+          { text: 'Race', value: 'raceName' },
+          { text: 'Rank', value: 'RankName' },
+          { text: 'Held', value: 'heldAt' },
+          { text: 'Interrogated', value: 'Processed' },
+        ]
+      }
+
+      return [
+        { text: 'Name', value: 'Name' },
+        { text: 'Rank', value: 'rankLabel' },
+        { text: 'Status', value: 'statusLabel' },
+        { text: 'Last record', value: 'lastTime' },
+        { text: this.formerGroup === 'dead' ? 'Age at death' : 'Age', value: 'age', align: 'end' },
+        { text: 'Kills (t)', value: 'kills', align: 'end' },
+        { text: 'Medals', value: 'MedalCount', align: 'end' },
+        { text: 'Bonuses', value: 'bonusList', sortable: false },
+        { text: '', value: 'data-table-expand' },
+      ]
     },
 
     rosterHeaders() {
@@ -437,6 +583,18 @@ export default {
     bonusWeight({ id, value }) {
       return id === COLONY_ADMINISTRATION || id === 27 ? 10 + value : value
     },
+    // The strongest bonuses as roster chips.
+    topBonuses(bonuses) {
+      return Object.entries(bonuses).map(([id, value]) => ({ id: Number(id), value })).sort((a, b) => this.bonusWeight(b) - this.bonusWeight(a)).slice(0, ROSTER_BONUSES).map((bonus) => ({
+        id: bonus.id,
+        abbrev: (this.bonusTypeById[bonus.id] || {}).BonusAbbrev || `#${bonus.id}`,
+        description: (this.bonusTypeById[bonus.id] || {}).Description || `Bonus ${bonus.id}`,
+        text: formatBonus(bonus.id, bonus.value),
+      }))
+    },
+    date(seconds) {
+      return gameTime(this.StartYear, seconds).format('YYYY-MM-DD')
+    },
     bonusText(bonusId, value) {
       return value === null || value === undefined ? 'none' : `${(this.bonusTypeById[bonusId] || {}).Description || 'Bonus'} ${formatBonus(bonusId, value)}`
     },
@@ -455,15 +613,15 @@ export default {
     },
   },
   asyncComputed: {
-    // Every living commander of the race, with rank level (1 is the lowest rank), age, assignment
-    // name, and bonuses and traits as "id:value" / "id" lists.
+    // Every serving commander of the race (not retired, dead or a prisoner), with rank level (1 is
+    // the lowest rank), age, assignment name, and bonuses and traits as "id:value" / "id" lists.
     commanders: {
       get: tracked('commanders', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, VIR_Levels.Lowest - FCT_Ranks.Priority + 1 as RankLevel, round(coalesce(FCT_Species.GraduationAge, 21) + (FCT_Game.GameTime - FCT_Commander.CareerStart) / 31536000.0, 1) as Age, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID left join (select FCT_Ranks.RankType, max(FCT_Ranks.Priority) as Lowest from FCT_Ranks where FCT_Ranks.GameID = ${this.GameID} and FCT_Ranks.RaceID = ${this.RaceID} group by FCT_Ranks.RankType) as VIR_Levels on VIR_Levels.RankType = FCT_Ranks.RankType left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || FCT_CommanderBonuses.BonusValue, ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.Deceased = 0 and FCT_Commander.Prisoner = 0 order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => items)
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, VIR_Levels.Lowest - FCT_Ranks.Priority + 1 as RankLevel, round(coalesce(FCT_Species.GraduationAge, 21) + (FCT_Game.GameTime - FCT_Commander.CareerStart) / 31536000.0, 1) as Age, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID left join (select FCT_Ranks.RankType, max(FCT_Ranks.Priority) as Lowest from FCT_Ranks where FCT_Ranks.GameID = ${this.GameID} and FCT_Ranks.RaceID = ${this.RaceID} group by FCT_Ranks.RankType) as VIR_Levels on VIR_Levels.RankType = FCT_Ranks.RankType left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || FCT_CommanderBonuses.BonusValue, ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and ${SERVING_COMMANDER} order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => items)
       }),
       default: [],
     },
@@ -517,6 +675,65 @@ export default {
         }
 
         return await this.database.query(`select FCT_ResearchProject.ProjectID, FCT_ResearchProject.ResSpecID, DIM_ResearchField.FieldName, FCT_ResearchProject.Facilities, FCT_TechSystem.Name as ProjectName, FCT_Population.PopName, (select FCT_Commander.CommanderID from FCT_Commander where FCT_Commander.CommandID = FCT_ResearchProject.ProjectID and FCT_Commander.CommandType = 7 and FCT_Commander.RaceID = FCT_ResearchProject.RaceID and FCT_Commander.Deceased = 0 limit 1) as ScientistID from FCT_ResearchProject left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_ResearchProject.ResSpecID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`).then(([items]) => items)
+      }),
+      default: [],
+    },
+    // Commanders of the race no longer serving: prisoners of another race, and retired or dead
+    // commanders the player kept. A prisoner's captor is the race owning the ship or colony that
+    // holds them, named as this race knows it.
+    former: {
+      get: tracked('former', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.StoryCharacter, FCT_Commander.Notes, FCT_Commander.KillTonnageMilitary, FCT_Commander.KillTonnageCommercial, FCT_Commander.CareerStart, FCT_Commander.RetireStatus, FCT_Commander.Prisoner, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, coalesce(FCT_Species.GraduationAge, 21) as GraduationAge, FCT_Game.GameTime, coalesce(VIR_HoldShip.RaceID, VIR_HoldColony.RaceID) as CaptorID, FCT_AlienRace.AlienRaceName as CaptorName, VIR_Bonuses.Bonuses, VIR_Medals.Medals, VIR_Medals.MedalCount
+          from FCT_Commander
+          inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID
+          left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID
+          left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID
+          left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3
+          left join FCT_Ship as VIR_HoldShip on VIR_HoldShip.ShipID = FCT_Commander.TransportShipID and VIR_HoldShip.RaceID <> FCT_Commander.RaceID
+          left join FCT_Population as VIR_HoldColony on VIR_HoldColony.PopulationID = FCT_Commander.PopLocationID and VIR_HoldColony.RaceID <> FCT_Commander.RaceID
+          left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Commander.GameID and FCT_AlienRace.ViewRaceID = FCT_Commander.RaceID and FCT_AlienRace.AlienRaceID = coalesce(VIR_HoldShip.RaceID, VIR_HoldColony.RaceID)
+          left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || FCT_CommanderBonuses.BonusValue, ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID
+          left join (select FCT_CommanderMedal.CommanderID, group_concat(coalesce(FCT_RaceMedals.MedalName, 'Medal') || case when FCT_CommanderMedal.NumAwarded > 1 then ' ×' || FCT_CommanderMedal.NumAwarded else '' end, ', ') as Medals, sum(FCT_CommanderMedal.NumAwarded) as MedalCount from FCT_CommanderMedal inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderMedal.CommanderID left join FCT_RaceMedals on FCT_RaceMedals.MedalID = FCT_CommanderMedal.MedalID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderMedal.CommanderID) as VIR_Medals on VIR_Medals.CommanderID = FCT_Commander.CommanderID
+          where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and not (${SERVING_COMMANDER})`).then(([items]) => items)
+      }),
+      default: [],
+    },
+    // The career records of those commanders, newest first, by CommanderID.
+    formerHistory: {
+      get: tracked('formerHistory', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        const [rows] = await this.database.query(`select FCT_CommanderHistory.CommanderID, FCT_CommanderHistory.GameTime, FCT_CommanderHistory.HistoryText from FCT_CommanderHistory inner join FCT_Commander on FCT_Commander.CommanderID = FCT_CommanderHistory.CommanderID where FCT_CommanderHistory.GameID = ${this.GameID} and FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and not (${SERVING_COMMANDER}) order by FCT_CommanderHistory.GameTime desc, FCT_CommanderHistory.rowid desc`)
+        const history = {}
+
+        rows.forEach((row) => {
+          (history[row.CommanderID] = history[row.CommanderID] || []).push(row)
+        })
+
+        return history
+      }),
+      default: {},
+    },
+    // Other races' commanders this race holds prisoner, on its ships or at its colonies.
+    held: {
+      get: tracked('held', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_AlienRace.AlienRaceName, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, FCT_Commander.Processed, VIR_Ship.ShipName, VIR_Colony.PopName
+          from FCT_Commander
+          left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.TransportShipID and VIR_Ship.RaceID = ${this.RaceID}
+          left join FCT_Population as VIR_Colony on VIR_Colony.PopulationID = FCT_Commander.PopLocationID and VIR_Colony.RaceID = ${this.RaceID}
+          left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Commander.GameID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.AlienRaceID = FCT_Commander.RaceID
+          left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID
+          where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID <> ${this.RaceID} and FCT_Commander.Prisoner = 1 and (VIR_Ship.ShipID is not null or VIR_Colony.PopulationID is not null)`).then(([items]) => items)
       }),
       default: [],
     },
@@ -574,6 +791,16 @@ export default {
     line-height: 20px;
     white-space: nowrap;
     background: rgba(0, 0, 0, 0.06);
+  }
+
+  .career-line {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .career-date {
+    display: inline-block;
+    width: 96px;
   }
 }
 

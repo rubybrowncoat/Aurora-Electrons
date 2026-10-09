@@ -37,6 +37,35 @@ export const SURVEY = 2
 export const MINING = 6
 export const TERRAFORMING = 9
 
+// `FCT_Commander.RetireStatus` (the game's AuroraRetirementStatusEnum). `kind` sorts them for the
+// Former panel.
+export const RETIRE_STATUSES = {
+  1: { label: 'Killed in naval combat', kind: 'dead' },
+  2: { label: 'Retired: old age', kind: 'retired' },
+  3: { label: 'Retired: medical condition', kind: 'retired' },
+  4: { label: 'Retired when their ship was decommissioned', kind: 'retired' },
+  5: { label: 'Retired by order of High Command', kind: 'retired' },
+  6: { label: 'Captured', kind: 'prisoner' },
+  7: { label: 'Honourable discharge', kind: 'retired' },
+  8: { label: 'Killed in an accident', kind: 'dead' },
+  9: { label: 'Died of natural causes', kind: 'dead' },
+  10: { label: 'Died of life support failure', kind: 'dead' },
+  11: { label: 'Killed in ground combat', kind: 'dead' },
+  12: { label: 'Died in a life pod', kind: 'dead' },
+  13: { label: 'Killed in boarding combat', kind: 'dead' },
+  14: { label: 'Executed', kind: 'dead' },
+}
+
+// SQL condition for the commanders still serving. The game saves a retired or dead commander only
+// when the player keeps them (`RetainRetired`) or they are a prisoner (2.7.1 source,
+// Game.SaveCommanders); `RetireStatus` is 0 while they serve, and a captured one keeps 0 with
+// `Prisoner` set.
+export const SERVING_COMMANDER = 'FCT_Commander.RetireStatus = 0 and FCT_Commander.Prisoner = 0'
+
+// 'prisoner', 'dead' or 'retired' for an FCT_Commander row. A prisoner who is discharged or
+// executed in captivity keeps the flag, so the status decides first.
+export const formerKind = ({ RetireStatus, Prisoner }) => (RETIRE_STATUSES[RetireStatus] || {}).kind || (Prisoner ? 'prisoner' : 'retired')
+
 const EPSILON = 1e-9
 
 // "6:1.15,25:6" -> { 6: 1.15, 25: 6 }

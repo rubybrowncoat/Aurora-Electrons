@@ -59,6 +59,7 @@ import PathView from '../components/research/PathView.vue'
 import { statusStyle } from '../components/research/status-style'
 import countFormat from '../mixins/count-format'
 import { gameTime, toBoolean } from '../utilities/aurora'
+import { SERVING_COMMANDER } from '../utilities/commanders'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { sectionById } from '../utilities/navigation'
 import { ACTIVE, AVAILABLE, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, groupTechs, LOCKED, QUEUED, researchState, scheduleProjects } from '../utilities/research'
@@ -417,7 +418,7 @@ export default {
         const [rows] = await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.ResSpecID, coalesce(JOI_Research.BonusValue, 1) as ResearchBonus, coalesce(JOI_Admin.BonusValue, 0) as MaxLabs from FCT_Commander
           left join FCT_CommanderBonuses as JOI_Research on JOI_Research.CommanderID = FCT_Commander.CommanderID and JOI_Research.BonusID = 3
           left join FCT_CommanderBonuses as JOI_Admin on JOI_Admin.CommanderID = FCT_Commander.CommanderID and JOI_Admin.BonusID = 27
-          where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType = 3 and FCT_Commander.CommandType = 0 and FCT_Commander.Deceased = 0`)
+          where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType = 3 and FCT_Commander.CommandType = 0 and ${SERVING_COMMANDER}`)
 
         return Object.freeze(rows)
       }),
