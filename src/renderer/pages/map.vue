@@ -86,14 +86,16 @@
       <v-card class="panel map-card" elevation="1">
         <div class="panel-head">
           <span class="legend">
-            <span v-for="item in legend" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading' }">
-              <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid' }" />
-              <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
-              <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
-              <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
-              <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
-              <span v-else-if="item.kind !== 'heading'" class="dot" :style="{ background: item.color }" />
-              {{ item.label }}
+            <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
+              <span v-for="item in row" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading' }">
+                <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid' }" />
+                <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
+                <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
+                <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
+                <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
+                <span v-else-if="item.kind !== 'heading'" class="dot" :style="{ background: item.color }" />
+                {{ item.label }}
+              </span>
             </span>
           </span>
         </div>
@@ -325,17 +327,20 @@ const blend = (hex, background, alpha) => {
 
 const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')}, ${alpha})`
 
+const MARKER_BASE_SIZE = 44
+const MIN_MARKER_PIXELS = 12
+
 // 44 units across for a system with nobody in it, growing towards 104 with colonies and people.
 const markerSize = (colonies, population) => {
   if (!colonies) {
-    return 44
+    return MARKER_BASE_SIZE
   }
 
   const count = Math.log1p(colonies) / Math.log1p(100)
   const people = Math.log1p(Math.max(0, population)) / Math.log1p(10000)
   const blended = Math.exp(0.3 * Math.log(Math.max(1e-9, count)) + 0.7 * Math.log(Math.max(1e-9, people)))
 
-  return Math.round(44 + 60 * (blended / (1 + blended)))
+  return Math.round(MARKER_BASE_SIZE + 60 * (blended / (1 + blended)))
 }
 
 // The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted
@@ -1017,6 +1022,21 @@ export default {
       return items
     },
 
+    legendRows() {
+      const layer = []
+      const borders = []
+
+      this.legend.forEach((item) => {
+        (item.kind === 'area' || item.kind === 'heading' ? borders : layer).push(item)
+      })
+
+      if (borders.length && borders[0].kind !== 'heading') {
+        borders.unshift({ kind: 'heading', label: 'Borders:' })
+      }
+
+      return [layer, borders].filter((row) => row.length)
+    },
+
     arrangeModeHint() {
       return ARRANGE_MODES.find((option) => option.value === this.arrange.mode).hint
     },
@@ -1134,6 +1154,7 @@ export default {
     // Where the borders' names go, worked out again when the systems or the borders change.
     this.labelPlaces = null
     this.ringScale = 1
+    this.markerMinimum = MARKER_BASE_SIZE
     // `?system=<SystemID>` opens the map on that system.
     this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
   },
@@ -1245,8 +1266,8 @@ export default {
         {
           selector: 'node',
           style: {
-            width: 'data(size)',
-            height: 'data(size)',
+            width: (node) => this.displaySize(node.data('size')),
+            height: (node) => this.displaySize(node.data('size')),
             'background-color': 'data(fill)',
             'border-color': 'data(border)',
             'border-width': 'data(borderWidth)',
@@ -1275,21 +1296,21 @@ export default {
             'min-zoomed-font-size': 9,
           },
         },
-        // `ringScale` follows the zoom; `setRingScale` restyles these when it changes.
+        // Rings follow the zoom; `setZoomStyle` restyles them with the marker sizes.
         {
           selector: 'node[borderStyle = "dotted"]',
           style: {
             'border-style': 'dashed',
             'border-cap': 'round',
             'border-width': (node) => node.data('borderWidth') * this.ringScale,
-            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DOTS),
+            'border-dash-pattern': (node) => ringPattern(this.displaySize(node.data('size')), this.ringScale, RING_DOTS),
           },
         },
         {
           selector: 'node[borderStyle = "dashed"]',
           style: {
             'border-width': (node) => node.data('borderWidth') * this.ringScale,
-            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DASHES),
+            'border-dash-pattern': (node) => ringPattern(this.displaySize(node.data('size')), this.ringScale, RING_DASHES),
           },
         },
         {
@@ -1415,7 +1436,7 @@ export default {
       graph.on('scrollzoom pinchzoom dragpan', () => {
         this.fitted = false
       })
-      graph.on('zoom', () => this.setRingScale(ringScaleAt(graph.zoom())))
+      graph.on('zoom', () => this.setZoomStyle(graph.zoom()))
       graph.on('add remove position data', () => {
         this.labelPlaces = null
       })
@@ -1443,9 +1464,23 @@ export default {
       this.resizeObserver.observe(this.$refs.stage)
     },
 
-    setRingScale(scale) {
-      if (scale !== this.ringScale) {
-        this.ringScale = scale
+    displaySize(size) {
+      return Math.max(size, this.markerMinimum)
+    },
+
+    setZoomStyle(zoom) {
+      const minimum = Math.max(MARKER_BASE_SIZE, MIN_MARKER_PIXELS / zoom)
+      const scale = ringScaleAt(zoom)
+      const resized = minimum !== this.markerMinimum
+      const ringsChanged = scale !== this.ringScale
+
+      this.markerMinimum = minimum
+      this.ringScale = scale
+
+      if (resized) {
+        this.labelPlaces = null
+        this.graph.nodes().updateStyle()
+      } else if (ringsChanged) {
         this.graph.nodes('[borderStyle != "solid"]').updateStyle()
       }
     },
@@ -1460,14 +1495,14 @@ export default {
 
     // Where the borders find a system: its place on the map now, or nothing before it is added, and
     // its marker's size.
-    borderGeometry() {
+    borderGeometry(minimum = this.markerMinimum) {
       return {
         positionOf: (id) => {
           const node = this.graph.getElementById(id)
 
           return node.nonempty() ? node.position() : null
         },
-        sizeOf: (id) => this.rowById[id].size,
+        sizeOf: (id) => Math.max(this.rowById[id].size, minimum),
       }
     },
 
@@ -1522,7 +1557,7 @@ export default {
     paintMinimap(context, scale) {
       const { colors } = this
 
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom: scale })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(MARKER_BASE_SIZE), zoom: scale })
       context.lineWidth = 1 / scale
       context.strokeStyle = colors.link
       context.beginPath()
@@ -2047,24 +2082,25 @@ export default {
       const graph = this.graph
       // cytoscape renders its PNG at `scale` times the device pixel ratio.
       const scale = 2 * (window.devicePixelRatio || 1)
-      const geometry = this.borderGeometry()
+      const geometry = this.borderGeometry(MARKER_BASE_SIZE)
 
       try {
         const image = new Image()
         let systems
+        let places
 
-        // The PNG is drawn at zoom 1, which wants the rings, and the bounds they take, at their own
-        // size. They are back before the map on screen is drawn again.
-        this.setRingScale(1)
+        // Export at zoom 1, without the screen's minimum-size enlargement. Restore the interactive
+        // marker sizes and rings before the next frame.
+        this.setZoomStyle(1)
 
         try {
-          systems = graph.elements().boundingBox()
+          systems = graph.elements().boundingBox({ useCache: false })
           image.src = graph.png({ full: true, scale: 2 })
+          places = this.borderLabels()
         } finally {
-          this.setRingScale(ringScaleAt(graph.zoom()))
+          this.setZoomStyle(graph.zoom())
         }
 
-        const places = this.borderLabels()
         const borders = bordersBox(this.borderParts, geometry, places) || systems
         const x1 = Math.min(systems.x1, borders.x1) - 20
         const y1 = Math.min(systems.y1, borders.y1) - 20
@@ -2074,11 +2110,15 @@ export default {
         canvas.width = Math.ceil((Math.max(systems.x2, borders.x2) + 20 - x1) * scale)
         canvas.height = Math.ceil((Math.max(systems.y2, borders.y2) + 20 - y1) * scale)
         await image.decode()
-        context.fillStyle = this.theme.surface
-        context.fillRect(0, 0, canvas.width, canvas.height)
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
         drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
         context.setTransform(1, 0, 0, 1, 0, 0)
+        // Border painting cuts out its interiors. Fill behind the finished layer so its tint
+        // blends over the map's base colour, not transparency or the card surface.
+        context.globalCompositeOperation = 'destination-over'
+        context.fillStyle = window.getComputedStyle(this.$refs.stage).backgroundColor
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        context.globalCompositeOperation = 'source-over'
         context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))
 
         const result = await ipcRenderer.invoke('save-png', canvas.toDataURL('image/png').split(',')[1], `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`)
@@ -2214,9 +2254,16 @@ export default {
 
   .legend {
     display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .legend-row {
+    display: flex;
     flex-wrap: wrap;
     gap: 4px 16px;
-    font-size: 12px;
   }
 
   .legend-item {
