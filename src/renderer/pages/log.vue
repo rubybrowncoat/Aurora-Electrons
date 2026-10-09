@@ -88,6 +88,7 @@
                   <!-- Vuetify activates a row on Enter, even from a child link; keep link keys on the link. -->
                   <v-btn v-if="row.event.KnownSystemID && (!row.group || row.sameSystem)" icon x-small :to="systemLink(row.event)" :style="{ color: 'inherit' }" :aria-label="`Open ${row.event.SystemName} on the Galaxy Map`" :title="`Galaxy Map: ${row.event.SystemName}`" @click.stop @keydown.native.stop><v-icon small>mdi-map-outline</v-icon></v-btn>
                   <v-btn v-if="row.event.SystemBodyID && (!row.group || row.sameColony)" icon x-small :to="bodyLink(row.event)" :style="{ color: 'inherit' }" :aria-label="`Open ${row.event.ColonyName} in the Colonization Planner`" :title="`Colonization Planner: ${row.event.ColonyName}`" @click.stop @keydown.native.stop><v-icon small>mdi-earth</v-icon></v-btn>
+                  <v-btn icon x-small :style="{ color: 'inherit' }" :aria-label="`Hide ${row.event.TypeName} events`" :title="`Hide ${row.event.TypeName} events`" @click.stop="hideType(row.event)" @keydown.native.stop><v-icon small>mdi-eye-off-outline</v-icon></v-btn>
                   <v-icon v-if="row.group" small :style="{ color: 'inherit' }">{{ expandedGroups.includes(row.key) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
                 </div>
                 <div class="event-message">
@@ -106,13 +107,14 @@
     </template>
 
     <v-dialog :value="!!detail" max-width="760" @input="(value) => { if (!value) detail = null }">
-      <v-card v-if="detail">
+      <v-card v-if="detail" class="event-detail">
         <v-card-title class="event-detail-title">{{ detail.TypeName }}<v-spacer /><v-btn icon aria-label="Close event" @click="detail = null"><v-icon>mdi-close</v-icon></v-btn></v-card-title>
-        <v-card-subtitle>{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span></v-card-subtitle>
+        <v-card-subtitle class="event-detail-meta">{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span></v-card-subtitle>
         <v-card-text class="event-detail-message" :style="eventStyle(detail)">{{ detail.MessageText }}</v-card-text>
-        <v-card-actions>
+        <v-card-actions class="event-detail-actions">
           <v-btn v-if="detail.KnownSystemID" text :to="systemLink(detail)">Galaxy Map</v-btn>
           <v-btn v-if="detail.SystemBodyID" text :to="bodyLink(detail)">Colonization Planner</v-btn>
+          <v-btn text @click="hideType(detail)">Hide event type</v-btn>
           <v-spacer />
           <v-btn text @click="detail = null">Close</v-btn>
         </v-card-actions>
@@ -671,6 +673,11 @@ export default {
       this.saveFilters()
     },
 
+    hideType(event) {
+      this.setTypes(this.selectedTypes.filter((type) => type !== event.EventType))
+      this.detail = null
+    },
+
     selectMonth(value) {
       const month = this.timeline.find((month) => month.month === value)
       this.dateFrom = month ? month.from : ''
@@ -868,13 +875,27 @@ export default {
   }
 }
 
-.event-detail-title {
-  word-break: normal;
-}
+.event-detail {
+  .event-detail-title {
+    padding: 16px 24px 8px;
+    word-break: normal;
+  }
 
-.event-detail-message {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding-top: 16px;
+  .event-detail-meta {
+    padding: 0 24px 16px;
+    margin-top: 0;
+  }
+
+  .event-detail-message {
+    padding: 16px 24px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .event-detail-actions {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
 }
 </style>
