@@ -97,6 +97,7 @@
             <div class="map-controls">
               <v-btn icon small aria-label="Centre on the capital" title="Centre on the capital" :disabled="!systemRows.length" @click="focusCapital"><v-icon small>mdi-crosshairs-gps</v-icon></v-btn>
               <v-btn icon small aria-label="Fit the map" title="Fit the map" :disabled="!systemRows.length" @click="fitView"><v-icon small>mdi-fit-to-screen</v-icon></v-btn>
+              <v-btn icon small :color="locked ? 'primary' : undefined" :aria-pressed="String(locked)" :aria-label="lockLabel" :title="lockLabel" @click="toggleLock"><v-icon small>{{ locked ? 'mdi-lock' : 'mdi-lock-open-variant-outline' }}</v-icon></v-btn>
               <v-btn icon small aria-label="Export as PNG" title="Export as PNG" :disabled="!!busy || !systemRows.length" @click="exportPng"><v-icon small>mdi-camera</v-icon></v-btn>
             </div>
             <div v-if="busy || quality" class="map-status caption">
@@ -322,6 +323,28 @@ const markerSize = (colonies, population) => {
   return Math.round(44 + 60 * (blended / (1 + blended)))
 }
 
+// The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted
+// border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out.
+// These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least
+// `least` of them round a system.
+const RING_DOTS = { dash: 0, gap: 6, least: 8 }
+const RING_DASHES = { dash: 7, gap: 4, least: 6 }
+
+// Below RING_ZOOM the rings grow thicker and their gaps wider so they still show on screen. They
+// grow in these steps, rather than smoothly, so zooming restyles the map only now and then.
+const RING_ZOOM = 0.6
+const RING_SCALES = [1, 1.25, 1.5, 2, 2.5, 3, 4]
+
+const ringScaleAt = (zoom) => RING_SCALES.find((scale) => scale >= RING_ZOOM / zoom) || RING_SCALES[RING_SCALES.length - 1]
+
+// A whole number of dashes round the ring, so none is cut short where the ring starts and ends.
+const ringPattern = (size, scale, { dash, gap, least }) => {
+  const around = Math.PI * size
+  const period = around / Math.max(least, Math.round(around / ((dash + gap) * scale)))
+
+  return [(period * dash) / (dash + gap), (period * gap) / (dash + gap)]
+}
+
 const markerImages = new Map()
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points,
@@ -446,6 +469,7 @@ export default {
       layer: 'geological',
       borders: 'none',
       linkLength: 'travel',
+      locked: false,
       arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: 'none' },
       pinned: [],
       groups: [],
@@ -917,6 +941,10 @@ export default {
     systemDialogTitle() {
       return (this.rowById[this.systemViewId] || {}).Name || 'System'
     },
+
+    lockLabel() {
+      return this.locked ? 'Unlock the map, so systems can be dragged' : 'Lock the map: dragging a system then moves the view, not the system'
+    },
   },
   watch: {
     // The map's settings are kept per game and race; another race starts a fresh map.
@@ -931,6 +959,7 @@ export default {
         this.linkLength = setting('mapLinkLength', 'travel')
         this.arrange = { ...this.arrange, ...setting('mapArrange', {}) }
         this.pinned = setting('mapPinned', [])
+        this.locked = setting('mapLocked', false)
         this.groups = setting('mapGroups', [])
         this.resetGraph()
       },
@@ -964,6 +993,14 @@ export default {
       this.restyle()
     },
 
+    // A locked map's systems can't be grabbed; pressing on one pans the view as the background does.
+    locked(value) {
+      if (this.graph) {
+        this.graph.autoungrabify(value)
+        this.graph.nodes()[value ? 'panify' : 'unpanify']()
+      }
+    },
+
     '$vuetify.theme.dark'() {
       if (this.graph) {
         this.graph.style(this.stylesheet())
@@ -984,6 +1021,7 @@ export default {
     this.syncPending = false
     this.selectionQueued = false
     this.resizeObserver = null
+    this.ringScale = 1
     // `?system=<SystemID>` opens the map on that system.
     this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
   },
@@ -1024,6 +1062,11 @@ export default {
 
     saveArrange() {
       this.setSetting('mapArrange', { ...this.arrange })
+    },
+
+    toggleLock() {
+      this.locked = !this.locked
+      this.setSetting('mapLocked', this.locked)
     },
 
     alienControl(row) {
@@ -1103,6 +1146,23 @@ export default {
             'text-background-padding': 2,
             'text-background-shape': 'round-rectangle',
             'min-zoomed-font-size': 9,
+          },
+        },
+        // `ringScale` follows the zoom; `setRingScale` restyles these when it changes.
+        {
+          selector: 'node[borderStyle = "dotted"]',
+          style: {
+            'border-style': 'dashed',
+            'border-cap': 'round',
+            'border-width': (node) => node.data('borderWidth') * this.ringScale,
+            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DOTS),
+          },
+        },
+        {
+          selector: 'node[borderStyle = "dashed"]',
+          style: {
+            'border-width': (node) => node.data('borderWidth') * this.ringScale,
+            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DASHES),
           },
         },
         {
@@ -1214,6 +1274,7 @@ export default {
         layout: { name: 'preset' },
         minZoom: 0.05,
         maxZoom: 4,
+        autoungrabify: this.locked,
       })
 
       graph.on('mouseover', 'edge', (event) => event.target.addClass('hover'))
@@ -1227,6 +1288,7 @@ export default {
       graph.on('scrollzoom pinchzoom dragpan', () => {
         this.fitted = false
       })
+      graph.on('zoom', () => this.setRingScale(ringScaleAt(graph.zoom())))
       // The borders lie on a canvas under cytoscape's, drawn again after each frame it draws.
       graph.on('render', () => this.paintBorders())
 
@@ -1249,6 +1311,13 @@ export default {
         this.minimap.refresh()
       })
       this.resizeObserver.observe(this.$refs.stage)
+    },
+
+    setRingScale(scale) {
+      if (scale !== this.ringScale) {
+        this.ringScale = scale
+        this.graph.nodes('[borderStyle != "solid"]').updateStyle()
+      }
     },
 
     sizeBorders() {
@@ -1473,6 +1542,7 @@ export default {
             position: { ...positions[row.id] },
             locked: this.pinnedSet.has(row.id),
             selected: selected.has(row.id),
+            pannable: this.locked,
           })),
           ...this.links.list.map((link) => ({
             group: 'edges',
@@ -1820,20 +1890,30 @@ export default {
       // cytoscape renders its PNG at `scale` times the device pixel ratio.
       const scale = 2 * (window.devicePixelRatio || 1)
       const geometry = this.borderGeometry()
-      const systems = graph.elements().boundingBox()
-      const borders = bordersBox(this.borderParts, geometry) || systems
-      const x1 = Math.min(systems.x1, borders.x1) - 20
-      const y1 = Math.min(systems.y1, borders.y1) - 20
-      const canvas = document.createElement('canvas')
-
-      canvas.width = Math.ceil((Math.max(systems.x2, borders.x2) + 20 - x1) * scale)
-      canvas.height = Math.ceil((Math.max(systems.y2, borders.y2) + 20 - y1) * scale)
 
       try {
-        const context = canvas.getContext('2d')
         const image = new Image()
+        let systems
 
-        image.src = graph.png({ full: true, scale: 2 })
+        // The PNG is drawn at zoom 1, which wants the rings, and the bounds they take, at their own
+        // size. They are back before the map on screen is drawn again.
+        this.setRingScale(1)
+
+        try {
+          systems = graph.elements().boundingBox()
+          image.src = graph.png({ full: true, scale: 2 })
+        } finally {
+          this.setRingScale(ringScaleAt(graph.zoom()))
+        }
+
+        const borders = bordersBox(this.borderParts, geometry) || systems
+        const x1 = Math.min(systems.x1, borders.x1) - 20
+        const y1 = Math.min(systems.y1, borders.y1) - 20
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')
+
+        canvas.width = Math.ceil((Math.max(systems.x2, borders.x2) + 20 - x1) * scale)
+        canvas.height = Math.ceil((Math.max(systems.y2, borders.y2) + 20 - y1) * scale)
         await image.decode()
         context.fillStyle = this.theme.surface
         context.fillRect(0, 0, canvas.width, canvas.height)
