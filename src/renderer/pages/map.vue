@@ -329,6 +329,7 @@ const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice
 
 const MARKER_BASE_SIZE = 44
 const MIN_MARKER_PIXELS = 12
+const COLONY_FULL_MILLIONS = 10
 
 // 44 units across for a system with nobody in it, growing towards 104 with colonies and people.
 const markerSize = (colonies, population) => {
@@ -529,14 +530,15 @@ export default {
     colors() {
       const { categorical, inkMuted, surface, ink, primary } = this.theme
       const [blue, orange, green, amber, pink, , violet, red] = categorical
+      const outpost = blend(blue, surface, 0.35)
 
       return {
-        done: green,
-        left: orange,
+        done: this.layer === 'colonies' ? blue : green,
+        left: this.layer === 'colonies' ? outpost : orange,
         ground: pink,
         unexplored: amber,
         colony: blue,
-        outpost: blend(blue, surface, 0.35),
+        outpost,
         none: blend(inkMuted, surface, 0.3),
         ring: inkMuted,
         ink,
@@ -979,8 +981,8 @@ export default {
       } else if (this.layer === 'colonies') {
         items.push(
           { kind: 'ring', color: colors.ink, label: 'Capital' },
-          { kind: 'dot', color: colors.colony, label: 'Colonies with people' },
-          { kind: 'dot', color: colors.outpost, label: 'Colonies without' },
+          { kind: 'dot', color: colors.colony, label: `Population (full at ${COLONY_FULL_MILLIONS} M)` },
+          { kind: 'dot', color: colors.outpost, label: 'Zero people / unfilled' },
           { kind: 'dot', color: colors.none, label: 'No colony' }
         )
       } else if (this.layer === 'sectors') {
@@ -1116,6 +1118,10 @@ export default {
     },
 
     layer() {
+      if (this.graph) {
+        this.graph.style(this.stylesheet())
+      }
+
       this.restyle()
     },
 
@@ -1367,7 +1373,7 @@ export default {
       ]
     },
 
-    // A system's fill, border, survey pie and overlay for the layer shown.
+    // A system's fill, border, pie and overlay for the layer shown.
     markerData(row) {
       const { colors } = this
       let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, spots: 0, spotColor: null }
@@ -1389,11 +1395,15 @@ export default {
           spotColor: geological ? colors.ground : colors.unexplored,
         }
       } else if (this.layer === 'colonies') {
+        const share = row.colonies ? Math.min(100, (100 * Math.max(0, row.population)) / COLONY_FULL_MILLIONS) : 0
+
         marker = {
           ...marker,
-          fill: row.population > 0 ? colors.colony : row.colonies ? colors.outpost : colors.none,
+          fill: row.colonies ? colors.outpost : colors.none,
           border: row.capital ? colors.ink : row.colonies ? colors.colony : colors.ring,
           borderWidth: row.capital ? 4 : 2,
+          pieDone: share,
+          pieLeft: row.colonies ? 100 - share : 0,
         }
       } else if (this.layer === 'sectors') {
         marker.fill = (this.sectorById[row.SectorID] || {}).color || colors.none
@@ -1553,7 +1563,7 @@ export default {
     },
 
     // The overview: the borders, links and systems, without names. A system is a dot in the colour
-    // it shows most: the larger share of its survey pie, else its fill.
+    // it shows most: the larger share of its pie, else its fill.
     paintMinimap(context, scale) {
       const { colors } = this
 
