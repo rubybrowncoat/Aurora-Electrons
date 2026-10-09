@@ -185,15 +185,15 @@ export default {
         14: 'mdi-crosshairs-question', // Targeting Problem
         15: 'mdi-rocket', // Missile Launch
         16: 'mdi-ammunition', // Out of Ammo
-        17: 'mdi-rocket-off', // No Missile Assigned
+        17: 'mdi-rocket-outline', // No Missile Assigned
         18: 'mdi-timer-sand', // Weapon Reloading
         19: 'mdi-bullseye-arrow', // Chance To Hit
         20: 'mdi-bullseye', // Target Hit
-        21: 'mdi-bullseye-off', // Target Missed
+        21: 'mdi-crosshairs-off', // Target Missed
         22: 'mdi-flash-outline', // Weapon Recharging
         25: 'mdi-check-circle', // System Intact
         26: 'mdi-bomb', // Secondary Explosion
-        27: 'mdi-ferry-sink', // Ship Destroyed
+        27: 'mdi-sail-boat-sink', // Ship Destroyed
         28: 'mdi-file-document-alert', // Damage Report
         35: 'mdi-account-star', // Team Skill
         37: 'mdi-radar', // System Surveyed
@@ -249,7 +249,7 @@ export default {
         129: 'mdi-account-tie', // Command Assignment
         133: 'mdi-office-building', // Civilian Construction
         135: 'mdi-gas-station-off', // Fuel Shortage
-        138: 'mdi-asteroid', // Jump Point Detected
+        138: 'mdi-vector-link', // Jump Point Detected
         139: 'mdi-domain', // Civilian Activity
         140: 'mdi-block-helper', // Illegal Order
         141: 'mdi-diamond-stone', // New Mineral Deposit
@@ -277,10 +277,10 @@ export default {
         187: 'mdi-package-variant-closed', // Mineral Packet Contact
         191: 'mdi-ferry', // Civilian Contact
         195: 'mdi-earth-plus', // New System Discovered
-        200: 'mdi-rocket-off', // Missile Self-destruct
+        200: 'mdi-flare', // Missile Self-destruct
         201: 'mdi-timer-minus', // Overhaul Clock Reduced
         203: 'mdi-thermometer-off', // Thermal Contact Lost
-        204: 'mdi-radar-off', // GPD Contact Lost
+        204: 'mdi-access-point-off', // GPD Contact Lost
         206: 'mdi-target-account', // Hostile Contact Update
         207: 'mdi-account-question', // Neutral Contact Update
         208: 'mdi-account', // Friendly Contact Update
@@ -326,7 +326,7 @@ export default {
         284: 'mdi-terrain', // Change to Dominant Terrain
         285: 'mdi-crosshairs', // New Combat Contact
         286: 'mdi-account-cog', // Admin Command Update
-        287: 'mdi-school-off', // Training Task Abandoned
+        287: 'mdi-book-off', // Training Task Abandoned
         288: 'mdi-home-search', // Ground Survey Potential
         289: 'mdi-account-tie', // Senior Officer Required
         290: 'mdi-school', // Maximum Fleet Training
@@ -356,8 +356,8 @@ export default {
         314: 'mdi-eye', // Ground Combat Intelligence
         315: 'mdi-translate', // Alien Communication
         316: 'mdi-snowflake', // Ice Sheet Frozen
-        317: 'mdi-school-off', // Shipyard Task Abandoned
-        318: 'mdi-school-off', // Training not Possible
+        317: 'mdi-progress-close', // Shipyard Task Abandoned
+        318: 'mdi-book-off', // Training not Possible
         319: 'mdi-airplane', // Fighter Construction
         320: 'mdi-factory', // Production Started
         321: 'mdi-timer-alert', // Deployment Time Exceeded
@@ -367,7 +367,7 @@ export default {
         325: 'mdi-account-reactivate', // Commander Restored
         326: 'mdi-bomb-off', // Incorrect Ordnance
         327: 'mdi-swap-vertical', // Fleet Transfer
-        328: 'mdi-factory-off', // Installation Scrapped
+        328: 'mdi-domain-off', // Installation Scrapped
         329: 'mdi-shield-off', // Ground Units Scrapped
         330: 'mdi-shield-sun-outline', // Orbital Support Summary
         331: 'mdi-shield-sun', // Energy Point Defence
