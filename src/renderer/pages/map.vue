@@ -44,6 +44,8 @@
                 </v-select>
               </div>
               <v-checkbox v-model="arrange.diagonals" label="Allow links at 45°" dense hide-details @change="saveArrange" />
+              <div v-if="arrange.keepTogether.includes('stabilised')" class="caption text--secondary mt-2">Only jumps stabilised at both ends join a network.</div>
+              <div v-if="arrange.keepTogether.length > 1" class="caption text--secondary mt-2">With several choices, systems stay with those sharing every selected group.</div>
               <div v-if="groupList.length" class="mt-4">
                 <div class="caption text--secondary">Your groups, which come before the setting above</div>
                 <div v-for="group in groupList" :key="group.index" class="group-row">
@@ -238,14 +240,15 @@ const LAYERS = [
   { value: 'jumps', text: 'Jumps from the capital' },
 ]
 
-// What the borders go round: a sector's or an alien race's systems, the systems with the race's
-// colonies, or the systems the race rates as dangerous (the Route Finder's "avoid danger").
+// What the borders go round: sectors, alien control, colonies, danger, or connected networks.
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
   { value: 'control', text: 'Alien control', empty: 'no alien race holds a system' },
   { value: 'colonies', text: 'Your colonies', empty: 'no colonies' },
   { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
+  { value: 'stabilised', text: 'Stabilised networks', empty: 'no jumps are stabilised at both ends' },
+  { value: 'networks', text: 'Connected networks', empty: 'no systems have explored links' },
 ]
 
 // How long the free layouts want each link.
@@ -270,11 +273,12 @@ const SPACINGS = [
   { value: 160, text: '160' },
 ]
 
-// Arrange can keep both: a system in a sector and held by an alien race stays with the systems that
-// share both. `short` names each in the field when both are chosen.
+// Arrange combines the chosen kinds: systems stay with those sharing all of them.
+// `short` names each kind in the field when several are chosen.
 const KEEP_TOGETHER = [
   { value: 'sectors', text: 'Sectors', short: 'sectors' },
   { value: 'control', text: 'Alien control', short: 'aliens' },
+  { value: 'stabilised', text: 'Stabilised networks', short: 'networks' },
 ]
 
 const PHASES = {
@@ -736,10 +740,28 @@ export default {
       return Object.fromEntries(this.controllers.map((controller) => [controller.id, controller]))
     },
 
+    stabilisedNetworks() {
+      return this.networkParts(this.links.list.filter((link) => link.gate === 'both'), 'Stabilised network')
+    },
+
+    stabilisedNetworkById() {
+      return Object.fromEntries(this.stabilisedNetworks.flatMap((part) => part.ids.map((id) => [id, part.owner.id])))
+    },
+
+    connectedNetworks() {
+      return this.networkParts(this.links.list, 'Network')
+    },
+
     // The groups the borders go round, in the legend's order (each `{ name, color }`, with `legend`
-    // where the legend says more than the name, and no `name` where the shapes go unnamed), and which
-    // group a system is in.
+    // where the legend says more than the name, and no `name` where the shapes go unnamed).
+    // Networks provide their parts too, so unstabilised shortcuts aren't drawn inside their borders.
     borderGroups() {
+      if (this.borders === 'stabilised' || this.borders === 'networks') {
+        const parts = this.borders === 'stabilised' ? this.stabilisedNetworks : this.connectedNetworks
+
+        return { owners: parts.map((part) => part.owner), parts }
+      }
+
       if (this.borders === 'sectors') {
         return { owners: this.sectors.map((sector) => this.sectorById[sector.SectorCommandID]), ownerOf: (row) => this.sectorById[row.SectorID] }
       }
@@ -765,7 +787,11 @@ export default {
 
     // The shapes the borders draw: each group's systems, split where its own links don't join them.
     borderParts() {
-      return this.borders === 'none' ? [] : groupBorders(this.systemRows, this.links.list, this.borderGroups.ownerOf)
+      if (this.borders === 'none') {
+        return []
+      }
+
+      return this.borderGroups.parts || groupBorders(this.systemRows, this.links.list, this.borderGroups.ownerOf)
     },
 
     // The legend's entries for the borders: each group with a shape on the map, and its systems.
@@ -824,7 +850,7 @@ export default {
         if (this.groupOf[row.id] !== undefined) {
           keys[row.id] = `group-${this.groupOf[row.id]}`
         } else {
-          // Both settings at once keep together the systems that share both.
+          // Several choices keep together the systems that share every selected group.
           const by = []
 
           if (this.arrange.keepTogether.includes('sectors') && row.SectorID) {
@@ -833,6 +859,10 @@ export default {
 
           if (this.arrange.keepTogether.includes('control') && this.alienControl(row)) {
             by.push(`control-${row.ControlRaceID}`)
+          }
+
+          if (this.arrange.keepTogether.includes('stabilised') && this.stabilisedNetworkById[row.id]) {
+            by.push(`stabilised-${this.stabilisedNetworkById[row.id]}`)
           }
 
           if (by.length) {
@@ -1144,6 +1174,21 @@ export default {
 
     saveArrange() {
       this.setSetting('mapArrange', { ...this.arrange })
+    },
+
+    networkParts(links, label) {
+      const owner = {}
+      const parts = groupBorders(this.systemRows, links, () => owner).filter((part) => part.links.length)
+
+      // A network needs at least one link. Sort by size and lowest system ID so its name and
+      // colour don't depend on the order the save returned its systems or jump points.
+      parts.forEach((part) => part.ids.sort((a, b) => Number(a) - Number(b)))
+      parts.sort((a, b) => b.ids.length - a.ids.length || Number(a.ids[0]) - Number(b.ids[0]))
+      parts.forEach((part, index) => {
+        part.owner = { id: part.ids[0], name: `${label} ${index + 1}`, color: this.theme.categorical[index % this.theme.categorical.length] }
+      })
+
+      return parts
     },
 
     toggleLock() {
