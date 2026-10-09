@@ -9,16 +9,19 @@
     <v-container v-else fluid class="history-page">
       <v-row dense align="center" class="mb-1">
         <v-col class="caption text--secondary">
-          <template v-if="snapshots.length">{{ snapshots.length }} {{ snapshots.length === 1 ? 'snapshot' : 'snapshots' }}, {{ snapshots.length > 1 ? `${date(snapshots[0].t)} to ${date(snapshots[snapshots.length - 1].t)}` : date(snapshots[0].t) }}.</template>
+          <template v-if="allSnapshots.length">{{ allSnapshots.length }} {{ allSnapshots.length === 1 ? 'snapshot' : 'snapshots' }}, {{ allSnapshots.length > 1 ? `${date(allSnapshots[0].t)} to ${date(allSnapshots[allSnapshots.length - 1].t)}` : date(allSnapshots[0].t) }}.</template>
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
         </v-col>
         <v-col cols="auto">
+          <v-btn-toggle :value="span" mandatory dense class="mr-2" @change="setSpan">
+            <v-btn v-for="option in spanOptions" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>
+          </v-btn-toggle>
           <v-btn-toggle v-model="view" mandatory dense>
             <v-btn value="charts" small><v-icon small>mdi-chart-line</v-icon></v-btn>
             <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
           </v-btn-toggle>
-          <v-btn small text :disabled="!snapshots.length" class="ml-2" @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
-          <v-btn small text color="error" :disabled="!snapshots.length" @click="confirmClear = true">Clear</v-btn>
+          <v-btn small text :disabled="!allSnapshots.length" class="ml-2" @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
+          <v-btn small text color="error" :disabled="!allSnapshots.length" @click="confirmClear = true">Clear</v-btn>
         </v-col>
       </v-row>
 
@@ -29,7 +32,7 @@
         The latest save couldn't be read for a snapshot (the game may have been writing it), so this history is missing it. The app tries again at the next save. The console has the details.
       </v-alert>
 
-      <v-alert v-if="!snapshots.length" type="info" outlined dense class="mt-3">
+      <v-alert v-if="!allSnapshots.length" type="info" outlined dense class="mt-3">
         No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <router-link to="/finances">Finances</router-link>.
       </v-alert>
 
@@ -44,7 +47,7 @@
           </v-col>
         </v-row>
 
-        <v-alert v-if="snapshots.length === 1" type="info" outlined dense class="mt-4">
+        <v-alert v-if="allSnapshots.length === 1" type="info" outlined dense class="mt-4">
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
 
@@ -92,7 +95,7 @@
       <v-dialog v-model="confirmClear" max-width="440">
         <v-card>
           <v-card-title>Clear this race's history?</v-card-title>
-          <v-card-text>This deletes the {{ snapshots.length }} snapshots the app has recorded for this race. The save isn't touched, and recording starts again at the next save.</v-card-text>
+          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race. The save isn't touched, and recording starts again at the next save.</v-card-text>
           <v-card-actions>
             <v-spacer />
             <v-btn text @click="confirmClear = false">Cancel</v-btn>
@@ -115,6 +118,8 @@ import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 
 const SECONDS_PER_YEAR = 31536000
+// How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
+const SPAN_OPTIONS = [10, 20, 50].map((years) => ({ value: years, text: `${years} y`, title: `The last ${years} years` })).concat({ value: 0, text: 'All', title: 'Every snapshot' })
 // Installation types charted when the player hasn't picked any: the largest by count.
 const DEFAULT_INSTALLATIONS = 5
 
@@ -157,6 +162,8 @@ export default {
       installationIds: null,
       rivalMetric: 'population',
       rivalMetrics: RIVAL_METRICS,
+      span: 0,
+      spanOptions: SPAN_OPTIONS,
       // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
       spyNPR: false,
       // Bumped when this page clears the history, so `gameHistory` re-reads it.
@@ -197,8 +204,19 @@ export default {
       return this.$store.state.history.failures.find(({ GameID }) => GameID === null || GameID === Number(this.GameID)) || null
     },
 
-    snapshots() {
+    // Every snapshot recorded for the race; the CSV and Clear work on these.
+    allSnapshots() {
       return this.record && Array.isArray(this.record.snapshots) ? this.record.snapshots : []
+    },
+
+    // The first game time shown: `span` years before the latest snapshot, or the start.
+    since() {
+      return this.span && this.allSnapshots.length ? this.allSnapshots[this.allSnapshots.length - 1].t - this.span * SECONDS_PER_YEAR : -Infinity
+    },
+
+    // The snapshots in the chosen span, for the tiles, charts and table.
+    snapshots() {
+      return this.allSnapshots.filter((snapshot) => snapshot.t >= this.since)
     },
 
     latest() {
@@ -315,7 +333,7 @@ export default {
 
         return {
           label: record.raceName || `Race ${RaceID}`,
-          data: record.snapshots.map((snapshot) => ({ x: this.year(snapshot.t), y: metric.pick(snapshot) || 0 })),
+          data: record.snapshots.filter((snapshot) => snapshot.t >= this.since).map((snapshot) => ({ x: this.year(snapshot.t), y: metric.pick(snapshot) || 0 })),
           borderColor: color,
           backgroundColor: withAlpha(color, 0.1),
           borderWidth: selected ? 3 : 1.5,
@@ -363,6 +381,7 @@ export default {
         this.mineralIds = this.config.get('historyMinerals', [1, 2, 11])
         this.rivalMetric = this.config.get('historyRivalsMetric', 'population')
         this.installationIds = this.config.get(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, null)
+        this.span = this.config.get('historySpan', 0)
       },
     },
   },
@@ -413,6 +432,10 @@ export default {
       this.rivalMetric = value
       this.config.set('historyRivalsMetric', value)
     },
+    setSpan(value) {
+      this.span = value
+      this.config.set('historySpan', value)
+    },
     // Remove this race from the game's history file; other races keep theirs.
     clearHistory() {
       const store = historyConfig(this.GameID)
@@ -431,7 +454,7 @@ export default {
       const installationIds = Object.keys(names).map(Number)
       const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id])]
       const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-      const rows = this.snapshots.map((snapshot) => [snapshot.t, this.date(snapshot.t), snapshot.population, snapshot.colonies, snapshot.wealth, snapshot.income, snapshot.fuel, snapshot.msp, ...MINERALS.map((mineral) => (snapshot.minerals || [])[mineral.id - 1] || 0), snapshot.militaryShips, snapshot.militaryTons, snapshot.commercialShips, snapshot.commercialTons, snapshot.research, snapshot.systems, snapshot.commanders, ...installationIds.map((id) => (snapshot.installations || {})[id] || 0)])
+      const rows = this.allSnapshots.map((snapshot) => [snapshot.t, this.date(snapshot.t), snapshot.population, snapshot.colonies, snapshot.wealth, snapshot.income, snapshot.fuel, snapshot.msp, ...MINERALS.map((mineral) => (snapshot.minerals || [])[mineral.id - 1] || 0), snapshot.militaryShips, snapshot.militaryTons, snapshot.commercialShips, snapshot.commercialTons, snapshot.research, snapshot.systems, snapshot.commanders, ...installationIds.map((id) => (snapshot.installations || {})[id] || 0)])
       const csv = [header, ...rows].map((row) => row.map(quote).join(',')).join('\n')
       const link = document.createElement('a')
 
