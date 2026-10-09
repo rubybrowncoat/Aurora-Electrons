@@ -23,7 +23,7 @@
     "node": ">=22.12.0"
   },
   "devDependencies": {
-    "@mdi/font": "^6.4.95",
+    "@mdi/font": "^7.4.47",
     "@nuxtjs/eslint-config-typescript": "8.0.0",
     "@sentry/vue": "^11.5.0",
     "@timohausmann/quadtree-js": "^1.2.6",
@@ -31,13 +31,13 @@
     "chart.js": "^4.5.1",
     "chokidar": "^4.0.3",
     "color-hash": "^2.0.2",
-    "cytoscape": "^3.33.1",
+    "cytoscape": "^3.34.3",
     "cytoscape-cola": "^2.5.1",
     "cytoscape-cxtmenu": "^3.5.0",
     "cytoscape-fcose": "^2.2.0",
     "cytoscape-navigator": "^2.0.2",
-    "d3-color": "^2.0.0",
-    "dayjs": "^1.11.18",
+    "d3-color": "^3.1.0",
+    "dayjs": "^1.11.23",
     "electron": "^44.7.0",
     "electron-builder": "^26.0.0",
     "electron-devtools-installer": "^4.0.0",
@@ -46,10 +46,10 @@
     "env-paths": "^2.2.1",
     "eslint": "8.1.0",
     "eslint-friendly-formatter": "4.0.1",
-    "lodash": "^4.17.21",
+    "lodash": "^4.18.1",
     "pixi-viewport": "^4.35.0",
     "pixi.js": "^6.5.10",
-    "playwright": "1.56.1",
+    "playwright": "1.63.0",
     "roboto-fontface": "^0.10.0",
     "romanum": "^1.0.1",
     "sass": "^1.105.1",
@@ -62,7 +62,7 @@
     "vuex": "^3.6.2"
   },
   "dependencies": {
-    "sequelize": "^6.37.7",
+    "sequelize": "^6.37.8",
     "sqlite3": "^6.0.1"
   }
 }
