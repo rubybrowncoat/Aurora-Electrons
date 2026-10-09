@@ -6,6 +6,19 @@
 // Space left round the map inside the overview, as a share of its size.
 const MARGIN = 0.06
 
+// How far one wheel event zooms: a factor, from the wheel's movement in pixels (lines and pages
+// counted as the browsers scroll them). Holding Shift zooms twice as fast. Browsers turn a
+// Shift-wheel into a sideways scroll, so its movement comes in `deltaX`.
+const WHEEL_PIXELS = 500
+const WHEEL_PIXELS_FAST = 250
+
+export const wheelZoom = (event) => {
+  const unit = event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 800 : 1
+  const delta = (event.deltaY || event.deltaX) * unit
+
+  return Math.exp(-delta / (event.shiftKey ? WHEEL_PIXELS_FAST : WHEEL_PIXELS))
+}
+
 // `paint(context, scale)` draws the map on `context`, already transformed to map units, at `scale`
 // overview pixels to a map unit. Call `refresh` when something the graph doesn't report changes, such
 // as colours or the overview's size.
@@ -105,7 +118,7 @@ export const createMinimap = (graph, container, paint) => {
   // Zooms round the middle of the view, which the frame's middle shows.
   const onWheel = (event) => {
     event.preventDefault()
-    graph.zoom({ level: graph.zoom() * Math.exp(-event.deltaY / 500), renderedPosition: { x: graph.width() / 2, y: graph.height() / 2 } })
+    graph.zoom({ level: graph.zoom() * wheelZoom(event), renderedPosition: { x: graph.width() / 2, y: graph.height() / 2 } })
   }
 
   graph.on('add remove position data', refresh)

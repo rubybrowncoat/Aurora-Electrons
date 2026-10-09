@@ -36,7 +36,12 @@
               <div class="caption text--secondary mt-1 mb-4">{{ arrangeModeHint }}</div>
               <div class="arrange-fields">
                 <v-select v-model="arrange.spacing" :items="spacings" label="Spacing" dense outlined hide-details @change="saveArrange" />
-                <v-select v-model="arrange.keepTogether" :items="keepTogetherOptions" label="Keep together" dense outlined hide-details @change="saveArrange" />
+                <v-select v-model="arrange.keepTogether" :items="keepTogetherOptions" label="Keep together" placeholder="Nothing" persistent-placeholder multiple dense outlined hide-details @change="saveArrange">
+                  <!-- One line for what's chosen, where the select would wrap each choice onto its own. -->
+                  <template #selection="{ index }">
+                    <span v-if="index === 0" class="v-select__selection v-select__selection--comma" :title="keepTogetherLabel">{{ keepTogetherLabel }}</span>
+                  </template>
+                </v-select>
               </div>
               <v-checkbox v-model="arrange.diagonals" label="Allow links at 45°" dense hide-details @change="saveArrange" />
               <div v-if="groupList.length" class="mt-4">
@@ -79,18 +84,19 @@
       <v-card class="panel map-card" elevation="1">
         <div class="panel-head">
           <span class="legend">
-            <span v-for="item in legend" :key="item.label" class="legend-item">
+            <span v-for="item in legend" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading' }">
               <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid' }" />
               <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
               <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
               <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
-              <span v-else class="dot" :style="{ background: item.color }" />
+              <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
+              <span v-else-if="item.kind !== 'heading'" class="dot" :style="{ background: item.color }" />
               {{ item.label }}
             </span>
           </span>
         </div>
         <div class="map-body">
-          <div ref="stage" class="map-stage">
+          <div ref="stage" class="map-stage" @wheel.capture="shiftWheel">
             <canvas ref="borders" class="map-borders" />
             <div ref="canvas" class="map-canvas" aria-label="Galactic map of the known systems and their jump links" />
             <div ref="minimap" class="map-minimap" @pointerdown="fitted = false" />
@@ -207,8 +213,8 @@ import { gameTime } from '../utilities/aurora'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { bordersBox, drawBorders, groupBorders } from '../utilities/map-borders'
-import { createMinimap } from '../utilities/map-minimap'
+import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
+import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { scaleValue } from '../utilities/math'
 
 cytoscape.use(cxtmenu)
@@ -232,10 +238,14 @@ const LAYERS = [
   { value: 'jumps', text: 'Jumps from the capital' },
 ]
 
+// What the borders go round: a sector's or an alien race's systems, the systems with the race's
+// colonies, or the systems the race rates as dangerous (the Route Finder's "avoid danger").
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
-  { value: 'sectors', text: 'Sectors' },
-  { value: 'control', text: 'Alien control' },
+  { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
+  { value: 'control', text: 'Alien control', empty: 'no alien race holds a system' },
+  { value: 'colonies', text: 'Your colonies', empty: 'no colonies' },
+  { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
 ]
 
 // How long the free layouts want each link.
@@ -260,10 +270,11 @@ const SPACINGS = [
   { value: 160, text: '160' },
 ]
 
+// Arrange can keep both: a system in a sector and held by an alien race stays with the systems that
+// share both. `short` names each in the field when both are chosen.
 const KEEP_TOGETHER = [
-  { value: 'none', text: 'Nothing' },
-  { value: 'sectors', text: 'Sectors' },
-  { value: 'control', text: 'Alien control' },
+  { value: 'sectors', text: 'Sectors', short: 'sectors' },
+  { value: 'control', text: 'Alien control', short: 'aliens' },
 ]
 
 const PHASES = {
@@ -470,7 +481,7 @@ export default {
       borders: 'none',
       linkLength: 'travel',
       locked: false,
-      arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: 'none' },
+      arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [] },
       pinned: [],
       groups: [],
 
@@ -508,7 +519,7 @@ export default {
 
     colors() {
       const { categorical, inkMuted, surface, ink, primary } = this.theme
-      const [blue, orange, green, amber, pink, , violet] = categorical
+      const [blue, orange, green, amber, pink, , violet, red] = categorical
 
       return {
         done: green,
@@ -524,6 +535,7 @@ export default {
         primary,
         link: blend(inkMuted, surface, 0.6),
         gate: violet,
+        danger: red,
       }
     },
 
@@ -564,6 +576,7 @@ export default {
         colonies: system.Colonies || 0,
         population: system.Population || 0,
         capital: Boolean(system.Capital),
+        danger: system.DangerRating || 0,
         size: markerSize(system.Colonies || 0, system.Population || 0),
       }))
     },
@@ -723,18 +736,45 @@ export default {
       return Object.fromEntries(this.controllers.map((controller) => [controller.id, controller]))
     },
 
-    // The shapes the borders draw: each sector's or alien race's systems, split where its own links
-    // don't join them.
-    borderParts() {
+    // The groups the borders go round, in the legend's order (each `{ name, color }`, with `legend`
+    // where the legend says more than the name, and no `name` where the shapes go unnamed), and which
+    // group a system is in.
+    borderGroups() {
       if (this.borders === 'sectors') {
-        return groupBorders(this.systemRows, this.links.list, (row) => this.sectorById[row.SectorID])
+        return { owners: this.sectors.map((sector) => this.sectorById[sector.SectorCommandID]), ownerOf: (row) => this.sectorById[row.SectorID] }
       }
 
       if (this.borders === 'control') {
-        return groupBorders(this.systemRows, this.links.list, (row) => this.controllerById[row.ControlRaceID])
+        return { owners: this.controllers, ownerOf: (row) => this.controllerById[row.ControlRaceID] }
       }
 
-      return []
+      if (this.borders === 'colonies') {
+        const owner = { name: null, legend: 'Systems with your colonies', color: this.colors.colony }
+
+        return { owners: [owner], ownerOf: (row) => (row.colonies ? owner : null) }
+      }
+
+      if (this.borders === 'danger') {
+        const owner = { name: 'Danger', legend: 'Systems with a danger rating', color: this.colors.danger }
+
+        return { owners: [owner], ownerOf: (row) => (row.danger > 0 ? owner : null) }
+      }
+
+      return { owners: [], ownerOf: () => null }
+    },
+
+    // The shapes the borders draw: each group's systems, split where its own links don't join them.
+    borderParts() {
+      return this.borders === 'none' ? [] : groupBorders(this.systemRows, this.links.list, this.borderGroups.ownerOf)
+    },
+
+    // The legend's entries for the borders: each group with a shape on the map, and its systems.
+    borderLegend() {
+      const systems = new Map()
+
+      this.borderParts.forEach((part) => systems.set(part.owner, (systems.get(part.owner) || 0) + part.ids.length))
+
+      return this.borderGroups.owners.filter((owner) => systems.has(owner)).map((owner) => ({ owner, systems: systems.get(owner) }))
     },
 
     pinnedSet() {
@@ -764,6 +804,18 @@ export default {
       }).filter((group) => group.label)
     },
 
+    keepTogetherLabel() {
+      const chosen = KEEP_TOGETHER.filter((option) => this.arrange.keepTogether.includes(option.value))
+
+      if (chosen.length === 1) {
+        return chosen[0].text
+      }
+
+      const label = chosen.map((option) => option.short).join(', ')
+
+      return label.charAt(0).toUpperCase() + label.slice(1)
+    },
+
     // What Arrange keeps together for each system: its own group first, else the setting.
     keepTogetherKeys() {
       const keys = {}
@@ -771,10 +823,21 @@ export default {
       this.systemRows.forEach((row) => {
         if (this.groupOf[row.id] !== undefined) {
           keys[row.id] = `group-${this.groupOf[row.id]}`
-        } else if (this.arrange.keepTogether === 'sectors' && row.SectorID) {
-          keys[row.id] = `sector-${row.SectorID}`
-        } else if (this.arrange.keepTogether === 'control' && this.alienControl(row)) {
-          keys[row.id] = `control-${row.ControlRaceID}`
+        } else {
+          // Both settings at once keep together the systems that share both.
+          const by = []
+
+          if (this.arrange.keepTogether.includes('sectors') && row.SectorID) {
+            by.push(`sector-${row.SectorID}`)
+          }
+
+          if (this.arrange.keepTogether.includes('control') && this.alienControl(row)) {
+            by.push(`control-${row.ControlRaceID}`)
+          }
+
+          if (by.length) {
+            keys[row.id] = by.join(' ')
+          }
         }
       })
 
@@ -859,6 +922,10 @@ export default {
     legend() {
       const { colors } = this
       const items = []
+      // Borders round the groups the layer colours by: those entries show the border's swatch too.
+      const merged = this.borders === this.layer && (this.layer === 'sectors' || this.layer === 'control')
+      const shaped = new Set(this.borderLegend.map((entry) => entry.owner))
+      const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, label })
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
@@ -882,10 +949,10 @@ export default {
           { kind: 'dot', color: colors.none, label: 'No colony' }
         )
       } else if (this.layer === 'sectors') {
-        this.sectors.forEach((sector) => items.push({ kind: 'dot', color: this.sectorById[sector.SectorCommandID].color, label: sector.SectorName }))
+        this.sectors.forEach((sector) => items.push(group(this.sectorById[sector.SectorCommandID], sector.SectorName)))
         items.push({ kind: 'dot', color: colors.none, label: 'In no sector' })
       } else if (this.layer === 'control') {
-        this.controllers.forEach((controller) => items.push({ kind: 'dot', color: controller.color, label: `${controller.name} (${controller.systems})` }))
+        this.controllers.forEach((controller) => items.push(group(controller, `${controller.name} (${controller.systems})`)))
         items.push({ kind: 'dot', color: colors.none, label: 'Held by no alien race' })
       } else {
         items.push(
@@ -906,6 +973,15 @@ export default {
 
       if (this.pinnedCount) {
         items.push({ kind: 'icon', icon: 'mdi-lock', label: 'Pinned' })
+      }
+
+      if (this.borders !== 'none' && !merged) {
+        if (this.borderLegend.length) {
+          items.push({ kind: 'heading', label: 'Borders:' })
+          this.borderLegend.forEach(({ owner, systems }) => items.push({ kind: 'area', color: owner.color, tint: rgba(owner.color, TINT), label: `${owner.legend || owner.name} (${systems})` }))
+        } else {
+          items.push({ kind: 'heading', label: `Borders: ${BORDER_OPTIONS.find((option) => option.value === this.borders).empty}` })
+        }
       }
 
       return items
@@ -957,7 +1033,10 @@ export default {
         this.layer = setting('mapLayer', 'geological')
         this.borders = setting('mapBorders', 'none')
         this.linkLength = setting('mapLinkLength', 'travel')
-        this.arrange = { ...this.arrange, ...setting('mapArrange', {}) }
+        const arrange = setting('mapArrange', {})
+
+        // Keep together holds a list of what to keep together; an older single choice is dropped.
+        this.arrange = { ...this.arrange, ...arrange, keepTogether: Array.isArray(arrange.keepTogether) ? arrange.keepTogether : [] }
         this.pinned = setting('mapPinned', [])
         this.locked = setting('mapLocked', false)
         this.groups = setting('mapGroups', [])
@@ -978,6 +1057,7 @@ export default {
 
     // The borders and the overview draw outside cytoscape, which doesn't know when they change.
     borderParts() {
+      this.labelPlaces = null
       this.paintBorders()
 
       if (this.minimap) {
@@ -1021,6 +1101,8 @@ export default {
     this.syncPending = false
     this.selectionQueued = false
     this.resizeObserver = null
+    // Where the borders' names go, worked out again when the systems or the borders change.
+    this.labelPlaces = null
     this.ringScale = 1
     // `?system=<SystemID>` opens the map on that system.
     this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
@@ -1289,6 +1371,9 @@ export default {
         this.fitted = false
       })
       graph.on('zoom', () => this.setRingScale(ringScaleAt(graph.zoom())))
+      graph.on('add remove position data', () => {
+        this.labelPlaces = null
+      })
       // The borders lie on a canvas under cytoscape's, drawn again after each frame it draws.
       graph.on('render', () => this.paintBorders())
 
@@ -1341,6 +1426,34 @@ export default {
       }
     },
 
+    borderLabels() {
+      if (!this.labelPlaces) {
+        this.labelPlaces = placeLabels(this.$refs.borders.getContext('2d'), this.borderParts, {
+          ...this.borderGeometry(),
+          systems: this.systemRows.map((row) => row.id),
+          links: this.links.list,
+          nameOf: (id) => this.rowById[id].Name,
+        })
+      }
+
+      return this.labelPlaces
+    },
+
+    // Shift and the wheel zoom faster than cytoscape's own wheel zoom, round the pointer. This runs
+    // before cytoscape sees the wheel, which it then doesn't.
+    shiftWheel(event) {
+      if (!event.shiftKey || !this.graph || !this.$refs.canvas.contains(event.target)) {
+        return
+      }
+
+      const box = this.$refs.canvas.getBoundingClientRect()
+
+      event.preventDefault()
+      event.stopPropagation()
+      this.fitted = false
+      this.graph.zoom({ level: this.graph.zoom() * wheelZoom(event), renderedPosition: { x: event.clientX - box.left, y: event.clientY - box.top } })
+    },
+
     paintBorders() {
       const canvas = this.$refs.borders
 
@@ -1356,7 +1469,7 @@ export default {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * pan.x, ratio * pan.y)
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom) ? this.borderLabels() : null })
     },
 
     // The overview: the borders, links and systems, without names. A system is a dot in the colour
@@ -1364,7 +1477,7 @@ export default {
     paintMinimap(context, scale) {
       const { colors } = this
 
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom: scale, labels: false })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom: scale })
       context.lineWidth = 1 / scale
       context.strokeStyle = colors.link
       context.beginPath()
@@ -1906,7 +2019,8 @@ export default {
           this.setRingScale(ringScaleAt(graph.zoom()))
         }
 
-        const borders = bordersBox(this.borderParts, geometry) || systems
+        const places = this.borderLabels()
+        const borders = bordersBox(this.borderParts, geometry, places) || systems
         const x1 = Math.min(systems.x1, borders.x1) - 20
         const y1 = Math.min(systems.y1, borders.y1) - 20
         const canvas = document.createElement('canvas')
@@ -1918,7 +2032,7 @@ export default {
         context.fillStyle = this.theme.surface
         context.fillRect(0, 0, canvas.width, canvas.height)
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
-        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface })
+        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
         context.setTransform(1, 0, 0, 1, 0, 0)
         context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))
 
@@ -1941,7 +2055,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DiscoveredTime, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => rows)
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => rows)
       }),
       default: [],
     },
@@ -2063,6 +2177,29 @@ export default {
   .legend-item {
     display: inline-flex;
     align-items: center;
+  }
+
+  .legend-item--heading {
+    font-weight: 500;
+  }
+
+  // A border's swatch: its line and tint, with the layer's dot inside where both show one group.
+  .area {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 14px;
+    border: 2px solid;
+    border-radius: 6px;
+    margin-right: 6px;
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      margin: 0;
+    }
   }
 
   .dot {
@@ -2245,7 +2382,7 @@ export default {
 
 .arrange-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
