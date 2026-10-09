@@ -134,7 +134,7 @@
                     <div class="text-no-wrap">
                       <v-icon x-small>mdi-arrow-right</v-icon>
                       {{ item.to }}
-                      <v-icon v-if="item.gate" x-small :color="colors.route" title="A jump gate: ships without a jump drive can transit">mdi-gate</v-icon>
+                      <v-icon v-if="item.gate" x-small :color="colors.route" title="A stabilised jump point: ships without a jump drive can transit">mdi-gate</v-icon>
                     </div>
                     <div v-if="item.via" class="caption text--secondary">Lagrange jump from {{ item.via[0] }} to {{ item.via[1] }}</div>
                   </div>
@@ -201,7 +201,7 @@ const OPTIONS = [
   { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race you have no trade treaty with.' },
   { key: 'skipNoAutoRoute', config: 'routesSkipNoAutoRoute', default: false, label: 'Skip "no auto-route" systems', hint: 'Skips the systems you flagged to keep auto-routes out.' },
   { key: 'civilian', config: 'routesCivilian', default: false, label: 'Civilian shipping', hint: 'Keeps out of military restricted systems and jump points, as shipping lines do.' },
-  { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Jump gates only', hint: 'For ships without a jump drive: transits only where the jump point has a gate on the near side.' },
+  { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'For ships without a jump drive: transits only where the jump point is stabilised on the near side.' },
   { key: 'useLagrange', config: 'routesUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter, as fleets do unless told not to.' },
 ]
 
@@ -476,7 +476,7 @@ export default {
       const avoided = this.distanceRows.filter((row) => row.reason).length
       const out = this.distanceRows.length - reachable - avoided
       const route = this.route
-      const gates = this.legs.filter((leg) => leg.kind === 'jump' && leg.from.JumpGateStrength > 0).length
+      const stabilised = this.legs.filter((leg) => leg.kind === 'jump' && leg.from.JumpGateStrength > 0).length
       const lagrange = this.legs.filter((leg) => leg.via).length
       const noRoute = this.destination ? (this.avoidReasons[this.destination.SystemID] ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}` : 'Nothing reaches it with these options') : 'Pick a destination above, on the map or in the table'
 
@@ -484,7 +484,7 @@ export default {
         {
           label: 'Jumps',
           value: route ? this.count(route.jumps) : this.destination ? 'No route' : '—',
-          note: route ? `${gates} through jump gates${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}` : noRoute,
+          note: route ? `${stabilised} through stabilised jump points${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}` : noRoute,
         },
         {
           label: 'Distance',

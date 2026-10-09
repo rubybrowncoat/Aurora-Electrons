@@ -21,7 +21,6 @@
         "cytoscape-cola": "^2.5.1",
         "cytoscape-cxtmenu": "^3.5.0",
         "cytoscape-fcose": "^2.2.0",
-        "cytoscape-navigator": "^2.0.2",
         "d3-color": "^3.1.0",
         "dayjs": "^1.11.23",
         "electron": "^44.7.0",
@@ -597,8 +596,6 @@
     "cytoscape-cxtmenu": ["cytoscape-cxtmenu@3.5.0", "", {}, "sha512-CoqgKAxvQhmHO5fEgJdBqqR2VjwK1dNkxehc2i0MUMqY0araA13z3oP/9KkprHp9Td++KlVBz6JnncNAD76T0Q=="],
 
     "cytoscape-fcose": ["cytoscape-fcose@2.2.0", "", { "dependencies": { "cose-base": "^2.2.0" } }, "sha512-ki1/VuRIHFCzxWNrsshHYPs6L7TvLu3DL+TyIGEsRcvVERmxokbf5Gdk7mFxZnTdiGtnA4cfSmjZJMviqSuZrQ=="],
-
-    "cytoscape-navigator": ["cytoscape-navigator@2.0.2", "", {}, "sha512-TZFBLFWEMW858UOt4rzusOjtDj7YT5vNx2uCwpUuicUYbaWCHHcUROBZWO+hiuSPWpVhvGLFlOq3NBcAVYOAgw=="],
 
     "d3-color": ["d3-color@3.1.0", "", {}, "sha512-zg/chbXyeBtMQ1LbD/WSoW2DpC3I0mpmPdW+ynRTj/x2DAWYrIY7qeZIHidozwV24m4iavr15lNwIwLxRmOxhA=="],
 

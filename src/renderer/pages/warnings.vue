@@ -306,7 +306,7 @@
                 <v-expansion-panel-header class="font-weight-bold"> {{ undermannedShips.length }} ships short of crew </v-expansion-panel-header>
 
                 <v-expansion-panel-content>
-                  <div class="caption mb-2">Survey sensors, harvesters, orbital mining, maintenance, salvage, terraforming and jump-gate modules run at the share of crew aboard, cargo handling slows, and morale drops below half a crew.</div>
+                  <div class="caption mb-2">Survey sensors, harvesters, orbital mining, maintenance, salvage, terraforming and jump point stabilisation modules run at the share of crew aboard, cargo handling slows, and morale drops below half a crew.</div>
                   <v-list nav dense>
                     <v-list-item-group color="primary">
                       <v-list-item v-for="ship in undermannedShips" :key="ship.ShipID">

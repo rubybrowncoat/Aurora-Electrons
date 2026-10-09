@@ -18,9 +18,9 @@
           <div class="tool__label caption text--secondary">Colour by</div>
           <v-select v-model="layer" :items="layers" aria-label="Colour systems by" dense outlined hide-details @change="(value) => setSetting('mapLayer', value)" />
         </div>
-        <div class="tool tool--boxes">
-          <div class="tool__label caption text--secondary">Boxes</div>
-          <v-select v-model="boxes" :items="boxOptions" aria-label="Draw boxes around" dense outlined hide-details @change="(value) => setSetting('mapBoxes', value)" />
+        <div class="tool tool--borders">
+          <div class="tool__label caption text--secondary">Borders</div>
+          <v-select v-model="borders" :items="borderOptions" aria-label="Draw borders round" dense outlined hide-details @change="(value) => setSetting('mapBorders', value)" />
         </div>
         <div class="tool tool--actions">
           <v-menu v-model="arrangeMenu" offset-y left :close-on-content-click="false" max-width="400">
@@ -66,9 +66,9 @@
               <div class="caption text--secondary mt-2">{{ linkLengthHint }}</div>
               <div class="free-actions">
                 <v-btn outlined small :disabled="linkLength === 'galactic'" title="A force-directed layout that keeps linked systems close" @click="applyForces">Forces</v-btn>
-                <v-btn outlined small :disabled="boxes !== 'none'" title="Shakes the map loose and separates the systems" @click="scramble">Scramble</v-btn>
+                <v-btn outlined small title="Shakes the map loose and separates the systems" @click="scramble">Scramble</v-btn>
               </div>
-              <div class="caption text--secondary mt-2">Forces don't take galactic distances, and Scramble doesn't work with boxes.</div>
+              <div class="caption text--secondary mt-2">Forces don't take galactic distances.</div>
             </v-card>
           </v-menu>
           <v-btn outlined :disabled="!!busy || !movedIds.length" title="Put every system back where the save has it" @click="revertPositions"><v-icon small left>mdi-undo</v-icon>Revert</v-btn>
@@ -91,8 +91,9 @@
         </div>
         <div class="map-body">
           <div ref="stage" class="map-stage">
+            <canvas ref="borders" class="map-borders" />
             <div ref="canvas" class="map-canvas" aria-label="Galactic map of the known systems and their jump links" />
-            <div class="map-navigator" @pointerdown="fitted = false" />
+            <div ref="minimap" class="map-minimap" @pointerdown="fitted = false" />
             <div class="map-controls">
               <v-btn icon small aria-label="Centre on the capital" title="Centre on the capital" :disabled="!systemRows.length" @click="focusCapital"><v-icon small>mdi-crosshairs-gps</v-icon></v-btn>
               <v-btn icon small aria-label="Fit the map" title="Fit the map" :disabled="!systemRows.length" @click="fitView"><v-icon small>mdi-fit-to-screen</v-icon></v-btn>
@@ -197,7 +198,6 @@ import cytoscape from 'cytoscape'
 import cxtmenu from 'cytoscape-cxtmenu'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
-import navigator from 'cytoscape-navigator'
 
 import { chartTheme } from '../components/charts/theme'
 import SystemView from '../components/SystemView.vue'
@@ -206,15 +206,13 @@ import { gameTime } from '../utilities/aurora'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { bordersBox, drawBorders, groupBorders } from '../utilities/map-borders'
+import { createMinimap } from '../utilities/map-minimap'
 import { scaleValue } from '../utilities/math'
 
 cytoscape.use(cxtmenu)
 cytoscape.use(cola)
 cytoscape.use(fcose)
-
-if (typeof cytoscape('core', 'navigator') === 'undefined') {
-  navigator(cytoscape)
-}
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -233,7 +231,7 @@ const LAYERS = [
   { value: 'jumps', text: 'Jumps from the capital' },
 ]
 
-const BOX_OPTIONS = [
+const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors' },
   { value: 'control', text: 'Alien control' },
@@ -291,6 +289,10 @@ const nextTask = () => new Promise((resolve) => {
   channel.port1.onmessage = () => resolve()
   channel.port2.postMessage(null)
 })
+
+// The map as the player left it, per game and race: places with any unsaved moves, the view and the
+// selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
+const keptMaps = new Map()
 
 const samePlace = (a, b) => Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y)
 
@@ -442,7 +444,7 @@ export default {
       loaded: false,
 
       layer: 'geological',
-      boxes: 'none',
+      borders: 'none',
       linkLength: 'travel',
       arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: 'none' },
       pinned: [],
@@ -466,7 +468,7 @@ export default {
       systemViewId: null,
 
       layers: LAYERS,
-      boxOptions: BOX_OPTIONS,
+      borderOptions: BORDER_OPTIONS,
       linkLengths: LINK_LENGTHS,
       arrangeModes: ARRANGE_MODES,
       spacings: SPACINGS,
@@ -553,7 +555,7 @@ export default {
     },
 
     // One link per pair of systems joined by a jump point the race has explored from either
-    // side, with a gate on either end; and per system, the charted jump points still unexplored.
+    // side, stabilised at either end; and per system, the charted jump points still unexplored.
     links() {
       const byId = Object.fromEntries(this.jumpPoints.map((jumpPoint) => [jumpPoint.WarpPointID, jumpPoint]))
       const links = new Map()
@@ -695,6 +697,20 @@ export default {
 
     controllerById() {
       return Object.fromEntries(this.controllers.map((controller) => [controller.id, controller]))
+    },
+
+    // The shapes the borders draw: each sector's or alien race's systems, split where its own links
+    // don't join them.
+    borderParts() {
+      if (this.borders === 'sectors') {
+        return groupBorders(this.systemRows, this.links.list, (row) => this.sectorById[row.SectorID])
+      }
+
+      if (this.borders === 'control') {
+        return groupBorders(this.systemRows, this.links.list, (row) => this.controllerById[row.ControlRaceID])
+      }
+
+      return []
     },
 
     pinnedSet() {
@@ -857,11 +873,11 @@ export default {
       }
 
       if (this.links.list.some((link) => link.gate === 'both')) {
-        items.push({ kind: 'line', color: colors.gate, label: 'Gates at both ends' })
+        items.push({ kind: 'line', color: colors.gate, label: 'Stabilised at both ends' })
       }
 
       if (this.links.list.some((link) => link.gate === 'source' || link.gate === 'target')) {
-        items.push({ kind: 'line', color: colors.gate, dashed: true, label: 'Gate at one end (arrow: the way it lets ships through)' })
+        items.push({ kind: 'line', color: colors.gate, dashed: true, label: 'Stabilised at one end (arrow: the way it lets ships through)' })
       }
 
       if (this.pinnedCount) {
@@ -909,8 +925,9 @@ export default {
       handler() {
         const setting = (key, fallback) => this.config.get(`${this.settingsPrefix}.${key}`, fallback)
 
+        this.keepMap()
         this.layer = setting('mapLayer', 'geological')
-        this.boxes = setting('mapBoxes', 'none')
+        this.borders = setting('mapBorders', 'none')
         this.linkLength = setting('mapLinkLength', 'travel')
         this.arrange = { ...this.arrange, ...setting('mapArrange', {}) }
         this.pinned = setting('mapPinned', [])
@@ -930,8 +947,13 @@ export default {
       this.scheduleSync()
     },
 
-    boxes() {
-      this.rebuild()
+    // The borders and the overview draw outside cytoscape, which doesn't know when they change.
+    borderParts() {
+      this.paintBorders()
+
+      if (this.minimap) {
+        this.minimap.refresh()
+      }
     },
 
     layer() {
@@ -946,28 +968,27 @@ export default {
       if (this.graph) {
         this.graph.style(this.stylesheet())
         this.createMenu()
-        this.rebuild()
+        this.restyle()
       }
     },
   },
+  // The map's own state (its places, view and selection) is set by `resetGraph`, which the RaceID
+  // watcher has run by now.
   created() {
     this.graph = null
     this.menu = null
-    this.navigatorInstance = null
+    this.minimap = null
     this.layoutInstance = null
     this.run = null
-    this.syncedStart = null
     this.syncQueued = false
     this.syncPending = false
     this.selectionQueued = false
-    this.fitPending = true
-    // The view shows the whole map and the user hasn't moved it since, so a resize fits it again.
-    this.fitted = true
     this.resizeObserver = null
     // `?system=<SystemID>` opens the map on that system.
     this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
   },
   beforeDestroy() {
+    this.keepMap()
     this.run = null
 
     if (this.layoutInstance) {
@@ -978,8 +999,8 @@ export default {
       this.resizeObserver.disconnect()
     }
 
-    if (this.navigatorInstance) {
-      this.navigatorInstance.destroy()
+    if (this.minimap) {
+      this.minimap.destroy()
     }
 
     if (this.menu) {
@@ -1024,15 +1045,15 @@ export default {
     jumpPointSummary(row) {
       const linked = (this.neighbours[row.id] || []).length
       const unexplored = this.links.unexplored[row.id] || 0
-      const gates = this.links.list.filter((link) => (link.source === row.id && link.gateSource) || (link.target === row.id && link.gateTarget)).length
+      const stabilised = this.links.list.filter((link) => (link.source === row.id && link.gateSource) || (link.target === row.id && link.gateTarget)).length
       const parts = [`${linked} explored`]
 
       if (unexplored) {
         parts.push(`${unexplored} unexplored`)
       }
 
-      if (gates) {
-        parts.push(`${gates} with ${gates === 1 ? 'a gate' : 'gates'}`)
+      if (stabilised) {
+        parts.push(`${stabilised} stabilised`)
       }
 
       return parts.join(', ')
@@ -1082,25 +1103,6 @@ export default {
             'text-background-padding': 2,
             'text-background-shape': 'round-rectangle',
             'min-zoomed-font-size': 9,
-          },
-        },
-        {
-          selector: ':parent',
-          style: {
-            shape: 'round-rectangle',
-            'background-color': 'data(fill)',
-            'background-opacity': 0.12,
-            'background-image': 'none',
-            'border-color': 'data(fill)',
-            'border-width': 2,
-            'border-style': 'solid',
-            'pie-size': '0%',
-            padding: 30,
-            label: 'data(name)',
-            'font-size': 16,
-            'font-weight': 500,
-            'text-valign': 'top',
-            'text-margin-y': -4,
           },
         },
         {
@@ -1205,34 +1207,6 @@ export default {
       return { ...data, image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id)) }
     },
 
-    boxOf(row) {
-      if (this.boxes === 'sectors' && this.sectorById[row.SectorID]) {
-        return `box-sector-${row.SectorID}`
-      }
-
-      if (this.boxes === 'control' && this.controllerById[row.ControlRaceID]) {
-        return `box-control-${row.ControlRaceID}`
-      }
-
-      return undefined
-    },
-
-    boxElements() {
-      const boxes = new Map()
-
-      this.systemRows.forEach((row) => {
-        const id = this.boxOf(row)
-
-        if (id && !boxes.has(id)) {
-          const owner = this.boxes === 'sectors' ? this.sectorById[row.SectorID] : this.controllerById[row.ControlRaceID]
-
-          boxes.set(id, { group: 'nodes', data: { id, name: owner.name, fill: owner.color }, selectable: false, grabbable: false, pannable: true })
-        }
-      })
-
-      return [...boxes.values()]
-    },
-
     createGraph() {
       const graph = cytoscape({
         container: this.$refs.canvas,
@@ -1253,29 +1227,96 @@ export default {
       graph.on('scrollzoom pinchzoom dragpan', () => {
         this.fitted = false
       })
+      // The borders lie on a canvas under cytoscape's, drawn again after each frame it draws.
+      graph.on('render', () => this.paintBorders())
 
       this.graph = graph
-      this.navigatorInstance = graph.navigator({
-        container: '.map-navigator',
-        viewLiveFramerate: 0,
-        thumbnailEventFramerate: 30,
-        thumbnailLiveFramerate: false,
-        dblClickDelay: 200,
-        removeCustomContainer: false,
-        rerenderDelay: 100,
-      })
+      this.sizeBorders()
+      this.minimap = createMinimap(graph, this.$refs.minimap, (context, scale) => this.paintMinimap(context, scale))
       this.createMenu()
 
       // The side panel opening narrows the map; cytoscape only notices the window resizing. A map
       // the user hasn't moved is fitted again, so a larger window isn't left with it in a corner.
       this.resizeObserver = new ResizeObserver(() => {
+        this.sizeBorders()
         graph.resize()
 
         if (this.fitted && !this.busy) {
           graph.fit(undefined, 40)
         }
+
+        this.paintBorders()
+        this.minimap.refresh()
       })
       this.resizeObserver.observe(this.$refs.stage)
+    },
+
+    sizeBorders() {
+      const canvas = this.$refs.borders
+      const ratio = window.devicePixelRatio || 1
+
+      canvas.width = Math.round(canvas.clientWidth * ratio)
+      canvas.height = Math.round(canvas.clientHeight * ratio)
+    },
+
+    // Where the borders find a system: its place on the map now, or nothing before it is added, and
+    // its marker's size.
+    borderGeometry() {
+      return {
+        positionOf: (id) => {
+          const node = this.graph.getElementById(id)
+
+          return node.nonempty() ? node.position() : null
+        },
+        sizeOf: (id) => this.rowById[id].size,
+      }
+    },
+
+    paintBorders() {
+      const canvas = this.$refs.borders
+
+      if (!this.graph || !canvas) {
+        return
+      }
+
+      const context = canvas.getContext('2d')
+      const ratio = window.devicePixelRatio || 1
+      const zoom = this.graph.zoom()
+      const pan = this.graph.pan()
+
+      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * pan.x, ratio * pan.y)
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface })
+    },
+
+    // The overview: the borders, links and systems, without names. A system is a dot in the colour
+    // it shows most: the larger share of its survey pie, else its fill.
+    paintMinimap(context, scale) {
+      const { colors } = this
+
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom: scale, labels: false })
+      context.lineWidth = 1 / scale
+      context.strokeStyle = colors.link
+      context.beginPath()
+      this.graph.edges().forEach((edge) => {
+        const a = edge.source().position()
+        const b = edge.target().position()
+
+        context.moveTo(a.x, a.y)
+        context.lineTo(b.x, b.y)
+      })
+      context.stroke()
+      this.graph.nodes().forEach((node) => {
+        const { x, y } = node.position()
+        const done = node.data('pieDone')
+        const left = node.data('pieLeft')
+
+        context.beginPath()
+        context.arc(x, y, Math.max(node.data('size') / 2, 1.5 / scale), 0, 2 * Math.PI)
+        context.fillStyle = done || left ? (done >= left ? colors.done : colors.left) : node.data('fill')
+        context.fill()
+      })
     },
 
     // The right-click menu: Minerals and the Colonization Planner for the selection, pin or
@@ -1289,7 +1330,7 @@ export default {
 
       this.menu = this.graph.cxtmenu({
         menuRadius: 100,
-        selector: 'node:selectable',
+        selector: 'node',
         fillColor: rgba(this.theme.primary, 0.88),
         activeFillColor: rgba(this.theme.categorical[2], 0.9),
         indicatorSize: 36,
@@ -1319,18 +1360,37 @@ export default {
       })
     },
 
+    // Starts the map afresh for the game and race shown, as the player left it if they have been here.
     resetGraph() {
       if (this.graph) {
         this.graph.elements().remove()
       }
 
+      this.mapKey = this.settingsPrefix
+      this.kept = keptMaps.get(this.mapKey) || null
       this.syncedStart = null
       this.fitPending = true
-      this.fitted = true
-      this.before = null
-      this.selectedIds = []
+      // The view shows the whole map and the user hasn't moved it since, so a resize fits it again.
+      this.fitted = this.kept ? this.kept.fitted : true
+      this.before = this.kept ? this.kept.before : null
+      this.selectedIds = this.kept ? [...this.kept.selectedIds] : []
       this.movedIds = []
       this.quality = null
+    },
+
+    // Remembers the map as it is, for `resetGraph` to pick up when the player comes back to it.
+    keepMap() {
+      if (this.graph && this.syncedStart) {
+        keptMaps.set(this.mapKey, {
+          positions: this.graphPositions(),
+          syncedStart: this.syncedStart,
+          zoom: this.graph.zoom(),
+          pan: { ...this.graph.pan() },
+          fitted: this.fitted,
+          selectedIds: [...this.selectedIds],
+          before: this.before,
+        })
+      }
     },
 
     scheduleSync() {
@@ -1346,7 +1406,8 @@ export default {
     },
 
     // Brings the map in line with the save. A system the player has moved since the last sync
-    // stays where it is; the rest go where the save now has them.
+    // stays where it is; the rest go where the save now has them. Back on a map the player left,
+    // the places they left it with stand in for the graph's.
     syncGraph() {
       if (!this.ready || !this.$refs.canvas) {
         return
@@ -1362,8 +1423,9 @@ export default {
         this.createGraph()
       }
 
-      const current = this.graphPositions()
-      const previous = this.syncedStart || {}
+      const kept = this.kept
+      const current = kept ? kept.positions : this.graphPositions()
+      const previous = (kept ? kept.syncedStart : this.syncedStart) || {}
       const positions = {}
 
       this.systemRows.forEach(({ id }) => {
@@ -1376,9 +1438,16 @@ export default {
       this.syncedStart = this.startPositions
       this.buildElements(positions)
 
+      this.kept = null
+
       if (this.fitPending) {
         this.fitPending = false
-        this.graph.fit(undefined, 40)
+
+        if (kept && !kept.fitted) {
+          this.graph.viewport({ zoom: kept.zoom, pan: kept.pan })
+        } else {
+          this.graph.fit(undefined, 40)
+        }
       }
 
       this.refreshLayoutState()
@@ -1398,10 +1467,9 @@ export default {
       graph.batch(() => {
         graph.elements().remove()
         graph.add([
-          ...this.boxElements(),
           ...this.systemRows.map((row) => ({
             group: 'nodes',
-            data: { id: row.id, name: row.Name, system: true, parent: this.boxOf(row), size: row.size, ...this.markerData(row) },
+            data: { id: row.id, name: row.Name, size: row.size, ...this.markerData(row) },
             position: { ...positions[row.id] },
             locked: this.pinnedSet.has(row.id),
             selected: selected.has(row.id),
@@ -1416,20 +1484,13 @@ export default {
       this.queueSelection()
     },
 
-    // Rebuilds the elements where they stand, for new boxes or colours.
-    rebuild() {
-      if (this.graph && this.syncedStart) {
-        this.buildElements(this.graphPositions())
-      }
-    },
-
     restyle() {
       if (!this.graph) {
         return
       }
 
       this.graph.batch(() => {
-        this.graph.nodes('[?system]').forEach((node) => {
+        this.graph.nodes().forEach((node) => {
           const row = this.rowById[node.id()]
 
           if (row) {
@@ -1448,7 +1509,7 @@ export default {
       const positions = {}
 
       if (this.graph) {
-        this.graph.nodes('[?system]').forEach((node) => {
+        this.graph.nodes().forEach((node) => {
           const { x, y } = node.position()
 
           positions[node.id()] = { x, y }
@@ -1474,7 +1535,7 @@ export default {
       this.selectionQueued = true
       Promise.resolve().then(() => {
         this.selectionQueued = false
-        this.selectedIds = this.graph ? this.graph.nodes('[?system]:selected').map((node) => node.id()) : []
+        this.selectedIds = this.graph ? this.graph.nodes(':selected').map((node) => node.id()) : []
       })
     },
 
@@ -1700,7 +1761,6 @@ export default {
         ...(this.linkLength === 'auto' ? {} : { idealEdgeLength: (edge) => this.edgeLength(edge) }),
         nodeRepulsion: 15000,
         edgeElasticity: 1,
-        nestingFactor: 0,
         gravity: 0.1,
       })
     },
@@ -1754,16 +1814,42 @@ export default {
       }
     },
 
-    exportPng() {
-      const image = this.graph.png({ output: 'base64', full: true, scale: 2, bg: this.theme.surface })
+    // The whole map with its borders, at twice the screen's resolution.
+    async exportPng() {
+      const graph = this.graph
+      // cytoscape renders its PNG at `scale` times the device pixel ratio.
+      const scale = 2 * (window.devicePixelRatio || 1)
+      const geometry = this.borderGeometry()
+      const systems = graph.elements().boundingBox()
+      const borders = bordersBox(this.borderParts, geometry) || systems
+      const x1 = Math.min(systems.x1, borders.x1) - 20
+      const y1 = Math.min(systems.y1, borders.y1) - 20
+      const canvas = document.createElement('canvas')
 
-      ipcRenderer.invoke('save-png', image, `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`).then((result) => {
+      canvas.width = Math.ceil((Math.max(systems.x2, borders.x2) + 20 - x1) * scale)
+      canvas.height = Math.ceil((Math.max(systems.y2, borders.y2) + 20 - y1) * scale)
+
+      try {
+        const context = canvas.getContext('2d')
+        const image = new Image()
+
+        image.src = graph.png({ full: true, scale: 2 })
+        await image.decode()
+        context.fillStyle = this.theme.surface
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
+        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface })
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))
+
+        const result = await ipcRenderer.invoke('save-png', canvas.toDataURL('image/png').split(',')[1], `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`)
+
         if (!result?.canceled) {
           this.activateSnackbar({ color: 'success', text: 'Map exported as PNG' })
         }
-      }).catch((error) => {
+      } catch (error) {
         this.activateSnackbar({ color: 'error', text: `Couldn't export the map: ${error.message}` })
-      })
+      }
     },
   },
   asyncComputed: {
@@ -1849,7 +1935,7 @@ export default {
     min-width: 170px;
   }
 
-  .tool--boxes {
+  .tool--borders {
     flex: 0 1 140px;
     min-width: 120px;
   }
@@ -1981,6 +2067,14 @@ export default {
     background-size: 20px 20px;
   }
 
+  .map-borders {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
   .map-canvas {
     position: absolute;
     inset: 0;
@@ -1994,7 +2088,7 @@ export default {
     justify-content: center;
   }
 
-  .map-navigator {
+  .map-minimap {
     position: absolute;
     right: 12px;
     bottom: 12px;
@@ -2005,34 +2099,22 @@ export default {
     border: 1px solid var(--ae-border);
     border-radius: 4px;
     background: var(--ae-chrome);
-
-    > img {
-      max-width: 100%;
-      max-height: 100%;
-    }
+    cursor: pointer;
+    touch-action: none;
 
     > canvas {
       position: absolute;
       top: 0;
       left: 0;
-      z-index: 101;
     }
+  }
 
-    .cytoscape-navigatorView {
-      position: absolute;
-      top: 0;
-      left: 0;
-      z-index: 102;
-      cursor: move;
-      background: var(--ae-hover);
-      border: 2px solid var(--ae-primary);
-    }
-
-    .cytoscape-navigatorOverlay {
-      position: absolute;
-      inset: 0;
-      z-index: 103;
-    }
+  .map-minimap__frame {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    background: var(--ae-hover);
+    border: 2px solid var(--ae-primary);
   }
 
   .map-side {
