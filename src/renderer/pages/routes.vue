@@ -270,7 +270,8 @@ export default {
 
     // Where a route can start or end: colonies and fleets at their places in the system, systems at their centre.
     places() {
-      const systemName = (systemId) => (this.systemById[systemId] || {}).Name || ''
+      const { systemById } = this
+      const systemName = (systemId) => (systemById[systemId] || {}).Name || ''
 
       return [
         ...this.colonies.map((colony) => ({
@@ -374,6 +375,27 @@ export default {
       })
     },
 
+    // The same search with every option's limit lifted, to tell the systems the options cut off from the ones no
+    // explored route reaches at all.
+    openRoutes() {
+      if (!this.origin) {
+        return null
+      }
+
+      return searchRoutes(this.jumpPoints, [this.origin], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] })
+    },
+
+    // What keeps the destination out of reach with these options, when a route without them reaches it.
+    destinationBlockers() {
+      if (this.route || !this.destination || !this.openRoutes) {
+        return []
+      }
+
+      const open = this.destination.kind === 'system' ? this.openRoutes.toSystem(this.destination.SystemID) : this.openRoutes.toPlace(this.destination)
+
+      return open ? this.blockers(open) : []
+    },
+
     route() {
       if (!this.routes || !this.destination) {
         return null
@@ -425,36 +447,43 @@ export default {
       return rows
     },
 
+    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every
+    // dependency of theirs again.
     distanceRows() {
-      if (!this.routes) {
+      const { routes, openRoutes, origin, avoidReasons } = this
+
+      if (!routes) {
         return []
       }
 
       return this.systems.map((system) => {
-        const route = this.routes.toSystem(system.SystemID)
-        const isOrigin = this.origin && system.SystemID === this.origin.SystemID
-        const reason = isOrigin ? null : this.avoidReasons[system.SystemID] || null
+        const route = routes.toSystem(system.SystemID)
+        const isOrigin = origin && system.SystemID === origin.SystemID
+        const reason = isOrigin ? null : avoidReasons[system.SystemID] || null
+        const blocked = !route && !reason && Boolean(openRoutes.toSystem(system.SystemID))
 
         return {
           ...system,
           route,
           reason,
+          blocked,
           jumpsSort: route ? route.jumps : Infinity,
           kmSort: route ? route.km : Infinity,
-          status: isOrigin ? 'Origin' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : 'Out of reach',
+          status: isOrigin ? 'Origin' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
         }
       })
     },
 
     mapNodes() {
+      const { colors, theme, order } = this
       const onRoute = new Set(this.routeSystems)
       const ends = new Set([this.origin && this.origin.SystemID, this.destination && this.destination.SystemID])
       const reachable = this.distanceRows.filter((row) => row.route)
-      const farthest = Math.max(1, ...reachable.map((row) => (this.order === 'jumps' ? row.route.jumps : row.route.km)))
+      const farthest = Math.max(1, ...reachable.map((row) => (order === 'jumps' ? row.route.jumps : row.route.km)))
 
       return this.distanceRows.map((row) => {
         const end = ends.has(row.SystemID)
-        const reach = row.route ? (this.order === 'jumps' ? row.route.jumps : row.route.km) / farthest : null
+        const reach = row.route ? (order === 'jumps' ? row.route.jumps : row.route.km) / farthest : null
 
         return {
           SystemID: row.SystemID,
@@ -463,8 +492,8 @@ export default {
           Ycor: row.Ycor,
           rank: end ? 3 : onRoute.has(row.SystemID) ? 2 : row.route ? 1 : 0,
           size: end ? 7 : onRoute.has(row.SystemID) ? 5 : 3.5,
-          color: row.route ? withAlpha(this.colors.near, 1 - 0.65 * reach) : row.reason ? this.colors.avoided : this.colors.out,
-          ring: end ? this.theme.ink : null,
+          color: row.route ? withAlpha(colors.near, 1 - 0.65 * reach) : row.reason ? colors.avoided : colors.out,
+          ring: end ? theme.ink : null,
           label: end,
           title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${this.travelTime(row.route.km)}` : row.status}`,
         }
@@ -474,11 +503,19 @@ export default {
     tiles() {
       const reachable = this.distanceRows.filter((row) => row.route).length
       const avoided = this.distanceRows.filter((row) => row.reason).length
-      const out = this.distanceRows.length - reachable - avoided
+      const blocked = this.distanceRows.filter((row) => row.blocked).length
+      const out = this.distanceRows.length - reachable - avoided - blocked
       const route = this.route
       const stabilised = this.legs.filter((leg) => leg.kind === 'jump' && leg.from.JumpGateStrength > 0).length
       const lagrange = this.legs.filter((leg) => leg.via).length
-      const noRoute = this.destination ? (this.avoidReasons[this.destination.SystemID] ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}` : 'Nothing reaches it with these options') : 'Pick a destination above, on the map or in the table'
+      const blockers = this.destinationBlockers
+      const noRoute = !this.destination
+        ? 'Pick a destination above, on the map or in the table'
+        : this.avoidReasons[this.destination.SystemID]
+          ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}`
+          : blockers.length
+            ? `The options keep it out of reach: ${blockers.length > 3 ? `${blockers.slice(0, 3).join(', ')} and ${blockers.length - 3} more` : joinLabels(blockers)}`
+            : 'No explored jump route reaches it'
 
       return [
         {
@@ -499,7 +536,7 @@ export default {
         {
           label: 'Reachable systems',
           value: `${this.count(reachable)} of ${this.count(this.distanceRows.length)}`,
-          note: `${avoided} avoided, ${out} out of reach`,
+          note: `${avoided} avoided, ${blocked ? `${blocked} cut off by the options, ` : ''}${out} out of reach`,
         },
       ]
     },
@@ -634,6 +671,33 @@ export default {
     lagrangeName(point) {
       return systemBodyName(point, { Name: point.SystemName })
     },
+
+    // What the options would stop on a route found without them: systems they avoid, and jump points they don't
+    // transit, in route order.
+    blockers(route) {
+      const { gatesOnly, civilian } = this.options
+      const found = []
+
+      routeLegs(route).forEach((leg) => {
+        if (leg.kind !== 'jump') {
+          return
+        }
+
+        if (gatesOnly && !(leg.from.JumpGateStrength > 0)) {
+          found.push(`the unstabilised jump point in ${this.systemNameOf(leg.from.SystemID)}`)
+        } else if (civilian && leg.from.MilitaryRestricted) {
+          found.push(`the military restricted jump point in ${this.systemNameOf(leg.from.SystemID)}`)
+        }
+
+        const reason = this.avoidReasons[leg.to.SystemID]
+
+        if (reason) {
+          found.push(`${this.systemNameOf(leg.to.SystemID)} (${reason})`)
+        }
+      })
+
+      return [...new Set(found)]
+    },
   },
   asyncComputed: {
     // The known systems with what the avoid options look at: the danger rating against the protection value of
@@ -645,7 +709,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, case when FCT_RaceSysSurvey.ControlRaceID in (0, ${this.RaceID}) then null else coalesce((select FCT_AlienRace.AlienRaceName from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 'an unknown race') end as Controller, coalesce((select FCT_AlienRace.TradeTreaty from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 0) as TradeTreaty, (select sum(FCT_ShipClass.ProtectionValue) from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.GameID = ${this.GameID}) as Protection from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, case when FCT_RaceSysSurvey.ControlRaceID in (0, ${this.RaceID}) then null else coalesce((select FCT_AlienRace.AlienRaceName from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 'an unknown race') end as Controller, coalesce((select FCT_AlienRace.TradeTreaty from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 0) as TradeTreaty, (select sum(FCT_ShipClass.ProtectionValue) from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.GameID = ${this.GameID}) as Protection from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -698,7 +762,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_LagrangePoint.PlanetID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_LagrangePoint.PlanetID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
