@@ -420,8 +420,7 @@ export default {
       }))
     },
 
-    // The race's former commanders with their status, captor, last career record and age; the dead
-    // age only to their last record.
+    // The race's former commanders with their status, captor, last career record and age; the dead age only to their last record.
     formerRows() {
       const { formerHistory } = this
       return this.former.map((person) => {
@@ -589,9 +588,7 @@ export default {
     },
 
     governorEmptyText() {
-      return this.focusColonyId
-        ? `No better governor is available for ${this.focusColony ? this.focusColony.PopName : 'this colony'}.`
-        : "No unassigned administrator beats a current governor on their colony's bonuses, and no colony with a required bonus is without one."
+      return this.focusColonyId ? `No better governor is available for ${this.focusColony ? this.focusColony.PopName : 'this colony'}.` : "No unassigned administrator beats a current governor on their colony's bonuses, and no colony with a required bonus is without one."
     },
 
     linkQuery() {
@@ -603,8 +600,7 @@ export default {
     },
   },
   watch: {
-    // Choosing a bonus sorts the roster by it. While a linked commander is shown, the type that follows them, the
-    // filters it clears and this sort are for the visit only, so the stored choices stay.
+    // Choosing a bonus sorts the roster by it. While a linked commander is shown, the type that follows them, the filters it clears and this sort are for the visit only, so the stored choices stay.
     bonusId(value) {
       const table = { ...this.rosterTable, sortBy: value === null ? [] : ['selectedBonus'], sortDesc: value === null ? [] : [true] }
 
@@ -687,8 +683,7 @@ export default {
     },
   },
   asyncComputed: {
-    // Every serving commander of the race (not retired, dead or a prisoner), with rank level (1 is
-    // the lowest rank), age, assignment name, and bonuses and traits as "id:value" / "id" lists.
+    // Every serving commander of the race (not retired, dead or a prisoner), with rank level (1 is the lowest rank), age, assignment name, and bonuses and traits as "id:value" / "id" lists.
     commanders: {
       get: tracked('commanders', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -730,8 +725,7 @@ export default {
       }),
       default: [],
     },
-    // Terraformers, orbital miners, harvesters and survey ships, with their captain and science
-    // officer and whether the class has a Science Department.
+    // Terraformers, orbital miners, harvesters and survey ships, with their captain and science officer and whether the class has a Science Department.
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -752,9 +746,7 @@ export default {
       }),
       default: [],
     },
-    // Commanders of the race no longer serving: prisoners of another race, and retired or dead
-    // commanders the player kept. A prisoner's captor is the race owning the ship or colony that
-    // holds them, named as this race knows it.
+    // Commanders of the race no longer serving: prisoners of another race, and retired or dead commanders the player kept. A prisoner's captor is the race owning the ship or colony that holds them, named as this race knows it.
     former: {
       get: tracked('former', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

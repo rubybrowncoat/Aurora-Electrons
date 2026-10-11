@@ -21,9 +21,7 @@ import { pageByRoute } from '../utilities/navigation'
 
 const DEFAULT_PAGE = '/production'
 
-// Where the app starts, and where the rail's Empires entry leads: every game in the save with its empires. Picking one
-// selects it and opens the last page that showed a race's data this session, or the Production Recap. Switching from
-// the rail's Empires flyout instead keeps the page the user is on.
+// Where the app starts, and where the rail's Empires entry leads: every game in the save with its empires. Picking one selects it and opens the last page that showed a race's data this session, or the Production Recap. Switching from the rail's Empires flyout instead keeps the page the user is on.
 export default {
   components: {
     EmpireList,

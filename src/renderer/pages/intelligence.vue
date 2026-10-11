@@ -406,8 +406,7 @@ export default {
       const fleet = rebuildFleet(this.selectedShips, this.selected.Now)
       const translating = timeline.some((snapshot) => snapshot.comm === ATTEMPTING_COMMUNICATION)
       const intelDatasets = [line('Race intelligence', at('intel'), 0)]
-      // Diplomacy's axis reaches the nearest treaty or status line on each side, so where the race
-      // stands relative to them shows even with one point.
+      // Diplomacy's axis reaches the nearest treaty or status line on each side, so where the race stands relative to them shows even with one point.
       const points = timeline.map((snapshot) => snapshot.points)
       const lineAbove = DIPLOMACY_LINES.find((entry) => entry.y >= Math.max(...points))
       const lineBelow = DIPLOMACY_LINES.slice().reverse().find((entry) => entry.y <= Math.min(...points))

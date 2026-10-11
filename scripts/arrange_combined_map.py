@@ -16,8 +16,7 @@ import sqlite3
 
 def bounds(positions):
     points = list(positions.values())
-    return (min(p[0] for p in points), min(p[1] for p in points),
-            max(p[0] for p in points), max(p[1] for p in points))
+    return (min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points))
 
 
 def center(positions):
@@ -53,8 +52,7 @@ def leaf_pairs(maps, positions):
     edges = [(order[i], order[(i+1) % len(order)]) for i in range(len(order))]
     linked = {tuple(sorted(edge)) for edge in edges}
     third = set()
-    candidates = sorted((distance(a, b), a, b) for a in range(len(maps))
-                        for b in range(a+1, len(maps)) if (a, b) not in linked)
+    candidates = sorted((distance(a, b), a, b) for a in range(len(maps)) for b in range(a+1, len(maps)) if (a, b) not in linked)
     for _, a, b in candidates:
         if a not in third and b not in third:
             edges.append((a, b))
@@ -66,8 +64,7 @@ def leaf_pairs(maps, positions):
     for a, b in edges:
         left = [sid for sid in maps[a]['leaves'] if sid not in used[a]] or maps[a]['leaves']
         right = [sid for sid in maps[b]['leaves'] if sid not in used[b]] or maps[b]['leaves']
-        x, y = min(((x, y) for x in left for y in right),
-                   key=lambda pair: (math.dist(positions[pair[0]], positions[pair[1]]), pair))
+        x, y = min(((x, y) for x in left for y in right), key=lambda pair: (math.dist(positions[pair[0]], positions[pair[1]]), pair))
         used[a].add(x)
         used[b].add(y)
         result.append((x, y, 'leaf_cycle' if len(result) < len(maps) else 'leaf_extra'))
@@ -75,14 +72,10 @@ def leaf_pairs(maps, positions):
 
 
 def source_layout(source, game_id, preferred_race, system_ids, edges, seed):
-    races = source.execute('SELECT RaceID,RaceName,NPR FROM FCT_Race WHERE GameID=? ORDER BY NPR,RaceID',
-                           (game_id,)).fetchall()
+    races = source.execute('SELECT RaceID,RaceName,NPR FROM FCT_Race WHERE GameID=? ORDER BY NPR,RaceID', (game_id,)).fetchall()
     surveys = {}
     for rid, name, npr in races:
-        surveys[rid] = {sid: (float(x), float(y)) for sid, x, y in source.execute(
-            'SELECT SystemID,Xcor,Ycor FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=?',
-            (game_id, rid)) if sid in system_ids and x is not None and y is not None
-            and math.isfinite(x) and math.isfinite(y)}
+        surveys[rid] = {sid: (float(x), float(y)) for sid, x, y in source.execute('SELECT SystemID,Xcor,Ycor FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=?', (game_id, rid)) if sid in system_ids and x is not None and y is not None and math.isfinite(x) and math.isfinite(y)}
     def score(race):
         return len(set(surveys[race[0]].values()) - {(0, 0)})
     humans = [race for race in races if not race[2]]
@@ -94,9 +87,7 @@ def source_layout(source, game_id, preferred_race, system_ids, edges, seed):
             reference = max(races, key=lambda race: (score(race), not race[2], -race[0]))
     coordinates = surveys[reference[0]]
     origins = sorted(sid for sid, point in coordinates.items() if point == (0, 0))
-    capital = source.execute('SELECT SystemID FROM FCT_Population WHERE GameID=? AND RaceID=? '
-                             'ORDER BY Capital DESC,Population DESC,PopulationID LIMIT 1',
-                             (game_id, reference[0])).fetchone()
+    capital = source.execute('SELECT SystemID FROM FCT_Population WHERE GameID=? AND RaceID=? ORDER BY Capital DESC,Population DESC,PopulationID LIMIT 1', (game_id, reference[0])).fetchone()
     kept_origin = capital[0] if capital and capital[0] in origins else origins[0] if origins else None
     fixed = {sid: point for sid, point in coordinates.items() if point != (0, 0) or sid == kept_origin}
     if not fixed:
@@ -142,8 +133,7 @@ def source_layout(source, game_id, preferred_race, system_ids, edges, seed):
     movable = np.array([sid not in fixed for sid in ids])
     edge_a = np.array([index[a] for a, b in edges], dtype=int)
     edge_b = np.array([index[b] for a, b in edges], dtype=int)
-    # Local repulsion keeps new systems readable without spreading the whole map.
-    # Saved positions stay fixed through every iteration.
+    # Local repulsion keeps new systems readable without spreading the whole map. Saved positions stay fixed through every iteration.
     for step in range(240):
         dx = points[:, None, 0]-points[None, :, 0]
         dy = points[:, None, 1]-points[None, :, 1]
@@ -180,9 +170,7 @@ def pack_maps(maps, gap=140):
         feasible = []
         for dx, dy in candidates:
             rectangle = (x0+dx, y0+dy, x1+dx, y1+dy)
-            if any(not (rectangle[2]+gap <= a0+1e-6 or a1+gap <= rectangle[0]+1e-6 or
-                        rectangle[3]+gap <= b0+1e-6 or b1+gap <= rectangle[1]+1e-6)
-                   for a0, b0, a1, b1 in occupied.values()):
+            if any(not (rectangle[2]+gap <= a0+1e-6 or a1+gap <= rectangle[0]+1e-6 or rectangle[3]+gap <= b0+1e-6 or b1+gap <= rectangle[1]+1e-6) for a0, b0, a1, b1 in occupied.values()):
                 continue
             all_boxes = list(occupied.values())+[rectangle]
             width = max(r[2] for r in all_boxes)-min(r[0] for r in all_boxes)
@@ -217,8 +205,7 @@ def write_reports(manifest, destination, database):
              '- Duplicate maps match GameID and GameName; the copy with most systems is selected. Shared IDs alone imply no relationship.',
              '- Source databases, imported natural data, original jump links, empires and colonies are unchanged.',
              '- This database is for Aurora Electrons map visualization.', '',
-             'See `layout-report.json` for reference races, translations and preserved coordinates; '
-             '`merge-manifest.json` records ID translations and all generated connections.']
+             'See `layout-report.json` for reference races, translations and preserved coordinates; `merge-manifest.json` records ID translations and all generated connections.']
     (destination/'README.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     lines = ['# Added leaf-to-leaf jump connections', '',
              'Source degree is measured before adding inter-map connections: one for a leaf, zero for an isolated system.', '',
@@ -227,11 +214,9 @@ def write_reports(manifest, destination, database):
         endpoints = []
         for key in ['from_system','to_system']:
             sid = bridge[key]
-            name = database.execute('SELECT Name FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=? AND SystemID=?',
-                                    (manifest['game_id'],manifest['race_id'],sid)).fetchone()[0]
+            name = database.execute('SELECT Name FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=? AND SystemID=?', (manifest['game_id'],manifest['race_id'],sid)).fetchone()[0]
             endpoints.append(f'{name} ({sid})')
-        lines.append(f'| {endpoints[0]} | {endpoints[1]} | {bridge["source_leaf_degrees"]} | '
-                     f'{bridge["jump_ids"][0]} ↔ {bridge["jump_ids"][1]} | {bridge["kind"]} |')
+        lines.append(f'| {endpoints[0]} | {endpoints[1]} | {bridge["source_leaf_degrees"]} | {bridge["jump_ids"][0]} ↔ {bridge["jump_ids"][1]} | {bridge["kind"]} |')
     (destination/'added-connections.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 
@@ -260,32 +245,21 @@ def arrange(database, manifest_path, destination):
         source.row_factory = sqlite3.Row
         systems = [dict(r) for r in source.execute('SELECT * FROM FCT_System WHERE GameID=?', (record['game_id'],))]
         jumps = [dict(r) for r in source.execute('SELECT * FROM FCT_JumpPoint WHERE GameID=?', (record['game_id'],))]
-        mapping = {s['SystemID']: s['SystemID'] for s in systems} if i == 0 else {
-            int(k): v for k, v in record['id_maps']['SystemID'].items()}
+        mapping = {s['SystemID']: s['SystemID'] for s in systems} if i == 0 else {int(k): v for k, v in record['id_maps']['SystemID'].items()}
         by_jump = {j['WarpPointID']: j for j in jumps}
-        edges = sorted({tuple(sorted((j['SystemID'], by_jump[j['WPLink']]['SystemID'])))
-                        for j in jumps if j['WPLink'] in by_jump})
-        local, fixed, reference = source_layout(source, record['game_id'], rid if i == 0 else None,
-                                                set(mapping), edges, seed+i)
+        edges = sorted({tuple(sorted((j['SystemID'], by_jump[j['WPLink']]['SystemID']))) for j in jumps if j['WPLink'] in by_jump})
+        local, fixed, reference = source_layout(source, record['game_id'], rid if i == 0 else None, set(mapping), edges, seed+i)
         groups = components(systems, jumps)
         degrees = collections.Counter(j['SystemID'] for j in jumps if j['WPLink'])
         leaves = [mapping[sid] for sid in groups[0] if degrees[sid] <= 1]
         if not leaves:
             raise ValueError(f'No leaf systems in {record["game_name"]}')
-        maps.append(dict(file=record['file'], game_id=record['game_id'], game_name=record['game_name'],
-                         systems=list(mapping.values()), leaves=leaves,
-                         source_degrees={mapping[sid]: degrees[sid] for sid in mapping},
-                         original_components=len(groups),main_component_systems=len(groups[0]),
-                         positions={mapping[sid]: point for sid, point in local.items()},
-                         preserved={mapping[sid]: point for sid, point in fixed.items()},
-                         reference_race=dict(race_id=reference[0], name=reference[1], npr=reference[2])))
+        maps.append(dict(file=record['file'], game_id=record['game_id'], game_name=record['game_name'], systems=list(mapping.values()), leaves=leaves, source_degrees={mapping[sid]: degrees[sid] for sid in mapping}, original_components=len(groups),main_component_systems=len(groups[0]), positions={mapping[sid]: point for sid, point in local.items()}, preserved={mapping[sid]: point for sid, point in fixed.items()}, reference_race=dict(race_id=reference[0], name=reference[1], npr=reference[2])))
         source.close()
         print(f'{record["game_name"]}: preserved {len(fixed)} positions; placed {len(mapping)-len(fixed)} unpositioned systems', flush=True)
     offsets = pack_maps(maps)
-    positions = {sid: (x+offsets[i][0], y+offsets[i][1]) for i, item in enumerate(maps)
-                 for sid, (x, y) in item['positions'].items()}
-    target.executemany('UPDATE FCT_RaceSysSurvey SET Xcor=?,Ycor=? WHERE GameID=? AND RaceID=? AND SystemID=?',
-                       [(x, y, gid, rid, sid) for sid, (x, y) in positions.items()])
+    positions = {sid: (x+offsets[i][0], y+offsets[i][1]) for i, item in enumerate(maps) for sid, (x, y) in item['positions'].items()}
+    target.executemany('UPDATE FCT_RaceSysSurvey SET Xcor=?,Ycor=? WHERE GameID=? AND RaceID=? AND SystemID=?', [(x, y, gid, rid, sid) for sid, (x, y) in positions.items()])
     removed = [wid for bridge in manifest['bridges'] for wid in bridge['jump_ids']]
     target.executemany('DELETE FROM FCT_RaceJumpPointSurvey WHERE GameID=? AND WarpPointID=?', [(gid, wid) for wid in removed])
     target.executemany('DELETE FROM FCT_JumpPoint WHERE GameID=? AND WarpPointID=?', [(gid, wid) for wid in removed])
@@ -299,12 +273,10 @@ def arrange(database, manifest_path, destination):
             distance = 1496000000.0
             bearing = (len(bridges)*37+side*180) % 360
             radians = math.radians(bearing)
-            target.execute('INSERT INTO FCT_JumpPoint (WarpPointID,GameID,SystemID,WPLink,Distance,Bearing,Xcor,Ycor,JumpGateStrength,JumpGateRaceID) VALUES (?,?,?,?,?,?,?,?,0,0)',
-                           (ids[side],gid,sid,peer,distance,bearing,distance*math.sin(radians),-distance*math.cos(radians)))
+            target.execute('INSERT INTO FCT_JumpPoint (WarpPointID,GameID,SystemID,WPLink,Distance,Bearing,Xcor,Ycor,JumpGateStrength,JumpGateRaceID) VALUES (?,?,?,?,?,?,?,?,0,0)', (ids[side],gid,sid,peer,distance,bearing,distance*math.sin(radians),-distance*math.cos(radians)))
             target.execute('INSERT INTO FCT_RaceJumpPointSurvey (GameID,RaceID,WarpPointID,Charted,Explored,Hide) VALUES (?,?,?,1,1,0)', (gid,rid,ids[side]))
         provenance = lambda sid: {key: maps[origin_by_system[sid]][key] for key in ['file','game_id','game_name']}
-        bridges.append(dict(from_system=a,to_system=b,from_region=provenance(a),to_region=provenance(b),jump_ids=ids,kind=kind,
-                            source_leaf_degrees=[maps[origin_by_system[sid]]['source_degrees'][sid] for sid in [a,b]]))
+        bridges.append(dict(from_system=a,to_system=b,from_region=provenance(a),to_region=provenance(b),jump_ids=ids,kind=kind, source_leaf_degrees=[maps[origin_by_system[sid]]['source_degrees'][sid] for sid in [a,b]]))
     target.commit()
     target.execute('ATTACH DATABASE ? AS previous', (database.resolve().as_uri()+'?mode=ro',))
     for row in target.execute("SELECT name FROM previous.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall():
@@ -331,16 +303,12 @@ def arrange(database, manifest_path, destination):
     map_degrees = collections.Counter(origin_by_system[sid] for b in bridges for sid in [b['from_system'],b['to_system']])
     assert all(2 <= map_degrees[i] <= 3 for i in range(len(maps)))
     assert all(degree <= 1 for b in bridges for degree in b['source_leaf_degrees'])
-    report = dict(policy='Source coordinates preserved by translation only; unknown positions use anchored spring placement; map bounds separated by 140 units',
-                  seed=seed,before_bounds=bounds({r['SystemID']:(r['Xcor'],r['Ycor']) for r in original.execute('SELECT SystemID,Xcor,Ycor FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=?',(gid,rid))}),
-                  after_bounds=bounds(positions),maps=[])
+    report = dict(policy='Source coordinates preserved by translation only; unknown positions use anchored spring placement; map bounds separated by 140 units', seed=seed,before_bounds=bounds({r['SystemID']:(r['Xcor'],r['Ycor']) for r in original.execute('SELECT SystemID,Xcor,Ycor FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=?',(gid,rid))}), after_bounds=bounds(positions),maps=[])
     for i,item in enumerate(maps):
         offset=offsets[i]
         for sid,point in item['preserved'].items():
             assert positions[sid] == (point[0]+offset[0],point[1]+offset[1])
-        report['maps'].append(dict(file=item['file'],game_id=item['game_id'],game_name=item['game_name'],reference_race=item['reference_race'],
-                                  translation=offset,source_positions_preserved=len(item['preserved']),generated_positions=len(item['systems'])-len(item['preserved']),
-                                  connections=map_degrees[i],source_positions={sid:point for sid,point in item['preserved'].items()}))
+        report['maps'].append(dict(file=item['file'],game_id=item['game_id'],game_name=item['game_name'],reference_race=item['reference_race'], translation=offset,source_positions_preserved=len(item['preserved']),generated_positions=len(item['systems'])-len(item['preserved']), connections=map_degrees[i],source_positions={sid:point for sid,point in item['preserved'].items()}))
     assert all((Path(p).stat().st_size,Path(p).stat().st_mtime_ns)==state for p,state in source_stats.items())
     manifest['output']=str(output.resolve())
     manifest['bridges']=bridges
@@ -349,8 +317,7 @@ def arrange(database, manifest_path, destination):
     manifest.pop('random_link_samples',None)
     manifest['layout']=report
     manifest['validation'].pop('electron_smoke',None)
-    manifest['validation'].update(target=result,visible_systems=len(positions),layout_source_positions_preserved=True,only_coordinates_and_generated_links_changed=True,
-                                  inter_map_links_verified=dict(collections.Counter(b['kind'] for b in bridges)),all_maps_linked=len(maps),source_files_unchanged=True)
+    manifest['validation'].update(target=result,visible_systems=len(positions),layout_source_positions_preserved=True,only_coordinates_and_generated_links_changed=True, inter_map_links_verified=dict(collections.Counter(b['kind'] for b in bridges)),all_maps_linked=len(maps),source_files_unchanged=True)
     (destination/'merge-manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
     (destination/'layout-report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     for name in ['map-audit.json','map-comparison.md']:

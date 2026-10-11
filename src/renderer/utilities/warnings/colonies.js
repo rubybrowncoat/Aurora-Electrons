@@ -17,17 +17,15 @@ const installationRows = (ctx, items, valueKey, link) => {
     return aggregate
   }, {}))
 
-  return colonies
-    .sort((alpha, beta) => beta.TotalProductionValue - alpha.TotalProductionValue)
-    .map((colony) => ({
-      id: `colony:${colony.PopulationID}`,
-      cells: {
-        colony: colonyText(colony),
-        installations: colony.Installations.join(', '),
-        output: ctx.count(colony.TotalProductionValue, 1),
-      },
-      link: link(colony),
-    }))
+  return colonies.sort((alpha, beta) => beta.TotalProductionValue - alpha.TotalProductionValue).map((colony) => ({
+    id: `colony:${colony.PopulationID}`,
+    cells: {
+      colony: colonyText(colony),
+      installations: colony.Installations.join(', '),
+      output: ctx.count(colony.TotalProductionValue, 1),
+    },
+    link: link(colony),
+  }))
 }
 
 const populationRows = (populations, cell, link = (population) => linkTo.colonyOutlook(population.PopulationID)) => populations.map((population) => ({

@@ -3,8 +3,7 @@ import { URL, pathToFileURL } from 'url'
 
 import { app, Menu, net, protocol } from 'electron'
 
-// Set by `bun run dev` (electron-vite) to its dev server. Without it, the renderer is the build in out/renderer, served
-// through the app:// scheme.
+// Set by `bun run dev` (electron-vite) to its dev server. Without it, the renderer is the build in out/renderer, served through the app:// scheme.
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL
 const APP_SCHEME = 'app'
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer')
@@ -18,9 +17,7 @@ if (DEV_SERVER_URL) {
 
   app.once('ready', () => {
     // Downloaded on first use; offline, the app runs without it.
-    import('electron-devtools-installer')
-      .then(({ installExtension, VUEJS_DEVTOOLS }) => installExtension(VUEJS_DEVTOOLS))
-      .catch((error) => console.log(`Vue devtools not installed: ${error.message}`))
+    import('electron-devtools-installer').then(({ installExtension, VUEJS_DEVTOOLS }) => installExtension(VUEJS_DEVTOOLS)).catch((error) => console.log(`Vue devtools not installed: ${error.message}`))
   })
 } else {
   // The scheme must be registered before the app is ready.

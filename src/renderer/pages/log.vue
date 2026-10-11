@@ -437,9 +437,7 @@ export default {
     baseEvents() {
       const search = (this.search || '').trim().toLowerCase()
 
-      return this.logEvents.filter((event) => (!search || event.searchText.includes(search)) &&
-        (!this.place || this.place === `system-${event.KnownSystemID}` || this.place === `colony-${event.ColonyID}`) &&
-        (!this.hideNonCustomized || event.Customized))
+      return this.logEvents.filter((event) => (!search || event.searchText.includes(search)) && (!this.place || this.place === `system-${event.KnownSystemID}` || this.place === `colony-${event.ColonyID}`) && (!this.hideNonCustomized || event.Customized))
     },
 
     typeOptions() {

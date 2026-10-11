@@ -3,11 +3,7 @@ import { navalAdminRadius, navalAdminRequiredRanks, systemsWithinJumps } from '.
 // The command-type shares a bonus can come from (`DIM_NavalAdminCommandType` columns).
 const SHARES = ['Industrial', 'Survey', 'Logistics', 'Engineering', 'CrewTraining', 'Tactical', 'Reaction', 'FleetTraining']
 
-// The race's naval admin commands with one commander bonus, ready for `navalAdminChainBonus`:
-// { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Systems } }.
-// `bonusId`: the `FCT_CommanderBonuses.BonusID` (6 Mining, 2 Survey); `share`: the command-type
-// column that scales it ('Industrial', 'Survey'). An empty map when no command carries the bonus.
-// Radius, required rank and flag bridges: docs/DATABASE.md § Commander bonus rules.
+// The race's naval admin commands with one commander bonus, ready for `navalAdminChainBonus`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Systems } }. `bonusId`: the `FCT_CommanderBonuses.BonusID` (6 Mining, 2 Survey); `share`: the command-type column that scales it ('Industrial', 'Survey'). An empty map when no command carries the bonus. Radius, required rank and flag bridges: docs/DATABASE.md § Commander bonus rules.
 export const loadNavalAdmins = async (database, { GameID, RaceID, bonusId, share }) => {
   if (!SHARES.includes(share)) {
     throw new Error(`Unknown naval admin share: ${share}`)

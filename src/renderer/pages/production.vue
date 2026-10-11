@@ -299,16 +299,10 @@ const CAPACITY_COLUMNS = [
 // Less than this left over reads as nothing (it rounds to 0).
 const IDLE_MINIMUM = 0.5
 
-// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space
-// stations included, uses construction capacity.
+// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space stations included, uses construction capacity.
 const categoryOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
-// When each industrial project of one colony and category starts and finishes, in days from now, as the game runs
-// them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds
-// nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running
-// and paused ones leave, skipping any that don't, until none is left.
-// Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where
-// that never happens.
+// When each industrial project of one colony and category starts and finishes, in days from now, as the game runs them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left. Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where that never happens.
 const industrySchedule = (projects, capacity) => {
   const schedule = {}
   const running = []
@@ -356,11 +350,7 @@ const industrySchedule = (projects, capacity) => {
   return schedule
 }
 
-// How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game
-// runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the
-// air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`:
-// atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON
-// years.
+// How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`: atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON years.
 const waterVapourCycles = (terraform, step, years) => {
   let gas = terraform.GasAtm || 0
   let pressure = terraform.AtmosPress
@@ -476,11 +466,7 @@ export default {
       return projects.flatMap((project) => {
         const rate = this.populationResearchCapacity(project.PopulationID, project)
         const ownDays = rate > 0 ? (project.RemainingProduction / rate) * 365 : null
-        const status = project.Paused
-          ? { id: 'paused', label: 'Paused' }
-          : rate > 0
-            ? { id: 'running', label: 'Running' }
-            : { id: 'stalled', label: 'No labs', note: 'No research facilities are assigned' }
+        const status = project.Paused ? { id: 'paused', label: 'Paused' } : rate > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', label: 'No labs', note: 'No research facilities are assigned' }
         let start = project.Paused ? null : ownDays
 
         const jobs = [this.job({
@@ -558,9 +544,7 @@ export default {
             status = {
               id: 'queued',
               label: `Queued #${project.Queue}`,
-              note: start === null
-                ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}`
-                : `Starts in ${this.duration(start)}${project.Paused ? ', paused' : ''}`,
+              note: start === null ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}` : `Starts in ${this.duration(start)}${project.Paused ? ', paused' : ''}`,
             }
           } else if (project.Paused) {
             status = { id: 'paused', label: 'Paused' }
@@ -615,12 +599,8 @@ export default {
     shipyardJobs() {
       return this.shipyards.map((shipyard) => {
         const rate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, shipyard)
-        const days = shipyard.UpgradeTaskType === 8
-          ? this.shipyardContinualRemainingDays(shipyard)
-          : rate > 0 ? shipyard.RemainingProduction / rate * SECONDS_PER_YEAR / SECONDS_PER_DAY / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1) : null
-        const target = shipyard.UpgradeTaskType === 7 && shipyard.ClassName
-          ? ` to ${shipyard.ClassName}`
-          : shipyard.UpgradeTaskType === 8 ? ` to ${this.count(shipyard.CapacityTarget)} t` : ''
+        const days = shipyard.UpgradeTaskType === 8 ? this.shipyardContinualRemainingDays(shipyard) : rate > 0 ? shipyard.RemainingProduction / rate * SECONDS_PER_YEAR / SECONDS_PER_DAY / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1) : null
+        const target = shipyard.UpgradeTaskType === 7 && shipyard.ClassName ? ` to ${shipyard.ClassName}` : shipyard.UpgradeTaskType === 8 ? ` to ${this.count(shipyard.CapacityTarget)} t` : ''
 
         return this.job({
           key: `shipyard-${shipyard.ID}`,
@@ -767,9 +747,7 @@ export default {
       ]
     },
 
-    // Idle capacity per colony with any: the share of each industrial capacity no running project uses, the share
-    // of GFCC capacity no training task uses, labs no project uses and slipways without a task (a yard's Slipways
-    // less its tasks, as the game's shipyard list counts them).
+    // Idle capacity per colony with any: the share of each industrial capacity no running project uses, the share of GFCC capacity no training task uses, labs no project uses and slipways without a task (a yard's Slipways less its tasks, as the game's shipyard list counts them).
     colonyCapacity() {
       const shares = {}
       const trainingShares = {}
@@ -996,11 +974,7 @@ export default {
     },
 
     categoryCapacity(populationId, category) {
-      return category === 'ordnance'
-        ? this.populationOrdnanceCapacity(populationId)
-        : category === 'fighter'
-          ? this.populationFighterCapacity(populationId)
-          : this.populationConstructionCapacity(populationId)
+      return category === 'ordnance' ? this.populationOrdnanceCapacity(populationId) : category === 'fighter' ? this.populationFighterCapacity(populationId) : this.populationConstructionCapacity(populationId)
     },
 
     gfccCount(populationId) {

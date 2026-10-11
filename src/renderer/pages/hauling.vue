@@ -388,10 +388,7 @@ export default {
       }),
       default: [],
     },
-    // Those fleets' orders with where each one goes (X, Y) and where the fleet is after it (ExitX,
-    // ExitY): jump points (1), bodies (2, 15) and Lagrange points (12). Only a transit (DIM_MoveAction
-    // TransitOrder) or an Intra-system Jump (124) comes out on the far side (`Jumps`); any other order
-    // on a jump point or Lagrange point leaves the fleet where it went.
+    // Those fleets' orders with where each one goes (X, Y) and where the fleet is after it (ExitX, ExitY): jump points (1), bodies (2, 15) and Lagrange points (12). Only a transit (DIM_MoveAction TransitOrder) or an Intra-system Jump (124) comes out on the far side (`Jumps`); any other order on a jump point or Lagrange point leaves the fleet where it went.
     orders: {
       get: tracked('orders', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

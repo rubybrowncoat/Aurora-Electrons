@@ -12,8 +12,7 @@
 </template>
 
 <script>
-// The panel that slides out of the rail: a head with a title and a note, the content, and a foot. The title takes
-// the colour `--sc` of whoever styles the panel.
+// The panel that slides out of the rail: a head with a title and a note, the content, and a foot. The title takes the colour `--sc` of whoever styles the panel.
 export default {
   props: {
     title: {

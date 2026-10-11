@@ -1,6 +1,4 @@
-// Mineral maths shared by the Mineral Outlook page: deposit depletion, the
-// game's mineral ledger and the industrial queue's demand. Validated against
-// the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
+// Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
 import { roundToDecimal, separatedNumber } from './math'
 
@@ -18,17 +16,14 @@ export const MINERALS = [
   { id: 11, name: 'Gallicite' },
 ]
 
-// A civilian mining complex can be founded on a body with more than 10,000 t of Duranium or Gallicite at
-// accessibility 0.7 or better. The site's other conditions are in colonization.js `cmcSite`.
+// A civilian mining complex can be founded on a body with more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better. The site's other conditions are in colonization.js `cmcSite`.
 export const CMC_MINERAL_IDS = [1, 11]
 const CMC_MIN_AMOUNT = 10000
 const CMC_MIN_ACCESSIBILITY = 0.7
 
 export const qualifiesForCmc = (deposit) => !!deposit && deposit.Amount > CMC_MIN_AMOUNT && deposit.Accessibility >= CMC_MIN_ACCESSIBILITY
 
-// The Minerals page's mining potential of one deposit, 0 to 10. With r = sin(π/2 · accessibility), it is
-// atan((Amount / 20,000 t)^r · r²) scaled from [0, π/2) to [0, 10): 20,000 t at accessibility 1 scores 5,
-// 100,000 t at 0.7 about 8, and a deposit at 0.1 never passes 1 however large.
+// The Minerals page's mining potential of one deposit, 0 to 10. With r = sin(π/2 · accessibility), it is atan((Amount / 20,000 t)^r · r²) scaled from [0, π/2) to [0, 10): 20,000 t at accessibility 1 scores 5, 100,000 t at 0.7 about 8, and a deposit at 0.1 never passes 1 however large.
 const POTENTIAL_REFERENCE_AMOUNT = 20000
 
 export const depositPotential = (deposit) => {
@@ -37,10 +32,7 @@ export const depositPotential = (deposit) => {
   return (Math.atan(Math.pow(deposit.Amount / POTENTIAL_REFERENCE_AMOUNT, reach) * reach * reach) / (Math.PI / 2)) * 10
 }
 
-// What the game's own AI makes of a deposit: accessibility,
-// halved under 10,000 t and raised for a big deposit that is still easy to reach (more than 100,000, 250,000
-// and 1,000,000 t at accessibility above 0.4). Nothing under 2,000 t counts. An NPR seeds a mining colony on a
-// body whose deposits add up to 6 and adds mines to a colony from 4.
+// What the game's own AI makes of a deposit: accessibility, halved under 10,000 t and raised for a big deposit that is still easy to reach (more than 100,000, 250,000 and 1,000,000 t at accessibility above 0.4). Nothing under 2,000 t counts. An NPR seeds a mining colony on a body whose deposits add up to 6 and adds mines to a colony from 4.
 export const DEPOSIT_MINIMUM_AMOUNT = 2000
 export const RICH_DEPOSIT_VALUE = 6
 export const WORTH_MINING_VALUE = 4
@@ -56,11 +48,7 @@ export const depositValue = (deposit, minimumAmount = DEPOSIT_MINIMUM_AMOUNT) =>
   return deposit.Accessibility * size
 }
 
-// How short a mineral is for the race, from the runway the Mineral Outlook page shows (its stock and in-transit
-// cargo over its net loss a year). The game's AI scales a deposit the same way by how little its capital holds
-// (x3 under 1,000 t, x2 under 3,000, x1.5 under 5,000); here the runway decides. A mineral that holds or grows
-// counts once, and so does one that lasts a century or more. `years` is the runway a tier covers, up to and
-// excluding it.
+// How short a mineral is for the race, from the runway the Mineral Outlook page shows (its stock and in-transit cargo over its net loss a year). The game's AI scales a deposit the same way by how little its capital holds (x3 under 1,000 t, x2 under 3,000, x1.5 under 5,000); here the runway decides. A mineral that holds or grows counts once, and so does one that lasts a century or more. `years` is the runway a tier covers, up to and excluding it.
 export const CRITICAL_RUNWAY_YEARS = 5
 export const WARNING_RUNWAY_YEARS = 25
 export const SCARCITY = [
@@ -77,10 +65,7 @@ export const SECONDS_PER_DAY = 86400
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
 
-// t/yr at the deposit's current accessibility, as the game works it out: each kind
-// of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political
-// status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector
-// commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
+// t/yr at the deposit's current accessibility, as the game works it out: each kind of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.
 const whole = (capacity) => Math.floor(capacity + 1e-9)
 
 export const surfaceRate = (row, owned = true) => {
@@ -90,21 +75,16 @@ export const surfaceRate = (row, owned = true) => {
   return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
-// A ship short of crew runs its mining modules at Current Crew / Class Crew (docs:
-// crew-and-commanders, v2.6). Over-crewed ships don't mine faster; uncrewed classes always run.
+// A ship short of crew runs its mining modules at Current Crew / Class Crew (docs: crew-and-commanders, v2.6). Over-crewed ships don't mine faster; uncrewed classes always run.
 export const crewFraction = (row) => (row.ClassCrew > 0 ? Math.min(1, Math.max(0, row.CurrentCrew) / row.ClassCrew) : 1)
 
 // The workbook's orbital formula, plus the crew rule; unverified, the sample has no player orbital miners.
 export const orbitalRate = (row, adminBonus = 1) => row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crewFraction(row) * row.Accessibility
 
-// t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine
-// from orbit.
+// t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit.
 export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
 
-// Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its
-// civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records
-// nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver
-// transfer, which isn't income.
+// Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver transfer, which isn't income.
 export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
   const totals = {}
   const add = (row, rate) => {
@@ -121,15 +101,13 @@ const declineShape = (deposit) => {
   const { Amount: amount, Accessibility: accessibility, HalfOriginalAmount: half, OriginalAcc: original } = deposit
   const declines = original > ACCESSIBILITY_FLOOR && half > 0
   const slope = declines ? (original - ACCESSIBILITY_FLOOR) / half : 0
-  // Where the decline starts: the original value at the halfway point or, already below
-  // half, the unrounded current value (the stored one is rounded to 2 decimals).
+  // Where the decline starts: the original value at the halfway point or, already below half, the unrounded current value (the stored one is rounded to 2 decimals).
   const startAccessibility = !declines ? accessibility : amount > half ? original : ACCESSIBILITY_FLOOR + slope * amount
 
   return { amount, accessibility, half, declines, slope, startAccessibility }
 }
 
-// Above half the rate is flat. Below it, dA/dt = -k(0.1 + s·A), so accessibility
-// decays exponentially to the floor, where the deposit is empty.
+// Above half the rate is flat. Below it, dA/dt = -k(0.1 + s·A), so accessibility decays exponentially to the floor, where the deposit is empty.
 // `rate`: t/yr at the current accessibility, every colony and ship on the deposit summed.
 export const depositForecast = (deposit, rate) => {
   const { amount, accessibility, half, declines, slope, startAccessibility } = declineShape(deposit)
@@ -185,13 +163,7 @@ export const depositStateAt = (deposit, rate, years) => {
 // Evenly spaced [0, horizon] samples for a chart.
 export const yearSteps = (horizon, points = 80) => Array.from({ length: points + 1 }, (_, index) => (horizon * index) / points)
 
-// One mineral's stockpile over `steps` (years): today's stock, what each deposit still delivers
-// (exactly, from depositStateAt's remaining amounts, so a deposit never gives more than it holds),
-// and every other flow at today's net rate. Mining only slows down, so the level is concave: it
-// rises while the output beats the net drain, peaks where the two meet, then only falls, and so
-// crosses zero downwards at most once, after the peak. The peak is found on the output directly
-// (not on the samples, which can step over a rise and fall that fit between two of them).
-// `deposits`: [{ deposit, rate (t/yr now), share (of the output that reaches the stockpile) }]
+// One mineral's stockpile over `steps` (years): today's stock, what each deposit still delivers (exactly, from depositStateAt's remaining amounts, so a deposit never gives more than it holds), and every other flow at today's net rate. Mining only slows down, so the level is concave: it rises while the output beats the net drain, peaks where the two meet, then only falls, and so crosses zero downwards at most once, after the peak. The peak is found on the output directly (not on the samples, which can step over a rise and fall that fit between two of them). `deposits`: [{ deposit, rate (t/yr now), share (of the output that reaches the stockpile) }]
 export const stockProjection = ({ start, otherNet, deposits, steps }) => {
   const initial = deposits.map(({ deposit, rate }) => depositStateAt(deposit, rate, 0).amount)
   const levelAt = (years) => deposits.reduce((sum, { deposit, rate, share }, index) => sum + (initial[index] - depositStateAt(deposit, rate, years).amount) * share, start + otherNet * years)
@@ -232,9 +204,7 @@ export const stockProjection = ({ start, otherNet, deposits, steps }) => {
   return { stock: levels.map((level) => Math.max(0, level)), output, runOut }
 }
 
-// The ledger's purposes, folded to eight groups so a chart never needs a ninth colour.
-// Transfers between your own colonies (freighters, mass drivers) and the starting stockpile
-// aren't empire income or spending, so they're left out.
+// The ledger's purposes, folded to eight groups so a chart never needs a ninth colour. Transfers between your own colonies (freighters, mass drivers) and the starting stockpile aren't empire income or spending, so they're left out.
 export const FLOW_GROUPS = [
   { key: 'mining', label: 'Mining', income: true, types: [1, 11] },
   { key: 'salvage', label: 'Salvage', income: true, types: [10, 15, 17, 18, 19] },
@@ -248,17 +218,12 @@ export const FLOW_GROUPS = [
 
 export const TRANSFER_TYPES = new Set([7, 8, 12, 13, 20])
 
-// Types the game logs in its production phase, once per cycle and all at the same time (on the
-// sample, every one of them falls on a mining tick). Salvage and transfers come at other times.
+// Types the game logs in its production phase, once per cycle and all at the same time (on the sample, every one of them falls on a mining tick). Salvage and transfers come at other times.
 export const PRODUCTION_TYPES = FLOW_GROUPS.filter((group) => group.key !== 'salvage').flatMap((group) => group.types)
 
 export const flowGroupOf = (type) => FLOW_GROUPS.find((group) => group.types.includes(type))
 
-// How many days of history the ledger rows cover, the same span for every flow. Production
-// events (mining, construction, maintenance…) come once per cycle, each standing for the cycle
-// before it; transfers can fall in between. So the history starts where the cycle holding the
-// earliest event of any kind starts. `anchorTime` is a production tick (the latest one) and
-// `cycleDays` the cycle length.
+// How many days of history the ledger rows cover, the same span for every flow. Production events (mining, construction, maintenance…) come once per cycle, each standing for the cycle before it; transfers can fall in between. So the history starts where the cycle holding the earliest event of any kind starts. `anchorTime` is a production tick (the latest one) and `cycleDays` the cycle length.
 export const ledgerCoverageDays = ({ gameTime, firstTime, anchorTime, cycleDays, windowDays }) => {
   if (firstTime == null || anchorTime == null || !(cycleDays > 0)) {
     return 0
@@ -291,12 +256,7 @@ const ledgerCoverage = (ledger, gameTime, windowDays) => {
   })
 }
 
-// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and
-// salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the
-// net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime,
-// LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and
-// `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }. Without a ledger (a save before Aurora 2.6)
-// nothing is known and every mineral counts as holding.
+// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }. Without a ledger (a save before Aurora 2.6) nothing is known and every mineral counts as holding.
 export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit, unlogged = {} }) => {
   const coverageDays = ledgerCoverage(ledger, gameTime, windowDays)
   const perYear = coverageDays ? DAYS_PER_YEAR / coverageDays : 0
@@ -321,10 +281,7 @@ export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, s
 
 const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
-// Minerals the industrial queue will consume over the next year: each project's
-// cost scaled to one year of work at its share of the colony's capacity; queued
-// entries count only while the year has capacity left (as "mineral use.sql" does),
-// and only for the capacity earlier entries leave.
+// Minerals the industrial queue will consume over the next year: each project's cost scaled to one year of work at its share of the colony's capacity; queued entries count only while the year has capacity left (as "mineral use.sql" does), and only for the capacity earlier entries leave.
 // `capacityOf(PopulationID, ProductionType)`: BP/yr at 100%.
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
@@ -370,10 +327,7 @@ export const annualQueueDemand = (projects, capacityOf) => {
   return demand
 }
 
-// What a colony's stock can't cover of an industrial project's remaining units, the material that runs out first
-// leading: each mineral, then the fuel, with the units the stock covers. Each cycle the game cuts a build to what
-// the colony's stock covers, minerals first and then fuel. The project's mineral columns are per unit, with the
-// stock as `Stock<Mineral>` and `StockFuel`.
+// What a colony's stock can't cover of an industrial project's remaining units, the material that runs out first leading: each mineral, then the fuel, with the units the stock covers. Each cycle the game cuts a build to what the colony's stock covers, minerals first and then fuel. The project's mineral columns are per unit, with the stock as `Stock<Mineral>` and `StockFuel`.
 export const projectShortages = (project) => {
   const short = []
   const check = (limit, need, stock) => {
@@ -420,10 +374,7 @@ export const systemsWithinJumps = (graph, systemId, jumps) => {
   return reached
 }
 
-// An admin command's radius in jumps, or null when it has no base. A Naval Headquarters
-// adds one jump per doubling of its level (levels 1, 2, 4, 8 give 1, 2, 3, 4), times the
-// command type's multiplier (Patrol and Survey 2). A command on a flag bridge reaches
-// only its own system.
+// An admin command's radius in jumps, or null when it has no base. A Naval Headquarters adds one jump per doubling of its level (levels 1, 2, 4, 8 give 1, 2, 3, 4), times the command type's multiplier (Patrol and Survey 2). A command on a flag bridge reaches only its own system.
 export const navalAdminRadius = ({ ShipID, HeadquartersLevel, Radius }) => {
   if (ShipID) {
     return 0
@@ -477,11 +428,7 @@ export const navalAdminRequiredRanks = (admins, captainRanks) => {
   return required
 }
 
-// Naval admin bonuses chain up the command tree: the ship must be within its own
-// command's range, and each command's HQ within its parent's range for the parent
-// to apply too. A command without a commander of the required rank breaks the chain
-// (docs/DATABASE.md § Commander bonus rules). Each one passes on its commander's
-// bonus scaled by the command type's share.
+// Naval admin bonuses chain up the command tree: the ship must be within its own command's range, and each command's HQ within its parent's range for the parent to apply too. A command without a commander of the required rank breaks the chain (docs/DATABASE.md § Commander bonus rules). Each one passes on its commander's bonus scaled by the command type's share.
 // `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Systems: Set } }
 export const navalAdminChainBonus = (admins, systemId, commandId) => {
   let bonus = 1
@@ -520,8 +467,7 @@ export const compact = (value) => {
   return `${roundToDecimal(value, 0)} t`
 }
 
-// Years at a readable precision from COMPACT_YEARS on: 120 k, 2.4 M, 1.3 bn. At today's rate the sample's homeworld
-// deposits last millions of years.
+// Years at a readable precision from COMPACT_YEARS on: 120 k, 2.4 M, 1.3 bn. At today's rate the sample's homeworld deposits last millions of years.
 export const COMPACT_YEARS = 100000
 const YEAR_UNITS = [[1e9, 'bn'], [1e6, 'M'], [1e3, 'k']]
 

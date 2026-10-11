@@ -1,23 +1,17 @@
-// Borders round the systems of a sector or an alien race on the Galaxy Map. Linked systems of one group
-// share a shape that takes in the links between them; a system or cluster cut off from the rest of its
-// group gets a shape of its own.
+// Borders round the systems of a sector or an alien race on the Galaxy Map. Linked systems of one group share a shape that takes in the links between them; a system or cluster cut off from the rest of its group gets a shape of its own.
 
-// Room round a system's marker inside its border, the half width of the band along a link, and the
-// border's line, in map units. The band is narrower than the smallest system's room, so each link
-// shows as a neck between its systems.
+// Room round a system's marker inside its border, the half width of the band along a link, and the border's line, in map units. The band is narrower than the smallest system's room, so each link shows as a neck between its systems.
 const ROOM = 26
 const BAND = 34
 const LINE = 3
 export const TINT = 0.14
-// The group's name beside each shape, in map units. Like the systems' names, it shows once it would
-// be 9 pixels tall on screen.
+// The group's name beside each shape, in map units. Like the systems' names, it shows once it would be 9 pixels tall on screen.
 const LABEL_SIZE = 16
 const LABEL_FONT = `500 ${LABEL_SIZE}px Roboto, sans-serif`
 const LABEL_MIN_PX = 9
 // Between a name and its shape's line.
 const LABEL_GAP = 8
-// The systems' own names, as the page's cytoscape style draws them: under the marker, 5 units down,
-// in a 14 px font on a background 2 units wider all round, each line under the first 14 units more.
+// The systems' own names, as the page's cytoscape style draws them: under the marker, 5 units down, in a 14 px font on a background 2 units wider all round, each line under the first 14 units more.
 const NAME_FONT = '14px Roboto, sans-serif'
 const NAME_DROP = 3
 const NAME_HEIGHT = 21
@@ -27,9 +21,7 @@ const CROWD = 40
 
 export const showsLabels = (zoom) => LABEL_SIZE * zoom >= LABEL_MIN_PX
 
-// The systems of each group, split where the group's own links don't join them: [{ owner, ids, links }],
-// with `links` the [source, target] pairs inside the part. `ownerOf(row)` is the group (the same object
-// for every system in it, with `name` and `color`), or nothing for a system outside every group.
+// The systems of each group, split where the group's own links don't join them: [{ owner, ids, links }], with `links` the [source, target] pairs inside the part. `ownerOf(row)` is the group (the same object for every system in it, with `name` and `color`), or nothing for a system outside every group.
 export const groupBorders = (rows, links, ownerOf) => {
   const owners = new Map()
 
@@ -72,9 +64,7 @@ export const groupBorders = (rows, links, ownerOf) => {
   return [...parts.values()]
 }
 
-// Adds a part's shape to `path`, grown by `grow`: a disc round each system and a band along each link.
-// Every piece runs clockwise, so the nonzero fill joins them where they overlap. A system the map
-// doesn't have yet (`positionOf` gives nothing) is left out.
+// Adds a part's shape to `path`, grown by `grow`: a disc round each system and a band along each link. Every piece runs clockwise, so the nonzero fill joins them where they overlap. A system the map doesn't have yet (`positionOf` gives nothing) is left out.
 const tracePart = (path, part, { positionOf, sizeOf }, grow) => {
   part.ids.forEach((id) => {
     const at = positionOf(id)
@@ -106,10 +96,7 @@ const tracePart = (path, part, { positionOf, sizeOf }, grow) => {
   })
 }
 
-// Draws the parts on `context`, already transformed to map units, at `zoom` screen pixels to a map unit.
-// Each shape gets a line of its group's colour and a light tint inside; later shapes lie over earlier
-// ones where they meet. `positionOf(id)` and `sizeOf(id)` give a system's place and marker size;
-// `places`, from `placeLabels`, puts the groups' names, and none are drawn without it.
+// Draws the parts on `context`, already transformed to map units, at `zoom` screen pixels to a map unit. Each shape gets a line of its group's colour and a light tint inside; later shapes lie over earlier ones where they meet. `positionOf(id)` and `sizeOf(id)` give a system's place and marker size; `places`, from `placeLabels`, puts the groups' names, and none are drawn without it.
 export const drawBorders = (context, parts, { positionOf, sizeOf, zoom, ink, halo, places = null }) => {
   if (!parts.length) {
     return
@@ -126,8 +113,7 @@ export const drawBorders = (context, parts, { positionOf, sizeOf, zoom, ink, hal
     tracePart(outer, part, where, line)
     tracePart(inner, part, where, 0)
 
-    // The shape grown by the line, its inside cut back out, then tinted: one fill each, so the tint
-    // stays even where the discs and bands overlap.
+    // The shape grown by the line, its inside cut back out, then tinted: one fill each, so the tint stays even where the discs and bands overlap.
     context.fillStyle = part.owner.color
     context.fill(outer)
     context.globalCompositeOperation = 'destination-out'
@@ -192,13 +178,7 @@ const touches = (box, at, radius) => {
   return dx * dx + dy * dy < radius * radius
 }
 
-// Where each part's name goes: [{ name, x, y, align, box }], in map units. A name sits on the left or
-// the right of one of the part's systems: level with it just outside its shape, or just above or
-// below the system's ring, in the gap where no system's name is drawn. The place chosen covers the
-// fewest markers, system names and other parts' names, then crosses the fewest links and shapes,
-// then has the least close by. Larger parts choose first. `systems` are every system's id, `links`
-// every link ({ source, target }) and `nameOf(id)` a system's label, its lines split by newlines;
-// `context` measures the text.
+// Where each part's name goes: [{ name, x, y, align, box }], in map units. A name sits on the left or the right of one of the part's systems: level with it just outside its shape, or just above or below the system's ring, in the gap where no system's name is drawn. The place chosen covers the fewest markers, system names and other parts' names, then crosses the fewest links and shapes, then has the least close by. Larger parts choose first. `systems` are every system's id, `links` every link ({ source, target }) and `nameOf(id)` a system's label, its lines split by newlines; `context` measures the text.
 export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf, nameOf }) => {
   const obstacles = []
 
@@ -236,8 +216,7 @@ export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf
       }
 
       const reach = sizeOf(id) / 2 + ROOM + LINE
-      // Level with the system, clear of its ring; or over or under the ring, clear of a link's band
-      // running straight up or down from it.
+      // Level with the system, clear of its ring; or over or under the ring, clear of a link's band running straight up or down from it.
       const beside = reach + LABEL_GAP
       const off = BAND + LABEL_GAP
       const rise = reach + LABEL_GAP / 2 + height / 2
@@ -252,8 +231,7 @@ export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf
           const covered = blockers.filter((box) => overlaps(box, candidate.box)).length
           const crossed = segments.filter(([a, b]) => crosses(a, b, candidate.box)).length + rings.filter((ring) => touches(candidate.box, ring.at, ring.radius)).length
           const near = blockers.filter((box) => overlaps(box, grown(candidate.box, CROWD))).length
-          // Compared in order: what it covers, what it crosses, what's near, level with its
-          // system, higher up the map, then the right side.
+          // Compared in order: what it covers, what it crosses, what's near, level with its system, higher up the map, then the right side.
           const cost = [covered, crossed, near, away, y, candidate.align === 'left' ? 0 : 1]
           const differs = best ? cost.findIndex((value, i) => value !== best.cost[i]) : 0
 
@@ -272,8 +250,7 @@ export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf
   return places
 }
 
-// The box the parts cover in map units, with the names `places` puts beside them, or null when
-// there are none.
+// The box the parts cover in map units, with the names `places` puts beside them, or null when there are none.
 export const bordersBox = (parts, { positionOf, sizeOf }, places = []) => {
   let box = null
 

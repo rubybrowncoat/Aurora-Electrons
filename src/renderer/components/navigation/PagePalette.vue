@@ -7,15 +7,7 @@
       <div ref="list" class="page-palette__list">
         <template v-for="(row, key) in rows">
           <div v-if="row.group" :key="`group-${row.group}`" class="page-palette__group">{{ row.group }}</div>
-          <div
-            v-else
-            :key="`${row.page.route}-${key}`"
-            class="page-palette__row"
-            :class="{ 'page-palette__row--selected': row.index === selected }"
-            :style="row.style"
-            @click="$emit('go', row.page.route)"
-            @mouseenter="selected = row.index"
-          >
+          <div v-else :key="`${row.page.route}-${key}`" class="page-palette__row" :class="{ 'page-palette__row--selected': row.index === selected }" :style="row.style" @click="$emit('go', row.page.route)" @mouseenter="selected = row.index">
             <div class="page-palette__icon">
               <v-icon size="18">{{ row.page.icon }}</v-icon>
             </div>

@@ -20,8 +20,7 @@ const SHIPYARD_ACTIVITIES = {
   9: 'Spacemaster modification',
 }
 
-// A colony with some capacity that its projects of one kind leave unshared. `value` names the installation value
-// that makes the capacity, `alias` the total of those installations, and `types` the project types sharing it.
+// A colony with some capacity that its projects of one kind leave unshared. `value` names the installation value that makes the capacity, `alias` the total of those installations, and `types` the project types sharing it.
 const freeCapacityQuery = ({ GameID, RaceID }, { value, alias, types }) => `select VIR_Capacity.*, 100 - COALESCE(SUM(FCT_IndustrialProjects.Percentage), 0) as FreePercentage from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ${alias}, ${COLONY_COLUMNS} from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and DIM_PlanetaryInstallation.${value} > 0 GROUP BY FCT_Population.PopulationID) as VIR_Capacity left join FCT_IndustrialProjects on VIR_Capacity.PopulationID = FCT_IndustrialProjects.PopulationID and FCT_IndustrialProjects.Queue = 0 and FCT_IndustrialProjects.ProductionType ${types} group by VIR_Capacity.PopulationID having FreePercentage > 0`
 
 const freeCapacityRows = (ctx, populations, alias) => populations.map((population) => ({

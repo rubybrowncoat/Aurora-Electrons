@@ -1,18 +1,7 @@
 /*
-  Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app
-  with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it
-  runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the
-  renderer over app:// as the package does. Then launches Electron through Playwright on a copy of
-  the save and a fresh user-data folder, so your save, settings and history are never touched.
-  Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path
-  IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher
-  reloading the database. Database calls run in the renderer, so they're counted by wrapping the
-  Sequelize instance.
+  Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the renderer over app:// as the package does. Then launches Electron through Playwright on a copy of the save and a fresh user-data folder, so your save, settings and history are never touched. Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher reloading the database. Database calls run in the renderer, so they're counted by wrapping the Sequelize instance.
 
-  Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample
-  defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES
-  (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1
-  checks complete PNG export, high-DPI borders and layout restoration on /map.
+  Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1 checks complete PNG export, high-DPI borders and layout restoration on /map.
  */
 const os = require('os')
 const fs = require('fs')
@@ -59,8 +48,7 @@ const stopTree = (app) => {
   return app.close()
 }
 
-// Counts the renderer's database calls and keeps their failures, re-wrapping each database the
-// store swaps in when the save changes.
+// Counts the renderer's database calls and keeps their failures, re-wrapping each database the store swaps in when the save changes.
 const instrument = () => {
   const smoke = (window.__smoke = window.__smoke || { pending: new Map(), next: 0, last: Date.now(), errors: [], counts: {}, done: [], blockedMs: 0, databases: 0 })
 
@@ -104,8 +92,7 @@ const run = async () => {
   const { build } = await import('electron-vite')
   const SAVE = path.resolve(process.env.AURORA_DB || path.join(PROJECT_ROOT, 'AuroraDB.db'))
 
-  // Under the project, so the preload's requires (sequelize) find node_modules.
-  // The run folder (the save copy and user data) is kept until the next run for inspection.
+  // Under the project, so the preload's requires (sequelize) find node_modules. The run folder (the save copy and user data) is kept until the next run for inspection.
   const builds = path.join(PROJECT_ROOT, 'out', 'smoke')
   const work = path.join(builds, 'run')
   const userData = path.join(work, 'user-data')
@@ -217,8 +204,7 @@ const run = async () => {
   try {
     await page.waitForFunction(() => window.$app && window.$app.$store && window.$app.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    // The Empires page shows dated game headings and each race's title.
-    // A game with one visible race selects that race from its heading.
+    // The Empires page shows dated game headings and each race's title. A game with one visible race selects that race from its heading.
     const picker = page.locator('.empire-list').first()
 
     await picker.locator('.empire-list__game').filter({ hasText: `${GAME} ·` }).first().click({ timeout: PAGE_TIMEOUT_MS })
@@ -242,8 +228,7 @@ const run = async () => {
   const results = []
 
   if (process.env.SMOKE_MAP_EXPORT === '1') {
-    // Capture the export in the smoke process without opening a native save
-    // dialog. Decode and write the real PNG produced by the renderer.
+    // Capture the export in the smoke process without opening a native save dialog. Decode and write the real PNG produced by the renderer.
     await app.evaluate(({ ipcMain, nativeImage }, output) => {
       globalThis.__mapExports = []
       ipcMain.removeHandler('save-png')
@@ -270,9 +255,7 @@ const run = async () => {
     await settle()
 
     if (route === '/map' && process.env.SMOKE_MAP_EXPORT === '1') {
-      // Each export has to leave the positions, zoom and marker sizes as it found them. The
-      // second runs at DPR 2 with sector borders. Their legend narrows the stage, which refits
-      // a map nobody has moved, so each snapshot is taken right around its own export.
+      // Each export has to leave the positions, zoom and marker sizes as it found them. The second runs at DPR 2 with sector borders. Their legend narrows the stage, which refits a map nobody has moved, so each snapshot is taken right around its own export.
       const exportOnce = () => page.evaluate(async () => {
         const map = window.__smoke.map
         const state = () => JSON.stringify([map.graphPositions(), map.graph.zoom(), map.markerMinimum])
@@ -285,9 +268,7 @@ const run = async () => {
       })
 
       await page.evaluate(() => {
-        const findMap = (component) => component.$options.name === 'MapPage'
-          ? component
-          : component.$children.map(findMap).find(Boolean)
+        const findMap = (component) => component.$options.name === 'MapPage'? component: component.$children.map(findMap).find(Boolean)
 
         window.__smoke.map = findMap(window.$app)
       })
@@ -362,9 +343,7 @@ const run = async () => {
 
   check('history file written', snapshotCount(before) > 0, before ? `${historyPath}: ${snapshotCount(before)} snapshots for race ${RaceID}` : `${historyPath} missing`)
 
-  // Touch the unchanged save: the watcher reloads it and the recorder runs again.
-  // Copying over an open SQLite file truncates it first, so a concurrent reader
-  // can see an incomplete database even though the completed copy is identical.
+  // Touch the unchanged save: the watcher reloads it and the recorder runs again. Copying over an open SQLite file truncates it first, so a concurrent reader can see an incomplete database even though the completed copy is identical.
   const databases = await page.evaluate(() => window.__smoke.databases)
 
   const reloadTime = new Date()

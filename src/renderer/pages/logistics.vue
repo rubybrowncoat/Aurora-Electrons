@@ -174,8 +174,7 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using
-              {{ mspMineralsText }}.
+              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}.
             </div>
           </v-card>
 
@@ -587,9 +586,7 @@ export default {
     },
   },
   asyncComputed: {
-    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or
-    // refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility.
-    // Count deposits together: three correlated counts would scan the mineral table three times for every colony.
+    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility. Count deposits together: three correlated counts would scan the mineral table three times for every colony.
     colonies: {
       get: tracked('colonies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -614,8 +611,7 @@ export default {
       }),
       default: [],
     },
-    // Per fleet: what its ships need maintained (military classes not in a military hangar), the
-    // maintenance modules aboard (scaled by crew), and supply ships' MSP above their minimums.
+    // Per fleet: what its ships need maintained (military classes not in a military hangar), the maintenance modules aboard (scaled by crew), and supply ships' MSP above their minimums.
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -637,9 +633,7 @@ export default {
       }),
       default: [],
     },
-    // Per class with engines and tanks (docked craft aside): ships moving in the last increment,
-    // and the sum of each ship's lifetime duty cycle (distance / (age x top speed), age at least
-    // a quarter year).
+    // Per class with engines and tanks (docked craft aside): ships moving in the last increment, and the sum of each ship's lifetime duty cycle (distance / (age x top speed), age at least a quarter year).
     burn: {
       get: tracked('burn', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

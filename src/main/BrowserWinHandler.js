@@ -19,9 +19,7 @@ export default class BrowserWinHandler {
   }
 
   _createInstance () {
-    // This method will be called when Electron has finished
-    // initialization and is ready to create browser windows.
-    // Some APIs can only be used after this event occurs.
+    // This method will be called when Electron has finished initialization and is ready to create browser windows. Some APIs can only be used after this event occurs.
     if (app.isReady()) this._create()
     else {
       app.once('ready', () => {
@@ -29,28 +27,23 @@ export default class BrowserWinHandler {
       })
     }
 
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
+    // On macOS it's common to re-create a window in the app when the dock icon is clicked and there are no other windows open.
     if (!this.allowRecreate) return
     app.on('activate', () => this._recreate())
   }
 
   _create () {
-    this.browserWindow = new BrowserWindow(
-      {
-        ...this.options,
-        webPreferences: {
-          ...this.options.webPreferences,
-          // The renderer reaches Node only through src/preload/index.js, which shares its JavaScript world
-          // (no context isolation) to hand over Sequelize, chokidar and electron-store as they are, and needs
-          // the sandbox off to load them.
-          preload: path.join(__dirname, '..', 'preload', 'index.js'),
-          nodeIntegration: false,
-          contextIsolation: false,
-          sandbox: false,
-        }
+    this.browserWindow = new BrowserWindow({
+      ...this.options,
+      webPreferences: {
+        ...this.options.webPreferences,
+        // The renderer reaches Node only through src/preload/index.js, which shares its JavaScript world (no context isolation) to hand over Sequelize, chokidar and electron-store as they are, and needs the sandbox off to load them.
+        preload: path.join(__dirname, '..', 'preload', 'index.js'),
+        nodeIntegration: false,
+        contextIsolation: false,
+        sandbox: false,
       }
-    )
+    })
     this.browserWindow.on('closed', () => {
       // Dereference the window object
       this.browserWindow = null

@@ -1,8 +1,4 @@
-// The live line under each page in the section flyout: route -> async ({ database, GameID, RaceID, ... }) => string | null.
-// Each peek is a few cheap queries scoped to the selected race, validated against the sample and a large save in
-// docs/plans/aurcalcs/ (see ARCHITECTURE.md). A route with no entry has no peek. Kept apart from the page registry,
-// which Node also requires. The context also carries `StartYear`, `separator` (the thousands separator),
-// `historyRecorded` and `snapshotSummary` (the history store's getter).
+// The live line under each page in the section flyout: route -> async ({ database, GameID, RaceID, ... }) => string | null. Each peek is a few cheap queries scoped to the selected race, validated against the sample and a large save in docs/plans/aurcalcs/ (see ARCHITECTURE.md). A route with no entry has no peek. Kept apart from the page registry, which Node also requires. The context also carries `StartYear`, `separator` (the thousands separator), `historyRecorded` and `snapshotSummary` (the history store's getter).
 
 import { gameTime } from './aurora'
 import { people } from './colonies'
@@ -186,9 +182,7 @@ export const peeks = {
       return null
     }
 
-    return summary.count
-      ? `${counted(summary.count, separator, 'snapshot', 'snapshots')}, latest ${gameTime(StartYear, summary.latest).format('YYYY-MM-DD')}`
-      : 'No snapshots yet'
+    return summary.count ? `${counted(summary.count, separator, 'snapshot', 'snapshots')}, latest ${gameTime(StartYear, summary.latest).format('YYYY-MM-DD')}` : 'No snapshots yet'
   },
 
   '/commanders': async ({ database, GameID, RaceID, separator }) => {

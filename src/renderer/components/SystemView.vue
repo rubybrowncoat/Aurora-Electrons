@@ -1040,8 +1040,7 @@ export default {
         }
       }
 
-      // We'll need a scale to translate px-sized things (labels, min-screen radii) to world units.
-      // If not provided, estimate from the orbit-only union (fast) or fall back to current zoom.
+      // We'll need a scale to translate px-sized things (labels, min-screen radii) to world units. If not provided, estimate from the orbit-only union (fast) or fall back to current zoom.
       const sCurrent = this.viewport.scale?.x || 1
       let sTarget = assumeScale
       if (!sTarget) {
@@ -1630,13 +1629,10 @@ export default {
       return { orbitContainer, anchor, marker }
     },
 
-    drawJumpPoints(
-      jumpPoints,
-      {
-        minMarkerRadius = 6, // px on screen
-        labelPadPx = 8, // screen px
-      } = {}
-    ) {
+    drawJumpPoints(jumpPoints, {
+      minMarkerRadius = 6, // px on screen
+      labelPadPx = 8, // screen px
+    } = {}) {
       if (!Array.isArray(jumpPoints) || !this._starsResult) return
 
       const orbitContainer = this._starsResult.root // use the same root as stars
@@ -1803,12 +1799,9 @@ export default {
 
       this.pixi.stage.addChild(this.viewport)
 
-      this.viewport
-        .drag()
-        .wheel({
-          // smooth: 10,
-        })
-        .decelerate()
+      this.viewport.drag().wheel({
+        // smooth: 10,
+      }).decelerate()
 
       this._orbitRegistry = []
       this._annotationRegistry = []
@@ -1843,8 +1836,7 @@ export default {
           // radiusUnits: 'km', exaggeration: 1,  minPx: 0,    // strict physical realism
           radiusUnits: 'km',
           exaggeration: 1,
-          // radiusUnits: 'km', exaggeration: 500, minPx: 0.5, // gently magnified for readability
-          // radiusUnits: 'earthRadii', exaggeration: 1, minPx: 0.5, // if Radius is in R⊕
+          // radiusUnits: 'km', exaggeration: 500, minPx: 0.5, // gently magnified for readability radiusUnits: 'earthRadii', exaggeration: 1, minPx: 0.5, // if Radius is in R⊕
         },
         keepLabelUpright: true,
         labelPadPx: 8,
@@ -2010,9 +2002,7 @@ export default {
           }))
         })
 
-        const jumpPoints = await this.database
-          .query(
-            `
+        const jumpPoints = await this.database.query(`
           select FCT_JumpPoint.*, FCT_RaceSysSurvey.Name as SourceName, VIR_Destination.SystemID as DestinationID, VIR_Destination.Name as DestinationName, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.Charted, FCT_RaceJumpPointSurvey.Hide from FCT_JumpPoint 
           
           inner join FCT_RaceSysSurvey on FCT_JumpPoint.SystemID = FCT_RaceSysSurvey.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} 
@@ -2024,12 +2014,10 @@ export default {
           left join FCT_RaceJumpPointSurvey on FCT_JumpPoint.WarpPointID = FCT_RaceJumpPointSurvey.WarpPointID and FCT_Race.RaceID = FCT_RaceJumpPointSurvey.RaceID
           
           where FCT_JumpPoint.SystemID = ${this.$props.systemId} and FCT_JumpPoint.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
-        `
-          )
-          .then(([items]) => {
-            console.log('Loaded jump points:', items)
-            return items
-          })
+        `).then(([items]) => {
+          console.log('Loaded jump points:', items)
+          return items
+        })
 
         return {
           system: system.toJSON(),

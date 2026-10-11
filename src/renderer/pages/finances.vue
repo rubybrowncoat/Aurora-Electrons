@@ -472,10 +472,7 @@ export default {
       }),
       default: null,
     },
-    // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the
-    // window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign.
-    // The game's time is a scalar subquery of its own: reading it from the outer `FCT_Game` join made the cycle lookup re-run for every ledger
-    // row (over two minutes at 50 000 rows, against 0.1 s now), and the stalled read held the connection for every page.
+    // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign. The game's time is a scalar subquery of its own: reading it from the outer `FCT_Game` join made the cycle lookup re-run for every ledger row (over two minutes at 50 000 rows, against 0.1 s now), and the stalled read held the connection for every page.
     wealth: {
       get: tracked('wealth', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

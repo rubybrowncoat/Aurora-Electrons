@@ -45,27 +45,21 @@ export const starName = (index, raceSystem) => {
 }
 
 export const populationName = (population, prefix = '', suppressSystem = false) => {
-  const processedPopulation = prefix
-    ? {
-        SystemName: population[`${prefix}SystemName`] || population.SystemName,
-        SystemBodyID: population[`${prefix}SystemBodyID`] || population.SystemBodyID,
-        PlanetNumber: population[`${prefix}PlanetNumber`] || population.PlanetNumber,
-        OrbitNumber: population[`${prefix}OrbitNumber`] || population.OrbitNumber,
-        BodyClass: population[`${prefix}BodyClass`] || population.BodyClass,
-        SystemBodyName: population[`${prefix}SystemBodyName`] || population.SystemBodyName,
-        Component: population[`${prefix}Component`] || population.Component,
-        PopName: population[`${prefix}PopName`] || population.PopName,
-      }
-    : population
+  const processedPopulation = prefix ? {
+    SystemName: population[`${prefix}SystemName`] || population.SystemName,
+    SystemBodyID: population[`${prefix}SystemBodyID`] || population.SystemBodyID,
+    PlanetNumber: population[`${prefix}PlanetNumber`] || population.PlanetNumber,
+    OrbitNumber: population[`${prefix}OrbitNumber`] || population.OrbitNumber,
+    BodyClass: population[`${prefix}BodyClass`] || population.BodyClass,
+    SystemBodyName: population[`${prefix}SystemBodyName`] || population.SystemBodyName,
+    Component: population[`${prefix}Component`] || population.Component,
+    PopName: population[`${prefix}PopName`] || population.PopName,
+  } : population
 
   const populationBodyName = systemBodyName(processedPopulation)
-  const systemBodyComponent = `${processedPopulation.SystemName}-${populationBodyName}` === processedPopulation.PopName || processedPopulation.SystemBodyName === processedPopulation.PopName
-    ? processedPopulation.SystemName
-    : `${processedPopulation.SystemName} ${populationBodyName}`
+  const systemBodyComponent = `${processedPopulation.SystemName}-${populationBodyName}` === processedPopulation.PopName || processedPopulation.SystemBodyName === processedPopulation.PopName ? processedPopulation.SystemName : `${processedPopulation.SystemName} ${populationBodyName}`
 
-  return suppressSystem && processedPopulation.PopName.startsWith(processedPopulation.SystemName)
-    ? processedPopulation.PopName
-    : `${systemBodyComponent} &mdash; ${processedPopulation.PopName}`
+  return suppressSystem && processedPopulation.PopName.startsWith(processedPopulation.SystemName) ? processedPopulation.PopName : `${systemBodyComponent} &mdash; ${processedPopulation.PopName}`
 }
 
 export const modelSystemBodyName = (systemBody) => {

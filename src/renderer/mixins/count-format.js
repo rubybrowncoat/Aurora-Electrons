@@ -2,8 +2,7 @@ import { mapGetters } from 'vuex'
 
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 
-// Numbers as the "Thousands Separator" setting writes them, for components that don't read the setting themselves,
-// and spans of days in the unit that reads best.
+// Numbers as the "Thousands Separator" setting writes them, for components that don't read the setting themselves, and spans of days in the unit that reads best.
 export default {
   computed: {
     ...mapGetters(['config']),

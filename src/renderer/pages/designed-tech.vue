@@ -1249,21 +1249,17 @@ export default {
           return []
         }
 
-        const types = await this.database
-          .query(
-            `
+        const types = await this.database.query(`
           select DIM_ComponentType.ComponentTypeID, DIM_ComponentType.TypeDescription, DIM_ComponentType.EmptySpaceModifier, DIM_ComponentType.RatingDescription, DIM_ComponentType.ClassDisplayOrder, DIM_ComponentType.RepairPriority, DIM_ComponentType.ShowInClassDisplay, DIM_ComponentType.SingleSystem, DIM_ComponentType.ObsoleteAllowed, DIM_ComponentType.ClassSummaryTypeID, DIM_ClassSummaryType.Description as ClassSummaryType from DIM_ComponentType
 
           left join DIM_ClassSummaryType on DIM_ComponentType.ClassSummaryTypeID = DIM_ClassSummaryType.ClassSummaryTypeID
 
           where DIM_ComponentType.ObsoleteAllowed = 1
-        `
-          )
-          .then(([items]) => {
-            console.log('Component Types', items)
+        `).then(([items]) => {
+          console.log('Component Types', items)
 
-            return items
-          })
+          return items
+        })
 
         return types
       },
@@ -1275,19 +1271,15 @@ export default {
           return []
         }
 
-        const categories = await this.database
-          .query(
-            `
+        const categories = await this.database.query(`
           select DIM_ResearchCategories.CategoryID, DIM_ResearchCategories.CheckTech, DIM_ResearchCategories.Name, DIM_ResearchCategories.CompanyNameType, DIM_ResearchCategories.PlayerDefined, DIM_ResearchCategories.Components, DIM_ResearchCategories.NoteField from DIM_ResearchCategories
 
           order by DIM_ResearchCategories.Name
-        `
-          )
-          .then(([items]) => {
-            console.log('Research Categories', items)
+        `).then(([items]) => {
+          console.log('Research Categories', items)
 
-            return items
-          })
+          return items
+        })
 
         return categories
       },
@@ -1299,22 +1291,18 @@ export default {
           return []
         }
 
-        const components = await this.database
-          .query(
-            `
+        const components = await this.database.query(`
           select FCT_ShipDesignComponents.SDComponentID, FCT_RaceTech.Obsolete, FCT_ShipDesignComponents.Name, FCT_TechSystem.CategoryID, FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_TechSystem.AdditionalInfo, FCT_TechSystem.AdditionalInfo2, FCT_TechSystem.AdditionalInfo3, FCT_TechSystem.AdditionalInfo4, FCT_TechSystem.TechDescription, FCT_ShipDesignComponents.MilitarySystem, FCT_ShipDesignComponents.BeamWeapon, FCT_ShipDesignComponents.Crew, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.Cost, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.PowerRequirement, FCT_ShipDesignComponents.RechargeRate, FCT_ShipDesignComponents.ElectronicSystem, FCT_ShipDesignComponents.ElectronicCTD, FCT_ShipDesignComponents.TrackingSpeed, FCT_ShipDesignComponents.SpecialFunction, FCT_ShipDesignComponents.MaxSensorRange, FCT_ShipDesignComponents.Resolution, FCT_ShipDesignComponents.HTK, FCT_ShipDesignComponents.FuelUse, FCT_ShipDesignComponents.NoMaintFailure, FCT_ShipDesignComponents.HangarReloadOnly, FCT_ShipDesignComponents.ExplosionChance, FCT_ShipDesignComponents.MaxExplosionSize, FCT_ShipDesignComponents.DamageOutput, FCT_ShipDesignComponents.NumberOfShots, FCT_ShipDesignComponents.RangeModifier, FCT_ShipDesignComponents.MaxWeaponRange, FCT_ShipDesignComponents.SpinalWeapon, FCT_ShipDesignComponents.JumpDistance, FCT_ShipDesignComponents.JumpRating, FCT_ShipDesignComponents.RateOfFire, FCT_ShipDesignComponents.MaxPercentage, FCT_ShipDesignComponents.FuelEfficiency, FCT_ShipDesignComponents.IgnoreShields, FCT_ShipDesignComponents.IgnoreArmour, FCT_ShipDesignComponents.ElectronicOnly, FCT_ShipDesignComponents.StealthRating, FCT_ShipDesignComponents.CloakRating, FCT_ShipDesignComponents.Weapon, FCT_ShipDesignComponents.BGTech1, FCT_ShipDesignComponents.BGTech2, FCT_ShipDesignComponents.BGTech3, FCT_ShipDesignComponents.BGTech4, FCT_ShipDesignComponents.BGTech5, FCT_ShipDesignComponents.BGTech6, FCT_ShipDesignComponents.BGTech7, FCT_ShipDesignComponents.Duranium, FCT_ShipDesignComponents.Neutronium, FCT_ShipDesignComponents.Corbomite, FCT_ShipDesignComponents.Tritanium, FCT_ShipDesignComponents.Boronide, FCT_ShipDesignComponents.Mercassium, FCT_ShipDesignComponents.Vendarite, FCT_ShipDesignComponents.Sorium, FCT_ShipDesignComponents.Uridium, FCT_ShipDesignComponents.Corundium, FCT_ShipDesignComponents.Gallicite, FCT_ShipDesignComponents.SingleSystemOnly, FCT_ShipDesignComponents.ShipyardRepairOnly, FCT_ShipDesignComponents.ECCM, FCT_ShipDesignComponents.ArmourRetardation, FCT_ShipDesignComponents.WeaponToHitModifier, FCT_ShipDesignComponents.Prototype, FCT_ShipDesignComponents.TurretWeaponID, FCT_ShipDesignComponents.ShipComponentTemplateID, FCT_ShipDesignComponents.EnginePowerMod, FCT_ShipDesignComponents.ExtraHTK, FCT_ShipDesignComponents.FCRangeModifier, FCT_ShipDesignComponents.FCSpeedModifier, FCT_ShipDesignComponents.ShippingLineSystem from FCT_ShipDesignComponents
 
           left join FCT_RaceTech on FCT_ShipDesignComponents.SDComponentID = FCT_RaceTech.TechID and FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}
           left join FCT_TechSystem on FCT_ShipDesignComponents.SDComponentID = FCT_TechSystem.TechSystemID
 
           where FCT_ShipDesignComponents.GameID = 0 and FCT_TechSystem.RaceID = 0
-        `
-          )
-          .then(([items]) => {
-            console.log('Baseline Components', items)
+        `).then(([items]) => {
+          console.log('Baseline Components', items)
 
-            return items.map((component) => this.augmentComponent(component, true))
-          })
+          return items.map((component) => this.augmentComponent(component, true))
+        })
 
         return components
       },
@@ -1326,22 +1314,18 @@ export default {
           return []
         }
 
-        const components = await this.database
-          .query(
-            `
+        const components = await this.database.query(`
           select FCT_ShipDesignComponents.SDComponentID, FCT_RaceTech.GameID, FCT_RaceTech.RaceID, FCT_RaceTech.Obsolete, FCT_ShipDesignComponents.Name, FCT_TechSystem.CategoryID, FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_TechSystem.AdditionalInfo, FCT_TechSystem.AdditionalInfo2, FCT_TechSystem.AdditionalInfo3, FCT_TechSystem.AdditionalInfo4, FCT_TechSystem.TechDescription, FCT_ShipDesignComponents.MilitarySystem, FCT_ShipDesignComponents.BeamWeapon, FCT_ShipDesignComponents.Crew, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.Cost, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.PowerRequirement, FCT_ShipDesignComponents.RechargeRate, FCT_ShipDesignComponents.ElectronicSystem, FCT_ShipDesignComponents.ElectronicCTD, FCT_ShipDesignComponents.TrackingSpeed, FCT_ShipDesignComponents.SpecialFunction, FCT_ShipDesignComponents.MaxSensorRange, FCT_ShipDesignComponents.Resolution, FCT_ShipDesignComponents.HTK, FCT_ShipDesignComponents.FuelUse, FCT_ShipDesignComponents.NoMaintFailure, FCT_ShipDesignComponents.HangarReloadOnly, FCT_ShipDesignComponents.ExplosionChance, FCT_ShipDesignComponents.MaxExplosionSize, FCT_ShipDesignComponents.DamageOutput, FCT_ShipDesignComponents.NumberOfShots, FCT_ShipDesignComponents.RangeModifier, FCT_ShipDesignComponents.MaxWeaponRange, FCT_ShipDesignComponents.SpinalWeapon, FCT_ShipDesignComponents.JumpDistance, FCT_ShipDesignComponents.JumpRating, FCT_ShipDesignComponents.RateOfFire, FCT_ShipDesignComponents.MaxPercentage, FCT_ShipDesignComponents.FuelEfficiency, FCT_ShipDesignComponents.IgnoreShields, FCT_ShipDesignComponents.IgnoreArmour, FCT_ShipDesignComponents.ElectronicOnly, FCT_ShipDesignComponents.StealthRating, FCT_ShipDesignComponents.CloakRating, FCT_ShipDesignComponents.Weapon, FCT_ShipDesignComponents.BGTech1, FCT_ShipDesignComponents.BGTech2, FCT_ShipDesignComponents.BGTech3, FCT_ShipDesignComponents.BGTech4, FCT_ShipDesignComponents.BGTech5, FCT_ShipDesignComponents.BGTech6, FCT_ShipDesignComponents.BGTech7, FCT_ShipDesignComponents.Duranium, FCT_ShipDesignComponents.Neutronium, FCT_ShipDesignComponents.Corbomite, FCT_ShipDesignComponents.Tritanium, FCT_ShipDesignComponents.Boronide, FCT_ShipDesignComponents.Mercassium, FCT_ShipDesignComponents.Vendarite, FCT_ShipDesignComponents.Sorium, FCT_ShipDesignComponents.Uridium, FCT_ShipDesignComponents.Corundium, FCT_ShipDesignComponents.Gallicite, FCT_ShipDesignComponents.SingleSystemOnly, FCT_ShipDesignComponents.ShipyardRepairOnly, FCT_ShipDesignComponents.ECCM, FCT_ShipDesignComponents.ArmourRetardation, FCT_ShipDesignComponents.WeaponToHitModifier, FCT_ShipDesignComponents.Prototype, FCT_ShipDesignComponents.TurretWeaponID, FCT_ShipDesignComponents.ShipComponentTemplateID, FCT_ShipDesignComponents.EnginePowerMod, FCT_ShipDesignComponents.ExtraHTK, FCT_ShipDesignComponents.FCRangeModifier, FCT_ShipDesignComponents.FCSpeedModifier, FCT_ShipDesignComponents.ShippingLineSystem from FCT_RaceTech
 
           inner join FCT_ShipDesignComponents on FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID
           inner join FCT_TechSystem on FCT_RaceTech.TechID = FCT_TechSystem.TechSystemID
 
           where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID} and FCT_TechSystem.RaceID = FCT_RaceTech.RaceID
-        `
-          )
-          .then(([items]) => {
-            console.log('Components', items)
+        `).then(([items]) => {
+          console.log('Components', items)
 
-            return items.map((component) => this.augmentComponent(component))
-          })
+          return items.map((component) => this.augmentComponent(component))
+        })
 
         return components
       },
@@ -1353,9 +1337,7 @@ export default {
           return []
         }
 
-        const missiles = await this.database
-          .query(
-            `
+        const missiles = await this.database.query(`
           select FCT_MissileType.MissileID, FCT_MissileType.Name, FCT_RaceTech.Obsolete, FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_MissileType.Size, FCT_MissileType.Speed, FCT_MissileType.MaxRange, FCT_MissileType.Endurance, FCT_MissileType.FuelRequired, FCT_MissileType.WarheadStrength, FCT_MissileType.MultipleWarheads, FCT_MissileType.RadDamage, FCT_MissileType.SensorStrength, FCT_MissileType.SensorResolution, FCT_MissileType.SensorRange, FCT_MissileType.ThermalStrength, FCT_MissileType.EMStrength, FCT_MissileType.Geostrength, FCT_MissileType.NumDecoys, FCT_MissileType.ECCM, FCT_MissileType.ATG, FCT_MissileType.Retargeting, FCT_MissileType.Cost, FCT_MissileType.Corbomite, FCT_MissileType.Tritanium, FCT_MissileType.Boronide, FCT_MissileType.Uridium, FCT_MissileType.Gallicite, FCT_MissileType.SecondStageID, FCT_MissileType.NumSS, FCT_MissileType.SeparationRange, SecondStage.Name as SecondStageName, SecondStage.MaxRange as SecondStageMaxRange from FCT_RaceTech
 
           inner join FCT_MissileType on FCT_RaceTech.TechID = FCT_MissileType.MissileID and FCT_MissileType.GameID = FCT_RaceTech.GameID
@@ -1363,13 +1345,11 @@ export default {
           left join FCT_MissileType as SecondStage on FCT_MissileType.SecondStageID = SecondStage.MissileID and SecondStage.GameID = FCT_MissileType.GameID
 
           where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID} and FCT_TechSystem.RaceID = FCT_RaceTech.RaceID
-        `
-          )
-          .then(([items]) => {
-            console.log('Missiles', items)
+        `).then(([items]) => {
+          console.log('Missiles', items)
 
-            return items.map((missile) => this.augmentMissile(missile))
-          })
+          return items.map((missile) => this.augmentMissile(missile))
+        })
 
         return missiles
       },
@@ -1381,9 +1361,7 @@ export default {
           return []
         }
 
-        const species = await this.database
-          .query(
-            `
+        const species = await this.database.query(`
           select FCT_Species.SpeciesID, FCT_Species.TechSystemID, FCT_Species.HomeworldID, FCT_Species.DerivedSpeciesID, FCT_Species.SpeciesName as Name, FCT_Species.RacePic, FCT_Species.BreatheID, FCT_Species.Oxygen, FCT_Species.OxyDev, FCT_Species.PressMax, FCT_Species.Temperature, FCT_Species.TempDev, FCT_Species.Gravity, FCT_Species.GravDev, FCT_Species.Xenophobia, FCT_Species.Diplomacy, FCT_Species.Translation, FCT_Species.Militancy, FCT_Species.Expansionism, FCT_Species.Determination, FCT_Species.Trade, FCT_Species.SpecialNPRID, FCT_Species.ProductionRateModifier, FCT_Species.ResearchRateModifier, FCT_Species.PopulationGrowthModifier, FCT_Species.PopulationDensityModifier, FCT_Species.GraduationAge, FCT_RaceTech.Obsolete, FCT_TechSystem.CategoryID, FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_TechSystem.AdditionalInfo, FCT_TechSystem.AdditionalInfo2, FCT_TechSystem.AdditionalInfo3, FCT_TechSystem.AdditionalInfo4, FCT_TechSystem.TechDescription, DIM_Gases.Name as GasName, DIM_Gases.Symbol, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel from FCT_Species
 
           left join FCT_TechSystem on FCT_Species.TechSystemID = FCT_TechSystem.TechSystemID
@@ -1391,13 +1369,11 @@ export default {
           left join DIM_Gases on FCT_Species.BreatheID = DIM_Gases.GasID
 
           where FCT_Species.SpeciesID in (select FCT_Population.SpeciesID from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.Population > 0 group by FCT_Population.SpeciesID) or FCT_RaceTech.TechID = FCT_Species.TechSystemID
-        `
-          )
-          .then(([items]) => {
-            console.log('Species', items)
+        `).then(([items]) => {
+          console.log('Species', items)
 
-            return items.map((species) => this.augmentSpecies(species))
-          })
+          return items.map((species) => this.augmentSpecies(species))
+        })
 
         return species
       },

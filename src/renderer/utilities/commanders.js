@@ -1,5 +1,4 @@
-// Commander maths for the Commanders page: assignments, bonuses and better candidates.
-// Sources and checks: docs/plans/aurcalcs/build-3.md § Commanders.
+// Commander maths for the Commanders page: assignments, bonuses and better candidates. Sources and checks: docs/plans/aurcalcs/build-3.md § Commanders.
 
 export const COMMANDER_TYPES = [
   { id: 0, label: 'Naval', plural: 'Naval officers', flag: 'Naval' },
@@ -8,9 +7,7 @@ export const COMMANDER_TYPES = [
   { id: 3, label: 'Scientist', plural: 'Scientists', flag: 'Scientist' },
 ]
 
-// FCT_Commander.CommandType. The ship posts (8–15) were matched on the sample: every officer in
-// a post has its required bonus and serves on a ship with its command module (docs
-// `crew-and-commanders`).
+// FCT_Commander.CommandType. The ship posts (8–15) were matched on the sample: every officer in a post has its required bonus and serves on a ship with its command module (docs `crew-and-commanders`).
 export const POSTS = {
   0: 'Unassigned',
   1: 'Captain',
@@ -55,13 +52,10 @@ export const RETIRE_STATUSES = {
   14: { label: 'Executed', kind: 'dead' },
 }
 
-// SQL condition for the commanders still serving. The game saves a retired or dead commander only
-// when the player keeps them (`RetainRetired`) or they are a prisoner; `RetireStatus` is 0 while
-// they serve, and a captured one keeps 0 with `Prisoner` set.
+// SQL condition for the commanders still serving. The game saves a retired or dead commander only when the player keeps them (`RetainRetired`) or they are a prisoner; `RetireStatus` is 0 while they serve, and a captured one keeps 0 with `Prisoner` set.
 export const SERVING_COMMANDER = 'FCT_Commander.RetireStatus = 0 and FCT_Commander.Prisoner = 0'
 
-// 'prisoner', 'dead' or 'retired' for an FCT_Commander row. A prisoner who is discharged or
-// executed in captivity keeps the flag, so the status decides first.
+// 'prisoner', 'dead' or 'retired' for an FCT_Commander row. A prisoner who is discharged or executed in captivity keeps the flag, so the status decides first.
 export const formerKind = ({ RetireStatus, Prisoner }) => (RETIRE_STATUSES[RetireStatus] || {}).kind || (Prisoner ? 'prisoner' : 'retired')
 
 const EPSILON = 1e-9
@@ -86,10 +80,7 @@ const compareKeys = (a, b) => {
   return 0
 }
 
-// Governors (docs `crew-and-commanders`, automated assignment): a candidate must have the colony's
-// required bonus and ranks by it, then the secondary, then the tertiary bonus. For each colony with a
-// required bonus: the best unassigned administrator, when they beat the governor (or there is none).
-// A candidate can be the best for several colonies; `alsoBestFor` counts the others.
+// Governors (docs `crew-and-commanders`, automated assignment): a candidate must have the colony's required bonus and ranks by it, then the secondary, then the tertiary bonus. For each colony with a required bonus: the best unassigned administrator, when they beat the governor (or there is none). A candidate can be the best for several colonies; `alsoBestFor` counts the others.
 export const governorSuggestions = (colonies, administrators) => {
   const idle = administrators.filter((admin) => admin.CommandType === 0)
   const byId = Object.fromEntries(administrators.map((admin) => [admin.CommanderID, admin]))
@@ -109,9 +100,7 @@ export const governorSuggestions = (colonies, administrators) => {
   return suggestions.map((suggestion) => ({ ...suggestion, alsoBestFor: suggestions.filter((other) => other !== suggestion && other.candidate === suggestion.candidate).length }))
 }
 
-// The officer post and bonus that matter on a specialist ship. Terraformers and miners use their
-// captain's full bonus. Survey ships use their science officer's full Survey bonus when the class
-// has a Science Department, else half their captain's. Secondary officers rank one below the captain.
+// The officer post and bonus that matter on a specialist ship. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain.
 export const specialistPost = (ship) => {
   if (ship.Terraformers > 0) {
     return { post: 'captain', bonusId: TERRAFORMING, label: 'Terraforming', level: ship.RankRequired, share: 1 }
@@ -124,8 +113,7 @@ export const specialistPost = (ship) => {
   return { post: 'captain', bonusId: SURVEY, label: 'Survey (half for a captain)', level: ship.RankRequired, share: 0.5 }
 }
 
-// Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the
-// officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`.
+// Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`.
 export const shipSuggestions = (ships, officers) => {
   const idle = officers.filter((officer) => officer.CommandType === 0)
   const byId = Object.fromEntries(officers.map((officer) => [officer.CommanderID, officer]))
@@ -145,12 +133,10 @@ export const shipSuggestions = (ships, officers) => {
   }).filter((suggestion) => suggestion && (suggestion.candidate || !suggestion.holder))
 }
 
-// A scientist's research multiplier: in their own field the bonus counts four times (1.15 -> 1.60),
-// outside it once (production.vue's rule; the docs: changing field cuts the bonus by 75%).
+// A scientist's research multiplier: in their own field the bonus counts four times (1.15 -> 1.60), outside it once (production.vue's rule; the docs: changing field cuts the bonus by 75%).
 export const researchMultiplier = (bonus, inField) => (inField ? 4 * (bonus || 1) - 3 : bonus || 1)
 
-// Research projects where an unassigned scientist of the project's field, able to run its labs
-// (Research Administration >= labs), would research faster than the scientist on it.
+// Research projects where an unassigned scientist of the project's field, able to run its labs (Research Administration >= labs), would research faster than the scientist on it.
 export const researchSuggestions = (projects, scientists) => {
   const idle = scientists.filter((scientist) => scientist.CommandType === 0)
   const byId = Object.fromEntries(scientists.map((scientist) => [scientist.CommanderID, scientist]))

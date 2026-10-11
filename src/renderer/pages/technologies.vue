@@ -226,9 +226,7 @@ export default {
           icon: idle ? 'mdi-alert' : null,
           iconColor: 'warning',
         },
-        next
-          ? { label: 'Next to land', value: next.Name, note: `${this.landing(next.years)}, in ${durationLabel(next.years)}` }
-          : { label: 'Next to land', value: 'Nothing running', note: schedule.length ? 'Every project is paused or has no scientist' : 'No research project is under way' },
+        next ? { label: 'Next to land', value: next.Name, note: `${this.landing(next.years)}, in ${durationLabel(next.years)}` } : { label: 'Next to land', value: 'Nothing running', note: schedule.length ? 'Every project is paused or has no scientist' : 'No research project is under way' },
         {
           label: 'Available now',
           value: `${this.count(available)} ${available === 1 ? 'technology' : 'technologies'}`,

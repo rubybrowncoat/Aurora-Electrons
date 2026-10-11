@@ -7,12 +7,9 @@
 </template>
 
 <script>
-// A mark's glyph as the map draws it round a marker: a disc in the mark's colour with the icon in the surface
-// colour, or for the lesser state a ring with the icon in the colour. It is drawn rather than set in the icon
-// font, which snaps an icon this small to the text's pixel grid, off the middle of its disc.
+// A mark's glyph as the map draws it round a marker: a disc in the mark's colour with the icon in the surface colour, or for the lesser state a ring with the icon in the colour. It is drawn rather than set in the icon font, which snaps an icon this small to the text's pixel grid, off the middle of its disc.
 //
-// `path` is an MDI icon, 24 units square. `offset` moves an icon MDI draws off the middle of its square back
-// onto it, in the same units. A `text`, the habitable worlds' count, takes the icon's place.
+// `path` is an MDI icon, 24 units square. `offset` moves an icon MDI draws off the middle of its square back onto it, in the same units. A `text`, the habitable worlds' count, takes the icon's place.
 
 // The icon's width of the disc's 16, as the map draws 12 of its 16.
 const ICON = 11

@@ -1,12 +1,7 @@
 /*
-  Web mode only: serves the renderer's database calls from Node.
-  The browser shim (shims/database.js) posts raw queries and read-only model
-  calls here; they run against the real Sequelize models from
-  src/renderer/utilities/database.js.
+  Web mode only: serves the renderer's database calls from Node. The browser shim (shims/database.js) posts raw queries and read-only model calls here; they run against the real Sequelize models from src/renderer/utilities/database.js.
 
-  It executes arbitrary SQL against the save, so it only answers the web-mode
-  page itself: a localhost Host header (no DNS rebinding), a same-origin
-  request, a JSON body, and the per-run token web.js embeds in the page.
+  It executes arbitrary SQL against the save, so it only answers the web-mode page itself: a localhost Host header (no DNS rebinding), a same-origin request, a JSON body, and the per-run token web.js embeds in the page.
  */
 const fs = require('fs')
 const path = require('path')
@@ -73,8 +68,7 @@ const decode = (value) => {
   }, {})
 }
 
-// Instances become plain objects. Own properties set outside dataValues (e.g. by
-// the Contact afterFind hook) are kept too.
+// Instances become plain objects. Own properties set outside dataValues (e.g. by the Contact afterFind hook) are kept too.
 const serialize = (value) => {
   if (Array.isArray(value)) {
     return value.map(serialize)
@@ -83,11 +77,9 @@ const serialize = (value) => {
   if (value instanceof Model) {
     const plain = value.get({ plain: true })
 
-    Object.keys(value)
-      .filter((key) => !INSTANCE_INTERNALS.has(key) && !(key in plain))
-      .forEach((key) => {
-        plain[key] = serialize(value[key])
-      })
+    Object.keys(value).filter((key) => !INSTANCE_INTERNALS.has(key) && !(key in plain)).forEach((key) => {
+      plain[key] = serialize(value[key])
+    })
 
     return plain
   }
@@ -215,8 +207,7 @@ const handleDatabase = async (req, res) => {
   }
 }
 
-// The handler for /__aurora-db. `load` imports src/renderer/utilities/database.js: web.js has Vite load it, which
-// resolves its imports the way the renderer build does.
+// The handler for /__aurora-db. `load` imports src/renderer/utilities/database.js: web.js has Vite load it, which resolves its imports the way the renderer build does.
 const databaseHandler = (load) => {
   loadDatabaseModule = load
 

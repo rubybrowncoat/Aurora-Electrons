@@ -5,12 +5,7 @@ const HISTORY_MENU_LENGTH = 12
 const TRAIL_BEHIND = 7
 const TRAIL_AHEAD = 3
 
-// The pages visited this session, as the browser's back/forward list would keep them, plus the last
-// page used in each section and `lastRacePage`, the last one that showed a race's data, which the Empires page
-// opens after a pick. `entries` holds full paths. `pending` is the entry index a back,
-// forward or jump is navigating to, so `settle` can tell it from a fresh visit. `replacing` marks a router replace,
-// which a page makes when its focus changes (mixins/deep-link.js) and which updates the current entry instead of
-// adding one. `labels` names what each full path shows, such as the system a map entry is on.
+// The pages visited this session, as the browser's back/forward list would keep them, plus the last page used in each section and `lastRacePage`, the last one that showed a race's data, which the Empires page opens after a pick. `entries` holds full paths. `pending` is the entry index a back, forward or jump is navigating to, so `settle` can tell it from a fresh visit. `replacing` marks a router replace, which a page makes when its focus changes (mixins/deep-link.js) and which updates the current entry instead of adding one. `labels` names what each full path shows, such as the system a map entry is on.
 export const state = () => {
   return {
     entries: [],
@@ -113,8 +108,7 @@ const replace = (state, path) => {
 }
 
 export const mutations = {
-  // Called from the router's afterEach: a replace updates the current entry, a navigation the store asked for lands on
-  // its entry, any other is a new visit.
+  // Called from the router's afterEach: a replace updates the current entry, a navigation the store asked for lands on its entry, any other is a new visit.
   settle (state, path) {
     if (state.replacing) {
       state.replacing = false

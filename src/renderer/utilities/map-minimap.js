@@ -1,14 +1,9 @@
-// The overview in the Galaxy Map's corner: the whole map drawn small, with a frame round the part in
-// view. Pressing or dragging in it moves the view there, and the wheel zooms. It draws only when the
-// map changes, straight from the graph, where cytoscape-navigator rendered the graph to a PNG image as
-// often as ten times a second while the view moved, at 50–100 ms each.
+// The overview in the Galaxy Map's corner: the whole map drawn small, with a frame round the part in view. Pressing or dragging in it moves the view there, and the wheel zooms. It draws only when the map changes, straight from the graph, where cytoscape-navigator rendered the graph to a PNG image as often as ten times a second while the view moved, at 50–100 ms each.
 
 // Space left round the map inside the overview, as a share of its size.
 const MARGIN = 0.06
 
-// How far one wheel event zooms: a factor, from the wheel's movement in pixels (lines and pages
-// counted as the browsers scroll them). Holding Shift zooms twice as fast. Browsers turn a
-// Shift-wheel into a sideways scroll, so its movement comes in `deltaX`.
+// How far one wheel event zooms: a factor, from the wheel's movement in pixels (lines and pages counted as the browsers scroll them). Holding Shift zooms twice as fast. Browsers turn a Shift-wheel into a sideways scroll, so its movement comes in `deltaX`.
 const WHEEL_PIXELS = 500
 const WHEEL_PIXELS_FAST = 250
 
@@ -19,9 +14,7 @@ export const wheelZoom = (event) => {
   return Math.exp(-delta / (event.shiftKey ? WHEEL_PIXELS_FAST : WHEEL_PIXELS))
 }
 
-// `paint(context, scale)` draws the map on `context`, already transformed to map units, at `scale`
-// overview pixels to a map unit. Call `refresh` when something the graph doesn't report changes, such
-// as colours or the overview's size.
+// `paint(context, scale)` draws the map on `context`, already transformed to map units, at `scale` overview pixels to a map unit. Call `refresh` when something the graph doesn't report changes, such as colours or the overview's size.
 export const createMinimap = (graph, container, paint) => {
   const canvas = document.createElement('canvas')
   const frame = document.createElement('div')

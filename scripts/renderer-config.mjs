@@ -1,17 +1,13 @@
-// The renderer's Vite config, shared by the Electron app (electron.vite.config.mjs) and web mode (scripts/web.js).
-// They differ in what the Node-side modules the renderer imports turn into: src/renderer/bridge/ in Electron,
-// scripts/web/shims/ in a browser.
+// The renderer's Vite config, shared by the Electron app (electron.vite.config.mjs) and web mode (scripts/web.js). They differ in what the Node-side modules the renderer imports turn into: src/renderer/bridge/ in Electron, scripts/web/shims/ in a browser.
 import path from 'path'
 
 import vue from '@vitejs/plugin-vue2'
 
-// Vite runs from the project root or, when its path contains '#', from a junction to it (scripts/run-vite.js).
-// This file's own location can't tell which: electron-vite resolves the junction when it loads its config.
+// Vite runs from the project root or, when its path contains '#', from a junction to it (scripts/run-vite.js). This file's own location can't tell which: electron-vite resolves the junction when it loads its config.
 export const PROJECT_ROOT = process.cwd()
 export const RENDERER_DIR = path.join(PROJECT_ROOT, 'src', 'renderer')
 
-// Swaps modules in the browser bundle: `bare` maps import names (`electron`), `files` maps the absolute paths of
-// renderer files to their stand-ins. Server-side loads (web mode's database middleware) keep the originals.
+// Swaps modules in the browser bundle: `bare` maps import names (`electron`), `files` maps the absolute paths of renderer files to their stand-ins. Server-side loads (web mode's database middleware) keep the originals.
 const swapModules = ({ bare = {}, files = {} }) => ({
   name: 'aurora:swap-modules',
   enforce: 'pre',

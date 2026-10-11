@@ -106,15 +106,13 @@ export const actions = {
     })
   },
 
-  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or
-  // running on it can't hold the app up, and what was read from it is let go.
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go.
   renew ({ commit, state }, { storagePath }) {
     const previous = state.database
     let database = null
     let message = null
 
-    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on
-    // as if the save held no games.
+    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on as if the save held no games.
     try {
       database = cacheQueries(resetDatabase(storagePath))
     } catch (error) {

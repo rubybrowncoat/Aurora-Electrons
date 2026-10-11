@@ -9,14 +9,7 @@
             </div>
           </v-col>
           <v-col cols="12" lg="6">
-            <v-slider
-              v-model="distance"
-              min="1"
-              max="100"
-              :hint="`over a distance of ${distance} billion kilometers`"
-              thumb-label
-              persistent-hint
-            />
+            <v-slider v-model="distance" min="1" max="100" :hint="`over a distance of ${distance} billion kilometers`" thumb-label persistent-hint />
           </v-col>
           <v-col cols="12" lg="6">
             <v-autocomplete v-model="fleets" :items="fleetNames" label="Specific Military Fleets" item-text="FleetName" item-value="FleetID" clearable multiple small-chips deletable-chips />

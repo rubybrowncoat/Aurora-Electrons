@@ -65,10 +65,7 @@ const intruderTotals = (totals) => {
 
 const intruderRaces = (races) => Object.values(races).map((race) => {
   const alien = race.Race.AlienRaces[0]
-  const types = Object.entries(race.Types)
-    .filter(([, contacts]) => contacts.length)
-    .map(([type, contacts]) => `${contacts.length} ${type}s`)
-    .join(', ')
+  const types = Object.entries(race.Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ')
 
   return `${alien.AlienRaceName} — ${types}${alien.ContactStatus === HOSTILE ? ' — Hostile' : ''}`
 }).join('; ')
@@ -248,41 +245,38 @@ export const checks = [
         order: [['Diameter', 'DESC']],
       })
 
-      return rifts
-        .map((rift) => {
-          const [civilianFleets, militaryFleets] = _partition(rift.System.Fleets, (fleet) => fleet.ShippingLine)
+      return rifts.map((rift) => {
+        const [civilianFleets, militaryFleets] = _partition(rift.System.Fleets, (fleet) => fleet.ShippingLine)
 
-          const [inhabitedColonies, uninhabitedColonies] = _partition(rift.System.Populations, (population) => population.Population)
-          const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
-          const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
-          const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
+        const [inhabitedColonies, uninhabitedColonies] = _partition(rift.System.Populations, (population) => population.Population)
+        const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
+        const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
+        const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
 
-          return {
-            rift,
-            civilianFleets: civilianFleets.length,
-            militaryFleets: militaryFleets.length,
-            inhabitedColonies: inhabitedColonies.length,
-            usedColonies: usedColonies.length,
-            stockedColonies: stockedColonies.length,
-            groundUnitBases: groundUnitBases.length,
-          }
-        })
-        .filter((item) => item.civilianFleets || item.militaryFleets || item.inhabitedColonies || item.usedColonies || item.stockedColonies || item.groundUnitBases)
-        .map((item) => ({
-          id: `rift:${item.rift.SystemID}:${item.rift.Xcor}:${item.rift.Ycor}`,
-          cells: {
-            system: item.rift.System.RaceSystemSurveys[0].Name,
-            size: `${ctx.count(item.rift.Diameter / 1000000, 2)} Mkm`,
-            fleets: joined([item.militaryFleets && plural(item.militaryFleets, 'military fleet', 'military fleets'), item.civilianFleets && plural(item.civilianFleets, 'civilian fleet', 'civilian fleets')]),
-            colonies: joined([
-              item.inhabitedColonies && plural(item.inhabitedColonies, 'inhabited colony', 'inhabited colonies'),
-              item.usedColonies && plural(item.usedColonies, 'used colony', 'used colonies'),
-              item.stockedColonies && plural(item.stockedColonies, 'stocked colony', 'stocked colonies'),
-              item.groundUnitBases && plural(item.groundUnitBases, 'ground unit base', 'ground unit bases'),
-            ]),
-          },
-          link: linkTo.map(item.rift.SystemID),
-        }))
+        return {
+          rift,
+          civilianFleets: civilianFleets.length,
+          militaryFleets: militaryFleets.length,
+          inhabitedColonies: inhabitedColonies.length,
+          usedColonies: usedColonies.length,
+          stockedColonies: stockedColonies.length,
+          groundUnitBases: groundUnitBases.length,
+        }
+      }).filter((item) => item.civilianFleets || item.militaryFleets || item.inhabitedColonies || item.usedColonies || item.stockedColonies || item.groundUnitBases).map((item) => ({
+        id: `rift:${item.rift.SystemID}:${item.rift.Xcor}:${item.rift.Ycor}`,
+        cells: {
+          system: item.rift.System.RaceSystemSurveys[0].Name,
+          size: `${ctx.count(item.rift.Diameter / 1000000, 2)} Mkm`,
+          fleets: joined([item.militaryFleets && plural(item.militaryFleets, 'military fleet', 'military fleets'), item.civilianFleets && plural(item.civilianFleets, 'civilian fleet', 'civilian fleets')]),
+          colonies: joined([
+            item.inhabitedColonies && plural(item.inhabitedColonies, 'inhabited colony', 'inhabited colonies'),
+            item.usedColonies && plural(item.usedColonies, 'used colony', 'used colonies'),
+            item.stockedColonies && plural(item.stockedColonies, 'stocked colony', 'stocked colonies'),
+            item.groundUnitBases && plural(item.groundUnitBases, 'ground unit base', 'ground unit bases'),
+          ]),
+        },
+        link: linkTo.map(item.rift.SystemID),
+      }))
     },
   },
   {
@@ -438,39 +432,34 @@ export const checks = [
         ],
       })
 
-      return constructs
-        .map((construct) => {
-          const populations = construct.SystemBody.Populations
-            .filter((population) => population.RaceID === RaceID)
-            .map((population) => population.Population + (orbitalPopulations[population.PopulationID] || 0))
+      return constructs.map((construct) => {
+        const populations = construct.SystemBody.Populations.filter((population) => population.RaceID === RaceID).map((population) => population.Population + (orbitalPopulations[population.PopulationID] || 0))
 
-          return { construct, populations }
-        })
-        .filter(({ construct, populations }) => !construct.Active || !populations.length || !populations.filter((population) => population > 10).length)
-        .map(({ construct, populations }) => {
-          const body = construct.SystemBody
-          const systemName = body.System.RaceSystemSurveys[0].Name
+        return { construct, populations }
+      }).filter(({ construct, populations }) => !construct.Active || !populations.length || !populations.filter((population) => population > 10).length).map(({ construct, populations }) => {
+        const body = construct.SystemBody
+        const systemName = body.System.RaceSystemSurveys[0].Name
 
-          return {
-            id: `construct:${construct.AncientConstructID}`,
-            cells: {
-              construct: `${systemName} — ${modelSystemBodyName(body)}`,
-              bonus: construct.Active ? `${roundToDecimal((construct.ResearchBonus - 1) * 100)}% ${construct.ResearchField.FieldName}` : 'Dormant',
-              blocker: populations.length ? 'Lacking 10 million population on the body' : 'No population on the body',
-            },
-            link: linkTo.planner({
-              bodies: [{
-                SystemBodyID: body.SystemBodyID,
-                SystemBodyName: body.SystemBodyNames.length ? body.SystemBodyNames[0].Name : null,
-                SystemName: systemName,
-                BodyClass: body.BodyClass,
-                Component: body.Star.Component,
-                PlanetNumber: body.PlanetNumber,
-                OrbitNumber: body.OrbitNumber,
-              }],
-            }),
-          }
-        })
+        return {
+          id: `construct:${construct.AncientConstructID}`,
+          cells: {
+            construct: `${systemName} — ${modelSystemBodyName(body)}`,
+            bonus: construct.Active ? `${roundToDecimal((construct.ResearchBonus - 1) * 100)}% ${construct.ResearchField.FieldName}` : 'Dormant',
+            blocker: populations.length ? 'Lacking 10 million population on the body' : 'No population on the body',
+          },
+          link: linkTo.planner({
+            bodies: [{
+              SystemBodyID: body.SystemBodyID,
+              SystemBodyName: body.SystemBodyNames.length ? body.SystemBodyNames[0].Name : null,
+              SystemName: systemName,
+              BodyClass: body.BodyClass,
+              Component: body.Star.Component,
+              PlanetNumber: body.PlanetNumber,
+              OrbitNumber: body.OrbitNumber,
+            }],
+          }),
+        }
+      })
     },
   },
 ]

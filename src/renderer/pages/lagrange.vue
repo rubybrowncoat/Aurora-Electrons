@@ -197,8 +197,7 @@ export default {
       return Object.fromEntries(this.colonies.map((row) => [row.SystemID, row.Colonies]))
     },
 
-    // Body names straight from the read: the ship rows name the body an order is for, so they mustn't
-    // depend on bodyRows, which times stabilisations with the best ship.
+    // Body names straight from the read: the ship rows name the body an order is for, so they mustn't depend on bodyRows, which times stabilisations with the best ship.
     bodyNames() {
       return Object.fromEntries(this.bodies.map((body) => [body.SystemBodyID, systemBodyName(body, { Name: body.SystemName })]))
     },
@@ -239,8 +238,7 @@ export default {
       return counts
     },
 
-    // Computed values are read once, outside the loop: each read inside it would subscribe this
-    // property to every dependency of theirs again.
+    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again.
     bodyRows() {
       const { bestShip, orders, pointsBySystem, coloniesBySystem, bodyNames } = this
       const multiplier = bestShip ? bestShip.multiplier : 1
@@ -248,11 +246,7 @@ export default {
       return this.bodies.map((body) => {
         const order = orders.find((candidate) => candidate.SystemBodyID === body.SystemBodyID)
         const days = (BASE_DAYS / Math.sqrt(body.Mass)) * multiplier
-        const status = body.LagrangePointID
-          ? { key: 'stable', label: 'Stable', icon: 'mdi-check-circle', color: 'success', rank: 2 }
-          : order
-            ? { key: 'working', label: order.Arrived ? 'Being stabilised' : 'Ship on the way', note: this.orderNote(order), icon: 'mdi-progress-wrench', color: 'primary', rank: 1 }
-            : { key: 'candidate', label: 'Can be stabilised', icon: 'mdi-circle-outline', color: '', rank: 0 }
+        const status = body.LagrangePointID ? { key: 'stable', label: 'Stable', icon: 'mdi-check-circle', color: 'success', rank: 2 } : order ? { key: 'working', label: order.Arrived ? 'Being stabilised' : 'Ship on the way', note: this.orderNote(order), icon: 'mdi-progress-wrench', color: 'primary', rank: 1 } : { key: 'candidate', label: 'Can be stabilised', icon: 'mdi-circle-outline', color: '', rank: 0 }
 
         return {
           ...body,
@@ -283,10 +277,7 @@ export default {
     visibleBodies() {
       const search = (this.search || '').toLowerCase()
 
-      return this.bodyRows.filter((body) => (this.view === 'all' || (this.view === 'stable') === (body.status.key === 'stable')) &&
-        (!this.colonySystemsOnly || body.Colonies > 0) &&
-        (!this.selectedSystemId || body.SystemID === this.selectedSystemId) &&
-        (!search || body.name.toLowerCase().includes(search) || body.SystemName.toLowerCase().includes(search)))
+      return this.bodyRows.filter((body) => (this.view === 'all' || (this.view === 'stable') === (body.status.key === 'stable')) && (!this.colonySystemsOnly || body.Colonies > 0) && (!this.selectedSystemId || body.SystemID === this.selectedSystemId) && (!search || body.name.toLowerCase().includes(search) || body.SystemName.toLowerCase().includes(search)))
     },
 
     mapNodes() {
@@ -437,9 +428,7 @@ export default {
       }),
       default: [],
     },
-    // Planets and moons of the known systems that could hold a Lagrange point (0.25 Earth masses and up), and
-    // any that has one. Lagrange points belong to no race: every one in a known system shows. Frozen, as
-    // thousands of read-only rows.
+    // Planets and moons of the known systems that could hold a Lagrange point (0.25 Earth masses and up), and any that has one. Lagrange points belong to no race: every one in a known system shows. Frozen, as thousands of read-only rows.
     bodies: {
       get: tracked('bodies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -450,8 +439,7 @@ export default {
       }),
       default: [],
     },
-    // Ships with a jump point stabilisation module, their captain's (CommandType 1) Production bonus, and whether
-    // a module is damaged.
+    // Ships with a jump point stabilisation module, their captain's (CommandType 1) Production bonus, and whether a module is damaged.
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -462,8 +450,7 @@ export default {
       }),
       default: [],
     },
-    // Stabilise orders: the body is DestinationID; once the fleet is there (`Arrived`), TimeRequired is the
-    // seconds left.
+    // Stabilise orders: the body is DestinationID; once the fleet is there (`Arrived`), TimeRequired is the seconds left.
     orders: {
       get: tracked('orders', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

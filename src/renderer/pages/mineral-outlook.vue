@@ -106,8 +106,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
-            Click a row to see its outlook.
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }} Click a row to see its outlook.
           </div>
         </v-card>
 
@@ -298,8 +297,7 @@ export default {
       return !!(this.ledger && this.ledger.length)
     },
 
-    // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last,
-    // possibly stale, value, so it doesn't count).
+    // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last, possibly stale, value, so it doesn't count).
     forecastReady() {
       return this.inputsLoaded && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
     },
@@ -313,8 +311,7 @@ export default {
         return 0
       }
 
-      // The production ticks (distinct times of production-phase rows, counted in SQL) set the
-      // cycle; the history starts at the earliest row of any kind.
+      // The production ticks (distinct times of production-phase rows, counted in SQL) set the cycle; the history starts at the earliest row of any kind.
       const [{ ProductionTicks: ticks, FirstTick: firstTick, LastTick: lastTick }] = this.ledger
 
       return ledgerCoverageDays({
@@ -733,9 +730,7 @@ export default {
       this.pickFocusMineral()
     },
 
-    // Focus the mineral that runs out first, once the forecast can say which. The deposits panel
-    // filters by the focus and doesn't wait for the forecast, so until then the mineral whose
-    // deposit empties first stands in (and gives way to the runway pick).
+    // Focus the mineral that runs out first, once the forecast can say which. The deposits panel filters by the focus and doesn't wait for the forecast, so until then the mineral whose deposit empties first stands in (and gives way to the runway pick).
     pickFocusMineral() {
       const rows = this.mineralRows
 
@@ -1015,9 +1010,7 @@ export default {
       }),
       default: null,
     },
-    // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now.
-    // Older saves don't have the table: null means "not loaded", [] means "none". Any other
-    // failure (the game holding a lock while it saves, say) rejects, and the page says so.
+    // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now. Older saves don't have the table: null means "not loaded", [] means "none". Any other failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {
       get: tracked('ledger', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

@@ -281,8 +281,7 @@ export default {
       return bySystem
     },
 
-    // Computed values are read once, outside the loop: each read inside it would subscribe this
-    // property to every dependency of theirs again, which is every unsurveyed body.
+    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again, which is every unsurveyed body.
     systemRows() {
       const { fleetRows, bodiesBySystem } = this
 
@@ -492,8 +491,7 @@ export default {
       this.setUnsaved('systemsTable', { ...this.systemsTable, sortBy: ['remaining'], sortDesc: [true] })
       this.expanded = [row]
 
-      // The row's page in the order the table will show: unfiltered, most work left first (the
-      // table's numeric sort is a stable subtraction too, so ties keep the same order).
+      // The row's page in the order the table will show: unfiltered, most work left first (the table's numeric sort is a stable subtraction too, so ties keep the same order).
       const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
       const target = this.systemsTable.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.systemsTable.itemsPerPage) + 1 : 1
 
@@ -540,9 +538,7 @@ export default {
       }),
       default: null,
     },
-    // Known systems with their gravitational locations (done of all) and geological bodies
-    // (planets, moons, asteroids, comets; points left on the ones neither surveyed nor banned).
-    // The large reads are frozen: read-only rows Vue needn't observe.
+    // Known systems with their gravitational locations (done of all) and geological bodies (planets, moons, asteroids, comets; points left on the ones neither surveyed nor banned). The large reads are frozen: read-only rows Vue needn't observe.
     systems: {
       get: tracked('systems', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -574,8 +570,7 @@ export default {
       }),
       default: [],
     },
-    // Ships with geological or gravitational sensors, with their captain's (CommandType 1) and
-    // science officer's (CommandType 10) Survey bonus.
+    // Ships with geological or gravitational sensors, with their captain's (CommandType 1) and science officer's (CommandType 10) Survey bonus.
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -606,8 +601,7 @@ export default {
       }),
       default: [],
     },
-    // Geologically surveyed bodies with ground-survey potential left, with the race's colony there
-    // (progress in GroundGeoSurvey) and its geosurvey formations' points a day.
+    // Geologically surveyed bodies with ground-survey potential left, with the race's colony there (progress in GroundGeoSurvey) and its geosurvey formations' points a day.
     groundSurveys: {
       get: tracked('groundSurveys', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

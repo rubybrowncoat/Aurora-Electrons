@@ -1,19 +1,7 @@
 <template>
   <nav v-show="visible" class="section-nav" :style="frame" aria-label="Sections">
     <div class="section-nav__ticks" @mouseleave="show(null)">
-      <button
-        v-for="(section, index) in sections"
-        :key="section.key"
-        type="button"
-        class="section-nav__tick"
-        :class="{ 'section-nav__tick--active': index === active, 'section-nav__tick--shown': index === shown }"
-        :aria-label="section.title"
-        :aria-current="index === active ? 'location' : null"
-        @mouseenter="show(index, $event)"
-        @focus="show(index, $event)"
-        @blur="show(null)"
-        @click="go(index)"
-      />
+      <button v-for="(section, index) in sections" :key="section.key" type="button" class="section-nav__tick" :class="{ 'section-nav__tick--active': index === active, 'section-nav__tick--shown': index === shown }" :aria-label="section.title" :aria-current="index === active ? 'location' : null" @mouseenter="show(index, $event)" @focus="show(index, $event)" @blur="show(null)" @click="go(index)" />
     </div>
 
     <div v-if="card" ref="card" class="section-nav__card" :style="{ top: `${cardTop}px` }" aria-hidden="true">
@@ -25,10 +13,7 @@
 </template>
 
 <script>
-// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one
-// is clicked and shows its title and figures when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss):
-// its title is the text of the head's first element, its figures the chips and secondary notes in the head, the size of its
-// table and the caption in its foot. The ticks show once a page has two sections and is too long for the window.
+// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one is clicked and shows its title and figures when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss): its title is the text of the head's first element, its figures the chips and secondary notes in the head, the size of its table and the caption in its foot. The ticks show once a page has two sections and is too long for the window.
 
 const SCAN_DELAY = 200
 
@@ -68,10 +53,7 @@ const titleOf = (head) => {
   return squash(texts.join(' '))
 }
 
-const figuresOf = (head) => [...head.querySelectorAll(FIGURES)]
-  .filter((figure) => figure !== head.firstElementChild && !within(figure.parentElement, FIGURES, head) && !within(figure, CONTROLS, head))
-  .map((figure) => squash(figure.textContent))
-  .filter(Boolean)
+const figuresOf = (head) => [...head.querySelectorAll(FIGURES)].filter((figure) => figure !== head.firstElementChild && !within(figure.parentElement, FIGURES, head) && !within(figure, CONTROLS, head)).map((figure) => squash(figure.textContent)).filter(Boolean)
 
 // The number of rows in the panel's table, unless a figure in the head already gives it.
 const rowsOf = (panel, figures) => {
@@ -132,8 +114,7 @@ export default {
     },
   },
   created () {
-    // The panels behind the ticks, in the same order, and the section last clicked with the scroll position the page came
-    // to rest at, null while it is still scrolling there. That section stays the active one until the page moves on.
+    // The panels behind the ticks, in the same order, and the section last clicked with the scroll position the page came to rest at, null while it is still scrolling there. That section stays the active one until the page moves on.
     this.panels = []
     this.pin = null
   },
@@ -181,22 +162,17 @@ export default {
         this.scanTimer = setTimeout(this.scan, SCAN_DELAY)
       }
     },
-    // Panels in reading order: by their top, then left to right for panels side by side. A panel nested in another
-    // panel, hidden, or without a title is not a section.
+    // Panels in reading order: by their top, then left to right for panels side by side. A panel nested in another panel, hidden, or without a title is not a section.
     scan () {
       this.scanTimer = null
 
       const root = this.$el.parentElement
       const scroller = document.scrollingElement
-      const found = [...root.querySelectorAll('.panel')]
-        .filter((panel) => !panel.parentElement.closest('.panel') && panel.getClientRects().length)
-        .map((panel) => {
-          const head = partOf(panel, 'panel-head')
+      const found = [...root.querySelectorAll('.panel')].filter((panel) => !panel.parentElement.closest('.panel') && panel.getClientRects().length).map((panel) => {
+        const head = partOf(panel, 'panel-head')
 
-          return { panel, title: head ? titleOf(head) : '', rect: panel.getBoundingClientRect() }
-        })
-        .filter(({ title }) => title)
-        .sort((a, b) => (Math.round(a.rect.top) - Math.round(b.rect.top)) || (a.rect.left - b.rect.left))
+        return { panel, title: head ? titleOf(head) : '', rect: panel.getBoundingClientRect() }
+      }).filter(({ title }) => title).sort((a, b) => (Math.round(a.rect.top) - Math.round(b.rect.top)) || (a.rect.left - b.rect.left))
 
       this.panels = found.map(({ panel }) => panel)
       this.sections = found.map(({ title }, index) => ({ key: `${index}:${title}`, title }))
@@ -225,8 +201,7 @@ export default {
         this.pin.at = window.scrollY
       }
     },
-    // The section being read: the one clicked, while the page goes to it and stays there; the last section once the page is
-    // scrolled to its end; otherwise the last whose top is above a line a third of the way down the window.
+    // The section being read: the one clicked, while the page goes to it and stays there; the last section once the page is scrolled to its end; otherwise the last whose top is above a line a third of the way down the window.
     current () {
       const { panels } = this
       const { bar, top, bottom, footer, insetFooter } = this.$vuetify.application

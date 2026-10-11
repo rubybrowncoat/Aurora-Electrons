@@ -188,8 +188,7 @@ const INPUT_LABELS = {
 }
 const SECONDS_PER_DAY = 86400
 
-// A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its
-// origin.
+// A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
 const OPTIONS = [
   { key: 'avoidDanger', config: 'routesAvoidDanger', default: true, label: 'Avoid danger', hint: 'Skips systems with a danger rating your ships there don\'t outweigh in protection value.' },
   { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race you have no trade treaty with.' },
@@ -379,8 +378,7 @@ export default {
       })
     },
 
-    // The same search with every option's limit lifted, to tell the systems the options cut off from the ones no
-    // explored route reaches at all.
+    // The same search with every option's limit lifted, to tell the systems the options cut off from the ones no explored route reaches at all.
     openRoutes() {
       if (!this.origin) {
         return null
@@ -452,8 +450,7 @@ export default {
       return rows
     },
 
-    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every
-    // dependency of theirs again.
+    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again.
     distanceRows() {
       const { routes, openRoutes, origin, avoidReasons } = this
 
@@ -514,13 +511,7 @@ export default {
       const stabilised = this.legs.filter((leg) => leg.kind === 'jump' && leg.from.JumpGateStrength > 0).length
       const lagrange = this.legs.filter((leg) => leg.via).length
       const blockers = this.destinationBlockers
-      const noRoute = !this.destination
-        ? 'Pick a destination above, on the map or in the table'
-        : this.avoidReasons[this.destination.SystemID]
-          ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}`
-          : blockers.length
-            ? `The options keep it out of reach: ${blockers.length > 3 ? `${blockers.slice(0, 3).join(', ')} and ${blockers.length - 3} more` : joinLabels(blockers)}`
-            : 'No explored jump route reaches it'
+      const noRoute = !this.destination ? 'Pick a destination above, on the map or in the table' : this.avoidReasons[this.destination.SystemID] ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}` : blockers.length ? `The options keep it out of reach: ${blockers.length > 3 ? `${blockers.slice(0, 3).join(', ')} and ${blockers.length - 3} more` : joinLabels(blockers)}` : 'No explored jump route reaches it'
 
       return [
         {
@@ -682,8 +673,7 @@ export default {
       return [text.slice(0, at), text.slice(at)]
     },
 
-    // What the options would stop on a route found without them: systems they avoid, and jump points they don't
-    // transit, in route order.
+    // What the options would stop on a route found without them: systems they avoid, and jump points they don't transit, in route order.
     blockers(route) {
       const { gatesOnly, civilian } = this.options
       const found = []
@@ -710,9 +700,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The known systems with what the avoid options look at: the danger rating against the protection value of
-    // your own ships there (the game counts every fleet present, which fog of war hides), and the controlling race
-    // with your trade treaty, if any.
+    // The known systems with what the avoid options look at: the danger rating against the protection value of your own ships there (the game counts every fleet present, which fog of war hides), and the controlling race with your trade treaty, if any.
     systems: {
       get: tracked('systems', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -743,8 +731,7 @@ export default {
       }),
       default: [],
     },
-    // Your own fleets that move, without the shipping lines', with their movement settings and whether any ship
-    // carries a jump drive.
+    // Your own fleets that move, without the shipping lines', with their movement settings and whether any ship carries a jump drive.
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

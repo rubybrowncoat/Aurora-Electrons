@@ -1,5 +1,4 @@
-// The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette,
-// titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
+// The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette, titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
 
 // `slot` indexes `chartTheme(dark).categorical` in components/charts/theme.js.
 const SECTIONS = [
@@ -13,12 +12,7 @@ const SECTIONS = [
   { id: 'research', title: 'Research', icon: 'mdi-flask-outline', slot: 5 },
 ]
 
-// `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the
-// selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or
-// default smoke list. `noRace` pages (Empires, Settings, About) work before a game and race are picked; every other page
-// shows the selected race's data, so it can't be opened until one is. `planned` pages have no page file yet: the section flyout lists them dimmed with a
-// "Planned" chip, and they are never navigable and appear in no tabs, palette, history or smoke list.
-// Pages within a section appear in this order. `/`, the Empires page, is where the app starts.
+// `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or default smoke list. `noRace` pages (Empires, Settings, About) work before a game and race are picked; every other page shows the selected race's data, so it can't be opened until one is. `planned` pages have no page file yet: the section flyout lists them dimmed with a "Planned" chip, and they are never navigable and appear in no tabs, palette, history or smoke list. Pages within a section appear in this order. `/`, the Empires page, is where the app starts.
 const PAGES = [
   { route: '/production', section: 'command', tab: 'Production', title: 'Production Recap', icon: 'mdi-factory', blurb: 'Research, industry, shipyards and training, each with its time left.', keywords: 'research industry shipyard queue terraforming' },
   { route: '/warnings', section: 'command', tab: 'Warnings', title: 'Warnings', icon: 'mdi-alert-octagon-outline', blurb: 'About 40 checks over contacts, economy, ships, fleets and colonies.', keywords: 'alerts idle fleets damaged ships intruders lifepods' },

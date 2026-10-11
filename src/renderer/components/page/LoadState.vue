@@ -9,9 +9,7 @@
 </template>
 
 <script>
-// What a page shows above its content until its reads are in: the failed reads with a Retry button, else a progress
-// bar while loading. With the load-state mixin a page passes `failedInputsText`, `loadErrors[failedInputs[0]]`,
-// `!ready` and `retryFailedInputs`.
+// What a page shows above its content until its reads are in: the failed reads with a Retry button, else a progress bar while loading. With the load-state mixin a page passes `failedInputsText`, `loadErrors[failedInputs[0]]`, `!ready` and `retryFailedInputs`.
 export default {
   name: 'LoadState',
   props: {

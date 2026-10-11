@@ -1,9 +1,7 @@
 import { chartTheme, withAlpha } from '../charts/theme'
 import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, QUEUED } from '../../utilities/research'
 
-// One colour per research status, from the chart palette: researched blue, running and queued orange,
-// available teal; locked and out-of-reach techs recede to the muted ink and the border. Shapes carry the
-// same meaning (filled, hatched, ringed, hollow, dashed) so colour is never the only cue.
+// One colour per research status, from the chart palette: researched blue, running and queued orange, available teal; locked and out-of-reach techs recede to the muted ink and the border. Shapes carry the same meaning (filled, hatched, ringed, hollow, dashed) so colour is never the only cue.
 export const statusColors = (dark) => {
   const theme = chartTheme(dark)
   const [blue, orange, teal] = theme.categorical

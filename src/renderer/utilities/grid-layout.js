@@ -1,21 +1,12 @@
 // Grid layout for the galactic map.
 //
-// Places each known system on a square grid the way players arrange their maps by hand (the
-// maps on issue #60 and the saves measured for it): one system per cell, links along the
-// horizontal, vertical and 45° lines, chains straight, dead ends beside their parent, and no
-// link crossing another link or passing over a system. It is a multicriteria search on the
-// grid (Stott, Rodgers et al. 2011, "Automatic Metro Map Layout Using Multicriteria
-// Optimization"): every rule below is a cost, and a move is kept when it lowers the sum.
+// Places each known system on a square grid the way players arrange their maps by hand (the maps on issue #60 and the saves measured for it): one system per cell, links along the horizontal, vertical and 45° lines, chains straight, dead ends beside their parent, and no link crossing another link or passing over a system. It is a multicriteria search on the grid (Stott, Rodgers et al. 2011, "Automatic Metro Map Layout Using Multicriteria Optimization"): every rule below is a cost, and a move is kept when it lowers the sum.
 //
-// A rebuild starts from a stress layout (straight-line distances that match the jumps
-// between systems), turned to match the map the player has; a tidy-up starts from the map as
-// it is and pays for every cell a system moves. Both then snap to the grid and improve it.
+// A rebuild starts from a stress layout (straight-line distances that match the jumps between systems), turned to match the map the player has; a tidy-up starts from the map as it is and pays for every cell a system moves. Both then snap to the grid and improve it.
 //
-// A nexus is drawn otherwise: it sits in the middle of an empty square, its links reaching
-// out at any angle to a ring round it, evenly spaced, the ring wider the more links it has.
+// A nexus is drawn otherwise: it sits in the middle of an empty square, its links reaching out at any angle to a ring round it, evenly spaced, the ring wider the more links it has.
 //
-// `gridLayout` is a generator: it yields { phase, progress } often so the page can run it in
-// slices between frames, and returns { positions, cost }.
+// `gridLayout` is a generator: it yields { phase, progress } often so the page can run it in slices between frames, and returns { positions, cost }.
 
 export const GRID_LAYOUT_DEFAULTS = {
   mode: 'rebuild',
@@ -56,8 +47,7 @@ const BUCKET = 4
 const cellKey = (x, y) => (x + 32768) * 65536 + (y + 32768)
 const bucketKey = (bx, by) => (bx + 8192) * 16384 + (by + 8192)
 
-// A nexus's links reach out to a ring this many cells round it, one cell wider for every six
-// links past twelve, and nothing else sits inside the ring.
+// A nexus's links reach out to a ring this many cells round it, one cell wider for every six links past twelve, and nothing else sits inside the ring.
 const nexusRing = (links) => Math.max(2, Math.ceil(links / 6))
 
 // The cells `radius` steps out from a cell (a square ring), as [dx, dy, angle], by angle.
@@ -90,10 +80,7 @@ function mulberry32(seed) {
   }
 }
 
-// The grid the player's map already uses, in game units: the most common gap between linked
-// systems along either axis (rounded to 10 so a hand-dragged map still counts). A map with no
-// clear grid uses the median link instead, so a free layout still reads as about one cell a
-// link.
+// The grid the player's map already uses, in game units: the most common gap between linked systems along either axis (rounded to 10 so a hand-dragged map still counts). A map with no clear grid uses the median link instead, so a free layout still reads as about one cell a link.
 function detectSpacing(positions, edges, fallback) {
   const counts = new Map()
   const lengths = []
@@ -219,8 +206,7 @@ function buildState({ nodes, edges, capitalId, options }) {
     placed: new Uint8Array(n),
     occupied: new Map(),
 
-    // Where the search would like each system: its cell in a tidy-up (paid per cell moved),
-    // or its snapped stress position while a rebuild first puts systems down.
+    // Where the search would like each system: its cell in a tidy-up (paid per cell moved), or its snapped stress position while a rebuild first puts systems down.
     homeX: new Int32Array(n),
     homeY: new Int32Array(n),
     hasHome: new Uint8Array(n),
@@ -327,8 +313,7 @@ function clearCells(state) {
   }
 }
 
-// Long links cost more the longer they get; links off the eight directions cost extra. A
-// nexus's links are free out to its ring, at any angle, so they can fan out round it.
+// Long links cost more the longer they get; links off the eight directions cost extra. A nexus's links are free out to its ring, at any angle, so they can fan out round it.
 function edgeCost(state, e) {
   const { x, y, ea, eb, ring, weights } = state
   const dx = Math.abs(x[ea[e]] - x[eb[e]])
@@ -420,10 +405,7 @@ function occlusionCost(state, e, w) {
   return distanceSquared < 0.0625 ? weights.occlusion : distanceSquared < 0.2 ? weights.near : 0
 }
 
-// The gaps between a system's links: up to four links want 90° apart, more share the
-// circle. A nexus's links share it evenly at any angle, the ones still to place too, and each
-// gap pays for the part of its share it lacks, so many links weigh no less than a few. A
-// system with two links also pays for every 45° its line turns.
+// The gaps between a system's links: up to four links want 90° apart, more share the circle. A nexus's links share it evenly at any angle, the ones still to place too, and each gap pays for the part of its share it lacks, so many links weigh no less than a few. A system with two links also pays for every 45° its line turns.
 function angleCost(state, v) {
   const { x, y, ea, eb, incident, placed, ring, weights } = state
   const angles = []
@@ -459,9 +441,7 @@ function angleCost(state, v) {
   return cost
 }
 
-// Costs of where a system sits: away from the capital (or from its cell in a tidy-up, or
-// from its stress position while snapping), away from its group, or boxed in with links
-// still to place.
+// Costs of where a system sits: away from the capital (or from its cell in a tidy-up, or from its stress position while snapping), away from its group, or boxed in with links still to place.
 function nodeCost(state, v) {
   const { x, y, group, weights } = state
   let cost = 0
@@ -508,8 +488,7 @@ function nodeCost(state, v) {
   return cost
 }
 
-// Systems side by side that aren't in the same group, where at least one is in a group, so
-// a group keeps outsiders out as well as other groups; each pair counted once.
+// Systems side by side that aren't in the same group, where at least one is in a group, so a group keeps outsiders out as well as other groups; each pair counted once.
 function separationCost(state, v) {
   if (!state.groupCount.length) {
     return 0
@@ -527,9 +506,7 @@ function separationCost(state, v) {
   return cost
 }
 
-// Systems inside a nexus's ring, more the nearer the nexus they sit: those round `v` if it is
-// a nexus, and `v` inside another nexus's ring unless that nexus is in the set too (it counts
-// them itself), so each pair is counted once.
+// Systems inside a nexus's ring, more the nearer the nexus they sit: those round `v` if it is a nexus, and `v` inside another nexus's ring unless that nexus is in the set too (it counts them itself), so each pair is counted once.
 function clearingCost(state, v) {
   const { x, y, ring, nexuses, placed, mark, occupied } = state
   const r = ring[v]
@@ -711,9 +688,7 @@ function moveSet(state, set, targets) {
   return true
 }
 
-// Tries each candidate layout of `set` and keeps the cheapest if it beats the current one.
-// While the search is warm a worse layout can win too, with a chance that shrinks with how
-// much worse it is, so the search can climb out of a dead end (simulated annealing).
+// Tries each candidate layout of `set` and keeps the cheapest if it beats the current one. While the search is warm a worse layout can win too, with a chance that shrinks with how much worse it is, so the search can climb out of a dead end (simulated annealing).
 function tryCandidates(state, set, candidates, rng, temperature = 0) {
   const before = localCost(state, set)
   const original = snapshot(state, set)
@@ -763,10 +738,7 @@ function translations(state, set, cells) {
   })
 }
 
-// Hops between every pair of systems, a link to a nexus counting as far as its ring so the
-// systems round it start out there. Pairs in different pieces of the map get one more than
-// the longest path; systems of one group sit a little closer and of two groups a little
-// further, so groups start out together.
+// Hops between every pair of systems, a link to a nexus counting as far as its ring so the systems round it start out there. Pairs in different pieces of the map get one more than the longest path; systems of one group sit a little closer and of two groups a little further, so groups start out together.
 function hopDistances(state) {
   const { n, neighbours, group, ring } = state
   const distances = new Float64Array(n * n).fill(-1)
@@ -812,8 +784,7 @@ function hopDistances(state) {
   return distances
 }
 
-// A stress layout (Gansner, Koren and North 2004), started from the two leading axes of the
-// distances (classical scaling by power iteration) so it doesn't depend on a random start.
+// A stress layout (Gansner, Koren and North 2004), started from the two leading axes of the distances (classical scaling by power iteration) so it doesn't depend on a random start.
 function* stressCoordinates(state, rng) {
   const { n } = state
   const distances = hopDistances(state)
@@ -922,8 +893,7 @@ function* stressCoordinates(state, rng) {
   return { sx, sy }
 }
 
-// Turns (and if need be mirrors) the stress layout about the capital to sit as close as it
-// can to the map the player has, so a rebuild keeps the map's orientation.
+// Turns (and if need be mirrors) the stress layout about the capital to sit as close as it can to the map the player has, so a rebuild keeps the map's orientation.
 function alignToCurrent(state, sx, sy, current) {
   const { n, capital } = state
   const ox = sx[capital]
@@ -961,9 +931,7 @@ function alignToCurrent(state, sx, sy, current) {
   }
 }
 
-// Puts systems down one at a time, outward from the capital, each on the cheapest free cell
-// near where `targetX`/`targetY` (in cells) would have it. Pinned systems go first, on their
-// own cells, then nexuses, widest ring first, so the rest keep out of their rings.
+// Puts systems down one at a time, outward from the capital, each on the cheapest free cell near where `targetX`/`targetY` (in cells) would have it. Pinned systems go first, on their own cells, then nexuses, widest ring first, so the rest keep out of their rings.
 function* placeNear(state, targetX, targetY, rng) {
   const { n, neighbours, capital } = state
   state.guided = true
@@ -1040,8 +1008,7 @@ function* placeNear(state, targetX, targetY, rng) {
   state.room = false
 }
 
-// Whether `v` on this cell would sit inside a nexus's ring or, being a nexus, have a system
-// inside its own. Placing keeps the rings empty; after that, the search only pays for it.
+// Whether `v` on this cell would sit inside a nexus's ring or, being a nexus, have a system inside its own. Placing keeps the rings empty; after that, the search only pays for it.
 function inRing(state, v, x, y) {
   const { ring, nexuses, placed, occupied } = state
   for (const u of nexuses) {
@@ -1061,9 +1028,7 @@ function inRing(state, v, x, y) {
   return false
 }
 
-// The pieces that hang off the map by a single system: take that system away and they come
-// loose from the capital. Each can turn about the system it hangs from, or shift, as a whole.
-// A piece with no link to the capital's piece hangs from nothing (anchor -1).
+// The pieces that hang off the map by a single system: take that system away and they come loose from the capital. Each can turn about the system it hangs from, or shift, as a whole. A piece with no link to the capital's piece hangs from nothing (anchor -1).
 function pendantPieces(state) {
   const { n, neighbours, capital } = state
   const pieces = []
@@ -1128,8 +1093,7 @@ function pendantPieces(state) {
   return pieces.sort((p, q) => p.members.length - q.members.length)
 }
 
-// Runs of systems with two links each inside the map's loops (its 2-core), with whatever
-// hangs off them: shifting one stretches or shrinks a loop without bending its corners.
+// Runs of systems with two links each inside the map's loops (its 2-core), with whatever hangs off them: shifting one stretches or shrinks a loop without bending its corners.
 function loopRuns(state, pieces) {
   const { n, neighbours } = state
   const degree = Int32Array.from(neighbours, (list) => list.length)
@@ -1210,9 +1174,7 @@ function shuffled(n, rng) {
   return order
 }
 
-// A nexus's links spread evenly round its ring in the order they run now, at eight turns of
-// the whole fan, each linked system taking what `carry` gives for it along. Linked systems
-// that are pinned or nexuses themselves stay where they are.
+// A nexus's links spread evenly round its ring in the order they run now, at eight turns of the whole fan, each linked system taking what `carry` gives for it along. Linked systems that are pinned or nexuses themselves stay where they are.
 function fanLayouts(state, v, carry) {
   const { x, y, ring, neighbours, placed, pinned } = state
   const angle = (w) => (Math.atan2(y[w] - y[v], x[w] - x[v]) * 180) / Math.PI
@@ -1366,8 +1328,7 @@ function* improve(state, rng, { heated, settle, warmth }) {
       gain += tryCandidates(state, members, translations(state, members, cells), rng, temperature)
     }
 
-    // Each nexus's links fanned out round it, alone and then with what hangs off them (but not
-    // the nexus itself, where it hangs off one of them).
+    // Each nexus's links fanned out round it, alone and then with what hangs off them (but not the nexus itself, where it hangs off one of them).
     for (const v of state.nexuses) {
       for (const carry of [() => [], (w) => hanging[w].filter((members) => members.length < carryLimit && !members.includes(v)).flat()]) {
         const fan = fanLayouts(state, v, carry)
@@ -1394,11 +1355,7 @@ function* improve(state, rng, { heated, settle, warmth }) {
   }
 }
 
-// Lays out `nodes` ({ id, group, pinned, nexus }) joined by `edges` ([idA, idB]) on a grid.
-// `positions` ({ id: { x, y } }, game units) is the map as it is: a tidy-up starts from it, a
-// rebuild keeps its orientation, and pinned systems keep their place. The capital keeps its
-// position and the rest is laid out around it, `options.spacing` game units apart. A system
-// marked `nexus` gets its links fanned out round it.
+// Lays out `nodes` ({ id, group, pinned, nexus }) joined by `edges` ([idA, idB]) on a grid. `positions` ({ id: { x, y } }, game units) is the map as it is: a tidy-up starts from it, a rebuild keeps its orientation, and pinned systems keep their place. The capital keeps its position and the rest is laid out around it, `options.spacing` game units apart. A system marked `nexus` gets its links fanned out round it.
 export function* gridLayout({ nodes, edges, capitalId = null, positions = {}, options = {} }) {
   const settings = { ...GRID_LAYOUT_DEFAULTS, ...options }
   const state = buildState({ nodes, edges, capitalId, options: settings })
@@ -1485,9 +1442,7 @@ export function* gridLayout({ nodes, edges, capitalId = null, positions = {}, op
   const result = {}
   for (let v = 0; v < state.n; v += 1) {
     const original = positions[state.ids[v]]
-    result[state.ids[v]] = state.pinned[v] && original
-      ? { x: original.x, y: original.y }
-      : { x: origin.x + (state.x[v] - shiftX) * settings.spacing, y: origin.y + (state.y[v] - shiftY) * settings.spacing }
+    result[state.ids[v]] = state.pinned[v] && original ? { x: original.x, y: original.y } : { x: origin.x + (state.x[v] - shiftX) * settings.spacing, y: origin.y + (state.y[v] - shiftY) * settings.spacing }
   }
 
   return { positions: result, cost: totalCost(state) }
@@ -1504,8 +1459,7 @@ export function runGridLayout(input) {
   }
 }
 
-// How tidy a map is, in game units: links that cross, links that pass over a system's marker
-// (`markerRadius`, 25 on the game's map), and links that run straight, at 45° or otherwise.
+// How tidy a map is, in game units: links that cross, links that pass over a system's marker (`markerRadius`, 25 on the game's map), and links that run straight, at 45° or otherwise.
 export function layoutQuality({ edges, positions, markerRadius = 25 }) {
   const segments = edges.map(([a, b]) => [String(a), String(b), positions[a], positions[b]]).filter(([, , pa, pb]) => pa && pb)
   const ids = Object.keys(positions)

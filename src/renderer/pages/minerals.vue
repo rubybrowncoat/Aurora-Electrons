@@ -882,12 +882,10 @@ export default {
     depositHeaders() {
       return [
         { text: 'Body', value: 'nameSort' },
-        ...(this.focus
-          ? [
-              { text: 'In the ground', value: 'amount', align: 'end' },
-              { text: 'Accessibility', value: 'accessibility' },
-            ]
-          : [{ text: 'Deposits', value: 'amount' }]),
+        ...(this.focus ? [
+          { text: 'In the ground', value: 'amount', align: 'end' },
+          { text: 'Accessibility', value: 'accessibility' },
+        ] : [{ text: 'Deposits', value: 'amount' }]),
         { text: 'Per mine', value: 'perMine', align: 'end' },
         { text: 'Potential', value: 'potential', align: 'end' },
         { text: 'Mining', value: 'mining', sortable: false },
@@ -954,8 +952,7 @@ export default {
       ]
     },
 
-    // The expanded colony's minerals, with what to do about the pressing ones: where the nearest stock free to
-    // move is, on the charted route from this colony.
+    // The expanded colony's minerals, with what to do about the pressing ones: where the nearest stock free to move is, on the charted route from this colony.
     colonyDetail() {
       const expanded = this.colonyExpanded[0] && this.colonyRows.find((row) => row.key === this.colonyExpanded[0].key)
 
@@ -975,12 +972,7 @@ export default {
         }
 
         const missing = mineral.state === 'short' ? mineral.needs - mineral.stock : mineral.reserve - mineral.stock
-        const source = others
-          .map((other) => ({ other, free: other.minerals[mineral.id - 1].free }))
-          .filter(({ free }) => free >= 1)
-          .map((candidate) => ({ ...candidate, route: routes.toPlace({ SystemID: candidate.other.colony.SystemID, Xcor: candidate.other.colony.Xcor, Ycor: candidate.other.colony.Ycor }) }))
-          .filter(({ route }) => route)
-          .reduce((best, candidate) => (!best || candidate.route.km < best.route.km ? candidate : best), null)
+        const source = others.map((other) => ({ other, free: other.minerals[mineral.id - 1].free })).filter(({ free }) => free >= 1).map((candidate) => ({ ...candidate, route: routes.toPlace({ SystemID: candidate.other.colony.SystemID, Xcor: candidate.other.colony.Xcor, Ycor: candidate.other.colony.Ycor }) })).filter(({ route }) => route).reduce((best, candidate) => (!best || candidate.route.km < best.route.km ? candidate : best), null)
         const lack = `${compact(missing)} ${mineral.state === 'short' ? 'more for the queue' : 'under the reserve'}`
 
         return {
@@ -998,8 +990,7 @@ export default {
       return this.selectedSystemIds.length === 1 ? this.selectedSystemIds[0] : null
     },
 
-    // Per system, the deposits of the focus mineral that pass the options and the deposit view, whether or not
-    // the system is in view.
+    // Per system, the deposits of the focus mineral that pass the options and the deposit view, whether or not the system is in view.
     systemDeposits() {
       const systems = {}
 
@@ -1210,8 +1201,7 @@ export default {
       default: [],
     },
 
-    // The race's colonies: stock and reserve of each mineral, mining in mine equivalents (manned, automated) and
-    // civilian complexes, mass drivers and where they send.
+    // The race's colonies: stock and reserve of each mineral, mining in mine equivalents (manned, automated) and civilian complexes, mass drivers and where they send.
     colonies: {
       get: tracked('colonies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -1225,8 +1215,7 @@ export default {
       default: [],
     },
 
-    // What each colony's queue still needs: industrial projects (per unit, times the units left) and shipyard
-    // tasks (their full cost, times the share of build points left).
+    // What each colony's queue still needs: industrial projects (per unit, times the units left) and shipyard tasks (their full cost, times the share of build points left).
     needs: {
       get: tracked('needs', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

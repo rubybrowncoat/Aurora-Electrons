@@ -1,8 +1,4 @@
-// Chart colours, from the Aurora Electrons design system (ink, surface, border,
-// primary) plus a categorical palette validated with the dataviz checks against
-// the app's surfaces (#ffffff light, #1e1e1e dark): adjacent CVD ΔE ≥ 8.4,
-// normal-vision ΔE ≥ 19.3. In light mode three hues sit under 3:1 on white, so
-// every chart that uses them also offers a table view.
+// Chart colours, from the Aurora Electrons design system (ink, surface, border, primary) plus a categorical palette validated with the dataviz checks against the app's surfaces (#ffffff light, #1e1e1e dark): adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3. In light mode three hues sit under 3:1 on white, so every chart that uses them also offers a table view.
 
 const TOKENS = {
   light: {
@@ -27,8 +23,7 @@ const TOKENS = {
 
 export const chartTheme = (dark) => TOKENS[dark ? 'dark' : 'light']
 
-// The flow groups' fixed slots: the order the validator passed, so neighbouring
-// stack segments (salvage | mining | construction | shipbuilding | …) stay distinct.
+// The flow groups' fixed slots: the order the validator passed, so neighbouring stack segments (salvage | mining | construction | shipbuilding | …) stay distinct.
 const FLOW_SLOTS = { mining: 0, construction: 1, shipbuilding: 2, ordnance: 3, ground: 4, fuel: 5, maintenance: 6, salvage: 7 }
 
 export const flowColor = (dark, key) => chartTheme(dark).categorical[FLOW_SLOTS[key]]

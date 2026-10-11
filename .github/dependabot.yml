@@ -1,5 +1,4 @@
-# Dependabot can't open security-update PRs for bun projects, only version updates.
-# Run `bun audit` before a release to catch advisories between these PRs.
+# Dependabot can't open security-update PRs for bun projects, only version updates. Run `bun audit` before a release to catch advisories between these PRs.
 version: 2
 updates:
   - package-ecosystem: "bun"

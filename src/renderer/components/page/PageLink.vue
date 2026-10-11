@@ -8,8 +8,7 @@
 <script>
 import { pageByRoute } from '../../utilities/navigation'
 
-// A small icon link to another page, `to` from utilities/deep-links.js `linkTo`, with that page's icon and a title
-// naming the page and what it opens on.
+// A small icon link to another page, `to` from utilities/deep-links.js `linkTo`, with that page's icon and a title naming the page and what it opens on.
 export default {
   props: {
     to: {

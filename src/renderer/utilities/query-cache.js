@@ -1,10 +1,6 @@
-// Answers a save's repeated reads from memory. The app opens a save afresh each time Aurora writes it, so until then
-// the same read gives the same rows, unless the app writes to a table it reads (the Galaxy Map saving positions).
-// Pages read again each time they open, and several read the same things, so a page opened again, or a read another
-// page has already made, skips the database and the queue of reads waiting on it.
+// Answers a save's repeated reads from memory. The app opens a save afresh each time Aurora writes it, so until then the same read gives the same rows, unless the app writes to a table it reads (the Galaxy Map saving positions). Pages read again each time they open, and several read the same things, so a page opened again, or a read another page has already made, skips the database and the queue of reads waiting on it.
 //
-// Each consumer gets its own copy of the rows: pages sort, extend and observe what they read, and the kept rows must
-// stay as the database gave them.
+// Each consumer gets its own copy of the rows: pages sort, extend and observe what they read, and the kept rows must stay as the database gave them.
 
 // What the kept results of one save may take, as estimated by `estimateBytes`. Past it, the reads used longest ago go.
 export const BUDGET_BYTES = 64 * 1024 * 1024
@@ -15,14 +11,12 @@ const caches = new WeakMap()
 
 const TABLES = /\b(?:FCT|DIM)_\w+/gi
 const READ = /^\s*(?:select|with)\b/i
-// A statement that changes the save, at its start or after a `with`. Anything else that isn't a read (transaction
-// control, settings) changes no table and passes straight through.
+// A statement that changes the save, at its start or after a `with`. Anything else that isn't a read (transaction control, settings) changes no table and passes straight through.
 const WRITE = /^\s*(?:insert|update|delete|replace|create|drop|alter)\b|\b(?:insert|replace)\s+into\b|\bupdate\s+\S+\s+set\b|\bdelete\s+from\b/i
 
 const tablesOf = (sql) => [...new Set((sql.match(TABLES) || []).map((table) => table.toLowerCase()))]
 
-// Only a plain read is kept. A read inside a transaction belongs to that transaction, and a Sequelize model read (its
-// options name the model) returns instances, not rows.
+// Only a plain read is kept. A read inside a transaction belongs to that transaction, and a Sequelize model read (its options name the model) returns instances, not rows.
 const keyOf = (sql, options) => {
   if (typeof sql !== 'string' || !READ.test(sql) || WRITE.test(sql)) {
     return null
@@ -94,8 +88,7 @@ const copyOf = (result) => {
 // Keeps `database`'s reads from now on, and drops those that read a table it writes to. Returns `database`.
 export const cacheQueries = (database) => {
   const query = database.query
-  // Reads by key, in the order they were last used. `writes` counts writes; `written` has the count at each table's
-  // last write, and `cleared` the count at the last write whose tables aren't known, which counts for every table.
+  // Reads by key, in the order they were last used. `writes` counts writes; `written` has the count at each table's last write, and `cleared` the count at the last write whose tables aren't known, which counts for every table.
   const cache = { entries: new Map(), bytes: 0, writes: 0, written: new Map(), cleared: 0, committing: new WeakMap(), closed: false }
 
   const remove = (key, entry) => {
@@ -142,8 +135,7 @@ export const cacheQueries = (database) => {
     }
   }
 
-  // A write in a transaction counts again when the transaction commits: until then, the other connection still reads
-  // what was there before. Without a transaction (or in web mode, where one is a pass-through), the write commits itself.
+  // A write in a transaction counts again when the transaction commits: until then, the other connection still reads what was there before. Without a transaction (or in web mode, where one is a pass-through), the write commits itself.
   const write = (sql, options) => {
     const tables = tablesOf(sql)
     const transaction = options && options.transaction

@@ -11,9 +11,7 @@
 </template>
 
 <script>
-// The row of stat tiles that opens a page, four to a row from 1264 px. Each tile is { label, value, note }, with an
-// optional icon (and iconColor) before the value and a title, the value's tooltip, which is the value itself unless
-// given. The styles are in styles/page-chrome.scss.
+// The row of stat tiles that opens a page, four to a row from 1264 px. Each tile is { label, value, note }, with an optional icon (and iconColor) before the value and a title, the value's tooltip, which is the value itself unless given. The styles are in styles/page-chrome.scss.
 export default {
   name: 'StatTiles',
   props: {

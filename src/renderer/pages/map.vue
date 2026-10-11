@@ -179,8 +179,7 @@
             Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
             <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until you save.</template>
           </span>
-          <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a
-               list to turn them on and off. -->
+          <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->
           <v-menu top left offset-y nudge-top="6" :close-on-content-click="false" content-class="tracker-menu">
             <template #activator="{ on, attrs }">
               <v-btn small outlined class="map-tracker" :aria-label="trackerLabel" :title="trackerLabel" v-bind="attrs" v-on="on">
@@ -214,8 +213,7 @@
       <v-card>
         <v-card-title class="text-h6">Save positions</v-card-title>
         <v-card-text>
-          Write the positions of {{ movedIds.length }} {{ movedIds.length === 1 ? 'system' : 'systems' }} to the save? Only systems that moved are written, rounded to whole units.
-          The game reads the map when it loads a save and writes its own copy back when it saves, so do this with the game closed, or load the save again in the game before playing on.
+          Write the positions of {{ movedIds.length }} {{ movedIds.length === 1 ? 'system' : 'systems' }} to the save? Only systems that moved are written, rounded to whole units. The game reads the map when it loads a save and writes its own copy back when it saves, so do this with the game closed, or load the save again in the game before playing on.
         </v-card-text>
         <v-progress-linear v-if="saving" indeterminate />
         <v-card-actions>
@@ -295,8 +293,7 @@ const LAYERS = [
   { value: 'discovery', text: 'Discovery era' },
 ]
 
-// The Star type layer's groups for a system's primary star, the first that fits it: by its size for the
-// giants, else by its spectral class. A group's colour is its entry in the page's `colors.stars`.
+// The Star type layer's groups for a system's primary star, the first that fits it: by its size for the giants, else by its spectral class. A group's colour is its entry in the page's `colors.stars`.
 const GIANT_SIZES = new Set(['III', 'II', 'Ib', 'Ia'])
 const STAR_GROUPS = [
   { value: 'hole', text: 'Black hole', fits: (spectral) => spectral === 'BH' },
@@ -322,8 +319,7 @@ const starText = ({ SpectralClass, SpectralNumber, SizeText, Stars }) => {
   return Stars > 1 ? `${primary} and ${Stars - 1} more` : primary
 }
 
-// What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or the
-// player's clusters.
+// What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or the player's clusters.
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
@@ -356,8 +352,7 @@ const SPACINGS = [
   { value: 160, text: '160' },
 ]
 
-// Arrange combines the chosen kinds: systems stay with those sharing all of them.
-// `short` names each kind in the field when several are chosen.
+// Arrange combines the chosen kinds: systems stay with those sharing all of them. `short` names each kind in the field when several are chosen.
 const KEEP_TOGETHER = [
   { value: 'sectors', text: 'Sectors', short: 'sectors' },
   { value: 'control', text: 'Alien control', short: 'aliens' },
@@ -384,10 +379,7 @@ const FLAG_PATH = 'M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'
 const CRANE_OFFSET = [1, 0]
 const FLAG_OFFSET = [-0.5, -0.5]
 
-// What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it.
-// `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc
-// with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for marks the names
-// carry; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
+// What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it. `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for marks the names carry; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
 const MARKS = [
   { value: 'habitable', text: 'Habitable worlds', short: 'habitable worlds', place: 'glyph', path: EARTH_PATH, color: 'colony' },
   { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', path: PILLAR_PATH, color: 'ruins' },
@@ -416,19 +408,15 @@ const PHASES = {
 // Arrange works in slices this long, handing the browser a turn between them to draw.
 const SLICE_MS = 12
 
-// Glyphs sit on a ring just outside the marker's rim, 16 units across with a 12 unit icon, so a
-// marker with any has this much more room on every side.
+// Glyphs sit on a ring just outside the marker's rim, 16 units across with a 12 unit icon, so a marker with any has this much more room on every side.
 const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
-// Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the
-// left first, then over the top and down the right, clear of the name below. The count of habitable
-// worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
+// Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
 const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120]
 const BADGE_ANGLE = 30
 
-// A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes
-// in a hidden or minimised window, so an Arrange carries on there.
+// A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes in a hidden or minimised window, so an Arrange carries on there.
 const nextTask = () => new Promise((resolve) => {
   const channel = new MessageChannel()
 
@@ -436,8 +424,7 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// The map as the player left it, per game and race: places with any unsaved moves, the view and the
-// selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
+// The map as the player left it, per game and race: places with any unsaved moves, the view and the selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
 const keptMaps = new Map()
 
 const samePlace = (a, b) => Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y)
@@ -486,26 +473,19 @@ const markerSize = (colonies, population) => {
   return Math.round(MARKER_BASE_SIZE + 60 * (blended / (1 + blended)))
 }
 
-// The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted
-// border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out.
-// These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least
-// `least` of them round a system.
+// The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out. These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least `least` of them round a system.
 const RING_DOTS = { dash: 0, gap: 6, least: 8 }
 const RING_DASHES = { dash: 7, gap: 4, least: 6 }
 
-// Below RING_ZOOM the rings grow thicker and their gaps wider so they still show on screen. They
-// grow in these steps, rather than smoothly, so zooming restyles the map only now and then.
+// Below RING_ZOOM the rings grow thicker and their gaps wider so they still show on screen. They grow in these steps, rather than smoothly, so zooming restyles the map only now and then.
 const RING_ZOOM = 0.6
 const RING_SCALES = [1, 1.25, 1.5, 2, 2.5, 3, 4]
 
 const ringScaleAt = (zoom) => RING_SCALES.find((scale) => scale >= RING_ZOOM / zoom) || RING_SCALES[RING_SCALES.length - 1]
 
-// A wheel or pinch zoom restyles the markers once it has paused this long, the pause after which
-// cytoscape too counts a wheel zoom as over.
+// A wheel or pinch zoom restyles the markers once it has paused this long, the pause after which cytoscape too counts a wheel zoom as over.
 const ZOOM_PAUSE_MS = 150
-// Cytoscape keeps a picture of the whole map to pan and zoom with. It makes that picture only
-// while drawing, and not within a quarter second of the systems changing, so the map draws one more
-// frame once it has been quiet this long.
+// Cytoscape keeps a picture of the whole map to pan and zoom with. It makes that picture only while drawing, and not within a quarter second of the systems changing, so the map draws one more frame once it has been quiet this long.
 const SETTLE_MS = 300
 
 const ringPatterns = new Map()
@@ -514,8 +494,7 @@ const ringPatterns = new Map()
 const ringPattern = (size, scale, { dash, gap, least }) => {
   const key = `${size}|${scale}|${dash}|${gap}|${least}`
 
-  // Cytoscape skips a function-mapped property when its value has the same identity. Reusing the
-  // pattern also avoids reparsing unchanged rings when another marker property changes.
+  // Cytoscape skips a function-mapped property when its value has the same identity. Reusing the pattern also avoids reparsing unchanged rings when another marker property changes.
   if (!ringPatterns.has(key)) {
     const around = Math.PI * size
     const period = around / Math.max(least, Math.round(around / ((dash + gap) * scale)))
@@ -528,15 +507,10 @@ const ringPattern = (size, scale, { dash, gap, least }) => {
 
 const markerImages = new Map()
 
-// A clear pixel, for a marker with nothing over its fill. Cytoscape restyles a node without an
-// image each time it draws it, which throws away the picture of the whole map it keeps for
-// panning and zooming, so every frame would draw each system and link again.
+// A clear pixel, for a marker with nothing over its fill. Cytoscape restyles a node without an image each time it draws it, which throws away the picture of the whole map it keeps for panning and zooming, so every frame would draw each system and link again.
 const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
-// What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points,
-// or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the
-// outside (`{ key, path, offset, color, hollow }`, or a count as `text` at its own `angle`), which
-// the image then has MARK_ROOM for on every side.
+// What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points, or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the outside (`{ key, path, offset, color, hollow }`, or a count as `text` at its own `angle`), which the image then has MARK_ROOM for on every side.
 const markerImage = (size, spots, color, pinned, glyphs, surface) => {
   if (!spots && !pinned && !glyphs.length) {
     return CLEAR_IMAGE
@@ -581,9 +555,7 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       const ink = glyph.hollow ? glyph.color : surface
 
       content += `<circle cx="${x}" cy="${y}" r="${GLYPH_RADIUS}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="1.5" />`
-      content += glyph.text
-        ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Roboto, Arial, sans-serif" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1]}" fill="${ink}">${glyph.text}</text>`
-        : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
+      content += glyph.text ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Roboto, Arial, sans-serif" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1]}" fill="${ink}">${glyph.text}</text>` : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
     })
 
     markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${content}</svg>`)}`)
@@ -624,8 +596,7 @@ export default {
         normalise: (stored) => (stored !== null && typeof stored === 'object' ? { ...ARRANGE_DEFAULTS, ...stored, keepTogether: Array.isArray(stored.keepTogether) ? stored.keepTogether : [] } : undefined),
       },
       pinned: { key: 'mapPinned', default: [], scope: 'race' },
-      // The player's clusters, each a list of SystemIDs: systems Arrange keeps together. The code and the
-      // stored settings (mapGroups, and `groups` in mapLayer and mapBorders) call them groups.
+      // The player's clusters, each a list of SystemIDs: systems Arrange keeps together. The code and the stored settings (mapGroups, and `groups` in mapLayer and mapBorders) call them groups.
       groups: { key: 'mapGroups', default: [], scope: 'race' },
       locked: { key: 'mapLocked', default: false, scope: 'race' },
       // Marks the map no longer offered are dropped.
@@ -757,8 +728,7 @@ export default {
       return capital ? capital.id : null
     },
 
-    // One link per pair of systems joined by a jump point the race has explored from either
-    // side, stabilised at either end; and per system, the charted jump points still unexplored.
+    // One link per pair of systems joined by a jump point the race has explored from either side, stabilised at either end; and per system, the charted jump points still unexplored.
     links() {
       // Read the computed inputs once: every this.rowById read inside the loops collects its dependencies again.
       const { jumpPoints, rowById } = this
@@ -837,8 +807,7 @@ export default {
       return this.capitalId ? hopsFrom(this.capitalId, this.neighbours) : {}
     },
 
-    // The one system selected, else the capital: where Jumps and Travel measure from, and what the
-    // centre button centres on.
+    // The one system selected, else the capital: where Jumps and Travel measure from, and what the centre button centres on.
     originId() {
       return this.panelSystem ? this.panelSystem.id : this.capitalId
     },
@@ -861,8 +830,7 @@ export default {
       return Math.max(1, ...Object.values(this.originHops))
     },
 
-    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's
-    // galactic map measures distance.
+    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's galactic map measures distance.
     originKm() {
       const { originId } = this
       const km = {}
@@ -967,9 +935,7 @@ export default {
       return Object.fromEntries(this.controllers.map((controller) => [controller.id, controller]))
     },
 
-    // The parts of the map joined by jumps stabilised at both ends, each with at least one link. Sorted
-    // by size and lowest system ID so a network's name and colour don't depend on the order the save
-    // returned its systems or jump points.
+    // The parts of the map joined by jumps stabilised at both ends, each with at least one link. Sorted by size and lowest system ID so a network's name and colour don't depend on the order the save returned its systems or jump points.
     stabilisedNetworks() {
       const owner = {}
       const { categorical } = this.theme
@@ -988,9 +954,7 @@ export default {
       return Object.fromEntries(this.stabilisedNetworks.flatMap((part) => part.ids.map((id) => [id, part.owner.id])))
     },
 
-    // The groups the borders go round, in the legend's order (each `{ name, color }`, with `legend`
-    // where the legend says more than the name, and no `name` where the shapes go unnamed).
-    // Stabilised networks provide their parts too, so unstabilised shortcuts aren't drawn inside their borders.
+    // The groups the borders go round, in the legend's order (each `{ name, color }`, with `legend` where the legend says more than the name, and no `name` where the shapes go unnamed). Stabilised networks provide their parts too, so unstabilised shortcuts aren't drawn inside their borders.
     borderGroups() {
       if (this.borders === 'stabilised') {
         const parts = this.stabilisedNetworks
@@ -1080,8 +1044,7 @@ export default {
       return this.trackedMarks.length ? `Show on the map: ${this.marksLabel}` : 'Show on the map'
     },
 
-    // How each glyph looks, by what it marks: filled, or hollow for the lesser state. The habitable
-    // worlds' badge carries their count, which `text` gives an example of for the legend.
+    // How each glyph looks, by what it marks: filled, or hollow for the lesser state. The habitable worlds' badge carries their count, which `text` gives an example of for the legend.
     glyphStyles() {
       const { colors } = this
       const species = this.currentHabitability && this.currentHabitability.species
@@ -1116,8 +1079,7 @@ export default {
       return times.length ? { first: Math.min(...times), last: Math.max(...times) } : null
     },
 
-    // The Discovery era's As of slider, from the game's start to the year the last system was found: the
-    // year chosen and the game time its end comes at, which the systems found from then on fade behind.
+    // The Discovery era's As of slider, from the game's start to the year the last system was found: the year chosen and the game time its end comes at, which the systems found from then on fade behind.
     discoveryAsOf() {
       const range = this.discoveryRange
 
@@ -1183,8 +1145,7 @@ export default {
       return groupOf
     },
 
-    // A name, a colour and the systems of each cluster, by its index in `groups`. A cluster is named
-    // after its most populous system, the first of them where none has people.
+    // A name, a colour and the systems of each cluster, by its index in `groups`. A cluster is named after its most populous system, the first of them where none has people.
     groupOwners() {
       const { categorical } = this.theme
 
@@ -1620,8 +1581,7 @@ export default {
       this.restyle()
     },
 
-    // Dim and As of change only what is faint, so they skip rebuilding the markers: As of follows its
-    // slider as it moves.
+    // Dim and As of change only what is faint, so they skip rebuilding the markers: As of follows its slider as it moves.
     dimUnmarked() {
       this.refade()
     },
@@ -1663,8 +1623,7 @@ export default {
       }
     },
   },
-  // The map's own state (its places, view and selection) is set by `resetGraph`, which the RaceID
-  // watcher has run by now.
+  // The map's own state (its places, view and selection) is set by `resetGraph`, which the RaceID watcher has run by now.
   created() {
     this.graph = null
     this.menu = null
@@ -1826,8 +1785,7 @@ export default {
             'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DASHES),
           },
         },
-        // Faint: a system Show marks nothing at while Dim is on, or one found after the Discovery era's As
-        // of, and its links.
+        // Faint: a system Show marks nothing at while Dim is on, or one found after the Discovery era's As of, and its links.
         {
           selector: 'node[?dim]',
           style: {
@@ -1980,14 +1938,12 @@ export default {
       }
     },
 
-    // Whether a system is faint: Dim is on and Show marks nothing there, or the Discovery era's As of is
-    // set to a year before the race found it.
+    // Whether a system is faint: Dim is on and Show marks nothing there, or the Discovery era's As of is set to a year before the race found it.
     fades(row, marked) {
       return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
     },
 
-    // The fill for a system found at `time`: palest for those known from the start, then from the
-    // first found after it to the last, the strongest.
+    // The fill for a system found at `time`: palest for those known from the start, then from the first found after it to the last, the strongest.
     discoveryColor(time) {
       const range = this.discoveryRange
 
@@ -2007,9 +1963,7 @@ export default {
       return counts ? counts.findIndex(Boolean) : -1
     },
 
-    // The glyphs Show puts round a system's marker, in the order they take their places: each
-    // `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`; the
-    // habitable worlds' badge has their count as `text`, at its own `angle`.
+    // The glyphs Show puts round a system's marker, in the order they take their places: each `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`; the habitable worlds' badge has their count as `text`, at its own `angle`.
     glyphsOf(row) {
       const features = this.features[row.id] || NO_FEATURES
       const marks = this.marksSet
@@ -2087,8 +2041,7 @@ export default {
       return ''
     },
 
-    // A system's name with what Show adds: its wrecks after it, and a line under it for each of
-    // danger and the date it was found.
+    // A system's name with what Show adds: its wrecks after it, and a line under it for each of danger and the date it was found.
     labelOf(row) {
       const marks = MARKS.filter((mark) => mark.place !== 'glyph' && this.marksSet.has(mark.value))
       const after = marks.filter((mark) => mark.place === 'name').map((mark) => this.markText(mark.value, row)).filter(Boolean)
@@ -2123,8 +2076,7 @@ export default {
       })
       // Cytoscape tells of a wheel or pinch zoom just after the zoom itself.
       graph.on('zoom', () => queueMicrotask(() => this.zoomChanged()))
-      // The borders' names are placed again once the systems settle, not on each frame of a drag or
-      // of an animated layout: `dragfree` and `finishBusy` place them when those end.
+      // The borders' names are placed again once the systems settle, not on each frame of a drag or of an animated layout: `dragfree` and `finishBusy` place them when those end.
       graph.on('add remove data dragfree', () => {
         this.labelPlaces = null
       })
@@ -2144,8 +2096,7 @@ export default {
       this.minimap = createMinimap(graph, this.$refs.minimap, (context, scale) => this.paintMinimap(context, scale))
       this.createMenu()
 
-      // The side panel opening narrows the map; cytoscape only notices the window resizing. A map
-      // the user hasn't moved is fitted again, so a larger window isn't left with it in a corner.
+      // The side panel opening narrows the map; cytoscape only notices the window resizing. A map the user hasn't moved is fitted again, so a larger window isn't left with it in a corner.
       this.resizeObserver = new ResizeObserver(() => {
         this.sizeBorders()
         graph.resize()
@@ -2160,8 +2111,7 @@ export default {
       this.resizeObserver.observe(this.$refs.stage)
     },
 
-    // A zoom by hand restyles the rings once it pauses, not at each step on the way: on a large
-    // map each restyle takes the better part of a second. Any other zoom restyles them at once.
+    // A zoom by hand restyles the rings once it pauses, not at each step on the way: on a large map each restyle takes the better part of a second. Any other zoom restyles them at once.
     zoomChanged() {
       clearTimeout(this.zoomStyleTimer)
 
@@ -2174,8 +2124,7 @@ export default {
       this.zoomStyleTimer = setTimeout(() => this.setZoomStyle(this.graph.zoom()), ZOOM_PAUSE_MS)
     },
 
-    // One more frame once the map is quiet, for cytoscape to make its picture of the map (see
-    // SETTLE_MS). That frame doesn't ask for another.
+    // One more frame once the map is quiet, for cytoscape to make its picture of the map (see SETTLE_MS). That frame doesn't ask for another.
     settle() {
       clearTimeout(this.settleTimer)
 
@@ -2190,9 +2139,7 @@ export default {
       }, SETTLE_MS)
     },
 
-    // Zoomed out, the broken rings grow thicker and their gaps wider, in the steps of RING_SCALES.
-    // Markers keep their size: growing them to stay visible means restyling every one at each step,
-    // seconds of zooming on a large map.
+    // Zoomed out, the broken rings grow thicker and their gaps wider, in the steps of RING_SCALES. Markers keep their size: growing them to stay visible means restyling every one at each step, seconds of zooming on a large map.
     setZoomStyle(zoom) {
       const scale = ringScaleAt(zoom)
 
@@ -2210,8 +2157,7 @@ export default {
       canvas.height = Math.round(canvas.clientHeight * ratio)
     },
 
-    // Where the borders find a system: its place on the map now, or nothing before it is added, and
-    // its marker's size.
+    // Where the borders find a system: its place on the map now, or nothing before it is added, and its marker's size.
     borderGeometry() {
       return {
         positionOf: (id) => {
@@ -2236,8 +2182,7 @@ export default {
       return this.labelPlaces
     },
 
-    // Shift and the wheel zoom faster than cytoscape's own wheel zoom, round the pointer. This runs
-    // before cytoscape sees the wheel, which it then doesn't.
+    // Shift and the wheel zoom faster than cytoscape's own wheel zoom, round the pointer. This runs before cytoscape sees the wheel, which it then doesn't.
     shiftWheel(event) {
       if (!event.shiftKey || !this.graph || !this.$refs.canvas.contains(event.target)) {
         return
@@ -2270,8 +2215,7 @@ export default {
       drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom) ? this.borderLabels() : null })
     },
 
-    // The overview: the borders, links and systems, without names. A system is a dot in the colour
-    // it shows most: the larger share of its pie, else its fill.
+    // The overview: the borders, links and systems, without names. A system is a dot in the colour it shows most: the larger share of its pie, else its fill.
     paintMinimap(context, scale) {
       const { colors } = this
 
@@ -2299,8 +2243,7 @@ export default {
       })
     },
 
-    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or
-    // unpin, and the System View for a single system.
+    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or unpin, and the System View for a single system.
     createMenu() {
       if (this.menu) {
         this.menu.destroy()
@@ -2340,9 +2283,7 @@ export default {
       })
     },
 
-    // Starts the map afresh for the game and race shown, as the player left it if they have been here.
-    // The previous race's reads no longer count as loaded: every read depends on the race and runs
-    // again, and until it settles `ready` keeps a sync from drawing the old rows in the new view.
+    // Starts the map afresh for the game and race shown, as the player left it if they have been here. The previous race's reads no longer count as loaded: every read depends on the race and runs again, and until it settles `ready` keeps a sync from drawing the old rows in the new view.
     resetGraph() {
       this.loadErrors = {}
 
@@ -2389,9 +2330,7 @@ export default {
       })
     },
 
-    // Brings the map in line with the save. A system the player has moved since the last sync
-    // stays where it is; the rest go where the save now has them. Back on a map the player left,
-    // the places they left it with stand in for the graph's.
+    // Brings the map in line with the save. A system the player has moved since the last sync stays where it is; the rest go where the save now has them. Back on a map the player left, the places they left it with stand in for the graph's.
     syncGraph() {
       if (!this.ready || !this.$refs.canvas) {
         return
@@ -2897,8 +2836,7 @@ export default {
           width = Math.ceil(Math.max(systems.x2, borders.x2) + 20 - x1)
           height = Math.ceil(Math.max(systems.y2, borders.y2) + 20 - y1)
           scale = Math.min(requestedScale, 8192 / width, 8192 / height, Math.sqrt((32 * 1024 * 1024) / (width * height)))
-          // max dimensions use output pixels, independently of display DPI. They
-          // also keep the graph raster at the same scale as the border canvas.
+          // max dimensions use output pixels, independently of display DPI. They also keep the graph raster at the same scale as the border canvas.
           image.src = graph.png({ full: true, maxWidth: Math.ceil(systems.w) * scale, maxHeight: Math.ceil(systems.h) * scale })
         } finally {
           this.setZoomStyle(graph.zoom())
@@ -2914,8 +2852,7 @@ export default {
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
         drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
         context.setTransform(1, 0, 0, 1, 0, 0)
-        // Border painting cuts out its interiors. Fill behind the finished layer so its tint
-        // blends over the map's base colour, not transparency or the card surface.
+        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour, not transparency or the card surface.
         context.globalCompositeOperation = 'destination-over'
         context.fillStyle = window.getComputedStyle(this.$refs.stage).backgroundColor
         context.fillRect(0, 0, canvas.width, canvas.height)
@@ -2933,8 +2870,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The known systems with where the race has them on its map, their survey state, the race's
-    // colonies there, and the star's place in the galaxy for the free layouts.
+    // The known systems with where the race has them on its map, their survey state, the race's colonies there, and the star's place in the galaxy for the free layouts.
     systems: {
       get: tracked('systems', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

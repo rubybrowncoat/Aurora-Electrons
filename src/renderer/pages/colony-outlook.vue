@@ -474,8 +474,7 @@ export default {
       })
       const datasets = [{ label: 'Population', data: points, borderColor: color, backgroundColor: withAlpha(color, 0.1), fill: 'origin', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 }]
 
-      // Only limits near the curve: one far above it would flatten it (the note names it instead).
-      // Other populations on the body grow too, so the body's limits for this colony move with them.
+      // Only limits near the curve: one far above it would flatten it (the note names it instead). Other populations on the body grow too, so the body's limits for this colony move with them.
       const near = (values) => values.some((value) => value > 0 && value !== Infinity && value <= peak * 2)
       const limits = [
         ['Growth slows', row.otherSeries.map((other) => row.capacity / 3 - other), [2, 3]],

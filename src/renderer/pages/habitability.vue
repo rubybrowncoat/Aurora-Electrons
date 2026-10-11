@@ -530,15 +530,7 @@ export default {
         const { body, best } = row
         const alienPopulation = body.AlienPopulations.reduce((total, population) => total + population.PopulationAmount, 0)
 
-        return (
-          (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) &&
-          !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) &&
-          !(filters.withoutMinerals && !(row.minerals.total > 0)) &&
-          !(filters.ownPopulations && body.OwnPopulations.length) &&
-          !(filters.otherPopulations && body.AlienPopulations.length) &&
-          !(filters.doneTerraforming && !best.assessment.plan) &&
-          !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
-        )
+        return (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) && !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) && !(filters.withoutMinerals && !(row.minerals.total > 0)) && !(filters.ownPopulations && body.OwnPopulations.length) && !(filters.otherPopulations && body.AlienPopulations.length) && !(filters.doneTerraforming && !best.assessment.plan) && !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
       })
     },
 
@@ -741,8 +733,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
-    // Both steps run in slices so a large save keeps the window responsive; null until the first pass is done.
+    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking. Both steps run in slices so a large save keeps the window responsive; null until the first pass is done.
     assessed: {
       async get() {
         const { ready, bodies, species, raceRules, gases } = this
@@ -851,8 +842,7 @@ export default {
     line-height: 18px;
   }
 
-  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is
-  // left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
+  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
   .tool--species {
     flex: 0 1 260px;
     min-width: 180px;

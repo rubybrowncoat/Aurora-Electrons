@@ -1,16 +1,10 @@
-// The Colonization Planner's plan states: what a body is to the race looking at it, and what it takes to settle
-// it. One table, read by the ranking (can it be a target), the page (chip, tooltip, legend, counts, filter) and
-// docs/DATABASE.md, so a state is defined here and nowhere else.
+// The Colonization Planner's plan states: what a body is to the race looking at it, and what it takes to settle it. One table, read by the ranking (can it be a target), the page (chip, tooltip, legend, counts, filter) and docs/DATABASE.md, so a state is defined here and nowhere else.
 //
-// A state is decided from facts about the body (see `routeFacts` and `stateOf`), first match in table order. The
-// route is the one the ranking prefers for the best species: settle it as it is, or wait for terraforming.
+// A state is decided from facts about the body (see `routeFacts` and `stateOf`), first match in table order. The route is the one the ranking prefers for the best species: settle it as it is, or wait for terraforming.
 //   - who lives there: an own colony with people, an own colony without, a known alien colony;
 //   - whether any species can live there, and what a colony costs now against after terraforming;
 //   - whether its deposits are rich enough for a mining colony, whatever people could do there.
-// Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown
-// under 6 times the race's colonisation skill, so they are read on the cost before the skill
-// (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really
-// pays is the infrastructure per million people, shown beside the band.
+// Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown under 6 times the race's colonisation skill, so they are read on the cost before the skill (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really pays is the infrastructure per million people, shown beside the band.
 
 import { RICH_DEPOSIT_VALUE } from './minerals'
 import { roundToDecimal } from './math'
@@ -25,10 +19,7 @@ const years = (value) => (!Number.isFinite(value) ? 'never with these terraforme
 const perMillion = (infrastructure) => `${infrastructure} infrastructure per million people`
 const people = (millions) => (millions >= 1000 ? `${number(millions / 1000, 1)} billion` : `${number(millions, millions < 10 ? 2 : 0)} million`)
 
-// What the states read about one body, `facts`: `settled` is { people (millions), colonies (own populations),
-// alien (known alien populations) }; `route` the best species' numbers (see `routeFacts`), or null when no
-// species can live there; `richDeposit` whether its deposits reach the game's mining-colony value;
-// `peopleMinimum` the smallest colony worth planning for, in millions.
+// What the states read about one body, `facts`: `settled` is { people (millions), colonies (own populations), alien (known alien populations) }; `route` the best species' numbers (see `routeFacts`), or null when no species can live there; `richDeposit` whether its deposits reach the game's mining-colony value; `peopleMinimum` the smallest colony worth planning for, in millions.
 
 // The numbers of one species on one body, before and after terraforming.
 export const routeFacts = (evaluation, terraformYears) => {
@@ -52,16 +43,14 @@ export const routeFacts = (evaluation, terraformYears) => {
   }
 }
 
-// A body is a terraforming state when the ranking's best route for it is to wait for the plan (`route.plan` is
-// only there then): its worth after the years of work beats settling it as it is.
+// A body is a terraforming state when the ranking's best route for it is to wait for the plan (`route.plan` is only there then): its worth after the years of work beats settling it as it is.
 const terraforms = (route) => !!route.plan
 
 const peopleRoom = (route) => Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0)
 
 const settleNow = (route, extra = '') => `Costs ${number(route.cost, 2)} for ${route.species}${extra}, which is ${perMillion(route.infrastructure)}${route.lowGravity ? ' (low gravity doubles it)' : ''}. It holds ${people(route.capacity)}.`
 
-// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target`
-// is whether the state can be ranked as a place to settle next. `group` orders the legend.
+// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target` is whether the state can be ranked as a place to settle next. `group` orders the legend.
 export const PLAN_STATES = [
   {
     id: 'colony',

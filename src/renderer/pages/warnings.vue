@@ -321,8 +321,7 @@ export default {
       ]
     },
 
-    // Each check with the rows the filters leave. A check focused by link or button ignores the severity, group and
-    // search filters; muted rows and checks stay out unless shown.
+    // Each check with the rows the filters leave. A check focused by link or button ignores the severity, group and search filters; muted rows and checks stay out unless shown.
     sections() {
       const search = (this.filters.search || '').trim().toLowerCase()
       const focused = this.checkFilter !== null
@@ -331,9 +330,7 @@ export default {
         const checkMuted = this.mutedCheckSet.has(check.key)
         const mutedIds = this.mutedSets[check.key] || NO_IDS
         const inScope = focused ? check.key === this.checkFilter : (!this.filters.severity || check.severity === this.filters.severity) && (!this.filters.group || check.group === this.filters.group)
-        const shown = inScope && (this.showMuted || !checkMuted)
-          ? rows.filter((row) => (focused || !search || row.text.includes(search)) && (this.showMuted || !mutedIds.has(row.id)))
-          : []
+        const shown = inScope && (this.showMuted || !checkMuted) ? rows.filter((row) => (focused || !search || row.text.includes(search)) && (this.showMuted || !mutedIds.has(row.id))) : []
 
         return {
           check,
@@ -347,17 +344,14 @@ export default {
     },
 
     panels() {
-      return GROUPS
-        .map((group) => {
-          const sections = this.sections.filter((section) => section.check.group === group.key && section.rows.length)
+      return GROUPS.map((group) => {
+        const sections = this.sections.filter((section) => section.check.group === group.key && section.rows.length)
 
-          return { group, sections, total: sections.reduce((sum, section) => sum + section.rows.length, 0) }
-        })
-        .filter((panel) => panel.sections.length)
+        return { group, sections, total: sections.reduce((sum, section) => sum + section.rows.length, 0) }
+      }).filter((panel) => panel.sections.length)
     },
 
-    // The group panels in one column, or two from xl, each panel going to whichever column is shorter so far. A
-    // panel's height is reckoned in table rows: a check's head, column heads and foot, plus the rows it shows.
+    // The group panels in one column, or two from xl, each panel going to whichever column is shorter so far. A panel's height is reckoned in table rows: a check's head, column heads and foot, plus the rows it shows.
     columns() {
       if (!this.$vuetify.breakpoint.xl) {
         return [this.panels]
@@ -392,8 +386,7 @@ export default {
         }
       },
     },
-    // A read's load state settles just before the plugin assigns its rows, so the snapshot waits a tick for the last
-    // read's rows to land.
+    // A read's load state settles just before the plugin assigns its rows, so the snapshot waits a tick for the last read's rows to land.
     ready(value) {
       if (value) {
         this.$nextTick(this.markVisit)
@@ -409,8 +402,7 @@ export default {
       this.checkFilter = check && checkByKey[check] ? check : null
     },
 
-    // One check's rows. The context is built before the first await so the reads it makes are the read's dependencies:
-    // a check re-reads when the save, the race or an option it names changes.
+    // One check's rows. The context is built before the first await so the reads it makes are the read's dependencies: a check re-reads when the save, the race or an option it names changes.
     runCheck(check) {
       const { database, GameID, RaceID } = this
 

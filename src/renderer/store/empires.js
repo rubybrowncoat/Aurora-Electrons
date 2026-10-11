@@ -1,8 +1,6 @@
 import { loadEmpires } from '../utilities/empires'
 
-// Every game in the save with its races (`loadEmpires`), for the rail's Empires entry and flyout and the Empires page.
-// `error` says why the last read failed, null when it didn't; a failed read keeps the games read before it. `loaded`
-// is set by a read that finished, so an empty list can tell "no games in the save" from "not read yet".
+// Every game in the save with its races (`loadEmpires`), for the rail's Empires entry and flyout and the Empires page. `error` says why the last read failed, null when it didn't; a failed read keeps the games read before it. `loaded` is set by a read that finished, so an empty list can tell "no games in the save" from "not read yet".
 export const state = () => {
   return {
     games: [],

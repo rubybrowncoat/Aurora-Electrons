@@ -1,13 +1,10 @@
-// The empires the app can open: every game's races, each with its kind and a line about its capital and colonies.
-// Read into the `empires` store for the rail's Empires entry and flyout and the Empires page.
+// The empires the app can open: every game's races, each with its kind and a line about its capital and colonies. Read into the `empires` store for the rail's Empires entry and flyout and the Empires page.
 
 import { SPECIAL_NPR_NAMES, gameTime, toBoolean, toNumber } from './aurora'
 import { people } from './colonies'
 import { roundToDecimal, separatedNumber } from './math'
 
-// One row per race, the game's columns repeated. Each race names its capital and the capital's system as that race
-// knows them (`PopName` is its own, the system comes from the race's own survey rows), so nothing here shows what
-// the viewer's race hasn't seen: a row stands for its own empire, and under "spy on NPRs" that is the sanctioned exception.
+// One row per race, the game's columns repeated. Each race names its capital and the capital's system as that race knows them (`PopName` is its own, the system comes from the race's own survey rows), so nothing here shows what the viewer's race hasn't seen: a row stands for its own empire, and under "spy on NPRs" that is the sanctioned exception.
 const EMPIRES_SQL = `select FCT_Game.GameID, FCT_Game.GameName, FCT_Game.StartYear, FCT_Game.GameTime, FCT_Game.CivilianShippingLinesActive,
   FCT_Race.RaceID, FCT_Race.RaceTitle, FCT_Race.NPR, FCT_Race.SpecialNPRID, FCT_Race.FlagPic,
   VIR_Capital.PopName as CapitalName, FCT_RaceSysSurvey.Name as CapitalSystemName,
@@ -33,8 +30,7 @@ export const empireKind = ({ NPR, SpecialNPRID }) => {
   return { type: 'npr', label: 'NPR' }
 }
 
-// [{ GameID, GameName, StartYear, GameTime, CivilianShippingLinesActive, date, Races: [{ RaceID, RaceTitle, NPR,
-// SpecialNPRID, FlagPic, kind, ... }] }]. A game with no race to show is left out. Without `spyNPR`, NPRs are left out.
+// [{ GameID, GameName, StartYear, GameTime, CivilianShippingLinesActive, date, Races: [{ RaceID, RaceTitle, NPR, SpecialNPRID, FlagPic, kind, ... }] }]. A game with no race to show is left out. Without `spyNPR`, NPRs are left out.
 export const loadEmpires = async (database, spyNPR) => {
   const [rows] = await database.query(EMPIRES_SQL, { replacements: { spyNPR: spyNPR ? 1 : 0 } })
   const games = new Map()
@@ -63,8 +59,7 @@ export const loadEmpires = async (database, spyNPR) => {
 // Millions of people: the thousands-separated figure in millions from 10 M up, `people`'s precision below.
 const millions = (value, separator) => (value >= 10 ? `${separatedNumber(roundToDecimal(value, 1), separator)} M` : people(value))
 
-// The capital, its system and the colonies of a race row: "Aurelia, Aurelus · 39 colonies · 15'261.2 M".
-// A capital with nobody left is a remnant, not an empire. The Eldar's capital is literally named "Unknown", so only its system shows.
+// The capital, its system and the colonies of a race row: "Aurelia, Aurelus · 39 colonies · 15'261.2 M". A capital with nobody left is a remnant, not an empire. The Eldar's capital is literally named "Unknown", so only its system shows.
 export const empireDetails = ({ Colonies, Population, CapitalName, CapitalSystemName }, separator) => {
   const place = [CapitalName !== 'Unknown' ? CapitalName : null, CapitalSystemName].filter(Boolean).join(', ')
 

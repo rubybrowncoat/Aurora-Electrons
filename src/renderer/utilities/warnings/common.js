@@ -41,8 +41,7 @@ export const COLONY_COLUMNS = 'FCT_RaceSysSurvey.Name as SystemName, FCT_SystemB
 
 export const COLONY_JOINS = 'left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID'
 
-// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with
-// an id made unique where a query returned one twice.
+// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with an id made unique where a query returned one twice.
 export const normalizeRows = (rows) => {
   const seen = new Map()
 

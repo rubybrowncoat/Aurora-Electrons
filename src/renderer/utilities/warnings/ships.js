@@ -71,9 +71,7 @@ export const checks = [
         return aggregate
       }, {}))
 
-      return ships
-        .sort((alpha, beta) => beta.TotalCost - alpha.TotalCost)
-        .map((ship) => shipRow(ship, { components: ship.Components.join(', '), cost: `${ctx.count(ship.TotalCost * 2)} MSP` }))
+      return ships.sort((alpha, beta) => beta.TotalCost - alpha.TotalCost).map((ship) => shipRow(ship, { components: ship.Components.join(', '), cost: `${ctx.count(ship.TotalCost * 2)} MSP` }))
     },
   },
   {
@@ -164,12 +162,10 @@ export const checks = [
             SupplyLevel ASC
         `)
 
-      return ships
-        .filter((ship) => !maintenanceExclusions.includes(ship.ShipClassID) && ship.SupplyLevel * 100 <= maintenanceThreshold)
-        .map((ship) => shipRow(ship, {
-          level: { text: percent(ship.SupplyLevel), tone: levelTone(ship.SupplyLevel) },
-          msp: `${ctx.count(ship.CurrentMaintSupplies, 1)} / ${ctx.count(ship.MaintSupplies)}`,
-        }, { link: linkTo.logistics('maintenance') }))
+      return ships.filter((ship) => !maintenanceExclusions.includes(ship.ShipClassID) && ship.SupplyLevel * 100 <= maintenanceThreshold).map((ship) => shipRow(ship, {
+        level: { text: percent(ship.SupplyLevel), tone: levelTone(ship.SupplyLevel) },
+        msp: `${ctx.count(ship.CurrentMaintSupplies, 1)} / ${ctx.count(ship.MaintSupplies)}`,
+      }, { link: linkTo.logistics('maintenance') }))
     },
   },
   {
@@ -264,13 +260,11 @@ export const checks = [
             and FCT_ShipClass.MinimumSupplies = 0
         `)
 
-      return classes
-        .filter((shipClass) => !ctx.options.maintenanceExclusions.includes(shipClass.ShipClassID))
-        .map((shipClass) => ({
-          id: `class:${shipClass.ShipClassID}`,
-          cells: { class: `${shipClass.ClassName} Class`, problem: 'No minimum supply level set' },
-          link: linkTo.logistics('maintenance'),
-        }))
+      return classes.filter((shipClass) => !ctx.options.maintenanceExclusions.includes(shipClass.ShipClassID)).map((shipClass) => ({
+        id: `class:${shipClass.ShipClassID}`,
+        cells: { class: `${shipClass.ClassName} Class`, problem: 'No minimum supply level set' },
+        link: linkTo.logistics('maintenance'),
+      }))
     },
   },
   {

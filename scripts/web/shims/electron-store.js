@@ -1,7 +1,4 @@
-// Web mode stand-in for `electron-store`: dot-path get/set/delete/onDidChange and the
-// whole `store`, persisted in localStorage. Each store (`cwd` and `name`,
-// default 'config' as in electron-store) gets its own key, like
-// electron-store's separate files.
+// Web mode stand-in for `electron-store`: dot-path get/set/delete/onDidChange and the whole `store`, persisted in localStorage. Each store (`cwd` and `name`, default 'config' as in electron-store) gets its own key, like electron-store's separate files.
 
 const listeners = {}
 
@@ -13,8 +10,7 @@ const read = (storageKey) => {
   }
 }
 
-// Settings writes swallow a failure (storage unavailable: they last for the page only). Whole-store
-// writes, which hold the recorder's history, don't, like electron-store's throw on a failed write.
+// Settings writes swallow a failure (storage unavailable: they last for the page only). Whole-store writes, which hold the recorder's history, don't, like electron-store's throw on a failed write.
 const write = (storageKey, store, { strict = false } = {}) => {
   try {
     localStorage.setItem(storageKey, JSON.stringify(store))

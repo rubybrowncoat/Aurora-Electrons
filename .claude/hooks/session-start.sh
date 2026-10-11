@@ -19,8 +19,7 @@ if ! command -v bun >/dev/null 2>&1; then
   npm install -g bun 1>&2
 fi
 
-# --ignore-scripts skips the preinstall check and the Electron rebuild (postinstall).
-# Enough for `bun run lint` and `bun run web`; not enough for `bun run dev`/`bun run build`.
+# --ignore-scripts skips the preinstall check and the Electron rebuild (postinstall). Enough for `bun run lint` and `bun run web`; not enough for `bun run dev`/`bun run build`.
 bun install --frozen-lockfile --ignore-scripts 1>&2
 
 # Web mode (`bun run web`) runs Sequelize in Node, so fetch sqlite3's prebuilt Node binary if bun didn't.

@@ -1,5 +1,4 @@
-// Links between pages. Each page that a link can open on one thing (its focus) reads it from these query keys, and
-// writes its focus back to them as it changes (mixins/deep-link.js), so Back and Forward return it as it was left.
+// Links between pages. Each page that a link can open on one thing (its focus) reads it from these query keys, and writes its focus back to them as it changes (mixins/deep-link.js), so Back and Forward return it as it was left.
 //
 // | Page               | Query                                                                    |
 // |--------------------|--------------------------------------------------------------------------|
@@ -19,14 +18,10 @@
 // | `/log`             | `system=<SystemID>` or `colony=<PopulationID>`                           |
 // | `/warnings`        | `check=<check key>`                                                      |
 //
-// A mineral id is the `id` in utilities/minerals.js `MINERALS`. `<bodies>` is a JSON array of `bodyReference`s, which
-// carry the names a page shows before its own reads are in. A `<place>` is `colony:<PopulationID>`,
-// `fleet:<FleetID>` or `system:<SystemID>`, as Route Finder keys its places.
+// A mineral id is the `id` in utilities/minerals.js `MINERALS`. `<bodies>` is a JSON array of `bodyReference`s, which carry the names a page shows before its own reads are in. A `<place>` is `colony:<PopulationID>`, `fleet:<FleetID>` or `system:<SystemID>`, as Route Finder keys its places.
 
 // The query a link carries: the values given, as strings, and nothing for the ones left out.
-export const cleanQuery = (values) => Object.fromEntries(Object.entries(values || {})
-  .filter(([, value]) => value !== undefined && value !== null && value !== '')
-  .map(([key, value]) => [key, String(value)]))
+export const cleanQuery = (values) => Object.fromEntries(Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => [key, String(value)]))
 
 // Two queries that open a page the same way.
 export const sameQuery = (a, b) => {

@@ -1,34 +1,12 @@
 <template>
   <v-app>
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
-      <div
-        class="rail__empire"
-        :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }"
-        :style="neutralStyle"
-        role="link"
-        tabindex="0"
-        @click="goEmpires"
-        @keydown.enter="goEmpires"
-        @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)"
-        @mouseleave="leaveRail"
-      >
+      <div class="rail__empire" :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }" :style="neutralStyle" role="link" tabindex="0" @click="goEmpires" @keydown.enter="goEmpires" @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)" @mouseleave="leaveRail">
         <empire-avatar :race="selectedRace" :size="40" />
         <div class="rail__label">Empires</div>
       </div>
 
-      <div
-        v-for="section in railSections"
-        :key="section.id"
-        class="rail__item"
-        :class="{ 'rail__item--active': RaceID && currentSection === section, 'rail__item--peek': flyoutId === section.id, 'rail__item--disabled': !RaceID }"
-        :style="section.style"
-        role="link"
-        :tabindex="RaceID ? 0 : -1"
-        @click="goSection(section)"
-        @keydown.enter="goSection(section)"
-        @mouseenter="RaceID && peekSection(section.id)"
-        @mouseleave="leaveRail"
-      >
+      <div v-for="section in railSections" :key="section.id" class="rail__item" :class="{ 'rail__item--active': RaceID && currentSection === section, 'rail__item--peek': flyoutId === section.id, 'rail__item--disabled': !RaceID }" :style="section.style" role="link" :tabindex="RaceID ? 0 : -1" @click="goSection(section)" @keydown.enter="goSection(section)" @mouseenter="RaceID && peekSection(section.id)" @mouseleave="leaveRail">
         <div class="rail__pill">
           <v-icon>{{ section.icon }}</v-icon>
         </div>
@@ -52,29 +30,9 @@
       </div>
     </v-navigation-drawer>
 
-    <section-flyout
-      v-if="flyoutSection"
-      :style="flyoutSection.style"
-      :section="flyoutSection"
-      :pages="flyoutSection.pages"
-      :active-route="page.route"
-      :shortcut="railSections.indexOf(flyoutSection) + 1"
-      :peeks="peekLines"
-      @go="go"
-      @mouseenter.native="cancelLeave"
-      @mouseleave.native="leaveRail"
-    />
+    <section-flyout v-if="flyoutSection" :style="flyoutSection.style" :section="flyoutSection" :pages="flyoutSection.pages" :active-route="page.route" :shortcut="railSections.indexOf(flyoutSection) + 1" :peeks="peekLines" @go="go" @mouseenter.native="cancelLeave" @mouseleave.native="leaveRail" />
 
-    <flyout-panel
-      v-if="flyoutId === EMPIRES_ID && !onEmpiresPage"
-      class="empire-flyout"
-      :style="neutralStyle"
-      title="Empires"
-      :meta="`${raceCount} ${raceCount === 1 ? 'empire' : 'empires'}`"
-      :width="380"
-      @mouseenter.native="cancelLeave"
-      @mouseleave.native="leaveRail"
-    >
+    <flyout-panel v-if="flyoutId === EMPIRES_ID && !onEmpiresPage" class="empire-flyout" :style="neutralStyle" title="Empires" :meta="`${raceCount} ${raceCount === 1 ? 'empire' : 'empires'}`" :width="380" @mouseenter.native="cancelLeave" @mouseleave.native="leaveRail">
       <empire-list :games="games" @pick="flyoutId = null" />
       <template #foot><kbd>Esc</kbd> close</template>
     </flyout-panel>
@@ -240,8 +198,7 @@ export default {
       return this.tabs.length > 1
     },
 
-    // Every page that appears in the navigation, flagged `disabled` when it shows a race's data and none is picked yet or it needs
-    // Empire History the race doesn't have, `planned` when it has no page yet, and `peekable` when the flyout shows a live line under it.
+    // Every page that appears in the navigation, flagged `disabled` when it shows a race's data and none is picked yet or it needs Empire History the race doesn't have, `planned` when it has no page yet, and `peekable` when the flyout shows a live line under it.
     pages () {
       return PAGES.filter(({ hidden }) => !hidden).map((page) => {
         const disabled = (!this.RaceID && needsRace(page.route)) || Boolean(page.requiresHistory && !this.historyRecorded)
@@ -288,8 +245,7 @@ export default {
       },
     },
 
-    // The flyout's lines load when it opens, and again when the save, the race or the history file changes under it.
-    // The empire list is read again when the save or the NPR setting changes.
+    // The flyout's lines load when it opens, and again when the save, the race or the history file changes under it. The empire list is read again when the save or the NPR setting changes.
     flyoutId: 'loadFlyoutPeeks',
     database: ['loadFlyoutPeeks', 'loadEmpires'],
     RaceID: 'loadFlyoutPeeks',
@@ -439,14 +395,12 @@ export default {
 </script>
 
 <style lang="scss">
-// Off-canvas parts (a closed drawer parked past the right edge) must not make the window scroll sideways.
-// Content that really is too wide is still reported by the smoke test's layout check.
+// Off-canvas parts (a closed drawer parked past the right edge) must not make the window scroll sideways. Content that really is too wide is still reported by the smoke test's layout check.
 .v-main__wrap {
   overflow-x: clip;
 }
 
-// Tables keep a header on one line and scroll inside their own wrapper when they need more room.
-// Below the 1080p layout (1904 px and up) the cells give up more than a third of their side padding.
+// Tables keep a header on one line and scroll inside their own wrapper when they need more room. Below the 1080p layout (1904 px and up) the cells give up more than a third of their side padding.
 .v-application .v-data-table {
   th {
     white-space: nowrap;
@@ -674,8 +628,7 @@ export default {
   border-bottom: 1px solid var(--ae-border) !important;
 }
 
-// Same side padding as the page's container, and no block padding: Vuetify's 6 px leaves less height than the
-// tagline's line box, which then hangs below the centre while the trail stays centred.
+// Same side padding as the page's container, and no block padding: Vuetify's 6 px leaves less height than the tagline's line box, which then hangs below the centre while the trail stays centred.
 .app-footer.v-footer {
   padding-block: 0;
   padding-inline: 12px;

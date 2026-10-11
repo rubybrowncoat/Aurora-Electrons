@@ -1,19 +1,6 @@
 <template>
   <div class="system-map" :style="{ height }">
-    <canvas
-      ref="canvas"
-      class="system-map__canvas"
-      :class="{ 'system-map__canvas--dragging': dragging, 'system-map__canvas--over': hoverId !== null }"
-      role="img"
-      :aria-label="ariaLabel"
-      :title="hoverTitle"
-      @wheel.prevent="wheel"
-      @pointerdown="press"
-      @pointermove="move"
-      @pointerup="release"
-      @pointercancel="cancel"
-      @pointerleave="leave"
-    />
+    <canvas ref="canvas" class="system-map__canvas" :class="{ 'system-map__canvas--dragging': dragging, 'system-map__canvas--over': hoverId !== null }" role="img" :aria-label="ariaLabel" :title="hoverTitle" @wheel.prevent="wheel" @pointerdown="press" @pointermove="move" @pointerup="release" @pointercancel="cancel" @pointerleave="leave" />
     <div class="system-map__controls">
       <v-btn icon small aria-label="Zoom in" title="Zoom in" @click="zoomBy(zoomStep)"><v-icon small>mdi-plus</v-icon></v-btn>
       <v-btn icon small aria-label="Zoom out" title="Zoom out" @click="zoomBy(1 / zoomStep)"><v-icon small>mdi-minus</v-icon></v-btn>
@@ -29,8 +16,7 @@ import { placeUnplaced } from '../../utilities/map-placement'
 
 // Screen pixels kept round the systems when the map fits them.
 const FIT_PADDING = 30
-// The closest the map zooms: this many screen pixels to a map unit, so systems the game placed 140
-// units apart end up some 200 pixels apart, whatever the galaxy's extent.
+// The closest the map zooms: this many screen pixels to a map unit, so systems the game placed 140 units apart end up some 200 pixels apart, whatever the galaxy's extent.
 const MAX_PIXELS_PER_UNIT = 1.5
 const BUTTON_ZOOM = 1.5
 // A press that moves further than this, in screen pixels, pans the map instead of clicking.
@@ -40,13 +26,7 @@ const HIT_SLACK = 3
 const LABEL_FONT = "11px Roboto, 'Helvetica Neue', Arial, sans-serif"
 const LABEL_CELL = 64
 
-// The known systems at their places on the game's galactic map (FCT_RaceSysSurvey.Xcor/Ycor), joined by
-// their jump links; systems the game left at its centre get a place beside a linked system. The wheel
-// zooms round the pointer (faster with Shift), dragging pans, and the buttons zoom or fit the map again.
-// Sizes and strokes are in screen pixels whatever the zoom. The map draws on a canvas: as SVG, a few
-// thousand systems made every zoom step restyle and lay out the whole drawing for a second or more.
-// Nodes draw in the order given, so put the ones that matter last: the last one under the pointer is
-// the one clicked, its `title` shows on hover, and its name wins where names would cover each other.
+// The known systems at their places on the game's galactic map (FCT_RaceSysSurvey.Xcor/Ycor), joined by their jump links; systems the game left at its centre get a place beside a linked system. The wheel zooms round the pointer (faster with Shift), dragging pans, and the buttons zoom or fit the map again. Sizes and strokes are in screen pixels whatever the zoom. The map draws on a canvas: as SVG, a few thousand systems made every zoom step restyle and lay out the whole drawing for a second or more. Nodes draw in the order given, so put the ones that matter last: the last one under the pointer is the one clicked, its `title` shows on hover, and its name wins where names would cover each other.
 export default {
   name: 'SystemMap',
   props: {
@@ -78,8 +58,7 @@ export default {
       return this.systems.filter((system) => system.Xcor !== null && system.Ycor !== null)
     },
 
-    // Where each placed system is drawn: as saved, with the ones at the game's centre moved beside a
-    // linked system (map-placement.js `placeUnplaced`).
+    // Where each placed system is drawn: as saved, with the ones at the game's centre moved beside a linked system (map-placement.js `placeUnplaced`).
     positions() {
       const { placed } = this
       const ids = new Set(placed.map((system) => system.SystemID))
@@ -160,9 +139,7 @@ export default {
     },
   },
   created() {
-    // The view: the map point at the centre, and the zoom, as a multiple of the scale that fits the
-    // systems (`fitScale`, screen pixels to a map unit). It changes with every wheel step and drag,
-    // so it stays out of Vue's reactivity; `draw` reads it.
+    // The view: the map point at the centre, and the zoom, as a multiple of the scale that fits the systems (`fitScale`, screen pixels to a map unit). It changes with every wheel step and drag, so it stays out of Vue's reactivity; `draw` reads it.
     this.view = { x: 0, y: 0, zoom: 1 }
     this.fitScale = 1
     this.size = { width: 0, height: 0 }
@@ -322,9 +299,7 @@ export default {
       })
     },
 
-    // The names go over the systems, the ones of systems drawn last first, each only where it covers no
-    // name already placed: zoomed out on a crowded map, only some show, and zooming in brings in the rest.
-    // Names already placed are kept in cells of LABEL_CELL pixels, to check only the ones nearby.
+    // The names go over the systems, the ones of systems drawn last first, each only where it covers no name already placed: zoomed out on a crowded map, only some show, and zooming in brings in the rest. Names already placed are kept in cells of LABEL_CELL pixels, to check only the ones nearby.
     placeLabels(context, labels) {
       const cells = new Map()
       const placed = []
