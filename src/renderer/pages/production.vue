@@ -13,7 +13,7 @@
               </v-chip>
             </v-chip-group>
           </div>
-          <div class="tool">
+          <div class="tool tool--rows">
             <div class="tool__label caption text--secondary">Rows</div>
             <v-btn-toggle :value="groupByColony ? 'colony' : 'job'" mandatory dense @change="setGroupBy">
               <v-btn value="job" small>Jobs</v-btn>
@@ -74,12 +74,9 @@
               </div>
             </template>
             <template #[`item.colonyName`]="{ item }">
-              <div class="py-2 d-flex align-center">
-                <div>
-                  <div>{{ item.colonyName }}</div>
-                  <div class="caption text--secondary">{{ item.place }}</div>
-                </div>
-                <v-btn v-if="!focusId" icon x-small class="ml-2" title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn>
+              <div class="py-2">
+                <div>{{ item.colonyName }}<v-btn v-if="!focusId" icon x-small class="ml-1" title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn></div>
+                <div class="caption text--secondary">{{ item.place }}</div>
               </div>
             </template>
             <template #[`item.statusSort`]="{ item }">
@@ -151,17 +148,16 @@
               </div>
               <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacityTable.sortBy" :sort-desc.sync="capacityTable.sortDesc" :items-per-page.sync="capacityTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: capacityPageSizes }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
                 <template #[`item.colonyName`]="{ item }">
-                  <div class="py-2 d-flex align-center">
-                    <div>
-                      <div class="font-weight-medium">{{ item.colonyName }}</div>
-                      <div class="caption text--secondary">{{ item.place }}</div>
+                  <div class="py-2">
+                    <div class="font-weight-medium">
+                      {{ item.colonyName }}<v-btn v-if="!focusId" icon x-small class="ml-1" title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn>
+                      <span class="text-no-wrap">
+                        <page-link :to="linkTo.colonyOutlook(item.PopulationID)" :name="item.colonyName" />
+                        <page-link v-if="item.body" :to="linkTo.planner({ bodies: [item.body] })" :name="item.place" />
+                        <page-link :to="linkTo.commanders({ colony: item.PopulationID })" :name="item.colonyName" />
+                      </span>
                     </div>
-                    <span class="ml-2 text-no-wrap">
-                      <page-link :to="linkTo.colonyOutlook(item.PopulationID)" :name="item.colonyName" />
-                      <page-link v-if="item.body" :to="linkTo.planner({ bodies: [item.body] })" :name="item.place" />
-                      <page-link :to="linkTo.commanders({ colony: item.PopulationID })" :name="item.colonyName" />
-                      <v-btn v-if="!focusId" icon x-small title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn>
-                    </span>
+                    <div class="caption text--secondary">{{ item.place }}</div>
                   </div>
                 </template>
                 <template v-for="column in capacityColumns" #[`item.${column.key}Free`]="{ item }">
@@ -1226,6 +1222,11 @@ export default {
 
   .tool--types {
     flex: 0 1 auto;
+  }
+
+  // Rows and Options stay at the right end, so the type chips growing or shrinking as they are toggled doesn't move them.
+  .tool--rows {
+    margin-left: auto;
   }
 
   .tool--actions {
