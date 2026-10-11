@@ -1,12 +1,6 @@
 <template>
   <v-container fluid class="log-page">
-    <v-alert v-if="failedInputs.length" type="error" outlined dense>
-      Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-      <template #append>
-        <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-      </template>
-    </v-alert>
-    <v-progress-linear v-else-if="!ready" indeterminate />
+    <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
     <template v-if="ready">
       <div class="toolbar">
@@ -37,15 +31,7 @@
         </v-menu>
       </div>
 
-      <v-row dense class="my-2">
-        <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-          <v-card class="stat-tile pa-3" elevation="1">
-            <div class="caption text--secondary">{{ tile.label }}</div>
-            <div class="stat-value" :title="tile.value">{{ tile.value }}</div>
-            <div class="caption text--secondary">{{ tile.note }}</div>
-          </v-card>
-        </v-col>
-      </v-row>
+      <stat-tiles dense class="my-2" :tiles="tiles" />
 
       <v-card class="panel mb-3" elevation="1">
         <div class="panel-head">
@@ -128,19 +114,20 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { eventColorToRGBA, gameTime } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 
 const INPUT_LABELS = { logEvents: 'the game log' }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 export default {
-  components: { ChartCanvas },
-  mixins: [countFormat],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
-      loadErrors: {},
       activeTypes: null,
       search: '',
       place: null,
@@ -399,15 +386,7 @@ export default {
     },
 
     ready() {
-      return !!this.database && !!this.contextKey && allLoaded(this.loadErrors, INPUTS)
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
+      return !!this.database && !!this.contextKey && this.inputsLoaded
     },
 
     theme() {
@@ -647,10 +626,6 @@ export default {
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     saveFilters() {
       if (this.contextKey) {
         this.config.set(`${this.contextKey}.logFilters`, { search: this.search || '', place: this.place, types: this.activeTypes, from: this.dateFrom, to: this.dateTo, collapse: this.collapseRepeats, customized: this.hideNonCustomized })
@@ -767,22 +742,25 @@ export default {
     flex-basis: 240px;
   }
 
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  ::v-deep .stat-tile {
+    padding: 12px;
+    height: auto;
+  }
+
+  ::v-deep .stat-value {
+    margin: 0;
     font-variant-numeric: tabular-nums;
   }
 
+  .panel {
+    margin-top: 0;
+  }
+
   .panel-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
     gap: 8px 20px;
     padding: 10px 16px;
+    font-size: inherit;
+    line-height: inherit;
   }
 
   .panel-foot {

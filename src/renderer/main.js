@@ -10,6 +10,7 @@ import navigation from './plugins/navigation'
 import router from './app/router'
 import store from './app/store'
 import Layout from './layouts/default.vue'
+import './styles/page-chrome.scss'
 
 // Only packaged builds report errors: development, web mode and the smoke tests build in other modes.
 if (import.meta.env.MODE === 'production') {

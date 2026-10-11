@@ -1,13 +1,7 @@
 <template>
   <div>
     <v-container fluid class="minerals-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <div class="toolbar">
@@ -56,15 +50,7 @@
           </div>
         </div>
 
-        <v-row class="mt-1">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value text-truncate" :title="tile.title || tile.value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles class="mt-1" :tiles="tiles" />
 
         <v-row>
           <v-col cols="12" xl="7">
@@ -346,12 +332,15 @@ import { mapGetters } from 'vuex'
 
 import SystemMap from '../components/exploration/SystemMap.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, loadRoutes } from '../utilities/colonization-data'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MINERALS, compact, depositPotential, qualifiesForCmc } from '../utilities/minerals'
 
@@ -366,7 +355,6 @@ const INPUT_LABELS = {
   miners: 'the orbital miners',
   aliens: 'the alien colonies',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const MINERAL_NAMES = MINERALS.map((mineral) => mineral.name)
 const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: 'Ve', 8: 'So', 9: 'Ur', 10: 'Cr', 11: 'Ga' }
@@ -453,13 +441,12 @@ const betterSite = (a, b) => roundToDecimal(a.potential, 1) - roundToDecimal(b.p
 
 export default {
   name: 'MineralsPage',
-  components: { SystemMap },
-  mixins: [countFormat],
+  components: { LoadState, StatTiles, SystemMap },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     const { systems, bodies } = this.$route.query
 
     return {
-      loadErrors: {},
       focusId: 0,
       reach: 'all',
       depositView: 'all',
@@ -507,20 +494,8 @@ export default {
       return withAlpha(this.theme.inkMuted, 0.35)
     },
 
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
     raceRules() {
       return this.race || { MineProduction: 0, MaximumOrbitalMiningDiameter: 0, AllowCMC: 0 }
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     settingsPrefix() {
@@ -1101,10 +1076,6 @@ export default {
     withAlpha,
     depositPotential,
 
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     saveSetting(key, value) {
       this.config.set(`${this.settingsPrefix}.${key}`, value)
     },
@@ -1383,35 +1354,12 @@ export default {
     max-width: 260px;
   }
 
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
   .panel {
     margin-top: 8px;
   }
 
   > .panel {
     margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
   }
 
   .head-tools {
@@ -1423,40 +1371,6 @@ export default {
     .v-btn-toggle .v-btn {
       height: 40px !important;
     }
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    flex: 0 0 auto;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
   }
 
   td {

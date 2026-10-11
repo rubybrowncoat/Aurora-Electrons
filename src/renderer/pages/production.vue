@@ -1,13 +1,7 @@
 <template>
   <div>
     <v-container fluid class="production-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <div class="toolbar">
@@ -54,15 +48,7 @@
           </div>
         </div>
 
-        <v-row class="mt-1">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles class="mt-1" :tiles="tiles" />
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
@@ -187,10 +173,13 @@ import { mapGetters, mapState } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { gameTime, populationName } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { MINERALS, navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
@@ -205,7 +194,6 @@ const INPUT_LABELS = {
   terraforms: 'the terraforming',
   navalAdmins: 'the naval admin commands',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
@@ -430,11 +418,10 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas },
-  mixins: [countFormat, productionModifiers],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [countFormat, loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
-      loadErrors: {},
       search: '',
       shownTypes: [...TYPE_IDS],
       groupByColony: false,
@@ -465,18 +452,6 @@ export default {
 
     typeLabels() {
       return Object.fromEntries(TYPES.map((type) => [type.id, type.label]))
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     settingsPrefix() {
@@ -944,10 +919,6 @@ export default {
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     saveSetting(key, value) {
       this.config.set(`${this.settingsPrefix}.${key}`, value)
     },
@@ -1317,64 +1288,12 @@ export default {
     max-width: 260px;
   }
 
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
   .panel {
     margin-top: 8px;
   }
 
   > .panel {
     margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    flex: 0 0 auto;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
   }
 
   td {

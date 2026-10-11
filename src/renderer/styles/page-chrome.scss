@@ -1,0 +1,91 @@
+// The chrome the redesigned pages share: the stat tiles (components/page/StatTiles.vue), panels with a head, a body
+// and a foot, and legends of coloured dots. A page that departs from them overrides the rule under its own root class.
+
+.stat-tile {
+  padding: 16px;
+  height: 100%;
+}
+
+// One line: a value too long for its tile is cut short, and StatTiles gives it a tooltip.
+.stat-value {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
+  margin: 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Shorter tiles whose note stops at two lines (with the whole note as its tooltip).
+.stat-tiles--compact {
+  .stat-tile {
+    padding: 10px 16px;
+  }
+
+  .stat-value {
+    font-size: 20px;
+    line-height: 28px;
+    margin: 2px 0;
+  }
+
+  .stat-note {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1.3;
+  }
+}
+
+.panel {
+  margin-top: 20px;
+}
+
+// The title on the left; a legend and controls on the right, wrapping under it when the row is full.
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+  line-height: 28px;
+}
+
+.panel-body {
+  padding: 0 24px 16px;
+}
+
+// The caption under a panel that states the game rule behind its numbers.
+.panel-foot {
+  padding: 12px 24px 16px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+// An outline only, in the colour set as the dot's border colour.
+.dot-ring {
+  background: transparent;
+  border: 2px solid;
+}

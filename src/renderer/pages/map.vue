@@ -1,12 +1,6 @@
 <template>
   <v-container fluid class="map-page">
-    <v-alert v-if="failedInputs.length" type="error" outlined dense class="mb-0">
-      Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-      <template #append>
-        <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-      </template>
-    </v-alert>
-    <v-progress-linear v-else-if="!loaded" indeterminate />
+    <load-state class="mb-0" :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!loaded" @retry="retryFailedInputs" />
 
     <template v-if="loaded">
       <div class="toolbar">
@@ -254,12 +248,14 @@ import cola from 'cytoscape-cola'
 
 import { chartTheme } from '../components/charts/theme'
 import MapGlyph from '../components/MapGlyph.vue'
+import LoadState from '../components/page/LoadState.vue'
 import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { gameTime } from '../utilities/aurora'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { buildDistanceMap, loadJumpPoints } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { COLONY_COST_BANDS, CONTACT_ORDER, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
@@ -277,7 +273,6 @@ const INPUT_LABELS = {
   aliens: 'the alien races you know',
   features: 'what the map can mark',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const LAYERS = [
   { value: 'geological', text: 'Geological survey' },
@@ -601,11 +596,10 @@ const overallProgress = (mode, { phase, progress }) => {
 
 export default {
   name: 'MapPage',
-  components: { MapGlyph, SystemView },
-  mixins: [countFormat],
+  components: { LoadState, MapGlyph, SystemView },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
-      loadErrors: {},
       // Set once the first reads are in, so the map stays up while the page reads a changed save.
       loaded: false,
 
@@ -688,18 +682,6 @@ export default {
         bands: [blue, blend(blue, surface, 0.55), blend(blue, surface, 0.25)],
         stars: { hole: violet, giant: green, hot: blue, yellow: amber, orange, red, white: blend(blue, '#ffffff', 0.35), brown: blend(orange, '#000000', 0.6) },
       }
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     settingsPrefix() {
@@ -1714,10 +1696,6 @@ export default {
   },
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
-
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
 
     setSetting(key, value) {
       this.config.set(`${this.settingsPrefix}.${key}`, value)
@@ -3077,13 +3055,15 @@ export default {
     flex-direction: column;
   }
 
+  .panel {
+    margin-top: 0;
+  }
+
   .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
     gap: 8px 24px;
     padding: 10px 16px;
+    font-size: inherit;
+    line-height: inherit;
   }
 
   .panel-foot {
@@ -3110,22 +3090,16 @@ export default {
   }
 
   .legend {
-    display: flex;
     flex-direction: column;
+    flex-wrap: nowrap;
     width: 100%;
     gap: 4px;
-    font-size: 12px;
   }
 
   .legend-row {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 16px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .legend-item--heading {
@@ -3152,16 +3126,7 @@ export default {
   }
 
   .dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
+    flex: 0 1 auto;
   }
 
   .spot {

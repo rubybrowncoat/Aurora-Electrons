@@ -87,16 +87,13 @@ export default {
 <style lang="scss">
 .lines-view {
   .panel {
+    margin-top: 0;
     margin-bottom: 16px;
   }
 
   .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
+    flex-wrap: nowrap;
+    gap: 0;
   }
 
   .abbreviation {
@@ -175,16 +172,7 @@ export default {
     }
   }
 
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
   .legend-item {
-    display: inline-flex;
-    align-items: center;
     gap: 6px;
   }
 

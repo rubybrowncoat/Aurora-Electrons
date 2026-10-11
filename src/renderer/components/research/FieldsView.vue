@@ -549,18 +549,8 @@ export default {
   }
 
   .panel {
+    margin-top: 0;
     margin-bottom: 16px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
   }
 }
 
