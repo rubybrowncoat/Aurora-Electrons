@@ -7,11 +7,11 @@
         <div class="toolbar">
           <div class="tool tool--mineral">
             <div class="tool__label caption text--secondary">Mineral</div>
-            <v-select :value="focusId" :items="mineralItems" item-text="name" item-value="id" aria-label="Mineral" prepend-inner-icon="mdi-diamond-stone" dense outlined hide-details @change="setFocus" />
+            <v-select v-model="focusId" :items="mineralItems" item-text="name" item-value="id" aria-label="Mineral" prepend-inner-icon="mdi-diamond-stone" dense outlined hide-details />
           </div>
           <div class="tool tool--reach">
             <div class="tool__label caption text--secondary">Systems</div>
-            <v-select :value="reach" :items="reachItems" item-text="label" item-value="id" aria-label="Systems" :disabled="!!selection" dense outlined hide-details @change="setReach">
+            <v-select v-model="reach" :items="reachItems" item-text="label" item-value="id" aria-label="Systems" :disabled="!!selection" dense outlined hide-details>
               <template #item="{ item }">
                 <v-list-item-content>
                   <v-list-item-title>{{ item.label }}</v-list-item-title>
@@ -31,17 +31,17 @@
               </template>
               <v-card class="pa-4">
                 <div class="subtitle-2">Bodies</div>
-                <v-radio-group v-model="orbital" dense hide-details class="mt-1" @change="(value) => config.set('mineralsFilterOrbitalEligibility', value)">
+                <v-radio-group v-model="orbital" dense hide-details class="mt-1">
                   <v-radio v-for="option in orbitalOptions" :key="option.value" :value="option.value" :label="option.text" />
                 </v-radio-group>
                 <div class="caption text--secondary mt-1">Your orbital miners work bodies up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km across.</div>
                 <div class="subtitle-2 mt-4">Deposits</div>
                 <v-row dense class="mt-1">
                   <v-col cols="6">
-                    <v-select v-model="minAccessibility" :items="accessibilitySteps" label="Accessibility from" dense outlined hide-details @change="(value) => saveSetting('mineralsMinAccessibility', value)" />
+                    <v-select v-model="minAccessibility" :items="accessibilitySteps" label="Accessibility from" dense outlined hide-details />
                   </v-col>
                   <v-col cols="6">
-                    <v-text-field v-model.number="minAmount" type="number" min="0" label="Tonnes from" dense outlined hide-details clearable @change="(value) => saveSetting('mineralsMinAmount', Number(value) > 0 ? Number(value) : null)" />
+                    <v-text-field v-model.number="minAmount" type="number" min="0" label="Tonnes from" dense outlined hide-details clearable />
                   </v-col>
                 </v-row>
                 <v-btn v-if="activeOptionCount" text small class="mt-3" @click="resetOptions">Reset options</v-btn>
@@ -131,7 +131,7 @@
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} deposits` : 'Bodies with deposits' }}</span>
             <span class="head-tools">
-              <v-btn-toggle :value="depositView" mandatory dense @change="setDepositView">
+              <v-btn-toggle v-model="depositView" mandatory dense>
                 <v-btn v-for="view in depositViews" :key="view.id" :value="view.id" small>{{ view.label }}&nbsp;<span class="text--secondary">{{ count(viewCounts[view.id]) }}</span></v-btn>
               </v-btn-toggle>
               <v-text-field v-model="search" label="Search" placeholder="Body or system" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
@@ -142,7 +142,7 @@
             <v-btn small outlined :to="plannerLink(selectedRows)">Open in Colonization Planner</v-btn>
             <v-btn small text @click="selectedRows = []">Clear</v-btn>
           </div>
-          <v-data-table v-model="selectedRows" :headers="depositHeaders" :items="depositRows" item-key="SystemBodyID" show-select show-expand single-expand :expanded.sync="depositExpanded" :sort-by.sync="depositSortBy" :sort-desc.sync="depositSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :no-data-text="bodies.length ? 'No deposits match the systems, options and search.' : 'No surveyed body has deposits yet.'">
+          <v-data-table v-model="selectedRows" :headers="depositHeaders" :items="depositRows" item-key="SystemBodyID" show-select show-expand single-expand :expanded.sync="depositExpanded" :sort-by.sync="depositTable.sortBy" :sort-desc.sync="depositTable.sortDesc" :items-per-page.sync="depositTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="bodies.length ? 'No deposits match the systems, options and search.' : 'No surveyed body has deposits yet.'">
             <template #[`item.nameSort`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div>
@@ -268,7 +268,7 @@
             <span>{{ focus ? `${focus.name} in your colonies` : 'Minerals in your colonies' }}</span>
             <v-text-field v-model="colonySearch" label="Search" placeholder="Colony or system" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="colonyHeaders" :items="visibleColonyRows" item-key="key" show-expand single-expand :expanded.sync="colonyExpanded" :sort-by.sync="colonySortBy" :sort-desc.sync="colonySortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :no-data-text="colonyRows.length ? 'No colony matches the search.' : `No colony in the chosen systems holds, reserves, needs or expects ${focusName}.`">
+          <v-data-table :headers="colonyHeaders" :items="visibleColonyRows" item-key="key" show-expand single-expand :expanded.sync="colonyExpanded" :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="colonyRows.length ? 'No colony matches the search.' : `No colony in the chosen systems holds, reserves, needs or expects ${focusName}.`">
             <template #[`item.name`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
@@ -341,6 +341,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, loadRoutes } from '../utilities/colonization-data'
@@ -402,6 +403,8 @@ const ORBITAL_OPTIONS = [
 
 const ACCESSIBILITY_STEPS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
 
+const PAGE_SIZES = [15, 30, -1]
+
 // A colony's state for one mineral, most pressing first. Differences under a tonne are rounding.
 const STOCK_STATES = {
   short: { order: 0, label: 'Short for queue', icon: 'mdi-alert-circle-outline', color: 'error' },
@@ -437,27 +440,32 @@ const betterSite = (a, b) => roundToDecimal(a.potential, 1) - roundToDecimal(b.p
 export default {
   name: 'MineralsPage',
   components: { LoadState, PageLink, StatTiles, SystemMap },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      focusId: { key: 'mineralsFocus', default: 0, scope: 'race', valid: oneOf(MINERALS.map((mineral) => mineral.id)) },
+      reach: { key: 'mineralsReach', default: 'all', scope: 'race', valid: oneOf(REACHES.map((option) => option.id)) },
+      depositView: { key: 'mineralsDepositView', default: 'all', scope: 'race', valid: oneOf(DEPOSIT_VIEWS.map((option) => option.id)) },
+      orbital: { key: 'mineralsFilterOrbitalEligibility', default: 'all', valid: oneOf(ORBITAL_OPTIONS.map((option) => option.value)) },
+      minAccessibility: { key: 'mineralsMinAccessibility', default: 0, scope: 'race' },
+      minAmount: { key: 'mineralsMinAmount', default: null, scope: 'race', normalise: (stored) => (Number(stored) > 0 ? Number(stored) : null) },
+      search: { key: 'mineralsSearch', default: '', scope: 'race' },
+      colonySearch: { key: 'mineralsColonySearch', default: '', scope: 'race' },
+      depositTable: tableView('mineralsDepositsTable', { sortBy: ['potential'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      colonyTable: tableView('mineralsColoniesTable', { sortBy: ['stateOrder'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      focusId: 0,
-      reach: 'all',
-      depositView: 'all',
-      orbital: 'all',
-      minAccessibility: 0,
-      minAmount: null,
-      search: '',
-      colonySearch: '',
       // Systems the map or a click on this page's map picked, or bodies the Colonization Planner sent.
       selectedSystemIds: [],
       selectedBodies: [],
       selectedRows: [],
       depositExpanded: [],
       colonyExpanded: [],
-      depositSortBy: ['potential'],
-      depositSortDesc: [true],
-      colonySortBy: ['stateOrder'],
-      colonySortDesc: [false],
+      pageSizes: PAGE_SIZES,
       bands: BANDS,
       depositViews: DEPOSIT_VIEWS,
       orbitalOptions: ORBITAL_OPTIONS,
@@ -473,7 +481,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -489,10 +497,6 @@ export default {
 
     raceRules() {
       return this.race || { MineProduction: 0, MaximumOrbitalMiningDiameter: 0, AllowCMC: 0 }
-    },
-
-    settingsPrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}`
     },
 
     focus() {
@@ -1047,26 +1051,11 @@ export default {
     },
   },
   watch: {
-    // The focus, view and options are kept per game and race; the orbital filter for the app.
-    RaceID: {
-      immediate: true,
-      handler(_value, previous) {
-        const focusId = this.config.get(`${this.settingsPrefix}.mineralsFocus`, 0)
-        const reach = this.config.get(`${this.settingsPrefix}.mineralsReach`, 'all')
-        const view = this.config.get(`${this.settingsPrefix}.mineralsDepositView`, 'all')
-        const orbital = this.config.get('mineralsFilterOrbitalEligibility', 'all')
-
-        this.focusId = MINERALS.some((mineral) => mineral.id === focusId) ? focusId : 0
-        this.reach = REACHES.some((option) => option.id === reach) ? reach : 'all'
-        this.depositView = DEPOSIT_VIEWS.some((option) => option.id === view) ? view : 'all'
-        this.orbital = ORBITAL_OPTIONS.some((option) => option.value === orbital) ? orbital : 'all'
-        this.minAccessibility = this.config.get(`${this.settingsPrefix}.mineralsMinAccessibility`, 0)
-        this.minAmount = this.config.get(`${this.settingsPrefix}.mineralsMinAmount`, null)
-
-        if (previous) {
-          this.clearSelection()
-        }
-      },
+    // A picked system or set of bodies belongs to one race's map, so another race starts without them.
+    RaceID(_value, previous) {
+      if (previous) {
+        this.clearSelection()
+      }
     },
   },
   methods: {
@@ -1074,7 +1063,7 @@ export default {
       const mineral = queryId(query.mineral)
       const bodies = queryBodies(query.bodies)
 
-      this.focusId = MINERALS.some((item) => item.id === mineral) ? mineral : 0
+      this.setUnsaved('focusId', MINERALS.some((item) => item.id === mineral) ? mineral : 0)
       this.selectedBodies = bodies
       this.selectedSystemIds = bodies.length ? [] : queryIds(query.systems)
     },
@@ -1084,32 +1073,14 @@ export default {
     withAlpha,
     depositPotential,
 
-    saveSetting(key, value) {
-      this.config.set(`${this.settingsPrefix}.${key}`, value)
-    },
-
     setFocus(id) {
       this.focusId = id
-      this.saveSetting('mineralsFocus', id)
-    },
-
-    setReach(id) {
-      this.reach = id
-      this.saveSetting('mineralsReach', id)
-    },
-
-    setDepositView(id) {
-      this.depositView = id
-      this.saveSetting('mineralsDepositView', id)
     },
 
     resetOptions() {
       this.orbital = 'all'
       this.minAccessibility = 0
       this.minAmount = null
-      this.config.set('mineralsFilterOrbitalEligibility', 'all')
-      this.saveSetting('mineralsMinAccessibility', 0)
-      this.saveSetting('mineralsMinAmount', null)
     },
 
     clearSelection() {

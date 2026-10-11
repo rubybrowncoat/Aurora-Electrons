@@ -4,7 +4,7 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Window</span>
-          <v-btn-toggle v-model="windowDays" mandatory dense @change="(value) => config.set('financesWindowDays', value)">
+          <v-btn-toggle v-model="windowDays" mandatory dense>
             <v-btn v-for="days in windowOptions" :key="days" :value="days" small>{{ days }} d</v-btn>
           </v-btn-toggle>
         </v-col>
@@ -39,7 +39,7 @@
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="320" label="Wealth income and spending per production cycle, by category" />
                 <div class="caption text--secondary mt-2">Income above zero, spending below. The line is the net of each cycle.</div>
               </template>
-              <v-data-table v-else :headers="stepHeaders" :items="stepRows" item-key="time" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" dense />
+              <v-data-table v-else :headers="stepHeaders" :items="stepRows" item-key="time" :sort-by.sync="stepsTable.sortBy" :sort-desc.sync="stepsTable.sortDesc" :items-per-page.sync="stepsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: stepPageSizes }" dense />
             </div>
           </v-card>
 
@@ -96,6 +96,7 @@ import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -104,6 +105,9 @@ const SECONDS_PER_DAY = 86400
 // The save keeps one year of wealth history; the cycle length when it holds a single step.
 const HISTORY_DAYS = 365
 const DEFAULT_STEP_DAYS = 5
+const WINDOW_DAYS = [30, 90, 180, 365]
+const FLOWS_VIEWS = ['chart', 'table']
+const STEP_PAGE_SIZES = [15, 30, -1]
 
 const INPUT_LABELS = {
   treasury: 'the treasury',
@@ -127,12 +131,18 @@ const compact = (value) => {
 export default {
   name: 'FinancesPage',
   components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [loadState(INPUT_LABELS)],
+  mixins: [
+    loadState(INPUT_LABELS),
+    persistedView({
+      windowDays: { key: 'financesWindowDays', default: 365 },
+      flowsView: { key: 'financesFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
+      stepsTable: tableView('financesStepsTable', { itemsPerPage: 15, itemsPerPageOptions: STEP_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      windowOptions: [30, 90, 180, 365],
-      windowDays: 365,
-      flowsView: 'chart',
+      windowOptions: WINDOW_DAYS,
+      stepPageSizes: STEP_PAGE_SIZES,
     }
   },
   computed: {
@@ -433,9 +443,6 @@ export default {
         net: this.signed(netByStep[index]),
       })).reverse()
     },
-  },
-  created() {
-    this.windowDays = this.config.get('financesWindowDays', 365)
   },
   methods: {
     money(value) {

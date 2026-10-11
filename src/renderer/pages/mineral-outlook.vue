@@ -4,13 +4,13 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Ledger window</span>
-          <v-btn-toggle v-model="windowDays" mandatory dense @change="(value) => config.set('mineralOutlookWindowDays', value)">
+          <v-btn-toggle v-model="windowDays" mandatory dense>
             <v-btn v-for="days in windowOptions" :key="days" :value="days" small>{{ days }} d</v-btn>
           </v-btn-toggle>
         </v-col>
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Horizon</span>
-          <v-btn-toggle v-model="horizon" mandatory dense @change="(value) => config.set('mineralOutlookHorizon', value)">
+          <v-btn-toggle v-model="horizon" mandatory dense>
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
@@ -70,7 +70,7 @@
             <span>Mineral runway</span>
             <v-chip small>{{ coverageLabel }}</v-chip>
           </div>
-          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
+          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwayTable.sortBy" :sort-desc.sync="runwayTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
             <template #[`item.name`]="{ item }">
               <span class="font-weight-medium">{{ item.name }}</span>
             </template>
@@ -134,7 +134,7 @@
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
                 <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
               </template>
-              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
+              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :sort-by.sync="flowsTable.sortBy" :sort-desc.sync="flowsTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
             </v-card-text>
           </v-card>
         </v-dialog>
@@ -144,11 +144,11 @@
         <div class="panel-head">
           <span>Deposits being mined</span>
           <span class="d-flex align-center">
-            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" @change="(value) => config.set('mineralOutlookAllDeposits', !!value)" />
-            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" @change="(value) => config.set('mineralOutlookOnlyEmptying', !!value)" />
+            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" />
+            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" />
           </span>
         </div>
-        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositSortBy" :sort-desc.sync="depositSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, 60, -1] }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositTable.sortBy" :sort-desc.sync="depositTable.sortDesc" :items-per-page.sync="depositTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: depositPageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.place`]="{ item }">
             <div class="py-2">
               <div>{{ item.bodyName }}</div>
@@ -210,6 +210,7 @@ import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
@@ -241,30 +242,39 @@ const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
 
+const DEPOSIT_PAGE_SIZES = [15, 30, 60, -1]
+const FLOWS_VIEWS = ['chart', 'table']
+
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
   components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      windowDays: { key: 'mineralOutlookWindowDays', default: 365 },
+      horizon: { key: 'mineralOutlookHorizon', default: 50 },
+      allDeposits: { key: 'mineralOutlookAllDeposits', default: false },
+      onlyEmptying: { key: 'mineralOutlookOnlyEmptying', default: false },
+      focusMineralId: { key: 'mineralOutlookFocus', default: null, scope: 'race', valid: oneOf(MINERALS.map((mineral) => mineral.id)) },
+      flowsView: { key: 'mineralOutlookFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
+      runwayTable: tableView('mineralOutlookRunwayTable', { sortBy: ['runwaySort'], sortDesc: [false] }),
+      flowsTable: tableView('mineralOutlookFlowsTable', {}),
+      depositTable: tableView('mineralOutlookDepositsTable', { sortBy: ['emptySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: DEPOSIT_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
       windowOptions: [30, 90, 180, 365],
       horizonOptions: [25, 50, 100, 250],
-      windowDays: 365,
-      horizon: 50,
-      focusMineralId: null,
       linkTo,
       fallbackFocusId: null,
-      flowsView: 'chart',
       flowsOpen: false,
-      allDeposits: false,
-      onlyEmptying: false,
       expandedDeposits: [],
-      runwaySortBy: ['runwaySort'],
-      runwaySortDesc: [false],
-      depositSortBy: ['emptySort'],
-      depositSortDesc: [false],
+      depositPageSizes: DEPOSIT_PAGE_SIZES,
     }
   },
   computed: {
@@ -709,19 +719,17 @@ export default {
         this.fallbackFocusId = null
       }
     },
-  },
-  created() {
-    this.windowDays = this.config.get('mineralOutlookWindowDays', 365)
-    this.horizon = this.config.get('mineralOutlookHorizon', 50)
-    this.allDeposits = this.config.get('mineralOutlookAllDeposits', false)
-    this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
+    // A mineral restored for another race is the user's pick, not the stand-in of the race before.
+    RaceID() {
+      this.fallbackFocusId = null
+    },
   },
   methods: {
     applyLink(query) {
       const id = queryId(query.mineral)
 
       this.fallbackFocusId = null
-      this.focusMineralId = MINERALS.some((mineral) => mineral.id === id) ? id : null
+      this.setUnsaved('focusMineralId', MINERALS.some((mineral) => mineral.id === id) ? id : null)
       this.pickFocusMineral()
     },
 
@@ -739,13 +747,13 @@ export default {
         const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
 
         this.fallbackFocusId = null
-        this.focusMineralId = declining ? declining.id : rows[0].id
+        this.setUnsaved('focusMineralId', declining ? declining.id : rows[0].id)
       } else if (!this.focusMineralId && this.depositsReady) {
         const emptiest = this.deposits.reduce((first, deposit) => (first && first.emptySort <= deposit.emptySort ? first : deposit), null)
         const id = emptiest ? emptiest.MaterialID : rows[0].id
 
         this.fallbackFocusId = id
-        this.focusMineralId = id
+        this.setUnsaved('focusMineralId', id)
       }
     },
 
