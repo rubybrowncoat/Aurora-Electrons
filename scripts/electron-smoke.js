@@ -125,6 +125,9 @@ const run = async () => {
   // Without the dev server's address, the app loads the built renderer.
   const env = { ...process.env }
 
+  // The app's development override must point at the smoke copy as well.
+  env.AURORA_DB = save
+
   delete env.ELECTRON_RENDERER_URL
 
   const app = await _electron.launch({

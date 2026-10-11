@@ -31,6 +31,10 @@ if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettin
 Store.initRenderer()
 
 const storagePath = () => {
+  if (!app.isPackaged && process.env.AURORA_DB) {
+    return path.resolve(process.env.AURORA_DB)
+  }
+
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.includes('MacOS')
 
