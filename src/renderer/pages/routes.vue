@@ -177,6 +177,7 @@ import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey, queryPlace } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
+import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -268,18 +269,8 @@ export default {
       const { systemById } = this
       const systemName = (systemId) => (systemById[systemId] || {}).Name || ''
 
-      return [
-        ...this.colonies.map((colony) => ({
-          key: `colony:${colony.PopulationID}`,
-          kind: 'colony',
-          name: colony.PopName,
-          subtitle: `Colony in ${systemName(colony.SystemID)}${colony.Capital ? ', capital' : ''}`,
-          icon: colony.Capital ? 'mdi-star-circle-outline' : 'mdi-earth',
-          SystemID: colony.SystemID,
-          Xcor: colony.Xcor,
-          Ycor: colony.Ycor,
-          Capital: colony.Capital,
-        })),
+      return searchable([
+        ...colonyPlaces(this.colonies, systemName),
         ...this.fleets.map((fleet) => ({
           key: `fleet:${fleet.FleetID}`,
           kind: 'fleet',
@@ -291,17 +282,8 @@ export default {
           Ycor: fleet.Ycor,
           fleet,
         })),
-        ...this.systems.slice().sort((a, b) => a.Name.localeCompare(b.Name)).map((system) => ({
-          key: `system:${system.SystemID}`,
-          kind: 'system',
-          name: system.Name,
-          subtitle: 'System',
-          icon: 'mdi-white-balance-sunny',
-          SystemID: system.SystemID,
-          Xcor: 0,
-          Ycor: 0,
-        })),
-      ].map((place) => ({ ...place, text: `${place.name} ${systemName(place.SystemID)}`.toLowerCase() }))
+        ...systemPlaces(this.systems),
+      ], systemName)
     },
 
     placeByKey() {
@@ -565,9 +547,7 @@ export default {
   methods: {
     withAlpha,
 
-    filterPlace(item, query) {
-      return item.text.includes(query.toLowerCase())
-    },
+    filterPlace,
 
     filterSystem(_value, query, item) {
       return item.Name.toLowerCase().includes(query.toLowerCase())
