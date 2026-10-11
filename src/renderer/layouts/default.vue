@@ -126,6 +126,7 @@
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
         <router-view :key="$route.path" />
+        <section-nav :style="pageStyle" />
       </v-container>
     </v-main>
 
@@ -149,6 +150,7 @@ import PagePalette from '../components/navigation/PagePalette.vue'
 import PageTrail from '../components/navigation/PageTrail.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
+import SectionNav from '../components/page/SectionNav.vue'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -167,6 +169,7 @@ export default {
     PagePalette,
     PageTrail,
     SectionFlyout,
+    SectionNav,
   },
   data () {
     return {
