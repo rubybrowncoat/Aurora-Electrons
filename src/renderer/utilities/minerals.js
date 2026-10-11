@@ -370,6 +370,33 @@ export const annualQueueDemand = (projects, capacityOf) => {
   return demand
 }
 
+// What a colony's stock can't cover of an industrial project's remaining units, the material that runs out first
+// leading: each mineral, then the fuel, with the units the stock covers. Each cycle the game cuts a build to what
+// the colony's stock covers, minerals first and then fuel. The project's mineral columns are per unit, with the
+// stock as `Stock<Mineral>` and `StockFuel`.
+export const projectShortages = (project) => {
+  const short = []
+  const check = (limit, need, stock) => {
+    const covered = (stock || 0) / need
+
+    if (covered < project.Amount - 1e-6) {
+      short.push({ ...limit, covered: Math.max(0, covered) })
+    }
+  }
+
+  MINERALS.forEach((mineral) => {
+    if (project[mineral.name] > 0) {
+      check({ mineralId: mineral.id, name: mineral.name }, project[mineral.name], project[`Stock${mineral.name}`])
+    }
+  })
+
+  if (project.FuelRequired > 0) {
+    check({ mineralId: null, name: 'fuel' }, project.FuelRequired, project.StockFuel)
+  }
+
+  return short.sort((alpha, beta) => alpha.covered - beta.covered)
+}
+
 // Systems within `jumps` jumps of `systemId`, over a { SystemID: Set(neighbourIDs) } graph.
 export const systemsWithinJumps = (graph, systemId, jumps) => {
   const reached = new Set([systemId])
