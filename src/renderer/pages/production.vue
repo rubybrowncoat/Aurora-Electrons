@@ -7,7 +7,7 @@
         <div class="toolbar">
           <div class="tool tool--types">
             <div class="tool__label caption text--secondary">Show</div>
-            <v-chip-group :value="shownTypes" multiple column active-class="type-chip--on" class="type-chips" @change="setShownTypes">
+            <v-chip-group v-model="shownTypes" multiple column active-class="type-chip--on" class="type-chips">
               <v-chip v-for="type in typeOptions" :key="type.id" :value="type.id" small outlined filter>
                 <span class="dot" :style="{ background: type.color }" />{{ type.label }}&nbsp;<span class="text--secondary">{{ type.count }}</span>
               </v-chip>
@@ -27,7 +27,7 @@
               </template>
               <v-card class="pa-4">
                 <div class="subtitle-2">Jobs in the table and the chart</div>
-                <v-checkbox v-model="showQueued" dense hide-details @change="(value) => saveSetting('productionShowQueued', !!value)">
+                <v-checkbox v-model="showQueued" dense hide-details>
                   <template #label>
                     <div>
                       <div class="body-2">Queued jobs</div>
@@ -35,7 +35,7 @@
                     </div>
                   </template>
                 </v-checkbox>
-                <v-checkbox v-model="showPaused" dense hide-details @change="(value) => saveSetting('productionShowPaused', !!value)">
+                <v-checkbox v-model="showPaused" dense hide-details>
                   <template #label>
                     <div>
                       <div class="body-2">Paused jobs</div>
@@ -58,7 +58,7 @@
             </span>
             <v-text-field v-model="search" label="Search" placeholder="Job or colony" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="jobHeaders" :items="visibleJobs" item-key="key" :group-by="groupByColony ? 'colonyName' : []" :sort-by.sync="jobSortBy" :sort-desc.sync="jobSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :no-data-text="jobs.length ? 'No jobs match the filters.' : 'Nothing is being built, researched, trained or terraformed.'">
+          <v-data-table :headers="jobHeaders" :items="visibleJobs" item-key="key" :group-by="groupByColony ? 'colonyName' : []" :sort-by.sync="jobTable.sortBy" :sort-desc.sync="jobTable.sortDesc" :items-per-page.sync="jobTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: jobPageSizes }" :no-data-text="jobs.length ? 'No jobs match the filters.' : 'Nothing is being built, researched, trained or terraformed.'">
             <template #[`group.header`]="{ group, items, headers, isOpen, toggle }">
               <td :colspan="headers.length">
                 <v-btn icon small :aria-label="isOpen ? `Collapse ${group}` : `Expand ${group}`" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
@@ -124,7 +124,7 @@
             <v-card class="panel" elevation="1">
               <div class="panel-head">
                 <span>Completions</span>
-                <v-btn-toggle :value="horizon" mandatory dense @change="setHorizon">
+                <v-btn-toggle v-model="horizon" mandatory dense>
                   <v-btn v-for="option in horizons" :key="option.years" :value="option.years" small>{{ option.label }}</v-btn>
                 </v-btn-toggle>
               </div>
@@ -149,7 +149,7 @@
                 </span>
                 <v-chip small>{{ capacityRows.length }} {{ capacityRows.length === 1 ? 'colony' : 'colonies' }}</v-chip>
               </div>
-              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacitySortBy" :sort-desc.sync="capacitySortDesc" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
+              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacityTable.sortBy" :sort-desc.sync="capacityTable.sortDesc" :items-per-page.sync="capacityTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: capacityPageSizes }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
                 <template #[`item.colonyName`]="{ item }">
                   <div class="py-2 d-flex align-center">
                     <div>
@@ -196,6 +196,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { gameTime, populationName } from '../utilities/aurora'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
@@ -254,6 +255,9 @@ const HORIZONS = [
   { years: 5, label: '5 y', bins: 20, unit: 'quarter', format: 'YYYY-MM' },
   { years: 20, label: '20 y', bins: 20, unit: 'year', format: 'YYYY' },
 ]
+
+const JOB_PAGE_SIZES = [15, 30, -1]
+const CAPACITY_PAGE_SIZES = [10, 25, -1]
 
 const PRODUCTION_TYPES = {
   0: 'Construction',
@@ -413,29 +417,36 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 export default {
   name: 'ProductionPage',
   components: { ChartCanvas, LoadState, PageLink, StatTiles },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS), productionModifiers],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      shownTypes: { key: 'productionTypes', default: TYPE_IDS, scope: 'race', normalise: (types) => (Array.isArray(types) ? types.filter((type) => TYPE_IDS.includes(type)) : undefined) },
+      groupByColony: { key: 'productionGroupByColony', default: false, scope: 'race' },
+      showQueued: { key: 'productionShowQueued', default: true, scope: 'race' },
+      showPaused: { key: 'productionShowPaused', default: true, scope: 'race' },
+      horizon: { key: 'productionHorizon', default: 5, scope: 'race' },
+      search: { key: 'productionSearch', default: '', scope: 'race' },
+      jobTable: tableView('productionJobsTable', { sortBy: ['finishSort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: JOB_PAGE_SIZES }),
+      capacityTable: tableView('productionCapacityTable', { sortBy: ['constructionFree'], sortDesc: [true], itemsPerPage: 10, itemsPerPageOptions: CAPACITY_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      search: '',
       focusId: null,
       linkTo,
-      shownTypes: [...TYPE_IDS],
-      groupByColony: false,
-      showQueued: true,
-      showPaused: true,
-      horizon: 5,
       horizons: HORIZONS,
+      jobPageSizes: JOB_PAGE_SIZES,
+      capacityPageSizes: CAPACITY_PAGE_SIZES,
       capacityColumns: CAPACITY_COLUMNS,
-      jobSortBy: ['finishSort'],
-      jobSortDesc: [false],
-      capacitySortBy: ['constructionFree'],
-      capacitySortDesc: [true],
       STATUS,
       IDLE_MINIMUM,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
+    ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
     ...mapState(['RaceNPR']),
 
     theme() {
@@ -448,10 +459,6 @@ export default {
 
     typeLabels() {
       return Object.fromEntries(TYPES.map((type) => [type.id, type.label]))
-    },
-
-    settingsPrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}`
     },
 
     activeOptionCount() {
@@ -914,19 +921,9 @@ export default {
     },
   },
   watch: {
-    // The filters and the chart's span are kept per game and race.
-    RaceID: {
-      immediate: true,
-      handler() {
-        const types = this.config.get(`${this.settingsPrefix}.productionTypes`, TYPE_IDS)
-
-        this.shownTypes = Array.isArray(types) ? types.filter((type) => TYPE_IDS.includes(type)) : [...TYPE_IDS]
-        this.groupByColony = this.config.get(`${this.settingsPrefix}.productionGroupByColony`, false)
-        this.showQueued = this.config.get(`${this.settingsPrefix}.productionShowQueued`, true)
-        this.showPaused = this.config.get(`${this.settingsPrefix}.productionShowPaused`, true)
-        this.horizon = this.config.get(`${this.settingsPrefix}.productionHorizon`, 5)
-        this.focusId = null
-      },
+    // Which colony the tables show is not kept, so another race starts with all of them.
+    RaceID() {
+      this.focusId = null
     },
   },
   methods: {
@@ -934,23 +931,8 @@ export default {
       this.focusId = queryId(query.colony)
     },
 
-    saveSetting(key, value) {
-      this.config.set(`${this.settingsPrefix}.${key}`, value)
-    },
-
-    setShownTypes(types) {
-      this.shownTypes = types
-      this.saveSetting('productionTypes', types)
-    },
-
     setGroupBy(value) {
       this.groupByColony = value === 'colony'
-      this.saveSetting('productionGroupByColony', this.groupByColony)
-    },
-
-    setHorizon(years) {
-      this.horizon = years
-      this.saveSetting('productionHorizon', years)
     },
 
     // A table row: the colony's name and place, and the fields the table sorts and searches by.

@@ -4,9 +4,9 @@
 
     <template v-if="ready">
       <div class="toolbar">
-        <v-select v-model="severityFilter" :items="severityOptions" label="Severity" clearable dense outlined hide-details class="tool" @change="saveFilters" />
-        <v-select v-model="groupFilter" :items="groupOptions" label="Group" clearable dense outlined hide-details class="tool" @change="saveFilters" />
-        <v-text-field v-model="search" label="Search warnings" prepend-inner-icon="mdi-magnify" clearable dense outlined hide-details class="tool tool--search" @input="saveFilters" />
+        <v-select v-model="filters.severity" :items="severityOptions" label="Severity" clearable dense outlined hide-details class="tool" />
+        <v-select v-model="filters.group" :items="groupOptions" label="Group" clearable dense outlined hide-details class="tool" />
+        <v-text-field v-model="filters.search" label="Search warnings" prepend-inner-icon="mdi-magnify" clearable dense outlined hide-details class="tool tool--search" />
         <v-chip v-if="focusedCheck" close @click:close="checkFilter = null">Only {{ checkLabel(focusedCheck) }}</v-chip>
         <v-menu offset-y left :close-on-content-click="false" min-width="360" max-width="400">
           <template #activator="{ on, attrs }">
@@ -14,16 +14,16 @@
           </template>
           <v-card class="pa-4">
             <div class="subtitle-2">Muted warnings</div>
-            <v-switch :input-value="showMuted" label="Show muted warnings" dense inset hide-details @change="setShowMuted" />
+            <v-switch v-model="showMuted" label="Show muted warnings" dense inset hide-details />
             <div class="caption text--secondary mt-1">A muted warning, or a whole muted check, is kept out of the tiles and the lists. Show them here to unmute them.</div>
             <v-btn v-if="mutedTotal" small text class="mt-2" @click="unmuteAll">Unmute all ({{ count(mutedTotal) }})</v-btn>
 
             <div class="subtitle-2 mt-4">Idle fleets</div>
-            <v-switch :input-value="options.idleFleetsAtColonies" label="Include fleets parked at my colonies" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
+            <v-switch :input-value="idleFleetsAtColonies" label="Include fleets parked at my colonies" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
 
             <div class="subtitle-2 mt-4">Maintenance supplies</div>
-            <v-slider :value="options.maintenanceThreshold" min="10" max="100" :hint="`List ships under ${options.maintenanceThreshold}% maintenance`" thumb-label persistent-hint class="mt-6" @change="(value) => setOption('maintenanceThreshold', value)" />
-            <v-autocomplete :value="options.maintenanceExclusions" :items="shipClasses" label="Excluded ship classes" item-text="ClassName" item-value="ShipClassID" multiple small-chips deletable-chips clearable dense outlined hide-details class="mt-4" @change="(value) => setOption('maintenanceExclusions', [...(value || [])])" />
+            <v-slider :value="maintenanceThreshold" min="10" max="100" :hint="`List ships under ${maintenanceThreshold}% maintenance`" thumb-label persistent-hint class="mt-6" @change="(value) => setOption('maintenanceThreshold', value)" />
+            <v-autocomplete :value="maintenanceExclusions" :items="shipClasses" label="Excluded ship classes" item-text="ClassName" item-value="ShipClassID" multiple small-chips deletable-chips clearable dense outlined hide-details class="mt-4" @change="(value) => setOption('maintenanceExclusions', [...(value || [])])" />
             <v-btn v-if="!isMaintenanceDefault" small text class="mt-2" @click="resetMaintenance">Reset maintenance</v-btn>
           </v-card>
         </v-menu>
@@ -105,7 +105,7 @@
           </div>
           <div class="mt-2">
             <v-btn small text @click="resetFilters">Reset filters</v-btn>
-            <v-btn v-if="!showMuted && summary.mutedRows" small text @click="setShowMuted(true)">Show muted</v-btn>
+            <v-btn v-if="!showMuted && summary.mutedRows" small text @click="showMuted = true">Show muted</v-btn>
           </div>
         </template>
       </v-card>
@@ -122,6 +122,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView from '../mixins/persisted-view'
 import { linkTo } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { CHECKS, GROUPS, IDLE_FLEETS_KEY, SEVERITIES, checkByKey, checkLabel, normalizeRows } from '../utilities/warnings'
@@ -150,22 +151,36 @@ const checkReads = Object.fromEntries(CHECKS.map((check) => [readName(check), {
 
 export default {
   components: { LoadState, PageLink, StatTiles },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      filters: {
+        key: 'warningsFilters',
+        default: { severity: null, group: null, search: '' },
+        scope: 'race',
+        normalise: (stored) => {
+          const filters = stored || {}
+
+          return {
+            severity: SEVERITY_BY_KEY[filters.severity] ? filters.severity : null,
+            group: GROUPS.some((group) => group.key === filters.group) ? filters.group : null,
+            search: typeof filters.search === 'string' ? filters.search : '',
+          }
+        },
+      },
+      showMuted: { key: 'warningsShowMuted', default: false, scope: 'race', normalise: (stored) => !!stored },
+      idleFleetsAtColonies: { key: 'idleFleetsAtColonies', default: false, scope: 'race', normalise: (stored) => !!stored },
+      maintenanceThreshold: { key: 'maintenanceThreshold', default: 100, scope: 'race' },
+      maintenanceExclusions: { key: 'maintenanceExclusions', default: [], scope: 'race' },
+    }),
+  ],
   data() {
     return {
-      options: {
-        idleFleetsAtColonies: false,
-        maintenanceThreshold: 100,
-        maintenanceExclusions: [],
-      },
-
       muted: { checks: [], items: {} },
       lastLook: null,
-      showMuted: false,
 
-      severityFilter: null,
-      groupFilter: null,
-      search: '',
       checkFilter: null,
 
       expanded: {},
@@ -208,12 +223,21 @@ export default {
       return label ? label[0].toUpperCase() + label.slice(1) : null
     },
 
+    // The options the checks read.
+    options() {
+      return {
+        idleFleetsAtColonies: this.idleFleetsAtColonies,
+        maintenanceThreshold: this.maintenanceThreshold,
+        maintenanceExclusions: this.maintenanceExclusions,
+      }
+    },
+
     isMaintenanceDefault() {
-      return this.options.maintenanceThreshold === 100 && !this.options.maintenanceExclusions.length
+      return this.maintenanceThreshold === 100 && !this.maintenanceExclusions.length
     },
 
     activeOptionCount() {
-      return Number(this.showMuted) + Number(this.options.idleFleetsAtColonies) + Number(!this.isMaintenanceDefault)
+      return Number(this.showMuted) + Number(this.idleFleetsAtColonies) + Number(!this.isMaintenanceDefault)
     },
 
     mutedTotal() {
@@ -300,13 +324,13 @@ export default {
     // Each check with the rows the filters leave. A check focused by link or button ignores the severity, group and
     // search filters; muted rows and checks stay out unless shown.
     sections() {
-      const search = (this.search || '').trim().toLowerCase()
+      const search = (this.filters.search || '').trim().toLowerCase()
       const focused = this.checkFilter !== null
 
       return this.checkStates.map(({ check, rows }) => {
         const checkMuted = this.mutedCheckSet.has(check.key)
         const mutedIds = this.mutedSets[check.key] || NO_IDS
-        const inScope = focused ? check.key === this.checkFilter : (!this.severityFilter || check.severity === this.severityFilter) && (!this.groupFilter || check.group === this.groupFilter)
+        const inScope = focused ? check.key === this.checkFilter : (!this.filters.severity || check.severity === this.filters.severity) && (!this.filters.group || check.group === this.filters.group)
         const shown = inScope && (this.showMuted || !checkMuted)
           ? rows.filter((row) => (focused || !search || row.text.includes(search)) && (this.showMuted || !mutedIds.has(row.id)))
           : []
@@ -364,7 +388,7 @@ export default {
         this.expanded = {}
 
         if (prefix) {
-          this.loadSettings(prefix)
+          this.loadVisitState(prefix)
         }
       },
     },
@@ -401,7 +425,7 @@ export default {
         RaceNPR: this.RaceNPR,
         separator: this.separator,
         count: this.count,
-        options: Object.fromEntries((check.options || []).map((name) => [name, this.options[name]])),
+        options: Object.fromEntries((check.options || []).map((name) => [name, this[name]])),
       }
 
       if (check.clock) {
@@ -411,19 +435,9 @@ export default {
       return check.read(context).then(normalizeRows)
     },
 
-    loadSettings(prefix) {
+    loadVisitState(prefix) {
       const stored = (name, fallback) => this.config.get(`${prefix}.${name}`, fallback)
 
-      this.options.idleFleetsAtColonies = !!stored('idleFleetsAtColonies', false)
-      this.options.maintenanceThreshold = stored('maintenanceThreshold', 100)
-      this.options.maintenanceExclusions = [...stored('maintenanceExclusions', [])]
-
-      const filters = stored('warningsFilters', {}) || {}
-
-      this.severityFilter = SEVERITY_BY_KEY[filters.severity] ? filters.severity : null
-      this.groupFilter = GROUPS.some((group) => group.key === filters.group) ? filters.group : null
-      this.search = typeof filters.search === 'string' ? filters.search : ''
-      this.showMuted = !!stored('warningsShowMuted', false)
       this.lastLook = stored('warningsLastLook', null)
 
       const muted = stored('warningsMuted', {}) || {}
@@ -451,28 +465,13 @@ export default {
       }
     },
 
-    saveFilters() {
-      if (this.contextKey) {
-        this.config.set(`${this.contextKey}.warningsFilters`, { severity: this.severityFilter, group: this.groupFilter, search: this.search || '' })
-      }
-    },
-
     resetFilters() {
-      this.severityFilter = null
-      this.groupFilter = null
-      this.search = ''
+      this.filters = { severity: null, group: null, search: '' }
       this.checkFilter = null
-      this.saveFilters()
-    },
-
-    setShowMuted(value) {
-      this.showMuted = !!value
-      this.config.set(`${this.contextKey}.warningsShowMuted`, this.showMuted)
     },
 
     setOption(name, value) {
-      this.options[name] = value
-      this.config.set(`${this.contextKey}.${name}`, value)
+      this[name] = value
     },
 
     resetMaintenance() {

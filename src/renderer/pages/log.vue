@@ -4,8 +4,8 @@
 
     <template v-if="ready">
       <div class="toolbar">
-        <v-text-field v-model="search" label="Search messages" prepend-inner-icon="mdi-magnify" clearable dense outlined hide-details class="tool tool--search" @input="saveFilters" />
-        <v-autocomplete v-model="place" :items="placeOptions" label="System or colony" clearable dense outlined hide-details class="tool tool--place" @change="saveFilters" />
+        <v-text-field v-model="search" label="Search messages" prepend-inner-icon="mdi-magnify" clearable dense outlined hide-details class="tool tool--search" />
+        <v-autocomplete v-model="place" :items="placeOptions" label="System or colony" clearable dense outlined hide-details class="tool tool--place" />
         <v-select :value="selectedTypes" :items="typeOptions" label="Event types" multiple dense outlined hide-details class="tool tool--types" @change="setTypes">
           <template #prepend-item>
             <v-list-item @click="setTypes(null)"><v-list-item-title>All types</v-list-item-title></v-list-item>
@@ -22,9 +22,9 @@
           </template>
           <v-card class="pa-4">
             <div class="subtitle-2">Events in the list</div>
-            <v-checkbox v-model="collapseRepeats" label="Collapse daily repeats" dense hide-details @change="saveFilters" />
+            <v-checkbox v-model="collapseRepeats" label="Collapse daily repeats" dense hide-details />
             <div class="caption text--secondary mt-1">The same type on one game day folds into a row you can expand. No message is removed.</div>
-            <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details @change="saveFilters" />
+            <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details />
             <div class="caption text--secondary mt-1">Types with a colour entry in this race's game settings, including black.</div>
             <v-btn small text class="mt-3" @click="resetFilters">Reset filters</v-btn>
           </v-card>
@@ -37,8 +37,8 @@
         <div class="panel-head">
           <div class="subtitle-2">Timeline</div>
           <div class="date-fields">
-            <v-text-field v-model="dateFrom" type="date" label="From" dense outlined hide-details @change="saveFilters" />
-            <v-text-field v-model="dateTo" type="date" label="Through" dense outlined hide-details @change="saveFilters" />
+            <v-text-field v-model="dateFrom" type="date" label="From" dense outlined hide-details />
+            <v-text-field v-model="dateTo" type="date" label="Through" dense outlined hide-details />
             <v-select :value="selectedMonth" :items="monthOptions" label="Month" clearable dense outlined hide-details @change="selectMonth" />
           </div>
         </div>
@@ -120,6 +120,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView from '../mixins/persisted-view'
 import { eventColorToRGBA, gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
@@ -128,15 +129,22 @@ const INPUT_LABELS = { logEvents: 'the game log' }
 
 export default {
   components: { ChartCanvas, LoadState, PageLink, StatTiles },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      search: { key: 'logSearch', default: '', scope: 'race', normalise: (stored) => stored || '' },
+      place: { key: 'logPlace', default: null, scope: 'race', normalise: (stored) => stored || null },
+      activeTypes: { key: 'logTypes', default: null, scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored : null) },
+      dateFrom: { key: 'logDateFrom', default: '', scope: 'race', normalise: (stored) => stored || '' },
+      dateTo: { key: 'logDateTo', default: '', scope: 'race', normalise: (stored) => stored || '' },
+      collapseRepeats: { key: 'logCollapseRepeats', default: true, normalise: (stored) => stored !== false },
+      hideNonCustomized: { key: 'logOnlyCustomized', default: false, normalise: (stored) => !!stored },
+    }),
+  ],
   data() {
     return {
-      activeTypes: null,
-      search: '',
-      place: null,
-      dateFrom: '',
-      dateTo: '',
-      collapseRepeats: true,
       lastSeen: null,
       expandedGroups: [],
       detail: null,
@@ -377,8 +385,6 @@ export default {
         366: 'mdi-car-arrow-left', // Ship Rammed
         367: 'mdi-account-search', // Interrogation Update
       },
-
-      hideNonCustomized: false,
     }
   },
   computed: {
@@ -611,14 +617,6 @@ export default {
         if (!prefix) {
           return
         }
-        const filters = this.config.get(`${prefix}.logFilters`, {})
-        this.search = filters.search || ''
-        this.place = filters.place || null
-        this.activeTypes = Array.isArray(filters.types) ? filters.types : null
-        this.dateFrom = filters.from || ''
-        this.dateTo = filters.to || ''
-        this.collapseRepeats = filters.collapse !== false
-        this.hideNonCustomized = !!filters.customized
         this.lastSeen = this.config.get(`${prefix}.logLastSeen`, null)
       },
     },
@@ -647,13 +645,6 @@ export default {
       const colony = queryId(query.colony)
 
       this.place = system ? `system-${system}` : colony ? `colony-${colony}` : null
-      this.saveFilters()
-    },
-
-    saveFilters() {
-      if (this.contextKey) {
-        this.config.set(`${this.contextKey}.logFilters`, { search: this.search || '', place: this.place, types: this.activeTypes, from: this.dateFrom, to: this.dateTo, collapse: this.collapseRepeats, customized: this.hideNonCustomized })
-      }
     },
 
     resetFilters() {
@@ -664,12 +655,10 @@ export default {
       this.dateTo = ''
       this.collapseRepeats = true
       this.hideNonCustomized = false
-      this.saveFilters()
     },
 
     setTypes(types) {
       this.activeTypes = types
-      this.saveFilters()
     },
 
     hideType(event) {
@@ -681,7 +670,6 @@ export default {
       const month = this.timeline.find((month) => month.month === value)
       this.dateFrom = month ? month.from : ''
       this.dateTo = month ? month.to : ''
-      this.saveFilters()
     },
 
     inDateRange(event) {
