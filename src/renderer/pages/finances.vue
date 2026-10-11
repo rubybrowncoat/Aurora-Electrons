@@ -181,7 +181,9 @@ export default {
 
     // The cycle lengths, measured from the history (the game's construction cycle can differ from 5 days, and phases can differ in length).
     gapDays() {
-      return this.times.slice(1).map((time, index) => (time - this.times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
+      const { times } = this
+
+      return times.slice(1).map((time, index) => (time - times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
     },
 
     stepDays() {
@@ -211,17 +213,19 @@ export default {
 
     // Where the first step's cycle began: the logged end before it, else the gap after it (the first cycle of a save), else the default.
     firstStart() {
-      if (!this.steps.length) {
+      const { steps, times } = this
+
+      if (!steps.length) {
         return null
       }
 
-      const before = this.times.filter((time) => time < this.steps[0]).pop()
+      const before = times.filter((time) => time < steps[0]).pop()
 
       if (before !== undefined) {
         return before
       }
 
-      return this.steps[0] - (this.steps.length > 1 ? this.steps[1] - this.steps[0] : DEFAULT_STEP_DAYS * SECONDS_PER_DAY)
+      return steps[0] - (steps.length > 1 ? steps[1] - steps[0] : DEFAULT_STEP_DAYS * SECONDS_PER_DAY)
     },
 
     // The time the steps actually span, so cycles of different lengths count for what they are.
@@ -240,6 +244,7 @@ export default {
     // Every use in the window, income first, in the game's display order, each with its colour.
     categories() {
       const byId = {}
+      const { perYear } = this
 
       this.windowRows.forEach((row) => {
         const category = (byId[row.UseID] = byId[row.UseID] || { id: row.UseID, label: row.Description, income: !!row.Income, order: row.DisplayOrder ?? 999, total: 0 })
@@ -255,7 +260,7 @@ export default {
       return sorted.map((category, index) => ({
         ...category,
         color: index < palette.length ? palette[index] : withAlpha(palette[index % palette.length], 0.55),
-        perYear: category.total * this.perYear,
+        perYear: category.total * perYear,
         share: category.total / ((category.income ? incomeTotal : spendingTotal) || 1),
         // Each bar is the category's share of its own side, so small spending still reads.
         barWidth: (category.total / ((category.income ? incomeTotal : spendingTotal) || 1)) * 100,
@@ -290,7 +295,10 @@ export default {
     },
 
     netByStep() {
-      return this.steps.map((time) => this.categories.reduce((sum, category) => sum + (category.income ? 1 : -1) * ((this.amountsByStep[time] || {})[category.id] || 0), 0))
+      // Read the computed inputs once; Vue otherwise collects the whole ledger's dependencies for every cycle and category.
+      const { steps, categories, amountsByStep } = this
+
+      return steps.map((time) => categories.reduce((sum, category) => sum + (category.income ? 1 : -1) * ((amountsByStep[time] || {})[category.id] || 0), 0))
     },
 
     stepDates() {
@@ -333,11 +341,12 @@ export default {
     },
 
     flowsChart() {
-      const datasets = this.categories.map((category) => ({
+      const { categories, steps, amountsByStep, theme } = this
+      const datasets = categories.map((category) => ({
         label: category.label,
-        data: this.steps.map((time) => (category.income ? 1 : -1) * ((this.amountsByStep[time] || {})[category.id] || 0)),
+        data: steps.map((time) => (category.income ? 1 : -1) * ((amountsByStep[time] || {})[category.id] || 0)),
         backgroundColor: category.color,
-        borderColor: this.theme.surface,
+        borderColor: theme.surface,
         borderWidth: { left: 0, right: 0, top: 1, bottom: 1 },
         borderSkipped: false,
         stack: 'wealth',
@@ -437,11 +446,13 @@ export default {
     },
 
     stepRows() {
-      return this.steps.map((time, index) => ({
+      const { steps, stepDates, categories, amountsByStep, netByStep } = this
+
+      return steps.map((time, index) => ({
         time,
-        date: this.stepDates[index],
-        ...Object.fromEntries(this.categories.map((category) => [`use${category.id}`, this.money(((this.amountsByStep[time] || {})[category.id] || 0) * (category.income ? 1 : -1))])),
-        net: this.signed(this.netByStep[index]),
+        date: stepDates[index],
+        ...Object.fromEntries(categories.map((category) => [`use${category.id}`, this.money(((amountsByStep[time] || {})[category.id] || 0) * (category.income ? 1 : -1))])),
+        net: this.signed(netByStep[index]),
       })).reverse()
     },
   },
@@ -490,7 +501,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
+        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
