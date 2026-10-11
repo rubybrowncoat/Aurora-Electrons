@@ -44,9 +44,11 @@ import LinesView from '../components/research/LinesView.vue'
 import PathView from '../components/research/PathView.vue'
 import { statusStyle } from '../components/research/status-style'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { gameTime, toBoolean } from '../utilities/aurora'
 import { SERVING_COMMANDER } from '../utilities/commanders'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { sectionById } from '../utilities/navigation'
 import { ACTIVE, AVAILABLE, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, groupTechs, LOCKED, QUEUED, researchState, scheduleProjects } from '../utilities/research'
@@ -69,7 +71,7 @@ const VIEWS = ['fields', 'lines', 'path']
 export default {
   name: 'TechnologiesPage',
   components: { FieldsView, LinesView, LoadState, PathView, StatTiles },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       viewOptions: [
@@ -173,6 +175,23 @@ export default {
       return first ? first[0].id : null
     },
 
+    // The Path view's target, or nothing in the other views. Null while the target is still being worked out.
+    linkQuery() {
+      if (this.view !== 'path') {
+        return {}
+      } else if (this.research) {
+        return linkTo.techTree(this.activeTargetId).query
+      }
+
+      return this.targetId ? linkTo.techTree(this.targetId).query : null
+    },
+
+    linkLabel() {
+      const tech = this.view === 'path' && this.research ? this.research.graph.techs.get(this.activeTargetId) : null
+
+      return tech ? tech.name : null
+    },
+
     tiles() {
       const { counts, schedule, totalRate, scientists } = this.research
       const reachable = counts[DONE] + counts[ACTIVE] + counts[QUEUED] + counts[AVAILABLE] + counts[LOCKED]
@@ -223,6 +242,19 @@ export default {
     },
   },
   methods: {
+    // A tech in the query opens its path; without one the page leaves the path view for the view it remembers.
+    applyLink(query) {
+      const techId = queryId(query.tech)
+
+      if (techId) {
+        this.targetId = techId
+        this.view = 'path'
+      } else if (this.view === 'path') {
+        const remembered = this.config.get(`${this.preferencePrefix}View`, 'fields')
+
+        this.view = VIEWS.includes(remembered) && remembered !== 'path' ? remembered : 'fields'
+      }
+    },
     setView(view) {
       this.view = view
       this.config.set(`${this.preferencePrefix}View`, view)

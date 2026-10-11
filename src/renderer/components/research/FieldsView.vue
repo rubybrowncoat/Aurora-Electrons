@@ -60,7 +60,7 @@
                     <span v-if="!project.running" class="caption warning--text ml-2">{{ pausedLabel(project) }}</span>
                   </div>
                   <div class="caption text--secondary">
-                    {{ project.PopName }} · {{ scientistLabel(project) }} · {{ project.Facilities }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year
+                    {{ project.PopName }}<page-link :to="colonyLink(project.PopulationID)" :name="project.PopName" class="ml-1" /> · {{ scientistLabel(project) }}<page-link v-if="project.CommanderID" :to="commanderLink(project.CommanderID)" :name="project.ScientistName" class="ml-1" /> · {{ project.Facilities }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year
                   </div>
                 </div>
                 <div class="project-progress">
@@ -169,7 +169,9 @@
 <script>
 import countFormat from '../../mixins/count-format'
 import { gameTime } from '../../utilities/aurora'
+import { linkTo } from '../../utilities/deep-links'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import PageLink from '../page/PageLink.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
 
@@ -180,6 +182,7 @@ const STATUS_ORDER = [ACTIVE, QUEUED, AVAILABLE, LOCKED, DONE, BLOCKED]
 
 export default {
   name: 'FieldsView',
+  components: { PageLink },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
@@ -343,6 +346,14 @@ export default {
         unlocks: entry.unlocks,
         automatic: tech.automatic,
       }
+    },
+
+    colonyLink(populationId) {
+      return linkTo.colonyOutlook(populationId)
+    },
+
+    commanderLink(commanderId) {
+      return linkTo.commanders({ commander: commanderId })
     },
 
     scientistLabel(project) {

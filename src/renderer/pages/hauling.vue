@@ -14,7 +14,7 @@
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routeSortBy" :sort-desc.sync="routeSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}</div>
+                <div class="font-weight-medium">{{ item.FleetName }}<page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" /></div>
                 <div class="caption text--secondary">{{ item.Ships }} {{ item.Ships === 1 ? 'ship' : 'ships' }} at {{ count(item.Speed) }} km/s</div>
               </div>
             </template>
@@ -79,6 +79,9 @@
             <v-card class="panel" elevation="1">
               <div class="panel-head"><span>Deliveries by destination</span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
+                <template #[`item.destination`]="{ item }">
+                  <span>{{ item.destination }}</span><page-link :to="colonyLink(item.PopulationID)" :name="item.destination" class="ml-1" />
+                </template>
                 <template #[`item.amount`]="{ item }">{{ item.kind === 'colonists' ? `${count(item.amount)} people` : tons(item.amount) }}</template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
@@ -111,8 +114,10 @@
 import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import loadState from '../mixins/load-state'
+import { linkTo, place } from '../utilities/deep-links'
 import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -150,7 +155,7 @@ const placeOf = (order) => {
 
 export default {
   name: 'HaulingPage',
-  components: { LoadState, StatTiles },
+  components: { LoadState, PageLink, StatTiles },
   mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
@@ -232,7 +237,7 @@ export default {
 
         row.cargo.deliveries.forEach((delivery) => {
           const key = `${delivery.PopulationID}-${delivery.kind}`
-          const total = (totals[key] = totals[key] || { key, destination: delivery.name, kind: delivery.kind, amount: 0, fleets: new Set() })
+          const total = (totals[key] = totals[key] || { key, PopulationID: delivery.PopulationID, destination: delivery.name, kind: delivery.kind, amount: 0, fleets: new Set() })
 
           total.amount += row.year.trips * delivery.amount
           total.fleets.add(row.FleetName)
@@ -317,6 +322,12 @@ export default {
     },
   },
   methods: {
+    colonyLink(populationId) {
+      return linkTo.colonyOutlook(populationId)
+    },
+    fleetRoutesLink(fleetId) {
+      return linkTo.routes({ from: place.fleet(fleetId) })
+    },
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },

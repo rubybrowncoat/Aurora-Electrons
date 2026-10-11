@@ -63,7 +63,7 @@
             <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refinerySortBy" :sort-desc.sync="refinerySortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.PopName }}</div>
+                  <div class="font-weight-medium">{{ item.PopName }}<page-link :to="colonyLink(item.PopulationID)" :name="item.PopName" class="ml-1" /></div>
                   <div class="caption text--secondary">{{ item.place }}</div>
                 </div>
               </template>
@@ -130,7 +130,7 @@
             <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationSortBy" :sort-desc.sync="locationSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div class="font-weight-medium">{{ item.name }}<page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
                   <div class="caption text--secondary">{{ item.place }}</div>
                 </div>
               </template>
@@ -185,6 +185,9 @@
               <v-chip small>{{ count(supplyFleets.reduce((sum, fleet) => sum + fleet.SupplyMSP, 0)) }} MSP above their minimums</v-chip>
             </div>
             <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" disable-pagination hide-default-footer dense>
+              <template #[`item.FleetName`]="{ item }">
+                <span>{{ item.FleetName }}</span><page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" />
+              </template>
               <template #[`item.SupplyMSP`]="{ item }">{{ count(item.SupplyMSP) }}</template>
             </v-data-table>
           </v-card>
@@ -200,10 +203,13 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
+import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -221,13 +227,14 @@ const INPUT_LABELS = {
 }
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
+const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [loadState(INPUT_LABELS), productionModifiers],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       view: 'fuel',
@@ -391,6 +398,7 @@ export default {
 
         return {
           ...location,
+          PopulationID: main ? main.PopulationID : null,
           name: main ? main.PopName : fleets.length ? fleets.map((fleet) => fleet.FleetName).slice(0, 2).join(', ') : location.fleets[0].FleetName,
           place: main ? this.place(main) : `${location.fleets[0].SystemName || 'Unknown system'}, deep space`,
           belowWarning: location.warningLevel > 0 && location.stock < location.warningLevel,
@@ -507,12 +515,34 @@ export default {
         { text: 'MSP above minimum', value: 'SupplyMSP', align: 'end' },
       ]
     },
+
+    linkQuery() {
+      return linkTo.logistics(this.view).query
+    },
+
+    linkLabel() {
+      return VIEW_NAMES[this.view]
+    },
   },
   created() {
     this.view = this.config.get('logisticsView', 'fuel')
     this.showIdleLocations = this.config.get('logisticsShowIdleLocations', false)
   },
   methods: {
+    applyLink(query) {
+      const view = [].concat(query.view)[0]
+
+      this.view = Object.keys(VIEW_NAMES).includes(view) ? view : 'fuel'
+    },
+
+    colonyLink(populationId) {
+      return linkTo.colonyOutlook(populationId)
+    },
+
+    fleetRoutesLink(fleetId) {
+      return linkTo.routes({ from: placeKey.fleet(fleetId) })
+    },
+
     modifierOf(populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
