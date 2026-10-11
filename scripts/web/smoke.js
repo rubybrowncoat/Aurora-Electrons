@@ -23,6 +23,8 @@ const fs = require('fs')
 const path = require('path')
 const { chromium } = require('playwright')
 
+const pageLoading = require('../page-loading')
+
 const BASE_URL = process.env.BASE_URL || 'http://localhost:9080'
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
 const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
@@ -216,9 +218,9 @@ const run = async () => {
   const settle = async () => {
     const started = Date.now()
 
-    while (isBusy()) {
+    while (isBusy() || await page.evaluate(pageLoading)) {
       if (Date.now() - started > PAGE_TIMEOUT_MS) {
-        problems.push(`timeout: ${inFlight} database calls still pending`)
+        problems.push(inFlight > 0 ? `timeout: ${inFlight} database calls still pending` : 'timeout: the page is still loading')
         break
       }
 

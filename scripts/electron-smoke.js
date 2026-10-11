@@ -19,6 +19,8 @@ const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
 
+const pageLoading = require('./page-loading')
+
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
@@ -187,12 +189,12 @@ const run = async () => {
 
       state.errors.forEach((error) => problems.push(`db: ${error}`))
 
-      if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS) {
+      if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS && !(await page.evaluate(pageLoading))) {
         return
       }
 
       if (Date.now() - started > PAGE_TIMEOUT_MS) {
-        problems.push(`timeout: ${state.inFlight} database calls still pending`)
+        problems.push(state.inFlight > 0 ? `timeout: ${state.inFlight} database calls still pending` : 'timeout: the page is still loading')
         state.oldest.forEach((call) => problems.push(`pending ${call}`))
         // What kept the page busy: queries it repeats, its slowest ones, and a blocked main thread.
         const busy = await page.evaluate(() => ({
