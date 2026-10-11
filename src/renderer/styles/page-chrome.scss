@@ -6,12 +6,23 @@
   height: 100%;
 }
 
-// One line: a value too long for its tile is cut short, and StatTiles gives it a tooltip.
+// A row, so an icon before the value is centred on it instead of sitting low on the text's baseline.
 .stat-value {
+  display: flex;
+  align-items: center;
   font-size: 24px;
   line-height: 32px;
   font-weight: 400;
   margin: 4px 0;
+
+  > .v-icon {
+    flex: none;
+  }
+}
+
+// One line: a value too long for its tile is cut short, and StatTiles gives it a tooltip.
+.stat-value__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
