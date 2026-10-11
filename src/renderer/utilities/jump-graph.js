@@ -9,17 +9,17 @@ const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
 
 // The jump points the race has charted in systems it knows, with its own flags on them. Only explored ones
 // (`Explored`) can be travelled: the far side of the rest is unknown. `JumpGateStrength` > 0 is a gate, which
-// ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out.
-// Older saves have no `MilitaryRestricted` column, so it reads 0 there.
+// ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out;
+// `IgnoreForDistance` leaves it out of distance measures. The rows are frozen: they are read-only, and Vue
+// would otherwise observe every field of thousands of them.
 export const loadJumpPoints = async (database, { GameID, RaceID }) => {
-  const [[column]] = await database.query("select count(*) as Present from pragma_table_info('FCT_RaceJumpPointSurvey') where name = 'MilitaryRestricted'")
-  const [rows] = await database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, ${column.Present ? 'FCT_RaceJumpPointSurvey.MilitaryRestricted' : '0 as MilitaryRestricted'}
+  const [rows] = await database.query(`select FCT_JumpPoint.WarpPointID, FCT_JumpPoint.SystemID, FCT_JumpPoint.WPLink, FCT_JumpPoint.Xcor, FCT_JumpPoint.Ycor, FCT_JumpPoint.JumpGateStrength, FCT_RaceJumpPointSurvey.Explored, FCT_RaceJumpPointSurvey.MilitaryRestricted, FCT_RaceJumpPointSurvey.IgnoreForDistance
 from FCT_JumpPoint
-inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1
+inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.GameID = FCT_JumpPoint.GameID and FCT_RaceJumpPointSurvey.Charted = 1
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_JumpPoint.GameID
 where FCT_JumpPoint.GameID = ${GameID}`)
 
-  return rows
+  return Object.freeze(rows)
 }
 
 // One { SystemID, DestinationID } per charted jump point whose far side is charted too, for SystemMap.
@@ -207,9 +207,9 @@ export const routeLegs = (route) => {
 
 // Travel distance from the nearest of `origins` (the capital, or every sizeable colony) to a body: `distanceTo({
 // SystemID, Xcor, Ycor })` gives { km, jumps, from } on the shortest route in kilometres, or null when no explored
-// route from any origin reaches it.
+// route from any origin reaches it. Jump points the race marked to ignore for distance are left out.
 export const buildDistanceMap = (jumpPoints, origins) => {
-  const routes = searchRoutes(jumpPoints, origins, { order: 'km' })
+  const routes = searchRoutes(jumpPoints.filter((jumpPoint) => !jumpPoint.IgnoreForDistance), origins, { order: 'km' })
 
   return (body) => {
     const found = routes.toPlace(body)
