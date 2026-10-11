@@ -52,7 +52,10 @@
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
-            <span>Work in progress</span>
+            <span class="d-flex align-center">
+              <span>Work in progress</span>
+              <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
+            </span>
             <v-text-field v-model="search" label="Search" placeholder="Job or colony" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
           <v-data-table :headers="jobHeaders" :items="visibleJobs" item-key="key" :group-by="groupByColony ? 'colonyName' : []" :sort-by.sync="jobSortBy" :sort-desc.sync="jobSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :no-data-text="jobs.length ? 'No jobs match the filters.' : 'Nothing is being built, researched, trained or terraformed.'">
@@ -65,15 +68,18 @@
             </template>
             <template #[`item.name`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}</div>
+                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree(item.TechSystemID)" :name="item.name" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>
             </template>
             <template #[`item.colonyName`]="{ item }">
-              <div class="py-2">
-                <div>{{ item.colonyName }}</div>
-                <div class="caption text--secondary">{{ item.place }}</div>
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div>{{ item.colonyName }}</div>
+                  <div class="caption text--secondary">{{ item.place }}</div>
+                </div>
+                <v-btn v-if="!focusId" icon x-small class="ml-2" title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn>
               </div>
             </template>
             <template #[`item.statusSort`]="{ item }">
@@ -137,14 +143,25 @@
           <v-col cols="12" xl="7">
             <v-card class="panel" elevation="1">
               <div class="panel-head">
-                <span>Idle capacity by colony</span>
+                <span class="d-flex align-center">
+                  <span>Idle capacity by colony</span>
+                  <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
+                </span>
                 <v-chip small>{{ capacityRows.length }} {{ capacityRows.length === 1 ? 'colony' : 'colonies' }}</v-chip>
               </div>
-              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacitySortBy" :sort-desc.sync="capacitySortDesc" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" no-data-text="Every colony is using all its capacity.">
+              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacitySortBy" :sort-desc.sync="capacitySortDesc" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
                 <template #[`item.colonyName`]="{ item }">
-                  <div class="py-2">
-                    <div class="font-weight-medium">{{ item.colonyName }}</div>
-                    <div class="caption text--secondary">{{ item.place }}</div>
+                  <div class="py-2 d-flex align-center">
+                    <div>
+                      <div class="font-weight-medium">{{ item.colonyName }}</div>
+                      <div class="caption text--secondary">{{ item.place }}</div>
+                    </div>
+                    <span class="ml-2 text-no-wrap">
+                      <page-link :to="linkTo.colonyOutlook(item.PopulationID)" :name="item.colonyName" />
+                      <page-link v-if="item.body" :to="linkTo.planner({ bodies: [item.body] })" :name="item.place" />
+                      <page-link :to="linkTo.commanders({ colony: item.PopulationID })" :name="item.colonyName" />
+                      <v-btn v-if="!focusId" icon x-small title="Show only this colony" aria-label="Show only this colony" @click.stop="focusId = item.PopulationID"><v-icon small>mdi-filter-outline</v-icon></v-btn>
+                    </span>
                   </div>
                 </template>
                 <template v-for="column in capacityColumns" #[`item.${column.key}Free`]="{ item }">
@@ -174,13 +191,16 @@ import { mapGetters, mapState } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { gameTime, populationName } from '../utilities/aurora'
+import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { MINERALS, navalAdminChainBonus } from '../utilities/minerals'
+import { MINERALS, navalAdminChainBonus, projectShortages } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
 const INPUT_LABELS = {
@@ -332,32 +352,6 @@ const industrySchedule = (projects, capacity) => {
   return schedule
 }
 
-// How many units the colony's stock covers when that is less than the project still needs, and the material that
-// runs out first: each cycle the game cuts each build to what the colony's stock covers, minerals first and then
-// fuel. The mineral columns are per unit.
-const shortageOf = (project) => {
-  let covered = Infinity
-  let limit = null
-
-  MINERALS.forEach((mineral) => {
-    if (project[mineral.name] > 0) {
-      const units = (project[`Stock${mineral.name}`] || 0) / project[mineral.name]
-
-      if (units < covered) {
-        covered = units
-        limit = { mineralId: mineral.id, name: mineral.name }
-      }
-    }
-  })
-
-  if (project.FuelRequired > 0 && (project.StockFuel || 0) / project.FuelRequired < covered) {
-    covered = (project.StockFuel || 0) / project.FuelRequired
-    limit = { mineralId: null, name: 'fuel' }
-  }
-
-  return limit && covered < project.Amount - 1e-6 ? { ...limit, covered: Math.max(0, covered) } : null
-}
-
 // How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game
 // runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the
 // air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`:
@@ -418,11 +412,13 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [countFormat, loadState(INPUT_LABELS), productionModifiers],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       search: '',
+      focusId: null,
+      linkTo,
       shownTypes: [...TYPE_IDS],
       groupByColony: false,
       showQueued: true,
@@ -484,6 +480,7 @@ export default {
           key: `research-${project.ID}`,
           type: 'research',
           PopulationID: project.PopulationID,
+          TechSystemID: project.TechSystemID,
           name: project.Name,
           note: this.scientistNote(project, project.ProjectField),
           rateText: `${this.count(rate)} RP/yr`,
@@ -505,6 +502,7 @@ export default {
             key: `research-${project.ID}-${queue.ResearchOrder}`,
             type: 'research',
             PopulationID: project.PopulationID,
+            TechSystemID: queue.TechSystemID,
             name: queue.Name,
             note: this.scientistNote(project, queue.ProjectField),
             rateText: `${this.count(queueRate)} RP/yr`,
@@ -546,7 +544,7 @@ export default {
           const rate = (capacity * project.Percentage) / 100
           const { start, finish } = schedule[project.ID]
           // A spied NPR builds from its capital's stock.
-          const shortage = this.RaceNPR ? null : shortageOf(project)
+          const [shortage = null] = this.RaceNPR ? [] : projectShortages(project)
           let status
 
           if (project.Queue > 0) {
@@ -734,10 +732,22 @@ export default {
       }))
     },
 
+    focusName() {
+      return this.colony(this.focusId, '').colonyName
+    },
+
+    linkQuery() {
+      return linkTo.production(this.focusId).query
+    },
+
+    linkLabel() {
+      return this.focusId ? this.focusName : ''
+    },
+
     visibleJobs() {
       const search = (this.search || '').trim().toLowerCase()
 
-      return this.optionJobs.filter((job) => this.shownTypes.includes(job.type) && (!search || job.searchText.includes(search)))
+      return this.optionJobs.filter((job) => (!this.focusId || job.PopulationID === this.focusId) && this.shownTypes.includes(job.type) && (!search || job.searchText.includes(search)))
     },
 
     jobHeaders() {
@@ -791,7 +801,7 @@ export default {
     },
 
     capacityRows() {
-      return this.colonyCapacity.filter((row) => CAPACITY_COLUMNS.some((column) => row[`${column.key}Free`] >= IDLE_MINIMUM))
+      return this.colonyCapacity.filter((row) => (!this.focusId || row.PopulationID === this.focusId) && CAPACITY_COLUMNS.some((column) => row[`${column.key}Free`] >= IDLE_MINIMUM))
     },
 
     capacityHeaders() {
@@ -915,10 +925,15 @@ export default {
         this.showQueued = this.config.get(`${this.settingsPrefix}.productionShowQueued`, true)
         this.showPaused = this.config.get(`${this.settingsPrefix}.productionShowPaused`, true)
         this.horizon = this.config.get(`${this.settingsPrefix}.productionHorizon`, 5)
+        this.focusId = null
       },
     },
   },
   methods: {
+    applyLink(query) {
+      this.focusId = queryId(query.colony)
+    },
+
     saveSetting(key, value) {
       this.config.set(`${this.settingsPrefix}.${key}`, value)
     },
@@ -961,10 +976,10 @@ export default {
       const modifiers = this.populationProductionModifiers[populationId]
 
       if (!modifiers) {
-        return { colonyName: fallbackName || `Colony #${populationId}`, place: '' }
+        return { colonyName: fallbackName || `Colony #${populationId}`, place: '', body: null }
       }
 
-      return { colonyName: modifiers.PopName, place: stripHtml(populationName(modifiers)).replace(` — ${modifiers.PopName}`, '') }
+      return { colonyName: modifiers.PopName, place: stripHtml(populationName(modifiers)).replace(` — ${modifiers.PopName}`, ''), body: bodyReference(modifiers) }
     },
 
     groupSummary(items) {
@@ -982,7 +997,7 @@ export default {
     },
 
     mineralLink(shortage) {
-      return { path: '/mineral-outlook', query: { mineral: String(shortage.mineralId) } }
+      return linkTo.mineralOutlook(shortage.mineralId)
     },
 
     dateIn(days) {
@@ -1142,9 +1157,9 @@ export default {
           return { projects: [], queues: [] }
         }
 
-        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
+        const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
 
-        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
 
         return { projects, queues }
       }),

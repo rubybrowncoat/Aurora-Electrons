@@ -57,7 +57,7 @@
             <v-card class="panel" elevation="1">
               <div class="panel-head">
                 <span>By mineral</span>
-                <router-link v-if="focus" :to="{ path: '/mineral-outlook', query: { mineral: String(focus.id) } }" class="body-2">{{ focus.name }} runway in Mineral Outlook</router-link>
+                <router-link v-if="focus" :to="outlookLink" class="body-2">{{ focus.name }} runway in Mineral Outlook</router-link>
               </div>
               <v-simple-table dense class="overview-table">
                 <thead>
@@ -144,9 +144,12 @@
           </div>
           <v-data-table v-model="selectedRows" :headers="depositHeaders" :items="depositRows" item-key="SystemBodyID" show-select show-expand single-expand :expanded.sync="depositExpanded" :sort-by.sync="depositSortBy" :sort-desc.sync="depositSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :no-data-text="bodies.length ? 'No deposits match the systems, options and search.' : 'No surveyed body has deposits yet.'">
             <template #[`item.nameSort`]="{ item }">
-              <div class="py-2">
-                <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
-                <div class="caption text--secondary text-no-wrap">{{ item.place }}</div>
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
+                  <div class="caption text--secondary text-no-wrap">{{ item.place }}</div>
+                </div>
+                <page-link class="ml-2" :to="plannerLink([item])" :name="item.name" />
               </div>
             </template>
             <template #[`item.amount`]="{ item }">
@@ -333,12 +336,15 @@ import { mapGetters } from 'vuex'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, loadRoutes } from '../utilities/colonization-data'
+import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
@@ -425,27 +431,14 @@ const sum = (items, key) => items.reduce((total, item) => total + (item[key] || 
 const sums = (table) => MINERAL_NAMES.map((name) => `sum(${table}.${name}) as ${name}`).join(', ')
 const byPopulation = (rows) => Object.fromEntries(rows.map((row) => [row.PopulationID, row]))
 
-// What the Colonization Planner's `?bodies=` takes, and the Planner sends here.
-const bodyReference = (body) => ({
-  SystemBodyID: body.SystemBodyID,
-  SystemBodyName: body.SystemBodyName,
-  SystemName: body.SystemName,
-  BodyClass: body.BodyClass,
-  Component: body.Component,
-  PlanetNumber: body.PlanetNumber,
-  OrbitNumber: body.OrbitNumber,
-})
-
 // Deposits ranked for an untapped site: the higher potential (to a tenth, as shown), then accessibility, then size.
 const betterSite = (a, b) => roundToDecimal(a.potential, 1) - roundToDecimal(b.potential, 1) || a.accessibility - b.accessibility || a.amount - b.amount
 
 export default {
   name: 'MineralsPage',
-  components: { LoadState, StatTiles, SystemMap },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  components: { LoadState, PageLink, StatTiles, SystemMap },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
-    const { systems, bodies } = this.$route.query
-
     return {
       focusId: 0,
       reach: 'all',
@@ -456,8 +449,8 @@ export default {
       search: '',
       colonySearch: '',
       // Systems the map or a click on this page's map picked, or bodies the Colonization Planner sent.
-      selectedSystemIds: !bodies && systems ? systems.split(',').map((id) => parseInt(id, 10)).filter(Boolean) : [],
-      selectedBodies: bodies ? JSON.parse(bodies) : [],
+      selectedSystemIds: [],
+      selectedBodies: [],
       selectedRows: [],
       depositExpanded: [],
       colonyExpanded: [],
@@ -573,6 +566,20 @@ export default {
       }
 
       return null
+    },
+
+    linkQuery() {
+      const { selectedBodies, selectedSystemIds } = this
+
+      return linkTo.minerals({ mineral: this.focusId || null, systems: selectedBodies.length ? null : selectedSystemIds, bodies: selectedBodies }).query
+    },
+
+    linkLabel() {
+      return [this.focus && this.focus.name, this.selection && this.selection.label].filter(Boolean).join(' · ')
+    },
+
+    outlookLink() {
+      return linkTo.mineralOutlook(this.focusId)
     },
 
     distanceTo() {
@@ -1062,15 +1069,16 @@ export default {
       },
     },
   },
-  created() {
-    // `?mineral=<MaterialID>` opens on that mineral; the saved focus is left as it was.
-    const linked = MINERALS.find((mineral) => mineral.id === Number(this.$route.query.mineral))
-
-    if (linked) {
-      this.focusId = linked.id
-    }
-  },
   methods: {
+    applyLink(query) {
+      const mineral = queryId(query.mineral)
+      const bodies = queryBodies(query.bodies)
+
+      this.focusId = MINERALS.some((item) => item.id === mineral) ? mineral : 0
+      this.selectedBodies = bodies
+      this.selectedSystemIds = bodies.length ? [] : queryIds(query.systems)
+    },
+
     roundToDecimal,
     compact,
     withAlpha,
@@ -1176,7 +1184,7 @@ export default {
     },
 
     plannerLink(rows) {
-      return { path: '/habitability', query: { bodies: JSON.stringify(rows.map((row) => bodyReference(row.body || row))) } }
+      return linkTo.planner({ bodies: rows.map((row) => row.body || row) })
     },
   },
   asyncComputed: {

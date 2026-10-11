@@ -36,6 +36,7 @@
                 <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
               </v-chip>
               <v-chip small class="mr-3">{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
+              <v-btn small outlined class="mr-2" :to="linkTo.minerals({ mineral: focusMineralId })"><v-icon small left>mdi-diamond-stone</v-icon>Mineral Breakdown</v-btn>
               <v-btn small outlined @click="flowsOpen = true"><v-icon small left>mdi-chart-bar</v-icon>Sources and uses</v-btn>
             </span>
           </div>
@@ -207,10 +208,12 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { COMPACT_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
@@ -243,7 +246,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 export default {
   name: 'MineralOutlookPage',
   components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [loadState(INPUT_LABELS), productionModifiers],
+  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       windowOptions: [30, 90, 180, 365],
@@ -251,6 +254,7 @@ export default {
       windowDays: 365,
       horizon: 50,
       focusMineralId: null,
+      linkTo,
       fallbackFocusId: null,
       flowsView: 'chart',
       flowsOpen: false,
@@ -484,6 +488,16 @@ export default {
       return this.deposits.filter((deposit) => (this.allDeposits || deposit.MaterialID === this.focusMineralId) && (!this.onlyEmptying || (!deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon)))
     },
 
+    linkQuery() {
+      return linkTo.mineralOutlook(this.focusMineralId).query
+    },
+
+    linkLabel() {
+      const mineral = MINERALS.find((item) => item.id === this.focusMineralId)
+
+      return mineral ? mineral.name : ''
+    },
+
     tiles() {
       const declining = this.mineralRows.filter((row) => row.runway !== null)
       const shortest = declining.slice().sort((a, b) => a.runway - b.runway)[0]
@@ -701,15 +715,16 @@ export default {
     this.horizon = this.config.get('mineralOutlookHorizon', 50)
     this.allDeposits = this.config.get('mineralOutlookAllDeposits', false)
     this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
-
-    // `?mineral=<MaterialID>` (Production's "Short of" links) opens on that mineral, and the user's pick is kept.
-    const linkedMineral = MINERALS.find((mineral) => mineral.id === Number(this.$route.query.mineral))
-
-    if (linkedMineral) {
-      this.focusMineralId = linkedMineral.id
-    }
   },
   methods: {
+    applyLink(query) {
+      const id = queryId(query.mineral)
+
+      this.fallbackFocusId = null
+      this.focusMineralId = MINERALS.some((mineral) => mineral.id === id) ? id : null
+      this.pickFocusMineral()
+    },
+
     // Focus the mineral that runs out first, once the forecast can say which. The deposits panel
     // filters by the focus and doesn't wait for the forecast, so until then the mineral whose
     // deposit empties first stands in (and gives way to the runway pick).

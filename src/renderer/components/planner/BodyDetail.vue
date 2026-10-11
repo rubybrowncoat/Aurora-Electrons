@@ -119,7 +119,10 @@
           <div class="mt-1">{{ noPlanText }}</div>
         </div>
 
-        <div class="overline mt-4">Minerals</div>
+        <div class="overline mt-4 d-flex align-center">
+          Minerals
+          <page-link v-if="deposits.length" class="ml-2" :to="mineralsLink" :name="bodyName" />
+        </div>
         <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by this race yet. Ground survey potential: {{ groundSurvey }}.</div>
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
@@ -136,6 +139,9 @@
 </template>
 
 <script>
+import PageLink from '../page/PageLink.vue'
+import { systemBodyName } from '../../utilities/aurora'
+import { linkTo } from '../../utilities/deep-links'
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { cmcNote } from '../../utilities/colonization'
@@ -148,6 +154,7 @@ const INSTALLATION_YEARS = [5, 10, 25, 50]
 
 export default {
   name: 'BodyDetail',
+  components: { PageLink },
   props: {
     item: { type: Object, required: true },
     shown: { type: Object, required: true },
@@ -171,6 +178,13 @@ export default {
     },
     groundSurvey() {
       return GROUND_SURVEY[this.item.body.GroundMineralSurvey] || 'unknown'
+    },
+
+    mineralsLink() {
+      return linkTo.minerals({ bodies: [this.item.body] })
+    },
+    bodyName() {
+      return `${this.item.body.SystemName} ${systemBodyName(this.item.body)}`
     },
 
     factors() {

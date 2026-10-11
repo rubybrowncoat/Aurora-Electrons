@@ -144,7 +144,7 @@
           <v-row dense>
             <v-col cols="auto">
               <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
-              <v-btn :to="{ path: 'minerals', query: { bodies: JSON.stringify(selectedBodies.map(bodyReference)) } }" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
+              <v-btn :to="linkTo.minerals({ bodies: selectedBodies })" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
               <v-btn class="d-block mt-4" style="width: 100%" small outlined @click="clearSelection">Clear Selection</v-btn>
             </v-col>
             <v-col>
@@ -279,12 +279,14 @@ import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
 import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies } from '../utilities/colonization'
 import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
+import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
@@ -336,19 +338,6 @@ const VIEWS = [
   { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
 ]
 
-// The bodies or systems another page (the map) sent along in the query, over the defaults in data().
-const selectionFromQuery = (query) => {
-  if (query.bodies) {
-    const selectedBodies = JSON.parse(query.bodies)
-
-    return { selectedBodies, filterBySelectedBodies: !!selectedBodies.length }
-  } else if (query.systems) {
-    return { systems: query.systems.split(',').map((id) => parseInt(id, 10)) }
-  }
-
-  return {}
-}
-
 // System IDs are numbers; Vuetify's general selection search scans every item for every selected system.
 const SystemSelect = {
   extends: Vue.component('VAutocomplete'),
@@ -368,7 +357,7 @@ const SystemSelect = {
 
 export default {
   components: { BodyDetail, LoadState, SystemSelect },
-  mixins: [loadState(INPUT_LABELS)],
+  mixins: [deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       selectedSpeciesId: null,
@@ -396,8 +385,7 @@ export default {
         positive: (value) => value > 0 || 'Must be positive.',
       },
 
-      // Bodies or systems the map sent along in the query.
-      ...selectionFromQuery(this.$route.query),
+      linkTo,
     }
   },
   computed: {
@@ -467,6 +455,29 @@ export default {
       const total = this.systemNames.length
 
       return { count, total, all: count === total }
+    },
+
+    linkQuery() {
+      if (this.filterBySelectedBodies && this.selectedBodies.length) {
+        return linkTo.planner({ bodies: this.selectedBodies }).query
+      } else if (!this.systemNames.length) {
+        return null
+      }
+
+      return linkTo.planner({ systems: this.systemSelection.all ? null : this.systems }).query
+    },
+    linkLabel() {
+      if (this.filterBySelectedBodies && this.selectedBodies.length) {
+        const [body] = this.selectedBodies
+
+        return this.selectedBodies.length === 1 ? `${body.SystemName} ${systemBodyName(body)}` : `${this.selectedBodies.length} bodies`
+      } else if (this.systemSelection.all || !this.systems.length) {
+        return ''
+      }
+
+      const names = this.systems.map((id) => (this.systemNames.find((system) => system.SystemID === id) || {}).SystemName).filter(Boolean)
+
+      return names.length === 1 ? names[0] : `${this.systems.length} systems`
     },
     systemPresets() {
       const systemIds = new Set(this.systemNames.map((system) => system.SystemID))
@@ -628,6 +639,20 @@ export default {
     }
   },
   methods: {
+    applyLink(query) {
+      const bodies = queryBodies(query.bodies)
+
+      this.filterBySelectedBodies = bodies.length > 0
+
+      if (bodies.length) {
+        this.selectedBodies = bodies
+      } else {
+        const systems = queryIds(query.systems)
+
+        this.systems = systems.length ? systems : this.systemNames.map((system) => system.SystemID)
+      }
+    },
+
     areSetsEqual,
     people,
     roundToDecimal,
@@ -671,7 +696,7 @@ export default {
       return this.selectedBodies.some((selection) => selection.SystemBodyID === body.SystemBodyID)
     },
     select(body) {
-      this.selectedBodies.push(this.bodyReference(body))
+      this.selectedBodies.push(bodyReference(body))
     },
     deselect(body) {
       this.selectedBodies = this.selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID)
@@ -679,9 +704,6 @@ export default {
     clearSelection() {
       this.selectedBodies = []
       this.filterBySelectedBodies = false
-    },
-    bodyReference(body) {
-      return { SystemBodyID: body.SystemBodyID, SystemBodyName: body.SystemBodyName, SystemName: body.SystemName, BodyClass: body.BodyClass, Component: body.Component, PlanetNumber: body.PlanetNumber, OrbitNumber: body.OrbitNumber }
     },
 
     // The evaluation the detail panel shows: the species picked there, else the row's best.

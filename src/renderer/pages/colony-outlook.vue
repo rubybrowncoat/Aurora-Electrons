@@ -23,7 +23,10 @@
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
-            <span>Colonies</span>
+            <span class="d-flex align-center">
+              <span>Colonies</span>
+              <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
+            </span>
             <span class="legend">
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.service }" />Services</span>
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.agriculture }" />Agriculture</span>
@@ -32,13 +35,20 @@
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
-          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, -1] }" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, -1] }" :no-data-text="focusId ? 'This colony has no population, or is not one of yours.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.name`]="{ item }">
-              <div class="py-2">
-                <div class="font-weight-medium">
-                  <v-icon v-if="item.Capital" small class="mr-1" title="Capital">mdi-star</v-icon>{{ item.name }}
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div class="font-weight-medium">
+                    <v-icon v-if="item.Capital" small class="mr-1" title="Capital">mdi-star</v-icon>{{ item.name }}
+                  </div>
+                  <div class="caption text--secondary">{{ item.place }}<span v-if="multiSpecies"> · {{ item.SpeciesName }}</span></div>
                 </div>
-                <div class="caption text--secondary">{{ item.place }}<span v-if="multiSpecies"> · {{ item.SpeciesName }}</span></div>
+                <span class="ml-2 text-no-wrap">
+                  <page-link :to="linkTo.production(item.PopulationID)" :name="item.name" />
+                  <page-link :to="linkTo.planner({ bodies: [item] })" :name="item.place" />
+                  <page-link :to="linkTo.commanders({ colony: item.PopulationID })" :name="item.name" />
+                </span>
               </div>
             </template>
             <template #[`item.populationSort`]="{ item }">
@@ -81,6 +91,9 @@
             </template>
             <template #expanded-item="{ headers: columns, item }">
               <td :colspan="columns.length" class="py-4">
+                <div v-if="!focusId" class="mb-2">
+                  <v-btn small text @click="focusId = item.PopulationID"><v-icon small left>mdi-filter-outline</v-icon>Only this colony</v-btn>
+                </div>
                 <v-row>
                   <v-col cols="12" md="7">
                     <div class="chart-title">Population over {{ horizon }} years</div>
@@ -113,7 +126,7 @@
           </v-data-table>
           <div class="panel-foot caption text--secondary">
             Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. Colonies short of workers today are also on the
-            <router-link to="/warnings">Warnings</router-link> page.
+            <router-link :to="linkTo.warnings('low-efficiency-populations')">Warnings</router-link> page.
           </div>
         </v-card>
       </template>
@@ -127,11 +140,14 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
 import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
@@ -145,14 +161,16 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [loadState(INPUT_LABELS), productionModifiers],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       horizonOptions: [5, 10, 25, 50],
       horizon: 10,
       attentionOnly: false,
       search: '',
+      focusId: null,
+      linkTo,
       expanded: [],
       sortBy: ['populationSort'],
       sortDesc: [true],
@@ -249,7 +267,27 @@ export default {
       })
     },
 
+    focusRow() {
+      return this.focusId ? this.rows.find((row) => row.PopulationID === this.focusId) || null : null
+    },
+
+    focusName() {
+      return this.focusRow ? this.focusRow.name : `Colony #${this.focusId}`
+    },
+
+    linkQuery() {
+      return linkTo.colonyOutlook(this.focusId).query
+    },
+
+    linkLabel() {
+      return this.focusRow ? this.focusRow.name : ''
+    },
+
     visibleRows() {
+      if (this.focusId) {
+        return this.rows.filter((row) => row.PopulationID === this.focusId)
+      }
+
       const search = (this.search || '').toLowerCase()
 
       return this.rows.filter((row) => (!this.attentionOnly || row.attention) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
@@ -322,11 +360,26 @@ export default {
       ]
     },
   },
+  watch: {
+    // A colony picked by a link opens expanded.
+    focusRow(row, previous) {
+      if (row && (!previous || previous.PopulationID !== row.PopulationID)) {
+        this.expanded = [row]
+      }
+    },
+    RaceID() {
+      this.focusId = null
+    },
+  },
   created() {
     this.horizon = this.config.get('colonyOutlookHorizon', 10)
     this.attentionOnly = this.config.get('colonyOutlookAttentionOnly', false)
   },
   methods: {
+    applyLink(query) {
+      this.focusId = queryId(query.colony)
+    },
+
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },
