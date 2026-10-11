@@ -1247,6 +1247,13 @@ export function* gridLayout({ nodes, edges, capitalId = null, positions = {}, op
     return { positions: {}, cost: 0 }
   }
 
+  // One system has nothing to lay out against (the stress layout would divide by no weights).
+  if (state.n === 1) {
+    const position = positions[state.ids[0]] || { x: 0, y: 0 }
+
+    return { positions: { [state.ids[0]]: { x: position.x, y: position.y } }, cost: 0 }
+  }
+
   const capitalPosition = positions[state.ids[state.capital]] || { x: 0, y: 0 }
   const origin = {
     x: Math.round(capitalPosition.x / 20) * 20,
