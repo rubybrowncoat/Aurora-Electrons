@@ -1,7 +1,8 @@
 // What the Galaxy Map can mark at each system, read through what the race knows, as the game shows it:
 // ruins and ancient constructs only on bodies the race has surveyed; aether rifts and wrecks in every system
-// it knows (the game counts every one there, whoever left it); the race's own ships; and how many bodies there
-// its species could live on. Keyed by SystemID as a string, with only the systems that have something.
+// it knows (the game counts every one there, whoever left it); the race's own ships, shipyards and waypoints;
+// the alien contacts it holds now; and how many bodies there its species could live on. Keyed by SystemID as
+// a string, with only the systems that have something.
 
 import groupBy from 'lodash/groupBy'
 import { systemBodyName } from './aurora'
@@ -22,8 +23,17 @@ const BODY_COLUMNS = 'FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_
 // built it, and construction brigades recover its abandoned installations until none are left.
 export const ruinState = (ruin) => (!ruin.factories ? 'used' : ruin.known ? 'identified' : 'found')
 
+// Alien races as the race regards them, by FCT_AlienRace.ContactStatus, and the order a system with
+// contacts of several shows them in: the most threatening first. A race not yet identified comes after
+// the hostile.
+const CONTACT_STATUSES = ['hostile', 'neutral', 'friendly', 'allied', 'civilian']
+
+export const CONTACT_ORDER = ['hostile', 'unknown', 'neutral', 'friendly', 'allied', 'civilian']
+
+export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, warships: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
+
 export const loadMapFeatures = async (database, { GameID, RaceID }) => {
-  const [ruins, constructs, rifts, wrecks, ships] = await Promise.all([
+  const [ruins, constructs, rifts, wrecks, ships, shipyards, waypoints, contacts] = await Promise.all([
     rows(
       database,
       `select ${BODY_COLUMNS}, DIM_Ruin.Description as Ruin, FCT_SystemBody.AbandonedFactories, FCT_RuinRace.Name as RuinRaceName, FCT_KnownRuinRace.RuinRaceID is not null as Known
@@ -70,13 +80,33 @@ inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID
 where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.Destroyed = 0
 group by FCT_Fleet.SystemID`
     ),
+    rows(
+      database,
+      `select FCT_Population.SystemID, count(*) as Shipyards
+from FCT_Shipyard
+inner join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID
+where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}
+group by FCT_Population.SystemID`
+    ),
+    rows(database, `select FCT_Waypoint.SystemID, count(*) as Waypoints from FCT_Waypoint where FCT_Waypoint.GameID = ${GameID} and FCT_Waypoint.RaceID = ${RaceID} group by FCT_Waypoint.SystemID`),
+    // Contacts the race holds now: the game updates each one it still detects to the current time. One contact
+    // can have a row for each way it is detected.
+    rows(
+      database,
+      `select FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus, count(distinct FCT_Contacts.ContactType || ':' || FCT_Contacts.ContactID) as Contacts
+from FCT_Contacts
+inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
+left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Contacts.GameID and FCT_AlienRace.ViewRaceID = ${RaceID} and FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID
+where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and FCT_Contacts.LastUpdate = FCT_Game.GameTime
+group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`
+    ),
   ])
 
   const features = {}
   const of = (systemId) => {
     const id = String(systemId)
 
-    features[id] = features[id] || { ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, warships: 0, ships: 0 }
+    features[id] = features[id] || { ...NO_FEATURES, ruins: [], constructs: [], contacts: [] }
 
     return features[id]
   }
@@ -90,6 +120,14 @@ group by FCT_Fleet.SystemID`
     of(row.SystemID).wrecks = row.Wrecks
   })
   ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.Protection || 0, warships: row.Warships || 0, ships: row.Ships || 0 }))
+  shipyards.forEach((row) => {
+    of(row.SystemID).shipyards = row.Shipyards
+  })
+  waypoints.forEach((row) => {
+    of(row.SystemID).waypoints = row.Waypoints
+  })
+  contacts.forEach((row) => of(row.SystemID).contacts.push({ status: CONTACT_STATUSES[row.ContactStatus] || 'unknown', count: row.Contacts }))
+  Object.values(features).forEach((system) => system.contacts.sort((a, b) => CONTACT_ORDER.indexOf(a.status) - CONTACT_ORDER.indexOf(b.status)))
 
   return Object.freeze(features)
 }
