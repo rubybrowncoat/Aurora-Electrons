@@ -1,24 +1,10 @@
 <template>
   <div>
     <v-container fluid class="lagrange-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row>
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" />
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
@@ -116,10 +102,13 @@ import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 
 const INPUT_LABELS = {
@@ -130,7 +119,6 @@ const INPUT_LABELS = {
   ships: 'the stabilisation ships',
   orders: 'stabilisation orders',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 // DIM_ComponentType 'Jump Point Stabilisation', DIM_MoveAction 'Stabilise Lagrange Point', the Production bonus.
 const STABILISATION_COMPONENT = 29
 const STABILISE_ACTION = 217
@@ -141,8 +129,8 @@ const TYPES = { 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: '
 
 export default {
   name: 'LagrangePage',
-  components: { SystemMap },
-  mixins: [countFormat],
+  components: { LoadState, StatTiles, SystemMap },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
       view: 'candidates',
@@ -151,7 +139,6 @@ export default {
       selectedSystemId: null,
       sortBy: ['daysSort'],
       sortDesc: [false],
-      loadErrors: {},
       viewOptions: [
         { value: 'candidates', label: 'To stabilise' },
         { value: 'stable', label: 'Stable' },
@@ -178,18 +165,6 @@ export default {
         { key: 'one', label: 'One stable point', color: this.colors.one },
         { key: 'none', label: 'None', color: this.colors.none },
       ]
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     links() {
@@ -369,10 +344,6 @@ export default {
     this.colonySystemsOnly = this.config.get('lagrangeColonySystemsOnly', false)
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     selectSystem(systemId) {
       this.selectedSystemId = systemId
       this.search = ''
@@ -486,66 +457,6 @@ export default {
 
   .controls {
     gap: 12px;
-  }
-
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
   }
 
   td {

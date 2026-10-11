@@ -1,13 +1,7 @@
 <template>
   <div>
     <v-container fluid class="routes-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <div class="toolbar">
@@ -90,15 +84,7 @@
           </div>
         </div>
 
-        <v-row class="mt-1">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-1" />
 
         <v-row>
           <v-col cols="12" :xl="legRows.length ? 6 : 12">
@@ -178,10 +164,13 @@ import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { joinLabels, tracked } from '../utilities/load-tracking'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -191,7 +180,6 @@ const INPUT_LABELS = {
   classes: 'your ship classes',
   lagrangePoints: 'the Lagrange points',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 const SECONDS_PER_DAY = 86400
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its
@@ -207,8 +195,8 @@ const OPTIONS = [
 
 export default {
   name: 'RoutesPage',
-  components: { SystemMap },
-  mixins: [countFormat],
+  components: { LoadState, StatTiles, SystemMap },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
       fromKey: null,
@@ -220,7 +208,6 @@ export default {
       search: '',
       sortBy: ['jumpsSort'],
       sortDesc: [false],
-      loadErrors: {},
       orders: [
         { value: 'jumps', label: 'Fewest jumps', hint: 'The game\'s auto-route: the fewest transits, then the shorter way.' },
         { value: 'km', label: 'Shortest', hint: 'The fewest kilometres, as the galactic map\'s distances measure.' },
@@ -238,18 +225,6 @@ export default {
       const [blue, , green] = this.theme.categorical
 
       return { near: blue, route: green, avoided: this.theme.categorical[7], out: withAlpha(this.theme.inkMuted, 0.35) }
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     settingsPrefix() {
@@ -581,10 +556,6 @@ export default {
   methods: {
     withAlpha,
 
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     filterPlace(item, query) {
       return item.text.includes(query.toLowerCase())
     },
@@ -819,68 +790,12 @@ export default {
     max-width: 260px;
   }
 
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
   .panel {
     margin-top: 8px;
   }
 
   > .panel {
     margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
   }
 
   .line {

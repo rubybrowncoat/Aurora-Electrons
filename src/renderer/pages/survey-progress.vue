@@ -1,26 +1,10 @@
 <template>
   <div>
     <v-container fluid class="survey-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row>
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" />
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
@@ -165,9 +149,12 @@ import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
@@ -184,7 +171,6 @@ const INPUT_LABELS = {
   groundSurveys: 'ground surveys',
   navalAdmins: 'naval admin commands',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 const HOURS_PER_DAY = 24
 // FCT_SystemBody.GroundMineralSurvey, as the Minerals page labels it.
 const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
@@ -192,8 +178,8 @@ const SURVEY_ORDERS = new Set([9, 12])
 
 export default {
   name: 'SurveyProgressPage',
-  components: { SystemMap },
-  mixins: [countFormat],
+  components: { LoadState, StatTiles, SystemMap },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
       showSurveyed: false,
@@ -204,7 +190,6 @@ export default {
       selectedSystemId: null,
       sortBy: ['remaining'],
       sortDesc: [true],
-      loadErrors: {},
     }
   },
   computed: {
@@ -227,18 +212,6 @@ export default {
         { key: 'geo', label: 'Geological left', color: this.colors.geo },
         { key: 'done', label: 'Fully surveyed', color: this.colors.done },
       ]
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     surveySpeed() {
@@ -434,10 +407,6 @@ export default {
     this.showSurveyed = this.config.get('surveyShowSurveyed', false)
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     onSystemClick(item, { expand, isExpanded }) {
       this.selectedSystemId = item.SystemID
       expand(!isExpanded)
@@ -604,66 +573,6 @@ export default {
 .survey-page {
   .search-field {
     min-width: 220px;
-  }
-
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
   }
 
   td {

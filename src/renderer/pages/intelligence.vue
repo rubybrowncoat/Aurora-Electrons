@@ -7,13 +7,7 @@
     </v-container>
 
     <v-container v-else fluid class="intelligence-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <v-alert v-if="!rows.length" type="info" outlined dense>
@@ -25,15 +19,7 @@
             Only what this race has observed: tracked ships aren't the alien fleet, and a colony's details show once intelligence on it is high enough. History is recorded each time Aurora saves while the app is open, when something has changed.
           </div>
 
-          <v-row>
-            <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-              <v-card class="stat-tile" elevation="1">
-                <div class="caption text--secondary">{{ tile.label }}</div>
-                <div class="stat-value">{{ tile.value }}</div>
-                <div class="caption text--secondary">{{ tile.note }}</div>
-              </v-card>
-            </v-col>
-          </v-row>
+          <stat-tiles :tiles="tiles" />
 
           <v-card class="panel" elevation="1">
             <div class="panel-head">
@@ -205,10 +191,13 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import { gameTime } from '../utilities/aurora'
 import { historyConfig } from '../utilities/history'
 import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, COMM_STATUS, DIPLOMACY_LINES, ENGINE_TYPES, POPULATION_LEVELS, REWARD_COST, SPECIES_STATUS, alienRacesSql, contactStatus, intelSnapshot, populationField, populationLevel, rebuildFleet, rewardAttempts, standing, treatyNames } from '../utilities/intelligence'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const SECONDS_PER_YEAR = 31536000
@@ -223,7 +212,6 @@ const INPUT_LABELS = {
   systems: 'the systems they were seen in',
   species: 'the known species',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 // Colony columns, each shown once intelligence has unlocked it.
 const POPULATION_FIELDS = [
@@ -263,12 +251,12 @@ const compact = (value) => {
 
 export default {
   name: 'IntelligencePage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
       selectedId: null,
       detailView: 'classes',
-      loadErrors: {},
       POPULATION_FIELDS,
       GROUND_COUNTERS,
       GROUND_THRESHOLD,
@@ -285,18 +273,6 @@ export default {
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     rows() {
@@ -554,9 +530,6 @@ export default {
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
     select(AlienRaceID) {
       this.selectedId = AlienRaceID
       this.config.set(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, AlienRaceID)
@@ -705,51 +678,8 @@ export default {
 
 <style lang="scss">
 .intelligence-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
   .chart-panel {
     height: calc(100% - 20px);
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {
