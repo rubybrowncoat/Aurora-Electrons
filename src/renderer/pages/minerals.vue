@@ -606,6 +606,7 @@ export default {
 
     // Every surveyed body with deposits: its place, its deposits by mineral, who mines it and how far it is.
     bodies() {
+      const { raceRules, distanceTo } = this
       const colonies = {}
       const aliens = {}
       const miners = Object.fromEntries(this.miners.map((row) => [row.SystemBodyID, row]))
@@ -643,7 +644,7 @@ export default {
           place: [row.SystemBodyName ? row.SystemName : null, BODY_CLASSES[row.BodyClass], diameter ? `${this.count(diameter)} km` : null].filter(Boolean).join(' · '),
           search: `${name} ${row.SystemName}`.toLowerCase(),
           Diameter: diameter,
-          orbitalEligible: diameter <= this.raceRules.MaximumOrbitalMiningDiameter,
+          orbitalEligible: diameter <= raceRules.MaximumOrbitalMiningDiameter,
           depositList: MINERALS.map((mineral) => row.deposits[mineral.id]).filter(Boolean),
           complexes: sum(own, 'Complexes'),
           complexColonies: own.filter((colony) => colony.Complexes > 0),
@@ -656,7 +657,7 @@ export default {
           mining,
           worked: mining > 0,
           tapped: mining > 0 || alien.length > 0,
-          distance: this.distanceTo(row),
+          distance: distanceTo(row),
         }
       })
     },
@@ -666,7 +667,10 @@ export default {
     },
 
     scopedBodies() {
-      return this.bodiesPassingOrbital.filter((body) => this.inScope(body))
+      const { selectedBodyIds, scopeSystemIds } = this
+      const byBody = this.selectedBodies.length > 0
+
+      return this.bodiesPassingOrbital.filter((body) => byBody ? selectedBodyIds.has(body.SystemBodyID) : !scopeSystemIds || scopeSystemIds.has(body.SystemID))
     },
 
     // Per mineral, over the bodies in view and the deposits the options let through.
@@ -705,9 +709,10 @@ export default {
 
     // Per colony and mineral: stock, reserve, what moves, what the queue needs and what is on its way.
     colonyStocks() {
+      const { needsById, packetsById } = this
       return this.colonies.map((colony) => {
-        const needs = this.needsById[colony.PopulationID] || {}
-        const inbound = this.packetsById[colony.PopulationID] || {}
+        const needs = needsById[colony.PopulationID] || {}
+        const inbound = packetsById[colony.PopulationID] || {}
         const exporting = colony.MassDrivers > 0 && colony.MassDriverDest > 0
 
         return {
@@ -732,12 +737,13 @@ export default {
     },
 
     overviewRows() {
+      const { scopedColonyStocks, mineralStats } = this
       return MINERALS.map((mineral) => {
-        const stocks = this.scopedColonyStocks.map(({ minerals }) => minerals[mineral.id - 1])
+        const stocks = scopedColonyStocks.map(({ minerals }) => minerals[mineral.id - 1])
 
         return {
           ...mineral,
-          ...this.mineralStats[mineral.id],
+          ...mineralStats[mineral.id],
           stock: sum(stocks, 'stock'),
           free: sum(stocks, 'free'),
           short: stocks.filter((stock) => stock.state === 'short').length,
@@ -794,6 +800,7 @@ export default {
 
     // One row per body for all minerals: each mineral's cell, and the totals over the deposits that pass.
     allMineralRows() {
+      const { raceRules } = this
       return this.scopedBodies.map((body) => {
         const passing = body.depositList.filter((deposit) => this.passesDeposit(deposit))
 
@@ -814,7 +821,7 @@ export default {
           amount: sum(passing, 'Amount'),
           accessibility: Math.max(...passing.map((deposit) => deposit.Accessibility)),
           minerals: passing.length,
-          perMine: passing.reduce((total, deposit) => total + this.raceRules.MineProduction * deposit.Accessibility, 0),
+          perMine: passing.reduce((total, deposit) => total + raceRules.MineProduction * deposit.Accessibility, 0),
           potential,
           potentialTitle: `${roundToDecimal(potential, 1)} of 10, the average over the 11 minerals: ${passing.map((deposit) => `${this.mineralName(deposit.MaterialID)} ${roundToDecimal(depositPotential(deposit), 1)}`).join(', ')}${passing.length < MINERALS.length ? `, ${MINERALS.length - passing.length} at 0` : ''}.`,
           cells: MINERALS.map((mineral) => {
@@ -838,6 +845,7 @@ export default {
 
     focusRows() {
       const focus = this.focus
+      const { raceRules } = this
 
       return this.scopedBodies.map((body) => {
         const deposit = body.deposits[focus.id]
@@ -858,7 +866,7 @@ export default {
           amount: deposit.Amount,
           accessibility: deposit.Accessibility,
           band: bandOf(deposit.Accessibility),
-          perMine: this.raceRules.MineProduction * deposit.Accessibility,
+          perMine: raceRules.MineProduction * deposit.Accessibility,
           potential,
           potentialTitle: `${roundToDecimal(potential, 1)} of 10 for ${this.count(deposit.Amount)} t at accessibility ${deposit.Accessibility}`,
           workedSort: body.mining,
@@ -1033,12 +1041,13 @@ export default {
     // Out-of-view and empty systems first, so the ones with deposits in view draw on top.
     mapNodes() {
       const systems = this.systemDeposits
+      const { scopeSystemIds, colonySystemIds, bandColors, mutedColor, theme, mapSelected, focusName } = this
       const largest = Math.max(1, ...Object.values(systems).map((system) => system.amount))
 
       return this.systems.map((system) => {
         const deposits = systems[system.SystemID]
-        const shown = !!deposits && this.systemInScope(system.SystemID)
-        const colonised = this.colonySystemIds.has(system.SystemID)
+        const shown = !!deposits && (!scopeSystemIds || scopeSystemIds.has(system.SystemID))
+        const colonised = colonySystemIds.has(system.SystemID)
 
         return {
           SystemID: system.SystemID,
@@ -1046,10 +1055,10 @@ export default {
           Xcor: system.Xcor,
           Ycor: system.Ycor,
           size: deposits ? 4 + 10 * Math.sqrt(deposits.amount / largest) : 3,
-          color: shown ? this.bandColors[bandOf(deposits.best)] : this.mutedColor,
-          ring: colonised ? this.theme.ink : null,
-          label: colonised || system.SystemID === this.mapSelected,
-          title: deposits ? `${system.Name}: ${compact(deposits.amount)} of ${this.focusName} in ${this.counted(deposits.deposits, 'deposit', 'deposits')}, best accessibility ${deposits.best}${shown ? '' : ' (out of view)'}` : `${system.Name}: no ${this.focusName} deposits that pass`,
+          color: shown ? bandColors[bandOf(deposits.best)] : mutedColor,
+          ring: colonised ? theme.ink : null,
+          label: colonised || system.SystemID === mapSelected,
+          title: deposits ? `${system.Name}: ${compact(deposits.amount)} of ${focusName} in ${this.counted(deposits.deposits, 'deposit', 'deposits')}, best accessibility ${deposits.best}${shown ? '' : ' (out of view)'}` : `${system.Name}: no ${focusName} deposits that pass`,
           order: shown ? deposits.amount : -1,
         }
       }).sort((a, b) => a.order - b.order)
@@ -1221,7 +1230,7 @@ export default {
 
         const [systems] = await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.MilitaryRestrictedSystem from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`)
 
-        return systems
+        return Object.freeze(systems)
       }),
       default: [],
     },
@@ -1246,7 +1255,7 @@ export default {
 
         const [deposits] = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID})`)
 
-        return deposits
+        return Object.freeze(deposits)
       }),
       default: [],
     },
@@ -1261,7 +1270,7 @@ export default {
 
         const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${MINERAL_NAMES.map((name) => `FCT_Population.${name}, FCT_Population.Reserve${name}`).join(', ')}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
-        return colonies
+        return Object.freeze(colonies)
       }),
       default: [],
     },
@@ -1276,7 +1285,7 @@ export default {
 
         const [needs] = await this.database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${MINERAL_NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} union all select FCT_ShipyardTask.PopulationID, ${MINERAL_NAMES.map((name) => `FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID} and FCT_ShipyardTask.TotalBP > 0) as VIR_Needs group by VIR_Needs.PopulationID`)
 
-        return needs
+        return Object.freeze(needs)
       }),
       default: [],
     },
@@ -1290,7 +1299,7 @@ export default {
 
         const [packets] = await this.database.query(`select FCT_MassDriverPackets.DestID as PopulationID, ${sums('FCT_MassDriverPackets')} from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID} group by FCT_MassDriverPackets.DestID`)
 
-        return packets
+        return Object.freeze(packets)
       }),
       default: [],
     },
@@ -1304,7 +1313,7 @@ export default {
 
         const [miners] = await this.database.query(`select FCT_Fleet.OrbitBodyID as SystemBodyID, count(*) as Ships, sum(FCT_ShipClass.MiningModules) as Modules from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.MiningModules > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Fleet.OrbitBodyID > 0 group by FCT_Fleet.OrbitBodyID`)
 
-        return miners
+        return Object.freeze(miners)
       }),
       default: [],
     },
@@ -1318,7 +1327,7 @@ export default {
 
         const [aliens] = await this.database.query(`select FCT_AlienPopulation.PopulationID, FCT_AlienPopulation.PopulationName, FCT_Population.SystemBodyID, FCT_AlienRace.AlienRaceName from FCT_AlienPopulation inner join FCT_Population on FCT_Population.PopulationID = FCT_AlienPopulation.PopulationID left join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_AlienPopulation.AlienRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID} where FCT_AlienPopulation.GameID = ${this.GameID} and FCT_AlienPopulation.ViewingRaceID = ${this.RaceID}`)
 
-        return aliens
+        return Object.freeze(aliens)
       }),
       default: [],
     },

@@ -357,6 +357,7 @@ export default {
     // { [MaterialID]: { [groupKey]: t/yr } }
     flowsByMineral() {
       const flows = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, 0]))]))
+      const { perYear } = this
 
       if (!this.hasLedger) {
         return flows
@@ -366,7 +367,7 @@ export default {
         const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)
 
         if (group && flows[row.MaterialID]) {
-          flows[row.MaterialID][group.key] += row.Amount * this.perYear
+          flows[row.MaterialID][group.key] += row.Amount * perYear
         }
       })
 
@@ -382,6 +383,7 @@ export default {
     // Mined deposits: every colony and orbital miner on the same body and mineral summed.
     deposits() {
       const deposits = {}
+      const { navalAdmins } = this
       const add = (row, source) => {
         const key = `${row.SystemBodyID}-${row.MaterialID}`
 
@@ -413,7 +415,7 @@ export default {
       })
 
       this.orbitalMining.forEach((row) => {
-        const rate = orbitalMinerRate(row, this.navalAdmins)
+        const rate = orbitalMinerRate(row, navalAdmins)
 
         add(row, { name: row.ShipName, kind: 'orbital', rate, delivered: rate })
       })
@@ -447,13 +449,14 @@ export default {
     },
 
     mineralRows() {
+      const { flowsByMineral, stockpile, cargo, packets, deposits, hasLedger, queueDemand } = this
       return MINERALS.map((mineral) => {
-        const flows = this.flowsByMineral[mineral.id]
-        const stock = (this.stockpile && this.stockpile[mineral.name]) || 0
-        const transit = (this.cargo[mineral.id] || 0) + ((this.packets && this.packets[mineral.name]) || 0)
-        const mined = this.deposits.filter((deposit) => deposit.MaterialID === mineral.id).reduce((sum, deposit) => sum + deposit.delivered, 0)
-        const produced = this.hasLedger ? FLOW_GROUPS.filter((group) => group.income).reduce((sum, group) => sum + flows[group.key], 0) : mined
-        const used = this.hasLedger ? FLOW_GROUPS.filter((group) => !group.income).reduce((sum, group) => sum + flows[group.key], 0) : this.queueDemand[mineral.name]
+        const flows = flowsByMineral[mineral.id]
+        const stock = (stockpile && stockpile[mineral.name]) || 0
+        const transit = (cargo[mineral.id] || 0) + ((packets && packets[mineral.name]) || 0)
+        const mined = deposits.filter((deposit) => deposit.MaterialID === mineral.id).reduce((sum, deposit) => sum + deposit.delivered, 0)
+        const produced = hasLedger ? FLOW_GROUPS.filter((group) => group.income).reduce((sum, group) => sum + flows[group.key], 0) : mined
+        const used = hasLedger ? FLOW_GROUPS.filter((group) => !group.income).reduce((sum, group) => sum + flows[group.key], 0) : queueDemand[mineral.name]
         const net = produced - used
         const runway = net < 0 ? (stock + transit) / -net : null
 
@@ -468,9 +471,9 @@ export default {
           runway,
           status: this.runwayStatus(runway, produced, used),
           runwaySort: runway ?? Infinity,
-          queue: this.queueDemand[mineral.name],
+          queue: queueDemand[mineral.name],
           trend: this.trendFor(mineral.id, stock + transit),
-          otherIncome: this.hasLedger ? produced - flows.mining : 0,
+          otherIncome: hasLedger ? produced - flows.mining : 0,
         }
       })
     },
@@ -1028,7 +1031,7 @@ export default {
         const windowDays = Number(this.windowDays) || 365
         const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
 
-        return table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
+        return table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => Object.freeze(items)) : []
       }),
       default: null,
     },
@@ -1038,7 +1041,7 @@ export default {
           return []
         }
 
-        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
+        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1048,7 +1051,7 @@ export default {
           return []
         }
 
-        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
+        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1069,7 +1072,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => items)
+        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
