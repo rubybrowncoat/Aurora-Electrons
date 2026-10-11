@@ -94,7 +94,7 @@
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
                 <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
-                <span v-else-if="item.kind === 'glyph'" class="map-glyph" :style="glyphStyle(item)"><v-icon x-small :color="item.hollow ? item.color : colors.surface">{{ item.icon }}</v-icon></span>
+                <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :color="item.color" :hollow="item.hollow" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
@@ -178,7 +178,7 @@
             <template #activator="{ on, attrs }">
               <v-btn small outlined class="map-tracker" :aria-label="trackerLabel" :title="trackerLabel" v-bind="attrs" v-on="on">
                 <v-icon small>mdi-binoculars</v-icon>
-                <span v-for="mark in trackedMarks" :key="mark.value" class="map-glyph" :style="glyphStyle(mark)"><v-icon x-small :color="mark.hollow ? mark.color : colors.surface">{{ mark.icon }}</v-icon></span>
+                <map-glyph v-for="mark in trackedMarks" :key="mark.value" v-bind="mark.disc" :surface="colors.surface" />
               </v-btn>
             </template>
             <v-card>
@@ -188,7 +188,7 @@
                   <v-list-item v-for="mark in group.marks" :key="mark.value" role="menuitemcheckbox" :aria-checked="String(marksSet.has(mark.value))" @click="toggleMark(mark.value)">
                     <v-icon class="mr-3" :color="marksSet.has(mark.value) ? 'primary' : undefined">{{ marksSet.has(mark.value) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
                     <v-list-item-title>{{ mark.text }}</v-list-item-title>
-                    <span class="map-glyph ml-3" :style="glyphStyle(markDiscs[mark.value])"><v-icon x-small :color="markDiscs[mark.value].hollow ? markDiscs[mark.value].color : colors.surface">{{ mark.icon }}</v-icon></span>
+                    <map-glyph class="ml-3" v-bind="markDiscs[mark.value]" :surface="colors.surface" />
                   </v-list-item>
                 </template>
               </v-list>
@@ -239,6 +239,7 @@ import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
 
 import { chartTheme } from '../components/charts/theme'
+import MapGlyph from '../components/MapGlyph.vue'
 import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
 import { gameTime } from '../utilities/aurora'
@@ -320,16 +321,25 @@ const KEEP_TOGETHER = [
 // Arrange can centre the systems with more jump points than this, the nexuses.
 const NEXUS_JUMP_POINTS = 6
 
+const LOCK_PATH = 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z'
+const PILLAR_PATH = 'M6,5H18A1,1 0 0,1 19,6A1,1 0 0,1 18,7H6A1,1 0 0,1 5,6A1,1 0 0,1 6,5M21,2V4H3V2H21M15,8H17V22H15V8M7,8H9V22H7V8M11,8H13V22H11V8Z'
+const PYRAMID_PATH = 'M21.85 16.96H21.85L12.85 2.47C12.65 2.16 12.33 2 12 2S11.35 2.16 11.15 2.47L2.15 16.96H2.15C1.84 17.45 2 18.18 2.64 18.43L11.64 21.93C11.75 22 11.88 22 12 22S12.25 22 12.36 21.93L21.36 18.43C22 18.18 22.16 17.45 21.85 16.96M11 6.5V13.32L5.42 15.5L11 6.5M12 19.93L5.76 17.5L12 15.07L18.24 17.5L12 19.93M13 13.32V6.5L18.58 15.5L13 13.32Z'
+const HURRICANE_PATH = 'M15,6.79C16.86,7.86 18,9.85 18,12C18,22 6,22 6,22C7.25,21.06 8.38,19.95 9.34,18.71C9.38,18.66 9.41,18.61 9.44,18.55C9.69,18.06 9.5,17.46 9,17.21C7.14,16.14 6,14.15 6,12C6,2 18,2 18,2C16.75,2.94 15.62,4.05 14.66,5.29C14.62,5.34 14.59,5.39 14.56,5.45C14.31,5.94 14.5,6.54 15,6.79M12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14Z'
+const CLOSE_PATH = 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'
+const ALERT_PATH = 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16'
+const CALENDAR_PATH = 'M12 12H17V17H12V12M19 3H18V1H16V3H8V1H6V3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M19 5V7H5V5H19M5 19V9H19V19H5Z'
+
 // What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it.
 // `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc
-// with its `icon`, filled in the `colors` entry its glyphs take, or hollow for marks the names carry.
+// with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for marks the names
+// carry; `offset` centres an icon MDI draws high in its square (see MapGlyph).
 const MARKS = [
-  { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', icon: 'mdi-pillar', color: 'ruins' },
-  { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', icon: 'mdi-pyramid', color: 'construct' },
-  { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', icon: 'mdi-weather-hurricane', color: 'rift' },
-  { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'name', icon: 'mdi-close' },
-  { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', icon: 'mdi-alert-outline' },
-  { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', icon: 'mdi-calendar-outline' },
+  { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', path: PILLAR_PATH, color: 'ruins' },
+  { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', path: PYRAMID_PATH, color: 'construct' },
+  { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', path: HURRICANE_PATH, color: 'rift' },
+  { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'name', path: CLOSE_PATH },
+  { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
+  { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', path: CALENDAR_PATH, offset: [0, 1] },
 ]
 
 const MARK_HEADERS = { glyph: 'Round the marker', name: 'After the name', line: 'Under the name' }
@@ -347,11 +357,6 @@ const PHASES = {
 
 // Arrange works in slices this long, handing the browser a turn between them to draw.
 const SLICE_MS = 12
-
-const LOCK_PATH = 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z'
-const PILLAR_PATH = 'M6,5H18A1,1 0 0,1 19,6A1,1 0 0,1 18,7H6A1,1 0 0,1 5,6A1,1 0 0,1 6,5M21,2V4H3V2H21M15,8H17V22H15V8M7,8H9V22H7V8M11,8H13V22H11V8Z'
-const PYRAMID_PATH = 'M21.85 16.96H21.85L12.85 2.47C12.65 2.16 12.33 2 12 2S11.35 2.16 11.15 2.47L2.15 16.96H2.15C1.84 17.45 2 18.18 2.64 18.43L11.64 21.93C11.75 22 11.88 22 12 22S12.25 22 12.36 21.93L21.36 18.43C22 18.18 22.16 17.45 21.85 16.96M11 6.5V13.32L5.42 15.5L11 6.5M12 19.93L5.76 17.5L12 15.07L18.24 17.5L12 19.93M13 13.32V6.5L18.58 15.5L13 13.32Z'
-const HURRICANE_PATH = 'M15,6.79C16.86,7.86 18,9.85 18,12C18,22 6,22 6,22C7.25,21.06 8.38,19.95 9.34,18.71C9.38,18.66 9.41,18.61 9.44,18.55C9.69,18.06 9.5,17.46 9,17.21C7.14,16.14 6,14.15 6,12C6,2 18,2 18,2C16.75,2.94 15.62,4.05 14.66,5.29C14.62,5.34 14.59,5.39 14.56,5.45C14.31,5.94 14.5,6.54 15,6.79M12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14Z'
 
 // Glyphs sit on a ring just outside the marker's rim, 16 units across with a 12 unit icon, so a
 // marker with any has this much more room on every side.
@@ -508,7 +513,7 @@ const overallProgress = (mode, { phase, progress }) => {
 
 export default {
   name: 'MapPage',
-  components: { SystemView },
+  components: { MapGlyph, SystemView },
   mixins: [countFormat],
   data() {
     return {
@@ -887,11 +892,11 @@ export default {
 
     // Each mark's disc in the tracker.
     markDiscs() {
-      return Object.fromEntries(MARKS.map((mark) => [mark.value, mark.color ? { color: this.colors[mark.color] } : { color: this.colors.ink, hollow: true }]))
+      return Object.fromEntries(MARKS.map((mark) => [mark.value, { path: mark.path, offset: mark.offset, ...(mark.color ? { color: this.colors[mark.color] } : { color: this.colors.ink, hollow: true }) }]))
     },
 
     trackedMarks() {
-      return MARKS.filter((mark) => this.marksSet.has(mark.value)).map((mark) => ({ value: mark.value, icon: mark.icon, ...this.markDiscs[mark.value] }))
+      return MARKS.filter((mark) => this.marksSet.has(mark.value)).map((mark) => ({ value: mark.value, disc: this.markDiscs[mark.value] }))
     },
 
     trackerLabel() {
@@ -903,12 +908,12 @@ export default {
       const { colors } = this
 
       return {
-        'ruins-identified': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ruins, label: 'Ruins, their builders identified' },
-        'ruins-found': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
-        'ruins-used': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
-        'constructs-active': { path: PYRAMID_PATH, icon: 'mdi-pyramid', color: colors.construct, label: 'Active ancient construct' },
-        'constructs-dormant': { path: PYRAMID_PATH, icon: 'mdi-pyramid', color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
-        rifts: { path: HURRICANE_PATH, icon: 'mdi-weather-hurricane', color: colors.rift, label: 'Aether rift' },
+        'ruins-identified': { path: PILLAR_PATH, color: colors.ruins, label: 'Ruins, their builders identified' },
+        'ruins-found': { path: PILLAR_PATH, color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
+        'ruins-used': { path: PILLAR_PATH, color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
+        'constructs-active': { path: PYRAMID_PATH, color: colors.construct, label: 'Active ancient construct' },
+        'constructs-dormant': { path: PYRAMID_PATH, color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
+        rifts: { path: HURRICANE_PATH, color: colors.rift, label: 'Aether rift' },
       }
     },
 
@@ -1647,11 +1652,6 @@ export default {
       const share = range.last > range.first ? (time - range.first) / (range.last - range.first) : 1
 
       return blend(this.colors.discovery, this.colors.surface, 0.35 + 0.65 * share)
-    },
-
-    // A glyph's disc, as the markers carry it: filled in its colour, or only its outline for the lesser state.
-    glyphStyle({ color, hollow }) {
-      return hollow ? { borderColor: color } : { borderColor: color, background: color }
     },
 
     // The glyphs Show puts round a system's marker, in the order they take their places: each
@@ -2909,24 +2909,6 @@ export default {
   display: flex;
   gap: 8px;
   margin-top: 16px;
-}
-
-// A glyph as the markers carry it: a disc in the mark's colour, or its outline for the lesser state.
-// Outside `.map-page`, as the tracker's menu draws its discs where Vuetify puts menus.
-.map-glyph {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  border: 1.5px solid;
-  border-radius: 50%;
-
-  .v-icon {
-    font-size: 11px !important;
-  }
 }
 
 // The tracker's menu: a short row per mark under its heading.
