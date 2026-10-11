@@ -1,0 +1,4 @@
+# Layout-only commits that git blame skips with `git config blame.ignoreRevsFile .git-blame-ignore-revs` (GitHub reads this file by itself).
+
+# 🎨 Code: Keep lines at their natural length
+a670a6a1f21a67950b9e602dbb0cad325174775d
