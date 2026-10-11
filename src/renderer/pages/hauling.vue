@@ -11,7 +11,7 @@
             <span>Repeating routes</span>
             <v-chip small>Estimates</v-chip>
           </div>
-          <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routeSortBy" :sort-desc.sync="routeSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium">{{ item.FleetName }}<page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" /></div>
@@ -78,7 +78,7 @@
           <v-col cols="12" xl="6">
             <v-card class="panel" elevation="1">
               <div class="panel-head"><span>Deliveries by destination</span></div>
-              <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
+              <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
                   <span>{{ item.destination }}</span><page-link :to="colonyLink(item.PopulationID)" :name="item.destination" class="ml-1" />
                 </template>
@@ -90,7 +90,7 @@
           <v-col cols="12" xl="6">
             <v-card class="panel" elevation="1">
               <div class="panel-head"><span>Freighter classes</span></div>
-              <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :items-per-page="10" :footer-props="{ itemsPerPageOptions: [10, 25, -1] }" dense>
+              <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">
                   <span class="font-weight-medium">{{ item.ClassName }}</span>
                   <span class="caption text--secondary"> {{ item.HullAbbr }}</span>
@@ -117,6 +117,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import loadState from '../mixins/load-state'
+import persistedView, { tableView } from '../mixins/persisted-view'
 import { linkTo, place } from '../utilities/deep-links'
 import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
 import { tracked } from '../utilities/load-tracking'
@@ -130,6 +131,8 @@ const INPUT_LABELS = {
 }
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
+const ROUTE_PAGE_SIZES = [15, 30, -1]
+const SUMMARY_PAGE_SIZES = [10, 25, -1]
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -156,12 +159,19 @@ const placeOf = (order) => {
 export default {
   name: 'HaulingPage',
   components: { LoadState, PageLink, StatTiles },
-  mixins: [loadState(INPUT_LABELS)],
+  mixins: [
+    loadState(INPUT_LABELS),
+    persistedView({
+      routesTable: tableView('haulingRoutesTable', { sortBy: ['movedSort'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: ROUTE_PAGE_SIZES }),
+      deliveriesTable: tableView('haulingDeliveriesTable', { itemsPerPage: 10, itemsPerPageOptions: SUMMARY_PAGE_SIZES }),
+      classesTable: tableView('haulingClassesTable', { itemsPerPage: 10, itemsPerPageOptions: SUMMARY_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
       expanded: [],
-      routeSortBy: ['movedSort'],
-      routeSortDesc: [true],
+      routePageSizes: ROUTE_PAGE_SIZES,
+      summaryPageSizes: SUMMARY_PAGE_SIZES,
     }
   },
   computed: {

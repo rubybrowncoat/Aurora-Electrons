@@ -3,7 +3,7 @@
     <v-container fluid class="logistics-page">
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
-          <v-btn-toggle v-model="view" mandatory dense @change="(value) => config.set('logisticsView', value)">
+          <v-btn-toggle v-model="view" mandatory dense>
             <v-btn value="fuel" small><v-icon small left>mdi-gas-station</v-icon>Fuel</v-btn>
             <v-btn value="maintenance" small><v-icon small left>mdi-wrench</v-icon>Maintenance supplies</v-btn>
           </v-btn-toggle>
@@ -60,7 +60,7 @@
               <span>Colony fuel and refineries</span>
               <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining</v-chip>
             </div>
-            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refinerySortBy" :sort-desc.sync="refinerySortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refineriesTable.sortBy" :sort-desc.sync="refineriesTable.sortDesc" :items-per-page.sync="refineriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.PopName }}<page-link :to="colonyLink(item.PopulationID)" :name="item.PopName" class="ml-1" /></div>
@@ -99,7 +99,7 @@
               <span>Sorium harvesters</span>
               <v-chip small>Estimate</v-chip>
             </div>
-            <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :sort-by.sync="harvestersTable.sortBy" :sort-desc.sync="harvestersTable.sortDesc" :items-per-page.sync="harvestersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.ShipName`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.ShipName }}</div>
@@ -125,9 +125,9 @@
           <v-card class="panel" elevation="1">
             <div class="panel-head">
               <span>Maintenance locations</span>
-              <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" @change="(value) => config.set('logisticsShowIdleLocations', !!value)" />
+              <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
-            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationSortBy" :sort-desc.sync="locationSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.name }}<page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
@@ -184,7 +184,7 @@
               <span>Supply ships</span>
               <v-chip small>{{ count(supplyFleets.reduce((sum, fleet) => sum + fleet.SupplyMSP, 0)) }} MSP above their minimums</v-chip>
             </div>
-            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" disable-pagination hide-default-footer dense>
+            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" :sort-by.sync="supplyTable.sortBy" :sort-desc.sync="supplyTable.sortDesc" disable-pagination hide-default-footer dense>
               <template #[`item.FleetName`]="{ item }">
                 <span>{{ item.FleetName }}</span><page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" />
               </template>
@@ -207,6 +207,7 @@ import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
@@ -228,21 +229,29 @@ const INPUT_LABELS = {
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
 const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
+const PAGE_SIZES = [15, 30, -1]
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
   components: { ChartCanvas, LoadState, PageLink, StatTiles },
-  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      view: { key: 'logisticsView', default: 'fuel', valid: oneOf(Object.keys(VIEW_NAMES)) },
+      showIdleLocations: { key: 'logisticsShowIdleLocations', default: false },
+      refineriesTable: tableView('logisticsRefineriesTable', { sortBy: ['FuelStockpile'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      harvestersTable: tableView('logisticsHarvestersTable', { itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      supplyTable: tableView('logisticsSupplyTable', {}),
+    }),
+  ],
   data() {
     return {
-      view: 'fuel',
-      showIdleLocations: false,
-      refinerySortBy: ['FuelStockpile'],
-      refinerySortDesc: [true],
-      locationSortBy: ['runwaySort'],
-      locationSortDesc: [false],
+      pageSizes: PAGE_SIZES,
     }
   },
   computed: {
@@ -524,15 +533,11 @@ export default {
       return VIEW_NAMES[this.view]
     },
   },
-  created() {
-    this.view = this.config.get('logisticsView', 'fuel')
-    this.showIdleLocations = this.config.get('logisticsShowIdleLocations', false)
-  },
   methods: {
     applyLink(query) {
       const view = [].concat(query.view)[0]
 
-      this.view = Object.keys(VIEW_NAMES).includes(view) ? view : 'fuel'
+      this.setUnsaved('view', Object.keys(VIEW_NAMES).includes(view) ? view : 'fuel')
     },
 
     colonyLink(populationId) {

@@ -8,7 +8,7 @@
         </div>
         <div class="tool">
           <div class="tool__label caption text--secondary">Goal</div>
-          <v-btn-toggle v-model="goal" mandatory dense @change="(value) => config.set('habitabilityGoal', value)">
+          <v-btn-toggle v-model="goal" mandatory dense>
             <v-tooltip v-for="option in goals" :key="option.id" bottom>
               <template #activator="{ on }">
                 <v-btn :value="option.id" small v-on="on"><v-icon small left>{{ option.icon }}</v-icon>{{ option.label }}</v-btn>
@@ -19,7 +19,7 @@
         </div>
         <div class="tool tool--terraformers">
           <div class="tool__label caption text--secondary">Terraformers</div>
-          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto" @change="config.set('habitabilityTerraformers', terraformers)">
+          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto">
             <template #append>
               <v-tooltip bottom max-width="260">
                 <template #activator="{ on }">
@@ -32,7 +32,7 @@
         </div>
         <div class="tool tool--systems">
           <div class="tool__label caption text--secondary">Active systems</div>
-          <system-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
+          <system-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details>
             <template #selection="{ item, index }">
               <v-chip v-if="systemSelection.all && !index" small label>All {{ systemSelection.total }} systems</v-chip>
               <v-chip v-else-if="!systemSelection.all && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
@@ -67,7 +67,7 @@
               </template>
               <v-list dense>
                 <v-list-item v-for="filter in filterOptions" :key="filter.key">
-                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
+                  <v-checkbox :input-value="filters[filter.key]" :label="filter.label" dense hide-details @change="(value) => setFilter(filter, value)" />
                 </v-list-item>
                 <v-divider class="my-1" />
                 <v-list-item>
@@ -124,7 +124,7 @@
 
       <v-row dense align="center" class="mt-1">
         <v-col cols="12" class="d-flex align-center flex-wrap view-row">
-          <v-btn-toggle v-model="view" mandatory dense class="mr-4" @change="(value) => config.set('habitabilityView', value)">
+          <v-btn-toggle v-model="view" mandatory dense class="mr-4">
             <v-tooltip v-for="option in viewOptions" :key="option.id" bottom max-width="300">
               <template #activator="{ on }">
                 <v-btn :value="option.id" small v-on="on">{{ option.label }}<span class="view-count">{{ separatedNumber(viewCounts[option.id], separator) }}</span></v-btn>
@@ -133,7 +133,7 @@
             </v-tooltip>
           </v-btn-toggle>
           <span class="tool__label caption text--secondary mr-3">Show</span>
-          <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on" @change="config.set('habitabilityBodyClasses', bodyClasses)">
+          <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on">
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
           <v-chip v-for="id in stateFilter" :key="id" small label close :color="stateById[id].color" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
@@ -158,7 +158,7 @@
       <v-alert v-if="ready && rows && !speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
       <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
-        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
             <td class="text-no-wrap">
               <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
@@ -281,6 +281,7 @@ import LoadState from '../components/page/LoadState.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
@@ -309,16 +310,17 @@ const GROUND_SURVEY = { 0: 'Completed', 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'H
 const NO_RANK = 1e12
 // Rows per page before the user picks one: 10 fit a 1080 px window, 15 a window of 1200 px or more.
 const DEFAULT_ROWS = 10
+const PAGE_SIZES = [10, 15, 30, 50, 100]
 const DEFAULT_RULES = () => ({ ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
-// The filters the page has always kept, by the config key that carries them.
+// The filters the page keeps, by the data field and the config key that carry them.
 const FILTERS = [
-  { key: 'nonTerraformable', config: 'habitabilityFilterNonTerraformable', label: 'Hide Non-Terraformable' },
-  { key: 'withoutMinerals', config: 'habitabilityFilterWithoutMinerals', label: 'Hide Without Minerals' },
-  { key: 'ownPopulations', config: 'habitabilityFilterOwnPopulations', label: 'Hide Own Populations' },
-  { key: 'otherPopulations', config: 'habitabilityFilterOtherPopulations', label: 'Hide Other Populations' },
-  { key: 'doneTerraforming', config: 'habitabilityFilterDoneTerraforming', label: 'Hide Terraformed' },
-  { key: 'uninhabited', config: 'habitabilityFilterUninhabited', label: 'Hide Uninhabited' },
+  { key: 'nonTerraformable', field: 'filterNonTerraformable', config: 'habitabilityFilterNonTerraformable', label: 'Hide Non-Terraformable' },
+  { key: 'withoutMinerals', field: 'filterWithoutMinerals', config: 'habitabilityFilterWithoutMinerals', label: 'Hide Without Minerals' },
+  { key: 'ownPopulations', field: 'filterOwnPopulations', config: 'habitabilityFilterOwnPopulations', label: 'Hide Own Populations' },
+  { key: 'otherPopulations', field: 'filterOtherPopulations', config: 'habitabilityFilterOtherPopulations', label: 'Hide Other Populations' },
+  { key: 'doneTerraforming', field: 'filterDoneTerraforming', config: 'habitabilityFilterDoneTerraforming', label: 'Hide Terraformed' },
+  { key: 'uninhabited', field: 'filterUninhabited', config: 'habitabilityFilterUninhabited', label: 'Hide Uninhabited' },
 ]
 
 const RANKING_FIELDS = [
@@ -357,24 +359,26 @@ const SystemSelect = {
 
 export default {
   components: { BodyDetail, LoadState, SystemSelect },
-  mixins: [deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      selectedSpeciesId: { key: 'habitabilitySpecies', default: null, scope: 'race' },
+      goal: { key: 'habitabilityGoal', default: 'both', valid: oneOf(GOALS.map((option) => option.id)) },
+      view: { key: 'habitabilityView', default: 'best', valid: oneOf(VIEWS.map((option) => option.id)) },
+      stateFilter: { key: 'habitabilityStates', default: [], normalise: (stored) => (Array.isArray(stored) ? stored.filter((id) => STATE_BY_ID[id]) : undefined) },
+      terraformers: { key: 'habitabilityTerraformers', default: 10 },
+      ...Object.fromEntries(FILTERS.map((filter) => [filter.field, { key: filter.config, default: false, normalise: Boolean }])),
+      bodyClasses: { key: 'habitabilityBodyClasses', default: [1, 2, 3, 5], normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => BODY_CLASS_NAMES[value]) : undefined) },
+      systems: { key: 'habitabilitySystems', default: [] },
+      table: tableView('habitabilityTable', { sortBy: ['sortRank'], sortDesc: [false], itemsPerPage: DEFAULT_ROWS, itemsPerPageOptions: PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      selectedSpeciesId: null,
-      goal: 'both',
-      view: 'best',
-      stateFilter: [],
-      terraformers: 10,
-      filters: Object.fromEntries(FILTERS.map((filter) => [filter.key, false])),
-      bodyClasses: [1, 2, 3, 5],
-
-      itemsPerPage: 10,
-      sortBy: ['sortRank'],
-      sortDescending: [false],
+      pageSizes: PAGE_SIZES,
       expandedRows: [],
       detailSpecies: {},
-
-      systems: [],
       selectedBodies: [],
       filterBySelectedBodies: false,
 
@@ -401,11 +405,14 @@ export default {
     rankingFields: () => RANKING_FIELDS,
     bodyClassNames: () => BODY_CLASS_NAMES,
     bodyClassOptions: () => Object.entries(BODY_CLASS_NAMES).map(([value, text]) => ({ value: Number(value), text: `${text}s` })),
-    itemsPerPageOptions: () => [10, 15, 30, 50, 100],
     compactTons: () => compactTons,
 
     separator() {
       return thousandsSeparator(this.config.get('selectedSeparator', 'Tick'))
+    },
+
+    filters() {
+      return Object.fromEntries(FILTERS.map((filter) => [filter.key, this[filter.field]]))
     },
 
     rankingKey() {
@@ -413,7 +420,7 @@ export default {
     },
 
     activeFilterCount() {
-      return FILTERS.filter((filter) => this.filters[filter.key]).length
+      return FILTERS.filter((filter) => this[filter.field]).length
     },
 
     speciesRows() {
@@ -573,26 +580,11 @@ export default {
     },
   },
   watch: {
-    itemsPerPage(value) {
-      this.$store.commit('tables/setHabitabilityItemsPerPage', value)
-    },
-    sortBy: {
-      deep: true,
-      handler(value) {
-        this.$store.commit('tables/setHabitabilitySortBy', value)
-      },
-    },
-    sortDescending: {
-      deep: true,
-      handler(value) {
-        this.$store.commit('tables/setHabitabilitySortDescending', value)
-      },
-    },
     systemNames: {
       immediate: true,
       handler(names) {
         if (names.length && !this.systems.length) {
-          this.systems = names.map((system) => system.SystemID)
+          this.setUnsaved('systems', names.map((system) => system.SystemID))
         }
       },
     },
@@ -604,38 +596,14 @@ export default {
     },
     RaceID(_newRaceID, oldRaceID) {
       if (oldRaceID) {
-        this.config.set('habitabilitySystems', [])
         this.systems = []
-        this.selectedSpeciesId = null
         this.detailSpecies = {}
       }
     },
   },
   created() {
-    this.terraformers = this.config.get('habitabilityTerraformers', 10)
-    this.goal = GOALS.some((option) => option.id === this.config.get('habitabilityGoal')) ? this.config.get('habitabilityGoal') : 'both'
-    this.view = VIEWS.some((option) => option.id === this.config.get('habitabilityView')) ? this.config.get('habitabilityView') : 'best'
-    FILTERS.forEach((filter) => (this.filters[filter.key] = !!this.config.get(filter.config, false)))
-
-    const classes = this.config.get('habitabilityBodyClasses')
-
-    if (Array.isArray(classes)) {
-      this.bodyClasses = classes.filter((value) => BODY_CLASS_NAMES[value])
-    }
-
-    if (!this.systems.length) {
-      this.systems = this.config.get('habitabilitySystems', this.systems)
-    }
-
-    const { tables } = this.$store.state
-
-    if (tables) {
-      this.itemsPerPage = tables.habitabilityItemsPerPage > DEFAULT_ROWS ? tables.habitabilityItemsPerPage : this.rowsToFit()
-
-      if (Array.isArray(tables.habitabilitySortBy) && tables.habitabilitySortBy.length) {
-        this.sortBy = [...tables.habitabilitySortBy]
-        this.sortDescending = Array.isArray(tables.habitabilitySortDescending) ? [...tables.habitabilitySortDescending] : [false]
-      }
+    if (this.config.get('habitabilityTable') === undefined) {
+      this.setUnsaved('table', { ...this.table, itemsPerPage: this.rowsToFit() })
     }
   },
   methods: {
@@ -649,7 +617,7 @@ export default {
       } else {
         const systems = queryIds(query.systems)
 
-        this.systems = systems.length ? systems : this.systemNames.map((system) => system.SystemID)
+        this.setUnsaved('systems', systems.length ? systems : this.systemNames.map((system) => system.SystemID))
       }
     },
 
@@ -659,24 +627,23 @@ export default {
     separatedNumber,
     systemBodyName,
 
+    setFilter(filter, value) {
+      this[filter.field] = !!value
+    },
     resetFilters() {
       FILTERS.forEach((filter) => {
-        this.filters[filter.key] = false
-        this.config.set(filter.config, false)
+        this[filter.field] = false
       })
     },
 
     toggleSystems() {
       this.systems = this.systems.length === this.systemNames.length ? [] : this.systemNames.map((system) => system.SystemID)
-      this.config.set('habitabilitySystems', this.systems)
     },
     removeSystem(id) {
       this.systems = this.systems.filter((systemId) => systemId !== id)
-      this.config.set('habitabilitySystems', this.systems)
     },
     selectSystems(ids) {
       this.systems = ids
-      this.config.set('habitabilitySystems', this.systems)
     },
 
     setRanking(key, value) {
