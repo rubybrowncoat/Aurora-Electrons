@@ -1373,8 +1373,15 @@ export default {
         this.fitted = false
       })
       graph.on('zoom', () => this.setZoomStyle(graph.zoom()))
-      graph.on('add remove position data', () => {
+      // The borders' names are placed again once the systems settle, not on each frame of a drag or
+      // of an animated layout: `dragfree` and `finishBusy` place them when those end.
+      graph.on('add remove data dragfree', () => {
         this.labelPlaces = null
+      })
+      graph.on('position', 'node', (event) => {
+        if (this.busy !== 'layout' && !event.target.grabbed()) {
+          this.labelPlaces = null
+        }
       })
       // The borders lie on a canvas under cytoscape's, drawn again after each frame it draws.
       graph.on('render', () => this.paintBorders())
@@ -1404,8 +1411,10 @@ export default {
       return Math.max(size, this.markerMinimum)
     },
 
+    // Zoomed out, markers keep at least MIN_MARKER_PIXELS on screen. Their size grows in quarter
+    // octave steps, like the rings', so zooming restyles the map only now and then.
     setZoomStyle(zoom) {
-      const minimum = Math.max(MARKER_BASE_SIZE, MIN_MARKER_PIXELS / zoom)
+      const minimum = MARKER_BASE_SIZE * Math.max(1, 2 ** (Math.ceil(4 * Math.log2(MIN_MARKER_PIXELS / (zoom * MARKER_BASE_SIZE))) / 4))
       const scale = ringScaleAt(zoom)
       const resized = minimum !== this.markerMinimum
       const ringsChanged = scale !== this.ringScale
@@ -1559,7 +1568,11 @@ export default {
     },
 
     // Starts the map afresh for the game and race shown, as the player left it if they have been here.
+    // The previous race's reads no longer count as loaded: every read depends on the race and runs
+    // again, and until it settles `ready` keeps a sync from drawing the old rows in the new view.
     resetGraph() {
+      this.loadErrors = {}
+
       if (this.graph) {
         this.graph.elements().remove()
       }
@@ -1865,6 +1878,7 @@ export default {
       this.busy = null
       this.phase = null
       this.progress = 0
+      this.labelPlaces = null
       this.refreshLayoutState()
 
       if (this.syncPending) {
