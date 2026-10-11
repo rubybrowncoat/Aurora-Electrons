@@ -47,18 +47,18 @@
               <v-checkbox v-model="arrange.nexuses" label="Centre nexuses" dense hide-details @change="saveArrange" />
               <div v-if="arrange.nexuses" class="caption text--secondary mt-2">{{ nexusHint }}</div>
               <div v-if="arrange.keepTogether.includes('stabilised')" class="caption text--secondary mt-2">Only jumps stabilised at both ends join a network.</div>
-              <div v-if="arrange.keepTogether.length > 1" class="caption text--secondary mt-2">With several choices, systems stay with those sharing every selected group.</div>
+              <div v-if="arrange.keepTogether.length > 1" class="caption text--secondary mt-2">With several choices, systems stay with those that share all of them.</div>
               <div v-if="groupList.length" class="mt-4">
-                <div class="caption text--secondary">Your groups, which come before the setting above</div>
+                <div class="caption text--secondary">Clusters, which stay together ahead of the choices above</div>
                 <div v-for="group in groupList" :key="group.index" class="group-row">
-                  <span class="body-2 text-truncate" :title="group.title"><v-icon x-small :color="group.color" class="mr-1">mdi-circle</v-icon>{{ group.name }}: {{ group.label }}</span>
-                  <v-btn icon x-small aria-label="Drop this group" title="Drop this group" @click="dropGroup(group.index)"><v-icon x-small>mdi-close</v-icon></v-btn>
+                  <span class="body-2 text-truncate" :title="group.title"><v-icon x-small :color="group.color" class="mr-1">mdi-circle</v-icon>{{ group.name }} ({{ group.systems }})</span>
+                  <v-btn icon x-small :aria-label="`Delete the ${group.name}`" :title="`Delete the ${group.name}`" @click="dropGroup(group.index)"><v-icon x-small>mdi-close</v-icon></v-btn>
                 </div>
               </div>
               <div class="caption text--secondary mt-4">
                 <template v-if="pinnedCount">{{ pinnedCount }} pinned {{ pinnedCount === 1 ? 'system stays' : 'systems stay' }} where {{ pinnedCount === 1 ? 'it is' : 'they are' }} (<a @click="unpinAll">unpin all</a>).</template>
                 <template v-else>Pin a system from its panel to keep it where it is.</template>
-                Select several systems to keep them together.
+                Select several systems to make a cluster.
               </div>
               <v-btn color="primary" depressed block class="mt-4" @click="arrangeMap">Arrange</v-btn>
             </v-card>
@@ -89,7 +89,7 @@
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
-              <span v-for="(item, position) in row" :key="`${position}-${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }">
+              <span v-for="(item, position) in row" :key="`${position}-${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }" :title="item.title">
                 <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid', borderWidth: item.width && `${item.width}px` }" />
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
                 <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
@@ -139,7 +139,10 @@
             <dl class="facts">
               <template v-for="fact in panelFacts">
                 <dt :key="`${fact.label}-label`" class="text--secondary">{{ fact.label }}</dt>
-                <dd :key="`${fact.label}-value`">{{ fact.value }}</dd>
+                <dd :key="`${fact.label}-value`">
+                  <a v-if="fact.action" :title="fact.title" @click="fact.action">{{ fact.value }}</a>
+                  <template v-else>{{ fact.value }}</template>
+                </dd>
               </template>
             </dl>
             <template v-if="panelNeighbours.length">
@@ -153,7 +156,7 @@
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
               <v-btn small outlined @click="openSystemView(panelSystem.id)">System view</v-btn>
               <v-btn small outlined @click="togglePins([panelSystem.id])"><v-icon x-small left>{{ pinnedSet.has(panelSystem.id) ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ pinnedSet.has(panelSystem.id) ? 'Unpin' : 'Pin in place' }}</v-btn>
-              <v-btn v-if="groupOf[panelSystem.id] !== undefined" small text @click="leaveGroups([panelSystem.id])">Leave its group</v-btn>
+              <v-btn v-if="groupOf[panelSystem.id] !== undefined" small text @click="leaveGroups([panelSystem.id])">Remove from cluster</v-btn>
             </div>
           </aside>
           <aside v-else-if="selectedRows.length > 1" class="map-side">
@@ -161,15 +164,16 @@
               <div class="subtitle-1 font-weight-medium">{{ selectedRows.length }} systems selected</div>
               <v-btn icon small aria-label="Close" title="Close" @click="clearSelection"><v-icon small>mdi-close</v-icon></v-btn>
             </div>
-            <div class="body-2">{{ selectedNames }}</div>
+            <div class="body-2" :title="selectedNames.title">{{ selectedNames.text }}</div>
+            <div v-if="selectedClusters" class="caption text--secondary mt-1">{{ selectedClusters }}</div>
             <div class="side-actions">
               <v-btn small outlined :to="mineralsLink(selectedIds)">Minerals</v-btn>
               <v-btn small outlined :to="plannerLink(selectedIds)">Colonization Planner</v-btn>
               <v-btn small outlined @click="togglePins(selectedIds)"><v-icon x-small left>{{ allSelectedPinned ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ allSelectedPinned ? 'Unpin' : 'Pin in place' }}</v-btn>
-              <v-btn small outlined @click="keepTogether(selectedIds)"><v-icon x-small left>mdi-group</v-icon>Keep together</v-btn>
-              <v-btn v-if="selectedInGroups" small text @click="leaveGroups(selectedIds)">{{ selectedInGroups === selectedIds.length ? 'Leave their groups' : `Take ${selectedInGroups} out of their groups` }}</v-btn>
+              <v-btn small outlined @click="keepTogether(selectedIds)"><v-icon x-small left>mdi-group</v-icon>Make a cluster</v-btn>
+              <v-btn v-if="selectedInGroups" small text @click="leaveGroups(selectedIds)">{{ selectedInGroups === selectedIds.length ? 'Remove from clusters' : `Remove ${selectedInGroups} from clusters` }}</v-btn>
             </div>
-            <div class="caption text--secondary mt-2">Keep together makes them a group, which Colour by and Borders show under Your groups. Arrange draws a group's systems together and keeps other systems from between them, as far as their links allow. A group left with one system ends.</div>
+            <div class="caption text--secondary mt-2">Arrange keeps a cluster's systems side by side, and other systems from between them as far as their links allow. Colour by and Borders can show clusters. A system joins one cluster at a time, and a cluster left with one system ends.</div>
           </aside>
         </div>
         <div class="panel-foot caption text--secondary">
@@ -283,7 +287,7 @@ const LAYERS = [
   { value: 'stars', text: 'Star type' },
   { value: 'sectors', text: 'Sectors' },
   { value: 'control', text: 'Alien control' },
-  { value: 'groups', text: 'Your groups' },
+  { value: 'groups', text: 'Clusters' },
   { value: 'jumps', text: 'Jumps from a system' },
   { value: 'travel', text: 'Travel from a system' },
   { value: 'discovery', text: 'Discovery era' },
@@ -316,8 +320,8 @@ const starText = ({ SpectralClass, SpectralNumber, SizeText, Stars }) => {
   return Stars > 1 ? `${primary} and ${Stars - 1} more` : primary
 }
 
-// What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or
-// the groups the player keeps together.
+// What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or the
+// player's clusters.
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
@@ -325,7 +329,7 @@ const BORDER_OPTIONS = [
   { value: 'colonies', text: 'Your colonies', empty: 'no colonies' },
   { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
   { value: 'stabilised', text: 'Stabilised networks', empty: 'no jumps are stabilised at both ends' },
-  { value: 'groups', text: 'Your groups', empty: 'no groups (select systems and keep them together)' },
+  { value: 'groups', text: 'Clusters', empty: 'no clusters (select several systems to make one)' },
 ]
 
 // How long the free layouts want each link.
@@ -611,6 +615,8 @@ export default {
       locked: false,
       arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [], nexuses: false },
       pinned: [],
+      // The player's clusters, each a list of SystemIDs: systems Arrange keeps together. The code and the
+      // stored settings (mapGroups, and `groups` in mapLayer and mapBorders) call them groups.
       groups: [],
       marks: [],
       // Show can leave the systems it marks nothing at faint.
@@ -1155,7 +1161,7 @@ export default {
       return items
     },
 
-    // The group index of each system in one of the player's groups.
+    // The index in `groups` of each system's cluster.
     groupOf() {
       const groupOf = {}
 
@@ -1166,25 +1172,27 @@ export default {
       return groupOf
     },
 
-    // A colour and a name for each of the player's groups, by its index in `groups`.
+    // A name, a colour and the systems of each cluster, by its index in `groups`. A cluster is named
+    // after its most populous system, the first of them where none has people.
     groupOwners() {
       const { categorical } = this.theme
 
       return this.groups.map((group, index) => {
-        const names = group.map((id) => (this.rowById[id] || {}).Name).filter(Boolean)
+        const rows = group.map((id) => this.rowById[id]).filter(Boolean)
+        const lead = rows.reduce((best, row) => (!best || row.population > best.population ? row : best), null)
 
         return {
-          name: `Group ${index + 1}`,
-          legend: names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', '),
-          title: names.join(', '),
-          systems: names.length,
+          name: lead ? `${lead.Name} cluster` : `Cluster ${index + 1}`,
+          title: rows.map((row) => row.Name).join(', '),
+          systems: rows.length,
           color: categorical[index % categorical.length],
         }
       })
     },
 
+    // The clusters with systems the race knows, for Arrange's list.
     groupList() {
-      return this.groupOwners.map((owner, index) => ({ index, name: owner.name, label: owner.legend, title: owner.title, color: owner.color })).filter((group) => group.label)
+      return this.groupOwners.map((owner, index) => ({ index, ...owner })).filter((owner) => owner.systems)
     },
 
     keepTogetherLabel() {
@@ -1199,7 +1207,7 @@ export default {
       return label.charAt(0).toUpperCase() + label.slice(1)
     },
 
-    // What Arrange keeps together for each system: its own group first, else the setting.
+    // What Arrange keeps together for each system: its cluster first, else the setting.
     keepTogetherKeys() {
       const keys = {}
 
@@ -1207,7 +1215,7 @@ export default {
         if (this.groupOf[row.id] !== undefined) {
           keys[row.id] = `group-${this.groupOf[row.id]}`
         } else {
-          // Several choices keep together the systems that share every selected group.
+          // Several choices keep together the systems that share all of them.
           const by = []
 
           if (this.arrange.keepTogether.includes('sectors') && row.SectorID) {
@@ -1270,17 +1278,33 @@ export default {
       return this.selectedIds.map((id) => this.rowById[id]).filter(Boolean)
     },
 
+    // The selected systems' names, only the first few where there are many; its title has them all.
     selectedNames() {
       const names = this.selectedRows.map((row) => row.Name)
 
-      return names.length > 12 ? `${names.slice(0, 12).join(', ')} and ${names.length - 12} more` : names.join(', ')
+      return { text: names.length > 5 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', '), title: names.join(', ') }
+    },
+
+    // The clusters the selected systems are in, with how many of them each has.
+    selectedClusters() {
+      const counts = new Map()
+
+      this.selectedIds.forEach((id) => {
+        const group = this.groupOf[id]
+
+        if (group !== undefined) {
+          counts.set(group, (counts.get(group) || 0) + 1)
+        }
+      })
+
+      return [...counts].map(([group, systems]) => `${systems} in the ${this.groupOwners[group].name}`).join(', ')
     },
 
     allSelectedPinned() {
       return this.selectedIds.every((id) => this.pinnedSet.has(id))
     },
 
-    // How many of the selected systems are in one of the player's groups.
+    // How many of the selected systems are in a cluster.
     selectedInGroups() {
       return this.selectedIds.filter((id) => this.groupOf[id] !== undefined).length
     },
@@ -1340,7 +1364,9 @@ export default {
       ].filter(Boolean)
 
       if (group !== undefined) {
-        facts.push({ label: 'Kept with', value: `${this.groupOwners[group].name}: ${this.groups[group].filter((id) => id !== system.id && this.rowById[id]).map((id) => this.rowById[id].Name).join(', ')}` })
+        const owner = this.groupOwners[group]
+
+        facts.push({ label: 'Cluster', value: `${owner.name}, ${owner.systems} systems`, title: `Select them: ${owner.title}`, action: () => this.selectGroup(group) })
       }
 
       return facts
@@ -1391,8 +1417,8 @@ export default {
         this.controllers.forEach((controller) => items.push(group(controller, `${controller.name} (${controller.systems})`)))
         items.push({ kind: 'dot', color: colors.none, label: 'Held by no alien race' })
       } else if (this.layer === 'groups') {
-        this.groupOwners.filter((owner) => owner.legend).forEach((owner) => items.push(group(owner, `${owner.name} (${owner.systems}): ${owner.legend}`)))
-        items.push({ kind: 'dot', color: colors.none, label: `In no group (${systemsWhere((row) => this.groupOf[row.id] === undefined)})` })
+        this.groupOwners.filter((owner) => owner.systems).forEach((owner) => items.push({ ...group(owner, `${owner.name} (${owner.systems})`), title: owner.title }))
+        items.push({ kind: 'dot', color: colors.none, label: `In no cluster (${systemsWhere((row) => this.groupOf[row.id] === undefined)})` })
       } else if (this.layer === 'discovery') {
         const range = this.discoveryRange
         const year = (time) => gameTime(this.StartYear, time).format('YYYY')
@@ -1464,7 +1490,7 @@ export default {
       if (this.borders !== 'none' && !merged) {
         if (this.borderLegend.length) {
           items.push({ kind: 'heading', label: 'Borders:' })
-          this.borderLegend.forEach(({ owner, systems }) => items.push({ kind: 'area', color: owner.color, tint: rgba(owner.color, TINT), label: `${owner.legend || owner.name} (${systems})` }))
+          this.borderLegend.forEach(({ owner, systems }) => items.push({ kind: 'area', color: owner.color, tint: rgba(owner.color, TINT), label: `${owner.legend || owner.name} (${systems})`, title: owner.title }))
         } else {
           items.push({ kind: 'heading', label: `Borders: ${BORDER_OPTIONS.find((option) => option.value === this.borders).empty}` })
         }
@@ -2605,7 +2631,7 @@ export default {
       this.setSetting('mapPinned', [])
     },
 
-    // Makes `ids` one group, taking them out of any group they were in.
+    // Makes `ids` one cluster, taking them out of any they were in.
     keepTogether(ids) {
       const taken = new Set(ids)
       const groups = this.groups.map((group) => group.filter((id) => !taken.has(id))).filter((group) => group.length > 1)
@@ -2614,7 +2640,7 @@ export default {
       this.setSetting('mapGroups', this.groups)
     },
 
-    // Takes `ids` out of their groups; a group left with one system ends.
+    // Takes `ids` out of their clusters; a cluster left with one system ends.
     leaveGroups(ids) {
       const leaving = new Set(ids)
 
@@ -2625,6 +2651,17 @@ export default {
     dropGroup(index) {
       this.groups = this.groups.filter((_group, i) => i !== index)
       this.setSetting('mapGroups', this.groups)
+    },
+
+    // Selects the systems of the cluster at `index` and centres the view on them.
+    selectGroup(index) {
+      const members = new Set(this.groups[index])
+      const nodes = this.graph.nodes().filter((node) => members.has(node.id()))
+
+      this.graph.nodes(':selected').unselect()
+      nodes.select()
+      this.fitted = false
+      this.graph.animate({ center: { eles: nodes } }, { duration: 400 })
     },
 
     openSystemView(id) {
