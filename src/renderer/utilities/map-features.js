@@ -1,9 +1,12 @@
 // What the Galaxy Map can mark at each system, read through what the race knows, as the game shows it:
 // ruins and ancient constructs only on bodies the race has surveyed; aether rifts and wrecks in every system
-// it knows (the game counts every one there, whoever left it); and the race's own ships. Keyed by SystemID as
-// a string, with only the systems that have something.
+// it knows (the game counts every one there, whoever left it); the race's own ships; and how many bodies there
+// its species could live on. Keyed by SystemID as a string, with only the systems that have something.
 
+import groupBy from 'lodash/groupBy'
 import { systemBodyName } from './aurora'
+import { loadSpecies } from './colonization-data'
+import { BODY_CLASS, BODY_TYPE, costFactors, speciesLimits } from './habitability'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
 
@@ -89,4 +92,80 @@ group by FCT_Fleet.SystemID`
   ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.Protection || 0, warships: row.Warships || 0, ships: row.Ships || 0 }))
 
   return Object.freeze(features)
+}
+
+// The bands of colony cost the game counts in a system's summary: habitable under 2, low cost under 3 and
+// medium cost under 5. The game scales each by the race's colonisation tech; the costs here leave the tech out,
+// which comes to the same.
+export const COLONY_COST_BANDS = [2, 3, 5]
+
+// How many bodies of each known system fall in each band, as the game counts them for the species the race
+// lives as (its capital's, else its largest): every body's cost now, but for the bodies it can't colonise at all
+// (gas giants, fixed bodies and those too heavy for the species). Returns { species, systems }: the species'
+// name, null for a race without one, and per SystemID as a string one count per band, only for systems with a
+// body in one.
+export const loadHabitability = async (database, { GameID, RaceID }) => {
+  const [species, [capital]] = await Promise.all([
+    loadSpecies(database, { GameID, RaceID }),
+    rows(database, `select FCT_Population.SpeciesID from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Capital = 1`),
+  ])
+  const chosen = (capital && species.find((row) => row.SpeciesID === capital.SpeciesID)) || species[0]
+
+  if (!chosen) {
+    return Object.freeze({ species: null, systems: {} })
+  }
+
+  const limits = speciesLimits(chosen)
+  const top = COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]
+  const tidal = `(case when FCT_SystemBody.TidalLock and FCT_SystemBody.BodyClass != ${BODY_CLASS.MOON} then 5 else 1 end)`
+  // Besides the bodies the game can't colonise, this leaves out those whose temperature or pressure alone put
+  // them past the last band: each factor is a floor under the cost (see costFactors). On a 2,300-system galaxy
+  // that keeps a third of the bodies, and they come one row per system, packed in a string: 0.8 seconds,
+  // where a row per body took 4.
+  const where = `FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyTypeID not in (${BODY_TYPE.GAS_GIANT}, ${BODY_TYPE.SUPERJOVIAN}) and FCT_SystemBody.FixedBody = 0 and FCT_SystemBody.Gravity <= ${limits.MaximumGravity}
+and (FCT_SystemBody.AtmosPress <= ${limits.MaximumPressure} or FCT_SystemBody.AtmosPress < ${top * limits.MaximumPressure})
+and FCT_SystemBody.SurfaceTemp > ${limits.MinimumTemperature} - ${top * limits.TemperatureDeviation} * ${tidal}
+and FCT_SystemBody.SurfaceTemp < ${limits.MaximumTemperature} + ${top * limits.TemperatureDeviation} * ${tidal}`
+  const known = `inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`
+  const [packed, gases] = await Promise.all([
+    rows(
+      database,
+      `select FCT_SystemBody.SystemID, group_concat(FCT_SystemBody.SystemBodyID || ',' || FCT_SystemBody.BodyClass || ',' || FCT_SystemBody.TidalLock || ',' || FCT_SystemBody.AtmosPress || ',' || FCT_SystemBody.HydroExt || ',' || FCT_SystemBody.Gravity || ',' || FCT_SystemBody.SurfaceTemp, ';') as Bodies
+from FCT_SystemBody
+${known}
+where ${where}
+group by FCT_SystemBody.SystemID`
+    ),
+    rows(
+      database,
+      `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel
+from FCT_AtmosphericGas
+inner join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
+inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AtmosphericGas.SystemBodyID
+${known}
+where ${where}`
+    ),
+  ])
+  const atmospheres = groupBy(gases, 'SystemBodyID')
+  const systems = {}
+
+  packed.forEach(({ SystemID, Bodies }) => {
+    const counts = COLONY_COST_BANDS.map(() => 0)
+
+    Bodies.split(';').forEach((text) => {
+      const [id, BodyClass, TidalLock, AtmosPress, HydroExt, Gravity, SurfaceTemp] = text.split(',').map(Number)
+      const { cost } = costFactors({ BodyClass, TidalLock, AtmosPress, HydroExt, Gravity, Atmosphere: atmospheres[id] || [] }, limits, SurfaceTemp)
+      const band = COLONY_COST_BANDS.findIndex((limit) => cost < limit)
+
+      if (band >= 0) {
+        counts[band] += 1
+      }
+    })
+
+    if (counts.some(Boolean)) {
+      systems[SystemID] = counts
+    }
+  })
+
+  return Object.freeze({ species: chosen.SpeciesName, systems: Object.freeze(systems) })
 }

@@ -90,11 +90,11 @@
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
               <span v-for="item in row" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }">
-                <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid' }" />
+                <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid', borderWidth: item.width && `${item.width}px` }" />
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
                 <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
-                <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :color="item.color" :hollow="item.hollow" :surface="colors.surface" />
+                <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :text="item.text" :color="item.color" :hollow="item.hollow" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
@@ -244,10 +244,10 @@ import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
 import { gameTime } from '../utilities/aurora'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
-import { loadJumpPoints } from '../utilities/jump-graph'
+import { buildDistanceMap, loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
-import { loadMapFeatures, ruinState } from '../utilities/map-features'
+import { COLONY_COST_BANDS, loadHabitability, loadMapFeatures, ruinState } from '../utilities/map-features'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { scaleValue } from '../utilities/math'
@@ -269,12 +269,31 @@ const LAYERS = [
   { value: 'geological', text: 'Geological survey' },
   { value: 'gravitational', text: 'Gravitational survey' },
   { value: 'colonies', text: 'Colonies' },
+  { value: 'habitability', text: 'Habitability' },
+  { value: 'stars', text: 'Star type' },
   { value: 'sectors', text: 'Sectors' },
   { value: 'control', text: 'Alien control' },
   { value: 'groups', text: 'Your groups' },
-  { value: 'jumps', text: 'Jumps from the capital' },
+  { value: 'jumps', text: 'Jumps from a system' },
+  { value: 'travel', text: 'Travel from a system' },
   { value: 'discovery', text: 'Discovery era' },
 ]
+
+// The Star type layer's groups for a system's primary star, the first that fits it: by its size for the
+// giants, else by its spectral class. A group's colour is its entry in the page's `colors.stars`.
+const GIANT_SIZES = new Set(['III', 'II', 'Ib', 'Ia'])
+const STAR_GROUPS = [
+  { value: 'hole', text: 'Black hole', fits: (spectral) => spectral === 'BH' },
+  { value: 'giant', text: 'Giant (Wolf-Rayet, carbon and S stars too)', fits: (spectral, size) => GIANT_SIZES.has(size) || ['WR', 'C', 'S'].includes(spectral) },
+  { value: 'hot', text: 'O, B or A', fits: (spectral) => ['O', 'B', 'A'].includes(spectral) },
+  { value: 'yellow', text: 'F or G', fits: (spectral) => ['F', 'G'].includes(spectral) },
+  { value: 'orange', text: 'K', fits: (spectral) => spectral === 'K' },
+  { value: 'red', text: 'M', fits: (spectral) => spectral === 'M' },
+  { value: 'white', text: 'White dwarf', fits: (spectral) => spectral === 'D' },
+  { value: 'brown', text: 'Brown dwarf (L, T or Y)', fits: (spectral) => ['L', 'T', 'Y'].includes(spectral) },
+]
+
+const starGroup = (spectral, size) => (STAR_GROUPS.find((group) => group.fits(spectral, size)) || {}).value || null
 
 // What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or
 // the groups the player keeps together.
@@ -328,12 +347,14 @@ const HURRICANE_PATH = 'M15,6.79C16.86,7.86 18,9.85 18,12C18,22 6,22 6,22C7.25,2
 const CLOSE_PATH = 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'
 const ALERT_PATH = 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16'
 const CALENDAR_PATH = 'M12 12H17V17H12V12M19 3H18V1H16V3H8V1H6V3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M19 5V7H5V5H19M5 19V9H19V19H5Z'
+const EARTH_PATH = 'M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z'
 
 // What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it.
 // `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc
 // with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for marks the names
 // carry; `offset` centres an icon MDI draws high in its square (see MapGlyph).
 const MARKS = [
+  { value: 'habitable', text: 'Habitable worlds', short: 'habitable worlds', place: 'glyph', path: EARTH_PATH, color: 'colony' },
   { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', path: PILLAR_PATH, color: 'ruins' },
   { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', path: PYRAMID_PATH, color: 'construct' },
   { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', path: HURRICANE_PATH, color: 'rift' },
@@ -364,8 +385,10 @@ const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
 // Where the glyphs go round the marker, in degrees clockwise from the top: the left first, then over
-// the top and down the right, clear of the name below.
+// the top and down the right, clear of the name below. The count of habitable worlds has its own place
+// at the top right, BADGE_ANGLE, which the others leave free.
 const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120]
+const BADGE_ANGLE = 30
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes
 // in a hidden or minimised window, so an Arrange carries on there.
@@ -392,6 +415,23 @@ const blend = (hex, background, alpha) => {
 }
 
 const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')}, ${alpha})`
+
+// Jumps from `origin` to every system an explored route reaches, over the page's `neighbours`.
+const hopsFrom = (origin, neighbours) => {
+  const hops = { [origin]: 0 }
+  const queue = [origin]
+
+  for (let i = 0; i < queue.length; i += 1) {
+    (neighbours[queue[i]] || []).forEach((other) => {
+      if (hops[other] === undefined) {
+        hops[other] = hops[queue[i]] + 1
+        queue.push(other)
+      }
+    })
+  }
+
+  return hops
+}
 
 const MARKER_BASE_SIZE = 44
 const COLONY_FULL_MILLIONS = 10
@@ -458,7 +498,8 @@ const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAAL
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points,
 // or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the
-// outside (`{ key, path, color, hollow }`), which the image then has MARK_ROOM for on every side.
+// outside (`{ key, path, color, hollow }`, or a count as `text` at its own `angle`), which the image
+// then has MARK_ROOM for on every side.
 const markerImage = (size, spots, color, pinned, glyphs, surface) => {
   if (!spots && !pinned && !glyphs.length) {
     return CLEAR_IMAGE
@@ -485,14 +526,25 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       content += `<g transform="translate(${centre - lock / 2}, ${centre - lock / 2}) scale(${lock / 24})"><path fill="black" stroke="black" stroke-width="3" d="${LOCK_PATH}" /><path fill="white" d="${LOCK_PATH}" /></g>`
     }
 
-    glyphs.slice(0, GLYPH_ANGLES.length).forEach((glyph, i) => {
-      const angle = (GLYPH_ANGLES[i] * Math.PI) / 180
+    let next = 0
+
+    glyphs.forEach((glyph) => {
+      const degrees = glyph.angle === undefined ? GLYPH_ANGLES[next++] : glyph.angle
+
+      if (degrees === undefined) {
+        return
+      }
+
+      const angle = (degrees * Math.PI) / 180
       const x = centre + (size / 2 + GLYPH_RING) * Math.sin(angle)
       const y = centre - (size / 2 + GLYPH_RING) * Math.cos(angle)
       const icon = GLYPH_RADIUS - 2
+      const ink = glyph.hollow ? glyph.color : surface
 
       content += `<circle cx="${x}" cy="${y}" r="${GLYPH_RADIUS}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="1.5" />`
-      content += `<path transform="translate(${x - icon}, ${y - icon}) scale(${(2 * icon) / 24})" fill="${glyph.hollow ? glyph.color : surface}" d="${glyph.path}" />`
+      content += glyph.text
+        ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Roboto, Arial, sans-serif" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1]}" fill="${ink}">${glyph.text}</text>`
+        : `<path transform="translate(${x - icon}, ${y - icon}) scale(${(2 * icon) / 24})" fill="${ink}" d="${glyph.path}" />`
     })
 
     markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${content}</svg>`)}`)
@@ -586,6 +638,9 @@ export default {
         construct: green,
         rift: pink,
         discovery: orange,
+        // Habitability's shades, the best band first.
+        bands: [blue, blend(blue, surface, 0.55), blend(blue, surface, 0.25)],
+        stars: { hole: violet, giant: green, hot: blue, yellow: amber, orange, red, white: blend(blue, '#ffffff', 0.35), brown: blend(orange, '#000000', 0.6) },
       }
     },
 
@@ -627,6 +682,8 @@ export default {
         population: system.Population || 0,
         capital: Boolean(system.Capital),
         danger: system.DangerRating || 0,
+        stars: system.Stars || 0,
+        starGroup: starGroup(system.SpectralClass, system.SizeText),
         size: markerSize(system.Colonies || 0, system.Population || 0),
       }))
     },
@@ -718,30 +775,87 @@ export default {
     },
 
     hops() {
-      const { capitalId, neighbours } = this
-      const hops = {}
+      return this.capitalId ? hopsFrom(this.capitalId, this.neighbours) : {}
+    },
 
-      if (!capitalId) {
-        return hops
+    // Where Jumps and Travel measure from: the one system selected, else the capital.
+    distanceOrigin() {
+      return this.panelSystem ? this.panelSystem.id : this.capitalId
+    },
+
+    originHops() {
+      const { distanceOrigin } = this
+
+      if (!distanceOrigin) {
+        return {}
       }
 
-      hops[capitalId] = 0
-      const queue = [capitalId]
-
-      for (let i = 0; i < queue.length; i += 1) {
-        (neighbours[queue[i]] || []).forEach((other) => {
-          if (hops[other] === undefined) {
-            hops[other] = hops[queue[i]] + 1
-            queue.push(other)
-          }
-        })
-      }
-
-      return hops
+      return distanceOrigin === this.capitalId ? this.hops : hopsFrom(distanceOrigin, this.neighbours)
     },
 
     farthestHop() {
-      return Math.max(1, ...Object.values(this.hops))
+      return Math.max(1, ...Object.values(this.originHops))
+    },
+
+    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's
+    // galactic map measures distance.
+    originKm() {
+      const { distanceOrigin } = this
+      const km = {}
+
+      if (!distanceOrigin) {
+        return km
+      }
+
+      const distanceTo = buildDistanceMap(this.jumpPoints, [{ SystemID: Number(distanceOrigin), Xcor: 0, Ycor: 0 }])
+
+      this.systemRows.forEach((row) => {
+        const found = distanceTo({ SystemID: row.SystemID, Xcor: 0, Ycor: 0 })
+
+        if (found) {
+          km[row.id] = found.km
+        }
+      })
+
+      return km
+    },
+
+    farthestKm() {
+      return Math.max(1, ...Object.values(this.originKm))
+    },
+
+    // Colony costs are worked out only while the map shows them: every body of a large galaxy takes a while.
+    needsHabitability() {
+      return this.layer === 'habitability' || this.marksSet.has('habitable')
+    },
+
+    // The race's habitability once it has loaded: until then the plugin keeps the last race's.
+    currentHabitability() {
+      const { habitability } = this
+
+      return habitability && habitability.key === `${this.GameID}:${this.RaceID}` ? habitability : null
+    },
+
+    // What stands in for habitability while there is none to show, or null when there is.
+    habitabilityNote() {
+      if (!this.needsHabitability) {
+        return null
+      }
+
+      if (this.loadErrors.habitability) {
+        return 'Colony costs couldn\'t be worked out'
+      }
+
+      if (!this.currentHabitability) {
+        return 'Working out colony costs…'
+      }
+
+      return this.currentHabitability.species ? null : 'No species of yours to work out colony costs for'
+    },
+
+    // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
+    habitableBands() {
+      return this.currentHabitability ? this.currentHabitability.systems : {}
     },
 
     savedPositions() {
@@ -902,11 +1016,14 @@ export default {
       return this.trackedMarks.length ? `Show on the map: ${this.marksLabel}` : 'Show on the map'
     },
 
-    // How each glyph looks, by what it marks: filled, or hollow for the lesser state.
+    // How each glyph looks, by what it marks: filled, or hollow for the lesser state. The habitable
+    // worlds' badge carries their count, which `text` gives an example of for the legend.
     glyphStyles() {
       const { colors } = this
+      const species = this.currentHabitability && this.currentHabitability.species
 
       return {
+        habitable: { path: EARTH_PATH, text: '2', color: colors.colony, label: `Habitable worlds there, colony cost under ${COLONY_COST_BANDS[0]}${species ? ` for the ${species}` : ''}` },
         'ruins-identified': { path: PILLAR_PATH, color: colors.ruins, label: 'Ruins, their builders identified' },
         'ruins-found': { path: PILLAR_PATH, color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
         'ruins-used': { path: PILLAR_PATH, color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
@@ -933,7 +1050,9 @@ export default {
       }))
 
       MARKS.filter((mark) => this.marksSet.has(mark.value)).forEach((mark) => {
-        if (mark.place === 'glyph') {
+        if (mark.value === 'habitable' && this.habitabilityNote) {
+          items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}` })
+        } else if (mark.place === 'glyph') {
           const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
           const shown = names.filter((name) => counts[name])
 
@@ -1173,12 +1292,42 @@ export default {
         if (range) {
           items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})` })
         }
+      } else if (this.layer === 'habitability') {
+        if (this.habitabilityNote) {
+          items.push({ kind: 'note', label: this.habitabilityNote })
+        } else {
+          const best = this.systemRows.map((row) => this.bestBand(row))
+          const systems = (band) => best.filter((value) => value === band).length
+          const last = COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]
+
+          items.push(
+            ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${systems(band)})` })),
+            { kind: 'dot', color: colors.none, label: `None under ${last} (${systems(-1)})` },
+            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds` }
+          )
+        }
+      } else if (this.layer === 'stars') {
+        const systems = {}
+        const multiple = this.systemRows.filter((row) => row.stars > 1).length
+
+        this.systemRows.forEach((row) => {
+          systems[row.starGroup] = (systems[row.starGroup] || 0) + 1
+        })
+        STAR_GROUPS.filter((group) => systems[group.value]).forEach((group) => items.push({ kind: 'dot', color: colors.stars[group.value], label: `${group.text} (${systems[group.value]})` }))
+
+        if (multiple) {
+          items.push({ kind: 'ring', color: colors.ring, style: 'double', width: 4, label: `Two or more stars (${multiple})` })
+        }
       } else {
+        const origin = this.rowById[this.distanceOrigin]
+        const far = this.layer === 'travel' ? `${this.count(this.farthestKm / 1e9, 1)} billion km` : `${this.farthestHop} ${this.farthestHop === 1 ? 'jump' : 'jumps'}`
+
         items.push(
-          { kind: 'ring', color: colors.ink, label: 'Capital' },
+          { kind: 'ring', color: colors.ink, label: origin ? `From ${origin.Name}${origin.id === this.capitalId ? ', the capital' : ''}` : 'From the capital' },
           { kind: 'dot', color: colors.colony, label: 'Near' },
-          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${this.farthestHop} ${this.farthestHop === 1 ? 'jump' : 'jumps'})` },
-          { kind: 'dot', color: colors.none, label: 'No explored route' }
+          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${far})` },
+          { kind: 'dot', color: colors.none, label: 'No explored route' },
+          { kind: 'note', label: this.panelSystem ? 'Clear the selection to measure from the capital' : 'Select a system to measure from it' }
         )
       }
 
@@ -1328,6 +1477,17 @@ export default {
 
     features() {
       this.restyle()
+    },
+
+    habitableBands() {
+      this.restyle()
+    },
+
+    // Selecting one system measures Jumps and Travel from it.
+    distanceOrigin() {
+      if (this.layer === 'jumps' || this.layer === 'travel') {
+        this.restyle()
+      }
     },
 
     // A locked map's systems can't be grabbed; pressing on one pans the view as the background does.
@@ -1618,14 +1778,26 @@ export default {
           border: row.capital ? colors.ink : colors.ring,
           borderWidth: row.capital ? 4 : 2,
         }
+      } else if (this.layer === 'habitability') {
+        const band = this.bestBand(row)
+
+        marker.fill = band < 0 ? colors.none : colors.bands[band]
+      } else if (this.layer === 'stars') {
+        marker = {
+          ...marker,
+          fill: colors.stars[row.starGroup] || colors.none,
+          ...(row.stars > 1 ? { borderStyle: 'double', borderWidth: 6 } : {}),
+        }
       } else {
-        const hops = this.hops[row.id]
+        const travel = this.layer === 'travel'
+        const distance = travel ? this.originKm[row.id] : this.originHops[row.id]
+        const origin = row.id === this.distanceOrigin
 
         marker = {
           ...marker,
-          fill: hops === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (0.75 * hops) / this.farthestHop),
-          border: row.capital ? colors.ink : colors.ring,
-          borderWidth: row.capital ? 4 : 2,
+          fill: distance === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (0.75 * distance) / (travel ? this.farthestKm : this.farthestHop)),
+          border: origin ? colors.ink : colors.ring,
+          borderWidth: origin ? 4 : 2,
         }
       }
 
@@ -1654,16 +1826,20 @@ export default {
       return blend(this.colors.discovery, this.colors.surface, 0.35 + 0.65 * share)
     },
 
+    // The best colony cost band a system has a body in, as an index of COLONY_COST_BANDS, or -1.
+    bestBand(row) {
+      const counts = this.habitableBands[row.id]
+
+      return counts ? counts.findIndex(Boolean) : -1
+    },
+
     // The glyphs Show puts round a system's marker, in the order they take their places: each
-    // `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`.
+    // `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`; the
+    // habitable worlds' badge has their count as `text`, at its own `angle`.
     glyphsOf(row) {
-      const features = this.features[row.id]
+      const features = this.features[row.id] || NO_FEATURES
       const marks = this.marksSet
       const names = []
-
-      if (!features) {
-        return []
-      }
 
       if (marks.has('ruins') && features.ruins.length) {
         const states = new Set(features.ruins.map(ruinState))
@@ -1679,11 +1855,20 @@ export default {
         names.push('rifts')
       }
 
-      return names.map((name) => {
+      const glyphs = names.map((name) => {
         const style = this.glyphStyles[name]
 
         return { name, key: `${name}:${style.color}`, path: style.path, color: style.color, hollow: Boolean(style.hollow) }
       })
+      const habitable = marks.has('habitable') && this.habitableBands[row.id] ? this.habitableBands[row.id][0] : 0
+
+      if (habitable) {
+        const { color } = this.glyphStyles.habitable
+
+        glyphs.push({ name: 'habitable', key: `habitable:${color}:${habitable}`, text: String(habitable), angle: BADGE_ANGLE, color, hollow: false })
+      }
+
+      return glyphs
     },
 
     // What a mark placed by the name says for a system, or '' where it has nothing to say.
@@ -2501,7 +2686,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
       }),
       default: [],
     },
@@ -2544,6 +2729,31 @@ export default {
         return await loadMapFeatures(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: {},
+    },
+    // Loaded the first time the map shows habitability for the race, and kept for it after.
+    habitability: {
+      get: tracked('habitability', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        const key = `${this.GameID}:${this.RaceID}`
+
+        if (this.habitabilityKept && this.habitabilityKept.key === key) {
+          return this.habitabilityKept
+        }
+
+        if (!this.needsHabitability) {
+          return null
+        }
+
+        const habitability = await loadHabitability(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+
+        this.habitabilityKept = Object.freeze({ key, ...habitability })
+
+        return this.habitabilityKept
+      }),
+      default: null,
     },
   },
 }
