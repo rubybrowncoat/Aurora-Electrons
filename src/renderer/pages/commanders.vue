@@ -49,7 +49,7 @@
           </template>
 
           <template v-else-if="suggestionView === 'ships'">
-            <v-data-table v-if="shipRows.length" :headers="shipHeaders" :items="shipRows" item-key="key" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table v-if="shipRows.length" :headers="shipHeaders" :items="shipRows" item-key="key" :items-per-page.sync="shipTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: shipPageSizes }">
               <template #[`item.ship`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.ship.ShipName }}<page-link v-if="item.ship.SystemID" :to="systemLink(item.ship.SystemID)" :name="item.ship.SystemName" class="ml-1" /></div>
@@ -112,13 +112,13 @@
         <v-card class="panel" elevation="1">
           <div class="panel-head">
             <span>Roster</span>
-            <v-btn-toggle v-model="typeId" mandatory dense @change="(value) => config.set('commandersType', value)">
+            <v-btn-toggle v-model="typeId" mandatory dense>
               <v-btn v-for="type in commanderTypes" :key="type.id" :value="type.id" :disabled="!!focusCommanderId" small>{{ type.plural }} ({{ count(type.total) }})</v-btn>
             </v-btn-toggle>
           </div>
           <v-row dense align="center" class="px-6 pb-2">
             <v-col cols="12" sm="auto">
-              <v-switch v-model="unassignedOnly" label="Unassigned only" dense hide-details class="mt-0" :disabled="!!focusCommanderId" @change="(value) => config.set('commandersUnassignedOnly', !!value)" />
+              <v-switch v-model="unassignedOnly" label="Unassigned only" dense hide-details class="mt-0" :disabled="!!focusCommanderId" />
             </v-col>
             <v-col cols="12" sm="3">
               <v-text-field v-model="search" label="Search names and assignments" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable :disabled="!!focusCommanderId" />
@@ -130,7 +130,7 @@
               <v-select v-model="fieldId" :items="fieldItems" item-text="text" item-value="value" label="Research field" dense outlined hide-details clearable :disabled="!!focusCommanderId" />
             </v-col>
           </v-row>
-          <v-data-table :headers="rosterHeaders" :items="rosterRows" item-key="CommanderID" :sort-by.sync="rosterSortBy" :sort-desc.sync="rosterSortDesc" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, 100] }" class="roster-table">
+          <v-data-table :headers="rosterHeaders" :items="rosterRows" item-key="CommanderID" :sort-by.sync="rosterTable.sortBy" :sort-desc.sync="rosterTable.sortDesc" :items-per-page.sync="rosterTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: rosterPageSizes }" class="roster-table">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
               <v-icon v-if="item.StoryCharacter" small class="ml-1" title="Story character: never retires">mdi-book-open-variant</v-icon>
@@ -172,7 +172,7 @@
               <v-btn v-for="group in formerGroups" :key="group.value" :value="group.value" :disabled="!group.count" small>{{ group.text }} ({{ count(group.count) }})</v-btn>
             </v-btn-toggle>
           </div>
-          <v-data-table v-if="formerShown.length" :key="formerGroup === 'held' ? 'held' : 'own'" :headers="formerHeaders" :items="formerShown" item-key="CommanderID" :show-expand="formerGroup !== 'held'" :sort-by="formerGroup === 'held' ? 'raceName' : 'lastTime'" :sort-desc="formerGroup !== 'held'" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 50, -1] }" class="roster-table">
+          <v-data-table v-if="formerShown.length" :key="formerGroup === 'held' ? 'held' : 'own'" :headers="formerHeaders" :items="formerShown" item-key="CommanderID" :show-expand="formerGroup !== 'held'" :sort-by.sync="formerTable.sortBy" :sort-desc.sync="formerTable.sortDesc" :items-per-page.sync="formerTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: formerPageSizes }" class="roster-table">
             <template #[`item.Name`]="{ item }">
               <div class="py-2">
                 <span class="font-weight-medium">{{ item.Name }}</span>
@@ -236,6 +236,7 @@ import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RETIRE_STATUSES, SERVING_COMMANDER, formatBonus, formerKind, governorSuggestions, parseBonuses, researchSuggestions, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -262,22 +263,35 @@ const FORMER_GROUPS = [
   { value: 'dead', text: 'Dead' },
   { value: 'held', text: 'Held by us' },
 ]
+const ROSTER_PAGE_SIZES = [25, 50, 100]
+const SHIP_PAGE_SIZES = [15, 30, -1]
+const FORMER_PAGE_SIZES = [15, 50, -1]
 
 export default {
   name: 'CommandersPage',
   components: { LoadState, PageLink, StatTiles },
-  mixins: [deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      suggestionView: { key: 'commandersSuggestionView', default: 'governors', valid: oneOf(['governors', 'ships', 'research']) },
+      shipTable: tableView('commandersShipsTable', { itemsPerPage: 15, itemsPerPageOptions: SHIP_PAGE_SIZES }),
+      typeId: { key: 'commandersType', default: 0, valid: oneOf(COMMANDER_TYPES.map((type) => type.id)) },
+      unassignedOnly: { key: 'commandersUnassignedOnly', default: false },
+      search: { key: 'commandersSearch', default: '', scope: 'race' },
+      bonusId: { key: 'commandersBonus', default: null },
+      fieldId: { key: 'commandersField', default: null },
+      rosterTable: tableView('commandersRosterTable', { sortDesc: [], itemsPerPage: 25, itemsPerPageOptions: ROSTER_PAGE_SIZES }),
+      formerView: { key: 'commandersFormerView', default: 'prisoner', valid: oneOf(FORMER_GROUPS.map((group) => group.value)) },
+      formerOwnTable: tableView('commandersFormerOwnTable', { sortBy: ['lastTime'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: FORMER_PAGE_SIZES }),
+      formerHeldTable: tableView('commandersFormerHeldTable', { sortBy: ['raceName'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: FORMER_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      typeId: 0,
-      unassignedOnly: false,
-      search: '',
-      bonusId: null,
-      fieldId: null,
-      suggestionView: 'governors',
-      rosterSortBy: [],
-      rosterSortDesc: [],
-      formerView: 'prisoner',
+      rosterPageSizes: ROSTER_PAGE_SIZES,
+      shipPageSizes: SHIP_PAGE_SIZES,
+      formerPageSizes: FORMER_PAGE_SIZES,
       focusCommanderId: null,
       focusColonyId: null,
     }
@@ -459,6 +473,11 @@ export default {
       return chosen.count ? chosen.value : (this.formerGroups.find((group) => group.count) || chosen).value
     },
 
+    // The table of the chosen former-commanders group: the prisoners held by us have their own columns, the others share.
+    formerTable() {
+      return this.formerGroup === 'held' ? this.formerHeldTable : this.formerOwnTable
+    },
+
     formerShown() {
       return this.formerGroup === 'held' ? this.heldRows : this.formerRows.filter((person) => person.kind === this.formerGroup)
     },
@@ -584,24 +603,26 @@ export default {
     },
   },
   watch: {
+    // Choosing a bonus sorts the roster by it. While a linked commander is shown, the type that follows them, the
+    // filters it clears and this sort are for the visit only, so the stored choices stay.
     bonusId(value) {
-      this.rosterSortBy = value === null ? [] : ['selectedBonus']
-      this.rosterSortDesc = value === null ? [] : [true]
+      const table = { ...this.rosterTable, sortBy: value === null ? [] : ['selectedBonus'], sortDesc: value === null ? [] : [true] }
+
+      if (this.focusCommanderId) {
+        this.setUnsaved('rosterTable', table)
+      } else {
+        this.rosterTable = table
+      }
     },
     typeId() {
-      this.bonusId = null
-      this.fieldId = null
+      ['bonusId', 'fieldId'].forEach((name) => (this.focusCommanderId ? this.setUnsaved(name, null) : (this[name] = null)))
     },
     // A focused commander's roster is the one shown, so the type toggle follows them.
     focusPerson(person) {
       if (person) {
-        this.typeId = person.CommanderType
+        this.setUnsaved('typeId', person.CommanderType)
       }
     },
-  },
-  created() {
-    this.typeId = this.config.get('commandersType', 0)
-    this.unassignedOnly = this.config.get('commandersUnassignedOnly', false)
   },
   methods: {
     applyLink(query) {
@@ -609,7 +630,7 @@ export default {
       this.focusColonyId = this.focusCommanderId ? null : queryId(query.colony)
 
       if (this.focusColonyId) {
-        this.suggestionView = 'governors'
+        this.setUnsaved('suggestionView', 'governors')
       }
     },
     clearFocus() {

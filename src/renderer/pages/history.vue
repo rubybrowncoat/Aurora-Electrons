@@ -13,7 +13,7 @@
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
         </v-col>
         <v-col cols="auto">
-          <v-btn-toggle :value="span" mandatory dense class="mr-2" @change="setSpan">
+          <v-btn-toggle v-model="span" mandatory dense class="mr-2">
             <v-btn v-for="option in spanOptions" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>
           </v-btn-toggle>
           <v-btn-toggle v-model="view" mandatory dense>
@@ -51,7 +51,7 @@
             </span>
           </div>
           <div class="panel-body">
-            <v-btn-toggle :value="rivalMetric" mandatory dense class="mb-2 flex-wrap" @change="setRivalMetric">
+            <v-btn-toggle v-model="rivalMetric" mandatory dense class="mb-2 flex-wrap">
               <v-btn v-for="metric in rivalMetrics" :key="metric.value" :value="metric.value" small>{{ metric.text }}</v-btn>
             </v-btn-toggle>
             <chart-canvas type="line" :data="rivals.data" :options="rivals.options" :height="280" label="Rivals" />
@@ -80,7 +80,7 @@
         </v-row>
 
         <v-card v-else class="panel" elevation="1">
-          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 100, -1] }" dense />
+          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :sort-by.sync="historyTable.sortBy" :sort-desc.sync="historyTable.sortDesc" :items-per-page.sync="historyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: historyPageSizes }" dense />
         </v-card>
       </template>
 
@@ -105,6 +105,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import StatTiles from '../components/page/StatTiles.vue'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { historyConfig } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -113,6 +114,7 @@ import { MINERALS } from '../utilities/minerals'
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
 const SPAN_OPTIONS = [10, 20, 50].map((years) => ({ value: years, text: `${years} y`, title: `The last ${years} years` })).concat({ value: 0, text: 'All', title: 'Every snapshot' })
+const HISTORY_PAGE_SIZES = [25, 100, -1]
 // Installation types charted when the player hasn't picked any: the largest by count.
 const DEFAULT_INSTALLATIONS = 5
 
@@ -144,18 +146,26 @@ const RIVAL_METRICS = [
   { value: 'wealth', text: 'Treasury', pick: (snapshot) => snapshot.wealth, format: compact },
 ]
 
+const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
+
 export default {
   name: 'HistoryPage',
   components: { ChartCanvas, StatTiles },
+  mixins: [
+    persistedView({
+      view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
+      historyTable: tableView('historyTable', { itemsPerPage: 25, itemsPerPageOptions: HISTORY_PAGE_SIZES }),
+      mineralIds: { key: 'historyMinerals', default: [1, 2, 11] },
+      installationIds: { key: 'historyInstallations', default: null, scope: 'race' },
+      rivalMetric: { key: 'historyRivalsMetric', default: 'population', valid: oneOf(RIVAL_METRIC_VALUES) },
+      span: { key: 'historySpan', default: 0, valid: oneOf(SPAN_OPTIONS.map((option) => option.value)) },
+    }),
+  ],
   data() {
     return {
-      view: 'charts',
       confirmClear: false,
-      mineralIds: [1, 2, 11],
-      installationIds: null,
-      rivalMetric: 'population',
+      historyPageSizes: HISTORY_PAGE_SIZES,
       rivalMetrics: RIVAL_METRICS,
-      span: 0,
       spanOptions: SPAN_OPTIONS,
       // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
       spyNPR: false,
@@ -367,17 +377,6 @@ export default {
       }))
     },
   },
-  watch: {
-    RaceID: {
-      immediate: true,
-      handler() {
-        this.mineralIds = this.config.get('historyMinerals', [1, 2, 11])
-        this.rivalMetric = this.config.get('historyRivalsMetric', 'population')
-        this.installationIds = this.config.get(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, null)
-        this.span = this.config.get('historySpan', 0)
-      },
-    },
-  },
   created() {
     this.spyNPR = this.config.get('spyNPR', false)
   },
@@ -415,19 +414,9 @@ export default {
     },
     setMinerals(ids) {
       this.mineralIds = ids
-      this.config.set('historyMinerals', ids)
     },
     setInstallations(ids) {
       this.installationIds = ids
-      this.config.set(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, ids)
-    },
-    setRivalMetric(value) {
-      this.rivalMetric = value
-      this.config.set('historyRivalsMetric', value)
-    },
-    setSpan(value) {
-      this.span = value
-      this.config.set('historySpan', value)
     },
     // Remove this race from the game's history file; other races keep theirs.
     clearHistory() {

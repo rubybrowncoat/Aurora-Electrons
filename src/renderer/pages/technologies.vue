@@ -3,13 +3,13 @@
     <v-container fluid class="tech-page" :style="rootStyle">
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="mr-4">
-          <v-btn-toggle :value="view" mandatory dense @change="setView">
+          <v-btn-toggle :value="shownView" mandatory dense @change="setView">
             <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>
               <v-icon left small>{{ option.icon }}</v-icon>{{ option.label }}
             </v-btn>
           </v-btn-toggle>
         </v-col>
-        <v-col v-if="view !== 'path'" cols="12" sm="auto" class="search-field">
+        <v-col v-if="shownView !== 'path'" cols="12" sm="auto" class="search-field">
           <v-text-field v-model="search" label="Search technologies" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable />
         </v-col>
       </v-row>
@@ -24,8 +24,8 @@
         <stat-tiles :tiles="tiles" class="mt-2" />
 
         <div class="mt-4">
-          <fields-view v-if="view === 'fields'" :research="research" :field-id="activeFieldId" :search="search || ''" @select-field="setField" @select-tech="selectTech" />
-          <lines-view v-else-if="view === 'lines'" :research="research" :search="search || ''" :hide-finished="hideFinished" @set-hide-finished="setHideFinished" @select-tech="selectTech" />
+          <fields-view v-if="shownView === 'fields'" :research="research" :field-id="activeFieldId" :search="search || ''" @select-field="(id) => (fieldId = id)" @select-tech="selectTech" />
+          <lines-view v-else-if="shownView === 'lines'" :research="research" :search="search || ''" :hide-finished="hideFinished" @set-hide-finished="(value) => (hideFinished = value)" @select-tech="selectTech" />
           <path-view v-else :research="research" :target-id="activeTargetId" @select-tech="selectTech" />
         </div>
       </template>
@@ -46,6 +46,7 @@ import { statusStyle } from '../components/research/status-style'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf } from '../mixins/persisted-view'
 import { gameTime, toBoolean } from '../utilities/aurora'
 import { SERVING_COMMANDER } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -66,12 +67,24 @@ const INPUT_LABELS = {
   race: 'the race',
 }
 const SECONDS_PER_YEAR = 31536000
-const VIEWS = ['fields', 'lines', 'path']
+// The views a visit leaves behind; the path view opens on a tech and is never the remembered one.
+const STORED_VIEWS = ['fields', 'lines']
 
 export default {
   name: 'TechnologiesPage',
   components: { FieldsView, LinesView, LoadState, PathView, StatTiles },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      view: { key: 'techTreeView', default: 'fields', scope: 'race', valid: oneOf(STORED_VIEWS) },
+      fieldId: { key: 'techTreeField', default: null, scope: 'race' },
+      targetId: { key: 'techTreeTarget', default: null, scope: 'race' },
+      hideFinished: { key: 'techTreeHideFinished', default: true, scope: 'race' },
+      search: { key: 'techTreeSearch', default: '', scope: 'race' },
+    }),
+  ],
   data() {
     return {
       viewOptions: [
@@ -79,19 +92,11 @@ export default {
         { value: 'lines', label: 'Lines', icon: 'mdi-stairs' },
         { value: 'path', label: 'Path', icon: 'mdi-graph-outline' },
       ],
-      view: 'fields',
-      fieldId: null,
-      targetId: null,
-      hideFinished: true,
-      search: '',
+      pathOpen: false,
     }
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
-
-    preferencePrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}.techTree`
-    },
 
     rootStyle() {
       const dark = this.$vuetify.theme.dark
@@ -142,6 +147,11 @@ export default {
       }
     },
 
+    // The view on show: the path view while a tech is open, else the remembered one.
+    shownView() {
+      return this.pathOpen ? 'path' : this.view
+    },
+
     activeFieldId() {
       const { fields, fieldCounts } = this.research
 
@@ -177,7 +187,7 @@ export default {
 
     // The Path view's target, or nothing in the other views. Null while the target is still being worked out.
     linkQuery() {
-      if (this.view !== 'path') {
+      if (this.shownView !== 'path') {
         return {}
       } else if (this.research) {
         return linkTo.techTree(this.activeTargetId).query
@@ -187,7 +197,7 @@ export default {
     },
 
     linkLabel() {
-      const tech = this.view === 'path' && this.research ? this.research.graph.techs.get(this.activeTargetId) : null
+      const tech = this.shownView === 'path' && this.research ? this.research.graph.techs.get(this.activeTargetId) : null
 
       return tech ? tech.name : null
     },
@@ -228,50 +238,32 @@ export default {
     },
   },
   watch: {
-    preferencePrefix: {
-      immediate: true,
-      handler() {
-        const view = this.config.get(`${this.preferencePrefix}View`, 'fields')
-
-        this.view = VIEWS.includes(view) ? view : 'fields'
-        this.fieldId = this.config.get(`${this.preferencePrefix}Field`, null)
-        this.targetId = this.config.get(`${this.preferencePrefix}Target`, null)
-        this.hideFinished = this.config.get(`${this.preferencePrefix}HideFinished`, true)
-        this.search = ''
-      },
+    RaceID() {
+      this.pathOpen = false
     },
   },
   methods: {
-    // A tech in the query opens its path; without one the page leaves the path view for the view it remembers.
+    // A tech in the query opens its path; without one the page shows the view it remembers.
     applyLink(query) {
       const techId = queryId(query.tech)
 
       if (techId) {
-        this.targetId = techId
-        this.view = 'path'
-      } else if (this.view === 'path') {
-        const remembered = this.config.get(`${this.preferencePrefix}View`, 'fields')
-
-        this.view = VIEWS.includes(remembered) && remembered !== 'path' ? remembered : 'fields'
+        this.setUnsaved('targetId', techId)
       }
+
+      this.pathOpen = !!techId
     },
     setView(view) {
-      this.view = view
-      this.config.set(`${this.preferencePrefix}View`, view)
-    },
-    setField(fieldId) {
-      this.fieldId = fieldId
-      this.config.set(`${this.preferencePrefix}Field`, fieldId)
-    },
-    setHideFinished(value) {
-      this.hideFinished = value
-      this.config.set(`${this.preferencePrefix}HideFinished`, value)
+      this.pathOpen = view === 'path'
+
+      if (view !== 'path') {
+        this.view = view
+      }
     },
     // Looking at a tech anywhere opens its path.
     selectTech(techId) {
       this.targetId = techId
-      this.config.set(`${this.preferencePrefix}Target`, techId)
-      this.setView('path')
+      this.pathOpen = true
     },
 
     landing(years) {
