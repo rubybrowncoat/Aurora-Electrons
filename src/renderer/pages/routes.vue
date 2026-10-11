@@ -101,7 +101,7 @@
         </v-row>
 
         <v-row>
-          <v-col cols="12" :xl="legRows.length ? 7 : 12">
+          <v-col cols="12" :xl="legRows.length ? 6 : 12">
             <v-card class="panel" elevation="1">
               <div class="panel-head">
                 <span>Route map</span>
@@ -119,22 +119,22 @@
               </div>
             </v-card>
           </v-col>
-          <v-col v-if="legRows.length" cols="12" xl="5">
+          <v-col v-if="legRows.length" cols="12" xl="6">
             <v-card class="panel" elevation="1">
               <div class="panel-head">
                 <span>{{ origin.name }} to {{ destination.name }}</span>
               </div>
               <v-data-table :headers="legHeaders" :items="legRows" item-key="index" disable-pagination disable-sort hide-default-footer dense>
                 <template #[`item.SystemName`]="{ item }">
-                  <span class="font-weight-medium text-no-wrap">{{ item.SystemName }}</span>
+                  <span class="font-weight-medium">{{ item.SystemName }}</span>
                 </template>
                 <template #[`item.way`]="{ item }">
                   <div class="py-1">
                     <div>{{ item.from }}</div>
-                    <div class="text-no-wrap">
+                    <div class="leg-next">
                       <v-icon x-small>mdi-arrow-right</v-icon>
-                      {{ item.to }}
-                      <v-icon v-if="item.gate" x-small :color="colors.route" title="A stabilised jump point: ships without a jump drive can transit">mdi-gate</v-icon>
+                      <span v-if="item.gate">{{ lastWord(item.to)[0] }}<span class="text-no-wrap">{{ lastWord(item.to)[1] }} <v-icon x-small :color="colors.route" title="A stabilised jump point: ships without a jump drive can transit">mdi-gate</v-icon></span></span>
+                      <span v-else>{{ item.to }}</span>
                     </div>
                     <div v-if="item.via" class="caption text--secondary">Lagrange jump from {{ item.via[0] }} to {{ item.via[1] }}</div>
                   </div>
@@ -672,6 +672,13 @@ export default {
       return systemBodyName(point, { Name: point.SystemName })
     },
 
+    // A name split before its last word, so an icon after it wraps with that word.
+    lastWord(text) {
+      const at = text.lastIndexOf(' ') + 1
+
+      return [text.slice(0, at), text.slice(at)]
+    },
+
     // What the options would stop on a route found without them: systems they avoid, and jump points they don't
     // transit, in route order.
     blockers(route) {
@@ -882,6 +889,17 @@ export default {
     height: 4px;
     border-radius: 2px;
     margin-right: 6px;
+  }
+
+  // A long jump point name wraps beside its arrow.
+  .leg-next {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+
+  .leg-next > .v-icon {
+    flex: none;
   }
 
   .clickable-rows tbody tr {
