@@ -60,7 +60,7 @@
             <span v-if="lastSeen === null"> · First visit</span>
           </div>
         </div>
-        <v-virtual-scroll v-if="displayRows.length" ref="events" :items="displayRows" :item-height="84" :bench="4" class="events">
+        <window-virtual-scroll v-if="displayRows.length" ref="events" :items="displayRows" :item-height="84" :bench="4" class="events">
           <template #default="{ item: row }">
             <div v-if="row.divider" class="last-look"><v-icon small class="mr-2">mdi-history</v-icon>Last look<span class="ml-2 caption">{{ newCount ? 'Older events below' : 'No newer events in this view' }}</span></div>
             <v-list-item v-else :key="row.key" class="event-row" :class="{ 'event-row--child': row.child }" :style="eventStyle(row.event)" role="button" tabindex="0" :aria-expanded="row.group ? String(expandedGroups.includes(row.key)) : undefined" @click="openRow(row)" @keydown.space.self.prevent="openRow(row)">
@@ -84,7 +84,7 @@
               </v-list-item-content>
             </v-list-item>
           </template>
-        </v-virtual-scroll>
+        </window-virtual-scroll>
         <div v-else class="pa-6 text--secondary">{{ logEvents.length ? 'No events match these filters.' : 'This race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
           Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with your previous visit to this page.
@@ -117,6 +117,7 @@ import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import WindowVirtualScroll from '../components/page/WindowVirtualScroll.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -128,7 +129,7 @@ import { tracked } from '../utilities/load-tracking'
 const INPUT_LABELS = { logEvents: 'the game log' }
 
 export default {
-  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, StatTiles, WindowVirtualScroll },
   mixins: [
     countFormat,
     deepLink,
@@ -630,9 +631,14 @@ export default {
     },
     filteredEvents() {
       this.expandedGroups = []
+      // The filtered events start from the top: when the page is scrolled past the list's start, it goes back to it, just under the app bar.
       this.$nextTick(() => {
-        if (this.$refs.events) {
-          this.$refs.events.$el.scrollTop = 0
+        const list = this.$refs.events
+        const { bar, top } = this.$vuetify.application
+        const offset = list ? list.$el.getBoundingClientRect().top - bar - top : 0
+
+        if (offset < 0) {
+          window.scrollBy({ top: offset })
         }
       })
     },
@@ -791,7 +797,6 @@ export default {
   }
 
   .events {
-    height: clamp(336px, calc(100vh - 470px), 672px);
     border-top: 1px solid var(--ae-border);
   }
 
