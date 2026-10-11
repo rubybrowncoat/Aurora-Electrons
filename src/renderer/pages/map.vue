@@ -219,6 +219,7 @@ import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
+import { placeUnplaced } from '../utilities/map-placement'
 import { scaleValue } from '../utilities/math'
 
 cytoscape.use(cxtmenu)
@@ -292,11 +293,6 @@ const PHASES = {
 // Arrange works in slices this long, handing the browser a turn between them to draw.
 const SLICE_MS = 12
 
-// The game puts a newly found system this far from the one it was reached from, and no
-// closer than this to any other (RaceSysSurvey.AssignRelativeMapCoordinates).
-const GAME_SPACING = 140
-const AROUND = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]
-
 const LOCK_PATH = 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z'
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes
@@ -313,8 +309,6 @@ const nextTask = () => new Promise((resolve) => {
 const keptMaps = new Map()
 
 const samePlace = (a, b) => Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y)
-
-const clampToSpacing = (value) => Math.max(-GAME_SPACING, Math.min(GAME_SPACING, value))
 
 // `hex` laid over `background` at `alpha`, as an opaque colour: cytoscape takes no alpha in a colour.
 const blend = (hex, background, alpha) => {
@@ -398,74 +392,6 @@ const markerImage = (size, spots, color, pinned) => {
   }
 
   return markerImages.get(key)
-}
-
-// Systems the game never put on the map all sit at 0, 0. Each gets a place beside a linked
-// system that has one, the way the game places a system it has just found: straight on past
-// that system, away from the one it was reached from, else the first cell around it with no
-// system within 140. Systems with no placed link go in a row under the map.
-const placeUnplaced = (rows, saved, neighbours, capitalId) => {
-  const atOrigin = rows.filter((row) => !row.Xcor && !row.Ycor)
-
-  if (atOrigin.length < 2) {
-    return { positions: saved, unplaced: [] }
-  }
-
-  const kept = atOrigin.find((row) => row.id === capitalId) || atOrigin[0]
-  const unplaced = atOrigin.filter((row) => row !== kept).map((row) => row.id)
-  const waiting = new Set(unplaced)
-  const positions = { ...saved }
-  unplaced.forEach((id) => delete positions[id])
-
-  const free = ([x, y]) => Object.values(positions).every((position) => Math.abs(position.x - x) >= GAME_SPACING || Math.abs(position.y - y) >= GAME_SPACING)
-  let progress = true
-
-  while (waiting.size && progress) {
-    progress = false
-
-    for (const id of waiting) {
-      const anchor = (neighbours[id] || []).find((other) => positions[other])
-
-      if (!anchor) {
-        continue
-      }
-
-      const at = positions[anchor]
-      const from = (neighbours[anchor] || []).find((other) => other !== id && positions[other])
-      const spots = []
-
-      if (from) {
-        const dx = clampToSpacing(at.x - positions[from].x)
-        const dy = clampToSpacing(at.y - positions[from].y)
-
-        if (dx || dy) {
-          spots.push([at.x + dx, at.y + dy])
-        }
-      }
-
-      for (let ring = 1; ring <= 4; ring += 1) {
-        AROUND.forEach(([ox, oy]) => spots.push([at.x + ox * GAME_SPACING * ring, at.y + oy * GAME_SPACING * ring]))
-      }
-
-      const [x, y] = spots.find(free) || spots[spots.length - 1]
-      positions[id] = { x, y }
-      waiting.delete(id)
-      progress = true
-    }
-  }
-
-  if (waiting.size) {
-    const placed = Object.values(positions)
-    const bottom = Math.max(0, ...placed.map((position) => position.y)) + 2 * GAME_SPACING
-    let x = Math.min(0, ...placed.map((position) => position.x))
-
-    waiting.forEach((id) => {
-      positions[id] = { x, y: bottom }
-      x += GAME_SPACING
-    })
-  }
-
-  return { positions, unplaced }
 }
 
 // How far along a whole Arrange is, from the phase the layout reports.
