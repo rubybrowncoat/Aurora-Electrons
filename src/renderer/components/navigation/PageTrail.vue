@@ -3,8 +3,8 @@
     <div ref="scroller" class="trail__scroller" :class="{ 'trail__scroller--clipped': clipped }">
       <div ref="chips" class="trail__chips">
         <template v-for="(step, position) in steps">
-          <v-icon v-if="position" :key="`separator-${step.index}`" x-small class="trail__separator">mdi-chevron-right</v-icon>
-          <span :key="step.index" class="trail__step" :class="{ 'trail__step--now': step.index === index, 'trail__step--ahead': step.index > index, 'trail__step--disabled': step.disabled }" :style="step.style" :title="step.label ? `${step.page.title} · ${step.label}` : null" role="link" :tabindex="step.disabled ? -1 : 0" @click="jump(step.index)" @keydown.enter="jump(step.index)">
+          <v-icon v-if="position" :key="`separator-${step.key}`" x-small class="trail__separator">mdi-chevron-right</v-icon>
+          <span :key="step.key" class="trail__step" :class="{ 'trail__step--now': step.now, 'trail__step--ahead': step.ahead, 'trail__step--disabled': step.disabled }" :style="step.style" :title="step.label ? `${step.page.title} · ${step.label}` : null" role="link" :tabindex="step.disabled ? -1 : 0" @click="jump(step.index)" @keydown.enter="jump(step.index)">
             <span class="trail__dot" /><span class="trail__text">{{ step.page.tab }}{{ step.label ? ` · ${step.label}` : '' }}</span>
           </span>
         </template>
@@ -14,7 +14,7 @@
 </template>
 
 <script>
-import { mapActions, mapGetters, mapState } from 'vuex'
+import { mapActions, mapGetters } from 'vuex'
 
 import { sectionById, pageByRoute } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
@@ -26,16 +26,13 @@ export default {
     }
   },
   computed: {
-    ...mapState('navigation', [
-      'index',
-    ]),
     ...mapGetters('navigation', [
       'trail',
     ]),
 
-    // The trail's entries that are pages, each with its section's colours.
+    // The trail's pages, each with its section's colours.
     steps () {
-      return this.trail.map(({ index, path, label, disabled }) => ({ index, label, disabled, page: pageByRoute[path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(this.$vuetify.theme.dark, sectionById[step.page.section]) }))
+      return this.trail.map((step) => ({ ...step, page: pageByRoute[step.path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(this.$vuetify.theme.dark, sectionById[step.page.section]) }))
     },
   },
   watch: {
