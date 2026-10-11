@@ -51,7 +51,7 @@
               <div v-if="groupList.length" class="mt-4">
                 <div class="caption text--secondary">Your groups, which come before the setting above</div>
                 <div v-for="group in groupList" :key="group.index" class="group-row">
-                  <span class="body-2 text-truncate" :title="group.title">{{ group.label }}</span>
+                  <span class="body-2 text-truncate" :title="group.title"><v-icon x-small :color="group.color" class="mr-1">mdi-circle</v-icon>{{ group.name }}: {{ group.label }}</span>
                   <v-btn icon x-small aria-label="Drop this group" title="Drop this group" @click="dropGroup(group.index)"><v-icon x-small>mdi-close</v-icon></v-btn>
                 </div>
               </div>
@@ -162,7 +162,7 @@
               <v-btn small outlined @click="togglePins(selectedIds)"><v-icon x-small left>{{ allSelectedPinned ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ allSelectedPinned ? 'Unpin' : 'Pin in place' }}</v-btn>
               <v-btn small outlined @click="keepTogether(selectedIds)"><v-icon x-small left>mdi-group</v-icon>Keep together</v-btn>
             </div>
-            <div class="caption text--secondary mt-2">Keep together makes them a group. Arrange draws a group's systems together and keeps other systems from between them, as far as their links allow.</div>
+            <div class="caption text--secondary mt-2">Keep together makes them a group, which Colour by and Borders show under Your groups. Arrange draws a group's systems together and keeps other systems from between them, as far as their links allow.</div>
           </aside>
         </div>
         <div class="panel-foot caption text--secondary">
@@ -242,10 +242,12 @@ const LAYERS = [
   { value: 'colonies', text: 'Colonies' },
   { value: 'sectors', text: 'Sectors' },
   { value: 'control', text: 'Alien control' },
+  { value: 'groups', text: 'Your groups' },
   { value: 'jumps', text: 'Jumps from the capital' },
 ]
 
-// What the borders go round: sectors, alien control, colonies, danger, or stabilised networks.
+// What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or
+// the groups the player keeps together.
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
@@ -253,6 +255,7 @@ const BORDER_OPTIONS = [
   { value: 'colonies', text: 'Your colonies', empty: 'no colonies' },
   { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
   { value: 'stabilised', text: 'Stabilised networks', empty: 'no jumps are stabilised at both ends' },
+  { value: 'groups', text: 'Your groups', empty: 'no groups (select systems and keep them together)' },
 ]
 
 // How long the free layouts want each link.
@@ -719,6 +722,10 @@ export default {
         return { owners: this.controllers, ownerOf: (row) => this.controllerById[row.ControlRaceID] }
       }
 
+      if (this.borders === 'groups') {
+        return { owners: this.groupOwners, ownerOf: (row) => this.groupOwners[this.groupOf[row.id]] }
+      }
+
       if (this.borders === 'colonies') {
         const owner = { name: null, legend: 'Systems with your colonies', color: this.colors.colony }
 
@@ -771,12 +778,24 @@ export default {
       return groupOf
     },
 
-    groupList() {
+    // A colour and a name for each of the player's groups, by its index in `groups`.
+    groupOwners() {
+      const { categorical } = this.theme
+
       return this.groups.map((group, index) => {
         const names = group.map((id) => (this.rowById[id] || {}).Name).filter(Boolean)
 
-        return { index, label: names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', '), title: names.join(', ') }
-      }).filter((group) => group.label)
+        return {
+          name: `Group ${index + 1}`,
+          legend: names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', '),
+          title: names.join(', '),
+          color: categorical[index % categorical.length],
+        }
+      })
+    },
+
+    groupList() {
+      return this.groupOwners.map((owner, index) => ({ index, name: owner.name, label: owner.legend, title: owner.title, color: owner.color })).filter((group) => group.label)
     },
 
     keepTogetherLabel() {
@@ -910,7 +929,7 @@ export default {
       ]
 
       if (group !== undefined) {
-        facts.push({ label: 'Kept with', value: this.groups[group].filter((id) => id !== system.id && this.rowById[id]).map((id) => this.rowById[id].Name).join(', ') })
+        facts.push({ label: 'Kept with', value: `${this.groupOwners[group].name}: ${this.groups[group].filter((id) => id !== system.id && this.rowById[id]).map((id) => this.rowById[id].Name).join(', ')}` })
       }
 
       return facts
@@ -924,7 +943,7 @@ export default {
       const { colors } = this
       const items = []
       // Borders round the groups the layer colours by: those entries show the border's swatch too.
-      const merged = this.borders === this.layer && (this.layer === 'sectors' || this.layer === 'control')
+      const merged = this.borders === this.layer && (this.layer === 'sectors' || this.layer === 'control' || this.layer === 'groups')
       const shaped = new Set(this.borderLegend.map((entry) => entry.owner))
       const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, label })
 
@@ -955,6 +974,9 @@ export default {
       } else if (this.layer === 'control') {
         this.controllers.forEach((controller) => items.push(group(controller, `${controller.name} (${controller.systems})`)))
         items.push({ kind: 'dot', color: colors.none, label: 'Held by no alien race' })
+      } else if (this.layer === 'groups') {
+        this.groupOwners.filter((owner) => owner.legend).forEach((owner) => items.push(group(owner, `${owner.name}: ${owner.legend}`)))
+        items.push({ kind: 'dot', color: colors.none, label: 'In no group' })
       } else {
         items.push(
           { kind: 'ring', color: colors.ink, label: 'Capital' },
@@ -1094,6 +1116,12 @@ export default {
 
     pinned() {
       this.restyle()
+    },
+
+    groups() {
+      if (this.layer === 'groups') {
+        this.restyle()
+      }
     },
 
     // A locked map's systems can't be grabbed; pressing on one pans the view as the background does.
@@ -1361,6 +1389,8 @@ export default {
         marker.fill = (this.sectorById[row.SectorID] || {}).color || colors.none
       } else if (this.layer === 'control') {
         marker.fill = row.ControlRaceID === this.RaceID ? colors.primary : (this.controllerById[row.ControlRaceID] || {}).color || colors.none
+      } else if (this.layer === 'groups') {
+        marker.fill = (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none
       } else {
         const hops = this.hops[row.id]
 
