@@ -13,8 +13,9 @@ const routes = Object.entries(import.meta.glob('../pages/*.vue')).map(([file, co
 const router = new VueRouter({
   mode: 'hash',
   routes: [...routes, { path: '*', redirect: '/' }],
-  // Back and forward return to where the page was; anything else starts at the top.
-  scrollBehavior: (_to, _from, savedPosition) => savedPosition || { x: 0, y: 0 },
+  // Back and forward return to where the page was; a link to the page already open keeps its place, as does a page
+  // following its own focus; anything else starts at the top.
+  scrollBehavior: (to, from, savedPosition) => savedPosition || (to.path === from.path ? false : { x: 0, y: 0 }),
 })
 
 // A push without callbacks returns a promise that rejects when the navigation is redirected or aborted (the race guard

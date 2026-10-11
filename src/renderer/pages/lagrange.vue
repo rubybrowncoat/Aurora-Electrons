@@ -34,9 +34,13 @@
           </div>
           <v-data-table :headers="bodyHeaders" :items="visibleBodies" item-key="SystemBodyID" :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :items-per-page="15">
             <template #[`item.name`]="{ item }">
-              <div class="py-2">
-                <div class="font-weight-medium">{{ item.name }}</div>
-                <div class="caption text--secondary">{{ item.type }}</div>
+              <div class="py-2 d-flex align-center">
+                <div class="flex-grow-1">
+                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div class="caption text--secondary">{{ item.type }}</div>
+                </div>
+                <page-link :to="linkTo.planner({ bodies: [item] })" :name="item.name" />
+                <page-link :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
               </div>
             </template>
             <template #[`item.Mass`]="{ item }">{{ count(item.Mass, item.Mass < 10 ? 2 : 0) }}</template>
@@ -72,9 +76,12 @@
           </div>
           <v-data-table :headers="shipHeaders" :items="shipRows" item-key="ShipID" disable-pagination hide-default-footer>
             <template #[`item.ShipName`]="{ item }">
-              <div class="py-2">
-                <div class="font-weight-medium">{{ item.ShipName }}</div>
-                <div class="caption text--secondary">{{ item.ClassName }} · {{ item.FleetName }}</div>
+              <div class="py-2 d-flex align-center">
+                <div class="flex-grow-1">
+                  <div class="font-weight-medium">{{ item.ShipName }}</div>
+                  <div class="caption text--secondary">{{ item.ClassName }} · {{ item.FleetName }}</div>
+                </div>
+                <page-link :to="linkTo.routes({ from: place.fleet(item.FleetID) })" :name="item.FleetName" />
               </div>
             </template>
             <template #[`item.ProductionBonus`]="{ item }">
@@ -103,10 +110,13 @@ import { mapGetters } from 'vuex'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
+import { linkTo, place, queryId } from '../utilities/deep-links'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
@@ -129,8 +139,8 @@ const TYPES = { 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: '
 
 export default {
   name: 'LagrangePage',
-  components: { LoadState, StatTiles, SystemMap },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  components: { LoadState, PageLink, StatTiles, SystemMap },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       view: 'candidates',
@@ -144,6 +154,8 @@ export default {
         { value: 'stable', label: 'Stable' },
         { value: 'all', label: 'All' },
       ],
+      linkTo,
+      place,
     }
   },
   computed: {
@@ -250,6 +262,14 @@ export default {
       return this.systems.find((system) => system.SystemID === this.selectedSystemId) || null
     },
 
+    linkQuery() {
+      return linkTo.lagrange(this.selectedSystemId).query
+    },
+
+    linkLabel() {
+      return this.selectedSystem && this.selectedSystem.Name
+    },
+
     visibleBodies() {
       const search = (this.search || '').toLowerCase()
 
@@ -344,6 +364,10 @@ export default {
     this.colonySystemsOnly = this.config.get('lagrangeColonySystemsOnly', false)
   },
   methods: {
+    applyLink(query) {
+      this.selectedSystemId = queryId(query.system)
+    },
+
     selectSystem(systemId) {
       this.selectedSystemId = systemId
       this.search = ''

@@ -9,12 +9,13 @@
             class="trail__step"
             :class="{ 'trail__step--now': step.index === index, 'trail__step--ahead': step.index > index, 'trail__step--disabled': step.disabled }"
             :style="step.style"
+            :title="step.label ? `${step.page.title} · ${step.label}` : null"
             role="link"
             :tabindex="step.disabled ? -1 : 0"
             @click="jump(step.index)"
             @keydown.enter="jump(step.index)"
           >
-            <span class="trail__dot" />{{ step.page.tab }}
+            <span class="trail__dot" /><span class="trail__text">{{ step.page.tab }}{{ step.label ? ` · ${step.label}` : '' }}</span>
           </span>
         </template>
       </div>
@@ -45,7 +46,7 @@ export default {
     // The trail's entries that are pages, each with its section's colours.
     steps () {
       return this.trail
-        .map(({ index, path, disabled }) => ({ index, disabled, page: pageByRoute[path.split('?')[0]] }))
+        .map(({ index, path, label, disabled }) => ({ index, label, disabled, page: pageByRoute[path.split('?')[0]] }))
         .filter(({ page }) => page)
         .map((step) => ({ ...step, style: sectionStyle(this.$vuetify.theme.dark, sectionById[step.page.section]) }))
     },
@@ -150,6 +151,14 @@ export default {
   height: 6px;
   border-radius: 50%;
   background: var(--sc);
+}
+
+// A labelled step can name a long body or system; the full text is in its title.
+.trail__text {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 14px;
 }
 
 .trail__step--now {

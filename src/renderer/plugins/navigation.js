@@ -10,4 +10,16 @@ export default ({ router, store }) => {
   router.afterEach((to) => {
     store.commit('navigation/settle', to.fullPath)
   })
+
+  // A replace updates the current history entry rather than adding one. Like the app's push (app/router.js) it always
+  // gets callbacks, so it returns no promise to reject when the location is the one already open.
+  const replace = router.replace.bind(router)
+
+  router.replace = (location, onComplete = () => {}, onAbort = () => {}) => {
+    store.commit('navigation/expectReplace', true)
+    replace(location, onComplete, (error) => {
+      store.commit('navigation/expectReplace', false)
+      onAbort(error)
+    })
+  }
 }
