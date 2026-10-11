@@ -1541,8 +1541,14 @@ export default {
       this.ringScale = scale
 
       if (resized) {
+        const nodes = this.graph.nodes()
+
         this.labelPlaces = null
-        this.graph.nodes().updateStyle()
+        nodes.updateStyle()
+        // Cytoscape keeps each name's place, and the box it draws the name in, from before the
+        // markers resized, so after zooming in from a wide view every name sat where it did then,
+        // under another system. Clearing the boxes places the names afresh.
+        nodes.dirtyBoundingBoxCache()
       } else if (ringsChanged) {
         this.graph.nodes('[borderStyle != "solid"]').updateStyle()
       }
