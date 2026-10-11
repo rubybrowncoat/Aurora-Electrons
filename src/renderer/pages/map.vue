@@ -243,7 +243,7 @@ const LAYERS = [
   { value: 'jumps', text: 'Jumps from the capital' },
 ]
 
-// What the borders go round: sectors, alien control, colonies, danger, or connected networks.
+// What the borders go round: sectors, alien control, colonies, danger, or stabilised networks.
 const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
@@ -251,7 +251,6 @@ const BORDER_OPTIONS = [
   { value: 'colonies', text: 'Your colonies', empty: 'no colonies' },
   { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
   { value: 'stabilised', text: 'Stabilised networks', empty: 'no jumps are stabilised at both ends' },
-  { value: 'networks', text: 'Connected networks', empty: 'no systems have explored links' },
 ]
 
 // How long the free layouts want each link.
@@ -676,24 +675,33 @@ export default {
       return Object.fromEntries(this.controllers.map((controller) => [controller.id, controller]))
     },
 
+    // The parts of the map joined by jumps stabilised at both ends, each with at least one link. Sorted
+    // by size and lowest system ID so a network's name and colour don't depend on the order the save
+    // returned its systems or jump points.
     stabilisedNetworks() {
-      return this.networkParts(this.links.list.filter((link) => link.gate === 'both'), 'Stabilised network')
+      const owner = {}
+      const { categorical } = this.theme
+      const parts = groupBorders(this.systemRows, this.links.list.filter((link) => link.gate === 'both'), () => owner).filter((part) => part.links.length)
+
+      parts.forEach((part) => part.ids.sort((a, b) => Number(a) - Number(b)))
+      parts.sort((a, b) => b.ids.length - a.ids.length || Number(a.ids[0]) - Number(b.ids[0]))
+      parts.forEach((part, index) => {
+        part.owner = { id: part.ids[0], name: `Stabilised network ${index + 1}`, color: categorical[index % categorical.length] }
+      })
+
+      return parts
     },
 
     stabilisedNetworkById() {
       return Object.fromEntries(this.stabilisedNetworks.flatMap((part) => part.ids.map((id) => [id, part.owner.id])))
     },
 
-    connectedNetworks() {
-      return this.networkParts(this.links.list, 'Network')
-    },
-
     // The groups the borders go round, in the legend's order (each `{ name, color }`, with `legend`
     // where the legend says more than the name, and no `name` where the shapes go unnamed).
-    // Networks provide their parts too, so unstabilised shortcuts aren't drawn inside their borders.
+    // Stabilised networks provide their parts too, so unstabilised shortcuts aren't drawn inside their borders.
     borderGroups() {
-      if (this.borders === 'stabilised' || this.borders === 'networks') {
-        const parts = this.borders === 'stabilised' ? this.stabilisedNetworks : this.connectedNetworks
+      if (this.borders === 'stabilised') {
+        const parts = this.stabilisedNetworks
 
         return { owners: parts.map((part) => part.owner), parts }
       }
@@ -1012,7 +1020,10 @@ export default {
 
         this.keepMap()
         this.layer = setting('mapLayer', 'geological')
-        this.borders = setting('mapBorders', 'none')
+        // A saved choice the map no longer offers falls back to none.
+        const borders = setting('mapBorders', 'none')
+
+        this.borders = BORDER_OPTIONS.some((option) => option.value === borders) ? borders : 'none'
         this.linkLength = setting('mapLinkLength', 'travel')
         const arrange = setting('mapArrange', {})
 
@@ -1130,21 +1141,6 @@ export default {
 
     saveArrange() {
       this.setSetting('mapArrange', { ...this.arrange })
-    },
-
-    networkParts(links, label) {
-      const owner = {}
-      const parts = groupBorders(this.systemRows, links, () => owner).filter((part) => part.links.length)
-
-      // A network needs at least one link. Sort by size and lowest system ID so its name and
-      // colour don't depend on the order the save returned its systems or jump points.
-      parts.forEach((part) => part.ids.sort((a, b) => Number(a) - Number(b)))
-      parts.sort((a, b) => b.ids.length - a.ids.length || Number(a.ids[0]) - Number(b.ids[0]))
-      parts.forEach((part, index) => {
-        part.owner = { id: part.ids[0], name: `${label} ${index + 1}`, color: this.theme.categorical[index % this.theme.categorical.length] }
-      })
-
-      return parts
     },
 
     toggleLock() {
