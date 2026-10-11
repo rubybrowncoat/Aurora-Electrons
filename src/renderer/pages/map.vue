@@ -113,7 +113,7 @@
             <div ref="canvas" class="map-canvas" aria-label="Galactic map of the known systems and their jump links" />
             <div ref="minimap" class="map-minimap" @pointerdown="fitted = false" />
             <div class="map-controls">
-              <v-btn icon small aria-label="Centre on the capital" title="Centre on the capital" :disabled="!systemRows.length" @click="focusCapital"><v-icon small>mdi-crosshairs-gps</v-icon></v-btn>
+              <v-btn icon small :aria-label="centreLabel" :title="centreLabel" :disabled="!systemRows.length" @click="focusOrigin"><v-icon small>{{ panelSystem ? 'mdi-crosshairs' : 'mdi-crosshairs-gps' }}</v-icon></v-btn>
               <v-btn icon small aria-label="Fit the map" title="Fit the map" :disabled="!systemRows.length" @click="fitView"><v-icon small>mdi-fit-to-screen</v-icon></v-btn>
               <v-btn icon small :color="locked ? 'primary' : undefined" :aria-pressed="String(locked)" :aria-label="lockLabel" :title="lockLabel" @click="toggleLock"><v-icon small>{{ locked ? 'mdi-lock' : 'mdi-lock-open-variant-outline' }}</v-icon></v-btn>
               <v-btn icon small aria-label="Export as PNG" title="Export as PNG" :disabled="!!busy || !systemRows.length" @click="exportPng"><v-icon small>mdi-camera</v-icon></v-btn>
@@ -819,19 +819,24 @@ export default {
       return this.capitalId ? hopsFrom(this.capitalId, this.neighbours) : {}
     },
 
-    // Where Jumps and Travel measure from: the one system selected, else the capital.
-    distanceOrigin() {
+    // The one system selected, else the capital: where Jumps and Travel measure from, and what the
+    // centre button centres on.
+    originId() {
       return this.panelSystem ? this.panelSystem.id : this.capitalId
     },
 
-    originHops() {
-      const { distanceOrigin } = this
+    centreLabel() {
+      return this.panelSystem ? `Centre on ${this.panelSystem.Name}` : 'Centre on the capital'
+    },
 
-      if (!distanceOrigin) {
+    originHops() {
+      const { originId } = this
+
+      if (!originId) {
         return {}
       }
 
-      return distanceOrigin === this.capitalId ? this.hops : hopsFrom(distanceOrigin, this.neighbours)
+      return originId === this.capitalId ? this.hops : hopsFrom(originId, this.neighbours)
     },
 
     farthestHop() {
@@ -841,14 +846,14 @@ export default {
     // Kilometres from the origin's star to each system's on the shortest explored route, as the game's
     // galactic map measures distance.
     originKm() {
-      const { distanceOrigin } = this
+      const { originId } = this
       const km = {}
 
-      if (!distanceOrigin) {
+      if (!originId) {
         return km
       }
 
-      const distanceTo = buildDistanceMap(this.jumpPoints, [{ SystemID: Number(distanceOrigin), Xcor: 0, Ycor: 0 }])
+      const distanceTo = buildDistanceMap(this.jumpPoints, [{ SystemID: Number(originId), Xcor: 0, Ycor: 0 }])
 
       this.systemRows.forEach((row) => {
         const found = distanceTo({ SystemID: row.SystemID, Xcor: 0, Ycor: 0 })
@@ -1422,7 +1427,7 @@ export default {
           items.push({ kind: 'ring', color: colors.ring, style: 'double', width: 4, label: `Two or more stars (${multiple})` })
         }
       } else {
-        const origin = this.rowById[this.distanceOrigin]
+        const origin = this.rowById[this.originId]
         const far = this.layer === 'travel' ? `${this.count(this.farthestKm / 1e9, 1)} billion km` : `${this.farthestHop} ${this.farthestHop === 1 ? 'jump' : 'jumps'}`
         const distances = this.layer === 'travel' ? this.originKm : this.originHops
 
@@ -1605,7 +1610,7 @@ export default {
     },
 
     // Selecting one system measures Jumps and Travel from it.
-    distanceOrigin() {
+    originId() {
       if (this.layer === 'jumps' || this.layer === 'travel') {
         this.restyle()
       }
@@ -1935,7 +1940,7 @@ export default {
       } else {
         const travel = this.layer === 'travel'
         const distance = travel ? this.originKm[row.id] : this.originHops[row.id]
-        const origin = row.id === this.distanceOrigin
+        const origin = row.id === this.originId
 
         marker = {
           ...marker,
@@ -2564,8 +2569,8 @@ export default {
       this.graph.animate({ center: { eles: node }, zoom: Math.max(this.graph.zoom(), 1) }, { duration: 400 })
     },
 
-    focusCapital() {
-      const node = this.graph && this.capitalId && this.graph.getElementById(this.capitalId)
+    focusOrigin() {
+      const node = this.graph && this.originId && this.graph.getElementById(this.originId)
 
       if (node && node.nonempty()) {
         this.fitted = false
