@@ -11,6 +11,9 @@
 // between systems), turned to match the map the player has; a tidy-up starts from the map as
 // it is and pays for every cell a system moves. Both then snap to the grid and improve it.
 //
+// A nexus is drawn otherwise: it sits in the middle of an empty square, its links reaching
+// out at any angle to a ring round it, evenly spaced, the ring wider the more links it has.
+//
 // `gridLayout` is a generator: it yields { phase, progress } often so the page can run it in
 // slices between frames, and returns { positions, cost }.
 
@@ -39,6 +42,8 @@ const WEIGHTS = {
   separation: 4,
   room: 2,
   guide: 1,
+  clearing: 40,
+  spread: 12,
 }
 
 const NEIGHBOUR_CELLS = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]]
@@ -50,6 +55,29 @@ const BUCKET = 4
 
 const cellKey = (x, y) => (x + 32768) * 65536 + (y + 32768)
 const bucketKey = (bx, by) => (bx + 8192) * 16384 + (by + 8192)
+
+// A nexus's links reach out to a ring this many cells round it, one cell wider for every six
+// links past twelve, and nothing else sits inside the ring.
+const nexusRing = (links) => Math.max(2, Math.ceil(links / 6))
+
+// The cells `radius` steps out from a cell (a square ring), as [dx, dy, angle], by angle.
+const RINGS = []
+function ringCells(radius) {
+  if (!RINGS[radius]) {
+    const cells = []
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      for (let dy = -radius; dy <= radius; dy += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === radius) {
+          cells.push([dx, dy, (Math.atan2(dy, dx) * 180) / Math.PI])
+        }
+      }
+    }
+
+    RINGS[radius] = cells.sort((p, q) => p[2] - q[2])
+  }
+
+  return RINGS[radius]
+}
 
 function mulberry32(seed) {
   let a = seed >>> 0
@@ -159,6 +187,15 @@ function buildState({ nodes, edges, capitalId, options }) {
 
   const capital = index.has(String(capitalId)) ? index.get(String(capitalId)) : 0
 
+  const ring = new Int32Array(n)
+  const nexuses = []
+  nodes.forEach((node, i) => {
+    if (node.nexus) {
+      ring[i] = nexusRing(neighbours[i].length)
+      nexuses.push(i)
+    }
+  })
+
   return {
     n,
     m,
@@ -169,6 +206,8 @@ function buildState({ nodes, edges, capitalId, options }) {
     neighbours,
     capital,
     pinned: Uint8Array.from(nodes, (node) => (node.pinned ? 1 : 0)),
+    ring,
+    nexuses,
 
     group,
     groupX: new Float64Array(groupKeys.size),
@@ -288,15 +327,17 @@ function clearCells(state) {
   }
 }
 
-// Long links cost more the longer they get; links off the eight directions cost extra.
+// Long links cost more the longer they get; links off the eight directions cost extra. A
+// nexus's links are free out to its ring, at any angle, so they can fan out round it.
 function edgeCost(state, e) {
-  const { x, y, ea, eb, weights } = state
+  const { x, y, ea, eb, ring, weights } = state
   const dx = Math.abs(x[ea[e]] - x[eb[e]])
   const dy = Math.abs(y[ea[e]] - y[eb[e]])
-  const extra = Math.max(dx, dy) - 1
+  const reach = Math.max(1, ring[ea[e]], ring[eb[e]])
+  const extra = Math.max(0, Math.max(dx, dy) - reach)
 
   let cost = weights.length * extra + weights.lengthSquared * extra * extra
-  if (dx !== 0 && dy !== 0) {
+  if (reach === 1 && dx !== 0 && dy !== 0) {
     cost += dx === dy ? weights.diagonal : weights.oblique
   }
 
@@ -380,9 +421,11 @@ function occlusionCost(state, e, w) {
 }
 
 // The gaps between a system's links: up to four links want 90° apart, more share the
-// circle. A system with two links also pays for every 45° its line turns.
+// circle. A nexus's links share it evenly at any angle, the ones still to place too, and each
+// gap pays for the part of its share it lacks, so many links weigh no less than a few. A
+// system with two links also pays for every 45° its line turns.
 function angleCost(state, v) {
-  const { x, y, ea, eb, incident, placed, weights } = state
+  const { x, y, ea, eb, incident, placed, ring, weights } = state
   const angles = []
   for (const e of incident[v]) {
     const other = ea[e] === v ? eb[e] : ea[e]
@@ -397,16 +440,16 @@ function angleCost(state, v) {
 
   angles.sort((p, q) => p - q)
 
-  const wanted = angles.length <= 4 ? 90 : Math.max(45, 360 / angles.length)
+  const wanted = ring[v] ? 360 / incident[v].length : angles.length <= 4 ? 90 : Math.max(45, 360 / angles.length)
   let cost = 0
   for (let i = 0; i < angles.length; i += 1) {
     const gap = i + 1 < angles.length ? angles[i + 1] - angles[i] : angles[0] + 360 - angles[i]
     if (gap < wanted - 0.5) {
-      cost += (wanted - gap) / 45
+      cost += (wanted - gap) / (ring[v] ? wanted : 45)
     }
   }
 
-  cost *= weights.angle
+  cost *= ring[v] ? weights.spread : weights.angle
 
   if (angles.length === 2 && incident[v].length === 2) {
     const turn = Math.abs(angles[1] - angles[0])
@@ -482,6 +525,30 @@ function separationCost(state, v) {
   }
 
   return cost
+}
+
+// Systems inside a nexus's ring, more the nearer the nexus they sit: those round `v` if it is
+// a nexus, and `v` inside another nexus's ring unless that nexus is in the set too (it counts
+// them itself), so each pair is counted once.
+function clearingCost(state, v) {
+  const { x, y, ring, nexuses, placed, mark, occupied } = state
+  const r = ring[v]
+  let depth = 0
+  for (let dx = 1 - r; dx < r; dx += 1) {
+    for (let dy = 1 - r; dy < r; dy += 1) {
+      if ((dx || dy) && occupied.has(cellKey(x[v] + dx, y[v] + dy))) {
+        depth += r - Math.max(Math.abs(dx), Math.abs(dy))
+      }
+    }
+  }
+
+  for (const u of nexuses) {
+    if (u !== v && placed[u] && !mark[u]) {
+      depth += Math.max(0, ring[u] - Math.max(Math.abs(x[v] - x[u]), Math.abs(y[v] - y[u])))
+    }
+  }
+
+  return depth * state.weights.clearing
 }
 
 // Every cost that involves a system in `set`, each counted once.
@@ -578,7 +645,7 @@ function localCost(state, set) {
   }
 
   for (const v of set) {
-    cost += nodeCost(state, v) + separationCost(state, v)
+    cost += nodeCost(state, v) + separationCost(state, v) + clearingCost(state, v)
   }
 
   for (const e of local) {
@@ -696,27 +763,34 @@ function translations(state, set, cells) {
   })
 }
 
-// Hops between every pair of systems. Pairs in different pieces of the map get one more than
+// Hops between every pair of systems, a link to a nexus counting as far as its ring so the
+// systems round it start out there. Pairs in different pieces of the map get one more than
 // the longest path; systems of one group sit a little closer and of two groups a little
 // further, so groups start out together.
 function hopDistances(state) {
-  const { n, neighbours, group } = state
+  const { n, neighbours, group, ring } = state
   const distances = new Float64Array(n * n).fill(-1)
-  const queue = new Int32Array(n)
   let longest = 1
   for (let source = 0; source < n; source += 1) {
     const row = source * n
     distances[row + source] = 0
-    let head = 0
-    let tail = 0
-    queue[tail++] = source
-    while (head < tail) {
-      const v = queue[head++]
-      for (const w of neighbours[v]) {
-        if (distances[row + w] < 0) {
-          distances[row + w] = distances[row + v] + 1
-          longest = Math.max(longest, distances[row + w])
-          queue[tail++] = w
+
+    // Shortest paths over links of whole lengths, taking the systems a distance at a time.
+    const reached = [[source]]
+    for (let d = 0; d < reached.length; d += 1) {
+      for (const v of reached[d] || []) {
+        if (distances[row + v] !== d) {
+          continue
+        }
+
+        for (const w of neighbours[v]) {
+          const through = d + Math.max(1, ring[v], ring[w])
+          if (distances[row + w] < 0 || through < distances[row + w]) {
+            distances[row + w] = through
+            longest = Math.max(longest, through)
+            reached[through] = reached[through] || []
+            reached[through].push(w)
+          }
         }
       }
     }
@@ -889,7 +963,7 @@ function alignToCurrent(state, sx, sy, current) {
 
 // Puts systems down one at a time, outward from the capital, each on the cheapest free cell
 // near where `targetX`/`targetY` (in cells) would have it. Pinned systems go first, on their
-// own cells.
+// own cells, then nexuses, widest ring first, so the rest keep out of their rings.
 function* placeNear(state, targetX, targetY, rng) {
   const { n, neighbours, capital } = state
   state.guided = true
@@ -923,8 +997,10 @@ function* placeNear(state, targetX, targetY, rng) {
     }
   }
 
+  const nexusesFirst = [...state.nexuses].sort((p, q) => state.ring[q] - state.ring[p])
+
   let done = 0
-  for (const v of order) {
+  for (const v of [...nexusesFirst, ...order.filter((w) => !state.ring[w])]) {
     done += 1
     if (state.placed[v]) {
       continue
@@ -938,7 +1014,7 @@ function* placeNear(state, targetX, targetY, rng) {
     for (let radius = 0; radius <= 2 || bestCost === Infinity; radius += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
         for (let dy = -radius; dy <= radius; dy += 1) {
-          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius || state.occupied.has(cellKey(cx + dx, cy + dy))) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius || state.occupied.has(cellKey(cx + dx, cy + dy)) || inRing(state, v, cx + dx, cy + dy)) {
             continue
           }
 
@@ -962,6 +1038,27 @@ function* placeNear(state, targetX, targetY, rng) {
 
   state.guided = false
   state.room = false
+}
+
+// Whether `v` on this cell would sit inside a nexus's ring or, being a nexus, have a system
+// inside its own. Placing keeps the rings empty; after that, the search only pays for it.
+function inRing(state, v, x, y) {
+  const { ring, nexuses, placed, occupied } = state
+  for (const u of nexuses) {
+    if (u !== v && placed[u] && Math.max(Math.abs(x - state.x[u]), Math.abs(y - state.y[u])) < ring[u]) {
+      return true
+    }
+  }
+
+  for (let dx = 1 - ring[v]; dx < ring[v]; dx += 1) {
+    for (let dy = 1 - ring[v]; dy < ring[v]; dy += 1) {
+      if ((dx || dy) && occupied.has(cellKey(x + dx, y + dy))) {
+        return true
+      }
+    }
+  }
+
+  return false
 }
 
 // The pieces that hang off the map by a single system: take that system away and they come
@@ -1113,18 +1210,70 @@ function shuffled(n, rng) {
   return order
 }
 
+// A nexus's links spread evenly round its ring in the order they run now, at eight turns of
+// the whole fan, each linked system taking what `carry` gives for it along. Linked systems
+// that are pinned or nexuses themselves stay where they are.
+function fanLayouts(state, v, carry) {
+  const { x, y, ring, neighbours, placed, pinned } = state
+  const angle = (w) => (Math.atan2(y[w] - y[v], x[w] - x[v]) * 180) / Math.PI
+  const spokes = neighbours[v].filter((w) => placed[w] && !pinned[w] && !ring[w]).sort((p, q) => angle(p) - angle(q))
+  if (spokes.length < 2) {
+    return null
+  }
+
+  const loads = spokes.map(carry)
+  const set = [...spokes, ...loads.flat()]
+  const cells = ringCells(ring[v])
+  const step = 360 / neighbours[v].length
+  const candidates = []
+  for (let turn = 0; turn < 8; turn += 1) {
+    const start = angle(spokes[0]) + ((turn - 3.5) * step) / 8
+    const taken = new Uint8Array(cells.length)
+    const targets = new Int32Array(set.length * 2)
+    let k = spokes.length
+    spokes.forEach((w, i) => {
+      let best = 0
+      let bestOff = Infinity
+      cells.forEach(([, , cellAngle], c) => {
+        const off = Math.abs(((((cellAngle - start - i * step) % 360) + 540) % 360) - 180)
+        if (!taken[c] && off < bestOff) {
+          best = c
+          bestOff = off
+        }
+      })
+
+      taken[best] = 1
+      const dx = x[v] + cells[best][0] - x[w]
+      const dy = y[v] + cells[best][1] - y[w]
+      targets[i * 2] = x[w] + dx
+      targets[i * 2 + 1] = y[w] + dy
+      for (const u of loads[i]) {
+        targets[k * 2] = x[u] + dx
+        targets[k * 2 + 1] = y[u] + dy
+        k += 1
+      }
+    })
+
+    candidates.push(targets)
+  }
+
+  return { set, candidates }
+}
+
 function* improve(state, rng, { heated, settle, warmth }) {
   const { n, neighbours } = state
   const pieces = pendantPieces(state)
   const runs = loopRuns(state, pieces)
 
   // What a system drags along when it moves: the pieces that hang from it.
-  const carried = Array.from({ length: n }, () => [])
+  const hanging = Array.from({ length: n }, () => [])
   for (const { anchor, members } of pieces) {
     if (anchor >= 0) {
-      carried[anchor].push(...members)
+      hanging[anchor].push(members)
     }
   }
+
+  const carried = hanging.map((list) => list.flat())
 
   const carryLimit = Math.max(24, n / 8)
   const rounds = heated + settle
@@ -1152,9 +1301,9 @@ function* improve(state, rng, { heated, settle, warmth }) {
         }
       }
 
-      // Beside each system it links to, wherever that is.
+      // Beside each system it links to, wherever that is, or on its ring if it's a nexus.
       for (const w of neighbours[v]) {
-        for (const [dx, dy] of NEIGHBOUR_CELLS) {
+        for (const [dx, dy] of state.ring[w] ? ringCells(state.ring[w]) : NEIGHBOUR_CELLS) {
           cells.push([state.x[w] + dx, state.y[w] + dy])
         }
       }
@@ -1217,6 +1366,17 @@ function* improve(state, rng, { heated, settle, warmth }) {
       gain += tryCandidates(state, members, translations(state, members, cells), rng, temperature)
     }
 
+    // Each nexus's links fanned out round it, alone and then with what hangs off them (but not
+    // the nexus itself, where it hangs off one of them).
+    for (const v of state.nexuses) {
+      for (const carry of [() => [], (w) => hanging[w].filter((members) => members.length < carryLimit && !members.includes(v)).flat()]) {
+        const fan = fanLayouts(state, v, carry)
+        if (fan) {
+          gain += tryCandidates(state, fan.set, fan.candidates, rng, temperature)
+        }
+      }
+    }
+
     const cost = totalCost(state)
     if (cost < best.cost - 1e-6) {
       best = { cost, cells: snapshot(state, all) }
@@ -1234,10 +1394,11 @@ function* improve(state, rng, { heated, settle, warmth }) {
   }
 }
 
-// Lays out `nodes` ({ id, group, pinned }) joined by `edges` ([idA, idB]) on a grid.
+// Lays out `nodes` ({ id, group, pinned, nexus }) joined by `edges` ([idA, idB]) on a grid.
 // `positions` ({ id: { x, y } }, game units) is the map as it is: a tidy-up starts from it, a
 // rebuild keeps its orientation, and pinned systems keep their place. The capital keeps its
-// position and the rest is laid out around it, `options.spacing` game units apart.
+// position and the rest is laid out around it, `options.spacing` game units apart. A system
+// marked `nexus` gets its links fanned out round it.
 export function* gridLayout({ nodes, edges, capitalId = null, positions = {}, options = {} }) {
   const settings = { ...GRID_LAYOUT_DEFAULTS, ...options }
   const state = buildState({ nodes, edges, capitalId, options: settings })

@@ -44,6 +44,8 @@
                 </v-select>
               </div>
               <v-checkbox v-model="arrange.diagonals" label="Allow links at 45°" dense hide-details @change="saveArrange" />
+              <v-checkbox v-model="arrange.nexuses" label="Centre nexuses" dense hide-details @change="saveArrange" />
+              <div v-if="arrange.nexuses" class="caption text--secondary mt-2">{{ nexusHint }}</div>
               <div v-if="arrange.keepTogether.includes('stabilised')" class="caption text--secondary mt-2">Only jumps stabilised at both ends join a network.</div>
               <div v-if="arrange.keepTogether.length > 1" class="caption text--secondary mt-2">With several choices, systems stay with those sharing every selected group.</div>
               <div v-if="groupList.length" class="mt-4">
@@ -283,6 +285,9 @@ const KEEP_TOGETHER = [
   { value: 'stabilised', text: 'Stabilised networks', short: 'networks' },
 ]
 
+// Arrange can centre the systems with more jump points than this, the nexuses.
+const NEXUS_JUMP_POINTS = 6
+
 const PHASES = {
   stress: 'Spreading the systems out',
   place: 'Putting them on the grid',
@@ -416,7 +421,7 @@ export default {
       borders: 'none',
       linkLength: 'travel',
       locked: false,
-      arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [] },
+      arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [], nexuses: false },
       pinned: [],
       groups: [],
 
@@ -816,6 +821,28 @@ export default {
       })
 
       return keys
+    },
+
+    // The systems with more jump points charted than NEXUS_JUMP_POINTS, explored or not.
+    nexusIds() {
+      const counts = {}
+
+      this.jumpPoints.forEach((jumpPoint) => {
+        const id = String(jumpPoint.SystemID)
+        counts[id] = (counts[id] || 0) + 1
+      })
+
+      return new Set(Object.keys(counts).filter((id) => counts[id] > NEXUS_JUMP_POINTS && this.rowById[id]))
+    },
+
+    nexusHint() {
+      const count = this.nexusIds.size
+
+      if (!count) {
+        return `No system has more than ${NEXUS_JUMP_POINTS} jump points.`
+      }
+
+      return `${count} ${count === 1 ? 'system has' : 'systems have'} more than ${NEXUS_JUMP_POINTS} jump points. Each sits in the middle of its links, which fan out round it at any angle, with more room the more links it has.`
     },
 
     // Everything the map's elements are built from; a change rebuilds them.
@@ -1897,7 +1924,7 @@ export default {
       const positions = this.graphPositions()
       const before = layoutQuality({ edges: this.linkPairs, positions })
       const iterator = gridLayout({
-        nodes: this.systemRows.map((row) => ({ id: row.id, group: this.keepTogetherKeys[row.id] || null, pinned: this.pinnedSet.has(row.id) })),
+        nodes: this.systemRows.map((row) => ({ id: row.id, group: this.keepTogetherKeys[row.id] || null, pinned: this.pinnedSet.has(row.id), nexus: this.arrange.nexuses && this.nexusIds.has(row.id) })),
         edges: this.linkPairs,
         capitalId: this.capitalId,
         positions,
