@@ -11,7 +11,8 @@
 
   Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample
   defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES
-  (comma-separated routes, default the list in smoke-pages.js).
+  (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1
+  checks complete PNG export, high-DPI borders and layout restoration on /map.
  */
 const os = require('os')
 const fs = require('fs')
@@ -238,6 +239,24 @@ const run = async () => {
   const setupProblems = problems
   const results = []
 
+  if (process.env.SMOKE_MAP_EXPORT === '1') {
+    // Capture the export in the smoke process without opening a native save
+    // dialog. Decode and write the real PNG produced by the renderer.
+    await app.evaluate(({ ipcMain, nativeImage }, output) => {
+      globalThis.__mapExports = []
+      ipcMain.removeHandler('save-png')
+      ipcMain.handle('save-png', (_event, data) => {
+        const buffer = Buffer.from(data, 'base64')
+        const image = nativeImage.createFromBuffer(buffer)
+        const filePath = `${output}/map-export-${globalThis.__mapExports.length + 1}.png`
+
+        globalThis.__mapExports.push({ ...image.getSize(), bytes: buffer.length, empty: image.isEmpty(), filePath, data })
+
+        return { canceled: false, filePath }
+      })
+    }, OUT)
+  }
+
   for (const route of PAGES) {
     problems = []
 
@@ -247,6 +266,64 @@ const run = async () => {
     }, route)
     await wait(250)
     await settle()
+
+    if (route === '/map' && process.env.SMOKE_MAP_EXPORT === '1') {
+      // Each export has to leave the positions, zoom and marker sizes as it found them. The
+      // second runs at DPR 2 with sector borders. Their legend narrows the stage, which refits
+      // a map nobody has moved, so each snapshot is taken right around its own export.
+      const exportOnce = () => page.evaluate(async () => {
+        const map = window.__smoke.map
+        const state = () => JSON.stringify([map.graphPositions(), map.graph.zoom(), map.markerMinimum])
+        const before = state()
+        const bounds = map.graph.elements().boundingBox()
+
+        await map.exportPng()
+
+        return { systems: map.graph.nodes().length, bounds, restored: before === state() }
+      })
+
+      await page.evaluate(() => {
+        const findMap = (component) => component.$options.name === 'MapPage'
+          ? component
+          : component.$children.map(findMap).find(Boolean)
+
+        window.__smoke.map = findMap(window.$app)
+      })
+
+      const first = await exportOnce()
+      let second
+
+      try {
+        await page.evaluate(() => {
+          const map = window.__smoke.map
+
+          window.__smoke.exportRestore = { borders: map.borders, dpi: Object.getOwnPropertyDescriptor(window, 'devicePixelRatio') }
+          Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 })
+          map.borders = 'sectors'
+        })
+        await wait(250)
+        await settle()
+        second = await exportOnce()
+      } finally {
+        await page.evaluate(() => {
+          const { borders, dpi } = window.__smoke.exportRestore
+
+          window.__smoke.map.borders = borders
+          if (dpi) {
+            Object.defineProperty(window, 'devicePixelRatio', dpi)
+          } else {
+            delete window.devicePixelRatio
+          }
+        })
+      }
+
+      const exported = await app.evaluate(() => globalThis.__mapExports)
+
+      exported.forEach((image) => fs.writeFileSync(image.filePath, Buffer.from(image.data, 'base64')))
+      check('PNG exports decode', exported.length === 2 && exported.every((image) => !image.empty && image.bytes > 0), JSON.stringify(exported, (key, value) => key === 'data' ? undefined : value))
+      check('PNG export bounded', exported.length === 2 && exported.every((image) => image.width <= 8192 && image.height <= 8192 && image.width * image.height <= 32 * 1024 * 1024), `${first.systems} systems; source bounds ${Math.round(first.bounds.w)} × ${Math.round(first.bounds.h)}`)
+      check('PNG preserves layout', first.restored && second.restored, 'positions, zoom and marker sizes restored after each export')
+    }
 
     const name = route === '/' ? 'empires' : route.slice(1)
     const screenshot = path.join(OUT, `${name}.png`)

@@ -2026,17 +2026,22 @@ export default {
       }
     },
 
-    // The whole map with its borders, at twice the screen's resolution.
+    // The whole map with its borders. Keep both canvases within a bounded size;
+    // oversized canvases produce an empty data URL that Image.decode() rejects.
     async exportPng() {
       const graph = this.graph
-      // cytoscape renders its PNG at `scale` times the device pixel ratio.
-      const scale = 2 * (window.devicePixelRatio || 1)
+      const requestedScale = 2 * (window.devicePixelRatio || 1)
       const geometry = this.borderGeometry(MARKER_BASE_SIZE)
 
       try {
         const image = new Image()
         let systems
         let places
+        let x1
+        let y1
+        let width
+        let height
+        let scale
 
         // Export at zoom 1, without the screen's minimum-size enlargement. Restore the interactive
         // marker sizes and rings before the next frame.
@@ -2044,20 +2049,27 @@ export default {
 
         try {
           systems = graph.elements().boundingBox({ useCache: false })
-          image.src = graph.png({ full: true, scale: 2 })
           places = this.borderLabels()
+          const borders = bordersBox(this.borderParts, geometry, places) || systems
+
+          x1 = Math.min(systems.x1, borders.x1) - 20
+          y1 = Math.min(systems.y1, borders.y1) - 20
+          width = Math.ceil(Math.max(systems.x2, borders.x2) + 20 - x1)
+          height = Math.ceil(Math.max(systems.y2, borders.y2) + 20 - y1)
+          scale = Math.min(requestedScale, 8192 / width, 8192 / height, Math.sqrt((32 * 1024 * 1024) / (width * height)))
+          // max dimensions use output pixels, independently of display DPI. They
+          // also keep the graph raster at the same scale as the border canvas.
+          image.src = graph.png({ full: true, maxWidth: Math.ceil(systems.w) * scale, maxHeight: Math.ceil(systems.h) * scale })
         } finally {
           this.setZoomStyle(graph.zoom())
         }
 
-        const borders = bordersBox(this.borderParts, geometry, places) || systems
-        const x1 = Math.min(systems.x1, borders.x1) - 20
-        const y1 = Math.min(systems.y1, borders.y1) - 20
         const canvas = document.createElement('canvas')
+
+        canvas.width = Math.max(1, Math.floor(width * scale))
+        canvas.height = Math.max(1, Math.floor(height * scale))
         const context = canvas.getContext('2d')
 
-        canvas.width = Math.ceil((Math.max(systems.x2, borders.x2) + 20 - x1) * scale)
-        canvas.height = Math.ceil((Math.max(systems.y2, borders.y2) + 20 - y1) * scale)
         await image.decode()
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
         drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
@@ -2073,7 +2085,7 @@ export default {
         const result = await ipcRenderer.invoke('save-png', canvas.toDataURL('image/png').split(',')[1], `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`)
 
         if (!result?.canceled) {
-          this.activateSnackbar({ color: 'success', text: 'Map exported as PNG' })
+          this.activateSnackbar({ color: 'success', text: `Map exported as PNG (${canvas.width} × ${canvas.height})` })
         }
       } catch (error) {
         this.activateSnackbar({ color: 'error', text: `Couldn't export the map: ${error.message}` })
