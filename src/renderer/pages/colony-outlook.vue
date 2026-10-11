@@ -4,12 +4,12 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Horizon</span>
-          <v-btn-toggle v-model="horizon" mandatory dense @change="(value) => config.set('colonyOutlookHorizon', value)">
+          <v-btn-toggle v-model="horizon" mandatory dense>
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
         <v-col cols="auto" class="mr-4">
-          <v-switch v-model="attentionOnly" label="Only colonies that need attention" dense hide-details class="mt-0" @change="(value) => config.set('colonyOutlookAttentionOnly', !!value)" />
+          <v-switch v-model="attentionOnly" label="Only colonies that need attention" dense hide-details class="mt-0" />
         </v-col>
         <v-col cols="12" sm="auto" class="search-field">
           <v-text-field v-model="search" label="Search colonies" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable />
@@ -35,7 +35,7 @@
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
-          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, -1] }" :no-data-text="focusId ? 'This colony has no population, or is not one of yours.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or is not one of yours.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.name`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div>
@@ -144,6 +144,7 @@ import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
 import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
@@ -159,21 +160,30 @@ const INPUT_LABELS = {
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
+const HORIZONS = [5, 10, 25, 50]
+const COLONY_PAGE_SIZES = [25, 50, -1]
+
 export default {
   name: 'ColonyOutlookPage',
   components: { ChartCanvas, LoadState, PageLink, StatTiles },
-  mixins: [deepLink, loadState(INPUT_LABELS), productionModifiers],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      horizon: { key: 'colonyOutlookHorizon', default: 10, valid: oneOf(HORIZONS) },
+      attentionOnly: { key: 'colonyOutlookAttentionOnly', default: false },
+      search: { key: 'colonyOutlookSearch', default: '', scope: 'race' },
+      colonyTable: tableView('colonyOutlookTable', { sortBy: ['populationSort'], sortDesc: [true], itemsPerPage: 25, itemsPerPageOptions: COLONY_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      horizonOptions: [5, 10, 25, 50],
-      horizon: 10,
-      attentionOnly: false,
-      search: '',
+      horizonOptions: HORIZONS,
+      colonyPageSizes: COLONY_PAGE_SIZES,
       focusId: null,
       linkTo,
       expanded: [],
-      sortBy: ['populationSort'],
-      sortDesc: [true],
     }
   },
   computed: {
@@ -370,10 +380,6 @@ export default {
     RaceID() {
       this.focusId = null
     },
-  },
-  created() {
-    this.horizon = this.config.get('colonyOutlookHorizon', 10)
-    this.attentionOnly = this.config.get('colonyOutlookAttentionOnly', false)
   },
   methods: {
     applyLink(query) {
