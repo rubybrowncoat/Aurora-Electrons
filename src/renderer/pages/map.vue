@@ -96,6 +96,10 @@
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
                 <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :text="item.text" :color="item.color" :hollow="item.hollow" :offset="item.offset" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
+                <template v-else-if="item.kind === 'slider'">
+                  <span class="mr-2">{{ discoveryAsOf.text }}</span>
+                  <v-slider class="discovery-slider" :value="discoveryAsOf.year" :min="discoveryAsOf.min" :max="discoveryAsOf.max" step="1" dense hide-details thumb-label aria-label="The map as the race knew it at the end of a year" @change="setDiscoveryYear" />
+                </template>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
                 {{ item.label }}
@@ -610,6 +614,8 @@ export default {
       marks: [],
       // Show can leave the systems it marks nothing at faint.
       dimUnmarked: false,
+      // The Discovery era's As of: the last year it shows the race's finds through, or null for all of them.
+      discoveryYear: null,
 
       foundId: null,
       findText: null,
@@ -1087,6 +1093,29 @@ export default {
       return times.length ? { first: Math.min(...times), last: Math.max(...times) } : null
     },
 
+    // The Discovery era's As of slider, from the game's start to the year the last system was found: the
+    // year chosen and the game time its end comes at, which the systems found from then on fade behind.
+    discoveryAsOf() {
+      const range = this.discoveryRange
+
+      if (!range) {
+        return null
+      }
+
+      const start = gameTime(this.StartYear, 0)
+      const min = start.year()
+      const max = gameTime(this.StartYear, range.last).year()
+      const year = this.discoveryYear === null ? max : Math.min(max, Math.max(min, this.discoveryYear))
+      const cutoff = year < max ? start.set('year', year + 1).diff(start, 'second') : null
+      const known = cutoff === null ? this.systemRows.length : this.systemRows.filter((row) => !(row.DiscoveredTime >= cutoff)).length
+
+      return { min, max, year, cutoff, text: `As of ${start.set('year', year).format('YYYY')}: ${this.count(known)} of ${this.count(this.systemRows.length)} systems known` }
+    },
+
+    discoveryCutoff() {
+      return this.discoveryAsOf ? this.discoveryAsOf.cutoff : null
+    },
+
     // The legend's entries for Show: each glyph, mark or line it draws, with how many systems have it.
     marksLegend() {
       const items = []
@@ -1361,6 +1390,10 @@ export default {
 
         if (range) {
           items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})` })
+
+          if (this.discoveryAsOf.max > this.discoveryAsOf.min) {
+            items.push({ kind: 'slider', label: '' })
+          }
         }
       } else if (this.layer === 'habitability') {
         if (this.habitabilityNote) {
@@ -1507,6 +1540,7 @@ export default {
 
         this.marks = Array.isArray(marks) ? marks.filter((value) => MARKS.some((mark) => mark.value === value)) : []
         this.dimUnmarked = setting('mapDim', false)
+        this.discoveryYear = null
         this.resetGraph()
       },
     },
@@ -1552,6 +1586,12 @@ export default {
 
     dimUnmarked() {
       this.restyle()
+    },
+
+    discoveryCutoff() {
+      if (this.layer === 'discovery') {
+        this.restyle()
+      }
     },
 
     features() {
@@ -1652,6 +1692,10 @@ export default {
     toggleDim() {
       this.dimUnmarked = !this.dimUnmarked
       this.setSetting('mapDim', this.dimUnmarked)
+    },
+
+    setDiscoveryYear(year) {
+      this.discoveryYear = year >= this.discoveryAsOf.max ? null : year
     },
 
     saveArrange() {
@@ -1761,7 +1805,8 @@ export default {
             'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DASHES),
           },
         },
-        // Faint: a system Show marks nothing at while Dim is on, and its links.
+        // Faint: a system Show marks nothing at while Dim is on, or one found after the Discovery era's As
+        // of, and its links.
         {
           selector: 'node[?dim]',
           style: {
@@ -1907,8 +1952,9 @@ export default {
         label,
         imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM) / row.size : 1,
         image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface),
-        // Show marks the system where it has a glyph or its name carries more than the name.
-        dim: this.dimUnmarked && this.marks.length > 0 && !glyphs.length && label === row.Name,
+        // Show marks the system where it has a glyph or its name carries more than the name. The Discovery
+        // era's As of fades the systems found after its year.
+        dim: (this.dimUnmarked && this.marks.length > 0 && !glyphs.length && label === row.Name) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff),
       }
     },
 
@@ -3074,6 +3120,18 @@ export default {
     border: 1px solid var(--ae-border);
     border-radius: 3px;
     font-variant-numeric: tabular-nums;
+  }
+
+  // The Discovery era's As of, in the legend's row.
+  .discovery-slider {
+    flex: none;
+    width: 160px;
+    margin: 0 6px 0 0;
+    padding: 0;
+
+    .v-input__slot {
+      margin: 0;
+    }
   }
 
   .map-controls,
