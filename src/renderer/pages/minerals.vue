@@ -1206,13 +1206,9 @@ export default {
           return null
         }
 
-        // Saves before 2.7 have no FCT_Game.AllowCMC: the game founded civilian mining complexes in every game.
-        const [[[race]], [[game]]] = await Promise.all([
-          this.database.query(`select MineProduction, MaximumOrbitalMiningDiameter from FCT_Race where GameID = ${this.GameID} and RaceID = ${this.RaceID}`),
-          this.database.query(`select * from FCT_Game where GameID = ${this.GameID}`),
-        ])
+        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, FCT_Game.AllowCMC from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
 
-        return race ? { ...race, AllowCMC: game && game.AllowCMC !== undefined ? game.AllowCMC : 1 } : null
+        return race || null
       }),
       default: null,
     },
