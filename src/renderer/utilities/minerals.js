@@ -19,8 +19,7 @@ export const MINERALS = [
 ]
 
 // A civilian mining complex can be founded on a body with more than 10,000 t of Duranium or Gallicite at
-// accessibility 0.7 or better (the game's TryEstablishCivilianMiningColony). The site's other conditions are
-// in colonization.js `cmcSite`.
+// accessibility 0.7 or better. The site's other conditions are in colonization.js `cmcSite`.
 export const CMC_MINERAL_IDS = [1, 11]
 const CMC_MIN_AMOUNT = 10000
 const CMC_MIN_ACCESSIBILITY = 0.7
@@ -78,7 +77,7 @@ export const SECONDS_PER_DAY = 86400
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
 
-// t/yr at the deposit's current accessibility, as the game's RecalculateMiningProductionTotals has it: each kind
+// t/yr at the deposit's current accessibility, as the game works it out: each kind
 // of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political
 // status, automated mines and civilian complexes don't; radiation, the governor and a quarter of the sector
 // commander's bonus scale them all. `owned` drops civilian complexes the race taxes instead of buying from.

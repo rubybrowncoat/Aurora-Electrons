@@ -108,9 +108,8 @@ export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
   }
 }
 
-// Whether the game counts a body as near enough to its star for a civilian mining complex
-// (SystemBody.IsWithinApoapsisDistance(80, false)): an asteroid, comet or planet that is not a gas giant needs its
-// farthest point under 80 AU; a moon goes by its planet's orbital distance.
+// Whether the game counts a body as near enough to its star for a civilian mining complex: an asteroid, comet or
+// planet that is not a gas giant needs its farthest point under 80 AU; a moon goes by its planet's orbital distance.
 export const cmcBodyInReach = (body) => {
   if (body.BodyClass === 2) {
     return body.ParentOrbitalDistance < CMC_REACH_AU
@@ -123,7 +122,7 @@ export const cmcBodyInReach = (body) => {
   return [1, 3, 5].includes(body.BodyClass) && body.OrbitalDistance * (1 + (body.Eccentricity || 0)) < CMC_REACH_AU
 }
 
-// Whether the game lets a body of this star host a civilian mining complex (Star.CheckNearbyLagrangePoints(80)).
+// Whether the game lets a body of this star host a civilian mining complex.
 // The primary star always does. A companion does when it, or for a companion of a companion the star it circles,
 // keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU
 // and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its
@@ -149,10 +148,10 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
 // Before the race's rules load, no body is a ready site.
 export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
 
-// What the game also wants for a civilian mining complex, beyond the deposit (Game.ProcessNewCivilianMiningColonyCreation
-// and TryEstablishCivilianMiningColony). Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes
-// switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the
-// race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
+// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from
+// colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with
+// people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its
+// star in reach, not banned, and no colony on it.
 // A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count
 // (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
 export const cmcSite = (body, rules) => ({

@@ -1,7 +1,7 @@
 // Routes over the jump points a race has explored, as its fleets fly them: a straight line inside a system, no
-// distance through a jump point. The game's auto-route (Fleet.FindNearestAutoRouteDestination) takes the fewest
-// transits and breaks ties by whichever path it meets first; here ties go to the shorter distance. The galactic
-// map's distance (Game.PopulateMapDistancesFromSelectedSystem) is the shortest in kilometres, centre to centre.
+// distance through a jump point. The game's auto-route takes the fewest transits and breaks ties by whichever path
+// it meets first; here ties go to the shorter distance. The galactic map's distance is the shortest in kilometres,
+// centre to centre.
 
 export const KM_PER_AU = 149600000
 
@@ -85,8 +85,8 @@ const queue = (before) => {
 }
 
 // The way from `a` to `b` inside one system. With two or more Lagrange points there, a fleet that uses them flies
-// to one, jumps to another at no distance and goes on from there, when that beats the straight line
-// (Fleet.QueueMoveOrder with AutoIncludeLagrangePoints). `via` is that [entry, exit] pair, or null.
+// to one, jumps to another at no distance and goes on from there, when that beats the straight line. `via` is
+// that [entry, exit] pair, or null.
 const inSystem = (a, b, lagrangePoints = []) => {
   let best = { km: hypot(a, b), via: null }
 

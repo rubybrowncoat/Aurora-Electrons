@@ -194,8 +194,8 @@ const INPUT_LABELS = {
 const INPUTS = Object.keys(INPUT_LABELS)
 const SECONDS_PER_DAY = 86400
 
-// A fleet's movement settings, as the game's auto-route applies them (Fleet.FindNearestAutoRouteDestination,
-// RaceSysSurvey.GetAdjacentExploredSystemsForAutoRoute). None of them keeps a route from leaving its origin.
+// A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its
+// origin.
 const OPTIONS = [
   { key: 'avoidDanger', config: 'routesAvoidDanger', default: true, label: 'Avoid danger', hint: 'Skips systems with a danger rating your ships there don\'t outweigh in protection value.' },
   { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race you have no trade treaty with.' },

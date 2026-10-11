@@ -371,7 +371,7 @@ const INPUTS = Object.keys(INPUT_LABELS)
 const MINERAL_NAMES = MINERALS.map((mineral) => mineral.name)
 const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: 'Ve', 8: 'So', 9: 'Ur', 10: 'Cr', 11: 'Ga' }
 
-// Helpers.MassDriverCapacityPerInstallation: tonnes a year per mass driver.
+// Tonnes a year per mass driver.
 const MASS_DRIVER_TONS = 5000
 
 // Accessibility bands, best first, with their slot in the chart palette.
@@ -1176,7 +1176,7 @@ export default {
       return BANDS.map((band) => `${band.label}: ${this.count(row.bands[band.id])} t`).join(', ')
     },
 
-    // Accessibility holds down to half the original amount, then falls with what is left (Population.cs).
+    // Accessibility holds down to half the original amount, then falls with what is left.
     depletionText(deposit, long = false) {
       if (!(deposit.HalfOriginalAmount > 0)) {
         return ''

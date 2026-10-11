@@ -212,7 +212,7 @@ const SECONDS_PER_DAY = 86400
 
 const EARTH_SURFACE_AREA = 511187128
 
-// Water vapour (2.7.1 source, Helpers): condensation a year, hydrographic extent per atm, relative humidity factor.
+// Water vapour, as the game has it: condensation a year, hydrographic extent per atm, relative humidity factor.
 const CONDENSATION_PER_YEAR = 0.1
 const CONDENSATION_TO_HYDRO_RATE = 40
 const WATER_VAPOUR_IN_ATMOSPHERE = 0.01
@@ -287,14 +287,14 @@ const CAPACITY_COLUMNS = [
 // Less than this left over reads as nothing (it rounds to 0).
 const IDLE_MINIMUM = 0.5
 
-// The capacity a project draws on: components and space stations use construction capacity
-// (2.7.1 source, Game.LoadIndustrialProjects).
+// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space
+// stations included, uses construction capacity.
 const categoryOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
 // When each industrial project of one colony and category starts and finishes, in days from now, as the game runs
-// them (2.7.1 source, Population.ProcessIndustrialProjects). Every project out of the queue builds at its share of the
-// capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue
-// order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left.
+// them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds
+// nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running
+// and paused ones leave, skipping any that don't, until none is left.
 // Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where
 // that never happens.
 const industrySchedule = (projects, capacity) => {
@@ -345,8 +345,8 @@ const industrySchedule = (projects, capacity) => {
 }
 
 // How many units the colony's stock covers when that is less than the project still needs, and the material that
-// runs out first, as the game cuts each build to it (2.7.1 source, MineralData.LimitIndustrialProjectAmountByMinerals,
-// then fuel in Population.ProcessIndustrialProjects). The mineral columns are per unit.
+// runs out first: each cycle the game cuts each build to what the colony's stock covers, minerals first and then
+// fuel. The mineral columns are per unit.
 const shortageOf = (project) => {
   let covered = Infinity
   let limit = null
@@ -371,9 +371,8 @@ const shortageOf = (project) => {
 }
 
 // How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game
-// runs them: the terraformers change the gas each cycle and the job ends once it passes the target (2.7.1 source,
-// Population.ProcessTerraforming); vapour above the air's humidity then condenses into the oceans, up to 0.1 atm a year,
-// and the oceans evaporate up to it (Game.ProcessWaterVapourCondensation, Game.ProcessWaterVapourEvaporation). `step`:
+// runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the
+// air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`:
 // atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON
 // years.
 const waterVapourCycles = (terraform, step, years) => {
@@ -571,7 +570,7 @@ export default {
         return group.map((project) => {
           const rate = (capacity * project.Percentage) / 100
           const { start, finish } = schedule[project.ID]
-          // A spied NPR builds from its capital's stock (2.7.1 source, Population.ProcessIndustrialProjects).
+          // A spied NPR builds from its capital's stock.
           const shortage = this.RaceNPR ? null : shortageOf(project)
           let status
 
@@ -658,8 +657,7 @@ export default {
       })
     },
 
-    // Each task gets its percentage of the colony's ground formation construction capacity (2.7.1 source,
-    // Population.RecalculateGroundFormationConstructionCapacity and ProcessGroundUnitTrainingAndReplacements).
+    // Each task gets its percentage of the colony's ground formation construction capacity.
     trainingJobs() {
       return this.trainings.map((training) => {
         const gfccs = this.gfccCount(training.PopulationID)
@@ -778,8 +776,8 @@ export default {
     },
 
     // Idle capacity per colony with any: the share of each industrial capacity no running project uses, the share
-    // of GFCC capacity no training task uses, labs no project uses and slipways without a task (2.7.1 source,
-    // Economics shipyard list: Slipways less the yard's tasks).
+    // of GFCC capacity no training task uses, labs no project uses and slipways without a task (a yard's Slipways
+    // less its tasks, as the game's shipyard list counts them).
     colonyCapacity() {
       const shares = {}
       const trainingShares = {}
@@ -1250,7 +1248,7 @@ export default {
           return []
         }
 
-        // A commander without the terraforming bonus counts as 1 (2.7.1 source, Commander.GetBonusValue).
+        // A commander without the terraforming bonus counts as 1.
         const [orbitalTerraformers] = await this.database.query(`select sum(FCT_ShipClass.Terraformers * coalesce(FCT_CommanderBonuses.BonusValue, 1)) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`)
 
         const [planetaryTerraformers] = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`)

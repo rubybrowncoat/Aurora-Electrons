@@ -135,7 +135,7 @@ const INPUTS = Object.keys(INPUT_LABELS)
 const STABILISATION_COMPONENT = 29
 const STABILISE_ACTION = 217
 const PRODUCTION_BONUS = 5
-// Fleet.CalculateLagrangePointStabilisationTime: 60 / sqrt(mass) months of Helpers.SecondsPerMonth (30 days).
+// Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 const BASE_DAYS = 60 * 30
 const TYPES = { 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: 'Super-jovian' }
 

@@ -16,7 +16,7 @@ const rows = (database, sql) => database.query(sql).then(([items]) => items)
 // and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets
 // `CmcStarInReach` (colonization.js `cmcStarInReach` for its star), and each own colony `BlocksCmc`: whether the
 // game would keep a civilian mining complex off its body (people, automated mines, complexes or ex-complexes, or
-// no orbital miners of the race assigned to it there; Game.TryEstablishCivilianMiningColony).
+// no orbital miners of the race assigned to it there).
 export const loadBodies = async (database, { GameID, RaceID }) => {
   const [bodies, gases, deposits, own, alien, stars, lagrangePoints] = await Promise.all([
     rows(
@@ -129,9 +129,9 @@ inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID
 where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`
   ).then(([row]) => row || { ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
-// What the game asks of the race before it founds a civilian mining complex (Game.ProcessNewCivilianMiningColonyCreation):
-// complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system
-// the millions of people in the race's largest colony there (for colonization.js `cmcSite`).
+// What the game asks of the race before it founds a civilian mining complex: complexes switched on for the game, a
+// shipyard, more than one colony with people or infrastructure, and per system the millions of people in the race's
+// largest colony there (for colonization.js `cmcSite`).
 export const loadCmcRules = async (database, { GameID, RaceID }) => {
   const [[race], colonies] = await Promise.all([
     rows(

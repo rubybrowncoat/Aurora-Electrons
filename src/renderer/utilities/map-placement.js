@@ -1,5 +1,5 @@
 // The game puts a newly found system this far from the one it was reached from, and no
-// closer than this to any other (RaceSysSurvey.AssignRelativeMapCoordinates).
+// closer than this to any other.
 export const GAME_SPACING = 140
 const AROUND = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]
 
