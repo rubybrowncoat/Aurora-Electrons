@@ -153,7 +153,7 @@
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
               <v-btn small outlined @click="openSystemView(panelSystem.id)">System view</v-btn>
               <v-btn small outlined @click="togglePins([panelSystem.id])"><v-icon x-small left>{{ pinnedSet.has(panelSystem.id) ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ pinnedSet.has(panelSystem.id) ? 'Unpin' : 'Pin in place' }}</v-btn>
-              <v-btn v-if="groupOf[panelSystem.id] !== undefined" small text @click="leaveGroup(panelSystem.id)">Leave its group</v-btn>
+              <v-btn v-if="groupOf[panelSystem.id] !== undefined" small text @click="leaveGroups([panelSystem.id])">Leave its group</v-btn>
             </div>
           </aside>
           <aside v-else-if="selectedRows.length > 1" class="map-side">
@@ -167,8 +167,9 @@
               <v-btn small outlined :to="plannerLink(selectedIds)">Colonization Planner</v-btn>
               <v-btn small outlined @click="togglePins(selectedIds)"><v-icon x-small left>{{ allSelectedPinned ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ allSelectedPinned ? 'Unpin' : 'Pin in place' }}</v-btn>
               <v-btn small outlined @click="keepTogether(selectedIds)"><v-icon x-small left>mdi-group</v-icon>Keep together</v-btn>
+              <v-btn v-if="selectedInGroups" small text @click="leaveGroups(selectedIds)">{{ selectedInGroups === selectedIds.length ? 'Leave their groups' : `Take ${selectedInGroups} out of their groups` }}</v-btn>
             </div>
-            <div class="caption text--secondary mt-2">Keep together makes them a group, which Colour by and Borders show under Your groups. Arrange draws a group's systems together and keeps other systems from between them, as far as their links allow.</div>
+            <div class="caption text--secondary mt-2">Keep together makes them a group, which Colour by and Borders show under Your groups. Arrange draws a group's systems together and keeps other systems from between them, as far as their links allow. A group left with one system ends.</div>
           </aside>
         </div>
         <div class="panel-foot caption text--secondary">
@@ -1277,6 +1278,11 @@ export default {
 
     allSelectedPinned() {
       return this.selectedIds.every((id) => this.pinnedSet.has(id))
+    },
+
+    // How many of the selected systems are in one of the player's groups.
+    selectedInGroups() {
+      return this.selectedIds.filter((id) => this.groupOf[id] !== undefined).length
     },
 
     panelSystem() {
@@ -2608,8 +2614,11 @@ export default {
       this.setSetting('mapGroups', this.groups)
     },
 
-    leaveGroup(id) {
-      this.groups = this.groups.map((group) => group.filter((member) => member !== id)).filter((group) => group.length > 1)
+    // Takes `ids` out of their groups; a group left with one system ends.
+    leaveGroups(ids) {
+      const leaving = new Set(ids)
+
+      this.groups = this.groups.map((group) => group.filter((member) => !leaving.has(member))).filter((group) => group.length > 1)
       this.setSetting('mapGroups', this.groups)
     },
 
