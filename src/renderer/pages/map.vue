@@ -10,11 +10,11 @@
         </div>
         <div class="tool tool--layer">
           <div class="tool__label caption text--secondary">Colour by</div>
-          <v-select v-model="layer" :items="layers" aria-label="Colour systems by" dense outlined hide-details @change="(value) => setSetting('mapLayer', value)" />
+          <v-select v-model="layer" :items="layers" aria-label="Colour systems by" dense outlined hide-details />
         </div>
         <div class="tool tool--borders">
           <div class="tool__label caption text--secondary">Borders</div>
-          <v-select v-model="borders" :items="borderOptions" aria-label="Draw borders round" dense outlined hide-details @change="(value) => setSetting('mapBorders', value)" />
+          <v-select v-model="borders" :items="borderOptions" aria-label="Draw borders round" dense outlined hide-details />
         </div>
         <div class="tool tool--actions">
           <v-menu v-model="arrangeMenu" offset-y left :close-on-content-click="false" max-width="400">
@@ -24,21 +24,21 @@
             <v-card class="pa-4">
               <div class="subtitle-2">Arrange on a grid</div>
               <div class="caption text--secondary mb-3">As players lay out the galactic map: one system to a cell, links straight or at 45°, dead ends beside their system, and no link crossing another or running over a system wherever the jump network allows.</div>
-              <v-btn-toggle v-model="arrange.mode" mandatory dense @change="saveArrange">
+              <v-btn-toggle v-model="arrange.mode" mandatory dense>
                 <v-btn v-for="option in arrangeModes" :key="option.value" :value="option.value" small>{{ option.text }}</v-btn>
               </v-btn-toggle>
               <div class="caption text--secondary mt-1 mb-4">{{ arrangeModeHint }}</div>
               <div class="arrange-fields">
-                <v-select v-model="arrange.spacing" :items="spacings" label="Spacing" dense outlined hide-details @change="saveArrange" />
-                <v-select v-model="arrange.keepTogether" :items="keepTogetherOptions" label="Keep together" placeholder="Nothing" persistent-placeholder multiple dense outlined hide-details @change="saveArrange">
+                <v-select v-model="arrange.spacing" :items="spacings" label="Spacing" dense outlined hide-details />
+                <v-select v-model="arrange.keepTogether" :items="keepTogetherOptions" label="Keep together" placeholder="Nothing" persistent-placeholder multiple dense outlined hide-details>
                   <!-- One line for what's chosen, where the select would wrap each choice onto its own. -->
                   <template #selection="{ index }">
                     <span v-if="index === 0" class="v-select__selection v-select__selection--comma" :title="keepTogetherLabel">{{ keepTogetherLabel }}</span>
                   </template>
                 </v-select>
               </div>
-              <v-checkbox v-model="arrange.diagonals" label="Allow links at 45°" dense hide-details @change="saveArrange" />
-              <v-checkbox v-model="arrange.nexuses" label="Centre nexuses" dense hide-details @change="saveArrange" />
+              <v-checkbox v-model="arrange.diagonals" label="Allow links at 45°" dense hide-details />
+              <v-checkbox v-model="arrange.nexuses" label="Centre nexuses" dense hide-details />
               <div v-if="arrange.nexuses" class="caption text--secondary mt-2">{{ nexusHint }}</div>
               <div v-if="arrange.keepTogether.includes('stabilised')" class="caption text--secondary mt-2">Only jumps stabilised at both ends join a network.</div>
               <div v-if="arrange.keepTogether.length > 1" class="caption text--secondary mt-2">With several choices, systems stay with those that share all of them.</div>
@@ -63,7 +63,7 @@
             </template>
             <v-card class="pa-4">
               <div class="subtitle-2">Let the links pull the systems into place</div>
-              <v-radio-group v-model="linkLength" dense hide-details class="mt-2" @change="(value) => setSetting('mapLinkLength', value)">
+              <v-radio-group v-model="linkLength" dense hide-details class="mt-2">
                 <v-radio v-for="option in linkLengths" :key="option.value" :value="option.value" :label="option.text" />
               </v-radio-group>
               <div class="caption text--secondary mt-2">{{ linkLengthHint }}</div>
@@ -257,6 +257,7 @@ import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
@@ -600,27 +601,44 @@ const overallProgress = (mode, { phase, progress }) => {
   return phase === 'stress' ? 0.15 * progress : phase === 'place' ? 0.15 + 0.1 * progress : 0.25 + 0.75 * progress
 }
 
+// What Arrange starts from: the grid layout's defaults, nothing kept together and no nexus centring.
+const ARRANGE_DEFAULTS = { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [], nexuses: false }
+
 export default {
   name: 'MapPage',
   components: { LoadState, MapGlyph, SystemView },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      layer: { key: 'mapLayer', default: 'geological', scope: 'race' },
+      // A saved choice the map no longer offers falls back to none.
+      borders: { key: 'mapBorders', default: 'none', scope: 'race', valid: oneOf(BORDER_OPTIONS.map((option) => option.value)) },
+      linkLength: { key: 'mapLinkLength', default: 'travel', scope: 'race' },
+      // Keep together holds a list of what to keep together; an older single choice is dropped.
+      arrange: {
+        key: 'mapArrange',
+        default: ARRANGE_DEFAULTS,
+        scope: 'race',
+        normalise: (stored) => (stored !== null && typeof stored === 'object' ? { ...ARRANGE_DEFAULTS, ...stored, keepTogether: Array.isArray(stored.keepTogether) ? stored.keepTogether : [] } : undefined),
+      },
+      pinned: { key: 'mapPinned', default: [], scope: 'race' },
+      // The player's clusters, each a list of SystemIDs: systems Arrange keeps together. The code and the
+      // stored settings (mapGroups, and `groups` in mapLayer and mapBorders) call them groups.
+      groups: { key: 'mapGroups', default: [], scope: 'race' },
+      locked: { key: 'mapLocked', default: false, scope: 'race' },
+      // Marks the map no longer offered are dropped.
+      marks: { key: 'mapMarks', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => MARKS.some((mark) => mark.value === value)) : undefined) },
+      // Show can leave the systems it marks nothing at faint.
+      dimUnmarked: { key: 'mapDim', default: false, scope: 'race' },
+    }),
+  ],
   data() {
     return {
       // Set once the first reads are in, so the map stays up while the page reads a changed save.
       loaded: false,
 
-      layer: 'geological',
-      borders: 'none',
-      linkLength: 'travel',
-      locked: false,
-      arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [], nexuses: false },
-      pinned: [],
-      // The player's clusters, each a list of SystemIDs: systems Arrange keeps together. The code and the
-      // stored settings (mapGroups, and `groups` in mapLayer and mapBorders) call them groups.
-      groups: [],
-      marks: [],
-      // Show can leave the systems it marks nothing at faint.
-      dimUnmarked: false,
       // The Discovery era's As of: the last year it shows the race's finds through, or null for all of them.
       discoveryYear: null,
 
@@ -656,7 +674,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
+    ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -1557,27 +1575,7 @@ export default {
     RaceID: {
       immediate: true,
       handler() {
-        const setting = (key, fallback) => this.config.get(`${this.settingsPrefix}.${key}`, fallback)
-
         this.keepMap()
-        this.layer = setting('mapLayer', 'geological')
-        // A saved choice the map no longer offers falls back to none.
-        const borders = setting('mapBorders', 'none')
-
-        this.borders = BORDER_OPTIONS.some((option) => option.value === borders) ? borders : 'none'
-        this.linkLength = setting('mapLinkLength', 'travel')
-        const arrange = setting('mapArrange', {})
-
-        // Keep together holds a list of what to keep together; an older single choice is dropped.
-        this.arrange = { ...this.arrange, ...arrange, keepTogether: Array.isArray(arrange.keepTogether) ? arrange.keepTogether : [] }
-        this.pinned = setting('mapPinned', [])
-        this.locked = setting('mapLocked', false)
-        this.groups = setting('mapGroups', [])
-        // Marks the map no longer offers are dropped.
-        const marks = setting('mapMarks', [])
-
-        this.marks = Array.isArray(marks) ? marks.filter((value) => MARKS.some((mark) => mark.value === value)) : []
-        this.dimUnmarked = setting('mapDim', false)
         this.discoveryYear = null
         this.resetGraph()
       },
@@ -1714,31 +1712,20 @@ export default {
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
 
-    setSetting(key, value) {
-      this.config.set(`${this.settingsPrefix}.${key}`, value)
-    },
-
     toggleMark(value) {
       this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]
-      this.setSetting('mapMarks', this.marks)
     },
 
     toggleDim() {
       this.dimUnmarked = !this.dimUnmarked
-      this.setSetting('mapDim', this.dimUnmarked)
     },
 
     setDiscoveryYear(year) {
       this.discoveryYear = year >= this.discoveryAsOf.max ? null : year
     },
 
-    saveArrange() {
-      this.setSetting('mapArrange', { ...this.arrange })
-    },
-
     toggleLock() {
       this.locked = !this.locked
-      this.setSetting('mapLocked', this.locked)
     },
 
     alienControl(row) {
@@ -2638,12 +2625,10 @@ export default {
 
       ids.forEach((id) => (unpin ? pinned.delete(id) : pinned.add(id)))
       this.pinned = [...pinned]
-      this.setSetting('mapPinned', this.pinned)
     },
 
     unpinAll() {
       this.pinned = []
-      this.setSetting('mapPinned', [])
     },
 
     // Makes `ids` one cluster, taking them out of any they were in.
@@ -2652,7 +2637,6 @@ export default {
       const groups = this.groups.map((group) => group.filter((id) => !taken.has(id))).filter((group) => group.length > 1)
 
       this.groups = [...groups, [...ids]]
-      this.setSetting('mapGroups', this.groups)
     },
 
     // Takes `ids` out of their clusters; a cluster left with one system ends.
@@ -2660,12 +2644,10 @@ export default {
       const leaving = new Set(ids)
 
       this.groups = this.groups.map((group) => group.filter((member) => !leaving.has(member))).filter((group) => group.length > 1)
-      this.setSetting('mapGroups', this.groups)
     },
 
     dropGroup(index) {
       this.groups = this.groups.filter((_group, i) => i !== index)
-      this.setSetting('mapGroups', this.groups)
     },
 
     // Selects the systems of the cluster at `index` and centres the view on them.

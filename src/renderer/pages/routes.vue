@@ -34,7 +34,7 @@
           </div>
           <div class="tool">
             <div class="tool__label caption text--secondary">Route</div>
-            <v-btn-toggle v-model="order" mandatory dense @change="(value) => config.set('routesOrder', value)">
+            <v-btn-toggle v-model="order" mandatory dense>
               <v-tooltip v-for="option in orders" :key="option.value" bottom max-width="320">
                 <template #activator="{ on }">
                   <v-btn :value="option.value" small v-on="on">{{ option.label }}</v-btn>
@@ -45,7 +45,7 @@
           </div>
           <div class="tool tool--speed">
             <div class="tool__label caption text--secondary">Speed</div>
-            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="String(effectiveSpeed)" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details @change="saveSpeed">
+            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="String(effectiveSpeed)" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details>
               <template #append>
                 <v-menu offset-y left max-height="420">
                   <template #activator="{ on, attrs }">
@@ -53,7 +53,7 @@
                   </template>
                   <v-list dense>
                     <v-subheader>Speed of a class in service</v-subheader>
-                    <v-list-item v-for="shipClass in classOptions" :key="shipClass.ShipClassID" @click="useSpeed(shipClass.MaxSpeed)">
+                    <v-list-item v-for="shipClass in classOptions" :key="shipClass.ShipClassID" @click="speed = shipClass.MaxSpeed">
                       <v-list-item-content>
                         <v-list-item-title>{{ shipClass.ClassName }}</v-list-item-title>
                         <v-list-item-subtitle>{{ count(shipClass.MaxSpeed) }} km/s · {{ shipClass.Ships }} {{ shipClass.Ships === 1 ? 'ship' : 'ships' }}{{ shipClass.JumpRating ? '' : ' · no jump drive' }}</v-list-item-subtitle>
@@ -71,7 +71,7 @@
               </template>
               <v-card class="pa-4">
                 <div class="subtitle-2">As a fleet's movement settings</div>
-                <v-checkbox v-for="option in optionList" :key="option.key" v-model="options[option.key]" dense hide-details @change="(value) => config.set(option.config, !!value)">
+                <v-checkbox v-for="option in optionList" :key="option.key" :input-value="options[option.key]" dense hide-details @change="(value) => setOption(option.key, value)">
                   <template #label>
                     <div>
                       <div class="body-2">{{ option.label }}</div>
@@ -140,7 +140,7 @@
             <span>Distances from {{ origin ? origin.name : '—' }}</span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :items-per-page="15" class="clickable-rows" @click:row="(row) => setTo(`system:${row.SystemID}`)">
+          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => setTo(`system:${row.SystemID}`)">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
@@ -172,6 +172,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey, queryPlace } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
@@ -198,32 +199,44 @@ const OPTIONS = [
   { key: 'useLagrange', config: 'routesUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter, as fleets do unless told not to.' },
 ]
 
+const ORDERS = [
+  { value: 'jumps', label: 'Fewest jumps', hint: 'The game\'s auto-route: the fewest transits, then the shorter way.' },
+  { value: 'km', label: 'Shortest', hint: 'The fewest kilometres, as the galactic map\'s distances measure.' },
+]
+const DISTANCE_PAGE_SIZES = [15, 30, -1]
+// Each movement setting is kept on its own, for every game.
+const OPTION_FIELDS = Object.fromEntries(OPTIONS.map((option) => [option.key, { key: option.config, default: option.default }]))
+
 export default {
   name: 'RoutesPage',
   components: { LoadState, PageLink, StatTiles, SystemMap },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      fromKey: { key: 'routesFrom', default: null, scope: 'race' },
+      toKey: { key: 'routesTo', default: null, scope: 'race' },
+      // Only a positive speed is one; anything else is the fleet-class median.
+      speed: { key: 'routesSpeed', default: null, scope: 'race', valid: (value) => value > 0 },
+      order: { key: 'routesOrder', default: 'jumps', valid: oneOf(ORDERS.map((option) => option.value)) },
+      ...OPTION_FIELDS,
+      search: { key: 'routesSearch', default: '', scope: 'race' },
+      distanceTable: tableView('routesDistancesTable', { sortBy: ['jumpsSort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: DISTANCE_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      fromKey: null,
-      toKey: null,
       // The fleet key a link named as the origin, whose speed and movement settings apply once the fleets have loaded.
       pendingFleet: null,
-      order: 'jumps',
-      speed: null,
-      options: Object.fromEntries(OPTIONS.map((option) => [option.key, option.default])),
       optionList: OPTIONS,
-      search: '',
-      sortBy: ['jumpsSort'],
-      sortDesc: [false],
-      orders: [
-        { value: 'jumps', label: 'Fewest jumps', hint: 'The game\'s auto-route: the fewest transits, then the shorter way.' },
-        { value: 'km', label: 'Shortest', hint: 'The fewest kilometres, as the galactic map\'s distances measure.' },
-      ],
+      orders: ORDERS,
+      distancePageSizes: DISTANCE_PAGE_SIZES,
       linkTo,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -235,8 +248,8 @@ export default {
       return { near: blue, route: green, avoided: this.theme.categorical[7], out: withAlpha(this.theme.inkMuted, 0.35) }
     },
 
-    settingsPrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}`
+    options() {
+      return Object.fromEntries(OPTIONS.map((option) => [option.key, this[option.key]]))
     },
 
     links() {
@@ -554,25 +567,9 @@ export default {
     },
   },
   watch: {
-    // From, To and speed are kept per game and race; the options apply to every game.
-    RaceID: {
-      immediate: true,
-      handler() {
-        this.fromKey = this.config.get(`${this.settingsPrefix}.routesFrom`, null)
-        this.toKey = this.config.get(`${this.settingsPrefix}.routesTo`, null)
-        this.speed = this.config.get(`${this.settingsPrefix}.routesSpeed`, null)
-      },
-    },
-
     placeByKey() {
       this.adoptPendingFleet()
     },
-  },
-  created() {
-    this.order = this.config.get('routesOrder', 'jumps')
-    OPTIONS.forEach((option) => {
-      this.options[option.key] = this.config.get(option.config, option.default)
-    })
   },
   methods: {
     withAlpha,
@@ -593,13 +590,11 @@ export default {
 
       this.pendingFleet = null
       this.fromKey = key
-      this.config.set(`${this.settingsPrefix}.routesFrom`, key)
       this.adoptFleet(key)
     },
 
     setTo(key) {
       this.toKey = key || null
-      this.config.set(`${this.settingsPrefix}.routesTo`, this.toKey)
     },
 
     // From and To as the link names them; one it leaves out is cleared, so the origin is the capital.
@@ -612,8 +607,6 @@ export default {
 
       this.fromKey = keyOf(query.from)
       this.toKey = keyOf(query.to)
-      this.config.set(`${this.settingsPrefix}.routesFrom`, this.fromKey)
-      this.config.set(`${this.settingsPrefix}.routesTo`, this.toKey)
       this.pendingFleet = this.fromKey && this.fromKey.startsWith('fleet:') ? this.fromKey : null
       this.adoptPendingFleet()
     },
@@ -630,7 +623,7 @@ export default {
       const place = this.placeByKey[key]
 
       if (place && place.fleet) {
-        this.useSpeed(place.fleet.Speed)
+        this.speed = place.fleet.Speed
         this.setOption('avoidDanger', Boolean(place.fleet.AvoidDanger))
         this.setOption('avoidAlien', Boolean(place.fleet.AvoidAlienSystems))
         this.setOption('gatesOnly', !place.fleet.JumpRating)
@@ -645,17 +638,7 @@ export default {
     },
 
     setOption(key, value) {
-      this.options[key] = value
-      this.config.set(OPTIONS.find((option) => option.key === key).config, value)
-    },
-
-    useSpeed(speed) {
-      this.speed = speed
-      this.saveSpeed()
-    },
-
-    saveSpeed() {
-      this.config.set(`${this.settingsPrefix}.routesSpeed`, this.speed > 0 ? this.speed : null)
+      this[key] = Boolean(value)
     },
 
     // Flying time at the chosen speed, in the unit that reads best; nothing to fly is no time.

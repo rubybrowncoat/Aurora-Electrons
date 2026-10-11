@@ -25,14 +25,14 @@
             <span>Planets and moons</span>
             <span class="d-flex align-center flex-wrap controls">
               <v-chip v-if="selectedSystem" small close @click:close="selectedSystemId = null">{{ selectedSystem.Name }}</v-chip>
-              <v-btn-toggle v-model="view" mandatory dense @change="(value) => config.set('lagrangeView', value)">
+              <v-btn-toggle v-model="view" mandatory dense>
                 <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
               </v-btn-toggle>
-              <v-switch v-model="colonySystemsOnly" label="Systems with your colonies" dense hide-details class="mt-0" @change="(value) => config.set('lagrangeColonySystemsOnly', !!value)" />
+              <v-switch v-model="colonySystemsOnly" label="Systems with your colonies" dense hide-details class="mt-0" />
               <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
-          <v-data-table :headers="bodyHeaders" :items="visibleBodies" item-key="SystemBodyID" :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :items-per-page="15">
+          <v-data-table :headers="bodyHeaders" :items="visibleBodies" item-key="SystemBodyID" :sort-by.sync="bodiesTable.sortBy" :sort-desc.sync="bodiesTable.sortDesc" :items-per-page.sync="bodiesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: bodyPageSizes }">
             <template #[`item.name`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div class="flex-grow-1">
@@ -74,7 +74,7 @@
           <div class="panel-head">
             <span>Stabilisation ships</span>
           </div>
-          <v-data-table :headers="shipHeaders" :items="shipRows" item-key="ShipID" disable-pagination hide-default-footer>
+          <v-data-table :headers="shipHeaders" :items="shipRows" item-key="ShipID" :sort-by.sync="shipsTable.sortBy" :sort-desc.sync="shipsTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.ShipName`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div class="flex-grow-1">
@@ -115,6 +115,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
@@ -136,30 +137,39 @@ const PRODUCTION_BONUS = 5
 // Stabilising a Lagrange point takes 60 / sqrt(mass) months of 30 days.
 const BASE_DAYS = 60 * 30
 const TYPES = { 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: 'Super-jovian' }
+const VIEW_OPTIONS = [
+  { value: 'candidates', label: 'To stabilise' },
+  { value: 'stable', label: 'Stable' },
+  { value: 'all', label: 'All' },
+]
+const BODY_PAGE_SIZES = [15, 30, -1]
 
 export default {
   name: 'LagrangePage',
   components: { LoadState, PageLink, StatTiles, SystemMap },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      view: { key: 'lagrangeView', default: 'candidates', valid: oneOf(VIEW_OPTIONS.map((option) => option.value)) },
+      colonySystemsOnly: { key: 'lagrangeColonySystemsOnly', default: false },
+      search: { key: 'lagrangeSearch', default: '', scope: 'race' },
+      bodiesTable: tableView('lagrangeBodiesTable', { sortBy: ['daysSort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: BODY_PAGE_SIZES }),
+      shipsTable: tableView('lagrangeShipsTable', {}),
+    }),
+  ],
   data() {
     return {
-      view: 'candidates',
-      colonySystemsOnly: false,
-      search: '',
       selectedSystemId: null,
-      sortBy: ['daysSort'],
-      sortDesc: [false],
-      viewOptions: [
-        { value: 'candidates', label: 'To stabilise' },
-        { value: 'stable', label: 'Stable' },
-        { value: 'all', label: 'All' },
-      ],
+      viewOptions: VIEW_OPTIONS,
+      bodyPageSizes: BODY_PAGE_SIZES,
       linkTo,
       place,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -358,10 +368,6 @@ export default {
     RaceID() {
       this.selectedSystemId = null
     },
-  },
-  created() {
-    this.view = this.config.get('lagrangeView', 'candidates')
-    this.colonySystemsOnly = this.config.get('lagrangeColonySystemsOnly', false)
   },
   methods: {
     applyLink(query) {

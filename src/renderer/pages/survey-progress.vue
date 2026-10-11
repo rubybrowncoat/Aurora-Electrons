@@ -24,11 +24,11 @@
           <div class="panel-head">
             <span>Systems</span>
             <span class="d-flex align-center">
-              <v-switch v-model="showSurveyed" label="Show fully surveyed" dense hide-details class="mt-0 mr-4" @change="(value) => config.set('surveyShowSurveyed', !!value)" />
+              <v-switch v-model="showSurveyed" label="Show fully surveyed" dense hide-details class="mt-0 mr-4" />
               <v-text-field v-model="search" label="Search systems" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
-          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="onSystemClick">
+          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="systemsTable.sortBy" :sort-desc.sync="systemsTable.sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="systemsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="onSystemClick">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
@@ -85,7 +85,7 @@
             <span>Survey fleets</span>
             <v-chip small>Rates are estimates</v-chip>
           </div>
-          <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" disable-pagination hide-default-footer>
+          <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium">{{ item.FleetName }}<page-link class="ml-1" :to="linkTo.routes({ from: place.fleet(item.FleetID) })" :name="item.FleetName" /></div>
@@ -120,7 +120,7 @@
             <span>Ground surveys</span>
             <v-chip small>{{ groundRows.length }} {{ groundRows.length === 1 ? 'body' : 'bodies' }} with potential</v-chip>
           </div>
-          <v-data-table :headers="groundHeaders" :items="groundRows" item-key="SystemBodyID" disable-pagination hide-default-footer>
+          <v-data-table :headers="groundHeaders" :items="groundRows" item-key="SystemBodyID" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.name`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium">{{ item.name }}</div>
@@ -160,6 +160,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
@@ -183,28 +184,36 @@ const HOURS_PER_DAY = 24
 // FCT_SystemBody.GroundMineralSurvey, as the Minerals page labels it.
 const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const SURVEY_ORDERS = new Set([9, 12])
+const PAGE_SIZES = [15, 30, -1]
 
 export default {
   name: 'SurveyProgressPage',
   components: { LoadState, PageLink, StatTiles, SystemMap },
-  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      showSurveyed: { key: 'surveyShowSurveyed', default: false },
+      search: { key: 'surveySearch', default: '', scope: 'race' },
+      systemsTable: tableView('surveySystemsTable', { sortBy: ['remaining'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      fleetsTable: tableView('surveyFleetsTable', {}),
+      groundTable: tableView('surveyGroundTable', {}),
+    }),
+  ],
   data() {
     return {
-      showSurveyed: false,
-      search: '',
+      pageSizes: PAGE_SIZES,
       expanded: [],
       page: 1,
-      itemsPerPage: 15,
       selectedSystemId: null,
       revealPending: false,
-      sortBy: ['remaining'],
-      sortDesc: [true],
       linkTo,
       place,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -432,9 +441,6 @@ export default {
       this.revealLinked()
     },
   },
-  created() {
-    this.showSurveyed = this.config.get('surveyShowSurveyed', false)
-  },
   methods: {
     applyLink(query) {
       this.selectedSystemId = queryId(query.system)
@@ -482,15 +488,14 @@ export default {
         return false
       }
 
-      this.search = ''
-      this.sortBy = ['remaining']
-      this.sortDesc = [true]
+      this.setUnsaved('search', '')
+      this.setUnsaved('systemsTable', { ...this.systemsTable, sortBy: ['remaining'], sortDesc: [true] })
       this.expanded = [row]
 
       // The row's page in the order the table will show: unfiltered, most work left first (the
       // table's numeric sort is a stable subtraction too, so ties keep the same order).
       const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
-      const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
+      const target = this.systemsTable.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.systemsTable.itemsPerPage) + 1 : 1
 
       this.page = target
       // The table clamps the page to the pages it has before the cleared search widens the list.

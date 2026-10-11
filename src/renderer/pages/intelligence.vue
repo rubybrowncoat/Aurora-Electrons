@@ -25,7 +25,7 @@
             <div class="panel-head">
               <span>Known races</span>
             </div>
-            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 50, -1] }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
+            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
               <template #[`item.AlienRaceName`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.AlienRaceName }}</div>
@@ -102,7 +102,7 @@
               </div>
 
               <template v-if="detailView === 'classes'">
-                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.ClassName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.ClassName }}</div>
@@ -121,7 +121,7 @@
               </template>
 
               <template v-else-if="detailView === 'colonies'">
-                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :sort-by.sync="populationsTable.sortBy" :sort-desc.sync="populationsTable.sortDesc" :items-per-page.sync="populationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.PopulationName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.PopulationName }}</div>
@@ -146,7 +146,7 @@
               </template>
 
               <template v-else-if="detailView === 'sensors'">
-                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :sort-by.sync="sensorsTable.sortBy" :sort-desc.sync="sensorsTable.sortDesc" :items-per-page.sync="sensorsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.Range`]="{ item }">
                     <span v-if="item.IntelligencePoints > 100">{{ count(item.Range / 1e6, 1) }} M km, resolution {{ count(item.Resolution) }}</span>
                     <span v-else class="text--disabled">unknown until 100 points</span>
@@ -157,7 +157,7 @@
               </template>
 
               <template v-else-if="detailView === 'ground'">
-                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" :items-per-page.sync="groundTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template v-for="counter in GROUND_COUNTERS" #[`item.${counter.value}`]="{ item }">
                     <span :key="counter.value" :class="{ 'text--disabled': item[counter.value] < GROUND_THRESHOLD }">{{ count(item[counter.value]) }}<span v-if="item[counter.value] < GROUND_THRESHOLD"> / {{ GROUND_THRESHOLD }}</span></span>
                   </template>
@@ -195,6 +195,7 @@ import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { historyConfig } from '../utilities/history'
@@ -237,6 +238,10 @@ const GROUND_COUNTERS = [
   { text: 'Kills seen (hit points)', value: 'Destroyed' },
 ]
 
+const DETAIL_VIEWS = ['classes', 'colonies', 'sensors', 'ground', 'places']
+const RACE_PAGE_SIZES = [15, 50, -1]
+const DETAIL_PAGE_SIZES = [5, 10, 15, -1]
+
 const compact = (value) => {
   const size = Math.abs(value)
 
@@ -254,11 +259,24 @@ const compact = (value) => {
 export default {
   name: 'IntelligencePage',
   components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [deepLink, loadState(INPUT_LABELS)],
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      detailView: { key: 'intelligenceDetailView', default: 'classes', valid: oneOf(DETAIL_VIEWS) },
+      savedAlien: { key: 'intelligenceAlien', default: null, scope: 'race' },
+      racesTable: tableView('intelligenceRacesTable', { itemsPerPage: 15, itemsPerPageOptions: RACE_PAGE_SIZES }),
+      classesTable: tableView('intelligenceClassesTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      populationsTable: tableView('intelligencePopulationsTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      sensorsTable: tableView('intelligenceSensorsTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      groundTable: tableView('intelligenceGroundTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
       selectedId: null,
-      detailView: 'classes',
+      racePageSizes: RACE_PAGE_SIZES,
+      detailPageSizes: DETAIL_PAGE_SIZES,
       POPULATION_FIELDS,
       GROUND_COUNTERS,
       GROUND_THRESHOLD,
@@ -543,7 +561,7 @@ export default {
     // The race kept for this race's view, else the one with the most ships seen, when none is selected.
     selectDefault() {
       if (!this.selected && this.rows.length) {
-        const saved = this.config.get(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, null)
+        const saved = this.savedAlien
         const fallback = this.rows.slice().sort((a, b) => (b.KnownShips + b.DestroyedShips) - (a.KnownShips + a.DestroyedShips))[0]
 
         this.selectedId = this.rows.some((row) => row.AlienRaceID === saved) ? saved : fallback.AlienRaceID
@@ -551,7 +569,7 @@ export default {
     },
     select(AlienRaceID) {
       this.selectedId = AlienRaceID
-      this.config.set(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, AlienRaceID)
+      this.savedAlien = AlienRaceID
     },
     count(value, decimals = 0) {
       return separatedNumber(roundToDecimal(value || 0, decimals), this.separator)
