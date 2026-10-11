@@ -1,26 +1,10 @@
 <template>
   <div>
     <v-container fluid class="hauling-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row>
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" />
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
@@ -126,8 +110,11 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const INPUT_LABELS = {
@@ -136,7 +123,6 @@ const INPUT_LABELS = {
   fleetShips: 'their ships',
   orders: 'their orders',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
 
@@ -164,12 +150,13 @@ const placeOf = (order) => {
 
 export default {
   name: 'HaulingPage',
+  components: { LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
       expanded: [],
       routeSortBy: ['movedSort'],
       routeSortDesc: [true],
-      loadErrors: {},
     }
   },
   computed: {
@@ -179,18 +166,6 @@ export default {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
 
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     shipsByFleet() {
@@ -342,10 +317,6 @@ export default {
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },
@@ -416,37 +387,6 @@ export default {
 
 <style lang="scss">
 .hauling-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
   td {
     font-variant-numeric: tabular-nums;
   }

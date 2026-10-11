@@ -10,26 +10,10 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <template v-if="view === 'fuel'">
           <v-row>
@@ -215,9 +199,12 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
@@ -232,7 +219,6 @@ const INPUT_LABELS = {
   navalAdmins: 'naval admin commands',
   populationProductionModifiers: 'production modifiers',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
 
@@ -240,8 +226,8 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       view: 'fuel',
@@ -250,7 +236,6 @@ export default {
       refinerySortDesc: [true],
       locationSortBy: ['runwaySort'],
       locationSortDesc: [false],
-      loadErrors: {},
     }
   },
   computed: {
@@ -264,18 +249,6 @@ export default {
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     raceFuelProduction() {
@@ -540,10 +513,6 @@ export default {
     this.showIdleLocations = this.config.get('logisticsShowIdleLocations', false)
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     modifierOf(populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
@@ -673,53 +642,6 @@ export default {
 
 <style lang="scss">
 .logistics-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .swatch {
     display: inline-block;
     width: 12px;

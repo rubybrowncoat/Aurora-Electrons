@@ -37,15 +37,7 @@
       </v-alert>
 
       <template v-else>
-        <v-row class="mt-1">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-1" />
 
         <v-alert v-if="allSnapshots.length === 1" type="info" outlined dense class="mt-4">
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
@@ -112,6 +104,7 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import StatTiles from '../components/page/StatTiles.vue'
 import { gameTime } from '../utilities/aurora'
 import { historyConfig } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -153,7 +146,7 @@ const RIVAL_METRICS = [
 
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, StatTiles },
   data() {
     return {
       view: 'charts',
@@ -483,49 +476,6 @@ export default {
 
 <style lang="scss">
 .history-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .swatch {
     display: inline-block;
     width: 12px;

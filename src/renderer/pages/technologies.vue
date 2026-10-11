@@ -14,30 +14,14 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="research">
         <v-alert v-if="startPoints > 0" type="info" outlined dense class="mt-3">
           This empire has {{ count(startPoints) }} starting tech points left. The game's Research tab can spend them on techs instantly.
         </v-alert>
 
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value" :title="tile.value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <div class="mt-4">
           <fields-view v-if="view === 'fields'" :research="research" :field-id="activeFieldId" :search="search || ''" @select-field="setField" @select-tech="selectTech" />
@@ -53,14 +37,17 @@
 import { mapGetters } from 'vuex'
 
 import { sectionStyle } from '../components/navigation/section-style'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
 import FieldsView from '../components/research/FieldsView.vue'
 import LinesView from '../components/research/LinesView.vue'
 import PathView from '../components/research/PathView.vue'
 import { statusStyle } from '../components/research/status-style'
 import countFormat from '../mixins/count-format'
+import loadState from '../mixins/load-state'
 import { gameTime, toBoolean } from '../utilities/aurora'
 import { SERVING_COMMANDER } from '../utilities/commanders'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { sectionById } from '../utilities/navigation'
 import { ACTIVE, AVAILABLE, BLOCKED, buildLines, buildTechGraph, countStatuses, DONE, durationLabel, evaluateResearch, fieldBonuses, groupTechs, LOCKED, QUEUED, researchState, scheduleProjects } from '../utilities/research'
 
@@ -76,14 +63,13 @@ const INPUT_LABELS = {
   game: 'the game clock',
   race: 'the race',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 const SECONDS_PER_YEAR = 31536000
 const VIEWS = ['fields', 'lines', 'path']
 
 export default {
   name: 'TechnologiesPage',
-  components: { FieldsView, LinesView, PathView },
-  mixins: [countFormat],
+  components: { FieldsView, LinesView, LoadState, PathView, StatTiles },
+  mixins: [countFormat, loadState(INPUT_LABELS)],
   data() {
     return {
       viewOptions: [
@@ -96,7 +82,6 @@ export default {
       targetId: null,
       hideFinished: true,
       search: '',
-      loadErrors: {},
     }
   },
   computed: {
@@ -110,18 +95,6 @@ export default {
       const dark = this.$vuetify.theme.dark
 
       return { ...sectionStyle(dark, sectionById.research), ...statusStyle(dark) }
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     startPoints() {
@@ -250,10 +223,6 @@ export default {
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     setView(view) {
       this.view = view
       this.config.set(`${this.preferencePrefix}View`, view)
@@ -474,21 +443,6 @@ export default {
 .tech-page {
   .search-field {
     min-width: 260px;
-  }
-
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   td {
