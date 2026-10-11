@@ -37,8 +37,8 @@ const PAGES = [
   { route: '/designed-tech', section: 'research', tab: 'Designed', title: 'Designed Tech', icon: 'mdi-atom', blurb: 'Your component designs by category: their figures, the classes that mount them, and side-by-side comparison.', keywords: 'components engines sensors weapons armour compare obsolete unused classes' },
   { route: '/engines', section: null, tab: 'Engines', title: 'Engine Planner', icon: 'mdi-engine-outline', blurb: 'Engine design inputs and thrust.', hidden: true, keywords: 'engine thrust' },
   { route: '/', section: null, tab: 'Empires', title: 'Empires', noRace: true, icon: 'mdi-flag-variant-outline', blurb: 'Every game in the save and its empires: pick the one the other pages show.', keywords: 'games races pick select switch' },
-  { route: '/settings', section: null, tab: 'Settings', title: 'Settings', noRace: true, icon: 'mdi-wrench', blurb: 'NPR visibility, number format, CMC minerals and maintenance thresholds.', keywords: 'preferences options' },
-  { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help' },
+  { route: '/settings', section: null, tab: 'Settings', title: 'Settings', noRace: true, icon: 'mdi-wrench', blurb: 'Number format, theme and NPR empires, and resetting the views and filters the pages remember.', keywords: 'preferences options thousands separator dark theme npr spy reset views filters' },
+  { route: '/about', section: null, tab: 'About', title: 'About', noRace: true, icon: 'mdi-information-outline', blurb: 'Version, license, links, how to contribute and where your data lives.', keywords: 'version license github forum feedback credits contribute help data folder settings file' },
 ]
 
 // The forum thread for updates and feedback. The About page links to it while this is set, and says "coming soon" while it is empty.

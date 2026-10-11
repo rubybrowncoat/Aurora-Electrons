@@ -1,94 +1,263 @@
 <template>
   <div>
-    <v-container fluid>
+    <v-container fluid class="settings-page">
       <v-row>
-        <v-col>
-          <div class="display-1">
-            Application settings
-          </div>
+        <v-col cols="12" md="6" class="d-flex flex-column">
+          <v-card class="panel flex-grow-1" elevation="1">
+            <div class="panel-head"><span>Display</span></div>
+            <div class="panel-body">
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Thousands separator</div>
+                  <div class="caption text--secondary">How every page writes large numbers.</div>
+                </div>
+                <v-select :value="separatorName" :items="separatorOptions" aria-label="Thousands separator" class="setting__control" dense outlined hide-details @change="setSeparator" />
+              </div>
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Dark theme</div>
+                  <div class="caption text--secondary">The lamp in the app bar switches it too.</div>
+                </div>
+                <v-switch :input-value="dark" aria-label="Dark theme" class="setting__switch" inset dense hide-details @change="setDark" />
+              </div>
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Computer-run empires</div>
+                  <div class="caption text--secondary">Lists the NPR empires on the Empires page beside the players' ones, so their data can be opened, and adds the Rivals chart to Empire History.</div>
+                </div>
+                <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
+              </div>
+            </div>
+            <div class="panel-foot caption text--secondary">Each setting applies at once, on every page, and is kept in the settings file; About shows where it is.</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" md="6" class="d-flex flex-column">
+          <v-card class="panel flex-grow-1" elevation="1">
+            <div class="panel-head">
+              <span>Remembered views</span>
+              <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>
+            </div>
+            <div class="panel-body">
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">{{ empireName || 'This empire' }}</div>
+                  <div class="caption text--secondary">{{ empireNote }}</div>
+                </div>
+                <v-btn outlined :disabled="!empireCount" @click="ask('empire')">Reset</v-btn>
+              </div>
+              <div class="setting">
+                <div class="setting__text">
+                  <div class="body-2">Every empire and the app-wide views</div>
+                  <div class="caption text--secondary">{{ allNote }}</div>
+                </div>
+                <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
+              </div>
+            </div>
+            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at your last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
+          </v-card>
         </v-col>
       </v-row>
-      <v-row justify="start">
-        <v-col cols="12">
-          <v-switch v-model="spyNPR" inset :label="spyNPR ? 'Displays all races.' : 'Shows only player controlled races.'" @change="setSpyNPR" />
-        </v-col>
-      </v-row>
-      <v-row justify="start">
-        <v-col cols="12" md="4">
-          <v-select v-model="selectedSeparator" class="d-flex" :items="curatedSeparators" hint="Thousands Separator" solo persistent-hint dense @change="setSelectedSeparator" />
-        </v-col>
-        <v-col cols="12" md="8">
-          <v-text-field v-model="exampleString" label="Example Number" :hint="separatedNumber(exampleString, thousandsSeparator)" solo persistent-hint dense type="number" />
-        </v-col>
-      </v-row>
+
+      <v-dialog :value="Boolean(pending)" max-width="460" @input="(open) => !open && (pending = null)">
+        <v-card v-if="pending">
+          <v-card-title class="subtitle-1">{{ pending.title }}</v-card-title>
+          <v-card-text>{{ pending.text }}</v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn text @click="pending = null">Cancel</v-btn>
+            <v-btn text color="error" @click="reset">Reset</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-container>
   </div>
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapActions, mapGetters, mapState } from 'vuex'
 
-import { separatedNumber } from '../utilities/math'
+import countFormat from '../mixins/count-format'
+import { separatedNumber, thousandsSeparator } from '../utilities/math'
+
+const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
+
+// The settings the Display panel holds. A reset keeps them.
+const APP_SETTINGS = ['darkMode', 'spyNPR', 'selectedSeparator']
+// What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
+const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+// The app-wide keys a reset clears: every top-level key but the empires' and the Display settings.
+const appViews = (store) => Object.keys(store).filter((key) => key !== 'game' && !APP_SETTINGS.includes(key))
+
+// The keys a reset clears for each empire with any stored: [{ GameID, RaceID, keys }], ids as stored (strings).
+const empireViews = (store) => Object.entries(isObject(store.game) ? store.game : {}).flatMap(([GameID, game]) => Object.entries(isObject(game) && isObject(game.race) ? game.race : {}).map(([RaceID, values]) => ({ GameID, RaceID, keys: isObject(values) ? Object.keys(values).filter((key) => !KEPT_EMPIRE_KEYS.includes(key)) : [] }))).filter(({ keys }) => keys.length)
+
+// The settings with the views cleared: one empire's (`only`, { GameID, RaceID }), or every empire's and the app-wide ones.
+const withoutViews = (store, only) => {
+  const next = JSON.parse(JSON.stringify(store))
+
+  if (!only) {
+    appViews(next).forEach((key) => delete next[key])
+  }
+
+  empireViews(next).filter(({ GameID, RaceID }) => !only || (GameID === String(only.GameID) && RaceID === String(only.RaceID))).forEach(({ GameID, RaceID, keys }) => {
+    const races = next.game[GameID].race
+
+    keys.forEach((key) => delete races[RaceID][key])
+
+    if (!Object.keys(races[RaceID]).length) {
+      delete races[RaceID]
+    }
+  })
+
+  return next
+}
+
+const values = (number) => (number === 1 ? 'value' : 'values')
 
 export default {
-  components: {},
-  data () {
+  name: 'SettingsPage',
+  mixins: [countFormat],
+  data() {
     return {
-      curatedSeparators: ['Tick', 'Comma', 'Dash', 'Space', 'None'],
-
+      // The settings file as last read; the counts come from it.
+      stored: {},
       spyNPR: false,
-      selectedSeparator: 'Tick',
-      thousandsSeparator: '\'',
-      exampleString: '1234567890.1234',
+      // The reset waiting for its confirmation: { scope, title, text }.
+      pending: null,
     }
   },
-  methods: {
-    separatedNumber,
-
-    // APPLICATION
-    setSpyNPR (value) {
-      this.config.set('spyNPR', value)
-
-      this.spyNPR = value
-    },
-    setSelectedSeparator (value) {
-      this.config.set('selectedSeparator', value)
-
-      this.selectedSeparator = value
-      this.thousandsSeparator = value === 'Tick' ? '\'' : value === 'Comma' ? ',' : value === 'Dash' ? '-' : value === 'Space' ? ' ' : ''
-    },
-  },
   computed: {
-    ...mapGetters([
-      'config',
-    ]),
+    ...mapGetters(['config', 'GameID', 'RaceID']),
+    ...mapState('empires', ['games']),
 
-    // APPLICATION
-    storedSpyNPR () {
-      return this.config.get('spyNPR', false)
-    },
-    storedSelectedSeparator () {
+    separatorName() {
       return this.config.get('selectedSeparator', 'Tick')
+    },
+
+    separatorOptions() {
+      return SEPARATORS.map((name) => ({ value: name, text: `${name} · ${separatedNumber(1234567, thousandsSeparator(name))}` }))
+    },
+
+    dark() {
+      return this.$vuetify.theme.dark
+    },
+
+    empireName() {
+      const game = this.games.find((entry) => entry.GameID === this.GameID)
+      const race = game && game.Races.find((entry) => entry.RaceID === this.RaceID)
+
+      return race ? race.RaceTitle : ''
+    },
+
+    empires() {
+      return empireViews(this.stored)
+    },
+
+    empireCount() {
+      const own = this.empires.find(({ GameID, RaceID }) => GameID === String(this.GameID) && RaceID === String(this.RaceID))
+
+      return this.RaceID && own ? own.keys.length : 0
+    },
+
+    appCount() {
+      return appViews(this.stored).length
+    },
+
+    totalCount() {
+      return this.appCount + this.empires.reduce((total, { keys }) => total + keys.length, 0)
+    },
+
+    empireNote() {
+      if (!this.RaceID) {
+        return 'Pick an empire to reset what its pages remember.'
+      }
+
+      return this.empireCount ? `${this.count(this.empireCount)} remembered ${values(this.empireCount)} about its systems, colonies, fleets and searches.` : 'Its pages remember nothing of their own yet.'
+    },
+
+    allNote() {
+      const empires = this.empires.length
+
+      return `${this.count(this.appCount)} app-wide ${values(this.appCount)}, and ${this.count(this.totalCount - this.appCount)} over ${this.count(empires)} ${empires === 1 ? 'empire' : 'empires'}.`
     },
   },
   watch: {
-    storedSpyNPR: {
+    config: {
       immediate: true,
-      handler (spyNPR) {
-        this.spyNPR = spyNPR
+      handler(config) {
+        this.spyNPR = config.get('spyNPR', false)
+        this.stored = config.store
       },
     },
-    storedSelectedSeparator: {
-      immediate: true,
-      handler (selectedSeparator) {
-        this.selectedSeparator = selectedSeparator
-        this.thousandsSeparator = selectedSeparator === 'Tick' ? '\'' : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-      },
+  },
+  methods: {
+    ...mapActions(['reinstantiateConfig']),
+    ...mapActions('snackbar', ['activateSnackbar']),
+
+    // Every reader of the settings (number formats, the empire list, the layout) takes the change from a new settings instance.
+    save(key, value) {
+      this.config.set(key, value)
+      this.reinstantiateConfig()
+    },
+
+    setSeparator(name) {
+      this.save('selectedSeparator', name)
+    },
+
+    setDark(value) {
+      this.$vuetify.theme.dark = Boolean(value)
+      this.save('darkMode', Boolean(value))
+    },
+
+    setSpyNPR(value) {
+      this.save('spyNPR', Boolean(value))
+    },
+
+    ask(scope) {
+      this.pending = scope === 'empire' ? { scope, title: `Reset what ${this.empireName || 'this empire'}'s pages remember?`, text: `${this.count(this.empireCount)} ${values(this.empireCount)} go back to each page's defaults. The app-wide views and the other empires' stay.` } : { scope, title: 'Reset every remembered view?', text: `${this.count(this.totalCount)} ${values(this.totalCount)} go back to each page's defaults, for every empire and app-wide. The Display settings, mutes, pinned systems and clusters stay.` }
+    },
+
+    reset() {
+      const { scope } = this.pending
+      const cleared = scope === 'empire' ? this.empireCount : this.totalCount
+
+      this.config.store = withoutViews(this.config.store, scope === 'empire' ? { GameID: this.GameID, RaceID: this.RaceID } : null)
+      this.pending = null
+      this.reinstantiateConfig()
+      this.activateSnackbar({ text: `${this.count(cleared)} remembered ${values(cleared)} reset`, color: 'success' })
     },
   },
 }
 </script>
 
 <style lang="scss" scoped>
+.setting {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
 
+  & + & {
+    border-top: 1px solid var(--ae-border);
+  }
+}
+
+.setting__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting__control {
+  flex: 0 0 220px;
+}
+
+.setting__switch {
+  flex: none;
+  margin-top: 0;
+  padding-top: 0;
+}
 </style>
