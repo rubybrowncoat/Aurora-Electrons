@@ -154,14 +154,8 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready || !rows" indeterminate class="mt-3" />
-      <v-alert v-else-if="!speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready || !rows" class="mt-3" @retry="retryFailedInputs" />
+      <v-alert v-if="ready && rows && !speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
       <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
         <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
@@ -283,7 +277,9 @@
 import Vue from 'vue'
 import { mapGetters } from 'vuex'
 
+import LoadState from '../components/page/LoadState.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import loadState from '../mixins/load-state'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
@@ -291,7 +287,7 @@ import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normalis
 import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
 import { terraformCapacity } from '../utilities/terraforming'
@@ -305,7 +301,6 @@ const INPUT_LABELS = {
   routes: 'the jump routes',
   outlook: 'the mineral outlook',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
 const GROUND_SURVEY = { 0: 'Completed', 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
@@ -372,7 +367,8 @@ const SystemSelect = {
 }
 
 export default {
-  components: { BodyDetail, SystemSelect },
+  components: { BodyDetail, LoadState, SystemSelect },
+  mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
       selectedSpeciesId: null,
@@ -394,7 +390,6 @@ export default {
       filterBySelectedBodies: false,
 
       ranking: normaliseRanking(null),
-      loadErrors: {},
 
       rules: {
         required: (value) => !!value || 'Required.',
@@ -427,16 +422,6 @@ export default {
 
     rankingKey() {
       return `game.${this.GameID}.race.${this.RaceID}.targetWeights`
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     activeFilterCount() {
@@ -764,10 +749,6 @@ export default {
     },
     groundSurveyText(body) {
       return `No geological survey by this race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
-    },
-
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
     },
   },
   asyncComputed: {

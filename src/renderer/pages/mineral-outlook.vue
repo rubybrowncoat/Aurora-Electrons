@@ -19,30 +19,14 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-alert v-else-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!forecastReady" class="mt-3" @retry="retryFailedInputs" />
+      <v-alert v-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
         This save has no mineral ledger (Aurora 2.6 adds one). Production comes from your mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
       </v-alert>
-      <v-progress-linear v-else-if="!forecastReady" indeterminate class="mt-3" />
 
       <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
       <template v-if="forecastReady">
-        <v-row dense class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" md="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="stat-note caption text--secondary" :title="tile.note">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" compact class="mt-2" />
 
         <v-card v-if="focusRow" class="panel" elevation="1">
           <div class="panel-head">
@@ -221,10 +205,13 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
-import { joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { COMPACT_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
@@ -246,7 +233,6 @@ const INPUT_LABELS = {
   industrialProjects: 'the industry queue',
   populationProductionModifiers: 'production modifiers',
 }
-const FORECAST_INPUTS = Object.keys(INPUT_LABELS)
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 
 const CRITICAL_YEARS = 5
@@ -256,16 +242,13 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       windowOptions: [30, 90, 180, 365],
       horizonOptions: [25, 50, 100, 250],
       windowDays: 365,
-      // Each read's outcome, by async-computed key: null once it succeeds, the error message while
-      // it fails (see `tracked`).
-      loadErrors: {},
       horizon: 50,
       focusMineralId: null,
       fallbackFocusId: null,
@@ -301,18 +284,10 @@ export default {
       return !!(this.ledger && this.ledger.length)
     },
 
-    failedInputs() {
-      return FORECAST_INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
     // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last,
     // possibly stale, value, so it doesn't count).
     forecastReady() {
-      return FORECAST_INPUTS.every((key) => this.loadErrors[key] === null) && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
+      return this.inputsLoaded && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
     },
 
     depositsReady() {
@@ -759,10 +734,6 @@ export default {
       }
     },
 
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     flowColor(key) {
       return flowColor(this.$vuetify.theme.dark, key)
     },
@@ -1089,29 +1060,6 @@ export default {
     min-width: 220px;
   }
 
-  .stat-tile {
-    padding: 10px 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 20px;
-    line-height: 28px;
-    font-weight: 400;
-    margin: 2px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .stat-note {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-height: 1.3;
-  }
-
   .panel {
     margin-top: 16px;
   }
@@ -1130,22 +1078,11 @@ export default {
   }
 
   .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
     padding: 8px 24px;
-    font-size: 16px;
-    line-height: 28px;
   }
 
   .panel-body {
     padding: 0 24px 12px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
   }
 
   .chart-title {
@@ -1155,16 +1092,7 @@ export default {
   }
 
   .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
     margin-bottom: 8px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

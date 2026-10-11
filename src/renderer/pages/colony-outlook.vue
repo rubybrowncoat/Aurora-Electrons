@@ -16,26 +16,10 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
@@ -142,10 +126,13 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
 import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const INPUT_LABELS = {
@@ -153,14 +140,13 @@ const INPUT_LABELS = {
   inbound: 'cargo on its way',
   populationProductionModifiers: 'production modifiers',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS), productionModifiers],
   data() {
     return {
       horizonOptions: [5, 10, 25, 50],
@@ -170,7 +156,6 @@ export default {
       expanded: [],
       sortBy: ['populationSort'],
       sortDesc: [true],
-      loadErrors: {},
     }
   },
   computed: {
@@ -190,18 +175,6 @@ export default {
       const [blue, , green, , pink] = this.theme.categorical
 
       return { service: withAlpha(blue, 0.45), agriculture: withAlpha(pink, 0.6), employed: blue, free: green }
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     multiSpecies() {
@@ -354,10 +327,6 @@ export default {
     this.attentionOnly = this.config.get('colonyOutlookAttentionOnly', false)
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },
@@ -533,57 +502,10 @@ function percent(fraction, decimals) {
     min-width: 240px;
   }
 
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
   .chart-title {
     font-size: 14px;
     font-weight: 500;
     margin-bottom: 8px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

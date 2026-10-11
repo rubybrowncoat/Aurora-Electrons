@@ -10,30 +10,14 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <v-alert v-if="!steps.length" type="info" outlined dense class="mt-3">
           The save has no wealth history for this race yet. Aurora logs income and spending every production cycle.
         </v-alert>
 
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <template v-if="steps.length">
           <v-card class="panel" elevation="1">
@@ -109,8 +93,11 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
 import { gameTime } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const SECONDS_PER_DAY = 86400
@@ -122,7 +109,6 @@ const INPUT_LABELS = {
   treasury: 'the treasury',
   wealth: 'the wealth history',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -140,13 +126,13 @@ const compact = (value) => {
 
 export default {
   name: 'FinancesPage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
       windowOptions: [30, 90, 180, 365],
       windowDays: 365,
       flowsView: 'chart',
-      loadErrors: {},
     }
   },
   computed: {
@@ -162,16 +148,8 @@ export default {
       return chartTheme(this.$vuetify.theme.dark)
     },
 
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
     ready() {
-      return allLoaded(this.loadErrors, INPUTS) && !!this.treasury
+      return this.inputsLoaded && !!this.treasury
     },
 
     // Every logged cycle end, the one just before the year included.
@@ -460,10 +438,6 @@ export default {
     this.windowDays = this.config.get('financesWindowDays', 365)
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     money(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },
@@ -511,48 +485,8 @@ export default {
 
 <style lang="scss">
 .finances-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
   .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
     margin-bottom: 8px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {
