@@ -2,7 +2,7 @@
 // game's mineral ledger and the industrial queue's demand. Validated against
 // the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
-import { roundToDecimal } from './math'
+import { roundToDecimal, separatedNumber } from './math'
 
 export const MINERALS = [
   { id: 1, name: 'Duranium' },
@@ -77,8 +77,6 @@ export const SECONDS_PER_DAY = 86400
 
 // Accessibility never falls below this; the deposit is empty when it gets there.
 export const ACCESSIBILITY_FLOOR = 0.1
-// Forecasts past this are shown as "endless" (the sample's homeworld deposits run for millions of years).
-export const ENDLESS_YEARS = 10000
 
 // t/yr at the deposit's current accessibility, as the game's RecalculateMiningProductionTotals has it: each kind
 // of capacity cut to a whole number; manned mines scale with the colony's efficiency, stability and political
@@ -138,7 +136,7 @@ export const depositForecast = (deposit, rate) => {
   const { amount, accessibility, half, declines, slope, startAccessibility } = declineShape(deposit)
 
   if (!(rate > 0) || !(amount > 0) || !(accessibility > 0)) {
-    return { yearsToHalf: null, yearsToDepletion: null, endless: false, idle: true }
+    return { yearsToHalf: null, yearsToDepletion: null, idle: true }
   }
 
   const k = rate / accessibility
@@ -148,7 +146,6 @@ export const depositForecast = (deposit, rate) => {
   return {
     yearsToHalf,
     yearsToDepletion,
-    endless: yearsToDepletion > ENDLESS_YEARS,
     idle: false,
     // A ground survey can raise accessibility without updating the original values.
     upgraded: half > 0 && (amount > 2 * half + 1 || accessibility > deposit.OriginalAcc + 0.005),
@@ -495,4 +492,18 @@ export const compact = (value) => {
   }
 
   return `${roundToDecimal(value, 0)} t`
+}
+
+// Years at a readable precision from COMPACT_YEARS on: 120 k, 2.4 M, 1.3 bn. At today's rate the sample's homeworld
+// deposits last millions of years.
+export const COMPACT_YEARS = 100000
+const YEAR_UNITS = [[1e9, 'bn'], [1e6, 'M'], [1e3, 'k']]
+
+export const compactYears = (value, separator) => {
+  // A value that rounds up to the next unit takes it: 999,960 is 1 M, not 1,000 k.
+  const [size, suffix] = YEAR_UNITS.find(([unit]) => value >= unit * 0.9995) || [1, '']
+  const scaled = value / size
+  const number = separatedNumber(roundToDecimal(scaled, scaled < 100 ? 1 : 0), separator)
+
+  return suffix ? `${number} ${suffix}` : number
 }

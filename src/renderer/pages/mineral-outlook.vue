@@ -225,7 +225,7 @@ import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { joinLabels, tracked } from '../utilities/load-tracking'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
+import { COMPACT_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
@@ -779,15 +779,15 @@ export default {
     years(value) {
       if (value === null || value === undefined) {
         return '—'
-      } else if (value > ENDLESS_YEARS) {
-        return `> ${separatedNumber(ENDLESS_YEARS, this.separator)} y`
       } else if (value < 1) {
         return `${Math.max(1, Math.round(value * 12))} mo`
       } else if (value < 100) {
         return `${roundToDecimal(value, 1)} y`
+      } else if (value < COMPACT_YEARS) {
+        return `${separatedNumber(Math.round(value), this.separator)} y`
       }
 
-      return `${separatedNumber(Math.round(value), this.separator)} y`
+      return `${compactYears(value, this.separator)} y`
     },
 
     runwayStatus(runway, produced, used) {
@@ -890,10 +890,11 @@ export default {
       return part === 'half' ? (half / this.horizon) * 100 : (Math.max(0, end - half) / this.horizon) * 100
     },
 
+    // A deposit's whole life, however long: its output holds, then falls once accessibility starts to.
     depositSpan(deposit) {
       const { forecast } = deposit
 
-      return forecast.idle || forecast.endless ? this.horizon : Math.max(1, forecast.yearsToDepletion * 1.05)
+      return forecast.idle ? this.horizon : Math.max(1, forecast.yearsToDepletion * 1.05)
     },
     depositChart(deposit) {
       const color = this.theme.primary
@@ -925,7 +926,7 @@ export default {
         markers.push({ x: forecast.yearsToHalf, label: 'Half mined' })
       }
 
-      if (!forecast.idle && !forecast.endless) {
+      if (!forecast.idle) {
         markers.push({ x: forecast.yearsToDepletion, label: 'Empty' })
       }
 
@@ -933,6 +934,7 @@ export default {
         unit: 't/yr',
         markers,
         extraLabel: (raw) => [`Accessibility ${this.fixed(raw.accessibility, 2)}`, `${this.tons(raw.amount)} t left`],
+        span: this.depositSpan(deposit),
       })
     },
     depositNote(deposit) {
@@ -940,8 +942,6 @@ export default {
 
       if (forecast.idle) {
         return 'Nothing is being mined here at the moment (no workers or a colony at zero efficiency).'
-      } else if (forecast.endless) {
-        return `At today's rate this deposit lasts more than ${separatedNumber(ENDLESS_YEARS, this.separator)} years.`
       } else if (forecast.yearsToHalf === null) {
         return `Accessibility doesn't decline here; at today's rate it's empty in ${this.years(forecast.yearsToDepletion)}.`
       }
@@ -949,14 +949,17 @@ export default {
       return `Accessibility holds at ${this.fixed(deposit.OriginalAcc, 2)} until half the deposit is mined, then falls toward 0.10, slowing output until it's empty in ${this.years(forecast.yearsToDepletion)}.`
     },
 
-    lineOptions({ unit, markers = [], extraLabel = null }) {
+    lineOptions({ unit, markers = [], extraLabel = null, span = this.horizon }) {
+      // A chart spanning COMPACT_YEARS or more counts its years in k, M and bn.
+      const year = (value) => (span >= COMPACT_YEARS ? compactYears(value, this.separator) : separatedNumber(roundToDecimal(value, 1), this.separator))
+
       return {
         scales: {
           x: {
             type: 'linear',
             min: 0,
             title: { display: true, text: 'Years from now' },
-            ticks: { callback: (value) => separatedNumber(roundToDecimal(value, 1), this.separator) },
+            ticks: { callback: year },
           },
           y: {
             beginAtZero: true,
@@ -966,7 +969,7 @@ export default {
         plugins: {
           tooltip: {
             callbacks: {
-              title: (items) => `Year ${roundToDecimal(items[0].parsed.x, 1)}`,
+              title: (items) => `Year ${year(items[0].parsed.x)}`,
               label: (item) => [`${this.tons(item.parsed.y)} ${unit}`, ...(extraLabel ? extraLabel(item.raw) : [])],
             },
           },
