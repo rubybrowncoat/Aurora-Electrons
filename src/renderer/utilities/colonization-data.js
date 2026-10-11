@@ -81,21 +81,21 @@ where FCT_LagrangePoint.GameID = ${GameID}`
   const starInReach = new Map(stars.map((star) => [star.StarID, cmcStarInReach(star, starsBySystem[star.SystemID], pointsBySystem[star.SystemID] || [])]))
   const byId = new Map()
 
-  bodies.forEach((body) => {
-    byId.set(body.SystemBodyID, {
-      ...body,
-      StoredBaseTemp: body.BaseTemp,
-      BaseTemp: climateBaseTemp(body),
-      OriginalAlbedo: body.Albedo,
-      OriginalSurfaceTemp: body.SurfaceTemp,
-      SystemBodyOrder: `${body.Component}-${body.PlanetNumber}-${body.OrbitNumber}`,
-      Atmosphere: [],
-      Minerals: [],
-      OwnPopulations: [],
-      AlienPopulations: [],
-      CmcStarInReach: !!starInReach.get(body.StarID),
-    })
-  })
+  for (let index = 0; index < bodies.length; index += 1) {
+    const body = bodies[index]
+
+    body.StoredBaseTemp = body.BaseTemp
+    body.BaseTemp = climateBaseTemp(body)
+    body.OriginalAlbedo = body.Albedo
+    body.OriginalSurfaceTemp = body.SurfaceTemp
+    body.SystemBodyOrder = `${body.Component}-${body.PlanetNumber}-${body.OrbitNumber}`
+    body.Atmosphere = []
+    body.Minerals = []
+    body.OwnPopulations = []
+    body.AlienPopulations = []
+    body.CmcStarInReach = !!starInReach.get(body.StarID)
+    byId.set(body.SystemBodyID, body)
+  }
 
   gases.forEach((gas) => byId.has(gas.SystemBodyID) && byId.get(gas.SystemBodyID).Atmosphere.push(gas))
   deposits.forEach((deposit) => byId.has(deposit.SystemBodyID) && byId.get(deposit.SystemBodyID).Minerals.push(deposit))

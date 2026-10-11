@@ -184,12 +184,27 @@ export const cmcNote = (site) => {
   return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
 }
 
+// Give rendering and input a turn between batches on large saves.
+const mapBodies = async (bodies, transform) => {
+  const result = new Array(bodies.length)
+
+  for (let index = 0; index < bodies.length; index += 1) {
+    result[index] = transform(bodies[index])
+
+    if ((index + 1) % 512 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+
+  return result
+}
+
 // Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan
 // doesn't depend on the colony's capacity, so changing the terraformers doesn't redo any of this.
-export const assessBodies = (bodies, speciesRows, rules, gasInfo) => {
+export const assessBodies = async (bodies, speciesRows, rules, gasInfo) => {
   const species = speciesRows.map(speciesLimits)
 
-  return bodies.map((body) => ({
+  return mapBodies(bodies, (body) => ({
     body,
     byspecies: species.map((one) => {
       const assessment = assessTerraforming(body, one, rules.ColonizationSkill, gasInfo)
@@ -256,48 +271,46 @@ const sumPeople = (populations) => populations.reduce((total, population) => tot
 // so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from
 // the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook;
 // `cmcRules` is what `cmcSite` needs of the race.
-export const rankBodies = (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
+export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
   const terraformCapacityPerYear = terraformCapacity(rules, terraformers)
 
-  const rows = assessed
-    .filter(({ byspecies }) => byspecies.length)
-    .map(({ body, byspecies }) => {
-      const minerals = mineralSummary(body, ranking, outlook)
-      const site = cmcSite(body, cmcRules)
-      const cmcReady = minerals.cmc.length > 0 && Object.values(site).every(Boolean)
-      const distance = distanceOf(body)
-      const distanceAU = distance ? distance.km / KM_PER_AU : null
-      const capital = capitalDistanceOf(body)
-      const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }))
-      const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
-      const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
-      const settled = { people: sumPeople(body.OwnPopulations), colonies: body.OwnPopulations.length, alien: body.AlienPopulations.length }
-      const route = routeFacts(best, planYears(best.assessment.work, terraformCapacityPerYear))
-      const facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
-      const state = stateOf(facts)
-      const room = route ? Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0) : 0
-      const worthwhile = !!route && (room >= ranking.minimumPeople || minerals.worthMining || cmcReady)
+  const rows = await mapBodies(assessed.filter(({ byspecies }) => byspecies.length), ({ body, byspecies }) => {
+    const minerals = mineralSummary(body, ranking, outlook)
+    const site = cmcSite(body, cmcRules)
+    const cmcReady = minerals.cmc.length > 0 && Object.values(site).every(Boolean)
+    const distance = distanceOf(body)
+    const distanceAU = distance ? distance.km / KM_PER_AU : null
+    const capital = capitalDistanceOf(body)
+    const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }))
+    const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
+    const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
+    const settled = { people: sumPeople(body.OwnPopulations), colonies: body.OwnPopulations.length, alien: body.AlienPopulations.length }
+    const route = routeFacts(best, planYears(best.assessment.work, terraformCapacityPerYear))
+    const facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
+    const state = stateOf(facts)
+    const room = route ? Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0) : 0
+    const worthwhile = !!route && (room >= ranking.minimumPeople || minerals.worthMining || cmcReady)
 
-      return {
-        body,
-        minerals,
-        distance: distance ? { ...distance, au: distanceAU } : null,
-        capitalDistance: capital ? { ...capital, au: capital.km / KM_PER_AU } : null,
-        evaluations,
-        best,
-        cmcSite: site,
-        cmcReady,
-        settled: settled.colonies > 0,
-        facts,
-        state,
-        target: STATE_BY_ID[state.id].target && worthwhile,
-        rank: null,
-        score: null,
-      }
-    })
+    return {
+      body,
+      minerals,
+      distance: distance ? { ...distance, au: distanceAU } : null,
+      capitalDistance: capital ? { ...capital, au: capital.km / KM_PER_AU } : null,
+      evaluations,
+      best,
+      cmcSite: site,
+      cmcReady,
+      settled: settled.colonies > 0,
+      facts,
+      state,
+      target: STATE_BY_ID[state.id].target && worthwhile,
+      rank: null,
+      score: null,
+    }
+  })
 
   const targets = rows.filter((row) => row.target)
-  const top = Math.max(0, ...targets.map((row) => row.best.value))
+  const top = targets.reduce((maximum, row) => Math.max(maximum, row.best.value), 0)
 
   targets.forEach((row) => {
     row.score = top > 0 ? (100 * row.best.value) / top : null

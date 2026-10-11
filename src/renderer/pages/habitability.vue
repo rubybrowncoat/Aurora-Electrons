@@ -32,11 +32,11 @@
         </div>
         <div class="tool tool--systems">
           <div class="tool__label caption text--secondary">Active systems</div>
-          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
+          <system-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
             <template #selection="{ item, index }">
-              <v-chip v-if="systems.length === systemNames.length && !index" small label>All {{ systemNames.length }} systems</v-chip>
-              <v-chip v-else-if="systems.length !== systemNames.length && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
-              <span v-else-if="systems.length !== systemNames.length && index === 8" class="caption text--secondary ml-1">+{{ systems.length - 8 }} more</span>
+              <v-chip v-if="systemSelection.all && !index" small label>All {{ systemSelection.total }} systems</v-chip>
+              <v-chip v-else-if="!systemSelection.all && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
+              <span v-else-if="!systemSelection.all && index === 8" class="caption text--secondary ml-1">+{{ systemSelection.count - 8 }} more</span>
             </template>
             <template #prepend-item>
               <v-list-item ripple @click="toggleSystems">
@@ -57,7 +57,7 @@
               </v-list-item>
               <v-divider class="mt-2" />
             </template>
-          </v-autocomplete>
+          </system-select>
         </div>
         <div class="tool tool--actions">
           <div class="tool__buttons">
@@ -160,11 +160,11 @@
           <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
         </template>
       </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <v-progress-linear v-else-if="!ready || !rows" indeterminate class="mt-3" />
       <v-alert v-else-if="!speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
-      <v-card v-if="ready && speciesRows.length" class="mt-3" elevation="2">
-        <v-data-table :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+      <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
+        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
             <td class="text-no-wrap">
               <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
@@ -280,6 +280,7 @@
 </template>
 
 <script>
+import Vue from 'vue'
 import { mapGetters } from 'vuex'
 
 import BodyDetail from '../components/planner/BodyDetail.vue'
@@ -353,8 +354,25 @@ const selectionFromQuery = (query) => {
   return {}
 }
 
+// System IDs are numbers; Vuetify's general selection search scans every item for every selected system.
+const SystemSelect = {
+  extends: Vue.component('VAutocomplete'),
+  methods: {
+    setSelectedItems() {
+      const { allItems, internalValue } = this
+      const byId = new Map(allItems.map((item) => [item.SystemID, item]))
+
+      this.selectedItems = (Array.isArray(internalValue) ? internalValue : [internalValue]).filter((id) => byId.has(id)).map((id) => byId.get(id))
+
+      if (!this.isFocused) {
+        this.setSearch()
+      }
+    },
+  },
+}
+
 export default {
-  components: { BodyDetail },
+  components: { BodyDetail, SystemSelect },
   data() {
     return {
       selectedSpeciesId: null,
@@ -452,20 +470,18 @@ export default {
       return buildDistanceMap(this.routes.jumpPoints, this.routes.capital ? [this.routes.capital] : [])
     },
 
-    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
-    assessed() {
-      return this.ready ? assessBodies(this.bodies, this.species, this.raceRules, (id) => this.gases.find((gas) => gas.GasID === id)) : []
-    },
-    rows() {
-      return rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules: this.cmcRules, outlook: this.outlook })
-    },
-
     systemNames() {
       const names = new Map()
 
       this.bodies.forEach((body) => names.set(body.SystemID, body.SystemName))
 
       return [...names].map(([SystemID, SystemName]) => ({ SystemID, SystemName })).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
+    },
+    systemSelection() {
+      const count = this.systems.length
+      const total = this.systemNames.length
+
+      return { count, total, all: count === total }
     },
     systemPresets() {
       const systemIds = new Set(this.systemNames.map((system) => system.SystemID))
@@ -487,7 +503,7 @@ export default {
       const systems = new Set(this.systems)
       const classes = new Set(this.bodyClasses)
 
-      return this.rows.filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
+      return (this.rows || []).filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
     },
     viewCounts() {
       return Object.fromEntries(VIEWS.map((view) => [view.id, this.scopedRows.filter(view.has).length]))
@@ -503,7 +519,7 @@ export default {
     },
 
     filteredRows() {
-      const { filters } = this
+      const { filters, filterBySelectedBodies } = this
       const view = VIEWS.find((option) => option.id === this.view) || VIEWS[0]
       const states = new Set(this.stateFilter)
 
@@ -512,7 +528,7 @@ export default {
         const alienPopulation = body.AlienPopulations.reduce((total, population) => total + population.PopulationAmount, 0)
 
         return (
-          (this.filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) &&
+          (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) &&
           !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) &&
           !(filters.withoutMinerals && !(row.minerals.total > 0)) &&
           !(filters.ownPopulations && body.OwnPopulations.length) &&
@@ -755,13 +771,34 @@ export default {
     },
   },
   asyncComputed: {
+    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
+    // Both steps run in slices so a large save keeps the window responsive; null until the first pass is done.
+    assessed: {
+      async get() {
+        const { ready, bodies, species, raceRules, gases } = this
+        const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
+
+        return ready ? Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id))) : null
+      },
+      default: null,
+    },
+    rows: {
+      async get() {
+        if (!this.assessed) {
+          return null
+        }
+
+        return Object.freeze(await rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules: this.cmcRules, outlook: this.outlook }))
+      },
+      default: null,
+    },
     bodies: {
       get: tracked('bodies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
       }),
       default: [],
     },
@@ -771,7 +808,7 @@ export default {
           return []
         }
 
-        return loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
       }),
       default: [],
     },
@@ -797,7 +834,7 @@ export default {
     },
     gases: {
       get: tracked('gases', async function () {
-        return this.database ? loadGases(this.database) : []
+        return this.database ? loadGases(this.database).then(Object.freeze) : []
       }),
       default: [],
     },
@@ -807,7 +844,7 @@ export default {
           return { jumpPoints: [], capital: null, colonies: [] }
         }
 
-        return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
       }),
       default: { jumpPoints: [], capital: null, colonies: [] },
     },
@@ -817,7 +854,7 @@ export default {
           return NO_OUTLOOK
         }
 
-        return loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
       }),
       default: NO_OUTLOOK,
     },
