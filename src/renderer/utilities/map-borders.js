@@ -17,10 +17,11 @@ const LABEL_MIN_PX = 9
 // Between a name and its shape's line.
 const LABEL_GAP = 8
 // The systems' own names, as the page's cytoscape style draws them: under the marker, 5 units down,
-// in a 14 px font on a background 2 units wider all round.
+// in a 14 px font on a background 2 units wider all round, each line under the first 14 units more.
 const NAME_FONT = '14px Roboto, sans-serif'
 const NAME_DROP = 3
 const NAME_HEIGHT = 21
+const NAME_LINE = 14
 // Round a name's place, the room counted as crowding when choosing the freer side.
 const CROWD = 40
 
@@ -196,7 +197,8 @@ const touches = (box, at, radius) => {
 // below the system's ring, in the gap where no system's name is drawn. The place chosen covers the
 // fewest markers, system names and other parts' names, then crosses the fewest links and shapes,
 // then has the least close by. Larger parts choose first. `systems` are every system's id, `links`
-// every link ({ source, target }) and `nameOf(id)` a system's name; `context` measures the text.
+// every link ({ source, target }) and `nameOf(id)` a system's label, its lines split by newlines;
+// `context` measures the text.
 export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf, nameOf }) => {
   const obstacles = []
 
@@ -206,10 +208,11 @@ export const placeLabels = (context, parts, { systems, links, positionOf, sizeOf
 
     if (at) {
       const half = sizeOf(id) / 2
-      const width = context.measureText(nameOf(id)).width + 4
+      const lines = nameOf(id).split('\n')
+      const width = Math.max(...lines.map((line) => context.measureText(line).width)) + 4
 
       obstacles.push({ x1: at.x - half, y1: at.y - half, x2: at.x + half, y2: at.y + half })
-      obstacles.push({ x1: at.x - width / 2, y1: at.y + half + NAME_DROP, x2: at.x + width / 2, y2: at.y + half + NAME_DROP + NAME_HEIGHT })
+      obstacles.push({ x1: at.x - width / 2, y1: at.y + half + NAME_DROP, x2: at.x + width / 2, y2: at.y + half + NAME_DROP + NAME_HEIGHT + NAME_LINE * (lines.length - 1) })
     }
   })
 

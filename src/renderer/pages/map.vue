@@ -89,13 +89,15 @@
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
-              <span v-for="item in row" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading' }">
+              <span v-for="item in row" :key="`${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }">
                 <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid' }" />
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
                 <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
+                <span v-else-if="item.kind === 'glyph'" class="map-glyph" :style="glyphStyle(item)"><v-icon x-small :color="item.hollow ? item.color : colors.surface">{{ item.icon }}</v-icon></span>
+                <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
-                <span v-else-if="item.kind !== 'heading'" class="dot" :style="{ background: item.color }" />
+                <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
                 {{ item.label }}
               </span>
             </span>
@@ -166,8 +168,32 @@
           </aside>
         </div>
         <div class="panel-foot caption text--secondary">
-          Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
-          <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until you save.</template>
+          <span class="panel-foot__text">
+            Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
+            <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until you save.</template>
+          </span>
+          <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a
+               list to turn them on and off. -->
+          <v-menu top left offset-y nudge-top="6" :close-on-content-click="false" content-class="tracker-menu">
+            <template #activator="{ on, attrs }">
+              <v-btn small outlined class="map-tracker" :aria-label="trackerLabel" :title="trackerLabel" v-bind="attrs" v-on="on">
+                <v-icon small>mdi-binoculars</v-icon>
+                <span v-for="mark in trackedMarks" :key="mark.value" class="map-glyph" :style="glyphStyle(mark)"><v-icon x-small :color="mark.hollow ? mark.color : colors.surface">{{ mark.icon }}</v-icon></span>
+              </v-btn>
+            </template>
+            <v-card>
+              <v-list dense>
+                <template v-for="group in markGroups">
+                  <v-subheader :key="group.place">{{ group.header }}</v-subheader>
+                  <v-list-item v-for="mark in group.marks" :key="mark.value" role="menuitemcheckbox" :aria-checked="String(marksSet.has(mark.value))" @click="toggleMark(mark.value)">
+                    <v-icon class="mr-3" :color="marksSet.has(mark.value) ? 'primary' : undefined">{{ marksSet.has(mark.value) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
+                    <v-list-item-title>{{ mark.text }}</v-list-item-title>
+                    <span class="map-glyph ml-3" :style="glyphStyle(markDiscs[mark.value])"><v-icon x-small :color="markDiscs[mark.value].hollow ? markDiscs[mark.value].color : colors.surface">{{ mark.icon }}</v-icon></span>
+                  </v-list-item>
+                </template>
+              </v-list>
+            </v-card>
+          </v-menu>
         </div>
       </v-card>
     </template>
@@ -220,6 +246,7 @@ import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/gr
 import { loadJumpPoints } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
+import { loadMapFeatures, ruinState } from '../utilities/map-features'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { scaleValue } from '../utilities/math'
@@ -233,6 +260,7 @@ const INPUT_LABELS = {
   jumpPoints: 'the jump points',
   sectors: 'your sectors',
   aliens: 'the alien races you know',
+  features: 'what the map can mark',
 }
 const INPUTS = Object.keys(INPUT_LABELS)
 
@@ -244,6 +272,7 @@ const LAYERS = [
   { value: 'control', text: 'Alien control' },
   { value: 'groups', text: 'Your groups' },
   { value: 'jumps', text: 'Jumps from the capital' },
+  { value: 'discovery', text: 'Discovery era' },
 ]
 
 // What the borders go round: sectors, alien control, colonies, danger, stabilised networks, or
@@ -291,6 +320,25 @@ const KEEP_TOGETHER = [
 // Arrange can centre the systems with more jump points than this, the nexuses.
 const NEXUS_JUMP_POINTS = 6
 
+// What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it.
+// `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc
+// with its `icon`, filled in the `colors` entry its glyphs take, or hollow for marks the names carry.
+const MARKS = [
+  { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', icon: 'mdi-pillar', color: 'ruins' },
+  { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', icon: 'mdi-pyramid', color: 'construct' },
+  { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', icon: 'mdi-weather-hurricane', color: 'rift' },
+  { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'name', icon: 'mdi-close' },
+  { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', icon: 'mdi-alert-outline' },
+  { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', icon: 'mdi-calendar-outline' },
+]
+
+const MARK_HEADERS = { glyph: 'Round the marker', name: 'After the name', line: 'Under the name' }
+
+const MARK_GROUPS = Object.keys(MARK_HEADERS).map((place) => ({ place, header: MARK_HEADERS[place], marks: MARKS.filter((mark) => mark.place === place) }))
+
+// A system with nothing to mark.
+const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, warships: 0, ships: 0 })
+
 const PHASES = {
   stress: 'Spreading the systems out',
   place: 'Putting them on the grid',
@@ -301,6 +349,18 @@ const PHASES = {
 const SLICE_MS = 12
 
 const LOCK_PATH = 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z'
+const PILLAR_PATH = 'M6,5H18A1,1 0 0,1 19,6A1,1 0 0,1 18,7H6A1,1 0 0,1 5,6A1,1 0 0,1 6,5M21,2V4H3V2H21M15,8H17V22H15V8M7,8H9V22H7V8M11,8H13V22H11V8Z'
+const PYRAMID_PATH = 'M21.85 16.96H21.85L12.85 2.47C12.65 2.16 12.33 2 12 2S11.35 2.16 11.15 2.47L2.15 16.96H2.15C1.84 17.45 2 18.18 2.64 18.43L11.64 21.93C11.75 22 11.88 22 12 22S12.25 22 12.36 21.93L21.36 18.43C22 18.18 22.16 17.45 21.85 16.96M11 6.5V13.32L5.42 15.5L11 6.5M12 19.93L5.76 17.5L12 15.07L18.24 17.5L12 19.93M13 13.32V6.5L18.58 15.5L13 13.32Z'
+const HURRICANE_PATH = 'M15,6.79C16.86,7.86 18,9.85 18,12C18,22 6,22 6,22C7.25,21.06 8.38,19.95 9.34,18.71C9.38,18.66 9.41,18.61 9.44,18.55C9.69,18.06 9.5,17.46 9,17.21C7.14,16.14 6,14.15 6,12C6,2 18,2 18,2C16.75,2.94 15.62,4.05 14.66,5.29C14.62,5.34 14.59,5.39 14.56,5.45C14.31,5.94 14.5,6.54 15,6.79M12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14Z'
+
+// Glyphs sit on a ring just outside the marker's rim, 16 units across with a 12 unit icon, so a
+// marker with any has this much more room on every side.
+const GLYPH_RADIUS = 8
+const GLYPH_RING = 10
+const MARK_ROOM = 20
+// Where the glyphs go round the marker, in degrees clockwise from the top: the left first, then over
+// the top and down the right, clear of the name below.
+const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120]
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes
 // in a hidden or minimised window, so an Arrange carries on there.
@@ -393,20 +453,23 @@ const markerImages = new Map()
 const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points,
-// or bodies with ground survey potential), and a lock on a pinned system.
-const markerImage = (size, spots, color, pinned) => {
-  if (!spots && !pinned) {
+// or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the
+// outside (`{ key, path, color, hollow }`), which the image then has MARK_ROOM for on every side.
+const markerImage = (size, spots, color, pinned, glyphs, surface) => {
+  if (!spots && !pinned && !glyphs.length) {
     return CLEAR_IMAGE
   }
 
-  const key = `${size}|${spots}|${color}|${pinned}`
+  const key = `${size}|${spots}|${color}|${pinned}|${glyphs.map((glyph) => glyph.key).join(',')}|${surface}`
 
   if (!markerImages.has(key)) {
-    const centre = size / 2
+    const room = glyphs.length ? MARK_ROOM : 0
+    const centre = size / 2 + room
+    const width = size + 2 * room
     let content = ''
 
     for (let i = 0; i < spots; i += 1) {
-      const radius = centre - 4 + 3 * Math.floor(i / 11)
+      const radius = size / 2 - 4 + 3 * Math.floor(i / 11)
       const angle = (32 * i * Math.PI) / 180
 
       content += `<circle cx="${centre + radius * Math.sin(angle)}" cy="${centre - radius * Math.cos(angle)}" r="3" fill="${color}" />`
@@ -415,10 +478,20 @@ const markerImage = (size, spots, color, pinned) => {
     if (pinned) {
       const lock = size / 3
 
-      content += `<g transform="translate(${(size - lock) / 2}, ${(size - lock) / 2}) scale(${lock / 24})"><path fill="black" stroke="black" stroke-width="3" d="${LOCK_PATH}" /><path fill="white" d="${LOCK_PATH}" /></g>`
+      content += `<g transform="translate(${centre - lock / 2}, ${centre - lock / 2}) scale(${lock / 24})"><path fill="black" stroke="black" stroke-width="3" d="${LOCK_PATH}" /><path fill="white" d="${LOCK_PATH}" /></g>`
     }
 
-    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${content}</svg>`)}`)
+    glyphs.slice(0, GLYPH_ANGLES.length).forEach((glyph, i) => {
+      const angle = (GLYPH_ANGLES[i] * Math.PI) / 180
+      const x = centre + (size / 2 + GLYPH_RING) * Math.sin(angle)
+      const y = centre - (size / 2 + GLYPH_RING) * Math.cos(angle)
+      const icon = GLYPH_RADIUS - 2
+
+      content += `<circle cx="${x}" cy="${y}" r="${GLYPH_RADIUS}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="1.5" />`
+      content += `<path transform="translate(${x - icon}, ${y - icon}) scale(${(2 * icon) / 24})" fill="${glyph.hollow ? glyph.color : surface}" d="${glyph.path}" />`
+    })
+
+    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${content}</svg>`)}`)
   }
 
   return markerImages.get(key)
@@ -450,6 +523,7 @@ export default {
       arrange: { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT_DEFAULTS.spacing, diagonals: GRID_LAYOUT_DEFAULTS.diagonals, keepTogether: [], nexuses: false },
       pinned: [],
       groups: [],
+      marks: [],
 
       foundId: null,
       findText: null,
@@ -474,6 +548,7 @@ export default {
       arrangeModes: ARRANGE_MODES,
       spacings: SPACINGS,
       keepTogetherOptions: KEEP_TOGETHER,
+      markGroups: MARK_GROUPS,
     }
   },
   computed: {
@@ -503,6 +578,10 @@ export default {
         link: blend(inkMuted, surface, 0.6),
         gate: violet,
         danger: red,
+        ruins: amber,
+        construct: green,
+        rift: pink,
+        discovery: orange,
       }
     },
 
@@ -790,6 +869,87 @@ export default {
       return this.pinned.filter((id) => this.rowById[id]).length
     },
 
+    marksSet() {
+      return new Set(this.marks)
+    },
+
+    marksLabel() {
+      const chosen = MARKS.filter((mark) => this.marksSet.has(mark.value))
+
+      if (chosen.length === 1) {
+        return chosen[0].text
+      }
+
+      const label = chosen.map((mark) => mark.short).join(', ')
+
+      return label.charAt(0).toUpperCase() + label.slice(1)
+    },
+
+    // Each mark's disc in the tracker.
+    markDiscs() {
+      return Object.fromEntries(MARKS.map((mark) => [mark.value, mark.color ? { color: this.colors[mark.color] } : { color: this.colors.ink, hollow: true }]))
+    },
+
+    trackedMarks() {
+      return MARKS.filter((mark) => this.marksSet.has(mark.value)).map((mark) => ({ value: mark.value, icon: mark.icon, ...this.markDiscs[mark.value] }))
+    },
+
+    trackerLabel() {
+      return this.trackedMarks.length ? `Show on the map: ${this.marksLabel}` : 'Show on the map'
+    },
+
+    // How each glyph looks, by what it marks: filled, or hollow for the lesser state.
+    glyphStyles() {
+      const { colors } = this
+
+      return {
+        'ruins-identified': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ruins, label: 'Ruins, their builders identified' },
+        'ruins-found': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
+        'ruins-used': { path: PILLAR_PATH, icon: 'mdi-pillar', color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
+        'constructs-active': { path: PYRAMID_PATH, icon: 'mdi-pyramid', color: colors.construct, label: 'Active ancient construct' },
+        'constructs-dormant': { path: PYRAMID_PATH, icon: 'mdi-pyramid', color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
+        rifts: { path: HURRICANE_PATH, icon: 'mdi-weather-hurricane', color: colors.rift, label: 'Aether rift' },
+      }
+    },
+
+    // The first and last time the race found a system after the game began, in seconds of game time.
+    discoveryRange() {
+      const times = this.systemRows.map((row) => row.DiscoveredTime).filter((time) => time > 0)
+
+      return times.length ? { first: Math.min(...times), last: Math.max(...times) } : null
+    },
+
+    // The legend's entries for Show: each glyph, mark or line it draws, with how many systems have it.
+    marksLegend() {
+      const items = []
+      const counts = {}
+
+      this.systemRows.forEach((row) => this.glyphsOf(row).forEach((glyph) => {
+        counts[glyph.name] = (counts[glyph.name] || 0) + 1
+      }))
+
+      MARKS.filter((mark) => this.marksSet.has(mark.value)).forEach((mark) => {
+        if (mark.place === 'glyph') {
+          const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
+          const shown = names.filter((name) => counts[name])
+
+          shown.forEach((name) => items.push({ kind: 'glyph', ...this.glyphStyles[name], label: `${this.glyphStyles[name].label} (${counts[name]})` }))
+
+          if (!shown.length) {
+            items.push({ kind: 'note', label: `${mark.text}: none known` })
+          }
+        } else {
+          const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
+          const sample = { wrecks: '✕2', danger: '40 / 25', discovered: 'Date' }[mark.value]
+          const label = { wrecks: 'Wrecks there, after the name', danger: 'Danger rating / your protection there, ⚠ when it falls short', discovered: 'Date found, for systems found after the game began' }[mark.value]
+
+          items.push(systems ? { kind: 'sample', sample, label: `${label} (${systems})` } : { kind: 'note', label: `${mark.text}: none known` })
+        }
+      })
+
+      return items
+    },
+
     // The group index of each system in one of the player's groups.
     groupOf() {
       const groupOf = {}
@@ -1000,6 +1160,15 @@ export default {
       } else if (this.layer === 'groups') {
         this.groupOwners.filter((owner) => owner.legend).forEach((owner) => items.push(group(owner, `${owner.name}: ${owner.legend}`)))
         items.push({ kind: 'dot', color: colors.none, label: 'In no group' })
+      } else if (this.layer === 'discovery') {
+        const range = this.discoveryRange
+        const year = (time) => gameTime(this.StartYear, time).format('YYYY')
+
+        items.push({ kind: 'ring', color: colors.ink, label: 'Capital' }, { kind: 'dot', color: this.discoveryColor(0), label: 'Known from the start' })
+
+        if (range) {
+          items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})` })
+        }
       } else {
         items.push(
           { kind: 'ring', color: colors.ink, label: 'Capital' },
@@ -1045,7 +1214,9 @@ export default {
         borders.unshift({ kind: 'heading', label: 'Borders:' })
       }
 
-      return [layer, borders].filter((row) => row.length)
+      const marks = this.marksLegend.length ? [{ kind: 'heading', label: 'Show:' }, ...this.marksLegend] : []
+
+      return [layer, borders, marks].filter((row) => row.length)
     },
 
     arrangeModeHint() {
@@ -1104,6 +1275,10 @@ export default {
         this.pinned = setting('mapPinned', [])
         this.locked = setting('mapLocked', false)
         this.groups = setting('mapGroups', [])
+        // Marks the map no longer offers are dropped.
+        const marks = setting('mapMarks', [])
+
+        this.marks = Array.isArray(marks) ? marks.filter((value) => MARKS.some((mark) => mark.value === value)) : []
         this.resetGraph()
       },
     },
@@ -1141,6 +1316,14 @@ export default {
       if (this.layer === 'groups') {
         this.restyle()
       }
+    },
+
+    marks() {
+      this.restyle()
+    },
+
+    features() {
+      this.restyle()
     },
 
     // A locked map's systems can't be grabbed; pressing on one pans the view as the background does.
@@ -1219,6 +1402,11 @@ export default {
       this.config.set(`${this.settingsPrefix}.${key}`, value)
     },
 
+    toggleMark(value) {
+      this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]
+      this.setSetting('mapMarks', this.marks)
+    },
+
     saveArrange() {
       this.setSetting('mapArrange', { ...this.arrange })
     },
@@ -1289,12 +1477,14 @@ export default {
             'pie-2-background-color': 'data(pieLeftColor)',
             'pie-2-background-size': (node) => `${node.data('pieLeft') || 0}%`,
             'background-image': 'data(image)',
-            'background-width': '100%',
-            'background-height': '100%',
+            // A marker with glyphs has a larger image, centred on it, with room for them round the rim.
+            'background-width': (node) => `${100 * node.data('imageScale')}%`,
+            'background-height': (node) => `${100 * node.data('imageScale')}%`,
             'background-clip': 'none',
             'background-image-containment': 'over',
-            'bounds-expansion': 8,
-            label: 'data(name)',
+            'bounds-expansion': (node) => Math.max(8, Math.ceil((this.displaySize(node.data('size')) * (node.data('imageScale') - 1)) / 2)),
+            label: 'data(label)',
+            'text-wrap': 'wrap',
             color: theme.ink,
             'font-family': 'Roboto, sans-serif',
             'font-size': 14,
@@ -1416,6 +1606,13 @@ export default {
         marker.fill = row.ControlRaceID === this.RaceID ? colors.primary : (this.controllerById[row.ControlRaceID] || {}).color || colors.none
       } else if (this.layer === 'groups') {
         marker.fill = (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none
+      } else if (this.layer === 'discovery') {
+        marker = {
+          ...marker,
+          fill: this.discoveryColor(row.DiscoveredTime),
+          border: row.capital ? colors.ink : colors.ring,
+          borderWidth: row.capital ? 4 : 2,
+        }
       } else {
         const hops = this.hops[row.id]
 
@@ -1428,8 +1625,97 @@ export default {
       }
 
       const { spots, spotColor, ...data } = marker
+      const glyphs = this.glyphsOf(row)
 
-      return { ...data, image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id)) }
+      return {
+        ...data,
+        label: this.labelOf(row),
+        imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM) / row.size : 1,
+        image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface),
+      }
+    },
+
+    // The fill for a system found at `time`: palest for those known from the start, then from the
+    // first found after it to the last, the strongest.
+    discoveryColor(time) {
+      const range = this.discoveryRange
+
+      if (!(time > 0) || !range) {
+        return blend(this.colors.discovery, this.colors.surface, 0.15)
+      }
+
+      const share = range.last > range.first ? (time - range.first) / (range.last - range.first) : 1
+
+      return blend(this.colors.discovery, this.colors.surface, 0.35 + 0.65 * share)
+    },
+
+    // A glyph's disc, as the markers carry it: filled in its colour, or only its outline for the lesser state.
+    glyphStyle({ color, hollow }) {
+      return hollow ? { borderColor: color } : { borderColor: color, background: color }
+    },
+
+    // The glyphs Show puts round a system's marker, in the order they take their places: each
+    // `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`.
+    glyphsOf(row) {
+      const features = this.features[row.id]
+      const marks = this.marksSet
+      const names = []
+
+      if (!features) {
+        return []
+      }
+
+      if (marks.has('ruins') && features.ruins.length) {
+        const states = new Set(features.ruins.map(ruinState))
+
+        names.push(`ruins-${['identified', 'found', 'used'].find((state) => states.has(state))}`)
+      }
+
+      if (marks.has('constructs') && features.constructs.length) {
+        names.push(features.constructs.some((construct) => construct.active) ? 'constructs-active' : 'constructs-dormant')
+      }
+
+      if (marks.has('rifts') && features.rifts) {
+        names.push('rifts')
+      }
+
+      return names.map((name) => {
+        const style = this.glyphStyles[name]
+
+        return { name, key: `${name}:${style.color}`, path: style.path, color: style.color, hollow: Boolean(style.hollow) }
+      })
+    },
+
+    // What a mark placed by the name says for a system, or '' where it has nothing to say.
+    markText(mark, row) {
+      const features = this.features[row.id] || NO_FEATURES
+
+      if (mark === 'wrecks') {
+        return features.wrecks ? `✕${features.wrecks}` : ''
+      }
+
+      if (mark === 'danger') {
+        // The game reds its danger line where the warships there protect less than the danger.
+        const protection = Math.round(features.protection)
+
+        return row.danger > 0 ? `${protection < row.danger ? '⚠ ' : ''}${this.count(row.danger)} / ${this.count(protection)}` : ''
+      }
+
+      if (mark === 'discovered') {
+        return row.DiscoveredTime > 0 ? gameTime(this.StartYear, row.DiscoveredTime).format('YYYY-MM-DD') : ''
+      }
+
+      return ''
+    },
+
+    // A system's name with what Show adds: its wrecks after it, and a line under it for each of
+    // danger and the date it was found.
+    labelOf(row) {
+      const marks = MARKS.filter((mark) => mark.place !== 'glyph' && this.marksSet.has(mark.value))
+      const after = marks.filter((mark) => mark.place === 'name').map((mark) => this.markText(mark.value, row)).filter(Boolean)
+      const lines = marks.filter((mark) => mark.place === 'line').map((mark) => this.markText(mark.value, row)).filter(Boolean)
+
+      return [[row.Name, ...after].join('  '), ...lines].join('\n')
     },
 
     createGraph() {
@@ -1581,7 +1867,7 @@ export default {
           ...this.borderGeometry(),
           systems: this.systemRows.map((row) => row.id),
           links: this.links.list,
-          nameOf: (id) => this.rowById[id].Name,
+          nameOf: (id) => this.labelOf(this.rowById[id]),
         })
       }
 
@@ -1805,7 +2091,7 @@ export default {
         graph.add([
           ...this.systemRows.map((row) => ({
             group: 'nodes',
-            data: { id: row.id, name: row.Name, size: row.size, ...this.markerData(row) },
+            data: { id: row.id, size: row.size, ...this.markerData(row) },
             position: { ...positions[row.id] },
             locked: this.pinnedSet.has(row.id),
             selected: selected.has(row.id),
@@ -2267,6 +2553,16 @@ export default {
       }),
       default: [],
     },
+    features: {
+      get: tracked('features', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadMapFeatures(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: {},
+    },
   },
 }
 </script>
@@ -2341,8 +2637,26 @@ export default {
   }
 
   .panel-foot {
+    display: flex;
+    align-items: center;
+    gap: 16px;
     padding: 8px 16px 12px;
     border-top: 1px solid var(--ae-border);
+  }
+
+  .panel-foot__text {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  // The tracker: the binoculars, then a disc for each mark that is on.
+  .map-tracker {
+    flex: none;
+    padding: 0 8px !important;
+
+    .v-btn__content {
+      gap: 4px;
+    }
   }
 
   .legend {
@@ -2420,6 +2734,19 @@ export default {
     height: 0;
     border-radius: 0;
     border-top: 3px dashed;
+  }
+
+  .legend-item > .map-glyph {
+    margin-right: 6px;
+  }
+
+  // What a mark by the name reads, as the map's labels show it.
+  .sample {
+    padding: 0 4px;
+    margin-right: 6px;
+    border: 1px solid var(--ae-border);
+    border-radius: 3px;
+    font-variant-numeric: tabular-nums;
   }
 
   .map-controls,
@@ -2582,5 +2909,34 @@ export default {
   display: flex;
   gap: 8px;
   margin-top: 16px;
+}
+
+// A glyph as the markers carry it: a disc in the mark's colour, or its outline for the lesser state.
+// Outside `.map-page`, as the tracker's menu draws its discs where Vuetify puts menus.
+.map-glyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid;
+  border-radius: 50%;
+
+  .v-icon {
+    font-size: 11px !important;
+  }
+}
+
+// The tracker's menu: a short row per mark under its heading.
+.tracker-menu {
+  .v-subheader {
+    height: 28px;
+  }
+
+  .v-list-item {
+    min-height: 32px;
+  }
 }
 </style>
