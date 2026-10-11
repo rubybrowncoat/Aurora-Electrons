@@ -394,7 +394,6 @@ const blend = (hex, background, alpha) => {
 const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')}, ${alpha})`
 
 const MARKER_BASE_SIZE = 44
-const MIN_MARKER_PIXELS = 12
 const COLONY_FULL_MILLIONS = 10
 
 // 44 units across for a system with nobody in it, growing towards 104 with colonies and people.
@@ -1362,7 +1361,6 @@ export default {
     // Where the borders' names go, worked out again when the systems or the borders change.
     this.labelPlaces = null
     this.ringScale = 1
-    this.markerMinimum = MARKER_BASE_SIZE
     this.zoomedByHand = false
     this.zoomStyleTimer = null
     this.settleTimer = null
@@ -1470,8 +1468,8 @@ export default {
         {
           selector: 'node',
           style: {
-            width: (node) => this.displaySize(node.data('size')),
-            height: (node) => this.displaySize(node.data('size')),
+            width: 'data(size)',
+            height: 'data(size)',
             'background-color': 'data(fill)',
             'border-color': 'data(border)',
             'border-width': 'data(borderWidth)',
@@ -1487,7 +1485,7 @@ export default {
             'background-height': (node) => `${100 * node.data('imageScale')}%`,
             'background-clip': 'none',
             'background-image-containment': 'over',
-            'bounds-expansion': (node) => Math.max(8, Math.ceil((this.displaySize(node.data('size')) * (node.data('imageScale') - 1)) / 2)),
+            'bounds-expansion': (node) => Math.max(8, Math.ceil((node.data('size') * (node.data('imageScale') - 1)) / 2)),
             label: 'data(label)',
             'text-wrap': 'wrap',
             color: theme.ink,
@@ -1502,21 +1500,21 @@ export default {
             'min-zoomed-font-size': 9,
           },
         },
-        // Rings follow the zoom; `setZoomStyle` restyles them with the marker sizes.
+        // Rings follow the zoom; `setZoomStyle` restyles them.
         {
           selector: 'node[borderStyle = "dotted"]',
           style: {
             'border-style': 'dashed',
             'border-cap': 'round',
             'border-width': (node) => node.data('borderWidth') * this.ringScale,
-            'border-dash-pattern': (node) => ringPattern(this.displaySize(node.data('size')), this.ringScale, RING_DOTS),
+            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DOTS),
           },
         },
         {
           selector: 'node[borderStyle = "dashed"]',
           style: {
             'border-width': (node) => node.data('borderWidth') * this.ringScale,
-            'border-dash-pattern': (node) => ringPattern(this.displaySize(node.data('size')), this.ringScale, RING_DASHES),
+            'border-dash-pattern': (node) => ringPattern(node.data('size'), this.ringScale, RING_DASHES),
           },
         },
         {
@@ -1550,6 +1548,7 @@ export default {
             'line-style': 'dashed',
             'target-arrow-shape': 'triangle',
             'target-arrow-color': colors.gate,
+            'arrow-scale': 1.6,
           },
         },
         {
@@ -1559,6 +1558,7 @@ export default {
             'line-style': 'dashed',
             'source-arrow-shape': 'triangle',
             'source-arrow-color': colors.gate,
+            'arrow-scale': 1.6,
           },
         },
         {
@@ -1781,11 +1781,7 @@ export default {
       this.resizeObserver.observe(this.$refs.stage)
     },
 
-    displaySize(size) {
-      return Math.max(size, this.markerMinimum)
-    },
-
-    // A zoom by hand restyles the markers once it pauses, not at each step on the way: on a large
+    // A zoom by hand restyles the rings once it pauses, not at each step on the way: on a large
     // map each restyle takes the better part of a second. Any other zoom restyles them at once.
     zoomChanged() {
       clearTimeout(this.zoomStyleTimer)
@@ -1815,27 +1811,14 @@ export default {
       }, SETTLE_MS)
     },
 
-    // Zoomed out, markers keep at least MIN_MARKER_PIXELS on screen. Their size grows in quarter
-    // octave steps, like the rings', so zooming restyles the map only now and then.
+    // Zoomed out, the broken rings grow thicker and their gaps wider, in the steps of RING_SCALES.
+    // Markers keep their size: growing them to stay visible means restyling every one at each step,
+    // seconds of zooming on a large map.
     setZoomStyle(zoom) {
-      const minimum = MARKER_BASE_SIZE * Math.max(1, 2 ** (Math.ceil(4 * Math.log2(MIN_MARKER_PIXELS / (zoom * MARKER_BASE_SIZE))) / 4))
       const scale = ringScaleAt(zoom)
-      const resized = minimum !== this.markerMinimum
-      const ringsChanged = scale !== this.ringScale
 
-      this.markerMinimum = minimum
-      this.ringScale = scale
-
-      if (resized) {
-        const nodes = this.graph.nodes()
-
-        this.labelPlaces = null
-        nodes.updateStyle()
-        // Cytoscape keeps each name's place, and the box it draws the name in, from before the
-        // markers resized, so after zooming in from a wide view every name sat where it did then,
-        // under another system. Clearing the boxes places the names afresh.
-        nodes.dirtyBoundingBoxCache()
-      } else if (ringsChanged) {
+      if (scale !== this.ringScale) {
+        this.ringScale = scale
         this.graph.nodes('[borderStyle != "solid"]').updateStyle()
       }
     },
@@ -1850,14 +1833,14 @@ export default {
 
     // Where the borders find a system: its place on the map now, or nothing before it is added, and
     // its marker's size.
-    borderGeometry(minimum = this.markerMinimum) {
+    borderGeometry() {
       return {
         positionOf: (id) => {
           const node = this.graph.getElementById(id)
 
           return node.nonempty() ? node.position() : null
         },
-        sizeOf: (id) => Math.max(this.rowById[id].size, minimum),
+        sizeOf: (id) => this.rowById[id].size,
       }
     },
 
@@ -1913,7 +1896,7 @@ export default {
     paintMinimap(context, scale) {
       const { colors } = this
 
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(MARKER_BASE_SIZE), zoom: scale })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom: scale })
       context.lineWidth = 1 / scale
       context.strokeStyle = colors.link
       context.beginPath()
@@ -2449,7 +2432,7 @@ export default {
     async exportPng() {
       const graph = this.graph
       const requestedScale = 2 * (window.devicePixelRatio || 1)
-      const geometry = this.borderGeometry(MARKER_BASE_SIZE)
+      const geometry = this.borderGeometry()
 
       try {
         const image = new Image()
@@ -2461,8 +2444,7 @@ export default {
         let height
         let scale
 
-        // Export at zoom 1, without the screen's minimum-size enlargement. Restore the interactive
-        // marker sizes and rings before the next frame.
+        // Export with the rings as zoom 1 draws them, and put the screen's back before the next frame.
         this.setZoomStyle(1)
 
         try {
