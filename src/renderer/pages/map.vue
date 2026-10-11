@@ -359,21 +359,44 @@ const RING_SCALES = [1, 1.25, 1.5, 2, 2.5, 3, 4]
 
 const ringScaleAt = (zoom) => RING_SCALES.find((scale) => scale >= RING_ZOOM / zoom) || RING_SCALES[RING_SCALES.length - 1]
 
+// A wheel or pinch zoom restyles the markers once it has paused this long, the pause after which
+// cytoscape too counts a wheel zoom as over.
+const ZOOM_PAUSE_MS = 150
+// Cytoscape keeps a picture of the whole map to pan and zoom with. It makes that picture only
+// while drawing, and not within a quarter second of the systems changing, so the map draws one more
+// frame once it has been quiet this long.
+const SETTLE_MS = 300
+
+const ringPatterns = new Map()
+
 // A whole number of dashes round the ring, so none is cut short where the ring starts and ends.
 const ringPattern = (size, scale, { dash, gap, least }) => {
-  const around = Math.PI * size
-  const period = around / Math.max(least, Math.round(around / ((dash + gap) * scale)))
+  const key = `${size}|${scale}|${dash}|${gap}|${least}`
 
-  return [(period * dash) / (dash + gap), (period * gap) / (dash + gap)]
+  // Cytoscape skips a function-mapped property when its value has the same identity. Reusing the
+  // pattern also avoids reparsing unchanged rings when another marker property changes.
+  if (!ringPatterns.has(key)) {
+    const around = Math.PI * size
+    const period = around / Math.max(least, Math.round(around / ((dash + gap) * scale)))
+
+    ringPatterns.set(key, [(period * dash) / (dash + gap), (period * gap) / (dash + gap)])
+  }
+
+  return ringPatterns.get(key)
 }
 
 const markerImages = new Map()
+
+// A clear pixel, for a marker with nothing over its fill. Cytoscape restyles a node without an
+// image each time it draws it, which throws away the picture of the whole map it keeps for
+// panning and zooming, so every frame would draw each system and link again.
+const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points,
 // or bodies with ground survey potential), and a lock on a pinned system.
 const markerImage = (size, spots, color, pinned) => {
   if (!spots && !pinned) {
-    return 'none'
+    return CLEAR_IMAGE
   }
 
   const key = `${size}|${spots}|${color}|${pinned}`
@@ -1107,10 +1130,6 @@ export default {
     },
 
     layer() {
-      if (this.graph) {
-        this.graph.style(this.stylesheet())
-      }
-
       this.restyle()
     },
 
@@ -1156,12 +1175,18 @@ export default {
     this.labelPlaces = null
     this.ringScale = 1
     this.markerMinimum = MARKER_BASE_SIZE
+    this.zoomedByHand = false
+    this.zoomStyleTimer = null
+    this.settleTimer = null
+    this.settling = false
     // `?system=<SystemID>` opens the map on that system.
     this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
   },
   beforeDestroy() {
     this.keepMap()
     this.run = null
+    clearTimeout(this.zoomStyleTimer)
+    clearTimeout(this.settleTimer)
 
     if (this.layoutInstance) {
       this.layoutInstance.stop()
@@ -1259,9 +1284,9 @@ export default {
             'border-width': 'data(borderWidth)',
             'border-style': 'data(borderStyle)',
             'pie-size': '78%',
-            'pie-1-background-color': colors.done,
+            'pie-1-background-color': 'data(pieDoneColor)',
             'pie-1-background-size': (node) => `${node.data('pieDone') || 0}%`,
-            'pie-2-background-color': colors.left,
+            'pie-2-background-color': 'data(pieLeftColor)',
             'pie-2-background-size': (node) => `${node.data('pieLeft') || 0}%`,
             'background-image': 'data(image)',
             'background-width': '100%',
@@ -1356,7 +1381,7 @@ export default {
     // A system's fill, border, pie and overlay for the layer shown.
     markerData(row) {
       const { colors } = this
-      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, spots: 0, spotColor: null }
+      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null }
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
@@ -1428,7 +1453,11 @@ export default {
       graph.on('scrollzoom pinchzoom dragpan', () => {
         this.fitted = false
       })
-      graph.on('zoom', () => this.setZoomStyle(graph.zoom()))
+      graph.on('scrollzoom pinchzoom', () => {
+        this.zoomedByHand = true
+      })
+      // Cytoscape tells of a wheel or pinch zoom just after the zoom itself.
+      graph.on('zoom', () => queueMicrotask(() => this.zoomChanged()))
       // The borders' names are placed again once the systems settle, not on each frame of a drag or
       // of an animated layout: `dragfree` and `finishBusy` place them when those end.
       graph.on('add remove data dragfree', () => {
@@ -1440,7 +1469,10 @@ export default {
         }
       })
       // The borders lie on a canvas under cytoscape's, drawn again after each frame it draws.
-      graph.on('render', () => this.paintBorders())
+      graph.on('render', () => {
+        this.paintBorders()
+        this.settle()
+      })
 
       this.graph = graph
       this.sizeBorders()
@@ -1465,6 +1497,36 @@ export default {
 
     displaySize(size) {
       return Math.max(size, this.markerMinimum)
+    },
+
+    // A zoom by hand restyles the markers once it pauses, not at each step on the way: on a large
+    // map each restyle takes the better part of a second. Any other zoom restyles them at once.
+    zoomChanged() {
+      clearTimeout(this.zoomStyleTimer)
+
+      if (!this.zoomedByHand) {
+        this.setZoomStyle(this.graph.zoom())
+        return
+      }
+
+      this.zoomedByHand = false
+      this.zoomStyleTimer = setTimeout(() => this.setZoomStyle(this.graph.zoom()), ZOOM_PAUSE_MS)
+    },
+
+    // One more frame once the map is quiet, for cytoscape to make its picture of the map (see
+    // SETTLE_MS). That frame doesn't ask for another.
+    settle() {
+      clearTimeout(this.settleTimer)
+
+      if (this.settling) {
+        this.settling = false
+        return
+      }
+
+      this.settleTimer = setTimeout(() => {
+        this.settling = true
+        this.graph.forceRender()
+      }, SETTLE_MS)
     },
 
     // Zoomed out, markers keep at least MIN_MARKER_PIXELS on screen. Their size grows in quarter
@@ -1532,6 +1594,7 @@ export default {
       event.preventDefault()
       event.stopPropagation()
       this.fitted = false
+      this.zoomedByHand = true
       this.graph.zoom({ level: this.graph.zoom() * wheelZoom(event), renderedPosition: { x: event.clientX - box.left, y: event.clientY - box.top } })
     },
 
@@ -1762,11 +1825,17 @@ export default {
           const row = this.rowById[node.id()]
 
           if (row) {
-            node.data(this.markerData(row))
-            if (this.pinnedSet.has(row.id)) {
-              node.lock()
-            } else {
-              node.unlock()
+            const data = this.markerData(row)
+            const current = node.data()
+
+            if (Object.keys(data).some((key) => current[key] !== data[key])) {
+              node.data(data)
+            }
+
+            const pinned = this.pinnedSet.has(row.id)
+
+            if (node.locked() !== pinned) {
+              node[pinned ? 'lock' : 'unlock']()
             }
           }
         })
