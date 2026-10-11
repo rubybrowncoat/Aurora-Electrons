@@ -214,11 +214,11 @@ const run = async () => {
   try {
     await page.waitForFunction(() => window.$app && window.$app.$store && window.$app.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    // The app opens on the Empires page. A game with one race selects on click, and so does a race titled like its
-    // game, which the first click lands on; otherwise the race is next.
-    const picker = page.locator('.game-picker')
+    // The Empires page shows dated game headings and each race's title.
+    // A game with one visible race selects that race from its heading.
+    const picker = page.locator('.empire-list').first()
 
-    await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+    await picker.locator('.empire-list__game').filter({ hasText: `${GAME} ·` }).first().click({ timeout: PAGE_TIMEOUT_MS })
 
     if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
       await picker.getByText(RACE, { exact: true }).last().click()
@@ -283,10 +283,14 @@ const run = async () => {
 
   check('history file written', snapshotCount(before) > 0, before ? `${historyPath}: ${snapshotCount(before)} snapshots for race ${RaceID}` : `${historyPath} missing`)
 
-  // Rewrite the save with the same content: the watcher reloads the database and the recorder runs again.
+  // Touch the unchanged save: the watcher reloads it and the recorder runs again.
+  // Copying over an open SQLite file truncates it first, so a concurrent reader
+  // can see an incomplete database even though the completed copy is identical.
   const databases = await page.evaluate(() => window.__smoke.databases)
 
-  fs.copyFileSync(SAVE, save)
+  const reloadTime = new Date()
+
+  fs.utimesSync(save, reloadTime, reloadTime)
 
   try {
     await page.waitForFunction((count) => window.__smoke.databases > count, databases, { timeout: 30000 })
