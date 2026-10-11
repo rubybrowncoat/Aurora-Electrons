@@ -3003,16 +3003,18 @@ export default {
       }),
       default: {},
     },
-    // Loaded the first time the map shows habitability for the race, and kept for it after.
+    // Loaded the first time the map shows habitability for the race, and kept for it until the save changes.
     habitability: {
       get: tracked('habitability', async function () {
-        if (!this.database || !this.GameID || !this.RaceID) {
+        const { database } = this
+
+        if (!database || !this.GameID || !this.RaceID) {
           return null
         }
 
         const key = `${this.GameID}:${this.RaceID}`
 
-        if (this.habitabilityKept && this.habitabilityKept.key === key) {
+        if (this.habitabilityKept && this.habitabilityKept.key === key && this.habitabilityKeptFrom === database) {
           return this.habitabilityKept
         }
 
@@ -3020,9 +3022,10 @@ export default {
           return null
         }
 
-        const habitability = await loadHabitability(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        const habitability = await loadHabitability(database, { GameID: this.GameID, RaceID: this.RaceID })
 
         this.habitabilityKept = Object.freeze({ key, ...habitability })
+        this.habitabilityKeptFrom = database
 
         return this.habitabilityKept
       }),
