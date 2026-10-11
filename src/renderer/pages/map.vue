@@ -98,7 +98,7 @@
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
                 <template v-else-if="item.kind === 'slider'">
                   <span class="mr-2">{{ discoveryAsOf.text }}</span>
-                  <v-slider class="discovery-slider" :value="discoveryAsOf.year" :min="discoveryAsOf.min" :max="discoveryAsOf.max" step="1" dense hide-details thumb-label aria-label="The map as the race knew it at the end of a year" @change="setDiscoveryYear" />
+                  <v-slider class="discovery-slider" :value="discoveryAsOf.year" :min="discoveryAsOf.min" :max="discoveryAsOf.max" step="1" dense hide-details thumb-label aria-label="The map as the race knew it at the end of a year" @input="setDiscoveryYear" />
                 </template>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
@@ -1584,13 +1584,15 @@ export default {
       this.restyle()
     },
 
+    // Dim and As of change only what is faint, so they skip rebuilding the markers: As of follows its
+    // slider as it moves.
     dimUnmarked() {
-      this.restyle()
+      this.refade()
     },
 
     discoveryCutoff() {
       if (this.layer === 'discovery') {
-        this.restyle()
+        this.refade()
       }
     },
 
@@ -1946,16 +1948,23 @@ export default {
       const { spots, spotColor, ...data } = marker
       const glyphs = this.glyphsOf(row)
       const label = this.labelOf(row)
+      // Show marks the system where it has a glyph or its name carries more than the name.
+      const marked = glyphs.length > 0 || label !== row.Name
 
       return {
         ...data,
         label,
         imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM) / row.size : 1,
         image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface),
-        // Show marks the system where it has a glyph or its name carries more than the name. The Discovery
-        // era's As of fades the systems found after its year.
-        dim: (this.dimUnmarked && this.marks.length > 0 && !glyphs.length && label === row.Name) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff),
+        marked,
+        dim: this.fades(row, marked),
       }
+    },
+
+    // Whether a system is faint: Dim is on and Show marks nothing there, or the Discovery era's As of is
+    // set to a year before the race found it.
+    fades(row, marked) {
+      return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
     },
 
     // The fill for a system found at `time`: palest for those known from the start, then from the
@@ -2448,8 +2457,6 @@ export default {
       }
 
       this.graph.batch(() => {
-        const dim = new Set()
-
         this.graph.nodes().forEach((node) => {
           const row = this.rowById[node.id()]
 
@@ -2461,10 +2468,6 @@ export default {
               node.data(data)
             }
 
-            if (data.dim) {
-              dim.add(row.id)
-            }
-
             const pinned = this.pinnedSet.has(row.id)
 
             if (node.locked() !== pinned) {
@@ -2472,14 +2475,37 @@ export default {
             }
           }
         })
-        // A link fades with either of its systems.
-        this.graph.edges().forEach((edge) => {
-          const faded = dim.has(edge.data('source')) || dim.has(edge.data('target'))
+        this.fadeLinks()
+      })
+    },
 
-          if (edge.data('dim') !== faded) {
-            edge.data('dim', faded)
+    // Sets only which systems and links are faint, from the marks each marker already has.
+    refade() {
+      if (!this.graph) {
+        return
+      }
+
+      this.graph.batch(() => {
+        this.graph.nodes().forEach((node) => {
+          const row = this.rowById[node.id()]
+          const dim = Boolean(row) && this.fades(row, node.data('marked'))
+
+          if (node.data('dim') !== dim) {
+            node.data('dim', dim)
           }
         })
+        this.fadeLinks()
+      })
+    },
+
+    // A link fades with either of its systems.
+    fadeLinks() {
+      this.graph.edges().forEach((edge) => {
+        const dim = Boolean(edge.source().data('dim') || edge.target().data('dim'))
+
+        if (edge.data('dim') !== dim) {
+          edge.data('dim', dim)
+        }
       })
     },
 
