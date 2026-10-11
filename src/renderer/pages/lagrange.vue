@@ -200,13 +200,21 @@ export default {
       return Object.fromEntries(this.colonies.map((row) => [row.SystemID, row.Colonies]))
     },
 
+    // Body names straight from the read: the ship rows name the body an order is for, so they mustn't
+    // depend on bodyRows, which times stabilisations with the best ship.
+    bodyNames() {
+      return Object.fromEntries(this.bodies.map((body) => [body.SystemBodyID, systemBodyName(body, { Name: body.SystemName })]))
+    },
+
     // Undamaged, crewed ships time a stabilisation at 2 − Production bonus, × class crew / crew aboard when short.
     shipRows() {
+      const { orders } = this
+
       return this.ships.map((ship) => {
         const usable = !ship.Damaged && ship.CurrentCrew > 0
         const crew = ship.CurrentCrew < ship.ClassCrew ? ship.ClassCrew / ship.CurrentCrew : 1
         const multiplier = usable ? (2 - ship.ProductionBonus) * crew : null
-        const order = this.orders.find((candidate) => candidate.FleetID === ship.FleetID)
+        const order = orders.find((candidate) => candidate.FleetID === ship.FleetID)
 
         return {
           ...ship,
@@ -234,11 +242,14 @@ export default {
       return counts
     },
 
+    // Computed values are read once, outside the loop: each read inside it would subscribe this
+    // property to every dependency of theirs again.
     bodyRows() {
-      const multiplier = this.bestShip ? this.bestShip.multiplier : 1
+      const { bestShip, orders, pointsBySystem, coloniesBySystem, bodyNames } = this
+      const multiplier = bestShip ? bestShip.multiplier : 1
 
       return this.bodies.map((body) => {
-        const order = this.orders.find((candidate) => candidate.SystemBodyID === body.SystemBodyID)
+        const order = orders.find((candidate) => candidate.SystemBodyID === body.SystemBodyID)
         const days = (BASE_DAYS / Math.sqrt(body.Mass)) * multiplier
         const status = body.LagrangePointID
           ? { key: 'stable', label: 'Stable', icon: 'mdi-check-circle', color: 'success', rank: 2 }
@@ -248,10 +259,10 @@ export default {
 
         return {
           ...body,
-          name: systemBodyName(body, { Name: body.SystemName }),
+          name: bodyNames[body.SystemBodyID],
           type: TYPES[body.BodyTypeID] || (body.BodyClass === 2 ? 'Moon' : 'Planet'),
-          systemPoints: this.pointsBySystem[body.SystemID] || 0,
-          Colonies: this.coloniesBySystem[body.SystemID] || 0,
+          systemPoints: pointsBySystem[body.SystemID] || 0,
+          Colonies: coloniesBySystem[body.SystemID] || 0,
           days,
           daysSort: status.key === 'stable' ? Infinity : days,
           status,
@@ -274,16 +285,18 @@ export default {
     },
 
     mapNodes() {
+      const { pointsBySystem, coloniesBySystem, colors, theme } = this
+
       return this.systems.map((system) => {
-        const points = this.pointsBySystem[system.SystemID] || 0
-        const colonies = this.coloniesBySystem[system.SystemID] || 0
+        const points = pointsBySystem[system.SystemID] || 0
+        const colonies = coloniesBySystem[system.SystemID] || 0
 
         return {
           ...system,
           points,
           size: points ? 5 + 2 * Math.min(points, 4) : 3.5,
-          color: points >= 2 ? this.colors.many : points ? this.colors.one : this.colors.none,
-          ring: colonies ? this.theme.ink : null,
+          color: points >= 2 ? colors.many : points ? colors.one : colors.none,
+          ring: colonies ? theme.ink : null,
           label: points >= 2,
           title: `${system.Name}: ${points ? `${points} stable Lagrange ${points === 1 ? 'point' : 'points'}` : 'no stable Lagrange point'}${colonies ? `, ${colonies} ${colonies === 1 ? 'colony' : 'colonies'}` : ''}`,
         }
@@ -373,9 +386,7 @@ export default {
     },
 
     bodyNameOf(systemBodyId) {
-      const body = this.bodyRows.find((row) => row.SystemBodyID === systemBodyId)
-
-      return body ? body.name : `body #${systemBodyId}`
+      return this.bodyNames[systemBodyId] || `body #${systemBodyId}`
     },
 
     orderNote(order) {
@@ -401,7 +412,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -426,14 +437,15 @@ export default {
       default: [],
     },
     // Planets and moons of the known systems that could hold a Lagrange point (0.25 Earth masses and up), and
-    // any that has one. Lagrange points belong to no race: every one in a known system shows.
+    // any that has one. Lagrange points belong to no race: every one in a known system shows. Frozen, as
+    // thousands of read-only rows.
     bodies: {
       get: tracked('bodies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Mass, (select min(FCT_LagrangePoint.LagrangePointID) from FCT_LagrangePoint where FCT_LagrangePoint.PlanetID = FCT_SystemBody.SystemBodyID and FCT_LagrangePoint.GameID = ${this.GameID}) as LagrangePointID from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2) and (FCT_SystemBody.Mass >= 0.25 or FCT_SystemBody.SystemBodyID in (select FCT_LagrangePoint.PlanetID from FCT_LagrangePoint where FCT_LagrangePoint.GameID = ${this.GameID}))`).then(([items]) => items)
+        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Mass, (select min(FCT_LagrangePoint.LagrangePointID) from FCT_LagrangePoint where FCT_LagrangePoint.PlanetID = FCT_SystemBody.SystemBodyID and FCT_LagrangePoint.GameID = ${this.GameID}) as LagrangePointID from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2) and (FCT_SystemBody.Mass >= 0.25 or FCT_SystemBody.SystemBodyID in (select FCT_LagrangePoint.PlanetID from FCT_LagrangePoint where FCT_LagrangePoint.GameID = ${this.GameID}))`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
