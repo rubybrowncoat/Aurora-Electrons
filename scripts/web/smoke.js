@@ -229,11 +229,11 @@ const run = async () => {
   fs.mkdirSync(OUT, { recursive: true })
 
   await page.goto(BASE_URL)
-  // The app opens on the Empires page. A game with one race selects on click, and so does a race titled like its
-  // game, which the first click lands on; otherwise the race is next.
-  const picker = page.locator('.game-picker')
+  // The Empires page shows dated game headings and each race's title.
+  // A game with one visible race selects that race from its heading.
+  const picker = page.locator('.empire-list').first()
 
-  await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+  await picker.locator('.empire-list__game').filter({ hasText: `${GAME} ·` }).first().click({ timeout: PAGE_TIMEOUT_MS })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
     await picker.getByText(RACE, { exact: true }).last().click()
