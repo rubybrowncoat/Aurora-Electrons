@@ -148,6 +148,10 @@
             <div class="side-actions">
               <v-btn small outlined :to="mineralsLink([panelSystem.id])">Minerals</v-btn>
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
+              <v-btn small outlined :to="linkTo.survey(panelSystem.SystemID)">Survey progress</v-btn>
+              <v-btn small outlined :to="linkTo.lagrange(panelSystem.SystemID)">Lagrange points</v-btn>
+              <v-btn small outlined :to="linkTo.routes({ to: place.system(panelSystem.SystemID) })">Route here</v-btn>
+              <v-btn small outlined :to="linkTo.log({ system: panelSystem.SystemID })">Game log</v-btn>
               <v-btn small outlined @click="openSystemView(panelSystem.id)">System view</v-btn>
               <v-btn small outlined @click="togglePins([panelSystem.id])"><v-icon x-small left>{{ pinnedSet.has(panelSystem.id) ? 'mdi-lock-open-variant-outline' : 'mdi-lock-outline' }}</v-icon>{{ pinnedSet.has(panelSystem.id) ? 'Unpin' : 'Pin in place' }}</v-btn>
               <v-btn v-if="groupOf[panelSystem.id] !== undefined" small text @click="leaveGroups([panelSystem.id])">Remove from cluster</v-btn>
@@ -251,8 +255,10 @@ import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
 import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { gameTime } from '../utilities/aurora'
+import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { buildDistanceMap, loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
@@ -597,7 +603,7 @@ const overallProgress = (mode, { phase, progress }) => {
 export default {
   name: 'MapPage',
   components: { LoadState, MapGlyph, SystemView },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       // Set once the first reads are in, so the map stays up while the page reads a changed save.
@@ -621,6 +627,8 @@ export default {
       foundId: null,
       findText: null,
       selectedIds: [],
+      // The SystemID, as a string, of the system a link names, selected once the map has built it.
+      pendingFocus: null,
       arrangeMenu: false,
 
       busy: null,
@@ -642,6 +650,9 @@ export default {
       spacings: SPACINGS,
       keepTogetherOptions: KEEP_TOGETHER,
       markGroups: MARK_GROUPS,
+
+      linkTo,
+      place,
     }
   },
   computed: {
@@ -1295,6 +1306,14 @@ export default {
       return this.selectedRows.length === 1 ? this.selectedRows[0] : null
     },
 
+    linkQuery() {
+      return this.pendingFocus ? null : linkTo.map(this.panelSystem ? this.panelSystem.SystemID : null).query
+    },
+
+    linkLabel() {
+      return this.panelSystem && this.panelSystem.Name
+    },
+
     panelSubtitle() {
       const system = this.panelSystem
       const parts = []
@@ -1665,8 +1684,6 @@ export default {
     this.zoomStyleTimer = null
     this.settleTimer = null
     this.settling = false
-    // `?system=<SystemID>` opens the map on that system.
-    this.pendingFocus = this.$route.query.system ? String(this.$route.query.system) : null
   },
   beforeDestroy() {
     this.keepMap()
@@ -1758,11 +1775,11 @@ export default {
     },
 
     mineralsLink(ids) {
-      return { path: '/minerals', query: { systems: ids.join(',') } }
+      return linkTo.minerals({ systems: ids })
     },
 
     plannerLink(ids) {
-      return { path: '/habitability', query: { systems: ids.join(',') } }
+      return linkTo.planner({ systems: ids })
     },
 
     // The cytoscape style; the per-system colours are in each node's data, set by `markerData`.
@@ -2432,12 +2449,7 @@ export default {
 
       this.refreshLayoutState()
 
-      if (this.pendingFocus) {
-        const id = this.pendingFocus
-
-        this.pendingFocus = null
-        this.focusSystem(id)
-      }
+      this.focusPending()
     },
 
     buildElements(positions) {
@@ -2563,6 +2575,7 @@ export default {
         this.graph.nodes(':selected').unselect()
       }
 
+      this.selectedIds = []
       this.foundId = null
     },
 
@@ -2575,8 +2588,32 @@ export default {
 
       this.graph.nodes(':selected').unselect()
       node.select()
+      this.selectedIds = [node.id()]
       this.fitted = false
       this.graph.animate({ center: { eles: node }, zoom: Math.max(this.graph.zoom(), 1) }, { duration: 400 })
+    },
+
+    // The map shows the system the link names, or none.
+    applyLink(query) {
+      const id = queryId(query.system)
+
+      if (id === null) {
+        this.pendingFocus = null
+        this.clearSelection()
+      } else {
+        this.pendingFocus = String(id)
+        this.focusPending()
+      }
+    },
+
+    // Selects and centres the system a link named once the map has it.
+    focusPending() {
+      if (this.pendingFocus && this.graph && this.syncedStart) {
+        const id = this.pendingFocus
+
+        this.focusSystem(id)
+        this.pendingFocus = null
+      }
     },
 
     focusOrigin() {

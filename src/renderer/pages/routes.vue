@@ -113,6 +113,7 @@
               <v-data-table :headers="legHeaders" :items="legRows" item-key="index" disable-pagination disable-sort hide-default-footer dense>
                 <template #[`item.SystemName`]="{ item }">
                   <span class="font-weight-medium">{{ item.SystemName }}</span>
+                  <page-link v-if="item.SystemID" class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
                 </template>
                 <template #[`item.way`]="{ item }">
                   <div class="py-1">
@@ -142,6 +143,7 @@
           <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :items-per-page="15" class="clickable-rows" @click:row="(row) => setTo(`system:${row.SystemID}`)">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
+              <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
             <template #[`item.jumpsSort`]="{ item }">{{ item.route ? item.route.jumps : '—' }}</template>
             <template #[`item.kmSort`]="{ item }">{{ item.route ? distance(item.route.km) : '—' }}</template>
@@ -165,10 +167,13 @@ import { mapGetters } from 'vuex'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
+import { linkTo, place as placeKey, queryPlace } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 
@@ -195,12 +200,14 @@ const OPTIONS = [
 
 export default {
   name: 'RoutesPage',
-  components: { LoadState, StatTiles, SystemMap },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  components: { LoadState, PageLink, StatTiles, SystemMap },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       fromKey: null,
       toKey: null,
+      // The fleet key a link named as the origin, whose speed and movement settings apply once the fleets have loaded.
+      pendingFleet: null,
       order: 'jumps',
       speed: null,
       options: Object.fromEntries(OPTIONS.map((option) => [option.key, option.default])),
@@ -212,6 +219,7 @@ export default {
         { value: 'jumps', label: 'Fewest jumps', hint: 'The game\'s auto-route: the fewest transits, then the shorter way.' },
         { value: 'km', label: 'Shortest', hint: 'The fewest kilometres, as the galactic map\'s distances measure.' },
       ],
+      linkTo,
     }
   },
   computed: {
@@ -295,6 +303,14 @@ export default {
 
     destination() {
       return this.placeByKey[this.toKey] || null
+    },
+
+    linkQuery() {
+      return this.ready ? linkTo.routes({ from: this.origin && this.origin.key, to: this.destination && this.destination.key }).query : null
+    },
+
+    linkLabel() {
+      return this.origin && (this.destination ? `${this.origin.name} → ${this.destination.name}` : this.origin.name)
     },
 
     // Classes in service that move, fastest first, for the speed menu; their median speed until one is picked.
@@ -402,6 +418,7 @@ export default {
           total += leg.km
           rows.push({
             index: rows.length,
+            SystemID: leg.SystemID,
             SystemName: this.systemNameOf(leg.SystemID),
             from: this.pointName(leg.from),
             to: this.pointName(leg.to),
@@ -416,7 +433,7 @@ export default {
       const last = this.legs[this.legs.length - 1]
 
       if (last && last.kind === 'jump') {
-        rows.push({ index: rows.length, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to), to: 'Arrived', gate: false, via: null, km: 0, total })
+        rows.push({ index: rows.length, SystemID: last.to.SystemID, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to), to: 'Arrived', gate: false, via: null, km: 0, total })
       }
 
       return rows
@@ -546,6 +563,10 @@ export default {
         this.speed = this.config.get(`${this.settingsPrefix}.routesSpeed`, null)
       },
     },
+
+    placeByKey() {
+      this.adoptPendingFleet()
+    },
   },
   created() {
     this.order = this.config.get('routesOrder', 'jumps')
@@ -570,9 +591,42 @@ export default {
         return
       }
 
+      this.pendingFleet = null
       this.fromKey = key
       this.config.set(`${this.settingsPrefix}.routesFrom`, key)
+      this.adoptFleet(key)
+    },
 
+    setTo(key) {
+      this.toKey = key || null
+      this.config.set(`${this.settingsPrefix}.routesTo`, this.toKey)
+    },
+
+    // From and To as the link names them; one it leaves out is cleared, so the origin is the capital.
+    applyLink(query) {
+      const keyOf = (value) => {
+        const found = queryPlace(value)
+
+        return found ? placeKey[found.kind](found.id) : null
+      }
+
+      this.fromKey = keyOf(query.from)
+      this.toKey = keyOf(query.to)
+      this.config.set(`${this.settingsPrefix}.routesFrom`, this.fromKey)
+      this.config.set(`${this.settingsPrefix}.routesTo`, this.toKey)
+      this.pendingFleet = this.fromKey && this.fromKey.startsWith('fleet:') ? this.fromKey : null
+      this.adoptPendingFleet()
+    },
+
+    adoptPendingFleet() {
+      if (this.pendingFleet && this.placeByKey[this.pendingFleet]) {
+        this.adoptFleet(this.pendingFleet)
+        this.pendingFleet = null
+      }
+    },
+
+    // A fleet as origin brings its speed and movement settings.
+    adoptFleet(key) {
       const place = this.placeByKey[key]
 
       if (place && place.fleet) {
@@ -581,11 +635,6 @@ export default {
         this.setOption('avoidAlien', Boolean(place.fleet.AvoidAlienSystems))
         this.setOption('gatesOnly', !place.fleet.JumpRating)
       }
-    },
-
-    setTo(key) {
-      this.toKey = key || null
-      this.config.set(`${this.settingsPrefix}.routesTo`, this.toKey)
     },
 
     swap() {

@@ -31,6 +31,7 @@
           <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="onSystemClick">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
+              <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
             <template #[`item.gravSort`]="{ item }">
               <div class="progress-cell">
@@ -87,9 +88,13 @@
           <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" disable-pagination hide-default-footer>
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}</div>
+                <div class="font-weight-medium">{{ item.FleetName }}<page-link class="ml-1" :to="linkTo.routes({ from: place.fleet(item.FleetID) })" :name="item.FleetName" /></div>
                 <div class="caption text--secondary">{{ item.shipNames }}</div>
               </div>
+            </template>
+            <template #[`item.SystemName`]="{ item }">
+              {{ item.SystemName }}
+              <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
             </template>
             <template #[`item.geoRate`]="{ item }">
               <span :class="{ 'text--secondary': !item.geoRate }">{{ item.geoRate ? count(item.geoRate) : '—' }}</span>
@@ -150,10 +155,13 @@ import { mapGetters } from 'vuex'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { systemBodyName } from '../utilities/aurora'
+import { linkTo, place, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
@@ -178,8 +186,8 @@ const SURVEY_ORDERS = new Set([9, 12])
 
 export default {
   name: 'SurveyProgressPage',
-  components: { LoadState, StatTiles, SystemMap },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  components: { LoadState, PageLink, StatTiles, SystemMap },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       showSurveyed: false,
@@ -188,8 +196,11 @@ export default {
       page: 1,
       itemsPerPage: 15,
       selectedSystemId: null,
+      revealPending: false,
       sortBy: ['remaining'],
       sortDesc: [true],
+      linkTo,
+      place,
     }
   },
   computed: {
@@ -402,37 +413,58 @@ export default {
         { text: 'Time left', value: 'etaSort', align: 'end' },
       ]
     },
+
+    selectedSystem() {
+      return this.systems.find((system) => system.SystemID === this.selectedSystemId) || null
+    },
+
+    linkQuery() {
+      return linkTo.survey(this.selectedSystemId).query
+    },
+
+    linkLabel() {
+      return this.selectedSystem && this.selectedSystem.Name
+    },
+  },
+  watch: {
+    // A system a link names is shown once the reads have it.
+    systemRows() {
+      this.revealLinked()
+    },
   },
   created() {
     this.showSurveyed = this.config.get('surveyShowSurveyed', false)
   },
   methods: {
+    applyLink(query) {
+      this.selectedSystemId = queryId(query.system)
+      this.revealPending = this.selectedSystemId !== null
+
+      if (this.revealPending) {
+        this.revealLinked()
+      } else {
+        this.expanded = []
+      }
+    },
+
+    revealLinked() {
+      if (this.revealPending && this.revealSystem(this.selectedSystemId)) {
+        this.revealPending = false
+      }
+    },
+
     onSystemClick(item, { expand, isExpanded }) {
       this.selectedSystemId = item.SystemID
+      this.revealPending = false
       expand(!isExpanded)
     },
 
     selectSystem(systemId) {
       this.selectedSystemId = systemId
+      this.revealPending = false
 
-      const row = this.systemRows.find((system) => system.SystemID === systemId)
-
-      if (row) {
-        this.search = ''
-        this.sortBy = ['remaining']
-        this.sortDesc = [true]
-        this.expanded = [row]
-
-        // The row's page in the order the table will show: unfiltered, most work left first (the
-        // table's numeric sort is a stable subtraction too, so ties keep the same order).
-        const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
-        const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
-
-        this.page = target
+      if (this.revealSystem(systemId)) {
         this.$nextTick(() => {
-          // The table clamps the page to the pages it has before the cleared search widens the list.
-          this.page = target
-
           const panel = this.$refs.systemsPanel
 
           if (panel && panel.$el) {
@@ -440,6 +472,33 @@ export default {
           }
         })
       }
+    },
+
+    // Expands the system's row, on the page of the table it falls on; false while the system isn't among the rows.
+    revealSystem(systemId) {
+      const row = this.systemRows.find((system) => system.SystemID === systemId)
+
+      if (!row) {
+        return false
+      }
+
+      this.search = ''
+      this.sortBy = ['remaining']
+      this.sortDesc = [true]
+      this.expanded = [row]
+
+      // The row's page in the order the table will show: unfiltered, most work left first (the
+      // table's numeric sort is a stable subtraction too, so ties keep the same order).
+      const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
+      const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
+
+      this.page = target
+      // The table clamps the page to the pages it has before the cleared search widens the list.
+      this.$nextTick(() => {
+        this.page = target
+      })
+
+      return true
     },
 
     activity(fleet) {

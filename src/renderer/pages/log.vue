@@ -72,8 +72,8 @@
                   <span v-if="isNew(row.event)" class="new-label">New</span>
                   <span class="event-date">{{ row.group ? row.event.Day : row.event.DateTime }}</span>
                   <!-- Vuetify activates a row on Enter, even from a child link; keep link keys on the link. -->
-                  <v-btn v-if="row.event.KnownSystemID && (!row.group || row.sameSystem)" icon x-small :to="systemLink(row.event)" :style="{ color: 'inherit' }" :aria-label="`Open ${row.event.SystemName} on the Galaxy Map`" :title="`Galaxy Map: ${row.event.SystemName}`" @click.stop @keydown.native.stop><v-icon small>mdi-map-outline</v-icon></v-btn>
-                  <v-btn v-if="row.event.SystemBodyID && (!row.group || row.sameColony)" icon x-small :to="bodyLink(row.event)" :style="{ color: 'inherit' }" :aria-label="`Open ${row.event.ColonyName} in the Colonization Planner`" :title="`Colonization Planner: ${row.event.ColonyName}`" @click.stop @keydown.native.stop><v-icon small>mdi-earth</v-icon></v-btn>
+                  <page-link v-if="row.event.KnownSystemID && (!row.group || row.sameSystem)" :to="systemLink(row.event)" :name="row.event.SystemName" />
+                  <page-link v-if="row.event.SystemBodyID && (!row.group || row.sameColony)" :to="bodyLink(row.event)" :name="row.event.ColonyName" />
                   <v-btn icon x-small :style="{ color: 'inherit' }" :aria-label="`Hide ${row.event.TypeName} events`" :title="`Hide ${row.event.TypeName} events`" @click.stop="hideType(row.event)" @keydown.native.stop><v-icon small>mdi-eye-off-outline</v-icon></v-btn>
                   <v-icon v-if="row.group" small :style="{ color: 'inherit' }">{{ expandedGroups.includes(row.key) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
                 </div>
@@ -115,17 +115,20 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { eventColorToRGBA, gameTime } from '../utilities/aurora'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 
 const INPUT_LABELS = { logEvents: 'the game log' }
 
 export default {
-  components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [countFormat, loadState(INPUT_LABELS)],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [countFormat, deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       activeTypes: null,
@@ -402,14 +405,27 @@ export default {
 
       this.logEvents.forEach((event) => {
         if (event.KnownSystemID) {
-          places.set(`system-${event.KnownSystemID}`, `System: ${event.SystemName}`)
+          places.set(`system-${event.KnownSystemID}`, { text: `System: ${event.SystemName}`, name: event.SystemName })
         }
         if (event.ColonyID) {
-          places.set(`colony-${event.ColonyID}`, `Colony: ${event.ColonyName}${event.SystemName ? ` (${event.SystemName})` : ''}`)
+          places.set(`colony-${event.ColonyID}`, { text: `Colony: ${event.ColonyName}${event.SystemName ? ` (${event.SystemName})` : ''}`, name: event.ColonyName })
         }
       })
 
-      return [...places].map(([value, text]) => ({ value, text })).sort((a, b) => a.text.localeCompare(b.text))
+      return [...places].map(([value, { text, name }]) => ({ value, text, name })).sort((a, b) => a.text.localeCompare(b.text))
+    },
+
+    // The place filter as the query names it: a system or a colony, by the ID after its filter value's dash.
+    linkQuery() {
+      const [kind, id] = String(this.place || '').split('-')
+
+      return linkTo.log({ system: kind === 'system' ? id : null, colony: kind === 'colony' ? id : null }).query
+    },
+
+    linkLabel() {
+      const option = this.placeOptions.find((item) => item.value === this.place)
+
+      return option && option.name
     },
 
     baseEvents() {
@@ -626,6 +642,14 @@ export default {
     },
   },
   methods: {
+    applyLink(query) {
+      const system = queryId(query.system)
+      const colony = queryId(query.colony)
+
+      this.place = system ? `system-${system}` : colony ? `colony-${colony}` : null
+      this.saveFilters()
+    },
+
     saveFilters() {
       if (this.contextKey) {
         this.config.set(`${this.contextKey}.logFilters`, { search: this.search || '', place: this.place, types: this.activeTypes, from: this.dateFrom, to: this.dateTo, collapse: this.collapseRepeats, customized: this.hideNonCustomized })
@@ -689,11 +713,11 @@ export default {
     },
 
     systemLink(event) {
-      return { path: '/map', query: { system: String(event.KnownSystemID) } }
+      return linkTo.map(event.KnownSystemID)
     },
 
     bodyLink(event) {
-      return { path: '/habitability', query: { bodies: JSON.stringify([{ SystemBodyID: event.SystemBodyID, SystemBodyName: event.SystemBodyName, SystemName: event.SystemName, BodyClass: event.BodyClass, Component: event.Component, PlanetNumber: event.PlanetNumber, OrbitNumber: event.OrbitNumber }]) } }
+      return linkTo.planner({ bodies: [event] })
     },
   },
   asyncComputed: {

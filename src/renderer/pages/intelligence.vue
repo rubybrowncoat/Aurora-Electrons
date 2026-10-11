@@ -169,7 +169,7 @@
               <div v-else class="panel-body">
                 <div class="caption text--secondary mb-1">Systems where they've been seen</div>
                 <div class="mb-3">
-                  <v-chip v-for="system in selectedSystems" :key="system.SystemID" small outlined class="mr-1 mb-1">{{ system.Name || `System ${system.SystemID}` }}</v-chip>
+                  <v-chip v-for="system in selectedSystems" :key="system.SystemID" small outlined class="mr-1 mb-1" :to="linkTo.map(system.SystemID)">{{ system.Name || `System ${system.SystemID}` }}</v-chip>
                   <span v-if="!selectedSystems.length" class="caption text--secondary">None.</span>
                 </div>
                 <div class="caption text--secondary mb-1">Species</div>
@@ -193,8 +193,10 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import { gameTime } from '../utilities/aurora'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { historyConfig } from '../utilities/history'
 import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, COMM_STATUS, DIPLOMACY_LINES, ENGINE_TYPES, POPULATION_LEVELS, REWARD_COST, SPECIES_STATUS, alienRacesSql, contactStatus, intelSnapshot, populationField, populationLevel, rebuildFleet, rewardAttempts, standing, treatyNames } from '../utilities/intelligence'
 import { tracked } from '../utilities/load-tracking'
@@ -252,7 +254,7 @@ const compact = (value) => {
 export default {
   name: 'IntelligencePage',
   components: { ChartCanvas, LoadState, StatTiles },
-  mixins: [loadState(INPUT_LABELS)],
+  mixins: [deepLink, loadState(INPUT_LABELS)],
   data() {
     return {
       selectedId: null,
@@ -260,6 +262,7 @@ export default {
       POPULATION_FIELDS,
       GROUND_COUNTERS,
       GROUND_THRESHOLD,
+      linkTo,
     }
   },
   computed: {
@@ -286,6 +289,14 @@ export default {
 
     selected() {
       return this.rows.find((row) => row.AlienRaceID === this.selectedId) || null
+    },
+
+    linkQuery() {
+      return linkTo.intelligence(this.selectedId).query
+    },
+
+    linkLabel() {
+      return this.selected && this.selected.AlienRaceName
     },
 
     // What the recorder has kept for this race's view of the selected alien race, re-read when it writes.
@@ -518,6 +529,19 @@ export default {
   },
   watch: {
     rows() {
+      this.selectDefault()
+    },
+    RaceID() {
+      this.selectedId = null
+    },
+  },
+  methods: {
+    applyLink(query) {
+      this.selectedId = queryId(query.race)
+      this.selectDefault()
+    },
+    // The race kept for this race's view, else the one with the most ships seen, when none is selected.
+    selectDefault() {
       if (!this.selected && this.rows.length) {
         const saved = this.config.get(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, null)
         const fallback = this.rows.slice().sort((a, b) => (b.KnownShips + b.DestroyedShips) - (a.KnownShips + a.DestroyedShips))[0]
@@ -525,11 +549,6 @@ export default {
         this.selectedId = this.rows.some((row) => row.AlienRaceID === saved) ? saved : fallback.AlienRaceID
       }
     },
-    RaceID() {
-      this.selectedId = null
-    },
-  },
-  methods: {
     select(AlienRaceID) {
       this.selectedId = AlienRaceID
       this.config.set(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, AlienRaceID)
