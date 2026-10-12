@@ -100,6 +100,49 @@ export const governorSuggestions = (colonies, administrators) => {
   return suggestions.map((suggestion) => ({ ...suggestion, alsoBestFor: suggestions.filter((other) => other !== suggestion && other.candidate === suggestion.candidate).length }))
 }
 
+// What `governorSuggestions` leaves out, from the same inputs. `improvements` is only the colonies where an unassigned administrator beats the governor, so it can be zero while every colony is staffed. Per colony `status` is 'improvement', 'unrated' (no required bonus, not evaluated), 'no-candidate' (no unassigned administrator holds the required bonus) or 'not-stronger' (the best unassigned candidate does not beat the governor). `eligibleIdle` counts unassigned administrators holding the required bonus of at least one colony; `candidates` counts the distinct administrators proposed.
+export const governorCoverage = (colonies, administrators, suggestions) => {
+  const idle = administrators.filter((admin) => admin.CommandType === 0)
+  const improved = new Set(suggestions.map((suggestion) => suggestion.colony.PopulationID))
+  const wanted = new Set(colonies.filter((colony) => colony.BonusOne > 0).map((colony) => colony.BonusOne))
+  const status = {}
+  const tally = () => ({ assigned: 0, vacant: 0 })
+  const coverage = {
+    colonies: colonies.length,
+    assigned: 0,
+    vacant: 0,
+    unrated: tally(),
+    noCandidate: tally(),
+    notStronger: 0,
+    improvements: suggestions.length,
+    candidates: new Set(suggestions.map((suggestion) => suggestion.candidate.CommanderID)).size,
+    idleAdmins: idle.length,
+    eligibleIdle: idle.filter((admin) => [...wanted].some((bonusId) => admin.bonuses[bonusId] !== undefined)).length,
+    status,
+  }
+
+  colonies.forEach((colony) => {
+    const side = colony.GovernorID ? 'assigned' : 'vacant'
+
+    coverage[side]++
+
+    if (!(colony.BonusOne > 0)) {
+      status[colony.PopulationID] = 'unrated'
+      coverage.unrated[side]++
+    } else if (improved.has(colony.PopulationID)) {
+      status[colony.PopulationID] = 'improvement'
+    } else if (!idle.some((admin) => admin.bonuses[colony.BonusOne] !== undefined)) {
+      status[colony.PopulationID] = 'no-candidate'
+      coverage.noCandidate[side]++
+    } else {
+      status[colony.PopulationID] = 'not-stronger'
+      coverage.notStronger++
+    }
+  })
+
+  return coverage
+}
+
 // The officer post and bonus that matter on a specialist ship. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain.
 export const specialistPost = (ship) => {
   if (ship.Terraformers > 0) {

@@ -14,13 +14,14 @@
           <div class="panel-head">
             <span>Better assignments</span>
             <v-btn-toggle v-model="suggestionView" mandatory dense>
-              <v-btn value="governors" small>Governors ({{ governorRows.length }})</v-btn>
+              <v-btn value="governors" small>Governor improvements ({{ governorRows.length }})</v-btn>
               <v-btn value="ships" small>Specialist ships ({{ shipRows.length }})</v-btn>
               <v-btn value="research" small>Research ({{ researchRows.length }})</v-btn>
             </v-btn-toggle>
           </div>
 
           <template v-if="suggestionView === 'governors'">
+            <div class="panel-body caption text--secondary">{{ governorSummary }}</div>
             <v-data-table v-if="visibleGovernorRows.length" :headers="governorHeaders" :items="visibleGovernorRows" item-key="key" disable-pagination hide-default-footer>
               <template #[`item.colony`]="{ item }">
                 <div class="py-2">
@@ -42,7 +43,10 @@
                 </div>
               </template>
             </v-data-table>
-            <div v-else class="panel-body caption text--secondary">{{ governorEmptyText }}</div>
+            <div v-else class="panel-body caption text--secondary">
+              <div>{{ governorEmptyText }}</div>
+              <div v-for="reason in governorEmptyReasons" :key="reason">{{ reason }}</div>
+            </div>
             <div class="panel-foot caption text--secondary">
               As the game ranks governors: a candidate must have the colony's required bonus, and ranks by it, then the secondary, then the tertiary bonus (set on the Governor tab of the Economics window). Only unassigned administrators are considered.
             </div>
@@ -238,7 +242,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
-import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RETIRE_STATUSES, SERVING_COMMANDER, formatBonus, formerKind, governorSuggestions, parseBonuses, researchSuggestions, shipSuggestions } from '../utilities/commanders'
+import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RETIRE_STATUSES, SERVING_COMMANDER, formatBonus, formerKind, governorCoverage, governorSuggestions, parseBonuses, researchSuggestions, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -342,6 +346,10 @@ export default {
       return governorSuggestions(this.colonies, this.byType[2]).map((row) => ({ ...row, key: row.colony.PopulationID }))
     },
 
+    governorStats() {
+      return governorCoverage(this.colonies, this.byType[2], this.governorRows)
+    },
+
     shipRows() {
       return shipSuggestions(this.ships, this.byType[0]).map((row) => ({ ...row, key: row.ship.ShipID }))
     },
@@ -353,7 +361,7 @@ export default {
     tiles() {
       const types = this.commanderTypes
       const total = types.reduce((sum, type) => sum + type.total, 0)
-      const vacancies = this.colonies.filter((colony) => !colony.GovernorID && colony.Population > 0).length
+      const vacancies = this.governorStats.vacant
       const captainless = this.ships.filter((ship) => !ship.CaptainID).length
       const suggestions = this.governorRows.length + this.shipRows.length + this.researchRows.length
 
@@ -378,7 +386,7 @@ export default {
         {
           label: 'Better assignments',
           value: `${suggestions}`,
-          note: `${this.governorRows.length} governors, ${this.shipRows.length} specialist ships, ${this.researchRows.length} research projects`,
+          note: `${this.governorRows.length} governor improvements, ${this.shipRows.length} specialist ships, ${this.researchRows.length} research projects`,
           icon: suggestions ? 'mdi-swap-horizontal' : 'mdi-check-circle',
           iconColor: suggestions ? 'primary' : 'success',
         },
@@ -587,8 +595,77 @@ export default {
       return this.focusColonyId ? this.governorRows.filter((row) => row.colony.PopulationID === this.focusColonyId) : this.governorRows
     },
 
+    // The line above the governor table: the improvement count is not the number of governed colonies, so both are stated.
+    governorSummary() {
+      const stats = this.governorStats
+
+      if (!stats.colonies) {
+        return 'The race has no colonies.'
+      }
+
+      const proposed = stats.improvements ? `${this.count(stats.improvements)} improvements, naming ${this.count(stats.candidates)} distinct unassigned ${stats.candidates === 1 ? 'administrator' : 'administrators'}` : '0 improvements'
+
+      return `${this.colonyCount(stats.assigned)} with a governor · ${this.count(stats.vacant)} vacant · ${proposed} · ${this.count(stats.idleAdmins)} unassigned administrators, ${this.count(stats.eligibleIdle)} of them holding a bonus some colony requires`
+    },
+
+    // Why the governor table is empty. A colony filter gets its own reason, never the empire-wide one.
     governorEmptyText() {
-      return this.focusColonyId ? `No better governor is available for ${this.focusColony ? this.focusColony.PopName : 'this colony'}.` : "No unassigned administrator beats a current governor on their colony's bonuses, and no colony with a required bonus is without one."
+      const stats = this.governorStats
+
+      if (this.focusColonyId) {
+        return this.focusColony ? `No governor improvement for ${this.focusColony.PopName}. The filter is limited to this colony.` : 'No colony of this race has this ID.'
+      }
+
+      return stats.colonies ? `No governor improvements for any colony. ${this.colonyCount(stats.assigned)} with a governor, ${stats.vacant} vacant.` : 'No governor improvements: the race has no colonies.'
+    },
+
+    governorEmptyReasons() {
+      const stats = this.governorStats
+      const reasons = []
+
+      if (this.focusColonyId) {
+        const colony = this.focusColony
+        const status = colony ? stats.status[colony.PopulationID] : null
+        const bonus = colony && colony.BonusOne > 0 ? (this.bonusTypeById[colony.BonusOne] || {}).Description || `#${colony.BonusOne}` : null
+
+        if (status === 'unrated') {
+          reasons.push('No required bonus is set for this colony (Governor tab of the Economics window), so no administrator is compared.')
+        } else if (status === 'no-candidate') {
+          reasons.push(colony.GovernorID ? `No unassigned administrator holds the required bonus (${bonus}), so nobody can replace the current governor.` : `The colony is vacant, and none of the ${this.count(stats.idleAdmins)} unassigned administrators holds the required bonus (${bonus}).`)
+        } else if (status === 'not-stronger') {
+          reasons.push(`The best unassigned administrator with the required bonus (${bonus}) does not beat the current governor on this colony's bonuses.`)
+        }
+
+        reasons.push(stats.improvements ? `${this.count(stats.improvements)} improvements for other colonies are hidden by this filter.` : 'The empire has no governor improvements either.')
+
+        return reasons
+      }
+
+      const unrated = stats.unrated.assigned + stats.unrated.vacant
+
+      if (unrated) {
+        reasons.push(`Colonies with no required bonus, so none is compared: ${this.count(unrated)}${stats.unrated.vacant ? ` (${this.count(stats.unrated.vacant)} vacant)` : ''}.`)
+      }
+
+      if (stats.noCandidate.vacant) {
+        reasons.push(`Vacant colonies where no unassigned administrator holds the required bonus: ${this.count(stats.noCandidate.vacant)}.`)
+      }
+
+      if (stats.noCandidate.assigned) {
+        reasons.push(`Governed colonies where no unassigned administrator holds the required bonus: ${this.count(stats.noCandidate.assigned)}.`)
+      }
+
+      if (stats.notStronger) {
+        reasons.push(`Governed colonies whose governor is at least as strong as the best unassigned candidate: ${this.count(stats.notStronger)}.`)
+      }
+
+      if (stats.colonies && !stats.idleAdmins) {
+        reasons.push('No administrator is unassigned.')
+      } else if (stats.colonies > unrated && !stats.eligibleIdle) {
+        reasons.push(`None of the ${this.count(stats.idleAdmins)} unassigned administrators holds a required bonus of any colony.`)
+      }
+
+      return reasons
     },
 
     linkQuery() {
@@ -644,6 +721,9 @@ export default {
     },
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
+    },
+    colonyCount(value) {
+      return `${this.count(value)} ${value === 1 ? 'colony' : 'colonies'}`
     },
     fixed(value, decimals) {
       return roundToDecimal(value, decimals).toFixed(decimals)
