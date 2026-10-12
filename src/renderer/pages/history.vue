@@ -9,8 +9,9 @@
     <v-container v-else fluid class="history-page">
       <v-row dense align="center" class="mb-1">
         <v-col class="caption text--secondary">
-          <template v-if="allSnapshots.length">{{ allSnapshots.length }} {{ allSnapshots.length === 1 ? 'snapshot' : 'snapshots' }}, {{ allSnapshots.length > 1 ? `${date(allSnapshots[0].t)} to ${date(allSnapshots[allSnapshots.length - 1].t)}` : date(allSnapshots[0].t) }}.</template>
+          <template v-if="recording">{{ recording.headline }}</template>
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
+          <div v-if="recording && recording.note" class="history-recording-note">{{ recording.note }}</div>
         </v-col>
         <v-col cols="auto">
           <v-btn-toggle v-model="span" mandatory dense class="mr-2">
@@ -107,7 +108,7 @@ import { chartTheme, withAlpha } from '../components/charts/theme'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
-import { historyConfig } from '../utilities/history'
+import { MAX_SNAPSHOTS, historyConfig, recordedSpan } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 
@@ -224,6 +225,28 @@ export default {
 
     latest() {
       return this.snapshots[this.snapshots.length - 1]
+    },
+
+    // What the recording covers, labelled for the header: first and latest game dates, the span between them and how much of the chosen window it fills. Null when nothing is recorded.
+    recording() {
+      const coverage = recordedSpan(this.allSnapshots, this.span * SECONDS_PER_YEAR)
+
+      if (!coverage.count) {
+        return null
+      }
+
+      if (coverage.count === 1) {
+        return { headline: `1 snapshot, ${this.date(coverage.first)}. No span is recorded yet, and nothing earlier was observed.`, note: '' }
+      }
+
+      const years = (seconds) => (seconds / SECONDS_PER_YEAR).toFixed(1)
+      const dates = `${this.date(coverage.first)} to ${this.date(coverage.last)}`
+      const covered = this.span ? `${years(coverage.covered)} of ${this.span} years recorded${coverage.inWindow < coverage.count ? `, ${coverage.inWindow} of ${coverage.count} snapshots in this window` : ''}` : `${years(coverage.seconds)} years recorded`
+
+      return {
+        headline: `${coverage.count} snapshots, ${dates}: ${covered}.`,
+        note: `Game time before the first snapshot was never observed by the app and cannot be rebuilt, since snapshots keep only aggregate figures. Gaps between snapshots are expected: one is taken per save while the app is open, and past ${MAX_SNAPSHOTS} snapshots the older ones are thinned to every other one, so older stretches can be coarser than recent ones.`,
+      }
     },
 
     tiles() {

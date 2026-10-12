@@ -39,6 +39,20 @@ export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => {
   return result
 }
 
+// What a race's recording covers, from its time-ordered snapshots: { count, first, last, seconds } with the game times of the first and latest snapshot (null when there are none) and the span between them; `covered` is how much of the last `windowSeconds` that span fills, or the whole span when `windowSeconds` is 0, and `inWindow` how many snapshots fall in that window. Nothing is inferred for time before the first snapshot.
+export const recordedSpan = (snapshots, windowSeconds = 0) => {
+  if (!snapshots.length) {
+    return { count: 0, first: null, last: null, seconds: 0, covered: 0, inWindow: 0 }
+  }
+
+  const first = snapshots[0].t
+  const last = snapshots[snapshots.length - 1].t
+  const seconds = last - first
+  const since = windowSeconds ? last - windowSeconds : -Infinity
+
+  return { count: snapshots.length, first, last, seconds, covered: windowSeconds ? Math.min(seconds, windowSeconds) : seconds, inWindow: snapshots.filter((snapshot) => snapshot.t >= since).length }
+}
+
 // Every record in `records` ({ id: { ..., snapshots } }) without its snapshots at or after `t`;
 // records left empty are dropped.
 const before = (records, t) => {
