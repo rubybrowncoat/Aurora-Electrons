@@ -121,7 +121,7 @@
               </div>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by the shuttle bays (one for a craft of 500 t or less, which lands) plus one if the colony has a spaceport or cargo shuttle station, times the race's shuttle technology; commander and governor Logistics bonuses are not counted, so times err long. Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, without a station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength: the strength of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology, plus the technology once more if the colony has a spaceport or cargo shuttle station; commander, governor and sector Logistics bonuses are not counted, so times err long. Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, without a station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
         </v-card>
 
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
@@ -177,7 +177,7 @@ import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
-import { JUMP_DRIVE_COLUMNS, fleetCanTransit, roundTrip, routeBlockers, transitRule } from '../utilities/transport'
+import { JUMP_DRIVE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, fleetCanTransit, roundTrip, routeBlockers, transitRule } from '../utilities/transport'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -640,7 +640,7 @@ export default {
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
-      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, statusSort: works ? 0 : 1 }
+      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, statusSort: works ? 0 : 1 }
 
       if (works) {
         return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: base.cargo * trip.trips, colonistsYear: base.colonists * trip.trips, fuel: trip.fuelPerShip * count, fuelShare: trip.fuelShare }
@@ -663,7 +663,7 @@ export default {
     },
 
     tripTitle(run) {
-      return `${this.duration((2 * run.km) / run.speed / SECONDS_PER_DAY)} flying at ${this.count(run.speed)} km/s, ${this.duration(run.handlingSeconds / SECONDS_PER_DAY)} loading and unloading`
+      return `${this.duration((2 * run.km) / run.speed / SECONDS_PER_DAY)} flying at ${this.count(run.speed)} km/s, ${this.duration(run.handlingSeconds / SECONDS_PER_DAY)} loading and unloading${run.limiting ? `, the slowest stop set by ${run.limiting.ship.ShipName} at a loading strength of ${this.count(run.limiting.strength, 1)}` : ''}`
     },
 
     // A count of installations, which shipments can split in parts.
@@ -730,14 +730,14 @@ export default {
       }),
       default: [],
     },
-    // The ships of every fleet that has a hold or colony bays, with their class, the jump drives it carries (`Drive` the best ordinary one, `AnyDrive` the best of any kind, as ship sizes) and the race's shuttle technology.
+    // The ships of every fleet that has a hold or colony bays, with their class, the strength of their undamaged cargo shuttle bays, the jump drives it carries (`Drive` the best ordinary one, `AnyDrive` the best of any kind, as ship sizes) and the race's shuttle technology.
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, FCT_Ship.MothershipID, FCT_Fleet.FleetName, FCT_Fleet.ShippingLine, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.CargoShuttleStrength, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.MaxSpeed > 1 and FCT_Ship.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0)) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, FCT_Ship.MothershipID, FCT_Fleet.FleetName, FCT_Fleet.ShippingLine, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.MaxSpeed > 1 and FCT_Ship.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0)) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
