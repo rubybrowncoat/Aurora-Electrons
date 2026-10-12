@@ -14,7 +14,7 @@
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}<page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" /></div>
+                <div class="font-weight-medium">{{ item.FleetName }}<page-link :to="item.routesLink" :name="item.routesName" class="ml-1" /></div>
                 <div class="caption text--secondary">{{ item.Ships }} {{ item.Ships === 1 ? 'ship' : 'ships' }} at {{ count(item.Speed) }} km/s</div>
               </div>
             </template>
@@ -122,6 +122,7 @@ import { linkTo, place } from '../utilities/deep-links'
 import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { orderPlaceKey } from '../utilities/places'
 
 const INPUT_LABELS = {
   classes: 'the freighter classes',
@@ -154,6 +155,13 @@ const placeOf = (order) => {
   const at = order.ActionName ? description.lastIndexOf(`: ${order.ActionName}`) : -1
 
   return at > 0 ? description.slice(0, at) : description || order.ActionName
+}
+
+// The places a cycle visits, in order: where each order goes, leaving out transits (they only cross a jump point or Lagrange point), unnamed places and repeats, and the last when it is the first again.
+const cycleStops = (orders, raceId) => {
+  const stops = orders.filter((order) => !order.Jumps).map((order) => orderPlaceKey(order, raceId)).filter(Boolean).filter((key, index, keys) => key !== keys[index - 1])
+
+  return stops.length > 1 && stops[stops.length - 1] === stops[0] ? stops.slice(0, -1) : stops
 }
 
 export default {
@@ -217,6 +225,7 @@ export default {
         // A stop does something where it goes: transits and plain moves only pass through.
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''
+        const routesLink = this.routesLink(fleet, orders)
 
         return {
           ...fleet,
@@ -224,6 +233,8 @@ export default {
           cargo,
           year,
           stopsText: stops.join(' → '),
+          routesLink: routesLink.to,
+          routesName: routesLink.name,
           handlingHours: handling.seconds / 3600,
           blocked: handling.blocked,
           blockedText: handling.blocked.map((stop) => `${stop.place} (${stop.reason === 'crew' ? 'a ship has no crew aboard' : 'no shuttle bays or station, and too big to land'})`).join(', '),
@@ -335,8 +346,11 @@ export default {
     colonyLink(populationId) {
       return linkTo.colonyOutlook(populationId)
     },
-    fleetRoutesLink(fleetId) {
-      return linkTo.routes({ from: place.fleet(fleetId) })
+    // Route Finder with the fleet's cycle as its stops and its own speed and movement settings; a fleet with no stop to name opens on the fleet itself.
+    routesLink(fleet, orders) {
+      const stops = cycleStops(orders, this.RaceID)
+
+      return stops.length ? { to: linkTo.routes({ stops, cycle: true, fleet: fleet.FleetID }), name: `${fleet.FleetName}'s cycle` } : { to: linkTo.routes({ from: place.fleet(fleet.FleetID) }), name: fleet.FleetName }
     },
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
@@ -395,7 +409,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.SystemID when 12 then VIR_LagrangeIn.SystemID when 2 then FCT_SystemBody.SystemID when 15 then FCT_SystemBody.SystemID end as SystemID, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.Xcor when 12 then VIR_LagrangeIn.Xcor when 2 then FCT_SystemBody.Xcor when 15 then FCT_SystemBody.Xcor end as X, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.Ycor when 12 then VIR_LagrangeIn.Ycor when 2 then FCT_SystemBody.Ycor when 15 then FCT_SystemBody.Ycor end as Y, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.SystemID when 12 then VIR_LagrangeOut.SystemID when 2 then FCT_SystemBody.SystemID when 15 then FCT_SystemBody.SystemID end as ExitSystemID, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.Xcor when 12 then VIR_LagrangeOut.Xcor when 2 then FCT_SystemBody.Xcor when 15 then FCT_SystemBody.Xcor end as ExitX, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.Ycor when 12 then VIR_LagrangeOut.Ycor when 2 then FCT_SystemBody.Ycor when 15 then FCT_SystemBody.Ycor end as ExitY, VIR_ArrivalSystem.Name as ArrivalSystemName, coalesce(VIR_Station.Station, 0) as Station from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 left join (select FCT_PopulationInstallations.PopID, max(case when DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Station from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Station on VIR_Station.PopID = FCT_MoveOrders.PopulationID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.SystemID when 12 then VIR_LagrangeIn.SystemID when 2 then FCT_SystemBody.SystemID when 15 then FCT_SystemBody.SystemID end as SystemID, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.Xcor when 12 then VIR_LagrangeIn.Xcor when 2 then FCT_SystemBody.Xcor when 15 then FCT_SystemBody.Xcor end as X, case FCT_MoveOrders.DestinationType when 1 then VIR_Exit.Ycor when 12 then VIR_LagrangeIn.Ycor when 2 then FCT_SystemBody.Ycor when 15 then FCT_SystemBody.Ycor end as Y, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.SystemID when 12 then VIR_LagrangeOut.SystemID when 2 then FCT_SystemBody.SystemID when 15 then FCT_SystemBody.SystemID end as ExitSystemID, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.Xcor when 12 then VIR_LagrangeOut.Xcor when 2 then FCT_SystemBody.Xcor when 15 then FCT_SystemBody.Xcor end as ExitX, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.Ycor when 12 then VIR_LagrangeOut.Ycor when 2 then FCT_SystemBody.Ycor when 15 then FCT_SystemBody.Ycor end as ExitY, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, coalesce(VIR_Station.Station, 0) as Station from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 left join (select FCT_PopulationInstallations.PopID, max(case when DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Station from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Station on VIR_Station.PopID = FCT_MoveOrders.PopulationID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
