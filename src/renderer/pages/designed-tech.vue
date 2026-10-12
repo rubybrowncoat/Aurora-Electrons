@@ -34,7 +34,7 @@
                 <div class="caption text--secondary mt-1">Unused means on no class of yours. Missiles and species are never mounted, so this leaves them all.</div>
                 <div class="subtitle-2 mt-4">Columns</div>
                 <v-checkbox v-model="perHullSpace" label="Per hull space figures" dense hide-details class="mt-1" />
-                <div class="caption text--secondary mt-1">Adds damage per hull space to beam weapons and power per hull space to engines.</div>
+                <div class="caption text--secondary mt-1">Adds figures per hull space to the table: damage, strength, sensitivity, capacity and power. For missiles and missile engines it is per MSP. Compare always shows them, and the per build point ones too.</div>
                 <v-btn v-if="activeFilterCount" text small class="mt-3" @click="resetFilters">Reset filters</v-btn>
               </v-card>
             </v-menu>
@@ -114,12 +114,14 @@
           </div>
         </v-card>
 
-        <v-card v-if="compared.length > 1" class="panel" elevation="1">
+        <v-card v-if="selected.length > 1" class="panel" elevation="1">
           <div class="panel-head">
-            <span>Compare {{ compared.length }} designs</span>
+            <span>Compare {{ selected.length }} designs</span>
             <span class="head-tools">
               <span class="legend">
                 <span class="legend-item"><span class="dot differs-dot" />Differs</span>
+                <span class="legend-item"><v-icon x-small :class="verdictClass('best')">mdi-swap-vertical</v-icon>Best</span>
+                <span class="legend-item"><v-icon x-small :class="verdictClass('worst')">mdi-swap-vertical</v-icon>Worst</span>
                 <span class="legend-item"><v-icon x-small>mdi-arrow-up</v-icon>Highest</span>
                 <span class="legend-item"><v-icon x-small>mdi-arrow-down</v-icon>Lowest</span>
               </span>
@@ -130,7 +132,7 @@
             <thead>
               <tr>
                 <th>Attribute</th>
-                <th v-for="row in compared" :key="row.SDComponentID" class="text-right">
+                <th v-for="row in selected" :key="row.SDComponentID" class="text-right">
                   <div class="d-flex align-center justify-end">
                     <span class="text-no-wrap">{{ row.Name }}</span>
                     <v-btn icon x-small class="ml-1" :aria-label="`Remove ${row.Name} from the comparison`" @click="deselect(row.SDComponentID)"><v-icon x-small>mdi-close</v-icon></v-btn>
@@ -140,20 +142,22 @@
             </thead>
             <tbody>
               <tr v-for="attribute in compareAttributes" :key="attribute.key" :class="attribute.differs ? 'compare-differs' : 'compare-same'">
-                <td class="text-no-wrap">{{ attribute.label }}</td>
+                <td class="text-no-wrap" :title="attribute.title">{{ attribute.label }}</td>
                 <td v-for="(cell, index) in attribute.cells" :key="index" class="text-right">
-                  <div v-if="cell.none" class="text--disabled">—</div>
-                  <template v-else>
-                    <div class="text-no-wrap">
-                      <v-icon v-if="cell.mark" x-small class="mr-1">{{ cell.mark === 'high' ? 'mdi-arrow-up' : 'mdi-arrow-down' }}</v-icon>{{ cell.text }}
-                    </div>
-                    <div v-if="cell.note" class="caption text--secondary text-no-wrap">{{ cell.note }}</div>
-                  </template>
+                  <div class="text-no-wrap" :title="cell.markTitle">
+                    <v-icon v-if="cell.mark" x-small class="mr-1" :class="verdictClass(cell.verdict)">{{ cell.mark === 'high' ? 'mdi-arrow-up' : 'mdi-arrow-down' }}</v-icon>
+                    <span :class="{ 'text--disabled': cell.none }">{{ cell.text }}</span>
+                    <span v-if="cell.verdict" class="caption ml-1" :class="verdictClass(cell.verdict)">{{ cell.verdict }}</span>
+                  </div>
+                  <div v-if="cell.note && !cell.none" class="caption text--secondary text-no-wrap">{{ cell.note }}</div>
                 </td>
               </tr>
             </tbody>
           </v-simple-table>
-          <div class="panel-foot caption text--secondary">A row is tinted when the designs differ in it. The arrows mark the highest and the lowest value of a row that differs; they say nothing about which is better, since a lower cost or a longer interval can be what you want. Classes and ships are what your race has today.</div>
+          <div class="panel-foot caption text--secondary">
+            <div>A row is tinted when the designs differ in it. Where a figure has a better side, the best value is marked in green and the worst in red, each with its arrow and its word: more is better for damage, range, strength, sensitivity, capacity, power, output and hit points, and less is better for size, cost, crew, reload time, fuel use, explosion risk and cloak rating (the share of a ship's signature that still shows). Best and worst are only marked among designs of one component type, so a fuel tank is never ranked against a transfer system.</div>
+            <div class="mt-1">The arrows without a colour mark the highest and the lowest value of a figure with no better side, such as a sensor's resolution, a beam's power and capacitor draw, or the missile size a launcher takes. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes on what each space or point buys. Classes and ships are what your race has today. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
+          </div>
         </v-card>
       </template>
     </v-container>
@@ -168,7 +172,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
-import { MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, augmentComponent, augmentMissile, augmentSpecies, categoryNote, columnsFor, isMountable, tagsOf } from '../utilities/designed-tech'
+import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, augmentComponent, augmentMissile, augmentSpecies, categoryNote, columnsFor, isMountable, tagsOf } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
 
@@ -182,6 +186,25 @@ const INPUT_LABELS = {
 
 const PAGE_SIZES = [15, 30, -1]
 const MAX_COMPARE = 3
+
+// The stored picks are a list of design ids per category; whatever else was stored is dropped, and a category keeps at most as many as can be compared.
+const normaliseCompare = (stored) => {
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+    return undefined
+  }
+
+  const picks = {}
+
+  Object.keys(stored).forEach((categoryId) => {
+    const ids = Array.isArray(stored[categoryId]) ? stored[categoryId].filter((id) => typeof id === 'number' || typeof id === 'string').slice(0, MAX_COMPARE) : []
+
+    if (ids.length) {
+      picks[categoryId] = ids
+    }
+  })
+
+  return Object.keys(picks).length ? picks : undefined
+}
 
 const USAGE_COLUMNS = [
   { text: 'Classes', value: 'classCount', numeric: true, format: (item, f) => f.count(item.classCount), hint: 'Classes of yours that mount it, obsolete classes included.' },
@@ -206,12 +229,12 @@ export default {
       unusedOnly: { key: 'designedTechUnusedOnly', default: false },
       perHullSpace: { key: 'designedTechPerHullSpace', default: false },
       search: { key: 'designedTechSearch', default: '', scope: 'race', normalise: (stored) => (typeof stored === 'string' ? stored : '') },
+      compareByCategory: { key: 'designedTechCompare', default: {}, scope: 'race', normalise: normaliseCompare },
       componentsTable: tableView('designedTechComponentsTable', { sortBy: ['Name'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
   data() {
     return {
-      selected: [],
       expanded: [],
       pageSizes: PAGE_SIZES,
       maxCompare: MAX_COMPARE,
@@ -351,14 +374,24 @@ export default {
       ]
     },
 
+    // The columns the category shows, name first; the usage ones follow for a component a class can mount.
+    usageColumns() {
+      return this.mountable ? USAGE_COLUMNS : []
+    },
+
     columnSpecs() {
       const [name, ...rest] = columnsFor(this.activeCategoryId)
 
-      return [name, ...(this.mountable ? USAGE_COLUMNS : []), ...rest.filter((column) => this.perHullSpace || !column.perHS)]
+      return [name, ...this.usageColumns, ...rest.filter((column) => !column.compareOnly && (this.perHullSpace || !column.perHS))]
     },
 
     cellColumns() {
       return this.columnSpecs.filter((column) => column.value !== 'Name')
+    },
+
+    // Compare shows every figure of the category, the per hull space and per build point ones included, whatever the table shows.
+    compareColumns() {
+      return [...this.usageColumns, ...columnsFor(this.activeCategoryId).slice(1)]
     },
 
     hintedColumns() {
@@ -369,35 +402,39 @@ export default {
       return this.columnSpecs.map((column) => ({ text: column.text, value: column.value, align: column.numeric ? 'end' : 'start' }))
     },
 
-    compared() {
-      const byId = new Map(this.categoryRows.map((row) => [row.SDComponentID, row]))
+    // The picks of the active category, as the designs the race has today. A pick whose design is gone is left out.
+    selected: {
+      get() {
+        const byId = new Map(this.categoryRows.map((row) => [row.SDComponentID, row]))
 
-      return this.selected.map((item) => byId.get(item.SDComponentID)).filter(Boolean)
+        return (this.compareByCategory[this.activeCategoryId] || []).map((id) => byId.get(id)).filter(Boolean)
+      },
+      set(items) {
+        this.setCompare(items)
+      },
     },
 
     compareAttributes() {
-      const rows = this.compared
+      const rows = this.selected
 
-      const attributes = this.cellColumns.map((column) => {
+      const attributes = this.compareColumns.map((column) => {
         const cells = rows.map((row) => this.cellOf(column, row))
         const differs = new Set(cells.map((cell) => `${cell.text}|${cell.note}`)).size > 1
-        const values = rows.map((row) => Number(row[column.value]) || 0)
-        const high = Math.max(...values)
-        const low = Math.min(...values)
-        const marked = differs && column.numeric && high !== low
+        const marks = this.markCells(column, rows, differs)
 
         return {
           key: column.value,
           label: column.text,
+          title: [column.hint, this.sideOf(column)].filter(Boolean).join(' '),
           differs,
-          cells: cells.map((cell, index) => ({ ...cell, mark: marked ? (values[index] === high ? 'high' : values[index] === low ? 'low' : null) : null })),
+          cells: cells.map((cell, index) => ({ ...cell, ...marks[index] })),
         }
       })
 
       const textRow = (key, label, text) => {
         const texts = rows.map(text)
 
-        return { key, label, differs: new Set(texts).size > 1, cells: texts.map((value) => ({ text: value, note: '', none: false, mark: null })) }
+        return { key, label, title: '', differs: new Set(texts).size > 1, cells: texts.map((value) => ({ text: value, note: '', none: false, mark: null, verdict: null, markTitle: '' })) }
       }
 
       return [...attributes, textRow('status', 'Status', (row) => (row.Obsolete ? 'Obsolete' : 'Current')), textRow('marks', 'Marked as', (row) => tagsOf(row).join(', ') || 'None')]
@@ -412,7 +449,6 @@ export default {
   },
   watch: {
     activeCategoryId() {
-      this.selected = []
       this.expanded = []
     },
 
@@ -425,11 +461,6 @@ export default {
 
     categoryRows(rows) {
       const ids = new Set(rows.map((row) => row.SDComponentID))
-      const kept = this.selected.filter((item) => ids.has(item.SDComponentID))
-
-      if (kept.length !== this.selected.length) {
-        this.selected = kept
-      }
 
       this.expanded = this.expanded.filter((item) => ids.has(item.SDComponentID))
     },
@@ -472,6 +503,76 @@ export default {
       this.selected = []
     },
 
+    // Stores the active category's picks, and forgets every pick whose design is gone once the designs are loaded.
+    setCompare(items) {
+      const stored = { ...this.compareByCategory, [this.activeCategoryId]: items.map((item) => item.SDComponentID) }
+
+      if (this.ready) {
+        const present = new Set(this.allItems.map((item) => item.SDComponentID))
+
+        Object.keys(stored).forEach((key) => {
+          stored[key] = stored[key].filter((id) => present.has(id))
+        })
+      }
+
+      Object.keys(stored).forEach((key) => {
+        if (!stored[key].length) {
+          delete stored[key]
+        }
+      })
+
+      this.compareByCategory = stored
+    },
+
+    // Which cell of a compared row takes a mark: the highest and the lowest value of a row that differs. A column that says which side is better turns them into best and worst, as long as the designs are of one component type; any other row only shows the extremes.
+    markCells(column, rows, differs) {
+      const none = rows.map(() => ({ mark: null, verdict: null, markTitle: '' }))
+
+      if (!differs || !column.numeric) {
+        return none
+      }
+
+      const values = rows.map((row) => {
+        const value = row[column.value] == null ? NaN : Number(row[column.value])
+
+        return Number.isFinite(value) && !(column.skipZero && value === 0) ? value : null
+      })
+
+      const present = values.filter((value) => value !== null)
+      const high = Math.max(...present)
+      const low = Math.min(...present)
+
+      if (present.length < 2 || high === low) {
+        return none
+      }
+
+      const directed = Boolean(column.better) && rows.every((row) => row.ComponentTypeID === rows[0].ComponentTypeID)
+
+      return values.map((value) => {
+        if (value === null || (value !== high && value !== low)) {
+          return { mark: null, verdict: null, markTitle: '' }
+        }
+
+        const mark = value === high ? 'high' : 'low'
+
+        if (!directed) {
+          return { mark, verdict: null, markTitle: mark === 'high' ? 'Highest value' : 'Lowest value' }
+        }
+
+        const verdict = mark === column.better ? 'best' : 'worst'
+
+        return { mark, verdict, markTitle: `${verdict === 'best' ? 'Best' : 'Worst'}: the ${mark === 'high' ? 'highest' : 'lowest'} value, ${column.better === HIGH ? 'higher' : 'lower'} is better` }
+      })
+    },
+
+    sideOf(column) {
+      return column.better === HIGH ? 'Higher is better' : column.better === LOW ? 'Lower is better' : 'No better side'
+    },
+
+    verdictClass(verdict) {
+      return verdict === 'best' ? ['success--text', this.$vuetify.theme.dark ? '' : 'text--darken-2'] : verdict === 'worst' ? 'error--text' : ''
+    },
+
     resetFilters() {
       this.hideObsolete = true
       this.hideCommercial = false
@@ -512,7 +613,7 @@ export default {
           return []
         }
 
-        const [items] = await this.database.query(`select FCT_MissileType.MissileID, FCT_MissileType.Name, FCT_RaceTech.Obsolete, FCT_MissileType.Size, FCT_MissileType.Speed, FCT_MissileType.MaxRange, FCT_MissileType.Endurance, FCT_MissileType.FuelRequired, FCT_MissileType.WarheadStrength, FCT_MissileType.MultipleWarheads, FCT_MissileType.RadDamage, FCT_MissileType.SensorStrength, FCT_MissileType.SensorResolution, FCT_MissileType.SensorRange, FCT_MissileType.ThermalStrength, FCT_MissileType.EMStrength, FCT_MissileType.Geostrength, FCT_MissileType.NumDecoys, FCT_MissileType.ECCM, FCT_MissileType.ATG, FCT_MissileType.Retargeting, FCT_MissileType.Cost, FCT_MissileType.Corbomite, FCT_MissileType.Tritanium, FCT_MissileType.Boronide, FCT_MissileType.Uridium, FCT_MissileType.Gallicite, FCT_MissileType.SecondStageID, FCT_MissileType.NumSS, FCT_MissileType.SeparationRange, SecondStage.Name as SecondStageName, SecondStage.MaxRange as SecondStageMaxRange from FCT_RaceTech inner join FCT_MissileType on FCT_MissileType.MissileID = FCT_RaceTech.TechID and FCT_MissileType.GameID = FCT_RaceTech.GameID inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID and FCT_TechSystem.RaceID = FCT_RaceTech.RaceID left join FCT_MissileType as SecondStage on SecondStage.MissileID = FCT_MissileType.SecondStageID and SecondStage.GameID = FCT_MissileType.GameID where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}`)
+        const [items] = await this.database.query(`select FCT_MissileType.MissileID, FCT_MissileType.Name, FCT_RaceTech.Obsolete, FCT_MissileType.Size, FCT_MissileType.Speed, FCT_MissileType.MaxRange, FCT_MissileType.Endurance, FCT_MissileType.FuelRequired, FCT_MissileType.WarheadStrength, FCT_MissileType.MultipleWarheads, FCT_MissileType.RadDamage, FCT_MissileType.SensorStrength, FCT_MissileType.SensorResolution, FCT_MissileType.SensorRange, FCT_MissileType.ThermalStrength, FCT_MissileType.EMStrength, FCT_MissileType.Geostrength, FCT_MissileType.NumDecoys, FCT_MissileType.ShipDecoy, FCT_MissileType.ECCM, FCT_MissileType.ATG, FCT_MissileType.Retargeting, FCT_MissileType.Cost, FCT_MissileType.Corbomite, FCT_MissileType.Tritanium, FCT_MissileType.Boronide, FCT_MissileType.Uridium, FCT_MissileType.Gallicite, FCT_MissileType.SecondStageID, FCT_MissileType.NumSS, FCT_MissileType.SeparationRange, SecondStage.Name as SecondStageName, SecondStage.MaxRange as SecondStageMaxRange from FCT_RaceTech inner join FCT_MissileType on FCT_MissileType.MissileID = FCT_RaceTech.TechID and FCT_MissileType.GameID = FCT_RaceTech.GameID inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID and FCT_TechSystem.RaceID = FCT_RaceTech.RaceID left join FCT_MissileType as SecondStage on SecondStage.MissileID = FCT_MissileType.SecondStageID and SecondStage.GameID = FCT_MissileType.GameID where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}`)
 
         return Object.freeze(items.map(augmentMissile))
       }),

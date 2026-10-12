@@ -9,7 +9,7 @@
 //
 // Fields are restored as the page is created, and race-scoped ones again whenever the game or race changes (before a race is picked they hold their defaults). Every change is saved, on the next tick, unless it equals what was last restored or saved. A link's focus that isn't a preference goes through `setUnsaved`, which shows it for this visit and leaves the stored value alone.
 //
-// Page index, expanded and selected rows and open dialogs are not view parameters: they stay plain data.
+// Page index, expanded rows and open dialogs are not view parameters: they stay plain data. A pick a page is built around, such as the designs Designed Tech compares, is a field like any other.
 
 const copy = (value) => (value !== null && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value)
 
