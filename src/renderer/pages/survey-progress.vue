@@ -22,7 +22,7 @@
 
         <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, the points left and how long the ships there would take. It shows which systems still need surveying." elevation="1">
           <div class="panel-head">
-            <span>Systems</span>
+            <span>Systems<provenance-mark rule="survey.bodyPoints" /></span>
             <span class="d-flex align-center">
               <v-switch v-model="showSurveyed" label="Show fully surveyed" dense hide-details class="mt-0 mr-4" />
               <v-text-field v-model="search" label="Search systems" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
@@ -57,6 +57,7 @@
             </template>
             <template #[`item.etaSort`]="{ item }">
               <span v-if="item.eta !== null" class="text-no-wrap">{{ duration(item.eta) }}</span>
+              <span v-else-if="item.etaUnknown" class="text--secondary">Rates unknown</span>
               <span v-else-if="item.gravPoints || item.geoPoints" class="text--secondary">No ships here</span>
               <span v-else class="text--secondary">—</span>
             </template>
@@ -76,14 +77,14 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body's radius / 100 (× 10 for anything but a gas giant) for a geological survey. Time is survey time for the ships already in the system; travel between targets isn't counted. Fleets with one sensor type work their own survey in parallel; a fleet with both sensors does one target at a time, so its time is shared between the two surveys, in whichever split finishes the system soonest.
+            Survey points left: each gravitational location takes the system's points per location (more around a heavier primary), and a body takes its radius / 10 for a geological survey (radius / 100 for a gas giant or superjovian), at least 1. Time is survey time for the ships already in the system; travel between targets isn't counted. Fleets with one sensor type work their own survey in parallel; a fleet with both sensors does one target at a time, so its time is shared between the two surveys, in whichever split finishes the system soonest.
           </div>
         </v-card>
 
         <v-card class="panel" data-summary="Survey fleets, where they are, what they are doing and how fast they survey. It shows whether the survey ships are used well." elevation="1">
           <div class="panel-head">
             <span>Survey fleets</span>
-            <v-chip small>Rates are estimates</v-chip>
+            <v-chip small>{{ formulaVersion ? 'Rates follow the 2.7 rules' : 'Rates are estimates' }}</v-chip>
           </div>
           <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.FleetName`]="{ item }">
@@ -97,10 +98,10 @@
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
             </template>
             <template #[`item.geoRate`]="{ item }">
-              <span :class="{ 'text--secondary': !item.geoRate }">{{ item.geoRate ? count(item.geoRate) : '—' }}</span>
+              <span :class="{ 'text--secondary': !item.geoRate }">{{ item.geoRate ? count(item.geoRate) : '—' }}</span><provenance-mark v-if="item.geoRate !== 0" :result="item.geo" />
             </template>
             <template #[`item.gravRate`]="{ item }">
-              <span :class="{ 'text--secondary': !item.gravRate }">{{ item.gravRate ? count(item.gravRate) : '—' }}</span>
+              <span :class="{ 'text--secondary': !item.gravRate }">{{ item.gravRate ? count(item.gravRate) : '—' }}</span><provenance-mark v-if="item.gravRate !== 0" :result="item.grav" />
             </template>
             <template #[`item.activity`]="{ item }">
               <span class="text-no-wrap">
@@ -111,7 +112,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Points a day: sensor rating × 24 h × the game's survey speed ({{ surveySpeed }}%) × the better of the science officer's Survey bonus and half the captain's × the naval admin Survey share in range × the share of crew aboard. How the captain's and the science officer's bonuses combine isn't documented.
+            Points a day: the undamaged sensors' rating × 24 h × the officer factor (the science officer's Survey bonus while the ship's Science Department is undamaged, times half the captain's bonus; 1 for a ship without a captain) × the crew morale × the share of crew aboard, added over the fleet's ships (embarked ones too), × the naval admin Survey share in range × the game's survey speed ({{ surveySpeed }}%). The mark beside a rate shows how far it can be trusted: hover for what it rests on. The game keeps a fleet's gravitational rate until the save reloads, so that rate is always an estimate.
           </div>
         </v-card>
 
@@ -134,14 +135,15 @@
                 <span class="caption text-no-wrap">{{ count(item.PointsDone) }} / {{ count(item.PointsRequired) }}</span>
               </div>
             </template>
-            <template #[`item.PointsPerDay`]="{ item }">{{ item.PointsPerDay ? fixed(item.PointsPerDay, 2) : '—' }}</template>
+            <template #[`item.PointsPerDay`]="{ item }"><span :class="{ 'text--secondary': !item.PointsPerDay }">{{ item.PointsPerDay ? fixed(item.PointsPerDay, 2) : '—' }}</span><provenance-mark v-if="item.PointsPerDay !== 0" :result="item.rate" /></template>
             <template #[`item.etaSort`]="{ item }">
               <span v-if="item.eta !== null" class="text-no-wrap">{{ duration(item.eta) }}</span>
+              <span v-else-if="item.rateUnknown" class="text--secondary">Rate unknown</span>
               <span v-else class="text--secondary">{{ item.PopulationID ? 'No survey teams' : 'No colony' }}</span>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times its commander's Survey bonus. It can raise the body's mineral deposits; the potential is what the geological survey found.
+            A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times its commander's Survey bonus and the game's survey speed. It can raise the body's mineral deposits; the potential is what the geological survey found.
           </div>
         </v-card>
       </template>
@@ -156,6 +158,7 @@ import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
@@ -167,7 +170,10 @@ import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { sumResults, valueOrNull } from '../utilities/provenance'
+import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surveyShipSql } from '../utilities/survey'
 import { surveyDays } from '../utilities/survey-eta'
+import { loadFormulaVersion } from '../utilities/transport'
 
 const INPUT_LABELS = {
   game: 'the game settings',
@@ -179,8 +185,8 @@ const INPUT_LABELS = {
   standingOrders: 'standing orders',
   groundSurveys: 'ground surveys',
   navalAdmins: 'naval admin commands',
+  formulaVersion: 'the save\'s schema',
 }
-const HOURS_PER_DAY = 24
 // FCT_SystemBody.GroundMineralSurvey, as the Minerals page labels it.
 const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const SURVEY_ORDERS = new Set([9, 12])
@@ -188,7 +194,7 @@ const PAGE_SIZES = [15, 30, -1]
 
 export default {
   name: 'SurveyProgressPage',
-  components: { LoadState, PageLink, StatTiles, SystemMap },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles, SystemMap },
   mixins: [
     countFormat,
     deepLink,
@@ -234,41 +240,38 @@ export default {
       ]
     },
 
+    // The game's survey speed in percent; null while the game settings are not known, which leaves the rates unavailable.
     surveySpeed() {
-      return this.game ? this.game.SurveySpeed : 100
+      return this.game ? this.game.SurveySpeed : null
     },
 
-    // One row per survey ship with its points a day (geological and gravitational).
-    shipRates() {
-      const speed = this.surveySpeed / 100
-
-      return this.ships.map((ship) => {
-        const captain = 1 + (ship.CaptainBonus - 1) / 2
-        const officer = Math.max(captain, ship.ScienceBonus || 1)
-        const crew = ship.ClassCrew > 0 ? Math.min(1, Math.max(0, ship.CurrentCrew) / ship.ClassCrew) : 1
-        const admin = navalAdminChainBonus(this.navalAdmins, ship.SystemID, ship.NavalAdminCommandID)
-        const factor = ship.MothershipID ? 0 : HOURS_PER_DAY * speed * officer * crew * admin
-
-        return { ...ship, geoRate: ship.GeoSurvey * factor, gravRate: ship.GravSurvey * factor }
-      })
-    },
-
+    // One row per survey fleet with its geological and gravitational points a day: `geo` and `grav` are provenance results (utilities/provenance.js) and `geoRate` and `gravRate` their values, null when unavailable.
     fleetRows() {
+      const { surveySpeed: speed, formulaVersion: version, navalAdmins } = this
       const fleets = {}
 
-      this.shipRates.forEach((ship) => {
-        const fleet = (fleets[ship.FleetID] = fleets[ship.FleetID] || { FleetID: ship.FleetID, FleetName: ship.FleetName, SystemID: ship.SystemID, SystemName: ship.SystemName, Moving: ship.Moving, ships: [], geoRate: 0, gravRate: 0 })
+      this.ships.forEach((ship) => {
+        const fleet = (fleets[ship.FleetID] = fleets[ship.FleetID] || { FleetID: ship.FleetID, FleetName: ship.FleetName, SystemID: ship.SystemID, SystemName: ship.SystemName, NavalAdminCommandID: ship.NavalAdminCommandID, Moving: ship.Moving, ships: [] })
 
-        fleet.ships.push(ship.MothershipID ? `${ship.ShipName} (docked)` : ship.ShipName)
-        fleet.geoRate += ship.geoRate
-        fleet.gravRate += ship.gravRate
+        fleet.ships.push(ship)
       })
 
-      return Object.values(fleets).map((fleet) => ({
-        ...fleet,
-        shipNames: fleet.ships.join(', '),
-        activity: this.activity(fleet),
-      })).sort((a, b) => a.FleetName.localeCompare(b.FleetName))
+      return Object.values(fleets).map((fleet) => {
+        const ships = fleet.ships.slice().sort((a, b) => a.ShipID - b.ShipID)
+        const admin = navalAdminChainBonus(navalAdmins, fleet.SystemID, fleet.NavalAdminCommandID)
+        const geo = fleetSurveyRate(ships, 'geo', { speed, admin, version })
+        const grav = fleetSurveyRate(ships, 'grav', { speed, admin, version })
+
+        return {
+          ...fleet,
+          shipNames: ships.map((ship) => (ship.MothershipID ? `${ship.ShipName} (embarked)` : ship.ShipName)).join(', '),
+          geo,
+          grav,
+          geoRate: valueOrNull(geo),
+          gravRate: valueOrNull(grav),
+          activity: this.activity(fleet),
+        }
+      }).sort((a, b) => a.FleetName.localeCompare(b.FleetName))
     },
 
     bodiesBySystem() {
@@ -289,7 +292,8 @@ export default {
         const fleets = fleetRows.filter((fleet) => fleet.SystemID === system.SystemID)
         const gravPoints = Math.max(0, system.Locations - system.LocationsSurveyed) * system.PointsPerLocation
         const geoPoints = system.GeoPoints || 0
-        const eta = gravPoints || geoPoints ? surveyDays(gravPoints, geoPoints, fleets) : null
+        const etaUnknown = Boolean(gravPoints || geoPoints) && fleets.some((fleet) => fleet.geoRate === null || fleet.gravRate === null)
+        const eta = gravPoints || geoPoints ? (etaUnknown ? null : surveyDays(gravPoints, geoPoints, fleets)) : null
 
         return {
           ...system,
@@ -303,6 +307,7 @@ export default {
           fleetsHere: fleets.map((fleet) => fleet.FleetName),
           shipsHere: fleets.length,
           eta,
+          etaUnknown,
           etaSort: eta ?? Infinity,
           unsurveyedBodies: bodiesBySystem[system.SystemID] || [],
         }
@@ -335,11 +340,16 @@ export default {
 
     groundRows() {
       return this.groundSurveys.map((row) => {
+        const rate = groundSurveyRate(row.PointsPerDay, this.surveySpeed)
+        const perDay = valueOrNull(rate)
         const remaining = Math.max(0, row.PointsRequired - row.PointsDone)
-        const eta = row.PointsPerDay > 0 ? remaining / row.PointsPerDay : null
+        const eta = perDay > 0 ? remaining / perDay : null
 
         return {
           ...row,
+          rate,
+          PointsPerDay: perDay,
+          rateUnknown: rate.status === 'unavailable' && row.Units > 0,
           name: row.SystemBodyName ? `${row.SystemName} · ${row.SystemBodyName}` : systemBodyName(row, { Name: row.SystemName }),
           progress: row.PointsRequired > 0 ? row.PointsDone / row.PointsRequired : 0,
           progressSort: row.PointsRequired > 0 ? row.PointsDone / row.PointsRequired : 0,
@@ -356,8 +366,8 @@ export default {
       const geo = systems.filter((system) => system.geoPoints > 0)
       const locations = grav.reduce((sum, system) => sum + system.Locations - system.LocationsSurveyed, 0)
       const bodies = geo.reduce((sum, system) => sum + system.unsurveyedBodies.length, 0)
-      const geoRate = this.fleetRows.reduce((sum, fleet) => sum + fleet.geoRate, 0)
-      const gravRate = this.fleetRows.reduce((sum, fleet) => sum + fleet.gravRate, 0)
+      const geoRate = valueOrNull(sumResults({ rule: 'survey.geoRate', results: this.fleetRows.map((fleet) => fleet.geo) }))
+      const gravRate = valueOrNull(sumResults({ rule: 'survey.gravRate', results: this.fleetRows.map((fleet) => fleet.grav) }))
       const idle = this.fleetRows.filter((fleet) => fleet.activity.idle).length
 
       return [
@@ -381,7 +391,7 @@ export default {
         {
           label: 'Survey capacity',
           value: `${this.fleetRows.length} ${this.fleetRows.length === 1 ? 'fleet' : 'fleets'}`,
-          note: `${this.count(geoRate)} geological and ${this.count(gravRate)} gravitational points a day${idle ? `; ${idle} idle` : ''}`,
+          note: `${geoRate === null ? 'Unknown' : this.count(geoRate)} geological and ${gravRate === null ? 'unknown' : this.count(gravRate)} gravitational points a day${idle ? `; ${idle} idle` : ''}`,
           icon: idle ? 'mdi-sleep' : null,
           iconColor: 'warning',
         },
@@ -545,7 +555,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_System.JumpPointSurveyPoints as PointsPerLocation, coalesce(VIR_Locations.Locations, 0) as Locations, coalesce(VIR_Surveyed.Locations, 0) as LocationsSurveyed, coalesce(VIR_Bodies.Bodies, 0) as Bodies, coalesce(VIR_Bodies.Surveyed, 0) as BodiesSurveyed, coalesce(VIR_Bodies.Points, 0) as GeoPoints from FCT_RaceSysSurvey inner join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations from FCT_SurveyLocation where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_Locations on VIR_Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_RaceSurveyLocation.SystemID, count(*) as Locations from FCT_RaceSurveyLocation where FCT_RaceSurveyLocation.GameID = ${this.GameID} and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} group by FCT_RaceSurveyLocation.SystemID) as VIR_Surveyed on VIR_Surveyed.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end) as Surveyed, sum(case when FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null then FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) else 0 end) as Points from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) group by FCT_SystemBody.SystemID) as VIR_Bodies on VIR_Bodies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_System.JumpPointSurveyPoints as PointsPerLocation, coalesce(VIR_Locations.Locations, 0) as Locations, coalesce(VIR_Surveyed.Locations, 0) as LocationsSurveyed, coalesce(VIR_Bodies.Bodies, 0) as Bodies, coalesce(VIR_Bodies.Surveyed, 0) as BodiesSurveyed, coalesce(VIR_Bodies.Points, 0) as GeoPoints from FCT_RaceSysSurvey inner join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations from FCT_SurveyLocation where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_Locations on VIR_Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_RaceSurveyLocation.SystemID, count(*) as Locations from FCT_RaceSurveyLocation where FCT_RaceSurveyLocation.GameID = ${this.GameID} and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} group by FCT_RaceSurveyLocation.SystemID) as VIR_Surveyed on VIR_Surveyed.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end) as Surveyed, sum(case when FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null then ${bodyPointsSql()} else 0 end) as Points from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) group by FCT_SystemBody.SystemID) as VIR_Bodies on VIR_Bodies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -555,7 +565,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) as Points from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null order by FCT_SystemBody.SystemID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, ${bodyPointsSql()} as Points from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null order by FCT_SystemBody.SystemID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -570,14 +580,14 @@ export default {
       }),
       default: [],
     },
-    // Ships with geological or gravitational sensors, with their captain's (CommandType 1) and science officer's (CommandType 10) Survey bonus.
+    // Ships with geological or gravitational sensors, with their undamaged sensors, crew and officers (`loadSurveyShips`).
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, case when FCT_Fleet.Xcor <> FCT_Fleet.LastXcor or FCT_Fleet.Ycor <> FCT_Fleet.LastYcor then 1 else 0 end as Moving, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.MothershipID, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.GeoSurvey, FCT_ShipClass.GravSurvey, coalesce(VIR_Captain.BonusValue, 1) as CaptainBonus, VIR_Science.BonusValue as ScienceBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and (FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0) inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Captain on VIR_Captain.CommandID = FCT_Ship.ShipID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 10) as VIR_Science on VIR_Science.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0`).then(([items]) => items)
+        return await loadSurveyShips(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },
@@ -587,7 +597,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, FCT_MoveOrders.Description from FCT_MoveOrders where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.FleetID in (select FCT_Ship.FleetID from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and (FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0)) order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, FCT_MoveOrders.Description from FCT_MoveOrders where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} and FCT_MoveOrders.FleetID in (select FCT_Ship.FleetID from FCT_Ship where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and ${surveyShipSql()}) order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
@@ -608,7 +618,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.GroundMineralSurvey as Potential, FCT_SystemBody.Radius / 10.0 as PointsRequired, FCT_Population.PopulationID, FCT_Population.PopName, coalesce(FCT_Population.GroundGeoSurvey, 0) as PointsDone, coalesce(VIR_Teams.Units, 0) as Units, coalesce(VIR_Teams.PointsPerDay, 0) as PointsPerDay from FCT_SystemBody inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.GameID = ${this.GameID} left join (select FCT_GroundUnitFormation.PopulationID, sum(FCT_GroundUnitFormationElement.Units) as Units, sum(FCT_GroundUnitFormationElement.Units * VIR_Class.Geosurvey * coalesce(VIR_Commander.BonusValue, 1)) as PointsPerDay from FCT_GroundUnitFormation inner join FCT_GroundUnitFormationElement on FCT_GroundUnitFormationElement.FormationID = FCT_GroundUnitFormation.FormationID inner join (select FCT_GroundUnitClass.GroundUnitClassID, coalesce(VIR_A.Geosurvey, 0) + coalesce(VIR_B.Geosurvey, 0) + coalesce(VIR_C.Geosurvey, 0) + coalesce(VIR_D.Geosurvey, 0) as Geosurvey from FCT_GroundUnitClass left join DIM_GroundComponentType as VIR_A on VIR_A.ComponentTypeID = FCT_GroundUnitClass.ComponentA left join DIM_GroundComponentType as VIR_B on VIR_B.ComponentTypeID = FCT_GroundUnitClass.ComponentB left join DIM_GroundComponentType as VIR_C on VIR_C.ComponentTypeID = FCT_GroundUnitClass.ComponentC left join DIM_GroundComponentType as VIR_D on VIR_D.ComponentTypeID = FCT_GroundUnitClass.ComponentD where FCT_GroundUnitClass.GameID = ${this.GameID}) as VIR_Class on VIR_Class.GroundUnitClassID = FCT_GroundUnitFormationElement.ClassID and VIR_Class.Geosurvey > 0 left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5) as VIR_Commander on VIR_Commander.CommandID = FCT_GroundUnitFormation.FormationID where FCT_GroundUnitFormation.GameID = ${this.GameID} and FCT_GroundUnitFormation.RaceID = ${this.RaceID} group by FCT_GroundUnitFormation.PopulationID) as VIR_Teams on VIR_Teams.PopulationID = FCT_Population.PopulationID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.GroundMineralSurvey > 0 order by FCT_SystemBody.GroundMineralSurvey desc, FCT_Population.PopulationID desc`).then(([items]) => items)
+        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.GroundMineralSurvey as Potential, ${bodyPointsSql()} as PointsRequired, FCT_Population.PopulationID, FCT_Population.PopName, coalesce(FCT_Population.GroundGeoSurvey, 0) as PointsDone, coalesce(VIR_Teams.Units, 0) as Units, coalesce(VIR_Teams.PointsPerDay, 0) as PointsPerDay from FCT_SystemBody inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.GameID = ${this.GameID} left join (select FCT_GroundUnitFormation.PopulationID, sum(FCT_GroundUnitFormationElement.Units) as Units, sum(FCT_GroundUnitFormationElement.Units * VIR_Class.Geosurvey * coalesce(VIR_Commander.BonusValue, 1)) as PointsPerDay from FCT_GroundUnitFormation inner join FCT_GroundUnitFormationElement on FCT_GroundUnitFormationElement.FormationID = FCT_GroundUnitFormation.FormationID inner join (select FCT_GroundUnitClass.GroundUnitClassID, coalesce(VIR_A.Geosurvey, 0) + coalesce(VIR_B.Geosurvey, 0) + coalesce(VIR_C.Geosurvey, 0) + coalesce(VIR_D.Geosurvey, 0) as Geosurvey from FCT_GroundUnitClass left join DIM_GroundComponentType as VIR_A on VIR_A.ComponentTypeID = FCT_GroundUnitClass.ComponentA left join DIM_GroundComponentType as VIR_B on VIR_B.ComponentTypeID = FCT_GroundUnitClass.ComponentB left join DIM_GroundComponentType as VIR_C on VIR_C.ComponentTypeID = FCT_GroundUnitClass.ComponentC left join DIM_GroundComponentType as VIR_D on VIR_D.ComponentTypeID = FCT_GroundUnitClass.ComponentD where FCT_GroundUnitClass.GameID = ${this.GameID}) as VIR_Class on VIR_Class.GroundUnitClassID = FCT_GroundUnitFormationElement.ClassID and VIR_Class.Geosurvey > 0 left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5) as VIR_Commander on VIR_Commander.CommandID = FCT_GroundUnitFormation.FormationID where FCT_GroundUnitFormation.GameID = ${this.GameID} and FCT_GroundUnitFormation.RaceID = ${this.RaceID} group by FCT_GroundUnitFormation.PopulationID) as VIR_Teams on VIR_Teams.PopulationID = FCT_Population.PopulationID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.GroundMineralSurvey > 0 order by FCT_SystemBody.GroundMineralSurvey desc, FCT_Population.PopulationID desc`).then(([items]) => items)
       }),
       default: [],
     },
@@ -622,6 +632,17 @@ export default {
         return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 2, share: 'Survey' })
       }),
       default: {},
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
   },
 }

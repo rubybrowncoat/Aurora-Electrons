@@ -5,6 +5,7 @@ import { people } from './colonies'
 import { compact as compactLitres } from './logistics'
 import { MINERALS, compact as compactTons } from './minerals'
 import { roundToDecimal, separatedNumber } from './math'
+import { bodyPointsSql } from './survey'
 
 const PEEK_WINDOW_DAYS = 30
 
@@ -134,7 +135,7 @@ export const peeks = {
       inner join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID
       left join (select SystemID, count(*) as Locations from FCT_SurveyLocation where GameID = ${GameID} group by SystemID) as VIR_Locations on VIR_Locations.SystemID = FCT_RaceSysSurvey.SystemID
       left join (select SystemID, count(*) as Locations from FCT_RaceSurveyLocation where GameID = ${GameID} and RaceID = ${RaceID} group by SystemID) as VIR_Surveyed on VIR_Surveyed.SystemID = FCT_RaceSysSurvey.SystemID
-      left join (select FCT_SystemBody.SystemID, sum(FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end)) as Points from FCT_SystemBody
+      left join (select FCT_SystemBody.SystemID, sum(${bodyPointsSql()}) as Points from FCT_SystemBody
         where FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5)
           and FCT_SystemBody.SystemBodyID not in (select SystemBodyID from FCT_SystemBodySurveys where GameID = ${GameID} and RaceID = ${RaceID})
           and FCT_SystemBody.SystemBodyID not in (select SystemBodyID from FCT_BannedBodies where GameID = ${GameID} and RaceID = ${RaceID})
