@@ -1,5 +1,7 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
+import { registerRule } from './provenance'
+
 export const TONS_PER_HS = 50
 export const THRUST_EXPONENT = 2.5
 export const MAX_SPEED = 270000
@@ -158,3 +160,128 @@ export const selfJumpDrive = ({ hullHS, efficiency, squadronSizeCost = 1, squadr
     designHS += 1
   }
 }
+
+// The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
+const DESIGN_VERSIONS = ['2.7.x']
+const SAVE_CHECK = 'scripts/check-design-rules.js'
+
+registerRule({
+  id: 'design.engineDesign',
+  versions: DESIGN_VERSIONS,
+  units: 'EP, L/EPH, HS, BP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.EnginePowerMod', 'FCT_ShipDesignComponents.BGTech1..3', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
+  note: `Reproduces the power, fuel per engine-power hour, cost, crew, HTK, explosion figures, thermal share and military flag of every stored engine of a stock 2.7.1 save and a modded 2.7.0 save (${SAVE_CHECK}); the modded rows it cannot reproduce are listed there as set outside the rule. docs/DATABASE.md § Design rules.`,
+})
+
+registerRule({
+  id: 'design.classSpeed',
+  versions: DESIGN_VERSIONS,
+  units: 'km/s',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.EnginePower, Size, MaxSpeed', 'FCT_ClassComponent', 'FCT_ShipDesignComponents.ComponentValue'],
+  note: `Reproduces the stored top speed of every class of both sample saves (${SAVE_CHECK}). A class without engines keeps the game's starting speed of 1, which this formula does not give.`,
+})
+
+registerRule({
+  id: 'design.burnPerHour',
+  versions: DESIGN_VERSIONS,
+  units: 'L/h',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.ComponentValue, FuelEfficiency', 'FCT_ClassComponent.NumComponent'],
+  note: `Engine power times the share in use times the fuel per engine-power hour. The stored class fuel efficiency it starts from is reproduced from the class's engines (${SAVE_CHECK}); the linear burn is settled in docs/plans/planners/mechanics-operations.md.`,
+})
+
+registerRule({
+  id: 'design.fullPowerRangeKm',
+  versions: DESIGN_VERSIONS,
+  units: 'km',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower, MaxSpeed'],
+  note: `Fuel over the full-power burn, times the speed, times 3,600: the class window's figure, in km and the same at any speed (docs/plans/planners/mechanics-operations.md, settled). The stored fuel efficiency it uses is reproduced for every class with fuel (${SAVE_CHECK}).`,
+})
+
+registerRule({
+  id: 'design.enduranceHours',
+  versions: DESIGN_VERSIONS,
+  units: 'hours',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.FuelCapacity, FuelEfficiency, EnginePower'],
+  note: 'Fuel over the burn at the share of power in use; the burn rule is the one of design.burnPerHour.',
+})
+
+registerRule({
+  id: 'design.thermalSignature',
+  versions: DESIGN_VERSIONS,
+  units: 'thermal signature',
+  verification: 'estimated',
+  structure: ['FCT_ShipDesignComponents.StealthRating', 'FCT_ShipClass.ClassThermal'],
+  note: 'The rule is read from the game and settled in docs/plans/planners/mechanics-sensors.md, but no stored signature is compared with it yet.',
+  assumptions: ['The share of top speed the ship moves at is chosen by the player'],
+})
+
+registerRule({
+  id: 'design.packTanks',
+  versions: DESIGN_VERSIONS,
+  units: 'HS, L, BP',
+  verification: 'assumed',
+  structure: ['FCT_ShipDesignComponents.Size, ComponentValue, Cost of the race\'s stock fuel tanks'],
+  note: 'The game has no packing rule: this is the planner\'s own policy (fewest HS, then fewest BP). The litres each tank holds and its cost are stored figures.',
+  assumptions: ['Tanks are chosen by the planner\'s own packing, which the game does not do'],
+})
+
+registerRule({
+  id: 'design.jumpDriveDesign',
+  versions: DESIGN_VERSIONS,
+  units: 'HS, BP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, BGTech1..4', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2'],
+  note: `Reproduces the size, cost, crew, HTK and capacity of every stored jump drive of a modded 2.7.0 save (${SAVE_CHECK}). The one commercial drive of the stock 2.7.1 save was designed under an older rule that kept the size to 1 decimal, and is listed there as explained.`,
+})
+
+registerRule({
+  id: 'design.selfJumpDrive',
+  versions: DESIGN_VERSIONS,
+  units: 'HS, BP',
+  verification: 'estimated',
+  structure: ['FCT_TechSystem.AdditionalInfo of the race\'s jump drive efficiency, squadron size and radius techs'],
+  note: 'The drive sizing loop is the game\'s, but the game also re-sizes the armour as the class grows and this keeps the rest of the hull as it is, so the figure is approximate for a class with armour.',
+  assumptions: ['The rest of the hull stays as it is while the drive is added', 'The default squadron size and radius techs are used'],
+})
+
+registerRule({
+  id: 'design.propulsionShare',
+  versions: DESIGN_VERSIONS,
+  units: '%, HS',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.Size', 'FCT_ShipDesignComponents.Size'],
+  note: 'The engines\' and tanks\' HS over the finished ship\'s HS: arithmetic on stored sizes, or on sizes the engine and tank rules give.',
+})
+
+registerRule({
+  id: 'design.propulsionCrew',
+  versions: DESIGN_VERSIONS,
+  units: 'crew',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Crew'],
+  note: 'The sum of the engines\' and tanks\' crew, each stored, or given by the engine rule that reproduces every stored engine.',
+})
+
+registerRule({
+  id: 'design.savedPropulsionCost',
+  versions: DESIGN_VERSIONS,
+  units: 'BP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Cost', 'FCT_ClassComponent.NumComponent'],
+  note: 'The stored cost of each engine and tank a saved class mounts, times its count. It covers the propulsion parts only, not the whole class.',
+})
+
+registerRule({
+  id: 'design.propulsionSetCost',
+  versions: DESIGN_VERSIONS,
+  units: 'BP',
+  verification: 'estimated',
+  structure: ['FCT_ShipDesignComponents.Cost of the stock tanks', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the engine, fuel and thermal techs'],
+  note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (design.engineDesign), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own packing (design.packTanks) and the figure leaves out the rest of the class.',
+  assumptions: ['Engines are priced by the design rule, not by a stored component', 'Tanks are chosen by the planner\'s own packing', 'Only the engines and fuel tanks are counted, not the rest of the class'],
+})

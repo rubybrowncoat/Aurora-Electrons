@@ -80,12 +80,13 @@
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
-        <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship the engines and fuel take, with the saved class beside them. A row opens to the engine as the game would build it and the tanks that hold its fuel." elevation="1">
+        <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship the engines and fuel take, with the saved class beside them. A row opens to the engine as the game would build it and the tanks that hold its fuel. A mark beside speed, burn, range, endurance and BP says whether the figure is confirmed, estimated, assumed or unavailable, and the CSV keeps it." elevation="1">
           <div class="panel-head">
             <span>Propulsion sets</span>
             <span class="d-flex align-center flex-wrap">
               <v-chip v-if="hullReady" small class="mr-2">Hull {{ count(hullHS, 2) }} HS · {{ count(hullHS * tonsPerHs) }} tons</v-chip>
               <v-chip v-if="existingEngine" small color="primary" outlined close @click:close="engineId = null">{{ existingEngine.name }}</v-chip>
+              <v-btn small text :disabled="!rows.length" aria-label="Download the sets as CSV" @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
             </span>
           </div>
           <v-data-table :headers="setHeaders" :items="rows" item-key="key" show-expand :expanded.sync="expanded" :custom-sort="sortRows" :sort-by.sync="setsTable.sortBy" :sort-desc.sync="setsTable.sortDesc" :items-per-page.sync="setsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: setPageSizes }" :item-class="rowClass" :loading="searching" :no-data-text="searching ? 'Searching…' : 'No set yet.'" class="clickable-rows" @click:row="selectRow">
@@ -106,14 +107,14 @@
             </template>
             <template #[`item.share`]="{ item }"><span class="text-no-wrap">{{ percent(item.share) }}</span></template>
             <template #[`item.speed`]="{ item }">
-              <span class="text-no-wrap">{{ count(item.speed) }}</span>
-              <v-icon v-if="item.check && item.check.matches" x-small color="success" class="ml-1" :title="`The save stores ${count(item.check.stored)} km/s for this class, the same.`">mdi-check-circle-outline</v-icon>
-              <v-icon v-else-if="item.check" x-small color="warning" class="ml-1" :title="`The save stores ${count(item.check.stored)} km/s for this class.`">mdi-alert-circle-outline</v-icon>
+              <span class="text-no-wrap">{{ item.speed === null ? '—' : count(item.speed) }}</span>
+              <provenance-mark :result="item.provenance.speed" />
+              <v-icon v-if="item.check && !item.check.matches" x-small color="warning" class="ml-1" :title="`The save stores ${count(item.check.stored)} km/s for this class.`">mdi-alert-circle-outline</v-icon>
             </template>
-            <template #[`item.burn`]="{ item }"><span class="text-no-wrap">{{ litres(item.burn) }}</span></template>
-            <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ count(item.rangeBn, 2) }}</span></template>
-            <template #[`item.enduranceDays`]="{ item }"><span class="text-no-wrap">{{ count(item.enduranceDays, 1) }}</span></template>
-            <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ count(item.cost, 1) }}</span></template>
+            <template #[`item.burn`]="{ item }"><span class="text-no-wrap">{{ item.burn === null ? '—' : litres(item.burn) }}</span><provenance-mark :result="item.provenance.burn" /></template>
+            <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ item.rangeBn === null ? '—' : count(item.rangeBn, 2) }}</span><provenance-mark :result="item.provenance.rangeBn" /></template>
+            <template #[`item.enduranceDays`]="{ item }"><span class="text-no-wrap">{{ item.enduranceDays === null ? '—' : count(item.enduranceDays, 1) }}</span><provenance-mark :result="item.provenance.enduranceDays" /></template>
+            <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ item.cost === null ? '—' : count(item.cost, 1) }}</span><provenance-mark :result="item.provenance.cost" /></template>
             <template #[`item.type`]="{ item }"><span class="text-no-wrap">{{ item.type }}</span></template>
             <template #expanded-item="{ headers, item }">
               <td :colspan="headers.length" class="expand-cell">
@@ -181,8 +182,15 @@
               </td>
             </template>
           </v-data-table>
+          <div v-if="selectedRow" class="panel-body provenance-basis caption text--secondary">
+            <div class="provenance-basis__legend">
+              <span v-for="status in statuses" :key="status" class="provenance-basis__legend-item"><provenance-mark :status="status" label />{{ statusMeaning(status) }}</span>
+            </div>
+            <div class="mt-2">Basis of the figures of {{ selectedSetLabel }}:</div>
+            <div v-for="line in basisRows" :key="line.label" class="provenance-basis__line"><provenance-mark :result="line.result" label /><span class="font-weight-medium">{{ line.label }}</span> {{ basisText(line.result) }}</div>
+          </div>
           <div class="panel-foot caption text--secondary">
-            Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; a check mark says the save stores the same speed.
+            Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; its speed is confirmed when the save stores the same speed. A figure with nothing to work from, such as the range of a class without engines, shows a dash and is unavailable, never 0.
           </div>
         </v-card>
 
@@ -210,15 +218,16 @@
               </div>
               <chart-canvas type="line" :data="tradeChart.data" :options="tradeChart.options" :height="340" :label="`Share of the ship the propulsion takes against ${tradeMetric === 'speed' ? 'speed' : 'range'}`" />
             </template>
-            <v-data-table v-else :headers="tradeHeaders" :items="tradeTable" item-key="key" disable-pagination hide-default-footer dense>
+            <v-data-table v-else :headers="tradeHeaders" :items="tradeTable" item-key="key" :custom-sort="sortRows" disable-pagination hide-default-footer dense>
+              <template #[`item.name`]="{ item }">{{ item.name }}<span v-if="item.pinned" class="caption text--secondary"> · saved class</span></template>
               <template #[`item.share`]="{ item }"><span class="text-no-wrap">{{ percent(item.share) }}</span></template>
-              <template #[`item.speed`]="{ item }"><span class="text-no-wrap">{{ count(item.speed) }}</span></template>
-              <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ count(item.rangeBn, 2) }}</span></template>
+              <template #[`item.speed`]="{ item }"><span class="text-no-wrap">{{ item.speed === null ? '—' : count(item.speed) }}</span><provenance-mark :result="item.provenance.speed" /></template>
+              <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ item.rangeBn === null ? '—' : count(item.rangeBn, 2) }}</span><provenance-mark :result="item.provenance.rangeBn" /></template>
               <template #[`item.propulsionHS`]="{ item }"><span class="text-no-wrap">{{ count(item.propulsionHS, 2) }}</span></template>
-              <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ count(item.cost, 1) }}</span></template>
+              <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ item.cost === null ? '—' : count(item.cost, 1) }}</span><provenance-mark :result="item.provenance.cost" /></template>
             </v-data-table>
           </div>
-          <div class="panel-foot caption text--secondary">A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures.</div>
+          <div class="panel-foot caption text--secondary">A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures, with the saved class first, and the mark beside each figure keeps its status: a saved class's figures are observed, a designed set's BP is an estimate.</div>
         </v-card>
 
         <v-row>
@@ -280,10 +289,10 @@
                 <tbody>
                   <tr v-for="level in burnLevels" :key="level.fraction">
                     <td>{{ percent(level.fraction) }}{{ level.fraction === fraction ? ' (cruise)' : '' }}</td>
-                    <td class="text-right text-no-wrap">{{ count(level.speed) }}</td>
-                    <td class="text-right text-no-wrap">{{ litres(level.burn) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(level.days, 1) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(level.rangeBn, 2) }}</td>
+                    <td class="text-right text-no-wrap">{{ level.speed === null ? '—' : count(level.speed) }}</td>
+                    <td class="text-right text-no-wrap">{{ level.burn === null ? '—' : litres(level.burn) }}<provenance-mark :result="level.provenance.burn" /></td>
+                    <td class="text-right text-no-wrap">{{ level.days === null ? '—' : count(level.days, 1) }}<provenance-mark :result="level.provenance.days" /></td>
+                    <td class="text-right text-no-wrap">{{ level.rangeBn === null ? '—' : count(level.rangeBn, 2) }}<provenance-mark :result="level.provenance.rangeBn" /></td>
                   </tr>
                 </tbody>
               </v-simple-table>
@@ -346,6 +355,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
@@ -357,6 +367,7 @@ import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TO
 import { searchPropulsion } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
+import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
 import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, NO_RACE_TECH, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE, loadRaceTech } from '../utilities/race-tech'
 
@@ -416,6 +427,96 @@ const finiteNumber = (value) => {
 
 const sumBy = (items, value) => items.reduce((total, item) => total + value(item), 0)
 
+const unique = (lists) => [...new Set(lists.flat())]
+
+const SPEED_INPUTS = ['engine power', 'ship size']
+const BURN_INPUTS = ['engine power', 'fuel per engine-power hour']
+const NO_ENGINES = 'engines: the class mounts none'
+const SETS_NO_FUEL = 'fuel: no range or endurance target sizes any tanks'
+const CLASS_NO_FUEL = 'fuel: the class stores none that is known'
+
+// The figures the sets table, its CSV and the basis list carry a provenance result for.
+const BASIS_COLUMNS = [['Speed (km/s)', 'speed'], ['Burn (L/h)', 'burn'], ['Range (bn km)', 'rangeBn'], ['Endurance (days)', 'enduranceDays'], ['BP', 'cost']]
+
+const cruiseAssumption = (fraction) => `The engines run at ${Math.round(fraction * 100)}% of full power`
+
+// A saved class's top speed: unavailable without engines or a size, estimated when the save stores another speed than the rule gives, otherwise confirmed.
+const classSpeedResult = ({ power, sizeHS, speed, check }) => {
+  if (!(power > 0 && sizeHS > 0)) {
+    return unavailable({ rule: 'design.classSpeed', units: 'km/s', missing: [power > 0 ? 'ship size' : NO_ENGINES] })
+  }
+
+  if (check && !check.matches) {
+    return envelope({ value: speed, status: STATUS.ESTIMATED, rule: 'design.classSpeed', units: 'km/s', inputs: { present: SPEED_INPUTS }, assumptions: [`The save stores ${check.stored} km/s for this class; the rule gives ${speed} km/s`] })
+  }
+
+  return ofRule({ rule: 'design.classSpeed', value: speed, units: 'km/s', inputs: { present: SPEED_INPUTS } })
+}
+
+// The burn, range and endurance of one row. All three are unavailable when the engines are missing or burn nothing, and range and endurance when `noFuel` says no fuel is known; a figure is never 0 for want of an input. The range is built from the speed and burn results, so it is as weak as they are and keeps their assumptions and inputs. The endurance is assumed: it rests on the share of power the player chose.
+const fuelFigures = ({ speedResult, power, burn, noFuel, rangeKm, hours, fraction }) => {
+  const stopped = !(power > 0) ? NO_ENGINES : !(burn > 0) ? 'fuel consumption: the engines burn none' : null
+
+  if (stopped) {
+    return { burn: unavailable({ rule: 'design.burnPerHour', units: 'L/h', missing: [stopped] }), rangeBn: unavailable({ rule: 'design.fullPowerRangeKm', units: 'bn km', missing: [stopped] }), enduranceDays: unavailable({ rule: 'design.enduranceHours', units: 'days', missing: [stopped] }) }
+  }
+
+  const burnResult = ofRule({ rule: 'design.burnPerHour', value: burn, units: 'L/h', inputs: { present: BURN_INPUTS } })
+
+  if (noFuel) {
+    return { burn: burnResult, rangeBn: unavailable({ rule: 'design.fullPowerRangeKm', units: 'bn km', present: BURN_INPUTS, missing: [noFuel] }), enduranceDays: unavailable({ rule: 'design.enduranceHours', units: 'days', present: BURN_INPUTS, missing: [noFuel] }) }
+  }
+
+  return {
+    burn: burnResult,
+    rangeBn: combine({ rule: 'design.fullPowerRangeKm', parts: { speed: speedResult, burn: burnResult }, compute: () => rangeKm / 1e9, units: 'bn km', inputs: { present: ['fuel'] } }),
+    enduranceDays: envelope({ value: hours / 24, status: weakestStatus([STATUS.ASSUMED, burnResult.status]), rule: 'design.enduranceHours', units: 'days', inputs: { present: [...BURN_INPUTS, 'fuel'] }, assumptions: [cruiseAssumption(fraction)] }),
+  }
+}
+
+// A designed set's figures: speed, burn and range follow rules checked against saved classes; the endurance rests on the cruise share; the BP is an estimate.
+const setProvenance = (set, fraction) => {
+  const speedResult = classSpeedResult({ power: set.power, sizeHS: set.totalHS, speed: set.speed, check: null })
+
+  return {
+    speed: speedResult,
+    ...fuelFigures({ speedResult, power: set.power, burn: set.burnFull, noFuel: set.litres > 0 ? null : SETS_NO_FUEL, rangeKm: set.rangeKm, hours: set.enduranceHours, fraction }),
+    cost: ofRule({ rule: 'design.propulsionSetCost', value: set.cost, units: 'BP', inputs: { present: ['engine design', 'stock tank costs'] } }),
+  }
+}
+
+// A saved class's BP: the sum of the stored costs of its engines and tanks, unavailable and naming the component when any stored cost is missing, never counted as 0.
+const savedCostResult = (shipClass) => {
+  const parts = [...shipClass.engines, ...shipClass.tanks]
+  const missing = parts.filter((part) => !Number.isFinite(part.cost)).map((part) => `stored cost of ${part.name || 'a component'}`)
+
+  if (missing.length) {
+    return unavailable({ rule: 'design.savedPropulsionCost', units: 'BP', missing: unique([missing]) })
+  }
+
+  return ofRule({ rule: 'design.savedPropulsionCost', value: sumBy(parts, (part) => part.cost * part.count), units: 'BP', inputs: { present: ['engine costs', 'tank costs'] } })
+}
+
+// A saved class's figures, observed in the save or worked out exactly from what it stores.
+const classProvenance = ({ shipClass, power, speed, check, burn, rangeKm, hours, fraction }) => {
+  const speedResult = classSpeedResult({ power, sizeHS: shipClass.sizeHS, speed, check })
+
+  return {
+    speed: speedResult,
+    ...fuelFigures({ speedResult, power, burn, noFuel: Number.isFinite(shipClass.fuel) ? null : CLASS_NO_FUEL, rangeKm, hours, fraction }),
+    cost: savedCostResult(shipClass),
+  }
+}
+
+// A burn or endurance level of the chosen row: the row's own result when it is unavailable, confirmed at full power, and assumed at any other share, which the player picked.
+const levelResult = (base, rule, value, units, fraction) => {
+  if (!isAvailable(base)) {
+    return base
+  }
+
+  return fraction === 1 ? ofRule({ rule, value, units, inputs: base.inputs }) : envelope({ value, status: STATUS.ASSUMED, rule, units, inputs: base.inputs, assumptions: [cruiseAssumption(fraction)] })
+}
+
 // One engine as the game prints it on its design window, with how many the row mounts.
 const engineCard = (engine, name, count) => ({
   name,
@@ -437,7 +538,7 @@ const engineCard = (engine, name, count) => ({
 // A page for the propulsion of one hull: the engines and fuel tanks that give it a speed and a range, searched over the race's engine tech and ranked by the HS they take.
 export default {
   name: 'PropulsionPage',
-  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -470,6 +571,7 @@ export default {
       kinds: KINDS,
       setPageSizes: SET_PAGE_SIZES,
       maxSpeed: MAX_SPEED,
+      statuses: STATUSES,
       tonsPerHs: TONS_PER_HS,
       linkTo,
     }
@@ -647,6 +749,19 @@ export default {
       const commercial = shipClass.engines.filter((engine) => engine.commercial).length
       const heat = sumBy(shipClass.engines, (engine) => engine.thermal * engine.count)
       const single = shipClass.engines.length === 1 ? shipClass.engines[0] : null
+      const check = power > 0 ? { stored: shipClass.stored.speed, matches: shipClass.stored.speed === speed } : null
+      const tankCost = sumBy(shipClass.tanks, (tank) => tank.cost * tank.count)
+
+      const provenance = classProvenance({
+        shipClass,
+        power,
+        speed,
+        check,
+        burn: burnFull,
+        rangeKm: fullPowerRangeKm({ fuel: shipClass.fuel, enginePower: power, fuelPerEph, speed }),
+        hours: enduranceHours({ fuel: shipClass.fuel, enginePower: power, fuelPerEph, fraction: this.fraction }),
+        fraction: this.fraction,
+      })
 
       return {
         key: 'class',
@@ -661,22 +776,22 @@ export default {
         propulsionHS,
         tons: propulsionHS * TONS_PER_HS,
         share: shipClass.sizeHS > 0 ? propulsionHS / shipClass.sizeHS : 0,
-        speed,
-        check: power > 0 ? { stored: shipClass.stored.speed, matches: shipClass.stored.speed === speed } : null,
-        burn: burnFull,
-        rangeBn: fullPowerRangeKm({ fuel: shipClass.fuel, enginePower: power, fuelPerEph, speed }) / 1e9,
-        enduranceDays: enduranceHours({ fuel: shipClass.fuel, enginePower: power, fuelPerEph, fraction: this.fraction }) / 24,
-        cost: sumBy(shipClass.engines, (engine) => engine.cost * engine.count) + sumBy(shipClass.tanks, (tank) => tank.cost * tank.count),
+        speed: valueOrNull(provenance.speed),
+        check,
+        burn: valueOrNull(provenance.burn),
+        rangeBn: valueOrNull(provenance.rangeBn),
+        enduranceDays: valueOrNull(provenance.enduranceDays),
+        cost: valueOrNull(provenance.cost),
         crew: sumBy(shipClass.engines, (engine) => engine.crew * engine.count) + sumBy(shipClass.tanks, (tank) => tank.crew * tank.count),
         type: !shipClass.engines.length ? '—' : commercial === shipClass.engines.length ? 'Commercial' : commercial ? 'Mixed' : 'Military',
         thermal: thermalSignature({ enginePower: heat, stealthRating: 1, fraction: this.fraction, sizeHS: shipClass.sizeHS }),
         cards: shipClass.engines.map((engine) => engineCard(engine, engine.name, engine.count)),
         tanks: shipClass.tanks,
         tankHS: shipClass.tankHS,
-        tankCost: sumBy(shipClass.tanks, (tank) => tank.cost * tank.count),
+        tankCost,
         litres: shipClass.fuel,
         totalHS: shipClass.sizeHS,
-        rangeKm: fullPowerRangeKm({ fuel: shipClass.fuel, enginePower: power, fuelPerEph, speed }),
+        provenance,
       }
     },
 
@@ -696,6 +811,13 @@ export default {
       const row = this.selectedRow
 
       return row ? `${row.name}${row.pinned ? '' : ` × ${this.count(row.count)}`}` : ''
+    },
+
+    // What the figures of the chosen row rest on, one entry a figure with its result.
+    basisRows() {
+      const row = this.selectedRow
+
+      return row ? BASIS_COLUMNS.map(([label, key]) => ({ label, result: row.provenance[key] })) : EMPTY_LIST
     },
 
     // The finished hull's size without the jump drives the saved class mounts, as the game's automatic design starts from.
@@ -741,13 +863,19 @@ export default {
         return EMPTY_LIST
       }
 
-      return [...new Set([1, 0.5, this.fraction])].sort((a, b) => b - a).map((fraction) => ({
-        fraction,
-        speed: Math.floor(row.speed * fraction),
-        burn: burnPerHour({ enginePower: row.power, fuelPerEph: row.fuelPerEph, fraction }),
-        days: enduranceHours({ fuel: row.litres, enginePower: row.power, fuelPerEph: row.fuelPerEph, fraction }) / 24,
-        rangeBn: row.rangeKm / 1e9,
-      }))
+      return [...new Set([1, 0.5, this.fraction])].sort((a, b) => b - a).map((fraction) => {
+        const burn = isAvailable(row.provenance.burn) ? burnPerHour({ enginePower: row.power, fuelPerEph: row.fuelPerEph, fraction }) : null
+        const days = isAvailable(row.provenance.enduranceDays) ? enduranceHours({ fuel: row.litres, enginePower: row.power, fuelPerEph: row.fuelPerEph, fraction }) / 24 : null
+
+        return {
+          fraction,
+          speed: row.speed === null ? null : Math.floor(row.speed * fraction),
+          burn,
+          days,
+          rangeBn: row.rangeBn,
+          provenance: { burn: levelResult(row.provenance.burn, 'design.burnPerHour', burn, 'L/h', fraction), days: levelResult(row.provenance.enduranceDays, 'design.enduranceHours', days, 'days', fraction), rangeBn: row.provenance.rangeBn },
+        }
+      })
     },
 
     tiles() {
@@ -756,11 +884,18 @@ export default {
       const describe = (set) => `${this.count(set.count)} × ${this.setName(set)}`
       const tile = (label, set, figure) => ({ label, ...(set ? { value: figure(set), note: describe(set) } : none) })
       const tech = this.designTech
+      const cheapest = tile('Cheapest set', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`)
+
+      if (result && result.cheapest) {
+        const cost = setProvenance(result.cheapest, this.fraction).cost
+
+        Object.assign(cheapest, { icon: STATUS_MARKS[cost.status].icon, title: `${cheapest.value}. ${describeResult(cost)}`, note: `${cheapest.note} · cost ${cost.status}` })
+      }
 
       return [
         tile('Fastest set within the share', result && result.fastest, (set) => `${this.count(set.speed)} km/s`),
         tile('Lightest set for the targets', result && result.lightest, (set) => `${this.count(set.propulsionHS, 2)} HS (${this.count(set.tons)} tons)`),
-        tile('Cheapest set', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`),
+        cheapest,
         { label: 'Engine and fuel tech', value: tech ? `${this.count(tech.engineTech, 2)} EP/HS` : '—', note: tech ? `Fuel ${tech.fuelTech} L per EP hour · thrust × ${tech.minThrust} to × ${tech.maxThrust}` : 'None researched' },
       ]
     },
@@ -791,7 +926,11 @@ export default {
     },
 
     tradeRows() {
-      return this.tradeFrontier.map((set) => ({ key: `${set.engine.id || `${set.engine.sizeHS}-${set.engine.thrust}`}-${set.count}`, set, share: set.share, speed: set.speed, rangeBn: set.rangeKm / 1e9, propulsionHS: set.propulsionHS, cost: set.cost, name: this.setName(set), count: set.count, type: set.commercial ? 'Commercial' : 'Military' }))
+      return this.tradeFrontier.map((set) => {
+        const provenance = setProvenance(set, this.fraction)
+
+        return { key: `${set.engine.id || `${set.engine.sizeHS}-${set.engine.thrust}`}-${set.count}`, set, share: set.share, speed: valueOrNull(provenance.speed), rangeBn: valueOrNull(provenance.rangeBn), propulsionHS: set.propulsionHS, cost: valueOrNull(provenance.cost), name: this.setName(set), count: set.count, type: set.commercial ? 'Commercial' : 'Military', provenance }
+      })
     },
 
     // The saved class as a point of the chart.
@@ -813,25 +952,29 @@ export default {
     },
 
     tradeTable() {
-      return this.tradeRows
+      return this.tradeSaved ? [this.tradeSaved, ...this.tradeRows] : this.tradeRows
     },
 
     tradeChart() {
       const speed = this.tradeMetric === 'speed'
       const [military, commercial, saved] = this.theme.categorical
       const value = (row) => (speed ? row.speed : row.rangeBn)
+      const plotted = (rows) => rows.filter((row) => value(row) !== null)
       const point = (row, label) => ({ x: roundToDecimal(row.share * 100, 2), y: roundToDecimal(value(row), speed ? 0 : 2), label })
       const series = (label, color, data, style = 'circle') => ({ label, data, showLine: false, pointRadius: 5, pointHoverRadius: 8, pointStyle: style, backgroundColor: color, borderColor: color })
-      const describe = (row) => `${row.count} × ${row.name}: ${this.count(row.propulsionHS, 2)} HS, ${this.count(row.speed)} km/s, ${this.count(row.rangeBn, 2)} bn km`
+      const status = (result) => STATUS_MARKS[result.status].label.toLowerCase()
+      const shown = (figure, digits, unit, result) => (figure === null ? `${unit} unavailable` : `${this.count(figure, digits)} ${unit} (${status(result)})`)
+      const figures = (row) => `${this.count(row.propulsionHS, 2)} HS, ${shown(row.speed, 0, 'km/s', row.provenance.speed)}, ${shown(row.rangeBn, 2, 'bn km', row.provenance.rangeBn)}, ${shown(row.cost, 1, 'BP', row.provenance.cost)}`
+      const describe = (row) => `${row.count} × ${row.name}: ${figures(row)}`
       const datasets = [
-        series('Military', military, this.tradeRows.filter((row) => row.type === 'Military').map((row) => point(row, describe(row)))),
-        series('Commercial', commercial, this.tradeRows.filter((row) => row.type === 'Commercial').map((row) => point(row, describe(row)))),
+        series('Military', military, plotted(this.tradeRows.filter((row) => row.type === 'Military')).map((row) => point(row, describe(row)))),
+        series('Commercial', commercial, plotted(this.tradeRows.filter((row) => row.type === 'Commercial')).map((row) => point(row, describe(row)))),
       ]
 
-      if (this.tradeSaved) {
+      if (this.tradeSaved && value(this.tradeSaved) !== null) {
         const row = this.tradeSaved
 
-        datasets.push(series('Saved class', saved, [point(row, `${row.name} (saved): ${this.count(row.propulsionHS, 2)} HS, ${this.count(row.speed)} km/s, ${this.count(row.rangeBn, 2)} bn km`)], 'rectRot'))
+        datasets.push(series('Saved class', saved, [point(row, `${row.name} (saved): ${figures(row)}`)], 'rectRot'))
       }
 
       return {
@@ -963,6 +1106,7 @@ export default {
 
     rowOfSet(set, rank) {
       const name = this.setName(set)
+      const provenance = setProvenance(set, this.fraction)
 
       return {
         key: `${set.engine.id || `${set.engine.sizeHS}-${set.engine.thrust}`}-${set.count}`,
@@ -978,12 +1122,12 @@ export default {
         propulsionHS: set.propulsionHS,
         tons: set.tons,
         share: set.share,
-        speed: set.speed,
+        speed: valueOrNull(provenance.speed),
         check: null,
-        burn: set.burnFull,
-        rangeBn: set.rangeKm / 1e9,
-        enduranceDays: set.enduranceHours / 24,
-        cost: set.cost,
+        burn: valueOrNull(provenance.burn),
+        rangeBn: valueOrNull(provenance.rangeBn),
+        enduranceDays: valueOrNull(provenance.enduranceDays),
+        cost: valueOrNull(provenance.cost),
         crew: set.crew,
         type: set.commercial ? 'Commercial' : 'Military',
         thermal: set.thermal,
@@ -993,7 +1137,7 @@ export default {
         tankCost: set.tanks.reduce((total, tank) => total + tank.cost * tank.count, 0),
         litres: set.litres,
         totalHS: set.totalHS,
-        rangeKm: set.rangeKm,
+        provenance,
       }
     },
 
@@ -1019,7 +1163,11 @@ export default {
           const y = b[by]
 
           if (x === y) {
-            return a.rank - b.rank
+            return (a.rank || 0) - (b.rank || 0)
+          }
+
+          if (x === null || y === null) {
+            return x === null ? 1 : -1
           }
 
           return (typeof x === 'string' || typeof y === 'string' ? String(x).localeCompare(String(y)) : finiteNumber(x) - finiteNumber(y)) * direction
@@ -1036,6 +1184,46 @@ export default {
     // Litres an hour, with decimals for a small burn.
     litres(value) {
       return this.count(value, value < 10 ? 2 : value < 100 ? 1 : 0)
+    },
+
+    statusMeaning(status) {
+      return STATUS_MARKS[status].meaning
+    },
+
+    // A result's rule, versions, assumptions and missing inputs on one line.
+    basisText(result) {
+      const parts = [`${result.rule.id}, game ${result.rule.versions.join(', ')}`]
+
+      if (result.assumptions.length) {
+        parts.push(`assumes ${result.assumptions.join('; ')}`)
+      }
+
+      if (result.inputs.missing.length) {
+        parts.push(`missing ${result.inputs.missing.join(', ')}`)
+      }
+
+      return parts.join(' · ')
+    },
+
+    // The saved class and every set listed, with the status beside each figure and the rules, versions, assumptions and missing inputs of the row, so a copy keeps what the table showed. An unavailable figure is left empty, never 0.
+    downloadCsv() {
+      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs']
+      const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+
+      const lines = this.rows.map((row) => {
+        const results = BASIS_COLUMNS.map(([, key]) => row.provenance[key])
+        const fields = results.map(exportFields)
+
+        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; ')]
+      })
+
+      const csv = [header, ...lines].map((line) => line.map(quote).join(',')).join('\n')
+      const link = document.createElement('a')
+
+      link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+      link.download = 'propulsion-sets.csv'
+      link.click()
+      URL.revokeObjectURL(link.href)
     },
 
     // Stops the search running and, for an input that can be searched, starts it after a short wait. An input that changes meanwhile takes over.
@@ -1224,6 +1412,21 @@ export default {
 
   .is-searching {
     opacity: 0.6;
+  }
+
+  .provenance-basis__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+  }
+
+  .provenance-basis__legend-item {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .provenance-basis__line {
+    padding-top: 2px;
   }
 
   .clickable-rows tbody tr {

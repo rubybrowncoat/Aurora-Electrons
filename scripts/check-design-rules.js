@@ -3,13 +3,17 @@
 
   node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump] [--all-game]
 
-  Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. The save is opened read-only through the same sqlite3 module the app uses.
+  Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. Each check is printed under the id, verification and game versions of the rules it checks, read from the rule registry (utilities/provenance.js, filled by design-rules.js), and a registered rule that no check run covers is listed at the end. The save is opened read-only through the same sqlite3 module the app uses.
 */
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 
 const RULES = ['engine', 'speed', 'range', 'jump']
+
+// The registered rules whose formulas each check compares with stored values. The range check compares only the stored fuel efficiency with the class's engines, an input of the burn and range formulas, so it names no rule: design.burnPerHour and design.fullPowerRangeKm stay in the list of rules no check covers.
+const RULE_IDS = { engine: ['design.engineDesign'], speed: ['design.classSpeed'], range: [], jump: ['design.jumpDriveDesign'] }
+const INPUT_ONLY = { range: 'input check only: the stored fuel efficiency against the class\'s engines; the burn and range formulas are not compared with a stored value' }
 const RELATIVE_TOLERANCE = 1e-6
 const ABSOLUTE_TOLERANCE = 1e-9
 const NAMED_CLASSES = [64475, 62944]
@@ -70,11 +74,23 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
   database.all(sql, parameters, (error, rows) => (error ? reject(error) : resolve(rows)))
 })
 
-// design-rules.js is an ES module in a package without "type": "module", which Node would reparse with a warning; it imports nothing, so it loads from its own source.
-const loadRules = async () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'utilities', 'design-rules.js'), 'utf8')
+// design-rules.js and provenance.js are ES modules in a package without "type": "module", which Node would reparse with a warning; each loads from its own source as a data URL, design-rules.js importing provenance.js by the URL, so both share one rule registry.
+const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 
-  return await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+const loadRules = async () => {
+  const directory = path.resolve(__dirname, '..', 'src', 'renderer', 'utilities')
+  const provenanceUrl = dataUrl(fs.readFileSync(path.join(directory, 'provenance.js'), 'utf8'))
+  const importLine = "from './provenance'"
+  const rulesSource = fs.readFileSync(path.join(directory, 'design-rules.js'), 'utf8')
+
+  if (!rulesSource.includes(importLine)) {
+    throw new Error(`design-rules.js no longer imports ${importLine}; the check script loads it by that line`)
+  }
+
+  const rules = await import(dataUrl(rulesSource.replace(importLine, `from '${provenanceUrl}'`)))
+  const registry = await import(provenanceUrl)
+
+  return { ...rules, registry }
 }
 
 const close = (stored, computed) => Math.abs(stored - computed) <= Math.max(ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE * Math.max(Math.abs(stored), Math.abs(computed)))
@@ -82,8 +98,10 @@ const close = (stored, computed) => Math.abs(stored - computed) <= Math.max(ABSO
 const format = (value) => (typeof value === 'number' && !Number.isInteger(value) ? Number(value.toPrecision(10)) : value)
 
 class Report {
-  constructor (rule) {
+  constructor (rule, ruleIds, scope = '') {
     this.rule = rule
+    this.ruleIds = ruleIds
+    this.scope = scope
     this.checked = 0
     this.mismatches = []
     this.explained = []
@@ -113,8 +131,25 @@ class Report {
     this.explained.push({ id: row.id, name: row.name, field: '-', stored: '-', computed: '-', reason })
   }
 
-  print () {
-    console.log(`${this.rule}: ${this.checked} checked, ${this.mismatches.length} mismatches, ${this.explained.length} explained`)
+  // The check's registered rules, each with its verification and game versions, so the output says what the zero mismatches are evidence for; a check that compares no rule's formula says so.
+  describeRules (registry) {
+    if (!this.ruleIds.length) {
+      return this.scope
+    }
+
+    return this.ruleIds.map((id) => {
+      const rule = registry.getRule(id)
+
+      if (!rule) {
+        throw new Error(`Rule ${id} is not registered in design-rules.js`)
+      }
+
+      return `${id}: ${rule.verification}, game ${rule.versions.join(', ')}`
+    }).join('; ')
+  }
+
+  print (registry) {
+    console.log(`${this.rule} [${this.describeRules(registry)}]: ${this.checked} checked, ${this.mismatches.length} mismatches, ${this.explained.length} explained`)
 
     for (const note of this.notes) {
       console.log(`  note: ${note}`)
@@ -139,7 +174,7 @@ const named = (row) => ({ id: row.SDComponentID, name: row.Name })
 
 const checkEngines = async (context) => {
   const { database, rules, techs, parameters, allGame } = context
-  const report = new Report('engine')
+  const report = new Report('engine', RULE_IDS.engine)
   const rows = await all(database, componentsSql(allGame, 1), componentParameters(parameters, allGame))
   const shippingLine = rows.filter((row) => row.ShippingLineSystem).length
 
@@ -180,7 +215,7 @@ const engineExplainer = (thermalTech) => (field, stored) => (field === 'thermal'
 
 const checkSpeeds = async (context) => {
   const { database, rules, parameters } = context
-  const report = new Report('speed')
+  const report = new Report('speed', RULE_IDS.speed)
   const classes = await all(database, 'select ShipClassID, ClassName, Size, EnginePower, MaxSpeed from FCT_ShipClass where GameID = :game and RaceID = :race order by ShipClassID', parameters)
   const engineTotals = await classEngineTotals(database, parameters)
 
@@ -219,7 +254,7 @@ const classEngineTotals = async (database, parameters) => {
 
 const checkRanges = async (context) => {
   const { database, rules, parameters } = context
-  const report = new Report('range')
+  const report = new Report('range', RULE_IDS.range, INPUT_ONLY.range)
   const classes = await all(database, 'select ShipClassID, ClassName, Size, EnginePower, FuelEfficiency, FuelCapacity, MaxSpeed from FCT_ShipClass where GameID = :game and RaceID = :race order by ShipClassID', parameters)
   const engineTotals = await classEngineTotals(database, parameters)
   const ranges = []
@@ -263,7 +298,7 @@ const checkRanges = async (context) => {
   return report
 }
 
-// The source rounds a commercial drive's size to 2 decimals (Game.cs:30894), and the 2.7.0 save's own drives show it; the drives of older games (the 2.6 saves, and game 138 of the 2.7.x saves) keep 1 decimal, so they were designed under an older rule. Only a size equal to the unrounded size cut to 1 decimal is explained.
+// The game rounds a commercial drive's size to 2 decimals, and the 2.7.0 save's own drives show it; the drives of older games (the 2.6 saves, and game 138 of the 2.7.x saves) keep 1 decimal, so they were designed under an older rule. Only a size equal to the unrounded size cut to 1 decimal is explained.
 const jumpExplainer = (rules, commercial, shipSizeHS, design) => (field, stored) => {
   if (field !== 'size' || !commercial) {
     return null
@@ -271,12 +306,12 @@ const jumpExplainer = (rules, commercial, shipSizeHS, design) => (field, stored)
 
   const unrounded = shipSizeHS / design.modifiedEfficiency * rules.COMMERCIAL_JUMP_MULTIPLIER
 
-  return close(stored, rules.roundHalfEven(unrounded, 1)) ? 'commercial drive size rounded to 1 decimal: designed under the older rule (the source rounds to 2)' : null
+  return close(stored, rules.roundHalfEven(unrounded, 1)) ? 'commercial drive size rounded to 1 decimal: designed under the older rule (the game now rounds to 2)' : null
 }
 
 const checkJumpDrives = async (context) => {
   const { database, rules, techs, parameters, allGame } = context
-  const report = new Report('jump')
+  const report = new Report('jump', RULE_IDS.jump)
   const rows = await all(database, componentsSql(allGame, 16), componentParameters(parameters, allGame))
 
   report.notes.push(`scope: ${allGame ? 'every jump drive of the game' : 'the race\'s jump drives, held through FCT_RaceTech'}`)
@@ -330,12 +365,21 @@ const main = async () => {
   let mismatches = 0
   let explained = 0
 
+  const covered = new Set()
+
   for (const rule of options.rules) {
     const report = await CHECKS[rule](context)
 
-    report.print()
+    report.print(rules.registry)
+    report.ruleIds.forEach((id) => covered.add(id))
     mismatches += report.mismatches.length
     explained += report.explained.length
+  }
+
+  const unchecked = rules.registry.listRules().filter((rule) => !covered.has(rule.id))
+
+  if (unchecked.length) {
+    console.log(`registered rules no check here covers: ${unchecked.map((rule) => `${rule.id} (${rule.verification})`).join(', ')}`)
   }
 
   database.close()

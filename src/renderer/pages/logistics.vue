@@ -41,7 +41,7 @@
             <v-col cols="12" lg="7">
               <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways. Use it to find the classes that drain the fuel the most." elevation="1">
                 <div class="panel-head">
-                  <span>Burn by class</span>
+                  <span>Burn by class<provenance-mark rule="logistics.fullPowerBurn" label /></span>
                   <span class="legend">
                     <span class="legend-item"><span class="swatch" :style="{ background: theme.categorical[0] }" />Lifetime average</span>
                     <span class="legend-item"><span class="swatch" :style="{ background: theme.categorical[1] }" />Moving now, full power</span>
@@ -57,7 +57,7 @@
 
           <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each colony. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
             <div class="panel-head">
-              <span>Colony fuel and refineries</span>
+              <span>Colony fuel and refineries<provenance-mark rule="logistics.refineryOutput" label /></span>
               <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining</v-chip>
             </div>
             <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refineriesTable.sortBy" :sort-desc.sync="refineriesTable.sortDesc" :items-per-page.sync="refineriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
@@ -97,7 +97,7 @@
           <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with what each makes a year and how long its deposit will last. Use it to judge which harvesters are worth keeping where they are." elevation="1">
             <div class="panel-head">
               <span>Sorium harvesters</span>
-              <v-chip small>Estimate</v-chip>
+              <provenance-mark rule="logistics.harvesterOutput" label />
             </div>
             <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :sort-by.sync="harvestersTable.sortBy" :sort-desc.sync="harvestersTable.sortDesc" :items-per-page.sync="harvestersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.ShipName`]="{ item }">
@@ -124,7 +124,7 @@
         <template v-else>
           <v-card class="panel" data-summary="The colonies where ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
             <div class="panel-head">
-              <span>Maintenance locations</span>
+              <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
             <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
@@ -203,6 +203,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -234,7 +235,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),

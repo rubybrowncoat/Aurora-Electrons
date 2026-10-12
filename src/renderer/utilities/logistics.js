@@ -1,6 +1,8 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks: docs/plans/aurcalcs/build-2.md § Logistics.
 
+import { roundHalfEven } from './design-rules'
 import { roundToDecimal } from './math'
+import { ofRule, registerRule, unavailable } from './provenance'
 
 // The racial "Maintenance Production Rate" is BP per facility per year; 1 MSP is 0.25 BP.
 export const MSP_PER_BP = 4
@@ -126,3 +128,139 @@ export const compact = (value) => {
 
   return `${roundToDecimal(value, 0)}`
 }
+
+// The most years the maintenance life loop runs.
+const MAINTENANCE_LIFE_YEARS = 200
+
+const given = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+
+const KIND_FLAGS = [true, false, 1, 0]
+
+// Years a class's maintenance supplies last on their own (docs/plans/planners/mechanics-ships.md § 5). `commercial` says whether the class is commercial (true or false, or 1 or 0 as the save stores it) and has no default: a missing or other value leaves the class type unknown. `components` are the class's rows as { chanceToHit, cost }, `maxDacRoll` the damage roll the hit chances are cut from, `baseFailureChance` the class's failure chance a year and `maintSupplies` the MSP it stores. The average repair cost per failure weighs each component's cost by the share of the roll it covers; each year the supplies spent are that cost times the failure chance grown by the year, until the store is gone. A result with a missing input, a commercial class (the game gives it no life) or supplies that outlast the 200-year loop is unavailable and names why; it is never 0, so a deployment check on it is unknown (provenance `atLeast` gives null, which does not pass).
+export const maintenanceLife = ({ commercial, baseFailureChance, maintSupplies, maxDacRoll, components }) => {
+  const rule = 'logistics.maintenanceLife'
+  const rows = Array.isArray(components) ? components : []
+  const checks = [
+    ['class type (military or commercial)', KIND_FLAGS.includes(commercial)],
+    ['base failure chance', given(baseFailureChance)],
+    ['maintenance supplies', given(maintSupplies)],
+    ['damage roll', given(maxDacRoll) && Number(maxDacRoll) > 0],
+    ['components', rows.length > 0],
+  ]
+
+  if (rows.length) {
+    checks.push(['component hit chances', rows.every((row) => given(row.chanceToHit))], ['component costs', rows.every((row) => given(row.cost))])
+  }
+
+  const present = checks.filter(([, ok]) => ok).map(([name]) => name)
+  const missing = checks.filter(([, ok]) => !ok).map(([name]) => name)
+
+  if (commercial === true || commercial === 1) {
+    missing.unshift('a military class: the game gives a commercial class no maintenance life')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  let previous = 0
+  let repairCost = 0
+
+  for (const row of [...rows].sort((a, b) => a.chanceToHit - b.chanceToHit)) {
+    repairCost += row.cost * ((row.chanceToHit - previous) / maxDacRoll)
+    previous = row.chanceToHit
+  }
+
+  let spent = 0
+
+  for (let year = 1; year <= MAINTENANCE_LIFE_YEARS; year++) {
+    const annual = repairCost * (baseFailureChance * year / 100)
+
+    if (spent + annual > maintSupplies) {
+      return ofRule({ rule, value: roundHalfEven((year - 1) + (maintSupplies - spent) / annual, 2), inputs: { present } })
+    }
+
+    spent += annual
+  }
+
+  return unavailable({ rule, present, missing: [`supplies that run out within ${MAINTENANCE_LIFE_YEARS} years`] })
+}
+
+// The rule registry for the Logistics page's figures, with the evidence in docs/plans/aurcalcs/build-2.md § Logistics.
+const LOGISTICS_VERSIONS = ['2.7.x']
+const LEDGER = 'matches the game\'s own mineral ledger on every sample colony (docs/plans/aurcalcs/build-2.md § Logistics)'
+
+registerRule({
+  id: 'logistics.refineryOutput',
+  versions: LOGISTICS_VERSIONS,
+  units: 'L/yr',
+  verification: 'confirmed',
+  structure: ['FCT_Population.Refineries, FuelProduction, FuelProdStatus', 'the colony\'s production modifier'],
+  note: `Refineries times the racial rate times the colony's production modifier, while production is on; ${LEDGER}.`,
+})
+
+registerRule({
+  id: 'logistics.mspProduction',
+  versions: LOGISTICS_VERSIONS,
+  units: 'MSP/yr',
+  verification: 'confirmed',
+  structure: ['FCT_Population.MaintenanceFacilities, MSPProduction, MaintProdStatus', 'the colony\'s production modifier'],
+  note: `Facilities times the racial rate times 4 MSP per BP times the production modifier, while production is on; ${LEDGER}.`,
+})
+
+registerRule({
+  id: 'logistics.mspOutput',
+  versions: LOGISTICS_VERSIONS,
+  units: 'MSP/yr',
+  verification: 'estimated',
+  structure: ['FCT_Population stockpiles of the input minerals', 'FCT_Population.Mines, Deposit<mineral>'],
+  note: 'The production figure (logistics.mspProduction) held to what the input minerals allow. Mines elsewhere, orbital mining and incoming hauls are not visible from the colony row, so the cap can understate a colony supplied that way.',
+  assumptions: ['Only the colony\'s own stockpile and its own body\'s mines supply the input minerals'],
+})
+
+registerRule({
+  id: 'logistics.facilityCapacity',
+  versions: LOGISTICS_VERSIONS,
+  units: 't',
+  verification: 'estimated',
+  structure: ['FCT_Population.MaintenanceFacilities, MaintenanceCapacity, Efficiency, CapacityModifier, EconomicProdModifier'],
+  note: 'Facilities times the racial capacity times the colony\'s efficiency and modifiers, never negative, from the game\'s documentation; not compared with a stored figure.',
+})
+
+registerRule({
+  id: 'logistics.maintenanceLocation',
+  versions: LOGISTICS_VERSIONS,
+  units: 'MSP/yr, t, years',
+  verification: 'estimated',
+  structure: ['FCT_Fleet.OrbitBodyID, Xcor, Ycor', 'FCT_ShipClass.Commercial, Size', 'FCT_Population maintenance columns'],
+  note: 'Capacity, upkeep, net MSP and runway of the ships and colonies at one spot. The documentation\'s worked example (100 kt in orbit against 80 kt of capacity gives 80 %) is reproduced; the figures are not compared with a stored total, and the upkeep draws from where ships are, not where they are assigned.',
+  assumptions: ['Ships use the supplies where they are, populations first, then supply ships, then their own', 'A ship in a military hangar needs none'],
+})
+
+registerRule({
+  id: 'logistics.fullPowerBurn',
+  versions: LOGISTICS_VERSIONS,
+  units: 'L/yr per ship',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.EnginePower, FuelEfficiency'],
+  note: 'Engine power times the fuel per engine-power hour times the hours of a year: the burn of a ship at full power all year, an upper bound. The save does not hold how long fleets run their engines, so the figure shown is a range.',
+  assumptions: ['The ship runs its engines at full power for every hour of the year'],
+})
+
+registerRule({
+  id: 'logistics.harvesterOutput',
+  versions: LOGISTICS_VERSIONS,
+  units: 'L/yr per ship',
+  verification: 'estimated',
+  structure: ['FCT_Ship Harvesters, MiningBonus, CurrentCrew', 'FCT_ShipClass.FuelProduction, Crew', 'the deposit\'s Sorium accessibility'],
+  note: 'Modules times the racial refinery rate times the commander and admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard: the community workbook\'s rule, where the wiki gives a different base rate, so it is not confirmed.',
+})
+
+registerRule({
+  id: 'logistics.maintenanceLife',
+  versions: LOGISTICS_VERSIONS,
+  units: 'years',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, MaxDACRoll, Commercial', 'FCT_ClassComponent.ChanceToHit', 'FCT_ShipDesignComponents.Cost'],
+  note: 'The loop of docs/plans/planners/mechanics-ships.md § 5, read from the game; the save stores no maintenance life to compare it with, so the formula is not reproduced against saved data.',
+})
