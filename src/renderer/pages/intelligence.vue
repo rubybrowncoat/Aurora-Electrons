@@ -78,7 +78,7 @@
                   <div class="panel-head">
                     <span>{{ chart.title }}</span>
                     <span class="legend">
-                      <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><span class="swatch" :style="{ background: series.borderColor }" />{{ series.label }}</span>
+                      <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" :dash="series.borderDash" kind="line" />{{ series.label }}</span>
                     </span>
                   </div>
                   <div class="panel-body">
@@ -190,6 +190,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
@@ -259,7 +260,7 @@ const compact = (value) => {
 
 export default {
   name: 'IntelligencePage',
-  components: { ChartCanvas, LoadState, StatTiles },
+  components: { ChartCanvas, LoadState, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -728,14 +729,6 @@ export default {
 .intelligence-page {
   .chart-panel {
     height: calc(100% - 20px);
-  }
-
-  .swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    margin-right: 6px;
   }
 
   .selected-row {

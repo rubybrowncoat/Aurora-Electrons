@@ -310,6 +310,9 @@ export default {
   }
 
   &:focus-visible::after {
+    width: 16px;
+    background: var(--ae-ink);
+    opacity: 1;
     outline: 2px solid var(--ae-primary);
     outline-offset: 2px;
   }

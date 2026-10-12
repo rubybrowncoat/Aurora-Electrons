@@ -212,9 +212,9 @@
             <div v-if="!tradeRows.length && !tradeSaved" class="caption text--secondary">No sets to compare yet.</div>
             <template v-else-if="tradeView === 'chart'">
               <div class="legend">
-                <span class="legend-item"><span class="dot" :style="{ background: kindColors.military }" />Military</span>
-                <span class="legend-item"><span class="dot" :style="{ background: kindColors.commercial }" />Commercial</span>
-                <span v-if="tradeSaved" class="legend-item"><span class="dot" :style="{ background: kindColors.saved }" />Saved class</span>
+                <span class="legend-item"><series-key :color="kindColors.military" kind="point" />Military</span>
+                <span class="legend-item"><series-key :color="kindColors.commercial" kind="point" />Commercial</span>
+                <span v-if="tradeSaved" class="legend-item"><series-key :color="kindColors.saved" kind="point" />Saved class</span>
               </div>
               <chart-canvas type="line" :data="tradeChart.data" :options="tradeChart.options" :height="340" :label="`Share of the ship the propulsion takes against ${tradeMetric === 'speed' ? 'speed' : 'range'}`" />
             </template>
@@ -352,6 +352,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -539,7 +540,7 @@ const engineCard = (engine, name, count) => ({
 // A page for the propulsion of one hull: the engines and fuel tanks that give it a speed and a range, searched over the race's engine tech and ranked by the HS they take.
 export default {
   name: 'PropulsionPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,

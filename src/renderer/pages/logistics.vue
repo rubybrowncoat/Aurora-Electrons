@@ -43,8 +43,8 @@
                 <div class="panel-head">
                   <span>Burn by class<provenance-mark rule="logistics.fullPowerBurn" label /></span>
                   <span class="legend">
-                    <span class="legend-item"><span class="swatch" :style="{ background: theme.categorical[0] }" />Lifetime average</span>
-                    <span class="legend-item"><span class="swatch" :style="{ background: theme.categorical[1] }" />Moving now, full power</span>
+                    <span class="legend-item"><series-key :color="theme.categorical[0]" />Lifetime average</span>
+                    <span class="legend-item"><series-key :color="theme.categorical[1]" />Moving now, full power</span>
                   </span>
                 </div>
                 <div class="panel-body">
@@ -228,6 +228,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -273,7 +274,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -732,14 +733,6 @@ export default {
 
 <style lang="scss">
 .logistics-page {
-  .swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    margin-right: 6px;
-  }
-
   td {
     font-variant-numeric: tabular-nums;
   }

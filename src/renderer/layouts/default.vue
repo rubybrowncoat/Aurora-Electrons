@@ -624,6 +624,19 @@ export default {
   }
 }
 
+// Keyboard focus on the rail's entries and the search button, which are not Vuetify controls: a 2px ring in the focus colour (3:1 or more on every surface of every preset, scripts/check-contrast.js), drawn inside the rail's own width so the drawer does not clip it.
+.rail__item:focus-visible,
+.rail__empire:focus-visible {
+  outline: 2px solid var(--ae-primary);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.search-button:focus-visible {
+  outline: 2px solid var(--ae-primary);
+  outline-offset: 2px;
+}
+
 .app-bar.v-app-bar.v-sheet {
   background: var(--ae-bg) !important;
   border-bottom: 1px solid var(--ae-border) !important;

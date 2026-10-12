@@ -127,7 +127,7 @@
               </div>
               <div class="panel-body">
                 <div v-if="timeline.total" class="legend mb-2">
-                  <span v-for="series in timeline.series" :key="series.id" class="legend-item"><span class="dot" :style="{ background: series.color }" />{{ series.label }}</span>
+                  <span v-for="series in timeline.series" :key="series.id" class="legend-item"><series-key :color="series.color" />{{ series.label }}</span>
                 </div>
                 <chart-canvas v-if="timeline.total" type="bar" :data="timelineChart" :options="timelineOptions" :height="240" :label="`Jobs finishing per ${timeline.option.unit} over the next ${timeline.option.label}, by kind`" />
                 <div v-else class="caption text--secondary">None of the jobs shown finishes in the next {{ timeline.option.label }}.</div>
@@ -185,6 +185,7 @@
 import { mapGetters, mapState } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -402,7 +403,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,

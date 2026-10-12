@@ -14,3 +14,40 @@
     background-color: var(--ae-card);
   }
 }
+
+// Keyboard focus: a 2px ring in the appearance's focus colour on the controls Vuetify leaves with a faint grey overlay, so the focused control is told from its neighbours by an edge and not by a wash. scripts/check-contrast.js measures the focus colour at 3:1 or more on every surface of every preset.
+.v-application {
+  a:focus-visible,
+  .v-btn:focus-visible,
+  .v-chip--link:focus-visible,
+  .v-tab:focus-visible,
+  .v-list-item--link:focus-visible,
+  .v-slide-group__prev:focus-visible,
+  .v-slide-group__next:focus-visible,
+  .v-pagination__item:focus-visible,
+  .v-pagination__navigation:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
+  }
+
+  .v-list-item--link:focus-visible,
+  .v-tab:focus-visible {
+    outline-offset: -2px;
+  }
+}
+
+// Text on a filled chip: Vuetify draws it white (a `dark` chip, or a chip in one of its named colours). The preset's `inks.onFill` replaces it, so the text is 4.5:1 or more on every colour the chip is filled with (scripts/check-contrast.js). A hex fill is inline style, a named one a class; the icon and the close button follow the text.
+.v-application {
+  .v-chip:not(.v-chip--outlined).primary,
+  .v-chip:not(.v-chip--outlined).success,
+  .v-chip:not(.v-chip--outlined).error,
+  .v-chip:not(.v-chip--outlined).warning,
+  .v-chip:not(.v-chip--outlined).info,
+  .v-chip:not(.v-chip--outlined)[style*='background-color'] {
+    color: var(--ae-on-fill);
+
+    .v-icon {
+      color: inherit;
+    }
+  }
+}

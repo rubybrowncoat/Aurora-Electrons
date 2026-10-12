@@ -8,7 +8,7 @@
 import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip } from 'chart.js'
 
 import { activeAppearance } from '../../utilities/appearance'
-import { chartTheme } from './theme'
+import { barPattern, chartTheme, seriesIdentity } from './theme'
 
 Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip)
 
@@ -98,6 +98,68 @@ const guides = {
   },
 }
 
+const MARKERS_PER_LINE = 7
+const MARKER_BLEED = 12
+const markerPaths = new Map()
+
+// The markers of the lines and scatter series that carry a categorical slot (`aeSeries`, set by `encoded`): the slot's shape in its colour with a halo in the surface colour, at every point of a series that asked for points and at about seven of any other, staggered by slot so that the markers of two lines don't sit on one another, and at the point under the pointer. A series with markers on every point gives Chart.js its marker's radius for it to hit-test with, so what the pointer can pick is what is drawn; Chart.js's own point is transparent, and the active point's radius (`pointHoverRadius`) sizes the marker under the pointer.
+const series = {
+  id: 'series',
+  afterDatasetsDraw (chart, _args, pluginOptions) {
+    const { ctx, chartArea } = chart
+
+    chart.data.datasets.forEach((dataset, index) => {
+      const info = dataset.aeSeries
+
+      if (!info || !chart.isDatasetVisible(index)) {
+        return
+      }
+
+      const { identity, radius, every } = info
+      const { data } = chart.getDatasetMeta(index)
+      const stride = every ? 1 : Math.max(1, Math.ceil(data.length / MARKERS_PER_LINE))
+
+      if (!markerPaths.has(identity.markerPath)) {
+        markerPaths.set(identity.markerPath, new Path2D(identity.markerPath))
+      }
+
+      const path = markerPaths.get(identity.markerPath)
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left - MARKER_BLEED, chartArea.top - MARKER_BLEED, chartArea.width + 2 * MARKER_BLEED, chartArea.height + 2 * MARKER_BLEED)
+      ctx.clip()
+      ctx.fillStyle = identity.color
+      ctx.strokeStyle = pluginOptions.surface
+
+      data.forEach((point, position) => {
+        if (!(point.active || position % stride === identity.slot % stride) || point.skip || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+          return
+        }
+
+        const scale = Math.max(radius, point.active ? point.options.radius || 0 : 0) / 6
+
+        ctx.save()
+        ctx.translate(point.x, point.y)
+        ctx.scale(scale, scale)
+        ctx.lineWidth = 3 / scale
+        ctx.stroke(path)
+        ctx.fill(path)
+        ctx.restore()
+      })
+
+      ctx.restore()
+    })
+  },
+}
+
+// The colour key beside a value in the tooltip: the slot's colour for a series with markers, whose own Chart.js point is transparent.
+const labelColor = (context) => {
+  const info = context.dataset.aeSeries
+
+  return info ? { borderColor: info.identity.color, backgroundColor: info.identity.color, borderWidth: 0, borderRadius: 0 } : Tooltip.defaults.callbacks.labelColor(context)
+}
+
 export default {
   name: 'ChartCanvas',
   props: {
@@ -106,6 +168,7 @@ export default {
     options: { type: Object, default: () => ({}) },
     height: { type: Number, default: 280 },
     label: { type: String, default: '' },
+    encode: { type: Boolean, default: true },
   },
   computed: {
     appearance () {
@@ -131,7 +194,7 @@ export default {
       type: this.type,
       data: this.plainData(),
       options: this.resolvedOptions(),
-      plugins: [guides],
+      plugins: [guides, series],
     })
   },
   beforeDestroy () {
@@ -141,14 +204,31 @@ export default {
     }
   },
   methods: {
+    // A series drawn in one of the nine categorical colours also carries what tells its slot apart without the colour (SERIES_ENCODINGS in utilities/appearance.js): a line gets its slot's dash (unless it brings its own) and markers drawn by the series plugin, a bar its slot's texture over its colour. A dataset whose colour is none of the nine, or with `encode: false`, is left as it is. A series with `pointRadius` above 0 keeps a marker on each point, any other line one on about seven. Chart.js's own point is made transparent, so its shape (`pointStyle`) and colours show neither at rest nor under the pointer; a series with a marker on every point keeps its radius as the point's, which is also the area the pointer picks it by.
+    encoded (dataset) {
+      const identity = this.encode && dataset.encode !== false && seriesIdentity(this.appearance, (dataset.type || this.type) === 'line' ? dataset.borderColor || dataset.backgroundColor : dataset.backgroundColor || dataset.borderColor)
+
+      if (!identity) {
+        return dataset
+      }
+
+      if ((dataset.type || this.type) === 'line') {
+        const every = dataset.showLine === false || dataset.pointRadius > 0
+        const radius = every ? Math.max(dataset.pointRadius || 0, 4) : 4.5
+
+        return { ...dataset, borderDash: dataset.borderDash && dataset.borderDash.length ? dataset.borderDash : identity.dash, pointRadius: every ? radius : 0, pointBackgroundColor: 'transparent', pointBorderColor: 'transparent', pointBorderWidth: 0, pointHoverBackgroundColor: 'transparent', pointHoverBorderColor: 'transparent', pointHoverBorderWidth: 0, aeSeries: { identity, every, radius } }
+      }
+
+      return typeof dataset.backgroundColor === 'string' ? { ...dataset, backgroundColor: barPattern(identity, dataset.backgroundColor, this.theme.surface) } : dataset
+    },
     plainData () {
       return {
         labels: [...(this.data.labels || [])],
-        datasets: (this.data.datasets || []).map((dataset) => ({ ...dataset, data: dataset.data.map((point) => (isPlainObject(point) ? { ...point } : point)) })),
+        datasets: (this.data.datasets || []).map((dataset) => this.encoded({ ...dataset, data: dataset.data.map((point) => (isPlainObject(point) ? { ...point } : point)) })),
       }
     },
     resolvedOptions () {
-      const { ink, inkMuted, border, tooltip, tooltipInk } = this.theme
+      const { ink, inkMuted, border, surface, tooltip, tooltipInk } = this.theme
       const line = this.type === 'line'
       const axis = {
         grid: { color: `${border}99`, drawTicks: false },
@@ -176,8 +256,10 @@ export default {
             boxWidth: 12,
             boxHeight: 2,
             usePointStyle: false,
+            callbacks: { labelColor },
           },
           guides: { color: inkMuted, textColor: inkMuted, crosshair: line, markers: [], levels: [] },
+          series: { surface },
         },
       }, this.options)
     },

@@ -48,7 +48,7 @@
           <div class="panel-head">
             <span>Rivals <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
-              <span v-for="series in rivals.data.datasets" :key="series.label" class="legend-item" :class="{ 'font-weight-bold': series.borderWidth === 3 }"><span class="swatch" :style="{ background: series.borderColor }" />{{ series.label }}</span>
+              <span v-for="series in rivals.data.datasets" :key="series.label" class="legend-item" :class="{ 'font-weight-bold': series.borderWidth === 3 }"><series-key :color="series.borderColor" :dash="series.borderDash" kind="line" />{{ series.label }}</span>
             </span>
           </div>
           <div class="panel-body">
@@ -65,7 +65,7 @@
               <div class="panel-head">
                 <span>{{ chart.title }}</span>
                 <span class="legend">
-                  <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><span class="swatch" :style="{ background: series.borderColor }" />{{ series.label }}</span>
+                  <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" kind="line" />{{ series.label }}</span>
                 </span>
               </div>
               <div class="panel-body">
@@ -104,6 +104,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -152,7 +153,7 @@ const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
 
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas, StatTiles },
+  components: { ChartCanvas, SeriesKey, StatTiles },
   mixins: [
     persistedView({
       view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
@@ -500,14 +501,6 @@ export default {
 
 <style lang="scss">
 .history-page {
-  .swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    margin-right: 6px;
-  }
-
   td {
     font-variant-numeric: tabular-nums;
   }

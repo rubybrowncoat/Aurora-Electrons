@@ -383,6 +383,16 @@ const FLAG_PATH = 'M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'
 const CRANE_OFFSET = [1, 0]
 const FLAG_OFFSET = [-0.5, -0.5]
 
+// How the race regards an alien contact, as a shape inside the contact's disc besides its colour: a cross for hostile, a question mark for a race not yet identified, a bar for neutral, a tick for friendly, a star for allied, a dot for civilian. They are drawn on the map and in its legend, so the relationships tell apart without colour.
+const CONTACT_PATHS = {
+  hostile: 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z',
+  unknown: 'M10,19H13V22H10V19M12,2C17.35,2.22 19.68,7.62 16.5,11.67C15.67,12.67 14.33,13.33 13.67,14.17C13,15 13,16 13,17H10C10,15.33 10,13.92 10.67,12.92C11.33,11.92 12.67,11.33 13.5,10.67C15.92,8.43 15.32,5.26 12,5A3,3 0 0,0 9,8H6A6,6 0 0,1 12,2Z',
+  neutral: 'M19,13H5V11H19V13Z',
+  friendly: 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z',
+  allied: 'M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.63L12,2L9.19,8.63L2,9.24L7.45,13.97L5.82,21L12,17.27Z',
+  civilian: 'M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z',
+}
+
 // What Show adds to the map: glyphs round a system's marker, or lines under its name. `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for the lines under the name; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
 const MARKS = [
   { value: 'habitable', text: 'Habitable worlds', short: 'habitable worlds', place: 'glyph', path: EARTH_PATH, color: 'colony' },
@@ -1083,7 +1093,7 @@ export default {
         waypoints: { path: MAP_MARKER_PATH, color: colors.yours, label: 'Waypoints' },
         // The most threatening contacts there decide the glyph; a race not yet identified is drawn hollow.
         ...Object.fromEntries(CONTACT_ORDER.map((status) => [`contacts-${status}`, {
-          path: RADAR_PATH,
+          path: CONTACT_PATHS[status],
           color: colors.contacts[status],
           hollow: status === 'unknown',
           label: status === 'unknown' ? 'Alien contacts now, of a race not yet identified' : `${status.charAt(0).toUpperCase()}${status.slice(1)} alien contacts now`,

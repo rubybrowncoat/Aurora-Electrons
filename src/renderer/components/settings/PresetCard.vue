@@ -48,13 +48,14 @@
 
 <script>
 import { appearanceStyle } from '../../utilities/appearance'
+import { patternImage, seriesIdentity } from '../charts/theme'
 import { SECTIONS } from '../../utilities/navigation'
 import { sectionStyle } from '../navigation/section-style'
 
 // Static example data: nothing here comes from a save, so a card shows the same before any race is picked.
 const NAV = [{ id: 'colonies', active: true }, { id: 'economy', active: false }]
 const ROWS = [{ name: 'Example I', population: '1 240.5', output: '86.2' }, { name: 'Example II', population: '312.0', output: '14.9', hover: true }]
-const LEVELS = [{ key: 'action', label: 'Action', icon: 'mdi-alert-octagon-outline' }, { key: 'attention', label: 'Attention', icon: 'mdi-alert-outline' }, { key: 'info', label: 'Info', icon: 'mdi-information-outline' }]
+const LEVELS = [{ key: 'action', label: 'Action', icon: 'mdi-alert-circle' }, { key: 'attention', label: 'Attention', icon: 'mdi-alert' }, { key: 'info', label: 'Info', icon: 'mdi-information-outline' }]
 const BAR_HEIGHTS = [46, 72, 34, 88, 58, 40, 76, 30, 64]
 
 // One preset as a button: its name and mode, and a sample drawn with the preset's own resolved colours, not the live app's. `appearance` is a resolved appearance (`resolveAppearance`); `active` says it is the one in force (the previewed one), `applied` that it is the one kept.
@@ -95,8 +96,15 @@ export default {
       return LEVELS.map(({ key, label, icon }) => ({ label, icon, color: this.appearance.severity[key] }))
     },
 
+    // The nine categorical slots as bars, each with the texture that tells its slot apart without the colour.
     bars() {
-      return this.appearance.charts.categorical.map((background, index) => ({ background, height: `${BAR_HEIGHTS[index]}%` }))
+      const { categorical } = this.appearance.charts
+
+      return categorical.map((background, index) => {
+        const texture = patternImage(seriesIdentity(this.appearance, background), this.appearance.surfaces.card)
+
+        return { background, height: `${BAR_HEIGHTS[index]}%`, ...(texture ? { backgroundImage: texture, backgroundSize: '8px 8px' } : {}) }
+      })
     },
   },
 }

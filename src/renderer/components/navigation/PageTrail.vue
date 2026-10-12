@@ -128,6 +128,11 @@ export default {
   &:hover {
     border-color: var(--sc);
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
+  }
 }
 
 .trail__dot {

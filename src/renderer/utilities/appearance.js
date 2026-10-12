@@ -5,7 +5,7 @@ import Vue from 'vue'
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
 // - `surfaces`: `background` (the page and app bar), `chrome` (rail, footer), `card` (cards, tables, chart canvases), `border` (dividers and outlines), `track` and `trackSoft` (the empty part of a meter, the fill of a chip) and `rule` (a hairline under a table head).
-// - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks) and `onTooltip` (text on the chart tooltip).
+// - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks), `onTooltip` (text on the chart tooltip) and `onFill` (text on a chip filled with a severity, status, planner or focus colour: white where the fills are dark enough for it, the page's dark ink where they are light, because a tone that is also drawn as text on the dark surfaces cannot hold white).
 // - `focus`: `primary` (focus, selection, links, the Galaxy Map's selection), `hover` (the wash under the pointer) and Vuetify's other two named colours, `secondary` and `accent`.
 // - `rows`: table rows that mark something: `selected` (the picked row), `differs` (a compared row that differs), `differsMark` and `differsDot` (the stripe and the dot that go with it), `stripe` and `stripeSoft` (the two bands of the focused row's hatching).
 // - `severity`: Warnings' three levels, `action` (needs action), `attention` and `info`, plus `success`; Vuetify's `error`, `warning`, `info` and `success`.
@@ -18,24 +18,24 @@ import Vue from 'vue'
 //
 // Physical colours (stars and the star orbit lines drawn in their colour, planet terrain) depict the world, not a meaning, and stay out of presets.
 //
-// The categorical palette was validated with the dataviz checks against the app's surfaces (#ffffff light, #1e1e1e dark): adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3. In the light preset three hues sit under 3:1 on white, so every chart that uses them also offers a table view. The ninth hue (cyan, for the Design section) was added after that validation and was checked only for normal-vision ΔE (≥ 40 against the other eight in both presets). A preset that changes the categorical list or the surfaces has to be checked again.
+// The categorical palette is measured by scripts/check-contrast.js against the surfaces of every preset (page, card, chrome): every slot is 3:1 or more as a colour, in the light preset too (its slots 1, 2, 3, 4 and 8, the three weak hues and the ninth, were darkened to get there, which is why the preset's version is 2), a marker or pattern never standing in for it, and under protanopia, deuteranopia and tritanopia (Machado et al., severity 1.0) neighbouring slots differ by a CIEDE2000 of 9.6 or more. Two slots that are not neighbours can still come close under a colour-vision deficiency (as low as 1.9), which is what SERIES_ENCODINGS is for. A preset that changes the categorical list or the surfaces has to pass the script again; severity, status, planner and contact colours are measured by it too (text 4.5:1, graphics 3:1), and so is `inks.onFill` on every colour a chip is filled with (4.5:1). The planner tones are measured as text and as fills, which is why version 3 moved them (lighter in Dark, darker in Light): one tone has to read as text on the surface and carry the fill's text.
 
 const LIGHT = {
   id: 'light',
   name: 'Light',
-  version: 1,
+  version: 3,
   mode: 'light',
   surfaces: { background: '#ffffff', chrome: '#f6f7f9', card: '#ffffff', border: '#e0e3e8', track: 'rgba(0, 0, 0, .08)', trackSoft: 'rgba(0, 0, 0, .06)', rule: 'rgba(0, 0, 0, .12)' },
-  inks: { body: '#212121', muted: '#6a6a6a', onTooltip: '#ffffff' },
+  inks: { body: '#212121', muted: '#6a6a6a', onTooltip: '#ffffff', onFill: '#ffffff' },
   focus: { primary: '#1867c0', hover: 'rgba(24, 103, 192, .07)', secondary: '#b0bec5', accent: '#8c9eff' },
   rows: { selected: 'rgba(33, 150, 243, .08)', differs: 'rgba(33, 150, 243, .1)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .12)', stripeSoft: 'rgba(33, 150, 243, .04)' },
-  severity: { action: '#b71c1c', attention: '#FB8C00', info: '#2196F3', success: '#4CAF50' },
-  status: { inactive: '#9e9e9e' },
-  plan: { mining: '#ff8f00', terraformFree: '#9c27b0', terraformPartial: '#3f51b5', terraformCheaper: '#607d8b', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#d84315', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#00897b', unsurveyed: '#ff9800', selected: '#f44336' },
+  severity: { action: '#b71c1c', attention: '#a75d00', info: '#0b72c5', success: '#367d39' },
+  status: { inactive: '#707070' },
+  plan: { mining: '#b85c00', terraformFree: '#9c27b0', terraformPartial: '#3f51b5', terraformCheaper: '#5d7986', cheap: '#008276', moderate: '#037ab5', costly: '#8a5300', severe: '#d34215', insufficient: '#dc3500', rich: '#b85c00', cmc: '#00695c', unsurveyed: '#a86500', selected: '#f44336' },
   charts: {
     axis: '#cccccc',
     tooltip: 'rgba(97, 97, 97, 0.95)',
-    categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948', '#00a0b0'],
+    categorical: ['#2a78d6', '#e95c24', '#189d6e', '#ba7e00', '#e25a8e', '#008300', '#4a3aa7', '#e34948', '#0099a8'],
   },
   sections: { neutral: '#546e7a' },
   space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
@@ -45,15 +45,15 @@ const LIGHT = {
 const DARK = {
   id: 'dark',
   name: 'Dark',
-  version: 1,
+  version: 3,
   mode: 'dark',
   surfaces: { background: '#121212', chrome: '#1e1e1e', card: '#1e1e1e', border: '#333333', track: 'rgba(255, 255, 255, .12)', trackSoft: 'rgba(255, 255, 255, .1)', rule: 'rgba(255, 255, 255, .12)' },
-  inks: { body: '#f5f5f5', muted: '#b0b0b0', onTooltip: '#ffffff' },
+  inks: { body: '#f5f5f5', muted: '#b0b0b0', onTooltip: '#ffffff', onFill: '#121212' },
   focus: { primary: '#2196f3', hover: 'rgba(33, 150, 243, .10)', secondary: '#424242', accent: '#FF4081' },
   rows: { selected: 'rgba(33, 150, 243, .16)', differs: 'rgba(33, 150, 243, .2)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .22)', stripeSoft: 'rgba(33, 150, 243, .1)' },
   severity: { action: '#FF5252', attention: '#FB8C00', info: '#2196F3', success: '#4CAF50' },
   status: { inactive: '#9e9e9e' },
-  plan: { mining: '#ff8f00', terraformFree: '#9c27b0', terraformPartial: '#3f51b5', terraformCheaper: '#607d8b', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#d84315', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#00897b', unsurveyed: '#ff9800', selected: '#f44336' },
+  plan: { mining: '#ff8f00', terraformFree: '#c759da', terraformPartial: '#7482cf', terraformCheaper: '#6d8b9a', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#ea5527', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#f44336' },
   charts: {
     axis: '#333333',
     tooltip: 'rgba(97, 97, 97, 0.95)',
@@ -77,6 +77,19 @@ export const APPEARANCE_KEY = 'appearance'
 
 // Categorical slots of the colours that carry a meaning, by role; `muted` is the preset's muted ink.
 export const CONTACT_SLOTS = { hostile: 7, unknown: 7, neutral: 3, friendly: 2, allied: 0, civilian: 'muted' }
+
+// What tells a categorical slot apart without its colour, one entry per slot: the `marker` a line or scatter series carries (the shapes are in components/charts/theme.js), the `dash` of its line (line widths; empty is solid) and the `pattern` a bar or stack segment is hatched with. Each of the three is unique to a slot, so a series is identifiable by any one of them, and a legend shows all that apply. They belong to the slot, not to the preset, because a preset only recolours the slots. scripts/check-contrast.js checks that the nine are unique.
+export const SERIES_ENCODINGS = [
+  { marker: 'circle', dash: [], pattern: 'solid' },
+  { marker: 'square', dash: [9, 4], pattern: 'diagonal' },
+  { marker: 'triangle', dash: [2, 3], pattern: 'dots' },
+  { marker: 'diamond', dash: [9, 3, 2, 3], pattern: 'horizontal' },
+  { marker: 'cross', dash: [4, 3], pattern: 'crosshatch' },
+  { marker: 'ex', dash: [14, 5], pattern: 'vertical' },
+  { marker: 'down', dash: [9, 3, 2, 3, 2, 3], pattern: 'backdiagonal' },
+  { marker: 'star', dash: [1, 2.5], pattern: 'squares' },
+  { marker: 'hexagon', dash: [6, 6], pattern: 'zigzag' },
+]
 
 const ROLE_SLOTS = {
   contacts: CONTACT_SLOTS,
@@ -198,6 +211,7 @@ export const appearanceStyle = ({ surfaces, inks, focus, rows, space, status }) 
   '--ae-rule': surfaces.rule,
   '--ae-ink': inks.body,
   '--ae-muted': inks.muted,
+  '--ae-on-fill': inks.onFill,
   '--ae-primary': focus.primary,
   '--ae-hover': focus.hover,
   '--ae-row-selected': rows.selected,
