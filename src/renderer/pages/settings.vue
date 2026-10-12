@@ -73,6 +73,112 @@
         </v-col>
       </v-row>
 
+      <v-row>
+        <v-col cols="12" class="d-flex flex-column">
+          <v-card class="panel flex-grow-1" data-summary="Moves the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
+            <div class="panel-head">
+              <span>Export and import preferences</span>
+              <v-chip v-if="backup" small>Undo kept</v-chip>
+            </div>
+            <div class="panel-body">
+              <div class="setting setting--block">
+                <div class="setting__text">
+                  <div class="body-2">Export</div>
+                  <div class="caption text--secondary">{{ exportNote }}</div>
+                </div>
+                <div class="transfer__choices" role="group" aria-label="Categories to export">
+                  <v-checkbox v-for="category in categories" :key="category.id" v-model="exportCategories" :value="category.id" class="transfer__choice" dense hide-details :data-export-category="category.id">
+                    <template #label>
+                      <span>{{ category.title }}<span class="caption text--secondary d-block">{{ category.note }}</span></span>
+                    </template>
+                  </v-checkbox>
+                </div>
+                <div class="presets__actions">
+                  <v-btn small depressed color="primary" :disabled="!exportCategories.length || busy" data-transfer-action="export" @click="exportFile">Export file</v-btn>
+                </div>
+              </div>
+
+              <div class="setting setting--block">
+                <div class="setting__text">
+                  <div class="body-2">Import</div>
+                  <div class="caption text--secondary">{{ importNote }}</div>
+                </div>
+                <div class="presets__actions">
+                  <v-btn small outlined :loading="busy" data-transfer-action="choose" @click="chooseFile">Choose file</v-btn>
+                  <input ref="file" type="file" accept=".json,application/json" hidden aria-label="Preferences file to import" data-transfer-file @change="readFile">
+                </div>
+
+                <v-alert v-if="parsed && parsed.errors" type="error" text dense class="mb-0" data-transfer-errors>
+                  <div class="body-2">{{ parsed.fileName }} is rejected, and nothing is changed.</div>
+                  <ul class="transfer__list">
+                    <li v-for="error in shownErrors" :key="error.field"><span class="transfer__field">{{ error.field }}</span> {{ error.message }}</li>
+                  </ul>
+                  <div v-if="hiddenErrors" class="caption">and {{ count(hiddenErrors) }} more</div>
+                </v-alert>
+
+                <template v-else-if="plan">
+                  <div>
+                    <div class="body-2">{{ parsed.fileName }}</div>
+                    <div class="caption text--secondary" data-transfer-mapping>From {{ sourceText }} to {{ targetText }}.</div>
+                  </div>
+                  <v-alert :type="plan.identity.confirm ? 'warning' : 'info'" text dense class="mb-0" data-transfer-identity>{{ plan.identity.text }}</v-alert>
+                  <div class="transfer__choices" role="group" aria-label="Categories to import">
+                    <v-checkbox v-for="category in bundleCategories" :key="category.id" v-model="importCategories" :value="category.id" class="transfer__choice" dense hide-details :data-import-category="category.id">
+                      <template #label>
+                        <span>{{ category.title }}<span class="caption text--secondary d-block">{{ count(category.count) }} {{ valuesOf(category.count) }} in the file</span></span>
+                      </template>
+                    </v-checkbox>
+                  </div>
+                  <v-alert v-for="problem in plan.problems" :key="problem" type="error" text dense class="mb-0" data-transfer-problem>{{ problem }}</v-alert>
+                  <div v-if="plan.changes.length" class="transfer__table" data-transfer-changes>
+                    <v-simple-table dense>
+                      <thead>
+                        <tr>
+                          <th>Setting</th>
+                          <th>Applies to</th>
+                          <th>Now</th>
+                          <th>After the import</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="change in plan.changes" :key="change.fullKey">
+                          <td><span class="transfer__field">{{ change.key }}</span></td>
+                          <td>{{ change.scope === 'race' ? 'This empire' : 'App-wide' }}</td>
+                          <td><span class="transfer__field">{{ shorten(change.old) }}</span></td>
+                          <td><span class="transfer__field">{{ shorten(change.value) }}</span></td>
+                        </tr>
+                      </tbody>
+                    </v-simple-table>
+                  </div>
+                  <div v-else-if="!plan.problems.length" class="caption text--secondary" data-transfer-nothing>{{ nothingNote }}</div>
+                  <div class="caption text--secondary">{{ unchangedNote }}</div>
+                  <div>
+                    <div class="caption text--secondary">Not imported:</div>
+                    <ul class="transfer__list caption text--secondary" data-transfer-excluded>
+                      <li v-for="item in plan.excluded" :key="item.id"><strong>{{ item.title }}.</strong> {{ item.reason }}</li>
+                    </ul>
+                  </div>
+                  <v-checkbox v-if="plan.needsConfirmation" v-model="confirmed" label="Import it into this empire anyway" dense hide-details class="mt-0" data-transfer-confirm />
+                  <div class="presets__actions">
+                    <v-btn small depressed color="primary" :disabled="!canImport" data-transfer-action="import" @click="runImport">Import {{ count(plan.changes.length) }} {{ valuesOf(plan.changes.length) }}</v-btn>
+                    <v-btn small outlined data-transfer-action="cancel-import" @click="cancelImport">Cancel</v-btn>
+                  </div>
+                </template>
+              </div>
+
+              <div v-if="backup" class="setting" data-transfer-undo>
+                <div class="setting__text">
+                  <div class="body-2">Undo the last import</div>
+                  <div class="caption text--secondary">{{ backupNote }}</div>
+                </div>
+                <v-btn outlined data-transfer-action="undo" @click="undo">Undo</v-btn>
+              </div>
+            </div>
+            <div class="panel-foot caption text--secondary">A file holds only the categories chosen, as the app stores them, and nothing of the save. Values about one empire travel without its game and empire ids and are written to the empire picked here; values the file does not hold stay as they are. The whole file is checked before anything is written: an unknown key, or a value the page would not accept, rejects it and names the field. One undo is kept, in a file of its own beside the settings, and the next import replaces it. Empire History, Warnings mutes and exclusions, what was new at the last visit, local scenarios and save paths are never exported or imported.</div>
+          </v-card>
+        </v-col>
+      </v-row>
+
       <v-dialog :value="Boolean(pending)" max-width="460" @input="(open) => !open && (pending = null)">
         <v-card v-if="pending">
           <v-card-title class="subtitle-1">{{ pending.title }}</v-card-title>
@@ -90,11 +196,14 @@
 
 <script>
 import { mapActions, mapGetters, mapState } from 'vuex'
+import Config from 'electron-store'
 
 import PresetCard from '../components/settings/PresetCard.vue'
 import countFormat from '../mixins/count-format'
-import { APPEARANCE_KEY, DEFAULT_PRESET_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, cancelPreview, isPreviewing, listAppearances, previewPreset, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
+import { APPEARANCE_KEY, DEFAULT_PRESET_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, isPreviewing, listAppearances, previewPreset, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
+import { declaredViews } from '../mixins/persisted-view'
+import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportName, parseBundle, planImport, sameValue, shorten, undoImport, validBackup } from '../utilities/preferences'
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
@@ -134,6 +243,34 @@ const withoutViews = (store, only) => {
 
 const values = (number) => (number === 1 ? 'value' : 'values')
 
+// Every page and component module declares its remembered fields as it is loaded, which is on its first visit, so the allowlist of what can be exported and imported is complete only once all of them are. They load together the first time a file is exported or chosen, and the declarations are kept.
+// PresetCard is left out: this page imports it already, and declares nothing.
+const declaringModules = import.meta.glob(['../pages/*.vue', '../components/**/*.vue', '!../components/settings/PresetCard.vue'])
+let declarations = null
+
+const loadDeclarations = () => {
+  if (!declarations) {
+    declarations = Promise.all(Object.values(declaringModules).map((load) => load())).then(() => declaredViews())
+    declarations.catch(() => { declarations = null })
+  }
+
+  return declarations
+}
+
+const SHOWN_ERRORS = 12
+
+const download = (text, name) => {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+  const link = document.createElement('a')
+
+  link.href = url
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export default {
   name: 'SettingsPage',
   components: { PresetCard },
@@ -145,6 +282,13 @@ export default {
       spyNPR: false,
       // The reset waiting for its confirmation: { scope, title, text }.
       pending: null,
+      // The preferences panel: the categories to export; the file chosen to import (`errors` when it was rejected, else `bundle` and `entries`) with the categories to import from it and the confirmation of a source that can't be matched to this empire; whether a file is being read; and the undo kept from the last import.
+      exportCategories: CATEGORIES.map(({ id }) => id),
+      importCategories: [],
+      parsed: null,
+      confirmed: false,
+      busy: false,
+      backup: null,
     }
   },
   computed: {
@@ -245,6 +389,77 @@ export default {
 
       return `${this.count(this.appCount)} app-wide ${values(this.appCount)}, and ${this.count(this.totalCount - this.appCount)} over ${this.count(empires)} ${empires === 1 ? 'empire' : 'empires'}.`
     },
+
+    categories() {
+      return CATEGORIES
+    },
+
+    // The empire picked, as the export and the import's target know it.
+    target() {
+      const game = this.games.find((entry) => entry.GameID === this.GameID)
+
+      return { gameId: this.GameID, raceId: this.RaceID, gameName: game ? game.GameName : null, raceName: this.empireName || null }
+    },
+
+    exportNote() {
+      return this.RaceID ? `Saves the selected categories, as stored for ${this.empireName || 'this empire'}, to a JSON file.` : 'No empire is picked, so only the app-wide values are saved to the JSON file.'
+    },
+
+    importNote() {
+      return this.RaceID ? `Reads a file and shows every change before anything is written. Empire values go to ${this.empireName || 'this empire'}.` : 'Reads a file and shows every change before anything is written. Pick an empire to import its empire values.'
+    },
+
+    shownErrors() {
+      return this.parsed && this.parsed.errors ? this.parsed.errors.slice(0, SHOWN_ERRORS) : []
+    },
+
+    hiddenErrors() {
+      return this.parsed && this.parsed.errors ? Math.max(0, this.parsed.errors.length - SHOWN_ERRORS) : 0
+    },
+
+    // The categories the chosen file holds, each with its number of values.
+    bundleCategories() {
+      const entries = this.parsed && this.parsed.entries ? this.parsed.entries : []
+
+      return CATEGORIES.map((category) => ({ ...category, count: entries.filter((entry) => entry.category === category.id).length })).filter(({ count }) => count)
+    },
+
+    // The preview of the chosen file over the settings as they stand: what an import would write, and nothing else.
+    plan() {
+      if (!this.parsed || !this.parsed.entries) {
+        return null
+      }
+
+      return planImport({ store: this.stored, entries: this.parsed.entries, source: this.parsed.bundle.source, target: this.target, categories: this.importCategories })
+    },
+
+    sourceText() {
+      const source = this.parsed.bundle.source
+
+      return source && source.gameId !== null && source.gameId !== undefined && source.raceId !== null && source.raceId !== undefined ? `${source.raceName || 'an empire'} (empire ${source.raceId}) of ${source.gameName || 'a campaign'} (game ${source.gameId})` : 'an unknown empire'
+    },
+
+    targetText() {
+      return this.RaceID ? `${this.empireName || 'this empire'} (empire ${this.RaceID}) of ${this.target.gameName || 'a campaign'} (game ${this.GameID})` : 'no empire picked'
+    },
+
+    nothingNote() {
+      return this.importCategories.length ? 'Everything selected is already as the file has it.' : 'Select a category to preview its changes.'
+    },
+
+    unchangedNote() {
+      return this.plan.unchanged ? `${this.count(this.plan.unchanged)} selected ${values(this.plan.unchanged)} already as the file has ${this.plan.unchanged === 1 ? 'it' : 'them'}, and stay untouched.` : 'Every setting not listed stays untouched.'
+    },
+
+    canImport() {
+      return Boolean(this.plan && this.plan.changes.length && !this.plan.problems.length && (!this.plan.needsConfirmation || this.confirmed))
+    },
+
+    backupNote() {
+      const { entries, at, target } = this.backup
+
+      return `${this.count(entries.length)} ${values(entries.length)} written to ${target.raceName || 'an empire'} on ${new Date(at).toLocaleString()}. Undo puts back what they replaced, and removes the ones that were not set.`
+    },
   },
   watch: {
     config: {
@@ -254,6 +469,14 @@ export default {
         this.stored = config.store
       },
     },
+  },
+  created() {
+    // Beside config.json, not in a `preferences` folder: on a disk that ignores case that name is taken by the Chromium `Preferences` file in the same user-data folder.
+    this.backupStore = new Config({ name: 'preference-import-undo' })
+
+    const kept = this.backupStore.get('backup')
+
+    this.backup = validBackup(kept) ? kept : null
   },
   beforeDestroy() {
     cancelPreview()
@@ -312,6 +535,155 @@ export default {
       this.reinstantiateConfig()
       this.activateSnackbar({ text: `${this.count(cleared)} remembered ${values(cleared)} reset`, color: 'success' })
     },
+
+    valuesOf(number) {
+      return values(number)
+    },
+
+    shorten,
+
+    // The allowlist of what can be exported and imported, from every declared field; null, with a message, when the modules couldn't be loaded.
+    async loadSchema() {
+      this.busy = true
+
+      try {
+        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: listAppearances().map(({ id }) => id) }, separators: SEPARATORS })
+      } catch (error) {
+        console.error("Couldn't load the pages' declared preferences", error)
+        this.activateSnackbar({ text: "Couldn't load the list of preferences that can be exported", color: 'error' })
+
+        return null
+      } finally {
+        this.busy = false
+      }
+    },
+
+    async exportFile() {
+      const schema = await this.loadSchema()
+
+      if (!schema) {
+        return
+      }
+
+      const { bundle, keys, skipped } = buildExport(schema, this.config.store, this.target, this.exportCategories)
+
+      if (!keys.length) {
+        this.activateSnackbar({ text: 'Nothing is stored in the selected categories, so there is nothing to export', color: 'warning' })
+
+        return
+      }
+
+      download(JSON.stringify(bundle, null, 2), exportName(this.target))
+      this.activateSnackbar({ text: `${this.count(keys.length)} ${values(keys.length)} exported${skipped.length ? `; ${this.count(skipped.length)} left out because their pages would not accept them` : ''}`, color: skipped.length ? 'warning' : 'success' })
+    },
+
+    chooseFile() {
+      this.$refs.file.click()
+    },
+
+    // Reads and checks the file, changing nothing.
+    async readFile(event) {
+      const [file] = event.target.files
+
+      event.target.value = ''
+
+      if (!file) {
+        return
+      }
+
+      this.cancelImport()
+
+      const text = file.size > MAX_BYTES ? null : await file.text()
+      const schema = await this.loadSchema()
+
+      if (!schema) {
+        return
+      }
+
+      const result = text === null ? { errors: [{ field: 'file', message: `is larger than ${MAX_BYTES / 1024} KiB` }] } : parseBundle(text, schema)
+
+      this.parsed = { fileName: file.name, ...result }
+      this.importCategories = ['views', 'mapGroups'].filter((id) => this.bundleCategories.some((category) => category.id === id))
+    },
+
+    cancelImport() {
+      this.parsed = null
+      this.importCategories = []
+      this.confirmed = false
+    },
+
+    // The settings file is the one thing that changes, in one write, and what it replaced goes to the undo file first. The preview is made again over the settings as they are now, and a difference from the one on screen stops the import.
+    runImport() {
+      const { plan } = this
+      const settings = { target: this.target, source: this.parsed.bundle.source }
+      const current = planImport({ store: this.config.store, entries: this.parsed.entries, source: settings.source, target: this.target, categories: this.importCategories })
+
+      if (!this.canImport || !sameValue(current.changes, plan.changes)) {
+        this.stored = this.config.store
+        this.activateSnackbar({ text: 'The settings changed since the preview, so nothing was imported. The preview is refreshed.', color: 'warning' })
+
+        return
+      }
+
+      const { store, backup } = commitImport(this.config.store, current, settings)
+
+      try {
+        this.backupStore.set('backup', backup)
+        this.config.store = store
+      } catch (error) {
+        console.error("Couldn't write the imported preferences", error)
+        this.backupStore.delete('backup')
+        this.activateSnackbar({ text: "Couldn't write the settings, so nothing was imported", color: 'error' })
+
+        return
+      }
+
+      this.backup = backup
+      this.afterWrite(backup.entries.map(({ key }) => key))
+      this.cancelImport()
+      this.activateSnackbar({ text: `${this.count(backup.entries.length)} ${values(backup.entries.length)} imported. Undo is kept in Settings.`, color: 'success' })
+    },
+
+    undo() {
+      let result
+
+      try {
+        result = undoImport(this.config.store, this.backup)
+        this.config.store = result.store
+      } catch (error) {
+        console.error("Couldn't undo the import", error)
+        this.activateSnackbar({ text: "Couldn't undo the import", color: 'error' })
+
+        return
+      }
+
+      const keys = this.backup.entries.map(({ key }) => key)
+
+      this.backupStore.delete('backup')
+      this.backup = null
+      this.afterWrite(keys)
+      this.activateSnackbar({ text: `${this.count(result.restored)} ${values(result.restored)} put back`, color: 'success' })
+    },
+
+    // The colour preset in force follows the settings once they changed under it, and every reader takes a new settings instance.
+    afterWrite(keys) {
+      if (keys.includes(APPEARANCE_KEY)) {
+        const id = this.config.get(APPEARANCE_KEY)
+
+        if (listAppearances().some((preset) => preset.id === id)) {
+          applyPreset(this.config, id)
+        } else if (id === undefined) {
+          const legacy = this.config.get('darkMode')
+
+          applyPreset(this.config, typeof legacy === 'boolean' ? baselinePresetId(legacy ? 'dark' : 'light') : DEFAULT_PRESET_ID)
+          this.config.delete(APPEARANCE_KEY)
+        } else {
+          cancelPreview()
+        }
+      }
+
+      this.reinstantiateConfig()
+    },
   },
 }
 </script>
@@ -359,5 +731,32 @@ export default {
   flex: none;
   margin-top: 0;
   padding-top: 0;
+}
+
+.transfer__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 32px;
+}
+
+.transfer__choice {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.transfer__list {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+.transfer__field {
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.transfer__table {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--ae-border);
 }
 </style>

@@ -37,9 +37,20 @@ export const tableView = (key, { sortBy = [], sortDesc = false, itemsPerPage, it
   }
 }
 
+// Every field declared so far, in the order declared: `{ key, scope, default, normalise, valid }` with `scope` 'app' or 'race'. A page's module declares its fields when it is loaded, which is on its first visit, so the list is complete only once every page and component module has been loaded; utilities/preferences.js takes it as the allowlist of what can be exported and imported.
+const declared = []
+
+export const declaredViews = () => declared.slice()
+
 export default function persistedView (fields) {
   const names = Object.keys(fields)
   const raceNames = names.filter((name) => fields[name].scope === 'race')
+
+  names.forEach((name) => {
+    const { key, scope, normalise, valid } = fields[name]
+
+    declared.push({ key, scope: scope === 'race' ? 'race' : 'app', default: fields[name].default, normalise, valid })
+  })
 
   const racePrefix = (getters) => (getters.GameID && getters.RaceID ? `game.${getters.GameID}.race.${getters.RaceID}` : null)
 
