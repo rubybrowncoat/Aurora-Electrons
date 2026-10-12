@@ -1,4 +1,4 @@
-// Chart colours, from the Aurora Electrons design system (ink, surface, border, primary) plus a categorical palette validated with the dataviz checks against the app's surfaces (#ffffff light, #1e1e1e dark): adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3. In light mode three hues sit under 3:1 on white, so every chart that uses them also offers a table view.
+// Chart colours, from the Aurora Electrons design system (ink, surface, border, primary) plus a categorical palette validated with the dataviz checks against the app's surfaces (#ffffff light, #1e1e1e dark): adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.3. In light mode three hues sit under 3:1 on white, so every chart that uses them also offers a table view. The ninth hue (cyan, for the Design section) was added after that validation and was checked only for normal-vision ΔE (≥ 40 against the other eight in both themes).
 
 const TOKENS = {
   light: {
@@ -8,7 +8,7 @@ const TOKENS = {
     border: '#cccccc',
     primary: '#1867c0',
     tooltip: 'rgba(97, 97, 97, 0.95)',
-    categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'],
+    categorical: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948', '#00a0b0'],
   },
   dark: {
     surface: '#1e1e1e',
@@ -17,7 +17,7 @@ const TOKENS = {
     border: '#333333',
     primary: '#2196f3',
     tooltip: 'rgba(97, 97, 97, 0.95)',
-    categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+    categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
 }
 

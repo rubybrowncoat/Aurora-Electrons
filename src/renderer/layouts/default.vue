@@ -582,14 +582,22 @@ export default {
   letter-spacing: .02em;
 }
 
-// Eight sections, Settings and About take 750 px; a window under 780 px tall tightens them so About still shows at 720.
+// Nine sections, Settings and About take 760 px; a window under 780 px tall tightens them so About still shows at 720, with about 30 px to spare.
 @media (max-height: 779px) {
+  .rail ::v-deep .v-navigation-drawer__content {
+    gap: 1px;
+    padding-block: 6px;
+  }
+
   .rail__item {
-    padding-block: 3px;
+    padding-block: 2px;
+    gap: 2px;
   }
 
   .rail__empire {
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    padding-block: 2px;
+    gap: 2px;
   }
 }
 
