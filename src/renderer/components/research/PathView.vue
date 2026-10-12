@@ -34,7 +34,7 @@
       </div>
     </v-card>
 
-    <v-card v-if="tech" class="panel" data-summary="The chain of technologies leading to the one I picked, coloured by status. Use it to see what I already hold and what is still missing." elevation="1">
+    <v-card v-if="tech" class="panel" data-summary="The chain of technologies leading to the selected one, coloured by status. Use it to see which the race already holds and which are still missing." elevation="1">
       <div class="panel-head">
         <span>Prerequisites</span>
         <span class="legend">
@@ -43,12 +43,12 @@
         </span>
       </div>
       <div ref="graph" class="graph" role="img" :aria-label="`Prerequisites of ${tech.name}`" />
-      <div class="panel-foot caption text--secondary">An arrow runs from a prerequisite to what it unlocks. The leftmost researched boxes are what I already hold; click any box to look at that technology. Scroll to zoom, drag to move.</div>
+      <div class="panel-foot caption text--secondary">An arrow runs from a prerequisite to what it unlocks. The leftmost researched boxes are those the race already holds; click any box to look at that technology. Scroll to zoom, drag to move.</div>
     </v-card>
 
     <v-row v-if="tech">
       <v-col cols="12" md="6">
-        <v-card class="panel" data-summary="The technologies I still need before this one, in an order that reaches it, with the research points each has left. Click one to open its own path." elevation="1">
+        <v-card class="panel" data-summary="The technologies the race still needs before this one, in an order that reaches it, with the research points each has left. Click one to open its own path." elevation="1">
           <div class="panel-head"><span>{{ order.length > 1 ? 'Research in this order' : 'Nothing else needed' }}</span></div>
           <div class="panel-body">
             <div v-if="entry.status === 'done'" class="empty">Already researched.</div>

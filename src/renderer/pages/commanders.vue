@@ -10,7 +10,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder: governors, specialist ships and research projects. Use it to improve my assignments." elevation="1">
+        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder: governors, specialist ships and research projects. Use it to improve the assignments." elevation="1">
           <div class="panel-head">
             <span>Better assignments</span>
             <v-btn-toggle v-model="suggestionView" mandatory dense>
@@ -109,7 +109,7 @@
           </template>
         </v-card>
 
-        <v-card class="panel" data-summary="Every commander of mine with rank, post, bonuses and health. Use it to find who is available, who is best suited and who is ageing." elevation="1">
+        <v-card class="panel" data-summary="Every commander of the race with rank, post, bonuses and health. Use it to find who is available, who is best suited and who is ageing." elevation="1">
           <div class="panel-head">
             <span>Roster</span>
             <v-btn-toggle v-model="typeId" mandatory dense>
@@ -165,7 +165,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers. Use it to look back at who served me and who is held captive." elevation="1">
+        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers. Use it to look back at who served the race and who is held captive." elevation="1">
           <div class="panel-head">
             <span>Former commanders</span>
             <v-btn-toggle :value="formerGroup" mandatory dense @change="(value) => (formerView = value)">
@@ -220,7 +220,7 @@
           </v-data-table>
           <div v-else class="panel-body caption text--secondary">No commander of this race is a prisoner, retired or dead in the save, and the race holds no prisoners.</div>
           <div class="panel-foot caption text--secondary">
-            The game deletes a commander who retires or dies when the game is saved, unless I press Retain for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as my race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
+            The game deletes a commander who retires or dies when the game is saved, unless Retain is pressed for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as the race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
           </div>
         </v-card>
       </template>
@@ -261,7 +261,7 @@ const FORMER_GROUPS = [
   { value: 'prisoner', text: 'Prisoners' },
   { value: 'retired', text: 'Retired' },
   { value: 'dead', text: 'Dead' },
-  { value: 'held', text: 'Held by me' },
+  { value: 'held', text: 'Alien prisoners' },
 ]
 const ROSTER_PAGE_SIZES = [25, 50, 100]
 const SHIP_PAGE_SIZES = [15, 30, -1]

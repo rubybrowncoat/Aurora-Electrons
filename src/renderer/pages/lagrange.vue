@@ -6,12 +6,12 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the systems I know, shaded by how many stable Lagrange points each has. Use it to see where my ships can already jump between points and where more would help." elevation="1">
+        <v-card class="panel" data-summary="A map of the known systems, shaded by how many stable Lagrange points each has. Use it to see where the ships can already jump between points and where more would help." elevation="1">
           <div class="panel-head">
             <span>Lagrange map</span>
             <span class="legend">
               <span v-for="item in mapLegend" :key="item.key" class="legend-item"><span class="dot" :style="{ background: item.color }" />{{ item.label }}</span>
-              <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />My colonies</span>
+              <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />Colonies</span>
             </span>
           </div>
           <div class="panel-body">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, and how long I would need to stabilise each. Use it to choose which to stabilise." elevation="1">
+        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, and how long stabilising each would take. Use it to choose which to stabilise." elevation="1">
           <div class="panel-head">
             <span>Planets and moons</span>
             <span class="d-flex align-center flex-wrap controls">
@@ -28,7 +28,7 @@
               <v-btn-toggle v-model="view" mandatory dense>
                 <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
               </v-btn-toggle>
-              <v-switch v-model="colonySystemsOnly" label="Systems with my colonies" dense hide-details class="mt-0" />
+              <v-switch v-model="colonySystemsOnly" label="Systems with colonies" dense hide-details class="mt-0" />
               <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
@@ -70,7 +70,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="shipRows.length" class="panel" data-summary="My ships with a jump point stabilisation module, their captains and crews, and what each is doing now. It shows which ship to send to stabilise a point." elevation="1">
+        <v-card v-if="shipRows.length" class="panel" data-summary="Ships with a jump point stabilisation module, their captains and crews, and what each is doing now. It shows which ship to send to stabilise a point." elevation="1">
           <div class="panel-head">
             <span>Stabilisation ships</span>
           </div>
@@ -125,7 +125,7 @@ import { roundToDecimal } from '../utilities/math'
 const INPUT_LABELS = {
   systems: 'the known systems',
   jumpPoints: 'the jump points',
-  colonies: 'my colonies',
+  colonies: 'the colonies',
   bodies: 'the planets and moons',
   ships: 'the stabilisation ships',
   orders: 'stabilisation orders',
@@ -316,7 +316,7 @@ export default {
         {
           label: 'Planets and moons to stabilise',
           value: this.count(candidates.length),
-          note: `${this.count(candidates.filter((body) => body.Colonies > 0).length)} in systems with my colonies`,
+          note: `${this.count(candidates.filter((body) => body.Colonies > 0).length)} in systems with colonies`,
         },
         {
           label: 'Quickest to stabilise',
@@ -339,7 +339,7 @@ export default {
         { text: 'Stable points in system', value: 'systemPoints', align: 'end' },
         { text: 'Time to stabilise', value: 'daysSort', align: 'end' },
         { text: 'Lagrange point', value: 'statusSort' },
-        { text: 'My colonies in system', value: 'Colonies', align: 'end' },
+        { text: 'Colonies in system', value: 'Colonies', align: 'end' },
       ]
     },
 

@@ -123,7 +123,7 @@
               </template>
               <span v-else>{{ qualityText }}</span>
             </div>
-            <div v-if="!systemRows.length" class="map-empty text--secondary">My race knows no systems yet.</div>
+            <div v-if="!systemRows.length" class="map-empty text--secondary">The race knows no systems yet.</div>
           </div>
           <aside v-if="panelSystem" class="map-side">
             <div class="side-head">
@@ -180,7 +180,7 @@
         <div class="panel-foot caption text--secondary">
           <span class="panel-foot__text">
             Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
-            <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until I save.</template>
+            <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until the map is saved.</template>
           </span>
           <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->
           <v-menu top left offset-y nudge-top="6" :close-on-content-click="false" content-class="tracker-menu">
@@ -245,7 +245,7 @@
 
 <script>
 import { ipcRenderer } from 'electron'
-import { mapActions, mapGetters } from 'vuex'
+import { mapActions, mapGetters, mapState } from 'vuex'
 import cytoscape from 'cytoscape'
 import cxtmenu from 'cytoscape-cxtmenu'
 import fcose from 'cytoscape-fcose'
@@ -277,8 +277,8 @@ cytoscape.use(fcose)
 const INPUT_LABELS = {
   systems: 'the known systems',
   jumpPoints: 'the jump points',
-  sectors: 'my sectors',
-  aliens: 'the alien races I know',
+  sectors: 'the sectors',
+  aliens: 'the known alien races',
   features: 'what the map can mark',
 }
 
@@ -327,7 +327,7 @@ const BORDER_OPTIONS = [
   { value: 'none', text: 'None' },
   { value: 'sectors', text: 'Sectors', empty: 'no sector has a system' },
   { value: 'control', text: 'Alien control', empty: 'no alien race holds a system' },
-  { value: 'colonies', text: 'My colonies', empty: 'no colonies' },
+  { value: 'colonies', text: 'Colonies', empty: 'no colonies' },
   { value: 'danger', text: 'Danger', empty: 'no system has a danger rating' },
   { value: 'stabilised', text: 'Stabilised networks', empty: 'no jumps are stabilised at both ends' },
   { value: 'groups', text: 'Clusters', empty: 'no clusters (select several systems to make one)' },
@@ -344,8 +344,8 @@ const LINK_LENGTHS = [
 ]
 
 const ARRANGE_MODES = [
-  { value: 'rebuild', text: 'Rebuild', hint: 'Lays the map out afresh from its links, turned to face the way mine does.' },
-  { value: 'tidy', text: 'Tidy', hint: 'Straightens the map I have, moving each system as little as it can.' },
+  { value: 'rebuild', text: 'Rebuild', hint: 'Lays the map out afresh from its links, turned to face the way the current map does.' },
+  { value: 'tidy', text: 'Tidy', hint: 'Straightens the current map, moving each system as little as it can.' },
 ]
 
 const SPACINGS = [
@@ -389,9 +389,9 @@ const MARKS = [
   { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', path: PYRAMID_PATH, color: 'construct' },
   { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', path: HURRICANE_PATH, color: 'rift' },
   { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'glyph', path: SKULL_CROSSBONES_PATH, color: 'ring' },
-  { value: 'ships', text: 'My ships', short: 'ships', place: 'glyph', path: ROCKET_PATH, color: 'yours' },
-  { value: 'shipyards', text: 'My shipyards', short: 'shipyards', place: 'glyph', path: CRANE_PATH, color: 'yours', offset: CRANE_OFFSET },
-  { value: 'waypoints', text: 'My waypoints', short: 'waypoints', place: 'glyph', path: MAP_MARKER_PATH, color: 'yours' },
+  { value: 'ships', text: 'Ships', short: 'ships', place: 'glyph', path: ROCKET_PATH, color: 'yours' },
+  { value: 'shipyards', text: 'Shipyards', short: 'shipyards', place: 'glyph', path: CRANE_PATH, color: 'yours', offset: CRANE_OFFSET },
+  { value: 'waypoints', text: 'Waypoints', short: 'waypoints', place: 'glyph', path: MAP_MARKER_PATH, color: 'yours' },
   { value: 'contacts', text: 'Alien contacts now', short: 'contacts', place: 'glyph', path: RADAR_PATH, color: 'danger' },
   { value: 'flags', text: 'System flags', short: 'flags', place: 'glyph', path: FLAG_PATH, color: 'ring', offset: FLAG_OFFSET },
   { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
@@ -649,6 +649,15 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
+    ...mapState('empires', ['games']),
+
+    // The selected race's title, from the empire list the rail and Settings read it from.
+    raceTitle() {
+      const game = this.games.find((entry) => entry.GameID === this.GameID)
+      const race = game && game.Races.find((entry) => entry.RaceID === this.RaceID)
+
+      return race ? race.RaceTitle : ''
+    },
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -885,7 +894,7 @@ export default {
         return 'Working out colony costs…'
       }
 
-      return this.currentHabitability.species ? null : 'No species of mine to work out colony costs for'
+      return this.currentHabitability.species ? null : 'No species of the race to work out colony costs for'
     },
 
     // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
@@ -978,7 +987,7 @@ export default {
       }
 
       if (this.borders === 'colonies') {
-        const owner = { name: null, legend: 'Systems with my colonies', color: this.colors.colony }
+        const owner = { name: null, legend: 'Systems with colonies', color: this.colors.colony }
 
         return { owners: [owner], ownerOf: (row) => (row.colonies ? owner : null) }
       }
@@ -1061,16 +1070,16 @@ export default {
         'constructs-dormant': { path: PYRAMID_PATH, color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
         rifts: { path: HURRICANE_PATH, color: colors.rift, label: 'Aether rift' },
         wrecks: { path: SKULL_CROSSBONES_PATH, color: colors.ring, label: 'Wrecks' },
-        'ships-war': { path: ROCKET_PATH, color: colors.yours, label: 'My warships' },
-        'ships-other': { path: ROCKET_PATH, color: colors.yours, hollow: true, label: 'My ships, no warships' },
-        shipyards: { path: CRANE_PATH, offset: CRANE_OFFSET, color: colors.yours, label: 'My shipyards' },
-        waypoints: { path: MAP_MARKER_PATH, color: colors.yours, label: 'My waypoints' },
+        'ships-military': { path: ROCKET_PATH, color: colors.yours, label: 'Military ships' },
+        'ships-commercial': { path: ROCKET_PATH, color: colors.yours, hollow: true, label: 'Commercial ships only' },
+        shipyards: { path: CRANE_PATH, offset: CRANE_OFFSET, color: colors.yours, label: 'Shipyards' },
+        waypoints: { path: MAP_MARKER_PATH, color: colors.yours, label: 'Waypoints' },
         // The most threatening contacts there decide the glyph; a race not yet identified is drawn hollow.
         ...Object.fromEntries(CONTACT_ORDER.map((status) => [`contacts-${status}`, {
           path: RADAR_PATH,
           color: colors.contacts[status],
           hollow: status === 'unknown',
-          label: status === 'unknown' ? 'Contacts now, of a race not yet identified' : `${status.charAt(0).toUpperCase()}${status.slice(1)} contacts now`,
+          label: status === 'unknown' ? 'Alien contacts now, of a race not yet identified' : `${status.charAt(0).toUpperCase()}${status.slice(1)} alien contacts now`,
         }])),
         flags: { path: FLAG_PATH, offset: FLAG_OFFSET, color: colors.ring, label: 'Flagged system' },
       }
@@ -1131,7 +1140,7 @@ export default {
         } else {
           const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
           const sample = { danger: '40 / 25', discovered: 'Date' }[mark.value]
-          const label = { danger: 'Danger / my protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
+          const label = { danger: 'Danger / protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
 
           items.push(systems ? { kind: 'sample', sample, label: `${label} (${systems})` } : { kind: 'note', label: `${mark.text}: none known` })
         }
@@ -1341,11 +1350,11 @@ export default {
         features.constructs.length && { label: 'Ancient constructs', value: features.constructs.map((construct) => `${construct.body}: ${construct.active ? `${construct.field} research +${Math.round((construct.bonus - 1) * 100)}%` : 'dormant'}`).join('; ') },
         features.wrecks && { label: 'Wrecks', value: this.count(features.wrecks) },
         features.rifts && { label: 'Aether rifts', value: this.count(features.rifts) },
-        system.danger > 0 && { label: 'Danger', value: `${this.count(system.danger)}, my protection ${this.count(features.protection)}` },
-        features.ships && { label: 'My ships', value: `${this.count(features.ships)}${features.warships ? `, ${this.count(features.warships)} of them warships` : ''}` },
-        features.shipyards && { label: 'My shipyards', value: this.count(features.shipyards) },
-        features.waypoints && { label: 'My waypoints', value: this.count(features.waypoints) },
-        features.contacts.length && { label: 'Contacts now', value: features.contacts.map((contact) => `${this.count(contact.count)} ${contact.status === 'unknown' ? 'unidentified' : contact.status}`).join(', ') },
+        system.danger > 0 && { label: 'Danger', value: `${this.count(system.danger)}, protection ${this.count(features.protection)}` },
+        features.ships && { label: 'Ships', value: `${this.count(features.ships)}${features.military ? `, ${this.count(features.military)} of them military` : ''}` },
+        features.shipyards && { label: 'Shipyards', value: this.count(features.shipyards) },
+        features.waypoints && { label: 'Waypoints', value: this.count(features.waypoints) },
+        features.contacts.length && { label: 'Alien contacts now', value: features.contacts.map((contact) => `${this.count(contact.count)} ${contact.status === 'unknown' ? 'unidentified' : contact.status}`).join(', ') },
         system.flags.length && { label: 'Flags', value: system.flags.join(', ') },
       ].filter(Boolean)
 
@@ -1703,7 +1712,7 @@ export default {
       }
 
       if (row.ControlRaceID === this.RaceID) {
-        return 'Me'
+        return this.raceTitle || 'The race'
       }
 
       return (this.controllerById[row.ControlRaceID] || {}).name || 'An unknown race'
@@ -1994,7 +2003,7 @@ export default {
       }
 
       if (marks.has('ships') && features.ships) {
-        names.push(features.warships ? 'ships-war' : 'ships-other')
+        names.push(features.military ? 'ships-military' : 'ships-commercial')
       }
 
       if (marks.has('shipyards') && features.shipyards) {
@@ -2034,7 +2043,7 @@ export default {
       const features = this.features[row.id] || NO_FEATURES
 
       if (mark === 'danger') {
-        // The game reds its danger line where the warships there protect less than the danger.
+        // The game reds its danger line where the protection of the ships there falls short of the danger.
         const protection = Math.round(features.protection)
 
         return row.danger > 0 ? `${protection < row.danger ? '⚠ ' : ''}${this.count(row.danger)} / ${this.count(protection)}` : ''

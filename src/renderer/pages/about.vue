@@ -3,7 +3,7 @@
     <v-container fluid class="about-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release I am running." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release is running." elevation="1">
             <div class="panel-head">
               <span class="d-flex align-center">
                 <span>Aurora Electrons</span>
@@ -72,9 +72,9 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Where the app keeps my settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Where the app keeps its settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
             <div class="panel-head">
-              <span>My data</span>
+              <span>Data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
             </div>
             <div class="panel-body body-2">
@@ -88,7 +88,7 @@
                 <div class="path">{{ historyFile }}</div>
               </template>
             </div>
-            <div class="panel-foot caption text--secondary">The app only reads my save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
+            <div class="panel-foot caption text--secondary">The app only reads the save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
           </v-card>
         </v-col>
 

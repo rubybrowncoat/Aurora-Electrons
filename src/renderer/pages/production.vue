@@ -50,7 +50,7 @@
 
         <stat-tiles class="mt-1" :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Every job my colonies are building, researching, training or terraforming, with its status and finish time, to spot stalled work and shortages." elevation="1">
+        <v-card class="panel" data-summary="Every job the colonies are building, researching, training or terraforming, with its status and finish time, to spot stalled work and shortages." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Work in progress</span>
@@ -118,7 +118,7 @@
 
         <v-row>
           <v-col cols="12" xl="5">
-            <v-card class="panel" data-summary="How many of my jobs finish in each period ahead, by kind, to plan around coming completions." elevation="1">
+            <v-card class="panel" data-summary="How many jobs finish in each period ahead, by kind, to plan around coming completions." elevation="1">
               <div class="panel-head">
                 <span>Completions</span>
                 <v-btn-toggle v-model="horizon" mandatory dense>
@@ -138,7 +138,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="7">
-            <v-card class="panel" data-summary="The construction, ordnance, fighter, training, research and slipway capacity each of my colonies leaves unused, to find where I can start more work." elevation="1">
+            <v-card class="panel" data-summary="The construction, ordnance, fighter, training, research and slipway capacity each colony leaves unused, to find where more work can start." elevation="1">
               <div class="panel-head">
                 <span class="d-flex align-center">
                   <span>Idle capacity by colony</span>

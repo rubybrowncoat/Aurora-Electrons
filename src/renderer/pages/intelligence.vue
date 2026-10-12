@@ -21,7 +21,7 @@
 
           <stat-tiles :tiles="tiles" />
 
-          <v-card class="panel" data-summary="Every alien race I have met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
+          <v-card class="panel" data-summary="Every alien race met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
             <div class="panel-head">
               <span>Known races</span>
             </div>
@@ -53,7 +53,7 @@
           </v-card>
 
           <template v-if="selected">
-            <v-card class="panel" data-summary="The selected race's status, and what I have learned about it so far." elevation="1">
+            <v-card class="panel" data-summary="The selected race's status, and what has been learned about it so far." elevation="1">
               <div class="panel-head">
                 <span>
                   {{ selected.AlienRaceName }}
@@ -89,7 +89,7 @@
               </v-col>
             </v-row>
 
-            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species I have observed for the selected race. Switch views to see each kind." elevation="1">
+            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species observed for the selected race. Switch views to see each kind." elevation="1">
               <div class="panel-head">
                 <span>Observed</span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
@@ -373,10 +373,10 @@ export default {
         { label: 'Last ship contact', value: race.LastContact ? this.date(race.LastContact) : 'None' },
         { label: 'Diplomatic points', value: `${this.count(race.DiplomaticPoints)} (${race.standing.toLowerCase()})` },
         { label: 'Communication', value: race.CommEstablished > 0 ? `${race.communication} on ${this.date(race.CommEstablished)}` : race.communication },
-        { label: 'I grant', value: granted.length ? granted.join(', ') : 'No treaties' },
-        { label: 'They grant', value: received.length ? received.join(', ') : 'No treaties' },
+        { label: 'Treaties granted', value: granted.length ? granted.join(', ') : 'No treaties' },
+        { label: 'Treaties received', value: received.length ? received.join(', ') : 'No treaties' },
         { label: 'Race intelligence', value: `${this.count(race.AlienRaceIntelligencePoints, 1)} points; a discovery each time it passes ${REWARD_COST}` },
-        { label: 'Damage they have done to me', value: this.count(race.DamageCausedByAlienRace) },
+        { label: 'Damage received', value: this.count(race.DamageCausedByAlienRace) },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
@@ -427,7 +427,7 @@ export default {
         {
           key: 'fleet',
           title: 'Ships tracked',
-          summary: 'How many ships of the selected race I have tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
+          summary: 'How many ships of the selected race have been tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
           note: fleet.length ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'No ships tracked.',
           data: {
             datasets: [
@@ -441,7 +441,7 @@ export default {
         {
           key: 'intelligence',
           title: translating ? 'Intelligence and translation' : 'Race intelligence',
-          summary: 'The intelligence points I have gathered on the selected race over time, with translation progress while contact is being attempted.',
+          summary: 'The intelligence points gathered on the selected race over time, with translation progress while contact is being attempted.',
           note: `${recordedNote} Marks show where points were spent on a discovery.`,
           data: { datasets: intelDatasets },
           options: this.options({ y: (value) => this.count(value), y1: translating ? (value) => this.count(value) : null }, { markers: rewardAttempts(timeline).map((t) => ({ x: this.year(t), label: 'Discovery' })) }, { min: 0, suggestedMax: REWARD_COST, ticks: { precision: 0 } }),

@@ -1,7 +1,7 @@
 import { linkTo, place } from '../deep-links'
 import { amount, bodyText, rowsOf } from './common'
 
-export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so I can give them something to do.' }
+export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so they can be given something to do.' }
 
 export const IDLE_FLEETS_KEY = 'idle-fleets'
 
@@ -21,7 +21,7 @@ const idleFleetOrders = (fleet) => [fleet.StandingOrders ? 'Standing orders' : n
 
 const strandedMinerReason = (fleet, count) => {
   if (fleet.Reason === 'not surveyed') {
-    return 'I haven\'t surveyed this body'
+    return 'Body not surveyed'
   } else if (fleet.Reason === 'no deposits') {
     return 'No minerals here'
   }
@@ -41,8 +41,8 @@ export const checks = [
     key: IDLE_FLEETS_KEY,
     group: group.key,
     severity: 'attention',
-    title: (count, options = {}) => `${amount(count, 'idle fleet')}${options.idleFleetsAtColonies ? '' : ' away from my colonies'}`,
-    rule: 'A mobile military fleet with no orders and at least one ship that is neither overhauling nor docked; fleets following another fleet are left out, and so are fleets parked at my colonies unless the option is on.',
+    title: (count, options = {}) => `${amount(count, 'idle fleet')}${options.idleFleetsAtColonies ? '' : ' away from the colonies'}`,
+    rule: 'A mobile military fleet with no orders and at least one ship that is neither overhauling nor docked; fleets following another fleet are left out, and so are fleets parked at the colonies unless the option is on.',
     columns: [
       { key: 'fleet', text: 'Fleet' },
       { key: 'ships', text: 'Ships', align: 'end' },
@@ -113,7 +113,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => `${amount(count, 'orbital mining fleet')} at bodies they can't mine`,
-    rule: 'A fleet with mining modules and no orders orbits a body I haven\'t surveyed, a body without minerals, or one wider than my orbital mining limit.',
+    rule: 'A fleet with mining modules and no orders orbits an unsurveyed body, a body without minerals, or one wider than the orbital mining limit.',
     columns: [
       { key: 'fleet', text: 'Fleet' },
       { key: 'reason', text: 'Why' },
@@ -137,7 +137,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => `${amount(count, 'fleet')} assigned to a colony that no longer exists`,
-    rule: 'A fleet is assigned to a population that is no longer in the save, so it can\'t be supplied or reassigned until I assign it to a colony again.',
+    rule: 'A fleet is assigned to a population that is no longer in the save, so it can\'t be supplied or reassigned until it is assigned to a colony again.',
     columns: [
       { key: 'fleet', text: 'Fleet' },
       { key: 'system', text: 'System' },

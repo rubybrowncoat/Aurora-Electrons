@@ -18,7 +18,7 @@
         <template v-if="view === 'fuel'">
           <v-row>
             <v-col cols="12" lg="5">
-              <v-card class="panel" data-summary="The fuel my refineries and harvesters make each year set against what my ships burn. Use it to see whether my supply keeps up with demand." elevation="1">
+              <v-card class="panel" data-summary="The fuel the refineries and harvesters make each year set against what the ships burn. Use it to see whether the supply keeps up with demand." elevation="1">
                 <div class="panel-head"><span>Fuel balance per year</span></div>
                 <div class="panel-body">
                   <div v-for="group in fuelBalance" :key="group.label" class="balance-group">
@@ -39,7 +39,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="7">
-              <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways. Use it to find the classes that drain my fuel the most." elevation="1">
+              <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways. Use it to find the classes that drain the fuel the most." elevation="1">
                 <div class="panel-head">
                   <span>Burn by class</span>
                   <span class="legend">
@@ -55,7 +55,7 @@
             </v-col>
           </v-row>
 
-          <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each of my colonies. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
+          <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each colony. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
             <div class="panel-head">
               <span>Colony fuel and refineries</span>
               <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining</v-chip>
@@ -94,7 +94,7 @@
             </div>
           </v-card>
 
-          <v-card v-if="harvesterRows.length" class="panel" data-summary="My fuel harvester ships, with what each makes a year and how long its deposit will last. Use it to judge which harvesters are worth keeping where they are." elevation="1">
+          <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with what each makes a year and how long its deposit will last. Use it to judge which harvesters are worth keeping where they are." elevation="1">
             <div class="panel-head">
               <span>Sorium harvesters</span>
               <v-chip small>Estimate</v-chip>
@@ -122,7 +122,7 @@
         </template>
 
         <template v-else>
-          <v-card class="panel" data-summary="The colonies where my ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
+          <v-card class="panel" data-summary="The colonies where ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
             <div class="panel-head">
               <span>Maintenance locations</span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
@@ -178,7 +178,7 @@
             </div>
           </v-card>
 
-          <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships of mine carrying maintenance supplies, with how much each holds. Use it to see how much spare stock I could send to a colony in need." elevation="1">
+          <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships carrying maintenance supplies, with how much each holds. Use it to see how much spare stock could be sent to a colony in need." elevation="1">
             <div class="panel-head">
               <span>Supply ships</span>
               <v-chip small>{{ count(supplyFleets.reduce((sum, fleet) => sum + fleet.SupplyMSP, 0)) }} MSP above their minimums</v-chip>

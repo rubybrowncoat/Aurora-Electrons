@@ -19,7 +19,7 @@
             <v-btn v-if="mutedTotal" small text class="mt-2" @click="unmuteAll">Unmute all ({{ count(mutedTotal) }})</v-btn>
 
             <div class="subtitle-2 mt-4">Idle fleets</div>
-            <v-switch :input-value="idleFleetsAtColonies" label="Include fleets parked at my colonies" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
+            <v-switch :input-value="idleFleetsAtColonies" label="Include fleets parked at the colonies" dense inset hide-details @change="(value) => setOption('idleFleetsAtColonies', !!value)" />
 
             <div class="subtitle-2 mt-4">Maintenance supplies</div>
             <v-slider :value="maintenanceThreshold" min="10" max="100" :hint="`List ships under ${maintenanceThreshold}% maintenance`" thumb-label persistent-hint class="mt-6" @change="(value) => setOption('maintenanceThreshold', value)" />
@@ -139,7 +139,7 @@ const readName = (check) => `read${check.key.replace(/(^|-)(\w)/g, (_match, _das
 
 const INPUT_LABELS = {
   ...Object.fromEntries(CHECKS.map((check) => [readName(check), `the ${checkLabel(check)} check`])),
-  shipClasses: 'my ship classes',
+  shipClasses: 'the ship classes',
 }
 
 const checkReads = Object.fromEntries(CHECKS.map((check) => [readName(check), {
@@ -330,7 +330,7 @@ export default {
           label: 'Muted',
           value: this.count(mutedRows),
           icon: 'mdi-bell-off-outline',
-          note: mutedChecks ? `Includes ${this.count(mutedChecks)} muted ${mutedChecks === 1 ? 'check' : 'checks'}` : 'Warnings I have muted',
+          note: mutedChecks ? `Includes ${this.count(mutedChecks)} muted ${mutedChecks === 1 ? 'check' : 'checks'}` : 'Warnings muted',
         },
       ]
     },

@@ -72,10 +72,10 @@
 
         <stat-tiles :tiles="tiles" class="mt-1" />
 
-        <v-alert v-if="!destination" type="info" dense outlined class="mt-4 mb-0">Pick a destination to see what my fleets could move there.</v-alert>
+        <v-alert v-if="!destination" type="info" dense outlined class="mt-4 mb-0">Pick a destination to see what the fleets could move there.</v-alert>
         <v-alert v-for="problem in problems" :key="problem.text" type="warning" dense outlined class="mt-4 mb-0">{{ problem.text }}</v-alert>
 
-        <v-card class="panel" data-summary="How long each of my fleets would take to sail the chosen run and how much it could carry. Use it to pick the best ships for a haul between two places." elevation="1">
+        <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run and how much it could carry. Use it to pick the best ships for a haul between two places." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Fleets on this run</span>
@@ -121,10 +121,10 @@
               </div>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by the shuttle bays (one for a craft of 500 t or less, which lands) plus one if the colony has a spaceport or cargo shuttle station, times the race's shuttle technology; commander and governor Logistics bonuses are not counted, so times err long. Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point I have explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, without a station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by the shuttle bays (one for a craft of 500 t or less, which lands) plus one if the colony has a spaceport or cargo shuttle station, times the race's shuttle technology; commander and governor Logistics bonuses are not counted, so times err long. Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, without a station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="The installations my colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
+        <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Civilian work orders</span>
@@ -183,8 +183,8 @@ const INPUT_LABELS = {
   systems: 'the known systems',
   jumpPoints: 'the jump points',
   lagrangePoints: 'the Lagrange points',
-  colonies: 'my colonies',
-  ships: 'my ships',
+  colonies: 'the colonies',
+  ships: 'the ships',
   requests: 'the installation requests',
   shipments: 'the installations in transit',
 }
@@ -435,7 +435,7 @@ export default {
         return 'Pick a destination to time the run.'
       }
 
-      return this.militaryGroups.length ? 'No picked fleet carries cargo or colonists.' : 'None of my fleets has cargo holds or colony bays.'
+      return this.militaryGroups.length ? 'No picked fleet carries cargo or colonists.' : 'None of the fleets has cargo holds or colony bays.'
     },
 
     tiles() {
@@ -654,7 +654,7 @@ export default {
     // Why a profile of ships can't sail from the origin to the destination.
     reachNote(group, { open, blockers, profile }) {
       if (!open) {
-        return 'No jump route I have explored connects them.'
+        return 'No explored jump route connects them.'
       }
 
       const hint = !profile.gates ? '' : group.canTransit ? ' The Stabilised jump points only option is on.' : ` A jump drive that covers the ship would make it ${open.jumps} ${open.jumps === 1 ? 'jump' : 'jumps'}.`

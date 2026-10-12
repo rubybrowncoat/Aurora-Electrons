@@ -23,7 +23,7 @@
           <v-card class="pa-4">
             <div class="subtitle-2">Events in the list</div>
             <v-checkbox v-model="collapseRepeats" label="Collapse daily repeats" dense hide-details />
-            <div class="caption text--secondary mt-1">The same type on one game day folds into a row I can expand. No message is removed.</div>
+            <div class="caption text--secondary mt-1">The same type on one game day folds into an expandable row. No message is removed.</div>
             <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details />
             <div class="caption text--secondary mt-1">Types with a colour entry in this race's game settings, including black.</div>
             <v-btn small text class="mt-3" @click="resetFilters">Reset filters</v-btn>
@@ -33,7 +33,7 @@
 
       <stat-tiles dense class="my-2" :tiles="tiles" />
 
-      <v-card class="panel mb-3" data-summary="How many events my game log holds for each month, to find busy periods and narrow the list below to one." elevation="1">
+      <v-card class="panel mb-3" data-summary="How many events the game log holds for each month, to find busy periods and narrow the list below to one." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Timeline</div>
           <div class="date-fields">
@@ -52,7 +52,7 @@
         </div>
       </v-card>
 
-      <v-card class="panel" data-summary="The events in my game log, newest first, to review what happened and read any message in full." elevation="1">
+      <v-card class="panel" data-summary="The events in the game log, newest first, to review what happened and read any message in full." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Events <span class="caption text--secondary">{{ count(filteredEvents.length) }} of {{ count(logEvents.length) }}</span></div>
           <div class="caption text--secondary">
@@ -87,7 +87,7 @@
         </window-virtual-scroll>
         <div v-else class="pa-6 text--secondary">{{ logEvents.length ? 'No events match these filters.' : 'This race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with my previous visit to this page.
+          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with the previous visit to this page.
         </div>
       </v-card>
     </template>
@@ -491,7 +491,7 @@ export default {
         { label: 'Events in range', value: this.count(this.filteredEvents.length), note: `of ${this.count(this.logEvents.length)} in this race's log` },
         { label: 'Busiest type', value: typeName, note: type ? `${this.count(type[1])} events in this view` : 'No events in this view' },
         { label: 'Busiest month', value: month ? month[0] : '—', note: month ? `${this.count(month[1])} events in this view` : 'No events in this view' },
-        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after my previous visit' },
+        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after the previous visit' },
       ]
     },
 

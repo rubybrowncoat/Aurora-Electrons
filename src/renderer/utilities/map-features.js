@@ -23,7 +23,7 @@ const CONTACT_STATUSES = ['hostile', 'neutral', 'friendly', 'allied', 'civilian'
 
 export const CONTACT_ORDER = ['hostile', 'unknown', 'neutral', 'friendly', 'allied', 'civilian']
 
-export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, warships: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
+export const NO_FEATURES = Object.freeze({ ruins: [], constructs: [], rifts: 0, wrecks: 0, protection: 0, military: 0, ships: 0, shipyards: 0, waypoints: 0, contacts: [] })
 
 export const loadMapFeatures = async (database, { GameID, RaceID }) => {
   const [ruins, constructs, rifts, wrecks, ships, shipyards, waypoints, contacts] = await Promise.all([
@@ -50,9 +50,9 @@ from FCT_Wrecks
 inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Wrecks.SystemID and FCT_RaceSysSurvey.GameID = FCT_Wrecks.GameID and FCT_RaceSysSurvey.RaceID = ${RaceID}
 where FCT_Wrecks.GameID = ${GameID}
 group by FCT_Wrecks.SystemID`),
-    // The game's protection for a system adds up the protection value of each warship there that can move;
-    // a ship of a civilian shipping line is no ship of the race's own fleets.
-    rows(database, `select FCT_Fleet.SystemID, sum(case when FCT_ShipClass.ProtectionValue > 0 and FCT_ShipClass.MaxSpeed > 0 then FCT_ShipClass.ProtectionValue else 0 end) as Protection, sum(FCT_ShipClass.ProtectionValue > 0) as Warships, sum(FCT_Ship.ShippingLineID = 0) as Ships
+    // The game's protection for a system adds up the protection value of each ship there that has one and can move. Military ships are those of a class not marked commercial, survey ships included.
+    // A ship of a civilian shipping line is no ship of the race's own fleets.
+    rows(database, `select FCT_Fleet.SystemID, sum(case when FCT_ShipClass.ProtectionValue > 0 and FCT_ShipClass.MaxSpeed > 0 then FCT_ShipClass.ProtectionValue else 0 end) as Protection, sum(FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.Commercial = 0) as Military, sum(FCT_Ship.ShippingLineID = 0) as Ships
 from FCT_Ship
 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID
 inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID
@@ -90,7 +90,7 @@ group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`),
   wrecks.forEach((row) => {
     of(row.SystemID).wrecks = row.Wrecks
   })
-  ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.Protection || 0, warships: row.Warships || 0, ships: row.Ships || 0 }))
+  ships.forEach((row) => Object.assign(of(row.SystemID), { protection: row.Protection || 0, military: row.Military || 0, ships: row.Ships || 0 }))
   shipyards.forEach((row) => {
     of(row.SystemID).shipyards = row.Shipyards
   })

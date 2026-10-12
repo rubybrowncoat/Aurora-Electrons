@@ -21,7 +21,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" class="mt-2" />
 
-        <v-card class="panel" data-summary="Each of my colonies with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
+        <v-card class="panel" data-summary="Each colony with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Colonies</span>
@@ -35,7 +35,7 @@
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
-          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or is not one of mine.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or does not belong to the race.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.name`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div>

@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="A map of the systems I know, shaded by how much survey work each has left. Use it to pick where to send my survey ships next." elevation="1">
+        <v-card class="panel" data-summary="A map of the known systems, shaded by how much survey work each has left. Use it to pick where to send the survey ships next." elevation="1">
           <div class="panel-head">
             <span>Survey map</span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, the points left and how long my ships there would take. It shows which systems still need surveying." elevation="1">
+        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, the points left and how long the ships there would take. It shows which systems still need surveying." elevation="1">
           <div class="panel-head">
             <span>Systems</span>
             <span class="d-flex align-center">
@@ -80,7 +80,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="My survey fleets, where they are, what they are doing and how fast they survey. It shows whether my survey ships are used well." elevation="1">
+        <v-card class="panel" data-summary="Survey fleets, where they are, what they are doing and how fast they survey. It shows whether the survey ships are used well." elevation="1">
           <div class="panel-head">
             <span>Survey fleets</span>
             <v-chip small>Rates are estimates</v-chip>

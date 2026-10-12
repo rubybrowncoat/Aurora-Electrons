@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="The hauls that would cover what my colonies lack of each mineral, from the nearest colony with stock to spare, and what each of my freighter classes takes to carry them." elevation="1">
+        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, from the nearest colony with stock to spare, and what each freighter class takes to carry them." elevation="1">
           <div class="panel-head">
             <span>Hauling plan</span>
             <span class="d-flex align-center flex-wrap plan-tools">
@@ -42,7 +42,7 @@
             </template>
             <template #expanded-item="{ headers, item }">
               <td :colspan="headers.length" class="py-3">
-                <div class="caption text--secondary mb-1">My freighter classes on this haul</div>
+                <div class="caption text--secondary mb-1">Freighter classes on this haul</div>
                 <v-simple-table dense class="legs-table">
                   <thead>
                     <tr>
@@ -74,11 +74,11 @@
             <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}</div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on my charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The fleets of mine that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1">
+        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1">
           <div class="panel-head">
             <span>Repeating routes</span>
             <v-chip small>Estimates</v-chip>
@@ -148,7 +148,7 @@
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="What my repeating routes bring to each colony every year, by cargo. Use it to see which colonies depend most on hauling." elevation="1">
+            <v-card class="panel" data-summary="What the repeating routes bring to each colony every year, by cargo. Use it to see which colonies depend most on hauling." elevation="1">
               <div class="panel-head"><span>Deliveries by destination</span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
@@ -160,7 +160,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" data-summary="My freighter classes with their capacity, speed and yearly distance and fuel. Use it to compare which classes haul most efficiently." elevation="1">
+            <v-card class="panel" data-summary="Freighter classes with their capacity, speed and yearly distance and fuel. Use it to compare which classes haul most efficiently." elevation="1">
               <div class="panel-head"><span>Freighter classes</span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">
@@ -204,11 +204,11 @@ const INPUT_LABELS = {
   fleets: 'the repeating fleets',
   fleetShips: 'their ships',
   orders: 'their orders',
-  colonies: 'my colonies',
+  colonies: 'the colonies',
   needs: 'what their build queues need',
   packets: 'the mass-driver packets in flight',
   jumpPoints: 'the jump points',
-  shuttleTechnology: 'my shuttle technology',
+  shuttleTechnology: 'the shuttle technology',
 }
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
@@ -407,7 +407,7 @@ export default {
           mineralsText: haul.minerals.map((mineral) => `${mineral.name} ${this.tons(mineral.tonnes)}`).join(', '),
           reasonText: reasons({ queue: haul.queue, reserve: haul.tonnes - haul.queue }),
           mineralDetail: `${haul.minerals.map((mineral) => `${mineral.name}: ${reasons(mineral)}`).join('. ')}.`,
-          deliveredText: delivered ? `My routes already bring ${this.tons(delivered)} of minerals here a year` : '',
+          deliveredText: delivered ? `The routes already bring ${this.tons(delivered)} of minerals here a year` : '',
           transportLink: linkTo.transport(ends),
           routesLink: linkTo.routes(ends),
         }
@@ -431,10 +431,10 @@ export default {
 
     planEmptyText() {
       if (this.plan.unmet.length) {
-        return 'No colony of mine on a charted route has stock to spare for what the others lack.'
+        return 'No colony on a charted route has stock to spare for what the others lack.'
       }
 
-      return this.planReserves ? 'None of my colonies lacks a mineral for its queue or its reserve.' : 'None of my colonies lacks a mineral for its queue.'
+      return this.planReserves ? 'None of the colonies lacks a mineral for its queue or its reserve.' : 'None of the colonies lacks a mineral for its queue.'
     },
 
     planHeaders() {

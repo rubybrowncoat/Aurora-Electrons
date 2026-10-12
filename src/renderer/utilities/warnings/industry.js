@@ -3,7 +3,7 @@ import { roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
 import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, rowsOf } from './common'
 
-export const group = { key: 'industry', title: 'Industry', summary: 'Idle factory capacity, stalled projects and unused shipyards, so I can see where industry is not producing what it could.' }
+export const group = { key: 'industry', title: 'Industry', summary: 'Idle factory capacity, stalled projects and unused shipyards, so it is clear where industry is not producing what it could.' }
 
 const PRODUCTION_KINDS = { 1: 'Ordnance', 2: 'Fighters' }
 

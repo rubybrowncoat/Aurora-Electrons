@@ -1,7 +1,7 @@
 import { linkTo } from '../deep-links'
 import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, rowsOf } from './common'
 
-export const group = { key: 'administration', title: 'Administration', summary: 'Colonies, naval administrations and sectors that lack the governor or commander they need, so I can fill the posts.' }
+export const group = { key: 'administration', title: 'Administration', summary: 'Colonies, naval administrations and sectors that lack the governor or commander they need, so the posts can be filled.' }
 
 export const checks = [
   {

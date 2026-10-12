@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and theme. Use it to set the app up to suit me." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and theme. Use it to set the app up." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting">
@@ -33,7 +33,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered for me. Use it to clear them when I want every page back to its defaults." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered. Use it to clear them and bring every page back to its defaults." elevation="1">
             <div class="panel-head">
               <span>Remembered views</span>
               <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>
@@ -54,7 +54,7 @@
                 <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at my last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
           </v-card>
         </v-col>
       </v-row>

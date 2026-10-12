@@ -5,7 +5,7 @@ import { linkTo } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, bodyText, rowsOf } from './common'
 
-export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in space I have surveyed, such as rifts, lifepods, wrecks and ancient constructs, that may need a response.' }
+export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in surveyed space, such as rifts, lifepods, wrecks and ancient constructs, that may need a response.' }
 
 const SECONDS_PER_TWO_WEEKS = 1209600
 
@@ -86,7 +86,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => `${amount(count, 'system')} with intruders`,
-    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system I have surveyed, unless I am allied with it or it is marked friendly.',
+    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system the race has surveyed, unless the race is allied with it or it is marked friendly.',
     columns: [
       { key: 'system', text: 'System' },
       { key: 'contacts', text: 'Contacts' },
@@ -144,7 +144,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => amount(count, 'dangerous rift') + ' in occupied systems',
-    rule: 'An aether rift sits in a system where I have fleets, colonies or ground unit bases.',
+    rule: 'An aether rift sits in a system where the race has fleets, colonies or ground unit bases.',
     columns: [
       { key: 'system', text: 'System' },
       { key: 'size', text: 'Size', align: 'end' },
@@ -182,7 +182,7 @@ export const checks = [
     severity: 'attention',
     clock: true,
     title: (count) => amount(count, 'active lifepod'),
-    rule: 'Lifepods I have detected are still adrift; their crews last two weeks from the ship\'s loss.',
+    rule: 'Detected lifepods are still adrift; their crews last two weeks from the ship\'s loss.',
     columns: [
       { key: 'ship', text: 'Lifepod of' },
       { key: 'crew', text: 'Crew', align: 'end' },
@@ -214,7 +214,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'wreck') + ' in explored space',
-    rule: 'A wreck lies in a system I have surveyed.',
+    rule: 'A wreck lies in a surveyed system.',
     columns: [
       { key: 'wreck', text: 'Wreck' },
       { key: 'size', text: 'Size', align: 'end' },
@@ -242,7 +242,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'unexploited ancient construct'),
-    rule: 'An ancient construct on a surveyed body is dormant, or has no colony of mine with 10 million people on it, so its research bonus goes unused.',
+    rule: 'An ancient construct on a surveyed body is dormant, or has no colony of the race with 10 million people on it, so its research bonus goes unused.',
     columns: [
       { key: 'construct', text: 'Construct' },
       { key: 'bonus', text: 'Research bonus' },

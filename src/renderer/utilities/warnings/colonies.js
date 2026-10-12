@@ -2,7 +2,7 @@ import { linkTo } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, levelTone, rowsOf } from './common'
 
-export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so I can fix what holds them back.' }
+export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so what holds them back can be fixed.' }
 
 // One row per colony from a query with a row per installation: `valueKey` is the installation's output per unit.
 const installationRows = (ctx, items, valueKey, link) => {
@@ -62,7 +62,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'self-sustaining colonist destination'),
-    rule: 'A colony of more than 10 million at full efficiency that isn\'t my capital is not a colonist destination, so its people no longer need to be shipped there.',
+    rule: 'A colony of more than 10 million at full efficiency that isn\'t the capital is not a colonist destination, so its people no longer need to be shipped there.',
     columns: [
       { key: 'colony', text: 'Colony' },
       { key: 'population', text: 'Population', align: 'end' },

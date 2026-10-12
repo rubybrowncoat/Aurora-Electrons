@@ -90,7 +90,7 @@ export default {
     },
 
     subtitleOf(row) {
-      return row.place ? row.place.subtitle : row.status === 'loading' ? row.key : `${row.key}: not in a system my race knows, or gone`
+      return row.place ? row.place.subtitle : row.status === 'loading' ? row.key : `${row.key}: not in a system the race knows, or gone`
     },
 
     shift(index, direction) {

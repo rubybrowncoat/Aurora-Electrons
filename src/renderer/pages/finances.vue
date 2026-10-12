@@ -20,7 +20,7 @@
         <stat-tiles :tiles="tiles" class="mt-2" />
 
         <template v-if="steps.length">
-          <v-card class="panel" data-summary="Wealth my empire earned and spent in each production cycle, by category, with the net, to see whether income covers spending." elevation="1">
+          <v-card class="panel" data-summary="Wealth the empire earned and spent in each production cycle, by category, with the net, to see whether income covers spending." elevation="1">
             <div class="panel-head">
               <span>Income and spending, every {{ stepLabel }}</span>
               <v-btn-toggle v-model="flowsView" mandatory dense>
@@ -45,7 +45,7 @@
 
           <v-row>
             <v-col cols="12" lg="6">
-              <v-card class="panel" data-summary="Each source of income and each kind of spending as a yearly total and a share, to see what funds my empire and what costs most." elevation="1">
+              <v-card class="panel" data-summary="Each source of income and each kind of spending as a yearly total and a share, to see what funds the empire and what costs most." elevation="1">
                 <div class="panel-head">
                   <span>Where it comes from and goes</span>
                   <v-chip small>Per year, last {{ coverageText }}</v-chip>
@@ -70,7 +70,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="6">
-              <v-card class="panel" data-summary="My treasury balance over the window, to see whether wealth is building up or draining away." elevation="1">
+              <v-card class="panel" data-summary="Treasury balance over the window, to see whether wealth is building up or draining away." elevation="1">
                 <div class="panel-head">
                   <span>Treasury</span>
                   <v-chip small>Estimated</v-chip>

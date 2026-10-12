@@ -31,7 +31,7 @@
                 <v-checkbox v-model="hideCommercial" label="Hide commercial" dense hide-details class="mt-1" />
                 <v-checkbox v-model="hideCivilian" label="Hide civilian" dense hide-details class="mt-1" />
                 <v-checkbox v-model="unusedOnly" label="Unused only" dense hide-details class="mt-1" />
-                <div class="caption text--secondary mt-1">Unused means on no class of mine. Missiles and species are never mounted, so this leaves them all.</div>
+                <div class="caption text--secondary mt-1">Unused means on no class of the race. Missiles and species are never mounted, so this leaves them all.</div>
                 <div class="subtitle-2 mt-4">Columns</div>
                 <v-checkbox v-model="perHullSpace" label="Per hull space figures" dense hide-details class="mt-1" />
                 <div class="caption text--secondary mt-1">Adds figures per hull space to the table: damage, strength, sensitivity, capacity and power. For missiles and missile engines it is per MSP. Compare always shows them, and the per build point ones too.</div>
@@ -43,7 +43,7 @@
 
         <stat-tiles class="mt-1" :tiles="tiles" />
 
-        <v-card class="panel" data-summary="Every component design I know in the chosen category, with its figures. Filter and sort it to pick a design, and tick two or more to compare." elevation="1">
+        <v-card class="panel" data-summary="Every known component design in the chosen category, with its figures. Filter and sort it to pick a design, and tick two or more to compare." elevation="1">
           <div class="panel-head">
             <span>{{ categoryName }}</span>
             <span class="text--secondary body-2">{{ count(rows.length) }} of {{ count(categoryRows.length) }} shown</span>
@@ -114,7 +114,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="selected.length > 1" class="panel" data-summary="The designs I picked side by side, with differences tinted and the best and worst marked. Use it to choose between similar components." elevation="1">
+        <v-card v-if="selected.length > 1" class="panel" data-summary="The designs picked side by side, with differences tinted and the best and worst marked. Use it to choose between similar components." elevation="1">
           <div class="panel-head">
             <span>Compare {{ selected.length }} designs</span>
             <span class="head-tools">
@@ -156,7 +156,7 @@
           </v-simple-table>
           <div class="panel-foot caption text--secondary">
             <div>A row is tinted when the designs differ in it. Where a figure has a better side, the best value is marked in green and the worst in red, each with its arrow and its word: more is better for damage, range, strength, sensitivity, capacity, power, output and hit points, and less is better for size, cost, crew, reload time, fuel use, explosion risk and cloak rating (the share of a ship's signature that still shows). Best and worst are only marked among designs of one component type, so a fuel tank is never ranked against a transfer system.</div>
-            <div class="mt-1">The arrows without a colour mark the highest and the lowest value of a figure with no better side, such as a sensor's resolution, a beam's power and capacitor draw, or the missile size a launcher takes. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes on what each space or point buys. Classes and ships are what my race has today. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
+            <div class="mt-1">The arrows without a colour mark the highest and the lowest value of a figure with no better side, such as a sensor's resolution, a beam's power and capacitor draw, or the missile size a launcher takes. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes on what each space or point buys. Classes and ships are what the race has today. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
           </div>
         </v-card>
       </template>
@@ -207,13 +207,13 @@ const normaliseCompare = (stored) => {
 }
 
 const USAGE_COLUMNS = [
-  { text: 'Classes', value: 'classCount', numeric: true, format: (item, f) => f.count(item.classCount), hint: 'Classes of mine that mount it, obsolete classes included.' },
+  { text: 'Classes', value: 'classCount', numeric: true, format: (item, f) => f.count(item.classCount), hint: 'Classes of the race that mount it, obsolete classes included.' },
   { text: 'Ships', value: 'shipCount', numeric: true, format: (item, f) => f.count(item.shipCount), hint: 'Ships of those classes still in service.' },
 ]
 
 const MINERAL_COLUMNS = MINERALS.map((mineral) => `FCT_ShipDesignComponents.${mineral.name}`).join(', ')
 
-const RULE_NOTE = 'Lists the designs my race knows: researched ones and the base components it starts with. Used on counts the classes of my race that mount a component, obsolete classes included, and the ships of those classes still in service. A component marked obsolete is only kept out of the design pickers; classes that mount it keep it. Commercial is any component that is not a military system (a jump drive: one built as a commercial drive), Civilian one made for a shipping line, and Baseline one from the base data every game starts with. One hull space is 50 tons.'
+const RULE_NOTE = 'Lists the designs the race knows: researched ones and the base components it starts with. Used on counts the classes of the race that mount a component, obsolete classes included, and the ships of those classes still in service. A component marked obsolete is only kept out of the design pickers; classes that mount it keep it. Commercial is any component that is not a military system (a jump drive: one built as a commercial drive), Civilian one made for a shipping line, and Baseline one from the base data every game starts with. One hull space is 50 tons.'
 
 export default {
   name: 'DesignedTechPage',
@@ -359,15 +359,15 @@ export default {
 
       if (!this.mountable) {
         return [
-          { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with my filters` },
+          { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with the filters` },
           { label: 'In use', value: '—', note: 'Not mounted on a class' },
           { label: 'Unused', value: '—', note: 'Not mounted on a class' },
-          { label: 'Obsolete', value: this.count(obsolete.length), note: 'Filters ignored · marked obsolete by my race' },
+          { label: 'Obsolete', value: this.count(obsolete.length), note: 'Filters ignored · marked obsolete by the race' },
         ]
       }
 
       return [
-        { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with my filters` },
+        { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with the filters` },
         { label: 'In use', value: this.count(used.length), note: `Filters ignored · on ${this.count(shipClasses.size)} classes, ${this.count(shipTotal)} ships` },
         { label: 'Unused', value: this.count(unused.length), note: `Filters ignored · ${this.count(unused.filter((row) => !row.Obsolete).length)} not obsolete` },
         { label: 'Obsolete', value: this.count(obsolete.length), note: `Filters ignored · ${this.count(obsolete.filter((row) => row.classCount > 0).length)} still on a class` },
