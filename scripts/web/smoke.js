@@ -36,7 +36,7 @@ const PAGE_TIMEOUT_MS = 90000
   - overflow: the document, the body or .v-main scrolls sideways.
   - wide: an element in the content reaches past the window edge and no ancestor scrolls it.
   - clipped: an element with overflow hidden holds text wider than itself and doesn't ellipsise it.
-  - small chart: a canvas under 240 x 120 px.
+  - small chart: a canvas under 240 x 120 px. The Galaxy Map's corner minimap (.map-minimap) is small by design and isn't checked.
   - tight: a short label (a header, button, chip, tab or label of at most 24 characters) that wraps onto a second line.
   - island: from 1904 px up, the content stops short of 80% of the width, so the layout isn't filling the window.
   - summary: a section panel (a top-level .panel whose .panel-head has a title, as the section nav reads it) has no data-summary for its card.
@@ -120,7 +120,7 @@ const LAYOUT_CHECK = () => {
       }
     }
 
-    if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0) {
+    if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0 && !element.closest('.map-minimap')) {
       problems.push(`small chart: canvas ${Math.round(rect.width)} x ${Math.round(rect.height)}`)
     }
   })
