@@ -213,6 +213,9 @@ const run = async () => {
       await picker.getByText(RACE, { exact: true }).last().click()
     }
 
+    // The pages need the race, and each push to one is sent back to the Empires page until it is set.
+    await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: PAGE_TIMEOUT_MS })
+
     await settle()
   } catch (error) {
     const screenshot = path.join(OUT, 'setup.png')
@@ -247,12 +250,23 @@ const run = async () => {
   for (const route of PAGES) {
     problems = []
 
+    // The router's push returns no promise and a page loads on its first visit, so the route on screen stays the previous page's, already settled, until the new one commits. Wait for the new one, then for its reads.
     await page.evaluate((target) => {
       Object.assign(window.__smoke, { counts: {}, done: [], blockedMs: 0 })
       window.$app.$router.push(target)
     }, route)
-    await wait(250)
-    await settle()
+
+    const arrived = await page.waitForFunction(pageLoading.arrived, route, { timeout: PAGE_TIMEOUT_MS }).then(() => true, () => false)
+
+    if (arrived) {
+      await page.evaluate(() => { window.__smoke.last = Date.now() })
+      await wait(250)
+      await settle()
+    }
+
+    if (!(await page.evaluate(pageLoading.arrived, route))) {
+      problems.push(`navigation: ${route} was asked for, but the page on screen is ${await page.evaluate(() => window.$app.$route.path)}`)
+    }
 
     if (route === '/map' && process.env.SMOKE_MAP_EXPORT === '1') {
       // Each export has to leave the positions, zoom and marker sizes as it found them. The second runs at DPR 2 with sector borders. Their legend narrows the stage, which refits a map nobody has moved, so each snapshot is taken right around its own export.
@@ -268,7 +282,7 @@ const run = async () => {
       })
 
       await page.evaluate(() => {
-        const findMap = (component) => component.$options.name === 'MapPage'? component: component.$children.map(findMap).find(Boolean)
+        const findMap = (component) => (component.$options.name === 'MapPage' ? component : component.$children.map(findMap).find(Boolean))
 
         window.__smoke.map = findMap(window.$app)
       })

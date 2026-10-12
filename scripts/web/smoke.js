@@ -17,7 +17,7 @@ const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-smoke')
 const PAGES = process.env.SMOKE_PAGES ? process.env.SMOKE_PAGES.split(',') : require('../smoke-pages')
 
-const VIEWPORTS = process.env.SMOKE_VIEWPORTS? process.env.SMOKE_VIEWPORTS.split(',').map((size) => {
+const VIEWPORTS = process.env.SMOKE_VIEWPORTS ? process.env.SMOKE_VIEWPORTS.split(',').map((size) => {
   const [width, height] = size.trim().toLowerCase().split('x').map(Number)
 
   if (!(width > 0 && height > 0)) {
@@ -25,7 +25,7 @@ const VIEWPORTS = process.env.SMOKE_VIEWPORTS? process.env.SMOKE_VIEWPORTS.split
   }
 
   return { width, height, label: `${width}x${height}` }
-}): null
+}) : null
 const DARK = process.env.SMOKE_THEME === 'dark'
 
 const SETTLE_MS = 1500
@@ -225,7 +225,7 @@ const run = async () => {
 
   fs.mkdirSync(OUT, { recursive: true })
 
-  await page.goto(BASE_URL)
+  await page.goto(BASE_URL, { timeout: PAGE_TIMEOUT_MS })
   // The Empires page shows dated game headings and each race's title. A game with one visible race selects that race from its heading.
   const picker = page.locator('.empire-list').first()
 
@@ -234,6 +234,9 @@ const run = async () => {
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
     await picker.getByText(RACE, { exact: true }).last().click()
   }
+
+  // The pages need the race, and each push to one is sent back to the Empires page until it is set.
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: PAGE_TIMEOUT_MS })
 
   await settle()
 
@@ -254,8 +257,19 @@ const run = async () => {
       problems = []
       lastActivity = Date.now()
 
+      // The router's push returns no promise and a page loads on its first visit, so the route on screen stays the previous page's, already settled, until the new one commits. Wait for the new one, then for its reads.
       await page.evaluate((target) => window.$app.$router.push(target), route)
-      await settle()
+
+      const arrived = await page.waitForFunction(pageLoading.arrived, route, { timeout: PAGE_TIMEOUT_MS }).then(() => true, () => false)
+
+      if (arrived) {
+        lastActivity = Date.now()
+        await settle()
+      }
+
+      if (!(await page.evaluate(pageLoading.arrived, route))) {
+        problems.push(`navigation: ${route} was asked for, but the page on screen is ${await page.evaluate(() => window.$app.$route.path)}`)
+      }
 
       const name = route === '/' ? 'empires' : route.slice(1)
       const suffix = viewport ? `-${viewport.label}${DARK ? '-dark' : ''}` : ''
