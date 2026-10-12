@@ -46,11 +46,19 @@ export const placeUnplaced = (rows, saved, neighbours, capitalId = null) => {
         }
       }
 
+      const around = (ring) => AROUND.map(([ox, oy]) => [at.x + ox * GAME_SPACING * ring, at.y + oy * GAME_SPACING * ring])
+
       for (let ring = 1; ring <= 4; ring += 1) {
-        AROUND.forEach(([ox, oy]) => spots.push([at.x + ox * GAME_SPACING * ring, at.y + oy * GAME_SPACING * ring]))
+        spots.push(...around(ring))
       }
 
-      const [x, y] = spots.find(free) || spots[spots.length - 1]
+      // With all four rings taken, the search goes on outward until it finds a cell with no system within GAME_SPACING.
+      let spot = spots.find(free)
+      for (let ring = 5; !spot; ring += 1) {
+        spot = around(ring).find(free)
+      }
+
+      const [x, y] = spot
       positions[id] = { x, y }
       waiting.delete(id)
       progress = true
