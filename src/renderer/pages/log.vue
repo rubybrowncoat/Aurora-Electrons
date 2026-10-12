@@ -685,8 +685,8 @@ export default {
     },
 
     markVisit() {
-      // Keep the previous visit fixed on screen; only the next visit reads the new watermark.
-      this.config.set(`${this.contextKey}.logLastSeen`, Math.max(this.lastSeen || 0, this.latestIncrement))
+      // Keep the previous visit fixed on screen; only the next visit reads the new watermark. It is this save's latest event, not the highest ever seen, so an earlier save of the same game starts counting from where it stands.
+      this.config.set(`${this.contextKey}.logLastSeen`, this.latestIncrement)
     },
 
     openRow(row) {
