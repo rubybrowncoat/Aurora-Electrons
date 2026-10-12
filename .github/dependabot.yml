@@ -10,3 +10,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Vue 3 and Vuetify 3+ mean migrating the whole app: Vuetify 2, vuex 3 and @vitejs/plugin-vue2 all require Vue 2.
+      - dependency-name: "vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vuetify"
+        update-types: ["version-update:semver-major"]
+      # Only lint uses TypeScript, through @typescript-eslint, which needs its compiler API. TypeScript 7 no longer exports it, and lint crashes before reading a file.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
