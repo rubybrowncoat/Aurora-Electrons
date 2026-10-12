@@ -19,6 +19,11 @@ export const tracked = (key, get) => function () {
 
     if (latest()) {
       this.$set(this.loadErrors, key, error)
+
+      // The host's record of settled reads (mixins/load-state.js keeps the last successful read of each input).
+      if (this.inputSettled) {
+        this.inputSettled(key, error)
+      }
     }
   }
 

@@ -106,8 +106,8 @@ export const actions = {
     })
   },
 
-  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go.
-  renew ({ commit, state }, { storagePath }) {
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go. The new copy counts as read only once the freshness probe has read it.
+  renew ({ commit, dispatch, state }, { storagePath }) {
     const previous = state.database
     let database = null
     let message = null
@@ -122,7 +122,9 @@ export const actions = {
 
     commit('replaceDatabase', { database })
     commit('setDatabaseError', { message })
+    commit('freshness/opened', { at: Date.now() })
     dropQueryCache(previous)
+    dispatch('freshness/probe')
 
     return retireDatabase(previous)
   },

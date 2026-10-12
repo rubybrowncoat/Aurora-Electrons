@@ -93,6 +93,7 @@
         <page-trail v-if="hasMoved" key="trail" class="app-footer__trail" :style="pageStyle" />
         <div v-else key="tagline" class="overline"><span class="font-weight-bold">Aurora Electrons</span> - Looking Inwards</div>
       </transition>
+      <save-status />
     </v-footer>
   </v-app>
 </template>
@@ -106,6 +107,7 @@ import FlyoutPanel from '../components/navigation/FlyoutPanel.vue'
 import HistoryButtons from '../components/navigation/HistoryButtons.vue'
 import PagePalette from '../components/navigation/PagePalette.vue'
 import PageTrail from '../components/navigation/PageTrail.vue'
+import SaveStatus from '../components/navigation/SaveStatus.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import SectionNav from '../components/page/SectionNav.vue'
@@ -126,6 +128,7 @@ export default {
     HistoryButtons,
     PagePalette,
     PageTrail,
+    SaveStatus,
     SectionFlyout,
     SectionNav,
   },
