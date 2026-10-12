@@ -213,14 +213,22 @@ export default {
       return this.checkFilter ? checkByKey[this.checkFilter] || null : null
     },
 
+    // What the page shows as a link, so each filtering is a history entry: the focused check alone, as the severity and group filters don't apply to it, or else the severity and group filters. The search isn't part of it; it would step at every key.
     linkQuery() {
-      return linkTo.warnings(this.checkFilter).query
+      return this.checkFilter ? linkTo.warnings({ check: this.checkFilter }).query : linkTo.warnings({ severity: this.filters.severity, group: this.filters.group }).query
     },
 
     linkLabel() {
-      const label = this.focusedCheck && checkLabel(this.focusedCheck)
+      if (this.focusedCheck) {
+        const label = checkLabel(this.focusedCheck)
 
-      return label ? label[0].toUpperCase() + label.slice(1) : null
+        return label[0].toUpperCase() + label.slice(1)
+      }
+
+      const severity = SEVERITY_BY_KEY[this.filters.severity]
+      const group = GROUPS.find(({ key }) => key === this.filters.group)
+
+      return [severity && severity.label, group && group.title].filter(Boolean).join(' · ') || null
     },
 
     // The options the checks read.
@@ -402,10 +410,19 @@ export default {
   methods: {
     checkLabel,
 
+    // A link's check focuses it and keeps the severity and group filters for when it is closed; without one, the severity and group come from the link, and one it leaves out is cleared.
     applyLink(query) {
-      const check = Array.isArray(query.check) ? query.check[0] : query.check
+      const value = (key) => (Array.isArray(query[key]) ? query[key][0] : query[key])
+      const check = value('check')
 
       this.checkFilter = check && checkByKey[check] ? check : null
+
+      if (!this.checkFilter) {
+        const severity = value('severity')
+        const group = value('group')
+
+        this.filters = { ...this.filters, severity: SEVERITY_BY_KEY[severity] ? severity : null, group: GROUPS.some(({ key }) => key === group) ? group : null }
+      }
     },
 
     // One check's rows. The context is built before the first await so the reads it makes are the read's dependencies: a check re-reads when the save, the race or an option it names changes.
