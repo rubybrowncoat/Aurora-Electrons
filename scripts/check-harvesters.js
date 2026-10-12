@@ -79,9 +79,9 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 })
 
 const loadApp = async () => {
-  const { logistics, minerals, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules } = await loadUtilities(['logistics', 'minerals', 'naval-admins', 'provenance', 'design-rules'])
+  const { logistics, minerals, crew, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules } = await loadUtilities(['logistics', 'minerals', 'crew', 'naval-admins', 'provenance', 'design-rules'])
 
-  return { ...logistics, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven }
+  return { ...logistics, crewFraction: crew.crewFraction, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven }
 }
 
 // The page's own harvesters query, read from its source so the check compares what the page runs, not a copy of it.
@@ -331,7 +331,7 @@ const reconcileShips = (world, read, app, reports, years) => {
     reports.modules.compare(rowId, 'modules', row.Harvesters, state.modules, 'exact')
     reports.commander.compare(rowId, 'Mining bonus', row.MiningBonus, state.commander, 'decimal')
     reports.admin.compare(rowId, 'admin bonus', app.harvesterAdminBonus(world.admins, row), state.admin, 'decimal')
-    reports.crew.compare(rowId, 'crew fraction', app.harvesterCrewShare(row), crewFraction(state.input.crew, state.input.classCrew), 'decimal')
+    reports.crew.compare(rowId, 'crew fraction', app.crewFraction(row), crewFraction(state.input.crew, state.input.classCrew), 'decimal')
     reports.accessibility.compare(rowId, 'accessibility', row.SoriumAccessibility, state.known && state.deposit ? state.deposit.Accessibility : state.known ? 0 : null, 'exact')
     reports.capacity.compare(rowId, 'tank capacity', row.capacity, state.capacity, 'exact')
     reports.room.compare(rowId, 'tank room', pageRoom, ruleRoom, 'exact')

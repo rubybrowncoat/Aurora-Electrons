@@ -1,5 +1,6 @@
 // How fast a survey fleet works and how many points a body takes: the rules behind the Survey Progress page. A fleet's points a day are its undamaged sensors' rating, times the officer factor, the crew morale and the crew aboard, times the naval admin Survey share in range and the game's survey speed. Evidence and checks against saved progress: docs/plans/backlog/evidence/AE-110-01.md (AE-110-02).
 
+import { crewFraction } from './crew'
 import { envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const HOURS_PER_DAY = 24
@@ -97,22 +98,19 @@ export const officerFactor = (ship) => {
   return science * captain
 }
 
-// The share of its crew a ship has aboard, as the game scales its sensors: 1 at full crew or more, and a class without crew always runs.
-const crewShare = (ship) => (ship.ClassCrew > 0 && ship.CurrentCrew < ship.ClassCrew ? Math.max(0, ship.CurrentCrew) / ship.ClassCrew : 1)
-
-const isShort = (ship) => crewShare(ship) < 1
+const isShort = (ship) => crewFraction(ship) < 1
 
 // The sensor rating a ship adds before the fleet's crew factor: the undamaged sensors' rating times the officer factor and the crew morale and the crew share.
-const shipRating = (ship, value) => value * officerFactor(ship) * ship.CrewMorale * crewShare(ship)
+const shipRating = (ship, value) => value * officerFactor(ship) * ship.CrewMorale * crewFraction(ship)
 
 // The fleet's total, adding the ships in the order given. The game also applies a short-crewed ship's crew share to the running total once it has added that ship, so a short crew counts twice, and in a fleet of several ships the result depends on the order.
 const fleetTotal = (ships, value) => ships.reduce((total, ship) => {
   const added = total + shipRating(ship, ship[value])
 
-  return isShort(ship) ? added * crewShare(ship) : added
+  return isShort(ship) ? added * crewFraction(ship) : added
 }, 0)
 
-const weight = (ship, value) => (shipRating(ship, ship[value]) * crewShare(ship)) / (1 - crewShare(ship))
+const weight = (ship, value) => (shipRating(ship, ship[value]) * crewFraction(ship)) / (1 - crewFraction(ship))
 
 // The lowest and highest total over every order of the ships, for a fleet whose order is not known. Each ship turns the running total t into share x (t + rating), a share of 1 for a ship with its full crew, so a ship's rating counts times the shares of the ships after it: the full-crewed ships go last for the highest total and first for the lowest, and the short-crewed ones go in rising order of rating x share / (1 - share) for the highest and in falling order for the lowest (the order of any two neighbours that gives the larger total depends only on that figure).
 const fleetTotalRange = (ships, value) => {
@@ -140,7 +138,7 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, version = null 
 
   const sensors = ships.filter((ship) => ship[value] > 0).sort((a, b) => a.ShipID - b.ShipID)
 
-  if (sensors.some((ship) => !Number.isFinite(ship.CurrentCrew) || !Number.isFinite(ship.ClassCrew) || !Number.isFinite(ship.CrewMorale))) {
+  if (sensors.some((ship) => crewFraction(ship) === null || !Number.isFinite(ship.CrewMorale))) {
     missing.push('a ship\'s crew or morale')
   }
 

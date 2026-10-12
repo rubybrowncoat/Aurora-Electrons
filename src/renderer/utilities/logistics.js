@@ -1,5 +1,6 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks: docs/plans/aurcalcs/build-2.md § Logistics.
 
+import { crewFraction } from './crew'
 import { roundToDecimal } from './math'
 import { navalAdminChainBonus } from './minerals'
 import { envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
@@ -88,9 +89,6 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
 // Fuel a class burns per ship and year at full power: engine power x litres per EP-hour.
 export const fullPowerBurn = (shipClass) => shipClass.EnginePower * shipClass.FuelEfficiency * HOURS_PER_YEAR
 
-// The share of its crew a harvester has aboard: 1 at full crew or more, and a class without crew always runs.
-export const harvesterCrewShare = (ship) => (ship.ClassCrew > 0 && ship.CurrentCrew < ship.ClassCrew ? Math.max(0, ship.CurrentCrew) / ship.ClassCrew : 1)
-
 // The naval admin Mining multiplier a harvester earns: its fleet's command up the chain, and for a fleet with no command the race's root command. `admins`: as `loadNavalAdmins` gives them; `ship`: { SystemID, NavalAdminCommandID }.
 export const harvesterAdminBonus = (admins, ship) => {
   const root = Object.values(admins).find((admin) => !admin.ParentCommandID)
@@ -144,6 +142,7 @@ const assumptionsFor = (rule, version) => (ruleSupports(rule, version) === true 
 // The inputs of the unconstrained rate the save does not give.
 const rateMissing = (ship) => [
   ...(Number.isFinite(ship.Harvesters) ? [] : ['the undamaged harvester modules']),
+  ...(crewFraction(ship) === null ? ['the ship\'s crew'] : []),
   ...(!ship.SystemBodyID ? ['a gas giant or super-Jovian under the fleet'] : !ship.Surveyed ? ['the Sorium deposit (the body is not surveyed)'] : []),
 ]
 
@@ -156,7 +155,7 @@ const harvesterRate = (ship, admin, version) => {
     return unavailable({ rule, missing, present: ['the racial rate', 'the commander and naval admin bonuses', 'the crew'] })
   }
 
-  const value = ship.Harvesters * ship.FuelProduction * ship.MiningBonus * admin * harvesterCrewShare(ship) * (ship.SoriumAccessibility || 0)
+  const value = ship.Harvesters * ship.FuelProduction * ship.MiningBonus * admin * crewFraction(ship) * (ship.SoriumAccessibility || 0)
 
   return envelope({ value, status: statusFor(rule, version), rule, inputs: { present: ['the undamaged modules', 'the racial rate', 'the commander and naval admin bonuses', 'the crew', 'the deposit'] }, assumptions: assumptionsFor(rule, version) })
 }
@@ -164,6 +163,7 @@ const harvesterRate = (ship, admin, version) => {
 // One harvester's standing: why it works or not, its undamaged modules, tank room, unconstrained rate (a result and its value, null when unknown) and the years the rate takes to fill the room and the deposit's litres. `ship` is a row of the page's harvesters query; `admin` the naval admin multiplier (`harvesterAdminBonus`); `version` the formula version.
 export const harvesterBasis = (ship, { admin = 1, version = null } = {}) => {
   const idle = harvesterIdleReason(ship)
+  const crew = crewFraction(ship)
   const room = Number.isFinite(ship.FuelCapacity) ? Math.max(0, ship.FuelCapacity - ship.Fuel) : null
   const rate = harvesterRate(ship, admin, version)
   const perYear = rate.value
@@ -171,7 +171,8 @@ export const harvesterBasis = (ship, { admin = 1, version = null } = {}) => {
 
   return {
     idle,
-    unknown: harvesterReasonIsUnknown(idle),
+    unknown: harvesterReasonIsUnknown(idle) || (idle === null && crew === null),
+    crew,
     modules: ship.Harvesters,
     classModules: ship.ClassHarvesters,
     capacity: ship.FuelCapacity,
@@ -191,6 +192,7 @@ export const harvesterObtainable = (basis, horizon, version = null) => {
     const missing = [
       ...(Number.isFinite(basis.modules) ? [] : ['the undamaged harvester modules']),
       ...(Number.isFinite(basis.capacity) ? [] : ['the undamaged tank capacity']),
+      ...(basis.crew === null ? ['the ship\'s crew'] : []),
       ...(basis.idle === 'Not surveyed' ? ['the Sorium deposit (the body is not surveyed)'] : []),
     ]
 

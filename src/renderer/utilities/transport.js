@@ -1,6 +1,6 @@
 // Maths for the Transport page and what Hauling shares with it: which jump points a fleet's ships can transit, whether a ship can load or unload at a stop and why not, the loading strength of a ship at a stop and the time a stop takes, and the round trip of a group of ships between two places.
 
-import { crewFraction } from './minerals'
+import { crewFraction } from './crew'
 import { routeLegs } from './jump-graph'
 import { ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
@@ -206,12 +206,12 @@ export const shipEligibility = (ship, given, version) => {
     return verdict('blocked', 'no-colony', `${place} has no colony, and cargo moves only at a colony`)
   }
 
-  if (ship.ClassCrew > 0) {
-    if (ship.CurrentCrew === null || ship.CurrentCrew === undefined) {
-      return verdict('unsupported', 'crew', `${name}'s crew is not in the save`)
-    } else if (!(ship.CurrentCrew > 0)) {
-      return verdict('blocked', 'crew', `${name} has no crew aboard`)
-    }
+  const share = crewFraction(ship)
+
+  if (share === null) {
+    return verdict('unsupported', 'crew', `${name}'s crew is not in the save`)
+  } else if (share === 0) {
+    return verdict('blocked', 'crew', `${name} has no crew aboard`)
   }
 
   const helped = [endpoint.service === true ? endpoint.services || 'a spaceport or cargo shuttle station' : null, bays > 0 ? 'undamaged cargo shuttle bays' : null].filter(Boolean)

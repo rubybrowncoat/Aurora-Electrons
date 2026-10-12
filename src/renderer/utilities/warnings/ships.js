@@ -1,6 +1,9 @@
+import { CREW_MODULE_TYPES, crewEffects, crewFraction, crewFractionSql } from '../crew'
 import { linkTo, place } from '../deep-links'
+import { roundHalfEven } from '../design-rules'
 import { roundToDecimal } from '../math'
-import { amount, levelTone, rowsOf } from './common'
+import { loadFormulaVersion } from '../transport'
+import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, levelTone, rowsOf } from './common'
 
 export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems, so they can be repaired or refit before they matter.' }
 
@@ -17,29 +20,87 @@ const shipRow = (ship, cells, extra = {}) => ({
   ...extra,
 })
 
+// The colonies where a fleet can take on replacement crew: the race's own with more than a million people, the fleet's own system first and then the largest. Up to three are named.
+const REPLACEMENT_LIMIT = 3
+
+const replacementText = (ship, colonies) => {
+  if (!colonies.length) {
+    return 'No colony of the race has over a million people'
+  }
+
+  const inFleetSystem = (colony) => Number(colony.SystemID === ship.SystemID)
+  const ordered = [...colonies].sort((alpha, beta) => inFleetSystem(beta) - inFleetSystem(alpha) || beta.Population - alpha.Population)
+  const named = ordered.slice(0, REPLACEMENT_LIMIT).map((colony) => colonyText(colony)).join('; ')
+
+  return ordered.length > REPLACEMENT_LIMIT ? `${named}; ${ordered.length - REPLACEMENT_LIMIT} more` : named
+}
+
+// The crew grade the game turns into a performance modifier, in percent: the root of the grade points less 10. It and the crew morale are separate from the share of the crew aboard.
+const gradeText = (ship) => {
+  if (!Number.isFinite(ship.GradePoints) || ship.GradePoints < 0) {
+    return 'grade unknown'
+  }
+
+  const grade = roundHalfEven(Math.sqrt(ship.GradePoints) - 10)
+
+  return `grade ${grade >= 0 ? '+' : ''}${grade}%`
+}
+
+// A class with no deployment morale check (a commercial one, or any class with no military system or survey sensor) never loses morale to deployment, but its crew deficit still slows what it does.
+const moraleText = (ship) => [ship.MoraleCheckRequired ? (Number.isFinite(ship.CrewMorale) ? `morale ${percent(ship.CrewMorale)}` : 'morale unknown') : 'no morale check', gradeText(ship)].join(' · ')
+
+const modulesOf = (lines) => lines.reduce((modules, line) => ({ ...modules, [line.TypeID]: { designed: line.Designed, working: line.Working } }), {})
+
+const holdsOf = (ship) => {
+  const capacities = [ship.CargoCapacity, ship.ColonistCapacity, ship.TroopCapacity]
+
+  return capacities.every(Number.isFinite) ? capacities.some((capacity) => capacity > 0) : null
+}
+
 export const checks = [
   {
     key: 'undermanned-ships',
     group: group.key,
     severity: 'needs-action',
     title: (count) => `${amount(count, 'ship')} short of crew`,
-    rule: 'A ship has fewer crew aboard than its class needs; survey sensors, harvesters, orbital mining, maintenance, salvage, terraforming and jump point stabilisation modules run at the share of crew aboard, cargo handling slows, and morale drops below half a crew.',
+    rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of over a million people.',
     columns: [
       { key: 'ship', text: 'Ship' },
       { key: 'crew', text: 'Crew', align: 'end' },
       { key: 'aboard', text: 'Aboard', align: 'end' },
+      { key: 'slowed', text: 'Slowed' },
+      { key: 'morale', text: 'Morale and grade' },
+      { key: 'replace', text: 'Replace crew at' },
     ],
     async read(ctx) {
       const { GameID, RaceID } = ctx
+      const short = `FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.Crew > 0 and (FCT_Ship.CurrentCrew is null or FCT_Ship.CurrentCrew < FCT_ShipClass.Crew)`
 
-      const ships = await rowsOf(ctx, `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ClassName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_Ship.CrewMorale from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.Crew > 0 and FCT_Ship.CurrentCrew < FCT_ShipClass.Crew order by FCT_Ship.CurrentCrew * 1.0 / FCT_ShipClass.Crew, FCT_Fleet.FleetName`)
+      const ships = await rowsOf(ctx, `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.ClassName, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_Ship.CrewMorale, FCT_Ship.GradePoints, FCT_ShipClass.MoraleCheckRequired, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.TroopCapacity, (select count(*) from FCT_ClassComponent where FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID) as ClassLines from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where ${short} order by ${crewFractionSql()}, FCT_Fleet.FleetName`)
+
+      if (!ships.length) {
+        return []
+      }
+
+      const [lines, colonies, version] = await Promise.all([
+        rowsOf(ctx, `select FCT_Ship.ShipID, FCT_ShipDesignComponents.ComponentTypeID as TypeID, sum(FCT_ClassComponent.NumComponent) as Designed, sum(max(FCT_ClassComponent.NumComponent - coalesce((select FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_DamagedComponent.ComponentID = FCT_ClassComponent.ComponentID), 0), 0)) as Working from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID in (${CREW_MODULE_TYPES.join(', ')}) where ${short} group by FCT_Ship.ShipID, FCT_ShipDesignComponents.ComponentTypeID`),
+        rowsOf(ctx, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Population, ${COLONY_COLUMNS} from FCT_Population ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Population > 1`),
+        loadFormulaVersion(ctx.database),
+      ])
+
+      const linesByShip = lines.reduce((byShip, line) => ({ ...byShip, [line.ShipID]: [...(byShip[line.ShipID] || []), line] }), {})
 
       return ships.map((ship) => {
-        const level = ship.CurrentCrew / ship.ClassCrew
+        const level = crewFraction(ship)
+        const effects = crewEffects(ship, { modules: ship.ClassLines > 0 ? modulesOf(linesByShip[ship.ShipID] || []) : null, holds: holdsOf(ship), version })
+        const stopped = effects.some((effect) => effect.state === 'blocked' || effect.state === 'stopped' || effect.state === 'unsupported')
 
         return shipRow(ship, {
-          crew: { text: percent(level), tone: levelTone(level) },
-          aboard: `${ctx.count(ship.CurrentCrew)} of ${ctx.count(ship.ClassCrew)}`,
+          crew: level === null ? 'Unknown' : { text: percent(level), tone: levelTone(level) },
+          aboard: `${Number.isFinite(ship.CurrentCrew) ? ctx.count(ship.CurrentCrew) : 'unknown'} of ${ctx.count(ship.ClassCrew)}`,
+          slowed: effects.length ? { text: effects.map((effect) => effect.text).join(' · '), tone: stopped ? 'error' : 'warning' } : 'No hold or module the crew share scales',
+          morale: moraleText(ship),
+          replace: replacementText(ship, colonies),
         }, { caption: `${ship.FleetName} · ${ship.ClassName} Class` })
       })
     },
