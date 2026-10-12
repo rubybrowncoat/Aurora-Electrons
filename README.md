@@ -1,5 +1,7 @@
 # Aurora Electrons
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rubybrowncoat/Aurora-Electrons)
+
 #### Build Setup
 
 Requires Node 22.12 or newer (`.nvmrc` pins 24, so `nvm use 24` works) and [Bun](https://bun.com) as the package manager. The scripts still run on Node.
