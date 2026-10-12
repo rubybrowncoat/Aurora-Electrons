@@ -137,7 +137,7 @@
                 </div>
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
                 <div v-if="item.year" class="caption text--secondary mt-2">Each cycle: {{ fixed(item.year.movingDays, 2) }} days moving and {{ fixed(item.handlingHours, 1) }} hours loading and unloading.</div>
-                <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold: {{ tons(item.cargo.perTrip.minerals + item.cargo.perTrip.installations) }} a trip.</div>
+                <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
               </td>
             </template>
           </v-data-table>
@@ -312,12 +312,14 @@ export default {
         // A stop does something where it goes: transits and plain moves only pass through.
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''
+        const tripText = [cargo.perTrip.minerals ? `${this.tons(cargo.perTrip.minerals)} of minerals` : null, cargo.perTrip.installations ? `${this.tons(cargo.perTrip.installations)} of installations` : null].filter(Boolean).join(' and ')
         const routesLink = this.routesLink(fleet, orders)
 
         return {
           ...fleet,
           route,
           cargo,
+          tripText,
           year,
           stopsText: stops.join(' → '),
           routesLink: routesLink.to,
