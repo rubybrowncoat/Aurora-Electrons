@@ -2,7 +2,8 @@
 
 import { CARGO_POINTS } from './hauling'
 import { routeLegs, searchRoutes } from './jump-graph'
-import { hasGate, roundTrip } from './transport'
+import { hasGate, colonyEndpoint, roundTrip } from './transport'
+import { registerRule } from './provenance'
 
 // Less than a tonne is rounding.
 const TONNE = 1
@@ -118,11 +119,32 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
   }
 }
 
-// What one freighter class takes to carry a haul: the holds its cargo fills (a tonne of mineral takes two cargo points, `CARGO_POINTS.minerals`, so a hold carries half its capacity in minerals), a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceport or cargo shuttle station from its `Station`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed and undamaged, so the loading strength is the class's `ShuttleStrength` as designed. `shipClass` carries the class figures roundTrip reads.
-export const haulByClass = (haul, shipClass, shuttleTechnology) => {
-  const trip = roundTrip([{ ...shipClass, CurrentCrew: shipClass.ClassCrew }], haul.km, { origin: Boolean(haul.from.Station), destination: Boolean(haul.to.Station) }, shuttleTechnology, { colonists: false })
+// What one freighter class takes to carry a haul: the holds its cargo fills (a tonne of mineral takes two cargo points, `CARGO_POINTS.minerals`, so a hold carries half its capacity in minerals), a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceports and cargo shuttle stations from its `ShuttleCapacity` and `ServiceNames`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed and undamaged, so the loading strength is the class's `ShuttleStrength` as designed. `shipClass` carries the class figures roundTrip reads. `version` is the formula version (`loadFormulaVersion`). A trip that can't be timed has no days (null).
+export const haulByClass = (haul, shipClass, shuttleTechnology, version = null) => {
+  const trip = roundTrip([{ ...shipClass, CurrentCrew: shipClass.ClassCrew }], haul.km, { origin: colonyEndpoint(haul.from), destination: colonyEndpoint(haul.to) }, shuttleTechnology, { colonists: false, version })
   const holds = Math.ceil((haul.tonnes * CARGO_POINTS.minerals) / shipClass.CargoCapacity)
-  const tripDays = trip.tripSeconds / SECONDS_PER_DAY
+  const tripDays = trip.tripSeconds === null ? null : trip.tripSeconds / SECONDS_PER_DAY
 
-  return { ...trip, shipClass, holds, tripDays, oneShipDays: holds * tripDays, classDays: Math.ceil(holds / Math.max(1, shipClass.Ships)) * tripDays }
+  return { ...trip, shipClass, holds, tripDays, oneShipDays: tripDays === null ? null : holds * tripDays, classDays: tripDays === null ? null : Math.ceil(holds / Math.max(1, shipClass.Ships)) * tripDays }
 }
+
+// The rules this module implements, registered once (utilities/provenance.js). The days a class takes lean on the loading and round-trip rules in utilities/transport.js. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
+registerRule({
+  id: 'hauling.planTonnes',
+  versions: ['2.7.x'],
+  units: 't',
+  verification: 'estimated',
+  structure: ['FCT_Population mineral stock and reserve', 'FCT_IndustrialProjects and shipyard tasks', 'FCT_MassDriverPackets'],
+  note: 'A colony is short of a mineral by what its build queue needs beyond its stock and the packets on their way, and by its reserve when that is asked for; it gives what it holds above its reserve and its own queue. Which colony covers which shortfall (the nearest with stock to spare first) is the planner\'s choice, not a game rule.',
+  assumptions: ['the queue\'s needs are what the build queue asks for now', 'the nearest colony with stock to spare supplies first', 'minerals already in a freighter\'s hold are not counted'],
+})
+
+registerRule({
+  id: 'hauling.haulDays',
+  versions: ['2.7.x'],
+  units: 'days',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.CargoCapacity, MaxSpeed'],
+  note: 'Holds a class needs for the haul times its round trip (`transport.roundTrip`, cargo only), for one ship and for all the class\'s ships. The ships are taken as fully crewed and undamaged.',
+  assumptions: ['full holds', 'fully crewed, undamaged ships', 'top speed both ways'],
+})

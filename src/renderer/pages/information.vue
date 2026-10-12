@@ -78,7 +78,7 @@
         <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run and how much it could carry. Use it to pick the best ships for a haul between two places." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
-              <span>Fleets on this run</span>
+              <span>Fleets on this run<provenance-mark rule="transport.roundTrip" label /></span>
               <v-chip v-if="destination" small class="ml-3">{{ origin.name }} → {{ destination.name }}</v-chip>
               <page-link v-if="destination" class="ml-1" :to="routesLink" :name="`${origin.name} to ${destination.name}`" />
             </span>
@@ -91,21 +91,21 @@
               </div>
             </template>
             <template #[`item.ships`]="{ item }">{{ count(item.ships) }}</template>
-            <template #[`item.cargo`]="{ item }"><span class="text-no-wrap">{{ item.cargo ? `${count(item.cargo)} t` : '—' }}</span></template>
-            <template #[`item.colonists`]="{ item }"><span class="text-no-wrap">{{ item.colonists ? count(item.colonists) : '—' }}</span></template>
+            <template #[`item.cargo`]="{ item }"><span v-if="item.cargo !== null" class="text-no-wrap">{{ count(item.cargo) }} t</span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonists`]="{ item }"><span v-if="item.colonists !== null" class="text-no-wrap">{{ count(item.colonists) }}</span><span v-else class="text--secondary">—</span></template>
             <template #[`item.speed`]="{ item }"><span class="text-no-wrap">{{ count(item.speed) }} km/s</span></template>
             <template #[`item.tripDays`]="{ item }">
               <div v-if="item.status === 'ok' || item.status === 'range'" class="py-2 text-no-wrap" :title="tripTitle(item)">
-                <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}</div>
+                <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
                 <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}</div>
               </div>
-              <span v-else class="text--secondary">—</span>
+              <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
-            <template #[`item.trips`]="{ item }"><span v-if="item.trips" class="text-no-wrap">{{ count(item.trips, 1) }}</span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear" class="text-no-wrap">{{ count(item.tonsYear) }} t</span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear" class="text-no-wrap">{{ count(item.colonistsYear) }}</span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}</span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t</span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}</span><span v-else class="text--secondary">—</span></template>
             <template #[`item.fuel`]="{ item }">
-              <div v-if="item.fuel" class="py-2 text-no-wrap">
+              <div v-if="item.fuel !== null" class="py-2 text-no-wrap">
                 <div>{{ count(item.fuel) }} L</div>
                 <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of a tank</div>
               </div>
@@ -121,13 +121,13 @@
               </div>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength: the strength of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology, plus the technology once more if the colony has a spaceport or cargo shuttle station; commander, governor and sector Logistics bonuses are not counted, so times err long. Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, without a station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength: the strength of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology, plus the technology once more if the colony has a spaceport or cargo shuttle station; commander, governor and sector Logistics bonuses are not counted, so times err long. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, with no spaceport or cargo shuttle station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
         </v-card>
 
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
-              <span>Civilian work orders</span>
+              <span>Civilian work orders<provenance-mark rule="transport.shipments" label /></span>
               <template v-if="CivilianShippingLinesActive">
                 <v-chip small class="ml-3">Supply {{ amount(workTotals.supply) }}</v-chip>
                 <v-chip small class="ml-2">Demand {{ amount(workTotals.demand) }}</v-chip>
@@ -168,6 +168,7 @@ import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
@@ -177,7 +178,7 @@ import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
-import { JUMP_DRIVE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, fleetCanTransit, roundTrip, routeBlockers, transitRule } from '../utilities/transport'
+import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, loadFormulaVersion, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -187,6 +188,7 @@ const INPUT_LABELS = {
   ships: 'the ships',
   requests: 'the installation requests',
   shipments: 'the installations in transit',
+  formulaVersion: 'the save\'s schema',
 }
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -203,6 +205,8 @@ const STATUS = {
   ok: { label: 'Can run', icon: 'mdi-check-circle-outline', color: 'success' },
   blocked: { label: 'Can\'t load', icon: 'mdi-alert-circle-outline', color: 'warning' },
   range: { label: 'Out of range', icon: 'mdi-alert-circle-outline', color: 'warning' },
+  unknown: { label: 'Not known', icon: 'mdi-help-circle-outline', color: 'warning' },
+  immobile: { label: 'Can\'t move', icon: 'mdi-alert-circle-outline', color: 'warning' },
   noroute: { label: 'No route', icon: 'mdi-close-circle-outline', color: 'error' },
   none: { label: 'Nothing to move', icon: 'mdi-close-circle-outline', color: 'error' },
 }
@@ -214,7 +218,7 @@ const unique = (values) => [...new Set(values)]
 
 export default {
   name: 'TransportPage',
-  components: { LoadState, PageLink, StatTiles },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -382,15 +386,21 @@ export default {
       }
     },
 
-    stations() {
-      const has = (place) => Boolean(place && place.kind === 'colony' && place.colony.ShuttleCapacity >= 1)
+    // The formula version the save's schema stands for, in words for a panel foot.
+    versionNote() {
+      return describeFormulaVersion(this.formulaVersion)
+    },
 
-      return { origin: has(this.origin), destination: has(this.destination) }
+    // The two ends of the run as places a ship loads or unloads: a colony with the spaceports and cargo shuttle stations it has, and a system as a colony site with none.
+    endpoints() {
+      const endpointOf = (place) => (place ? colonyEndpoint(place.kind === 'colony' ? place.colony : { ShuttleCapacity: 0 }, place.name) : null)
+
+      return { origin: endpointOf(this.origin), destination: endpointOf(this.destination) }
     },
 
     // One entry per class in each fleet that is picked (every shipping line fleet too, while shipping lines are on), timed on its own.
     runs() {
-      const { reachOf, stations, destination } = this
+      const { reachOf, endpoints, destination } = this
       const chosen = new Set(this.chosenFleetIds)
       const runs = []
 
@@ -405,7 +415,7 @@ export default {
 
         const reach = reachOf(group)
 
-        group.classes.forEach((shipClass) => runs.push(this.runOf(group, shipClass, reach, stations)))
+        group.classes.forEach((shipClass) => runs.push(this.runOf(group, shipClass, reach, endpoints)))
       })
 
       return runs
@@ -440,28 +450,31 @@ export default {
 
     tiles() {
       const working = this.rows.filter((row) => row.status === 'ok')
-      const idle = this.rows.filter((row) => row.status !== 'ok').reduce((total, row) => total + row.ships, 0)
+      const unknownRows = this.rows.filter((row) => row.status === 'unknown')
+      const idle = this.rows.filter((row) => row.status !== 'ok' && row.status !== 'unknown').reduce((total, row) => total + row.ships, 0)
+      const unknown = unknownRows.reduce((total, row) => total + row.ships, 0)
       const sum = (list, field) => list.reduce((total, row) => total + row[field], 0)
       const trips = working.reduce((total, row) => total + row.ships * row.trips, 0)
       const shortest = Math.min(...working.map((row) => row.km))
       const longest = Math.max(...working.map((row) => row.km))
       const first = working[0]
-      const idleNote = idle ? `${this.count(idle)} ${idle === 1 ? 'ship' : 'ships'} can't work the route` : ''
-      const none = !this.destination ? 'Pick a destination above' : this.rows.length ? 'No picked fleet can work this route' : 'No fleet carries cargo or colonists'
+      const idleNote = [idle ? `${this.count(idle)} ${idle === 1 ? 'ship' : 'ships'} can't work the route` : '', unknown ? `${this.count(unknown)} ${unknown === 1 ? 'ship is' : 'ships are'} not known to load there` : ''].filter(Boolean).join('; ')
+      const none = !this.destination ? 'Pick a destination above' : this.rows.length ? (unknown ? 'No picked fleet is known to work this route' : 'No picked fleet can work this route') : 'No fleet carries cargo or colonists'
       const civilian = this.civilianRuns.filter((run) => run.status === 'ok')
       const civilianShips = this.civilianRuns.reduce((total, run) => total + run.ships, 0)
+      const civilianUnknown = this.civilianRuns.some((run) => run.status === 'unknown')
       const cargo = sum(working, 'cargo')
       const colonists = sum(working, 'colonists')
 
       return [
         {
           label: 'Freight a year',
-          value: cargo ? `${this.count(sum(working, 'tonsYear'))} t` : '—',
+          value: working.length ? `${this.count(sum(working, 'tonsYear'))} t` : '—',
           note: working.length ? [cargo ? `${this.count(cargo)} t a trip in ${this.count(sum(working, 'ships'))} ships` : 'No fleet that can run has a cargo hold', idleNote].filter(Boolean).join('; ') : none,
         },
         {
           label: 'Colonists a year',
-          value: colonists ? this.count(sum(working, 'colonistsYear')) : '—',
+          value: working.length ? this.count(sum(working, 'colonistsYear')) : '—',
           note: !working.length ? none : colonists ? `${this.count(colonists)} a trip` : 'No fleet that can run has colony bays',
         },
         {
@@ -472,7 +485,7 @@ export default {
         {
           label: 'Civilian freight a year',
           value: !this.CivilianShippingLinesActive ? 'Off in this game' : civilian.length ? `${this.count(sum(civilian, 'tonsYear'))} t` : '—',
-          note: !this.CivilianShippingLinesActive ? 'Shipping lines are not run here' : !this.destination ? 'Pick a destination above' : civilian.length ? `${this.count(sum(civilian, 'colonistsYear'))} colonists a year, from ${this.count(sum(civilian, 'ships'))} of ${this.count(civilianShips)} ships` : civilianShips ? 'None of the shipping line ships can work the route' : 'The shipping lines have no ships',
+          note: !this.CivilianShippingLinesActive ? 'Shipping lines are not run here' : !this.destination ? 'Pick a destination above' : civilian.length ? `${this.count(sum(civilian, 'colonistsYear'))} colonists a year, from ${this.count(sum(civilian, 'ships'))} of ${this.count(civilianShips)} ships` : civilianShips ? (civilianUnknown ? 'None of the shipping line ships is known to work the route' : 'None of the shipping line ships can work the route') : 'The shipping lines have no ships',
         },
       ]
     },
@@ -603,7 +616,7 @@ export default {
     },
 
     // A class in a fleet on a route: what it carries, how long a round trip takes and whether it can run.
-    runOf(group, shipClass, reach, stations) {
+    runOf(group, shipClass, reach, endpoints) {
       const [first] = shipClass.ships
       const count = shipClass.ships.length
       const base = {
@@ -613,20 +626,21 @@ export default {
         ClassName: shipClass.ClassName,
         civilian: group.civilian,
         ships: count,
-        cargo: count * first.CargoCapacity,
-        colonists: count * first.ColonistCapacity,
+        cargo: Number.isFinite(first.CargoCapacity) ? count * first.CargoCapacity : null,
+        colonists: Number.isFinite(first.ColonistCapacity) ? count * first.ColonistCapacity : null,
         speed: first.MaxSpeed,
         jumps: 0,
         km: 0,
-        tripSeconds: 0,
-        travelSeconds: 0,
-        handlingSeconds: 0,
-        tripDays: 0,
-        trips: 0,
-        tonsYear: 0,
-        colonistsYear: 0,
-        fuel: 0,
-        fuelShare: 0,
+        tripSeconds: null,
+        travelSeconds: null,
+        handlingSeconds: null,
+        tripDays: null,
+        trips: null,
+        tonsYear: null,
+        colonistsYear: null,
+        fuel: null,
+        fuelShare: null,
+        provenance: null,
         statusSort: 4,
         status: 'noroute',
         note: '',
@@ -636,19 +650,24 @@ export default {
         return { ...base, note: this.reachNote(group, reach) }
       }
 
-      const trip = roundTrip(shipClass.ships, reach.route.km, stations, first.ShuttleTechnology)
+      const trip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion })
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
-      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, statusSort: works ? 0 : 1 }
+      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: tripResult(trip), statusSort: works ? 0 : 1 }
+      const problems = trip.problems.map((problem) => `${problem.text.charAt(0).toUpperCase()}${problem.text.slice(1)}`).join('; ')
 
       if (works) {
-        return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: base.cargo * trip.trips, colonistsYear: base.colonists * trip.trips, fuel: trip.fuelPerShip * count, fuelShare: trip.fuelShare }
+        return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: base.cargo === null ? null : base.cargo * trip.trips, colonistsYear: base.colonists === null ? null : base.colonists * trip.trips, fuel: trip.fuelPerShip * count, fuelShare: trip.fuelShare }
       } else if (status === 'range') {
         return { ...run, note: `A round trip needs ${this.count(trip.fuelShare * 100)}% of a tank.` }
+      } else if (status === 'unknown') {
+        return { ...run, note: `Not known whether the class can load: ${problems}.` }
+      } else if (status === 'immobile') {
+        return { ...run, note: 'The class has no top speed.' }
       }
 
-      return { ...run, note: trip.problems.length ? `${trip.problems[0].text}.` : '' }
+      return { ...run, note: problems ? `${problems}.` : '' }
     },
 
     // Why a profile of ships can't sail from the origin to the destination.
@@ -663,12 +682,12 @@ export default {
     },
 
     tripTitle(run) {
-      return `${this.duration((2 * run.km) / run.speed / SECONDS_PER_DAY)} flying at ${this.count(run.speed)} km/s, ${this.duration(run.handlingSeconds / SECONDS_PER_DAY)} loading and unloading${run.limiting ? `, the slowest stop set by ${run.limiting.ship.ShipName} at a loading strength of ${this.count(run.limiting.strength, 1)}` : ''}`
+      return `${this.duration(run.travelSeconds / SECONDS_PER_DAY)} flying at ${this.count(run.speed)} km/s, ${this.duration(run.handlingSeconds / SECONDS_PER_DAY)} loading and unloading${run.limiting ? `, the slowest stop set by ${run.limiting.ship.ShipName} at a loading strength of ${this.count(run.limiting.strength, 1)}` : ''}`
     },
 
     // A count of installations, which shipments can split in parts.
     amount(value) {
-      return value ? this.count(value, Number.isInteger(value) ? 0 : 1) : '—'
+      return Number.isFinite(value) ? this.count(value, Number.isInteger(value) ? 0 : 1) : '—'
     },
 
     groupSummary(items) {
@@ -726,7 +745,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Capital, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, coalesce((select sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.GameID = ${this.GameID}), 0) as ShuttleCapacity from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} order by FCT_Population.Capital desc, FCT_Population.Population desc, FCT_Population.PopName`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.Capital, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS} from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} order by FCT_Population.Capital desc, FCT_Population.Population desc, FCT_Population.PopName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -762,6 +781,17 @@ export default {
         return await this.database.query(`select FCT_ShipCargo.CargoID as InstallationID, DIM_PlanetaryInstallation.Name as InstallationName, FCT_ShipCargo.StartingPop as OriginPopulationID, orders.PopulationID as DestinationPopulationID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_ShipCargo.CargoID left join (select FleetID, DestinationItemID, min(PopulationID) as PopulationID from FCT_MoveOrders where GameID = ${this.GameID} and MoveActionID = 177 and DestinationItemType = 19 group by FleetID, DestinationItemID) as orders on orders.FleetID = FCT_Ship.FleetID and orders.DestinationItemID = FCT_ShipCargo.CargoID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 2 and FCT_Ship.ShippingLineID != 0 group by FCT_ShipCargo.CargoID, FCT_ShipCargo.StartingPop, orders.PopulationID`).then(([items]) => Object.freeze(items))
       }),
       default: [],
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
   },
 }

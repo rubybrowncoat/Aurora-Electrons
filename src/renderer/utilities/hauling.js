@@ -1,6 +1,7 @@
 // Hauling maths for the Hauling Planner: repeating routes walked from their orders, and what they move in a year. Sources and checks: docs/plans/aurcalcs/build-3.md § Hauling Planner.
 
-import { LOADS, SECONDS_PER_YEAR, UNLOADS, stopHandling } from './transport'
+import { ofRule, registerRule, unavailable } from './provenance'
+import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, landingThreshold, missingInputsOf, stopHandling } from './transport'
 
 // Orders that move up to MaxItems tonnes of one mineral (Load Mineral Type, Unload Mineral Type, Load Mineral when X available); "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
 const QUANTITY_ACTIONS = new Set([178, 179, 180])
@@ -8,6 +9,103 @@ const QUANTITY_ACTIONS = new Set([178, 179, 180])
 const MAX_PASSES = 200
 // Cargo points of the hold one unit of each kind takes: a tonne of mineral takes two (the game loads available capacity / 2 of a mineral), an installation's tonnes are its cargo points. Colonists have their own berths.
 export const CARGO_POINTS = { minerals: 2, installations: 1 }
+
+// The rules this module implements, registered once (utilities/provenance.js). Loading time is `transport.handlingTime`, whose strength and landing rules the Hauling page shares with Transport. Evidence: docs/plans/backlog/evidence/AE-080-01.md.
+const HAULING_VERSIONS = ['2.7.x']
+
+registerRule({
+  id: 'hauling.routeDistance',
+  versions: HAULING_VERSIONS,
+  units: 'km',
+  verification: 'confirmed',
+  structure: ['FCT_MoveOrders', 'FCT_JumpPoint', 'FCT_LagrangePoint', 'FCT_SystemBody'],
+  note: 'The straight legs between the places a fleet\'s orders name, through the jump points and Lagrange points they cross, as the game measures a fleet\'s orders (docs `fleet`). A route with an order whose place the save no longer holds is not traced and has no distance.',
+})
+
+registerRule({
+  id: 'hauling.cycleTime',
+  versions: HAULING_VERSIONS,
+  units: 'days',
+  verification: 'estimated',
+  structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
+  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays. Loading leaves the Logistics bonuses out, so a cycle comes out long when they apply; refuelling and overhauls are not counted.',
+  assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops'],
+})
+
+registerRule({
+  id: 'hauling.freightMoved',
+  versions: HAULING_VERSIONS,
+  units: 't/yr',
+  verification: 'estimated',
+  structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.CargoCapacity'],
+  note: 'The minerals and installations a cycle carries, followed through the orders and the hold (a tonne of mineral takes two cargo points), times the cycles a year (`hauling.cycleTime`). The capacity arithmetic is exact; the cycles a year are estimated.',
+  assumptions: ['the colony has the stock a load asks for'],
+})
+
+registerRule({
+  id: 'hauling.colonistsMoved',
+  versions: HAULING_VERSIONS,
+  units: 'colonists/yr',
+  verification: 'estimated',
+  structure: ['FCT_MoveOrders.MaxItems', 'FCT_ShipClass.ColonistCapacity'],
+  note: 'The colonists a cycle unloads, followed through the orders and the berths, times the cycles a year (`hauling.cycleTime`). The capacity arithmetic is exact; the cycles a year are estimated.',
+  assumptions: ['the colony has the colonists a load asks for'],
+})
+
+registerRule({
+  id: 'hauling.fuelPerYear',
+  versions: HAULING_VERSIONS,
+  units: 'L/yr',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.EnginePower, FuelEfficiency', 'FCT_Fleet.Speed'],
+  note: 'Litres an hour at full power (engine power x fuel use per engine-power hour, as the Propulsion page\'s rule gives it) x hours under way x cycles a year. Refuelling and overhauls are not counted.',
+  assumptions: ['full power while moving'],
+})
+
+registerRule({
+  id: 'hauling.classYear',
+  versions: HAULING_VERSIONS,
+  units: 'billion km/yr',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.MaxSpeed, CargoCapacity, EnginePower, FuelEfficiency'],
+  note: 'Top speed x a year of seconds, capacity x that distance, and the full-power burn over a year.',
+  assumptions: ['top speed and full power all year, never stopping to load or refuel'],
+})
+
+registerRule({
+  id: 'hauling.deliveries',
+  versions: HAULING_VERSIONS,
+  units: 't/yr',
+  verification: 'estimated',
+  structure: ['FCT_MoveOrders.PopulationID'],
+  note: 'Each unload is credited with the cargo the fleet holds when it gets there, times the cycles a year (`hauling.cycleTime`).',
+  assumptions: ['every cycle delivers the same load'],
+})
+
+// How far a repeating route's figures can be trusted, as provenance results { cycle, freight, colonists, fuel }: the rules' own status when the route has a year, unavailable naming what is missing when a ship's eligibility or a timing input isn't known (`handling.unknown`), and null otherwise (a route that can't be traced, can't load or isn't moving says why in its own note).
+export const routeResults = (route, year, handling) => {
+  const assumptions = handling.versionSupported ? [] : [UNVERIFIED_VERSION]
+
+  if (year) {
+    return {
+      cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, assumptions }),
+      freight: ofRule({ rule: 'hauling.freightMoved', value: year.minerals + year.installations, assumptions }),
+      colonists: ofRule({ rule: 'hauling.colonistsMoved', value: year.colonists, assumptions }),
+      fuel: ofRule({ rule: 'hauling.fuelPerYear', value: year.fuel, assumptions }),
+    }
+  } else if (route.km !== null && handling.unknown.length && !handling.blocked.length) {
+    const missing = missingInputsOf(handling.unknown)
+
+    return {
+      cycle: unavailable({ rule: 'hauling.cycleTime', missing }),
+      freight: unavailable({ rule: 'hauling.freightMoved', missing }),
+      colonists: unavailable({ rule: 'hauling.colonistsMoved', missing }),
+      fuel: unavailable({ rule: 'hauling.fuelPerYear', missing }),
+    }
+  }
+
+  return null
+}
 
 // Where an order sends the fleet (`X`, `Y`, `SystemID`) and where it is afterwards (`ExitX`, `ExitY`, `ExitSystemID`): the same point, unless the order goes through a jump point or jumps between Lagrange points and leaves it on the far side. Positions are in-system km, each destination where the save has it now. An order whose destination the save no longer holds (or a jump point whose far side is uncharted) has none.
 const hasPoint = (order) => order.X !== null && order.X !== undefined && order.ExitX !== null && order.ExitX !== undefined
@@ -104,27 +202,37 @@ export const cycleCargo = (orders, fleet) => {
   return { moves, perTrip, deliveries, holdShare }
 }
 
-// Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`), as that part of every ship's capacity, counting the cargo points a tonne of mineral takes, and takes the slowest ship's time (`stopHandling`). Returns the total `seconds`, the `stops` (each with the `limiting` ship that sets its time and that ship's `strength`), `limiting` (the longest stop's { place, ship, strength }, null when nothing is moved) and the places where some ship can't load, `blocked`: [{ place, reason }].
-export const cycleHandling = (orders, cargo, fleet, ships) => {
+// Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`), as that part of every ship's capacity, counting the cargo points a tonne of mineral takes, and takes the slowest ship's time (`stopHandling`). An order's `endpoint` (`colonyEndpoint` or `bareEndpoint`) is where it loads or unloads; `version` the formula version (`loadFormulaVersion`). Returns the total `seconds` (null when a stop can't be timed), the `stops` (each with the `limiting` ship that sets its time, that ship's `strength` and its `eligibility`), `limiting` (the longest stop's { place, ship, strength }, null when nothing is moved), the places where a ship can't load, `blocked`: [{ place, status, code, text }] with the responsible ship or colony named in `text`, and the places where it isn't known whether one can (a missing input, or a landing size not verified for the version), `unknown`, in the same form. Only cargo orders count: loading troops is no cargo rule's business.
+export const cycleHandling = (orders, cargo, fleet, ships, version = null) => {
   const stops = orders.map((order, index) => {
     const move = cargo.moves[index]
     const capacity = move ? (move.kind === 'colonists' ? fleet.ColonistCapacity : fleet.CargoCapacity) : 0
+    const handled = stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version })
 
-    return { order, ...stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0) }
+    if (!move || Number.isFinite(capacity)) {
+      return { order, ...handled }
+    }
+
+    const gap = { status: 'unsupported', code: 'capacity', text: `${fleet.FleetName}'s ${move.kind === 'colonists' ? 'colonist' : 'cargo'} capacity is not in the save`, ship: fleet.FleetName, endpoint: order.label }
+
+    return { order, ...handled, seconds: null, eligibility: { ...handled.eligibility, status: handled.eligibility.status === 'blocked' ? 'blocked' : 'unsupported', reasons: [...handled.eligibility.reasons, gap] } }
   })
   const longest = stops.reduce((slowest, stop) => (stop.limiting && (!slowest || stop.seconds > slowest.seconds) ? stop : slowest), null)
+  const problems = stops.flatMap((stop) => stop.eligibility.reasons.map((reason) => ({ place: stop.order.label, status: reason.status, code: reason.code, text: reason.text }))).filter((problem, index, all) => all.findIndex((other) => other.text === problem.text) === index)
 
   return {
-    seconds: stops.reduce((sum, stop) => sum + stop.seconds, 0),
+    seconds: problems.length ? null : stops.reduce((sum, stop) => sum + stop.seconds, 0),
     stops,
     limiting: longest ? { place: longest.order.label, ship: longest.limiting, strength: longest.strength } : null,
-    blocked: stops.filter((stop) => stop.blocked).map((stop) => ({ place: stop.order.label, reason: stop.blocked })).filter((stop, index, all) => all.findIndex((other) => other.place === stop.place && other.reason === stop.reason) === index),
+    blocked: problems.filter((problem) => problem.status === 'blocked'),
+    unknown: problems.filter((problem) => problem.status === 'unsupported'),
+    versionSupported: landingThreshold(version) !== null,
   }
 }
 
-// A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order delays), what it moves, and the fuel its engines burn while moving (litres per hour x hours under way). Refuelling and overhauls aren't counted. A route that can't be traced, or where a ship can't load (`handling.blocked`), has no year: it would never move its cargo.
+// A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order delays), what it moves, and the fuel its engines burn while moving (litres per hour x hours under way). Refuelling and overhauls aren't counted. A route that can't be traced, a fleet with no speed, or a route where a ship can't load or isn't known to (`handling.blocked`, `handling.unknown`), has no year: it would never move its cargo, or it can't be told.
 export const routeYear = (fleet, route, cargo, handling, delaySeconds = 0) => {
-  if (route.km === null || !(fleet.Speed > 0) || handling.blocked.length) {
+  if (route.km === null || !(fleet.Speed > 0) || handling.blocked.length || handling.unknown.length) {
     return null
   }
 

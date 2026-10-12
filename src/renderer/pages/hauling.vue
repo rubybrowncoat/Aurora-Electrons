@@ -8,9 +8,8 @@
 
         <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, from the nearest colony with stock to spare, and what each freighter class takes to carry them." elevation="1">
           <div class="panel-head">
-            <span>Hauling plan</span>
+            <span>Hauling plan<provenance-mark rule="hauling.planTonnes" label /></span>
             <span class="d-flex align-center flex-wrap plan-tools">
-              <v-chip small>Estimates</v-chip>
               <v-switch v-model="planReserves" label="Fill reserves" dense hide-details class="mt-0" />
             </span>
           </div>
@@ -48,7 +47,7 @@
                     <tr>
                       <th>Class</th>
                       <th class="text-right" title="A tonne of mineral takes two tonnes of a ship's cargo capacity, so a hold carries half the class's cargo in minerals">Holds</th>
-                      <th class="text-right">Round trip</th>
+                      <th class="text-right">Round trip<provenance-mark rule="hauling.haulDays" /></th>
                       <th class="text-right">One ship</th>
                       <th class="text-right">All its ships</th>
                       <th />
@@ -58,7 +57,7 @@
                     <tr v-for="estimate in item.estimates" :key="estimate.shipClass.ShipClassID">
                       <td class="caption">{{ estimate.shipClass.ClassName }}</td>
                       <td class="caption text-right">{{ count(estimate.holds) }}</td>
-                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.tripDays, 1)} d` : '—' }}</td>
+                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.tripDays, 1)} d` : '—' }}<provenance-mark v-if="estimate.result" :result="estimate.result" /></td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.oneShipDays, 1)} d` : '—' }}</td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.classDays, 1)} d with ${count(estimate.shipClass.Ships)}` : '—' }}</td>
                       <td class="caption warning--text">{{ estimate.note }}</td>
@@ -74,14 +73,13 @@
             <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}</div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
           </div>
         </v-card>
 
         <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1">
           <div class="panel-head">
-            <span>Repeating routes</span>
-            <v-chip small>Estimates</v-chip>
+            <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
@@ -103,22 +101,42 @@
               </v-tooltip>
             </template>
             <template #[`item.cycleSort`]="{ item }">
-              <span v-if="item.year" class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span>
-              <span v-else class="text--secondary">—</span>
-              <div v-if="item.blocked.length" class="caption warning--text">Can't load at {{ item.blockedText }}. Left out of the totals.</div>
-              <div v-else-if="item.route.km !== null && !(item.Speed > 0)" class="caption warning--text">Not moving. Left out of the totals.</div>
+              <template v-if="item.year">
+                <span class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span><provenance-mark :result="item.results.cycle" />
+              </template>
+              <template v-else>
+                <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.cycle" />
+              </template>
+              <div v-if="item.blocked.length" class="caption warning--text">Can't load: {{ item.blockedText }}. Left out of the totals.</div>
+              <div v-if="item.unknown.length" class="caption warning--text">Not known whether the ships can load: {{ item.unknownText }}. Left out of the totals.</div>
+              <div v-if="!item.blocked.length && !item.unknown.length && item.route.km !== null && !(item.Speed > 0)" class="caption warning--text">Not moving. Left out of the totals.</div>
             </template>
             <template #[`item.tripsSort`]="{ item }">
-              <span v-if="item.year">{{ fixed(item.year.trips, 1) }}</span>
-              <span v-else class="text--secondary">—</span>
+              <template v-if="item.year">
+                <span>{{ fixed(item.year.trips, 1) }}</span><provenance-mark :result="item.results.cycle" />
+              </template>
+              <template v-else>
+                <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.cycle" />
+              </template>
             </template>
             <template #[`item.movedSort`]="{ item }">
-              <span v-if="item.year && item.movedText" class="text-no-wrap">{{ item.movedText }}</span>
-              <span v-else class="text--secondary">{{ item.year ? 'No cargo delivered' : '—' }}</span>
+              <template v-if="item.year">
+                <span v-if="item.freightText" class="text-no-wrap">{{ item.freightText }}</span><provenance-mark v-if="item.freightText" :result="item.results.freight" />
+                <span v-if="item.freightText && item.colonistsText">, </span>
+                <span v-if="item.colonistsText" class="text-no-wrap">{{ item.colonistsText }}</span><provenance-mark v-if="item.colonistsText" :result="item.results.colonists" />
+                <span v-if="!item.freightText && !item.colonistsText" class="text--secondary">No cargo delivered</span>
+              </template>
+              <template v-else>
+                <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.freight" />
+              </template>
             </template>
             <template #[`item.fuelSort`]="{ item }">
-              <span v-if="item.year" class="text-no-wrap">{{ litres(item.year.fuel) }}</span>
-              <span v-else class="text--secondary">—</span>
+              <template v-if="item.year">
+                <span class="text-no-wrap">{{ litres(item.year.fuel) }}</span><provenance-mark :result="item.results.fuel" />
+              </template>
+              <template v-else>
+                <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.fuel" />
+              </template>
             </template>
             <template #expanded-item="{ headers, item }">
               <td :colspan="headers.length" class="py-3">
@@ -142,14 +160,14 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Fleets Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the docs' cargo-handling time as Transport times it: every ship works at once and the slowest sets the stop's time, each at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology, plus the technology once more at a colony with a spaceport or cargo shuttle station. Commander, governor, admin and sector Logistics bonuses aren't counted, so a time can come out long; refuelling and overhauls aren't counted.
+            Fleets Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the docs' cargo-handling time as Transport times it: every ship works at once and the slowest sets the stop's time, each at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology, plus the technology once more at a colony with a spaceport or cargo shuttle station. A ship over 500 t with no undamaged bays can load or unload only at such a colony, and a route where a ship can't is named with the reason and left out of the totals; so is a route where it isn't known whether a ship can. Commander, governor, admin and sector Logistics bonuses aren't counted, so a time can come out long; refuelling and overhauls aren't counted. {{ versionNote }}
           </div>
         </v-card>
 
         <v-row>
           <v-col cols="12" xl="6">
             <v-card class="panel" data-summary="What the repeating routes bring to each colony every year, by cargo. Use it to see which colonies depend most on hauling." elevation="1">
-              <div class="panel-head"><span>Deliveries by destination</span></div>
+              <div class="panel-head"><span>Deliveries by destination<provenance-mark rule="hauling.deliveries" label /></span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
                   <span>{{ item.destination }}</span><page-link :to="colonyLink(item.PopulationID)" :name="item.destination" class="ml-1" />
@@ -161,14 +179,14 @@
           </v-col>
           <v-col cols="12" xl="6">
             <v-card class="panel" data-summary="Freighter classes with their capacity, speed and yearly distance and fuel. Use it to compare which classes haul most efficiently." elevation="1">
-              <div class="panel-head"><span>Freighter classes</span></div>
+              <div class="panel-head"><span>Freighter classes<provenance-mark rule="hauling.classYear" label /></span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">
                   <span class="font-weight-medium">{{ item.ClassName }}</span>
                   <span class="caption text--secondary"> {{ item.HullAbbr }}</span>
                 </template>
-                <template #[`item.CargoCapacity`]="{ item }">{{ item.CargoCapacity ? tons(item.CargoCapacity) : '—' }}</template>
-                <template #[`item.ColonistCapacity`]="{ item }">{{ item.ColonistCapacity ? count(item.ColonistCapacity) : '—' }}</template>
+                <template #[`item.CargoCapacity`]="{ item }">{{ tons(item.CargoCapacity) }}</template>
+                <template #[`item.ColonistCapacity`]="{ item }">{{ count(item.ColonistCapacity) }}</template>
                 <template #[`item.MaxSpeed`]="{ item }">{{ count(item.MaxSpeed) }}</template>
                 <template #[`item.gkm`]="{ item }">{{ count(item.gkm) }}</template>
                 <template #[`item.fuel`]="{ item }">{{ litres(item.fuel) }}</template>
@@ -187,18 +205,19 @@ import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
-import { classYear, cycleCargo, cycleHandling, routeYear, walkRoute } from '../utilities/hauling'
+import { classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
-import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_STRENGTH_COLUMNS } from '../utilities/transport'
+import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, loadFormulaVersion, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
   classes: 'the freighter classes',
@@ -210,6 +229,7 @@ const INPUT_LABELS = {
   packets: 'the mass-driver packets in flight',
   jumpPoints: 'the jump points',
   shuttleTechnology: 'the shuttle technology',
+  formulaVersion: 'the save\'s schema',
 }
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
@@ -218,6 +238,9 @@ const SUMMARY_PAGE_SIZES = [10, 25, -1]
 // The tables an order's destination sits in, each joined only for its own DestinationType (body, survey location, waypoint, contact, life pod, wreck, fleet, aether gate), so at most one of them gives the point. Jump points and Lagrange points come first in `orderPoint`: they are the only ones whose far side can differ from where the fleet went.
 const DESTINATIONS = ['FCT_SystemBody', 'VIR_Survey', 'VIR_Waypoint', 'VIR_Contact', 'VIR_Lifepod', 'VIR_Wreck', 'VIR_Destination', 'VIR_AetherGate']
 const orderPoint = (crossings, column) => `coalesce(${[...crossings, ...DESTINATIONS].map((table) => `${table}.${column}`).join(', ')})`
+
+// Whether a figure is one the save gave: a number that is not NaN or infinite. Unknown is not zero, so an absent figure reads as a dash and a real 0 as 0.
+const known = (value) => typeof value === 'number' && Number.isFinite(value)
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -250,7 +273,7 @@ const cycleStops = (orders, raceId) => {
 
 export default {
   name: 'HaulingPage',
-  components: { LoadState, PageLink, StatTiles },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     loadState(INPUT_LABELS),
     persistedView({
@@ -289,14 +312,20 @@ export default {
       return byFleet
     },
 
+    // The formula version the save's schema stands for, in words for a panel foot.
+    versionNote() {
+      return describeFormulaVersion(this.formulaVersion)
+    },
+
     ordersByFleet() {
       const byFleet = {}
 
       this.orders.forEach((order) => {
         const label = placeOf(order)
         const exitLabel = !order.Jumps ? label : order.DestinationType === 1 ? `${order.ArrivalSystemName || 'next system'} (arrival)` : order.Description && order.Description.includes(' Jump to ') ? order.Description.split(' Jump to ').pop() : label
+        const endpoint = order.PopulationID > 0 ? colonyEndpoint(order, label) : bareEndpoint(label)
 
-        ;(byFleet[order.FleetID] = byFleet[order.FleetID] || []).push({ ...order, label, exitLabel })
+        ;(byFleet[order.FleetID] = byFleet[order.FleetID] || []).push({ ...order, label, exitLabel, endpoint })
       })
 
       return byFleet
@@ -308,11 +337,13 @@ export default {
         const route = walkRoute(orders)
         const cargo = cycleCargo(orders, fleet)
         const ships = this.shipsByFleet[fleet.FleetID] || []
-        const handling = cycleHandling(orders, cargo, fleet, ships)
+        const handling = cycleHandling(orders, cargo, fleet, ships, this.formulaVersion)
         const year = routeYear(fleet, route, cargo, handling, orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
+        const results = routeResults(route, year, handling)
         // A stop does something where it goes: transits and plain moves only pass through.
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
-        const moved = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null, year.colonists ? `${this.count(year.colonists)} colonists` : null].filter(Boolean).join(', ') : ''
+        const freightText = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null].filter(Boolean).join(', ') : ''
+        const colonistsText = year && year.colonists ? `${this.count(year.colonists)} colonists` : ''
         const tripText = [cargo.perTrip.minerals ? `${this.tons(cargo.perTrip.minerals)} of minerals` : null, cargo.perTrip.installations ? `${this.tons(cargo.perTrip.installations)} of installations` : null].filter(Boolean).join(' and ')
         const routesLink = this.routesLink(fleet, orders)
 
@@ -325,16 +356,20 @@ export default {
           stopsText: stops.join(' → '),
           routesLink: routesLink.to,
           routesName: routesLink.name,
-          handlingHours: handling.seconds / 3600,
+          handlingHours: handling.seconds === null ? null : handling.seconds / 3600,
           limiting: handling.limiting,
           blocked: handling.blocked,
-          blockedText: handling.blocked.map((stop) => `${stop.place} (${stop.reason === 'crew' ? 'a ship has no crew aboard' : 'no undamaged shuttle bays or station, and too big to land'})`).join(', '),
-          movedText: moved,
+          blockedText: handling.blocked.map((problem) => problem.text).join('; '),
+          unknown: handling.unknown,
+          unknownText: handling.unknown.map((problem) => problem.text).join('; '),
+          results,
+          freightText,
+          colonistsText,
           kmSort: route.km ?? Infinity,
           cycleSort: year ? year.cycleDays : Infinity,
-          tripsSort: year ? year.trips : 0,
+          tripsSort: year ? year.trips : -1,
           movedSort: year ? year.minerals + year.installations + year.colonists / 1000 : -1,
-          fuelSort: year ? year.fuel : 0,
+          fuelSort: year ? year.fuel : -1,
         }
       })
     },
@@ -385,16 +420,17 @@ export default {
 
     // Each haul with every freighter class timed on it, those that can carry it first and the quickest single ship before the others.
     planRows() {
-      const { freighters, shuttleTechnology, mineralDeliveries } = this
+      const { freighters, shuttleTechnology, mineralDeliveries, formulaVersion } = this
       const reasons = (item) => Object.keys(HAUL_REASONS).filter((reason) => item[reason] >= 1).map((reason) => `${this.tons(item[reason])} ${HAUL_REASONS[reason].label}`).join(', ')
 
       return this.plan.hauls.map((haul) => {
         const estimates = freighters.map((shipClass) => {
-          const estimate = haulByClass(haul, shipClass, shuttleTechnology)
-          const note = estimate.status === 'range' ? 'A round trip needs more fuel than its tanks hold' : estimate.status === 'blocked' ? estimate.problems.map((problem) => problem.text).join('; ') : ''
+          const estimate = haulByClass(haul, shipClass, shuttleTechnology, formulaVersion)
+          const problems = estimate.problems.map((problem) => problem.text).join('; ')
+          const note = estimate.status === 'range' ? 'A round trip needs more fuel than its tanks hold' : estimate.status === 'blocked' ? `Can't load or unload: ${problems}` : estimate.status === 'unknown' ? `Not known: ${problems}` : estimate.status === 'immobile' ? 'The class has no speed' : ''
 
-          return { ...estimate, timed: estimate.status === 'ok' || estimate.status === 'range', note }
-        }).sort((a, b) => Number(b.status === 'ok') - Number(a.status === 'ok') || Number(b.timed) - Number(a.timed) || a.oneShipDays - b.oneShipDays)
+          return { ...estimate, timed: estimate.status === 'ok' || estimate.status === 'range', note, result: tripResult(estimate) }
+        }).sort((a, b) => Number(b.status === 'ok') - Number(a.status === 'ok') || Number(b.timed) - Number(a.timed) || (a.oneShipDays ?? 0) - (b.oneShipDays ?? 0))
         const best = estimates.find((estimate) => estimate.status === 'ok') || null
         const delivered = mineralDeliveries[haul.to.PopulationID]
         const ends = { from: place.colony(haul.from.PopulationID), to: place.colony(haul.to.PopulationID) }
@@ -455,6 +491,7 @@ export default {
       const untraced = this.routeRows.filter((row) => row.route.km === null).length
       const blocked = this.routeRows.filter((row) => row.route.km !== null && row.blocked.length).length
       const idle = this.routeRows.filter((row) => row.route.km !== null && !row.blocked.length && !(row.Speed > 0)).length
+      const unknown = this.routeRows.filter((row) => row.route.km !== null && row.unknown.length && !row.blocked.length).length
       const sum = (key) => counted.reduce((total, row) => total + row.year[key], 0)
       const cargo = this.classes.reduce((total, shipClass) => total + shipClass.CargoCapacity * shipClass.Ships, 0)
       const colonists = this.classes.reduce((total, shipClass) => total + shipClass.ColonistCapacity * shipClass.Ships, 0)
@@ -479,14 +516,14 @@ export default {
         {
           label: 'Repeating routes',
           value: `${this.routeRows.length}`,
-          note: `${counted.length === this.routeRows.length ? 'All traced' : `${counted.length} counted: ${[untraced ? `${untraced} can't be traced` : null, blocked ? `${blocked} can't load` : null, idle ? `${idle} not moving` : null].filter(Boolean).join(', ')}`}; ${this.litres(sum('fuel'))} of fuel a year at the set speed`,
+          note: `${counted.length === this.routeRows.length ? 'All traced' : `${counted.length} counted: ${[untraced ? `${untraced} can't be traced` : null, blocked ? `${blocked} can't load` : null, unknown ? `${unknown} not known to load` : null, idle ? `${idle} not moving` : null].filter(Boolean).join(', ')}`}; ${counted.length ? `${this.litres(sum('fuel'))} of fuel a year at the set speed` : 'no fuel figure'}`,
           icon: counted.length === this.routeRows.length ? null : 'mdi-alert',
           iconColor: 'warning',
         },
         {
           label: 'Moved per year',
-          value: this.tons(sum('minerals') + sum('installations')),
-          note: `${this.tons(sum('minerals'))} minerals, ${this.tons(sum('installations'))} installations, ${this.count(sum('colonists'))} colonists`,
+          value: counted.length || !this.routeRows.length ? this.tons(sum('minerals') + sum('installations')) : '—',
+          note: counted.length ? `${this.tons(sum('minerals'))} minerals, ${this.tons(sum('installations'))} installations, ${this.count(sum('colonists'))} colonists` : this.routeRows.length ? 'No route could be timed' : 'No fleet repeats its orders',
         },
       ]
     },
@@ -536,16 +573,16 @@ export default {
       return stops.length ? { to: linkTo.routes({ stops, cycle: true, fleet: fleet.FleetID }), name: `${fleet.FleetName}'s cycle` } : { to: linkTo.routes({ from: place.fleet(fleet.FleetID) }), name: fleet.FleetName }
     },
     count(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
+      return known(value) ? separatedNumber(roundToDecimal(value, 0), this.separator) : '—'
     },
     fixed(value, decimals) {
-      return roundToDecimal(value, decimals).toFixed(decimals)
+      return known(value) ? roundToDecimal(value, decimals).toFixed(decimals) : '—'
     },
     tons(value) {
-      return `${compact(value || 0)} t`
+      return known(value) ? `${compact(value)} t` : '—'
     },
     litres(value) {
-      return `${compact(value || 0)} L`
+      return known(value) ? `${compact(value)} L` : '—'
     },
     gkm(km) {
       return km >= 1e9 ? `${roundToDecimal(km / 1e9, 2)} bn km` : `${roundToDecimal(km / 1e6, 1)} M km`
@@ -592,7 +629,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, coalesce(VIR_Station.Station, 0) as Station from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 left join (select FCT_PopulationInstallations.PopID, case when sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) >= 1 then 1 else 0 end as Station from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Station on VIR_Station.PopID = FCT_MoveOrders.PopulationID where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },
@@ -603,7 +640,7 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, coalesce(VIR_Installations.Station, 0) as Station, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, case when sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) >= 1 then 1 else 0 end as Station, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.MassDriverDest, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, ${SHUTTLE_SERVICE_COLUMNS}, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join (select FCT_PopulationInstallations.PopID, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID ${shuttleServiceJoin(this.GameID, 'FCT_Population.PopulationID')} where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),
@@ -642,18 +679,29 @@ export default {
       }),
       default: [],
     },
-    // The race's cargo shuttle technology, which speeds every load and unload.
+    // The race's cargo shuttle technology, which speeds every load and unload. Null when the race row has none: the loading strength is then unknown, not 1.
     shuttleTechnology: {
       get: tracked('shuttleTechnology', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return 1
+          return null
         }
 
         const [[race]] = await this.database.query(`select FCT_Race.CargoShuttleLoadModifier from FCT_Race where FCT_Race.RaceID = ${this.RaceID}`)
 
-        return race ? race.CargoShuttleLoadModifier : 1
+        return race && race.CargoShuttleLoadModifier > 0 ? race.CargoShuttleLoadModifier : null
       }),
-      default: 1,
+      default: null,
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
   },
 }
