@@ -47,7 +47,7 @@
                   <thead>
                     <tr>
                       <th>Class</th>
-                      <th class="text-right">Holds</th>
+                      <th class="text-right" title="A tonne of mineral takes two tonnes of a ship's cargo capacity, so a hold carries half the class's cargo in minerals">Holds</th>
                       <th class="text-right">Round trip</th>
                       <th class="text-right">One ship</th>
                       <th class="text-right">All its ships</th>
@@ -74,7 +74,7 @@
             <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}</div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks, paused and queued ones too) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on my charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and without Logistics bonuses; the best class is the one a single ship of which finishes soonest. A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks, paused and queued ones too) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on my charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
           </div>
         </v-card>
 

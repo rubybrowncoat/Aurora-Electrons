@@ -1,5 +1,6 @@
 // The Hauling Planner's plan: what the race's colonies lack of each mineral, which colonies have some to spare, the hauls that cover each shortfall from the nearest spare stock, and what each freighter class takes to carry a haul. The rules are in docs/DATABASE.md § Hauling plan.
 
+import { CARGO_POINTS } from './hauling'
 import { routeLegs, searchRoutes } from './jump-graph'
 import { hasGate, roundTrip } from './transport'
 
@@ -117,10 +118,10 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
   }
 }
 
-// What one freighter class takes to carry a haul: the holds its cargo fills, a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceport or cargo shuttle station from its `Station`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed. `shipClass` carries the class figures roundTrip reads.
+// What one freighter class takes to carry a haul: the holds its cargo fills (a tonne of mineral takes two cargo points, `CARGO_POINTS.minerals`, so a hold carries half its capacity in minerals), a round trip as Transport times one (both ways at top speed, loading at the source and unloading at the destination, cargo alone, with each colony's spaceport or cargo shuttle station from its `Station`; `status` and `problems` as roundTrip gives them), the days one ship of the class takes, and the days its `Ships` take together. The ships are taken as fully crewed. `shipClass` carries the class figures roundTrip reads.
 export const haulByClass = (haul, shipClass, shuttleTechnology) => {
   const trip = roundTrip([{ ...shipClass, CurrentCrew: shipClass.ClassCrew }], haul.km, { origin: Boolean(haul.from.Station), destination: Boolean(haul.to.Station) }, shuttleTechnology, { colonists: false })
-  const holds = Math.ceil(haul.tonnes / shipClass.CargoCapacity)
+  const holds = Math.ceil((haul.tonnes * CARGO_POINTS.minerals) / shipClass.CargoCapacity)
   const tripDays = trip.tripSeconds / SECONDS_PER_DAY
 
   return { ...trip, shipClass, holds, tripDays, oneShipDays: holds * tripDays, classDays: Math.ceil(holds / Math.max(1, shipClass.Ships)) * tripDays }
