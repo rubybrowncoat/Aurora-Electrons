@@ -1,7 +1,7 @@
 /*
-  Checks the planners' design rules (src/renderer/utilities/design-rules.js) against a save: every stored engine, class speed, class range input and jump drive of one race is recomputed from the tech rows it was designed with and compared with what the game wrote.
+  Checks the planners' design rules (src/renderer/utilities/design-rules.js) against a save: every stored engine, class speed, class range input, jump drive and class maintenance figure (annual failure rate, maintenance supplies, damage roll and thresholds) of one race is recomputed from the rows it was designed with and compared with what the game wrote.
 
-  node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump] [--all-game]
+  node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance] [--all-game]
 
   Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. Each check is printed under the id, verification and game versions of the rules it checks, read from the rule registry (utilities/provenance.js, filled by design-rules.js), and a registered rule that no check run covers is listed at the end. The save is opened read-only through the same sqlite3 module the app uses.
 */
@@ -10,10 +10,10 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 
-const RULES = ['engine', 'speed', 'range', 'jump']
+const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance']
 
 // The registered rules whose formulas each check compares with stored values. The range check compares only the stored fuel efficiency with the class's engines, an input of the burn and range formulas, so it names no rule: design.burnPerHour and design.fullPowerRangeKm stay in the list of rules no check covers.
-const RULE_IDS = { engine: ['design.engineDesign'], speed: ['design.classSpeed'], range: [], jump: ['design.jumpDriveDesign'] }
+const RULE_IDS = { engine: ['design.engineDesign'], speed: ['design.classSpeed'], range: [], jump: ['design.jumpDriveDesign'], maintenance: ['design.engineeringMsp', 'design.maintenanceStorage', 'design.classMaintenanceSupplies', 'design.annualFailureRate', 'design.damageAllocation'] }
 const INPUT_ONLY = { range: 'input check only: the stored fuel efficiency against the class\'s engines; the burn and range formulas are not compared with a stored value' }
 const RELATIVE_TOLERANCE = 1e-6
 const ABSOLUTE_TOLERANCE = 1e-9
@@ -50,7 +50,7 @@ const parseArguments = (argv) => {
   }
 
   if (!options.save || !Number.isInteger(options.race)) {
-    fail('Usage: node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump] [--all-game]')
+    fail('Usage: node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance] [--all-game]')
   }
 
   const unknown = options.rules.filter((rule) => !RULES.includes(rule))
@@ -78,7 +78,7 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
 const loadRules = async () => {
   const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'provenance'])
 
-  return { ...rules, registry }
+  return { ...rules, registry, isAvailable: registry.isAvailable }
 }
 
 const close = (stored, computed) => Math.abs(stored - computed) <= Math.max(ABSOLUTE_TOLERANCE, RELATIVE_TOLERANCE * Math.max(Math.abs(stored), Math.abs(computed)))
@@ -333,7 +333,109 @@ const checkJumpDrives = async (context) => {
   return report
 }
 
-const CHECKS = { engine: checkEngines, speed: checkSpeeds, range: checkRanges, jump: checkJumpDrives }
+// Per class: its rows of components as the save stores them, joined to their design components. `missing` counts class rows whose design component is not in the save.
+const classComponentRows = async (database, parameters) => {
+  const rows = await all(database, 'select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ClassComponent.ChanceToHit, FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.Cost from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID left join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ShipClass.GameID = :game and FCT_ShipClass.RaceID = :race order by FCT_ClassComponent.ClassID, FCT_ClassComponent.ChanceToHit, FCT_ClassComponent.ComponentID', parameters)
+  const classes = new Map()
+
+  for (const row of rows) {
+    const entry = classes.get(row.ClassID) || { rows: [], missing: 0 }
+
+    if (row.SDComponentID === null) {
+      entry.missing++
+    } else {
+      entry.rows.push(row)
+    }
+
+    classes.set(row.ClassID, entry)
+  }
+
+  return classes
+}
+
+// A stored figure the rule cannot give for a reason in the class itself is explained by that reason; the rule's own unavailable result names it.
+const unavailableReason = (result) => result.inputs.missing.join('; ')
+
+const checkMaintenance = async (context) => {
+  const { database, rules, parameters } = context
+  const report = new Report('maintenance', RULE_IDS.maintenance)
+  const classes = await all(database, 'select ShipClassID, ClassName, Size, Cost, Commercial, MaintSupplies, BaseFailureChance, MaxDACRoll from FCT_ShipClass where GameID = :game and RaceID = :race order by ShipClassID', parameters)
+  const components = await classComponentRows(database, parameters)
+  const branches = { commercial: 0, military: 0, noEngineering: 0, noStorage: 0 }
+  const lives = []
+
+  for (const row of classes) {
+    const identity = { id: row.ShipClassID, name: row.ClassName }
+    const entry = components.get(row.ShipClassID) || { rows: [], missing: 0 }
+
+    report.checked++
+
+    if (entry.missing) {
+      report.skip(identity, `${entry.missing} of the class's component rows have no design component in the save`)
+      continue
+    }
+
+    const ofType = (type) => entry.rows.filter((component) => component.ComponentTypeID === type)
+    const engineeringValue = ofType(rules.ENGINEERING_COMPONENT_TYPE).reduce((total, component) => total + component.NumComponent * component.ComponentValue, 0)
+    const storage = ofType(rules.MAINTENANCE_STORAGE_COMPONENT_TYPE).map((component) => ({ value: component.ComponentValue, count: component.NumComponent }))
+    const sizeHS = row.Size
+    const failureRate = rules.annualFailureRate({ sizeHS, engineeringValue })
+    const supplies = rules.classMaintenanceSupplies({ sizeHS, cost: row.Cost, engineeringValue, storage })
+    // Armour first at threshold 0, then each component by its stored threshold: the order the game's table has, so the rule's thresholds are comparable one for one.
+    const ordered = [...entry.rows].sort((a, b) => (b.ComponentTypeID === rules.ARMOUR_COMPONENT_TYPE) - (a.ComponentTypeID === rules.ARMOUR_COMPONENT_TYPE) || a.ChanceToHit - b.ChanceToHit)
+    const allocation = rules.damageAllocation({ components: ordered.map((component) => ({ sizeHS: component.Size, count: component.NumComponent, armour: component.ComponentTypeID === rules.ARMOUR_COMPONENT_TYPE })) })
+
+    branches[row.Commercial ? 'commercial' : 'military']++
+
+    if (engineeringValue === 0) {
+      branches.noEngineering++
+    }
+
+    if (!storage.length) {
+      branches.noStorage++
+    }
+
+    if (rules.isAvailable(failureRate)) {
+      report.compare(identity, 'baseFailureChance', row.BaseFailureChance, failureRate.value, 'decimal', null)
+    } else {
+      report.skip(identity, `no annual failure rate: ${unavailableReason(failureRate)}`)
+    }
+
+    if (rules.isAvailable(supplies)) {
+      report.compare(identity, 'maintSupplies', row.MaintSupplies, supplies.value, 'integer', null)
+    } else {
+      report.skip(identity, `no maintenance supplies: ${unavailableReason(supplies)}`)
+    }
+
+    if (rules.isAvailable(allocation)) {
+      report.compare(identity, 'maxDacRoll', row.MaxDACRoll, allocation.value.maxDacRoll, 'integer', null)
+      ordered.forEach((component, index) => report.compare(identity, `chanceToHit of ${component.SDComponentID}`, component.ChanceToHit, allocation.value.chanceToHit[index], 'integer', null))
+    } else {
+      report.skip(identity, `no damage allocation: ${unavailableReason(allocation)}`)
+    }
+
+    if (!row.Commercial && rules.isAvailable(allocation)) {
+      const repairCost = rules.averageRepairCost({ components: entry.rows.map((component) => ({ chanceToHit: component.ChanceToHit, cost: component.Cost })), maxDacRoll: row.MaxDACRoll })
+      const life = rules.maintenanceLifeSeries({ commercial: row.Commercial, baseFailureChance: row.BaseFailureChance, averageRepairCost: repairCost.value, maintSupplies: row.MaintSupplies })
+
+      if (rules.isAvailable(life)) {
+        lives.push({ ...identity, repairCost: repairCost.value, supplies: row.MaintSupplies, life: life.value })
+      } else {
+        report.notes.push(`${identity.id} "${identity.name}" has no maintenance life: ${unavailableReason(life)}`)
+      }
+    }
+  }
+
+  report.notes.unshift(`classes: ${branches.military} military, ${branches.commercial} commercial; ${branches.noEngineering} without engineering, ${branches.noStorage} without maintenance storage`)
+
+  for (const row of [...lives].sort((a, b) => b.supplies - a.supplies).slice(0, 3)) {
+    report.notes.push(`life ${row.id} "${row.name}": ${row.life.life} years on ${row.supplies} MSP, average repair ${format(row.repairCost)} MSP, ${format(row.life.firstYear)} MSP in year 1, ${format(row.life.fiveYear)} MSP in 5 years`)
+  }
+
+  return report
+}
+
+const CHECKS = { engine: checkEngines, speed: checkSpeeds, range: checkRanges, jump: checkJumpDrives, maintenance: checkMaintenance }
 
 const main = async () => {
   const options = parseArguments(process.argv.slice(2))

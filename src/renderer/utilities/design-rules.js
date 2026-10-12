@@ -1,6 +1,6 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
-import { registerRule } from './provenance'
+import { combine, ofRule, registerRule, unavailable } from './provenance'
 
 export const TONS_PER_HS = 50
 export const THRUST_EXPONENT = 2.5
@@ -161,6 +161,248 @@ export const selfJumpDrive = ({ hullHS, efficiency, squadronSizeCost = 1, squadr
   }
 }
 
+// Ship maintenance: the class window's own figures, from a design alone. Component type ids as the game stores them in FCT_ShipDesignComponents.ComponentTypeID.
+export const ARMOUR_COMPONENT_TYPE = 11
+export const ENGINEERING_COMPONENT_TYPE = 31
+export const MAINTENANCE_STORAGE_COMPONENT_TYPE = 47
+// A class's engineering is judged against this share of its size (HS of engineering per HS of hull); a class without engineering fails at this many percent a year per HS instead.
+export const ENGINEERING_COVERAGE = 0.04
+export const UNENGINEERED_AFR_PER_HS = 10
+// The most years the class window's maintenance loop runs.
+export const MAINTENANCE_LIFE_YEARS = 200
+
+// Rounds a positive value up to a whole number, without letting float error take 3 up to 4 (a 0.1 HS component times 30 is 3.0000000000000004).
+const ceilExact = (value) => Math.ceil(value - 1e-9)
+
+const given = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+
+const positive = (value) => given(value) && Number(value) > 0
+
+const nonNegative = (value) => given(value) && Number(value) >= 0
+
+const KIND_FLAGS = [true, false, 1, 0]
+
+// Splits [name, ok, reason] checks into the inputs present and the ones missing; a missing input is named by its reason where it has one.
+const gather = (checks) => ({ present: checks.filter(([, ok]) => ok).map(([name]) => name), missing: checks.filter(([, ok]) => !ok).map(([name, , reason]) => reason || name) })
+
+// The class's engineering MSP: half its cost over its engineering coverage factor (`engineeringValue` the sum of the engineering components' value times count, `cost` the class's BP), cut to a whole number. Not applicable, with the reason named, for a class with no engineering (its supplies are its storage alone) or no cost; never 0.
+export const engineeringMsp = ({ sizeHS, cost, engineeringValue }) => {
+  const rule = 'design.engineeringMsp'
+  const { present, missing } = gather([
+    ['class size', positive(sizeHS), 'class size above zero'],
+    ['class cost', given(cost) && Number(cost) >= 0, 'the class cost'],
+    ['engineering', nonNegative(engineeringValue), 'the class\'s engineering'],
+  ])
+
+  if (!missing.length && Number(cost) === 0) {
+    missing.push('class cost above zero: engineering MSP is half the cost, so a class with no cost has none')
+  }
+
+  if (!missing.length && Number(engineeringValue) === 0) {
+    missing.push('engineering above zero: a class with none has no engineering MSP, its supplies are its maintenance storage alone')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  return ofRule({ rule, value: floorExact(Number(cost) / 2 * Number(engineeringValue) / (Number(sizeHS) * ENGINEERING_COVERAGE)), inputs: { present } })
+}
+
+// The MSP the class's maintenance storage components hold: each component's value times its count, cut to a whole number on its own, then summed (`components` as { value, count }). A class with no storage component holds none; that is a known 0.
+export const maintenanceStorage = ({ components }) => {
+  const rule = 'design.maintenanceStorage'
+  const rows = Array.isArray(components) ? components : null
+  const { present, missing } = gather([
+    ['storage components', rows !== null, 'storage components (the class\'s maintenance storage rows, none if it has none)'],
+    ['storage values and counts', rows !== null && rows.every((row) => nonNegative(row.value) && nonNegative(row.count)), 'a storage value and count of zero or more for every component'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  return ofRule({ rule, value: rows.reduce((total, row) => total + floorExact(Number(row.value) * Number(row.count)), 0), inputs: { present } })
+}
+
+// The class's MSP, as stored in MaintSupplies: engineering MSP plus storage. A class with no engineering (`engineeringValue` of 0) holds its storage alone, which is the game's own figure for it; an unknown engineering, or a class with engineering but no cost, gives no figure.
+export const classMaintenanceSupplies = ({ sizeHS, cost, engineeringValue, storage }) => {
+  const rule = 'design.classMaintenanceSupplies'
+  const stored = maintenanceStorage({ components: storage })
+
+  if (given(engineeringValue) && Number(engineeringValue) === 0) {
+    return combine({ rule, parts: { storage: stored }, compute: (values) => values.storage, assumptions: ['no engineering: the class holds its maintenance storage alone'] })
+  }
+
+  return combine({ rule, parts: { engineering: engineeringMsp({ sizeHS, cost, engineeringValue }), storage: stored }, compute: (values) => values.engineering + values.storage })
+}
+
+// The class's annual failure rate, in percent a year at a maintenance clock of one year (the stored BaseFailureChance): half the size times the coverage factor, `sizeHS` x 0.04 over the engineering. A class with no engineering fails at ten percent a year per HS of size, the game's own flat rate, and the result says so; an unknown engineering gives no figure.
+export const annualFailureRate = ({ sizeHS, engineeringValue }) => {
+  const rule = 'design.annualFailureRate'
+  const { present, missing } = gather([
+    ['class size', positive(sizeHS), 'class size above zero'],
+    ['engineering', nonNegative(engineeringValue), 'engineering of zero or more'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  if (Number(engineeringValue) === 0) {
+    return ofRule({ rule, value: Number(sizeHS) * UNENGINEERED_AFR_PER_HS, inputs: { present }, assumptions: ['no engineering: the game\'s flat rate of 10% a year per HS replaces the coverage formula'] })
+  }
+
+  return ofRule({ rule, value: Number(sizeHS) / 2 * (Number(sizeHS) * ENGINEERING_COVERAGE / Number(engineeringValue)), inputs: { present } })
+}
+
+// The damage allocation table of a class built from `components` in design order, as { sizeHS, count, armour }: each component other than armour takes the next slice of the roll, its size times its count rounded up, and its chance-to-hit threshold is the running total; armour takes none (threshold 0). Returns { chanceToHit: [one threshold per component, in the order given], maxDacRoll: the total }. A class with nothing but armour has no roll and gives no figure. The order of the table is the game's design order, which a saved class does not keep apart from its thresholds; the roll and every slice are the same in any order.
+export const damageAllocation = ({ components }) => {
+  const rule = 'design.damageAllocation'
+  const rows = Array.isArray(components) ? components : null
+  const { present, missing } = gather([
+    ['components', rows !== null && rows.length > 0, 'components'],
+    ['component sizes and counts', rows !== null && rows.every((row) => nonNegative(row.sizeHS) && nonNegative(row.count)), 'a size and count of zero or more for every component'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  let total = 0
+  const chanceToHit = rows.map((row) => {
+    if (row.armour) {
+      return 0
+    }
+
+    total += ceilExact(Number(row.sizeHS) * Number(row.count))
+
+    return total
+  })
+
+  if (total === 0) {
+    return unavailable({ rule, present, missing: ['a component other than armour with a size: a class with none has no damage allocation roll'] })
+  }
+
+  return ofRule({ rule, value: { chanceToHit, maxDacRoll: total }, inputs: { present } })
+}
+
+// The average MSP a failure costs a class: each component's cost weighted by the share of the damage roll it covers, which is the difference between its chance-to-hit threshold and the one before it (components in threshold order, armour at 0 first) over `maxDacRoll`. `components` as { chanceToHit, cost }. The weights are those slices of the roll, not the components' counts or sizes: a component's slice is its size times its count rounded up. A class with no roll, thresholds past the roll, or only free components gives no figure, never 0.
+export const averageRepairCost = ({ components, maxDacRoll }) => {
+  const rule = 'design.averageRepairCost'
+  const rows = Array.isArray(components) ? components : []
+  const { present, missing } = gather([
+    ['components', rows.length > 0, 'components'],
+    ['component thresholds', rows.length > 0 && rows.every((row) => nonNegative(row.chanceToHit)), 'a chance-to-hit threshold of zero or more for every component'],
+    ['component costs', rows.length > 0 && rows.every((row) => nonNegative(row.cost)), 'a cost of zero or more for every component'],
+    ['damage roll', nonNegative(maxDacRoll), 'the class\'s damage roll'],
+  ])
+
+  if (!missing.length && Number(maxDacRoll) === 0) {
+    missing.push('a damage roll above zero: a class with none has no damage allocation')
+  }
+
+  if (!missing.length && rows.some((row) => Number(row.chanceToHit) > Number(maxDacRoll))) {
+    missing.push('component thresholds within the damage roll')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  let previous = 0
+  let weighted = 0
+
+  for (const row of [...rows].sort((a, b) => a.chanceToHit - b.chanceToHit)) {
+    weighted += Number(row.cost) * ((Number(row.chanceToHit) - previous) / Number(maxDacRoll))
+    previous = Number(row.chanceToHit)
+  }
+
+  if (!(weighted > 0)) {
+    return unavailable({ rule, present, missing: ['a component cost above zero: a failure of a class whose parts are free draws no supplies'] })
+  }
+
+  return ofRule({ rule, value: weighted, inputs: { present } })
+}
+
+// A class's expected maintenance life as the class window works it out, one row a year of an unmaintained clock that is never reset: in year n the failure rate is `baseFailureChance` x n / 100 and the supplies spent that year are `averageRepairCost` times it, so the draw grows by the same step every year; the loop stops in the year the running total passes `maintSupplies`. Returns { life, firstYear, fiveYear, years: [{ year, failureRate, supplyUse, cumulative, remaining, fundedFraction }] } where `life` is the whole years before that year plus the part of it the remainder pays for, to 2 decimals (the game's rounding), `firstYear` the first year's spend and `fiveYear` the game's 5-year figure (15 times it, the sum of years 1 to 5). The last row is the year the supplies run out: `fundedFraction` below 1, `cumulative` the supplies spent. `commercial` is true or false (or 1 or 0 as the save stores it) and has no default; a commercial class has no life. A missing input, no failure (a zero rate or repair cost), or supplies that outlast the 200 years give no figure. This is the class's expected series on a fresh clock: it knows nothing of a ship's actual clock, crew, commanders, location coverage or the supplies it holds now (see `incrementFailureChance`).
+export const maintenanceLifeSeries = ({ commercial, baseFailureChance, averageRepairCost: repairCost, maintSupplies }) => {
+  const rule = 'design.maintenanceLifeSeries'
+  const { present, missing } = gather([
+    ['class type (military or commercial)', KIND_FLAGS.includes(commercial), 'class type (military or commercial)'],
+    ['base failure chance', nonNegative(baseFailureChance), 'the class\'s annual failure rate'],
+    ['average repair cost', nonNegative(repairCost), 'the class\'s average repair cost'],
+    ['maintenance supplies', nonNegative(maintSupplies), 'maintenance supplies of zero or more'],
+  ])
+
+  if (commercial === true || commercial === 1) {
+    missing.unshift('a military class: the game gives a commercial class no maintenance life')
+  }
+
+  if (nonNegative(baseFailureChance) && Number(baseFailureChance) === 0) {
+    missing.push('a failure chance above zero: a class that never fails has no maintenance life')
+  }
+
+  if (nonNegative(repairCost) && Number(repairCost) === 0) {
+    missing.push('an average repair cost above zero: a class whose failures cost nothing has no maintenance life')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  const years = []
+  let cumulative = 0
+
+  for (let year = 1; year <= MAINTENANCE_LIFE_YEARS; year++) {
+    const failureRate = Number(baseFailureChance) * year / 100
+    const supplyUse = Number(repairCost) * failureRate
+
+    if (cumulative + supplyUse > Number(maintSupplies)) {
+      const fundedFraction = (Number(maintSupplies) - cumulative) / supplyUse
+
+      years.push({ year, failureRate, supplyUse, cumulative: Number(maintSupplies), remaining: 0, fundedFraction })
+
+      const firstYear = Number(repairCost) * Number(baseFailureChance) / 100
+
+      return ofRule({ rule, value: { life: roundHalfEven((year - 1) + fundedFraction, 2), firstYear, fiveYear: firstYear * 15, years }, inputs: { present } })
+    }
+
+    cumulative += supplyUse
+    years.push({ year, failureRate, supplyUse, cumulative, remaining: Number(maintSupplies) - cumulative, fundedFraction: 1 })
+  }
+
+  return unavailable({ rule, present, missing: [`supplies that run out within ${MAINTENANCE_LIFE_YEARS} years`] })
+}
+
+// The chance, in percent, that a ship suffers a maintenance failure in one game increment, as the game works it out for a ship outside a maintenance location or short of cover. `baseFailureChance` is the ship's own annual failure rate: the class's stored one while all its engineering is undamaged (the game re-reads the ship's engineering each increment, so damage raises it); `clockYears` the years since its last overhaul; `elapsedYears` the increment's length; `uncoveredFraction` 1 away from maintenance and one minus the coverage where capacity or supplies fall short; `crewPerformance` and `engineeringBonus` the ship's crew performance modifier and its combined commander and admin engineering multiplier; `training` whether its fleet is under a training command (doubles the rate). A ship whose clock is at zero is not tested and gives no figure. Every input is the ship's runtime state and has no default.
+export const incrementFailureChance = ({ baseFailureChance, clockYears, elapsedYears, uncoveredFraction, crewPerformance, engineeringBonus, training }) => {
+  const rule = 'design.incrementFailureChance'
+  const { present, missing } = gather([
+    ['annual failure rate', nonNegative(baseFailureChance), 'an annual failure rate of zero or more'],
+    ['maintenance clock', nonNegative(clockYears), 'a maintenance clock of zero or more years'],
+    ['elapsed years', nonNegative(elapsedYears), 'elapsed years of zero or more'],
+    ['uncovered fraction', given(uncoveredFraction) && Number(uncoveredFraction) >= 0 && Number(uncoveredFraction) <= 1, 'an uncovered fraction from 0 to 1'],
+    ['crew performance', given(crewPerformance), 'the ship\'s crew performance modifier'],
+    ['engineering bonus', given(engineeringBonus), 'the combined commander and admin engineering multiplier'],
+    ['training command', KIND_FLAGS.includes(training), 'whether the fleet is under a training command'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  const base = Number(baseFailureChance) * Number(clockYears)
+
+  if (!(base > 0)) {
+    return unavailable({ rule, present, missing: ['a maintenance clock and failure rate above zero: the game does not test a ship whose product is zero'] })
+  }
+
+  const rate = (training === true || training === 1) ? base * 2 : base
+
+  return ofRule({ rule, value: Number(elapsedYears) * (rate * Number(uncoveredFraction)) * (2 - Number(crewPerformance)) * (2 - Number(engineeringBonus)), inputs: { present } })
+}
+
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
 const DESIGN_VERSIONS = ['2.7.x']
 const SAVE_CHECK = 'scripts/check-design-rules.js'
@@ -284,4 +526,79 @@ registerRule({
   structure: ['FCT_ShipDesignComponents.Cost of the stock tanks', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the engine, fuel and thermal techs'],
   note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (design.engineDesign), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own packing (design.packTanks) and the figure leaves out the rest of the class.',
   assumptions: ['Engines are priced by the design rule, not by a stored component', 'Tanks are chosen by the planner\'s own packing', 'Only the engines and fuel tanks are counted, not the rest of the class'],
+})
+
+registerRule({
+  id: 'design.engineeringMsp',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.Size, Cost, MaintSupplies', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
+  note: `Half the class cost over the coverage factor (size x 0.04 over the engineering), cut to a whole number. Reproduced with the storage rule in every stored MaintSupplies of a stock 2.7.1 save and a modded 2.7.0 save, bar the rows ${SAVE_CHECK} lists as explained.`,
+})
+
+registerRule({
+  id: 'design.maintenanceStorage',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.ComponentTypeID 47, ComponentValue', 'FCT_ClassComponent.NumComponent'],
+  note: `Each storage component's value times its count, cut to a whole number, summed. Reproduced with the engineering rule in the stored MaintSupplies (${SAVE_CHECK}).`,
+})
+
+registerRule({
+  id: 'design.classMaintenanceSupplies',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.MaintSupplies', 'design.engineeringMsp', 'design.maintenanceStorage'],
+  note: `Engineering MSP plus storage; a class without engineering holds its storage alone. Compared with the stored MaintSupplies of every class of both sample saves (${SAVE_CHECK}).`,
+  assumptions: ['The class is a stored or designed class whose cost, size and component rows are final'],
+})
+
+registerRule({
+  id: 'design.annualFailureRate',
+  versions: DESIGN_VERSIONS,
+  units: '% a year',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.Size, BaseFailureChance', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentTypeID 31, ComponentValue'],
+  note: `Half the size times size x 0.04 over the engineering, in percent at a clock of one year; a class without engineering fails at 10% a year per HS. Compared with the stored BaseFailureChance of every class of both sample saves (${SAVE_CHECK}).`,
+})
+
+registerRule({
+  id: 'design.damageAllocation',
+  versions: DESIGN_VERSIONS,
+  units: 'damage roll',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.MaxDACRoll', 'FCT_ClassComponent.ChanceToHit, NumComponent', 'FCT_ShipDesignComponents.Size, ComponentTypeID 11'],
+  note: `Each component other than armour takes size times count rounded up of the roll; the thresholds are the running total and MaxDACRoll the sum. Compared with every stored MaxDACRoll and ChanceToHit of both sample saves (${SAVE_CHECK}).`,
+})
+
+registerRule({
+  id: 'design.averageRepairCost',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP',
+  verification: 'estimated',
+  structure: ['FCT_ClassComponent.ChanceToHit', 'FCT_ShipClass.MaxDACRoll', 'FCT_ShipDesignComponents.Cost'],
+  note: 'Each component\'s cost weighted by the difference of its damage allocation threshold and the one before it over MaxDACRoll. The thresholds and the roll it weighs by are reproduced by design.damageAllocation, but the save stores no repair cost to compare the figure with; docs/plans/backlog/evidence/AE-106-01.md works one saved class through by hand.',
+})
+
+registerRule({
+  id: 'design.maintenanceLifeSeries',
+  versions: DESIGN_VERSIONS,
+  units: 'years, MSP',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.BaseFailureChance, MaintSupplies, Commercial'],
+  note: 'The class window\'s yearly supply series on a fresh, never-overhauled clock: the spend in year n is the average repair cost times the failure rate times n, summed until the supplies run out, over at most 200 years. The save stores no maintenance life to compare it with, and the series is an expectation, not a promise of when a ship fails.',
+  assumptions: ['The ship\'s maintenance clock starts at zero and is never reset', 'Failures draw the average repair cost, not a particular component\'s'],
+})
+
+registerRule({
+  id: 'design.incrementFailureChance',
+  versions: DESIGN_VERSIONS,
+  units: '% an increment',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.BaseFailureChance', 'FCT_Ship.LastOverhaul'],
+  note: 'Elapsed years times the annual failure rate times the clock, doubled in a training command, times the uncovered share, times 2 minus the crew performance modifier and 2 minus the engineering bonus. Read from the game; the save stores no ship\'s failure chance to compare it with.',
+  assumptions: ['The ship\'s engineering is undamaged, so its annual failure rate is the class\'s'],
 })
