@@ -143,11 +143,11 @@ const CMC_NEEDS = {
   allowed: 'civilian mining complexes switched on for the game',
   shipyard: 'a shipyard',
   settledColonies: 'more than one colony with people or infrastructure',
-  populatedSystem: 'one of your colonies in the system with over 10 M people',
+  populatedSystem: 'one of my colonies in the system with over 10 M people',
   nearStar: 'a body under 80 AU from its star at its farthest (a moon: its planet\'s orbit), and not a gas giant',
   starInReach: 'a star the game counts as in reach (a companion within 80 AU of what it orbits, or linked by Lagrange points within 80 AU)',
   notBanned: 'a body that is not banned',
-  uncolonised: 'a body with no colony on it (yours with only orbital miners is fine)',
+  uncolonised: 'a body with no colony on it (mine with only orbital miners is fine)',
 }
 
 // The site's unmet conditions as one sentence.

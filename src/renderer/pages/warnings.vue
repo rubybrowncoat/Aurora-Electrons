@@ -139,7 +139,7 @@ const readName = (check) => `read${check.key.replace(/(^|-)(\w)/g, (_match, _das
 
 const INPUT_LABELS = {
   ...Object.fromEntries(CHECKS.map((check) => [readName(check), `the ${checkLabel(check)} check`])),
-  shipClasses: 'your ship classes',
+  shipClasses: 'my ship classes',
 }
 
 const checkReads = Object.fromEntries(CHECKS.map((check) => [readName(check), {
@@ -316,7 +316,7 @@ export default {
           label: 'Muted',
           value: this.count(mutedRows),
           icon: 'mdi-bell-off-outline',
-          note: mutedChecks ? `Includes ${this.count(mutedChecks)} muted ${mutedChecks === 1 ? 'check' : 'checks'}` : 'Warnings you have muted',
+          note: mutedChecks ? `Includes ${this.count(mutedChecks)} muted ${mutedChecks === 1 ? 'check' : 'checks'}` : 'Warnings I have muted',
         },
       ]
     },

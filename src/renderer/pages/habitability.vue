@@ -82,14 +82,14 @@
               <v-card class="pa-4 planner-menu">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
-                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before your colonisation tech, so the scale means the same for every race), years of terraforming, and AU from your nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before my colonisation tech, so the scale means the same for every race), years of terraforming, and AU from my nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
                 </div>
                 <v-row dense>
                   <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
                     <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
                   </v-col>
                 </v-row>
-                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short you are of that mineral.</div>
+                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short I am of that mineral.</div>
                 <v-row dense>
                   <v-col v-for="mineral in minerals" :key="mineral.id" cols="6" sm="4">
                     <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" :hint="scarcityHint(mineral.id)" persistent-hint dense outlined @change="(value) => setWeight(mineral.id, value)" />
@@ -105,7 +105,7 @@
               <v-card class="pa-4 planner-menu">
                 <div class="subtitle-2 mb-1">What each plan state means</div>
                 <div class="caption text--secondary mb-3">
-                  The Plan column says what it takes to settle a body. Colony cost bands are read before your colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what you actually pay. Click a state to show only those bodies.
+                  The Plan column says what it takes to settle a body. Colony cost bands are read before my colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what I actually pay. Click a state to show only those bodies.
                 </div>
                 <div v-for="group in stateGroups" :key="group.group" class="mb-2">
                   <div class="overline">{{ group.group }}</div>
@@ -172,7 +172,7 @@
               <span class="rank-number">{{ item.row.rank }}</span>
               <span class="score-meter" :title="`Worth ${roundToDecimal(item.row.score, 0)}% of the best target`"><i :style="{ width: `${item.row.score}%` }" /></span>
             </div>
-            <span v-else class="caption text--secondary">{{ item.row.settled ? 'Yours' : '' }}</span>
+            <span v-else class="caption text--secondary">{{ item.row.settled ? 'Mine' : '' }}</span>
           </template>
 
           <template #[`item.bodyOrder`]="{ item }">
@@ -328,7 +328,7 @@ const RANKING_FIELDS = [
   { key: 'minimumPeople', label: 'Smallest colony (M)', hint: 'Under this a body is only a target for its deposits' },
   { key: 'minimumDeposit', label: 'Minimum deposit (t)', hint: 'Smaller deposits are worth nothing' },
   { key: 'cmcBonus', label: 'CMC bonus', hint: 'Deposit value a civilian complex site adds' },
-  { key: 'costScale', label: 'Colony cost scale', hint: 'Worth halves at this cost, before your tech' },
+  { key: 'costScale', label: 'Colony cost scale', hint: 'Worth halves at this cost, before my tech' },
   { key: 'yearsScale', label: 'Terraforming years scale', hint: 'Worth halves after this many years' },
   { key: 'distanceScale', label: 'Distance scale (AU)', hint: 'Worth halves at this distance from a colony' },
 ]
@@ -337,7 +337,7 @@ const RANKING_FIELDS = [
 const VIEWS = [
   { id: 'best', label: 'Best targets', hint: `Places to settle next that are worth at least ${BEST_TARGET_SCORE}% of the best one`, has: (row) => !!row.rank && row.score >= BEST_TARGET_SCORE },
   { id: 'ranked', label: 'All ranked', hint: 'Every ranked place to settle, from the best down', has: (row) => !!row.rank },
-  { id: 'colonies', label: 'Colonies', hint: 'Bodies where you already have a colony or outpost', has: (row) => row.settled },
+  { id: 'colonies', label: 'Colonies', hint: 'Bodies where I already have a colony or outpost', has: (row) => row.settled },
   { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
 ]
 
@@ -713,7 +713,7 @@ export default {
       const { distance, capitalDistance } = row
       const capital = capitalDistance && distance.from && !distance.from.Capital ? ` The capital is ${roundToDecimal(capitalDistance.au, 1)} AU and ${capitalDistance.jumps} ${capitalDistance.jumps === 1 ? 'jump' : 'jumps'} away.` : ''
 
-      return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'your nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
+      return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'my nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
     },
     scarcityHint(id) {
       const mineral = this.outlook.minerals[id]

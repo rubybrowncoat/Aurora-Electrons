@@ -34,7 +34,7 @@
                 <v-radio-group v-model="orbital" dense hide-details class="mt-1">
                   <v-radio v-for="option in orbitalOptions" :key="option.value" :value="option.value" :label="option.text" />
                 </v-radio-group>
-                <div class="caption text--secondary mt-1">Your orbital miners work bodies up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km across.</div>
+                <div class="caption text--secondary mt-1">My orbital miners work bodies up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km across.</div>
                 <div class="subtitle-2 mt-4">Deposits</div>
                 <v-row dense class="mt-1">
                   <v-col cols="6">
@@ -105,7 +105,7 @@
                 </tbody>
               </v-simple-table>
               <div class="panel-foot caption text--secondary">
-                Click a mineral to focus the page on it, and again for all minerals. In the ground counts the deposits in the chosen systems that pass the options, split by accessibility; a deposit is mined when a colony of yours on the body has mines or your orbital miners are there, and untapped when nobody mines it and no known alien colony holds the body. Colonies short need more for their build queue than they hold; below reserve hold less than the reserve set for them.
+                Click a mineral to focus the page on it, and again for all minerals. In the ground counts the deposits in the chosen systems that pass the options, split by accessibility; a deposit is mined when a colony of mine on the body has mines or my orbital miners are there, and untapped when nobody mines it and no known alien colony holds the body. Colonies short need more for their build queue than they hold; below reserve hold less than the reserve set for them.
               </div>
             </v-card>
           </v-col>
@@ -116,7 +116,7 @@
                 <span class="legend">
                   <span v-for="band in bands" :key="band.id" class="legend-item"><span class="dot" :style="{ background: bandColors[band.id] }" />{{ band.label }}</span>
                   <span class="legend-item"><span class="dot" :style="{ background: mutedColor }" />None or out of reach</span>
-                  <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />Your colonies</span>
+                  <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />My colonies</span>
                 </span>
               </div>
               <div class="panel-body">
@@ -190,7 +190,7 @@
                   <template #activator="{ on }">
                     <v-chip x-small label outlined v-on="on">Orbital</v-chip>
                   </template>
-                  <span>{{ count(item.body.Diameter) }} km across: your orbital miners can work it (up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km), with no colony.</span>
+                  <span>{{ count(item.body.Diameter) }} km across: my orbital miners can work it (up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km), with no colony.</span>
                 </v-tooltip>
                 <v-tooltip v-if="item.body.complexes" top max-width="360">
                   <template #activator="{ on }">
@@ -202,7 +202,7 @@
                   <template #activator="{ on }">
                     <v-chip x-small label outlined v-on="on">CMC</v-chip>
                   </template>
-                  <span>Could host a civilian mining complex: more than 10,000 t of {{ item.body.cmcCandidate }} at accessibility 0.7 or better, and the body is close enough to its star. The game founds one only if one of your colonies in the system has over 10 M people, the body has no colony (one of yours with only orbital miners is fine) and isn't banned, and its star is in reach (a companion star within 80 AU of what it orbits, or linked by Lagrange points). It then rolls 1 in 3 for each such body, richest first. The Colonization Planner checks every condition per body.</span>
+                  <span>Could host a civilian mining complex: more than 10,000 t of {{ item.body.cmcCandidate }} at accessibility 0.7 or better, and the body is close enough to its star. The game founds one only if one of my colonies in the system has over 10 M people, the body has no colony (one of mine with only orbital miners is fine) and isn't banned, and its star is in reach (a companion star within 80 AU of what it orbits, or linked by Lagrange points). It then rolls 1 in 3 for each such body, richest first. The Colonization Planner checks every condition per body.</span>
                 </v-tooltip>
                 <v-tooltip v-if="item.body.GroundMineralSurvey" top max-width="320">
                   <template #activator="{ on }">
@@ -259,13 +259,13 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            A mine digs {{ count(raceRules.MineProduction) }} t a year at accessibility 1 with your mining tech, times the deposit's accessibility, before the colony's own modifiers; an automated mine digs the same and a civilian mining complex ten times as much. Accessibility holds until a deposit is down to half its original amount, then falls with what is left, to {{ ACCESSIBILITY_FLOOR }} when it is empty. Orbital miners work bodies up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km across. Untapped: nobody mines the body and no known alien colony holds it; a colony of yours without mines counts as untapped. Distance is the charted route from your nearest colony of {{ SUPPLY_BASE_MILLIONS }} million people or more.
+            A mine digs {{ count(raceRules.MineProduction) }} t a year at accessibility 1 with my mining tech, times the deposit's accessibility, before the colony's own modifiers; an automated mine digs the same and a civilian mining complex ten times as much. Accessibility holds until a deposit is down to half its original amount, then falls with what is left, to {{ ACCESSIBILITY_FLOOR }} when it is empty. Orbital miners work bodies up to {{ count(raceRules.MaximumOrbitalMiningDiameter) }} km across. Untapped: nobody mines the body and no known alien colony holds it; a colony of mine without mines counts as untapped. Distance is the charted route from my nearest colony of {{ SUPPLY_BASE_MILLIONS }} million people or more.
           </div>
         </v-card>
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
-            <span>{{ focus ? `${focus.name} in your colonies` : 'Minerals in your colonies' }}</span>
+            <span>{{ focus ? `${focus.name} in my colonies` : 'Minerals in my colonies' }}</span>
             <v-text-field v-model="colonySearch" label="Search" placeholder="Colony or system" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
           <v-data-table :headers="colonyHeaders" :items="visibleColonyRows" item-key="key" show-expand single-expand :expanded.sync="colonyExpanded" :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="colonyRows.length ? 'No colony matches the search.' : `No colony in the chosen systems holds, reserves, needs or expects ${focusName}.`">
@@ -384,15 +384,15 @@ const BODY_CLASSES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
 
 const REACHES = [
   { id: 'all', label: 'All known systems' },
-  { id: 'colonies', label: 'Systems with your colonies' },
-  { id: 'inhabited', label: 'Systems with your people' },
+  { id: 'colonies', label: 'Systems with my colonies' },
+  { id: 'inhabited', label: 'Systems with my people' },
   { id: 'unrestricted', label: 'Unrestricted systems' },
 ]
 
 const DEPOSIT_VIEWS = [
   { id: 'all', label: 'All' },
   { id: 'untapped', label: 'Untapped' },
-  { id: 'worked', label: 'Mined by you' },
+  { id: 'worked', label: 'Mined by me' },
 ]
 
 const ORBITAL_OPTIONS = [
@@ -771,9 +771,9 @@ export default {
           note: best ? bestNote : 'Everything in view is mined, or held by aliens',
         },
         {
-          label: 'Deposits you mine',
+          label: 'Deposits I mine',
           value: this.count(worked),
-          note: worked ? (falling ? `${this.count(falling)} past half and losing accessibility` : 'None past half yet; accessibility holds') : 'No colony or orbital miner of yours mines here',
+          note: worked ? (falling ? `${this.count(falling)} past half and losing accessibility` : 'None past half yet; accessibility holds') : 'No colony or orbital miner of mine mines here',
         },
         {
           label: 'Free to move',
@@ -1142,7 +1142,7 @@ export default {
       const names = body.complexColonies.map((colony) => colony.PopName)
       const purchased = body.complexColonies.some((colony) => colony.PurchaseCivilianMinerals)
 
-      return `${names.join(' and ')} ${names.length > 1 ? 'run' : 'runs'} ${this.counted(body.complexes, 'civilian mining complex', 'civilian mining complexes')} here. ${purchased ? 'You buy their minerals.' : "You tax them; their minerals don't reach your stockpile."}`
+      return `${names.join(' and ')} ${names.length > 1 ? 'run' : 'runs'} ${this.counted(body.complexes, 'civilian mining complex', 'civilian mining complexes')} here. ${purchased ? 'I buy their minerals.' : "I tax them; their minerals don't reach my stockpile."}`
     },
 
     plannerLink(rows) {

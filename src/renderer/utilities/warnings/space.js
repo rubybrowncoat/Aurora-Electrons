@@ -86,7 +86,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => `${amount(count, 'system')} with intruders`,
-    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system you have surveyed, unless you are allied with it or it is marked friendly.',
+    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system I have surveyed, unless I am allied with it or it is marked friendly.',
     columns: [
       { key: 'system', text: 'System' },
       { key: 'contacts', text: 'Contacts' },
@@ -144,7 +144,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => amount(count, 'dangerous rift') + ' in occupied systems',
-    rule: 'An aether rift sits in a system where you have fleets, colonies or ground unit bases.',
+    rule: 'An aether rift sits in a system where I have fleets, colonies or ground unit bases.',
     columns: [
       { key: 'system', text: 'System' },
       { key: 'size', text: 'Size', align: 'end' },
@@ -182,7 +182,7 @@ export const checks = [
     severity: 'attention',
     clock: true,
     title: (count) => amount(count, 'active lifepod'),
-    rule: 'Lifepods you have detected are still adrift; their crews last two weeks from the ship\'s loss.',
+    rule: 'Lifepods I have detected are still adrift; their crews last two weeks from the ship\'s loss.',
     columns: [
       { key: 'ship', text: 'Lifepod of' },
       { key: 'crew', text: 'Crew', align: 'end' },
@@ -214,7 +214,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'wreck') + ' in explored space',
-    rule: 'A wreck lies in a system you have surveyed.',
+    rule: 'A wreck lies in a system I have surveyed.',
     columns: [
       { key: 'wreck', text: 'Wreck' },
       { key: 'size', text: 'Size', align: 'end' },
@@ -242,7 +242,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'unexploited ancient construct'),
-    rule: 'An ancient construct on a surveyed body is dormant, or has no colony of yours with 10 million people on it, so its research bonus goes unused.',
+    rule: 'An ancient construct on a surveyed body is dormant, or has no colony of mine with 10 million people on it, so its research bonus goes unused.',
     columns: [
       { key: 'construct', text: 'Construct' },
       { key: 'bonus', text: 'Research bonus' },

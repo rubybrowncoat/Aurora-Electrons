@@ -74,7 +74,7 @@
         <v-col cols="12" md="6" class="d-flex flex-column">
           <v-card class="panel flex-grow-1" elevation="1">
             <div class="panel-head">
-              <span>Your data</span>
+              <span>My data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
             </div>
             <div class="panel-body body-2">
@@ -88,7 +88,7 @@
                 <div class="path">{{ historyFile }}</div>
               </template>
             </div>
-            <div class="panel-foot caption text--secondary">The app only reads your save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
+            <div class="panel-foot caption text--secondary">The app only reads my save. The one exception is the Galaxy Map's Save Positions button, which writes system positions back to it. Settings can reset the views the pages remember.</div>
           </v-card>
         </v-col>
 
@@ -174,12 +174,12 @@ export default {
 
       // Each step is a list of text and `{ code }` parts.
       steps: [
-        ['Fork the repository on GitHub and clone your fork.'],
+        ['Fork the repository on GitHub and clone the fork.'],
         ['Install with ', { code: 'bun install' }, ' (bun only, other package managers are rejected).'],
         ['Put a save at ', { code: './AuroraDB.db' }, ', or unzip the sample with ', { code: 'unzip fixtures/AuroraDB.zip' }, '.'],
         ['Run ', { code: 'bun run dev' }, ' for the app, or ', { code: 'bun run web' }, ' for the renderer in a browser.'],
         ['With ', { code: 'bun run web' }, ' running, check every page with ', { code: 'bun run web:smoke' }, '.'],
-        ['Lint only the files you touched. The repo-wide baseline is not clean.'],
+        ['Lint only the files the change touches. The repo-wide baseline is not clean.'],
         ['Commit as ', { code: '<gitmoji> Summary description' }, ', capitalized, with no trailing period.'],
         ['Open a pull request.'],
       ],

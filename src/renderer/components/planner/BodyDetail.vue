@@ -60,7 +60,7 @@
             <div class="why-line"><span>× {{ distanceText }}</span><span>{{ why.distance }}</span></div>
             <div class="caption text--secondary mt-1">{{ rankText }}</div>
           </template>
-          <div v-else class="caption text--secondary">No species of yours can live here, so there is nothing to rank.</div>
+          <div v-else class="caption text--secondary">No species of mine can live here, so there is nothing to rank.</div>
         </v-card>
       </v-col>
 
@@ -131,7 +131,7 @@
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
-        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short you are of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
+        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short I am of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
         <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ distanceLine }}</div>
       </v-col>
     </v-row>
@@ -209,7 +209,7 @@ export default {
     planSummary() {
       const total = planYears(this.assessment.work, this.terraformCapacity)
 
-      return `${this.years(total)} with ${this.terraformCapacity > 0 ? 'the terraformers you set' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
+      return `${this.years(total)} with ${this.terraformCapacity > 0 ? 'the terraformers I set' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
     },
 
     tiles() {

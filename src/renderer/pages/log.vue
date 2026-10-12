@@ -23,7 +23,7 @@
           <v-card class="pa-4">
             <div class="subtitle-2">Events in the list</div>
             <v-checkbox v-model="collapseRepeats" label="Collapse daily repeats" dense hide-details />
-            <div class="caption text--secondary mt-1">The same type on one game day folds into a row you can expand. No message is removed.</div>
+            <div class="caption text--secondary mt-1">The same type on one game day folds into a row I can expand. No message is removed.</div>
             <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details />
             <div class="caption text--secondary mt-1">Types with a colour entry in this race's game settings, including black.</div>
             <v-btn small text class="mt-3" @click="resetFilters">Reset filters</v-btn>
@@ -87,7 +87,7 @@
         </window-virtual-scroll>
         <div v-else class="pa-6 text--secondary">{{ logEvents.length ? 'No events match these filters.' : 'This race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with your previous visit to this page.
+          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with my previous visit to this page.
         </div>
       </v-card>
     </template>
@@ -491,7 +491,7 @@ export default {
         { label: 'Events in range', value: this.count(this.filteredEvents.length), note: `of ${this.count(this.logEvents.length)} in this race's log` },
         { label: 'Busiest type', value: typeName, note: type ? `${this.count(type[1])} events in this view` : 'No events in this view' },
         { label: 'Busiest month', value: month ? month[0] : '—', note: month ? `${this.count(month[1])} events in this view` : 'No events in this view' },
-        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after your previous visit' },
+        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after my previous visit' },
       ]
     },
 

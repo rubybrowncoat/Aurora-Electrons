@@ -220,7 +220,7 @@
           </v-data-table>
           <div v-else class="panel-body caption text--secondary">No commander of this race is a prisoner, retired or dead in the save, and the race holds no prisoners.</div>
           <div class="panel-foot caption text--secondary">
-            The game deletes a commander who retires or dies when the game is saved, unless you press Retain for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as your race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
+            The game deletes a commander who retires or dies when the game is saved, unless I press Retain for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as my race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
           </div>
         </v-card>
       </template>
@@ -261,7 +261,7 @@ const FORMER_GROUPS = [
   { value: 'prisoner', text: 'Prisoners' },
   { value: 'retired', text: 'Retired' },
   { value: 'dead', text: 'Dead' },
-  { value: 'held', text: 'Held by us' },
+  { value: 'held', text: 'Held by me' },
 ]
 const ROSTER_PAGE_SIZES = [25, 50, 100]
 const SHIP_PAGE_SIZES = [15, 30, -1]
@@ -472,7 +472,7 @@ export default {
       return chosen.count ? chosen.value : (this.formerGroups.find((group) => group.count) || chosen).value
     },
 
-    // The table of the chosen former-commanders group: the prisoners held by us have their own columns, the others share.
+    // The table of the chosen former-commanders group: the prisoners the race holds have their own columns, the others share.
     formerTable() {
       return this.formerGroup === 'held' ? this.formerHeldTable : this.formerOwnTable
     },

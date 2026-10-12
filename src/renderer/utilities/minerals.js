@@ -204,7 +204,7 @@ export const stockProjection = ({ start, otherNet, deposits, steps }) => {
   return { stock: levels.map((level) => Math.max(0, level)), output, runOut }
 }
 
-// The ledger's purposes, folded to eight groups so a chart never needs a ninth colour. Transfers between your own colonies (freighters, mass drivers) and the starting stockpile aren't empire income or spending, so they're left out.
+// The ledger's purposes, folded to eight groups so a chart never needs a ninth colour. Transfers between the race's own colonies (freighters, mass drivers) and the starting stockpile aren't empire income or spending, so they're left out.
 export const FLOW_GROUPS = [
   { key: 'mining', label: 'Mining', income: true, types: [1, 11] },
   { key: 'salvage', label: 'Salvage', income: true, types: [10, 15, 17, 18, 19] },

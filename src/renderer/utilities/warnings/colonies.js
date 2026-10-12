@@ -62,7 +62,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'self-sustaining colonist destination'),
-    rule: 'A colony of more than 10 million at full efficiency that isn\'t your capital is not a colonist destination, so its people no longer need to be shipped there.',
+    rule: 'A colony of more than 10 million at full efficiency that isn\'t my capital is not a colonist destination, so its people no longer need to be shipped there.',
     columns: [
       { key: 'colony', text: 'Colony' },
       { key: 'population', text: 'Population', align: 'end' },

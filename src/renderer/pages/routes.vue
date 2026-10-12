@@ -67,7 +67,7 @@
         <v-row>
           <v-col cols="12" lg="5" xl="4">
             <stop-list :rows="stopRows" :cycle="cycle" :groups="pickerGroups" @insert="insertStop" @replace="replaceStop" @remove="removeStop" @move="moveStop" @need="ensureLarge" @update:cycle="(value) => (cycle = value)">
-              <template #foot>Each leg is routed on its own over the jump points your race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Bodies, fleets, waypoints and the rest are where the save has them now.</template>
+              <template #foot>Each leg is routed on its own over the jump points my race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Bodies, fleets, waypoints and the rest are where the save has them now.</template>
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
@@ -143,7 +143,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points your race has explored are used. Click a row to add that system as the last stop.
+            To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points my race has explored are used. Click a row to add that system as the last stop.
           </div>
         </v-card>
       </template>
@@ -175,9 +175,9 @@ import { planRoute } from '../utilities/route-plan'
 const INPUT_LABELS = {
   systems: 'the known systems',
   jumpPoints: 'the jump points',
-  colonies: 'your colonies',
-  fleets: 'your fleets',
-  classes: 'your ship classes',
+  colonies: 'my colonies',
+  fleets: 'my fleets',
+  classes: 'my ship classes',
   lagrangePoints: 'the Lagrange points',
   smallPlaces: 'the waypoints, wrecks and contacts',
   placeCounts: 'the bodies and survey locations',
@@ -186,9 +186,9 @@ const SECONDS_PER_DAY = 86400
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
 const OPTIONS = [
-  { key: 'avoidDanger', config: 'routesAvoidDanger', default: true, label: 'Avoid danger', hint: 'Skips systems with a danger rating your ships there don\'t outweigh in protection value.' },
-  { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race you have no trade treaty with.' },
-  { key: 'skipNoAutoRoute', config: 'routesSkipNoAutoRoute', default: false, label: 'Skip "no auto-route" systems', hint: 'Skips the systems you flagged to keep auto-routes out.' },
+  { key: 'avoidDanger', config: 'routesAvoidDanger', default: true, label: 'Avoid danger', hint: 'Skips systems with a danger rating my ships there don\'t outweigh in protection value.' },
+  { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race I have no trade treaty with.' },
+  { key: 'skipNoAutoRoute', config: 'routesSkipNoAutoRoute', default: false, label: 'Skip "no auto-route" systems', hint: 'Skips the systems I flagged to keep auto-routes out.' },
   { key: 'civilian', config: 'routesCivilian', default: false, label: 'Civilian shipping', hint: 'Keeps out of military restricted systems and jump points, as shipping lines do.' },
   { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'For ships without a jump drive: transits only where the jump point is stabilised on the near side.' },
   { key: 'useLagrange', config: 'routesUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter, as fleets do unless told not to.' },
@@ -1000,7 +1000,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The known systems with what the avoid options look at: the danger rating against the protection value of your own ships there (the game counts every fleet present, which fog of war hides), and the controlling race with your trade treaty, if any.
+    // The known systems with what the avoid options look at: the danger rating against the protection value of the race's own ships there (the game counts every fleet present, which fog of war hides), and the controlling race with the race's trade treaty, if any.
     systems: {
       get: tracked('systems', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -1031,7 +1031,7 @@ export default {
       }),
       default: [],
     },
-    // Your own fleets with ships in known systems, with their movement settings and whether any ship carries a jump drive.
+    // The race's own fleets with ships in known systems, with their movement settings and whether any ship carries a jump drive.
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {

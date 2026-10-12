@@ -49,7 +49,7 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => amount(count, 'damaged ship'),
-    rule: 'A ship of yours has one or more damaged components; the cost is the maintenance supplies a repair takes.',
+    rule: 'A ship of mine has one or more damaged components; the cost is the maintenance supplies a repair takes.',
     columns: [
       { key: 'ship', text: 'Ship' },
       { key: 'components', text: 'Damaged components' },
@@ -173,7 +173,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'active obsolete ship'),
-    rule: 'A ship of yours belongs to a class marked obsolete.',
+    rule: 'A ship of mine belongs to a class marked obsolete.',
     columns: [
       { key: 'ship', text: 'Ship' },
       { key: 'class', text: 'Class' },
@@ -335,7 +335,7 @@ export const checks = [
     group: group.key,
     severity: 'info',
     title: (count) => amount(count, 'ship class', 'ship classes') + ' with outdated crew quarters',
-    rule: 'Each class keeps the Crew Quarters Design of the day it was designed, so a current class behind your race\'s design efficiency wastes space on new ships; update it on the class window (unlock the class first).',
+    rule: 'Each class keeps the Crew Quarters Design of the day it was designed, so a current class behind my race\'s design efficiency wastes space on new ships; update it on the class window (unlock the class first).',
     columns: [
       { key: 'class', text: 'Class' },
       { key: 'quarters', text: 'Crew quarters', align: 'end' },

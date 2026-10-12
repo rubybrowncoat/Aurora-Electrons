@@ -54,7 +54,7 @@
                 <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at your last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at my last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
           </v-card>
         </v-col>
       </v-row>

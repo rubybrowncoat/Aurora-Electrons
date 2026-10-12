@@ -13,7 +13,7 @@
 export default {
   name: 'LoadState',
   props: {
-    // The failed reads, named ("the jump points and your colonies"); empty while none has failed.
+    // The failed reads, named ("the jump points and my colonies"); empty while none has failed.
     failed: {
       type: String,
       default: '',

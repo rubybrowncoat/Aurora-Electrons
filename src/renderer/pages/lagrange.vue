@@ -11,7 +11,7 @@
             <span>Lagrange map</span>
             <span class="legend">
               <span v-for="item in mapLegend" :key="item.key" class="legend-item"><span class="dot" :style="{ background: item.color }" />{{ item.label }}</span>
-              <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />Your colonies</span>
+              <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />My colonies</span>
             </span>
           </div>
           <div class="panel-body">
@@ -28,7 +28,7 @@
               <v-btn-toggle v-model="view" mandatory dense>
                 <v-btn v-for="option in viewOptions" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
               </v-btn-toggle>
-              <v-switch v-model="colonySystemsOnly" label="Systems with your colonies" dense hide-details class="mt-0" />
+              <v-switch v-model="colonySystemsOnly" label="Systems with my colonies" dense hide-details class="mt-0" />
               <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
@@ -125,7 +125,7 @@ import { roundToDecimal } from '../utilities/math'
 const INPUT_LABELS = {
   systems: 'the known systems',
   jumpPoints: 'the jump points',
-  colonies: 'your colonies',
+  colonies: 'my colonies',
   bodies: 'the planets and moons',
   ships: 'the stabilisation ships',
   orders: 'stabilisation orders',
@@ -316,7 +316,7 @@ export default {
         {
           label: 'Planets and moons to stabilise',
           value: this.count(candidates.length),
-          note: `${this.count(candidates.filter((body) => body.Colonies > 0).length)} in systems with your colonies`,
+          note: `${this.count(candidates.filter((body) => body.Colonies > 0).length)} in systems with my colonies`,
         },
         {
           label: 'Quickest to stabilise',
@@ -339,7 +339,7 @@ export default {
         { text: 'Stable points in system', value: 'systemPoints', align: 'end' },
         { text: 'Time to stabilise', value: 'daysSort', align: 'end' },
         { text: 'Lagrange point', value: 'statusSort' },
-        { text: 'Your colonies in system', value: 'Colonies', align: 'end' },
+        { text: 'My colonies in system', value: 'Colonies', align: 'end' },
       ]
     },
 

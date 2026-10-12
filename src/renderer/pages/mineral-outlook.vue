@@ -21,7 +21,7 @@
 
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!forecastReady" class="mt-3" @retry="retryFailedInputs" />
       <v-alert v-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
-        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from your mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
+        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from my mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
       </v-alert>
 
       <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
@@ -106,7 +106,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }} Click a row to see its outlook.
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between my colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from my mines; used is the industry queue over the next 12 months.' }} Click a row to see its outlook.
           </div>
         </v-card>
 
@@ -535,7 +535,7 @@ export default {
         {
           label: 'Mined per year',
           value: this.tons(minedPerYear),
-          note: !this.hasLedger ? 'From your mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
+          note: !this.hasLedger ? 'From my mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
         },
       ]
     },

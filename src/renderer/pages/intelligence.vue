@@ -373,10 +373,10 @@ export default {
         { label: 'Last ship contact', value: race.LastContact ? this.date(race.LastContact) : 'None' },
         { label: 'Diplomatic points', value: `${this.count(race.DiplomaticPoints)} (${race.standing.toLowerCase()})` },
         { label: 'Communication', value: race.CommEstablished > 0 ? `${race.communication} on ${this.date(race.CommEstablished)}` : race.communication },
-        { label: 'You grant', value: granted.length ? granted.join(', ') : 'No treaties' },
+        { label: 'I grant', value: granted.length ? granted.join(', ') : 'No treaties' },
         { label: 'They grant', value: received.length ? received.join(', ') : 'No treaties' },
         { label: 'Race intelligence', value: `${this.count(race.AlienRaceIntelligencePoints, 1)} points; a discovery each time it passes ${REWARD_COST}` },
-        { label: 'Damage they have done to you', value: this.count(race.DamageCausedByAlienRace) },
+        { label: 'Damage they have done to me', value: this.count(race.DamageCausedByAlienRace) },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
