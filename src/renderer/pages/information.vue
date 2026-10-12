@@ -568,18 +568,13 @@ export default {
       return `${item.colonyName} ${item.systemName} ${item.InstallationName}`.toLowerCase().includes(query.toLowerCase())
     },
 
-    // The picks the query names; one it leaves out stays as it is. They are plain keys, so a link that arrives before the places are read lands on its pair once they load.
+    // The picks the query names; one it leaves out is cleared, so the origin is the capital again and there is no destination. They are plain keys, so a link that arrives before the places are read lands on its pair once they load.
     applyLink(query) {
       const [from] = queryPlaceKeys(query.from)
       const [to] = queryPlaceKeys(query.to)
 
-      if (from) {
-        this.fromKey = from
-      }
-
-      if (to) {
-        this.toKey = to
-      }
+      this.fromKey = from || null
+      this.toKey = to || null
     },
 
     setFrom(key) {
