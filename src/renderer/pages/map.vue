@@ -369,7 +369,7 @@ const LOCK_PATH = 'M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15
 const PILLAR_PATH = 'M6,5H18A1,1 0 0,1 19,6A1,1 0 0,1 18,7H6A1,1 0 0,1 5,6A1,1 0 0,1 6,5M21,2V4H3V2H21M15,8H17V22H15V8M7,8H9V22H7V8M11,8H13V22H11V8Z'
 const PYRAMID_PATH = 'M21.85 16.96H21.85L12.85 2.47C12.65 2.16 12.33 2 12 2S11.35 2.16 11.15 2.47L2.15 16.96H2.15C1.84 17.45 2 18.18 2.64 18.43L11.64 21.93C11.75 22 11.88 22 12 22S12.25 22 12.36 21.93L21.36 18.43C22 18.18 22.16 17.45 21.85 16.96M11 6.5V13.32L5.42 15.5L11 6.5M12 19.93L5.76 17.5L12 15.07L18.24 17.5L12 19.93M13 13.32V6.5L18.58 15.5L13 13.32Z'
 const HURRICANE_PATH = 'M15,6.79C16.86,7.86 18,9.85 18,12C18,22 6,22 6,22C7.25,21.06 8.38,19.95 9.34,18.71C9.38,18.66 9.41,18.61 9.44,18.55C9.69,18.06 9.5,17.46 9,17.21C7.14,16.14 6,14.15 6,12C6,2 18,2 18,2C16.75,2.94 15.62,4.05 14.66,5.29C14.62,5.34 14.59,5.39 14.56,5.45C14.31,5.94 14.5,6.54 15,6.79M12,14A2,2 0 0,0 14,12A2,2 0 0,0 12,10A2,2 0 0,0 10,12A2,2 0 0,0 12,14Z'
-const CLOSE_PATH = 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'
+const SKULL_CROSSBONES_PATH = 'M15.8,18.5L21.8,20.1L21.4,22L12,19.5L2.6,22L2.1,20.1L8.1,18.5L2,16.9L2.5,15L11.9,17.5L21.3,15L21.8,16.9L15.8,18.5M18,8C18,9.8 17.2,11.3 16,12.4V15H14V13.7L14,13H13V15H11V13H10V13.7L10,15H8V12.4C6.8,11.3 6,9.8 6,8A6,6 0 0,1 12,2A6,6 0 0,1 18,8M11,7.5C11,6.7 10.3,6 9.5,6C8.7,6 8,6.7 8,7.5C8,8.3 8.7,9 9.5,9C10.3,9 11,8.3 11,7.5M13,11L12,9L11,11H13M16,7.5C16,6.7 15.3,6 14.5,6C13.7,6 13,6.7 13,7.5C13,8.3 13.7,9 14.5,9C15.3,9 16,8.3 16,7.5Z'
 const ALERT_PATH = 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16'
 const CALENDAR_PATH = 'M12 12H17V17H12V12M19 3H18V1H16V3H8V1H6V3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M19 5V7H5V5H19M5 19V9H19V19H5Z'
 const EARTH_PATH = 'M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z'
@@ -382,23 +382,23 @@ const FLAG_PATH = 'M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'
 const CRANE_OFFSET = [1, 0]
 const FLAG_OFFSET = [-0.5, -0.5]
 
-// What Show adds to the map: glyphs round a system's marker, a mark after its name, or lines under it. `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for marks the names carry; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
+// What Show adds to the map: glyphs round a system's marker, or lines under its name. `short` names each mark in the tracker's title when several are on. In the tracker a mark is a disc with its icon `path`, filled in the `colors` entry its glyphs take, or hollow for the lines under the name; `offset` centres an icon MDI draws off the middle of its square (see MapGlyph).
 const MARKS = [
   { value: 'habitable', text: 'Habitable worlds', short: 'habitable worlds', place: 'glyph', path: EARTH_PATH, color: 'colony' },
   { value: 'ruins', text: 'Ruins', short: 'ruins', place: 'glyph', path: PILLAR_PATH, color: 'ruins' },
   { value: 'constructs', text: 'Ancient constructs', short: 'constructs', place: 'glyph', path: PYRAMID_PATH, color: 'construct' },
   { value: 'rifts', text: 'Aether rifts', short: 'rifts', place: 'glyph', path: HURRICANE_PATH, color: 'rift' },
+  { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'glyph', path: SKULL_CROSSBONES_PATH, color: 'ring' },
   { value: 'ships', text: 'Your ships', short: 'ships', place: 'glyph', path: ROCKET_PATH, color: 'yours' },
   { value: 'shipyards', text: 'Your shipyards', short: 'shipyards', place: 'glyph', path: CRANE_PATH, color: 'yours', offset: CRANE_OFFSET },
   { value: 'waypoints', text: 'Your waypoints', short: 'waypoints', place: 'glyph', path: MAP_MARKER_PATH, color: 'yours' },
   { value: 'contacts', text: 'Alien contacts now', short: 'contacts', place: 'glyph', path: RADAR_PATH, color: 'danger' },
   { value: 'flags', text: 'System flags', short: 'flags', place: 'glyph', path: FLAG_PATH, color: 'ring', offset: FLAG_OFFSET },
-  { value: 'wrecks', text: 'Wrecks', short: 'wrecks', place: 'name', path: CLOSE_PATH },
   { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
   { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', path: CALENDAR_PATH, offset: [0, 1] },
 ]
 
-const MARK_HEADERS = { glyph: 'Round the marker', name: 'After the name', line: 'Under the name' }
+const MARK_HEADERS = { glyph: 'Round the marker', line: 'Under the name' }
 
 const MARK_GROUPS = Object.keys(MARK_HEADERS).map((place) => ({ place, header: MARK_HEADERS[place], marks: MARKS.filter((mark) => mark.place === place) }))
 
@@ -415,8 +415,8 @@ const SLICE_MS = 12
 const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
-// Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
-const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120]
+// Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below; only a system with every kind takes the last, at the lower left. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
+const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210]
 const BADGE_ANGLE = 30
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes in a hidden or minimised window, so an Arrange carries on there.
@@ -1060,6 +1060,7 @@ export default {
         'constructs-active': { path: PYRAMID_PATH, color: colors.construct, label: 'Active ancient construct' },
         'constructs-dormant': { path: PYRAMID_PATH, color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
         rifts: { path: HURRICANE_PATH, color: colors.rift, label: 'Aether rift' },
+        wrecks: { path: SKULL_CROSSBONES_PATH, color: colors.ring, label: 'Wrecks' },
         'ships-war': { path: ROCKET_PATH, color: colors.yours, label: 'Your warships' },
         'ships-other': { path: ROCKET_PATH, color: colors.yours, hollow: true, label: 'Your ships, no warships' },
         shipyards: { path: CRANE_PATH, offset: CRANE_OFFSET, color: colors.yours, label: 'Your shipyards' },
@@ -1129,8 +1130,8 @@ export default {
           }
         } else {
           const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
-          const sample = { wrecks: '✕2', danger: '40 / 25', discovered: 'Date' }[mark.value]
-          const label = { wrecks: 'Wrecks', danger: 'Danger / your protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
+          const sample = { danger: '40 / 25', discovered: 'Date' }[mark.value]
+          const label = { danger: 'Danger / your protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
 
           items.push(systems ? { kind: 'sample', sample, label: `${label} (${systems})` } : { kind: 'note', label: `${mark.text}: none known` })
         }
@@ -1930,7 +1931,7 @@ export default {
       const { spots, spotColor, ...data } = marker
       const glyphs = this.glyphsOf(row)
       const label = this.labelOf(row)
-      // Show marks the system where it has a glyph or its name carries more than the name.
+      // Show marks the system where it has a glyph or a line under its name.
       const marked = glyphs.length > 0 || label !== row.Name
 
       return {
@@ -1988,6 +1989,10 @@ export default {
         names.push('rifts')
       }
 
+      if (marks.has('wrecks') && features.wrecks) {
+        names.push('wrecks')
+      }
+
       if (marks.has('ships') && features.ships) {
         names.push(features.warships ? 'ships-war' : 'ships-other')
       }
@@ -2024,13 +2029,9 @@ export default {
       return glyphs
     },
 
-    // What a mark placed by the name says for a system, or '' where it has nothing to say.
+    // What a line under the name says for a system, or '' where it has nothing to say.
     markText(mark, row) {
       const features = this.features[row.id] || NO_FEATURES
-
-      if (mark === 'wrecks') {
-        return features.wrecks ? `✕${features.wrecks}` : ''
-      }
 
       if (mark === 'danger') {
         // The game reds its danger line where the warships there protect less than the danger.
@@ -2046,13 +2047,11 @@ export default {
       return ''
     },
 
-    // A system's name with what Show adds: its wrecks after it, and a line under it for each of danger and the date it was found.
+    // A system's name with what Show adds under it: a line for each of danger and the date it was found.
     labelOf(row) {
-      const marks = MARKS.filter((mark) => mark.place !== 'glyph' && this.marksSet.has(mark.value))
-      const after = marks.filter((mark) => mark.place === 'name').map((mark) => this.markText(mark.value, row)).filter(Boolean)
-      const lines = marks.filter((mark) => mark.place === 'line').map((mark) => this.markText(mark.value, row)).filter(Boolean)
+      const lines = MARKS.filter((mark) => mark.place === 'line' && this.marksSet.has(mark.value)).map((mark) => this.markText(mark.value, row)).filter(Boolean)
 
-      return [[row.Name, ...after].join('  '), ...lines].join('\n')
+      return [row.Name, ...lines].join('\n')
     },
 
     createGraph() {
