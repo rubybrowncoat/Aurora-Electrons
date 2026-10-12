@@ -4,34 +4,9 @@
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
+        <v-alert v-if="largeProblem" type="warning" dense text class="mb-2">{{ largeProblem }}</v-alert>
+
         <div class="toolbar">
-          <div class="tool tool--place">
-            <div class="tool__label caption text--secondary">From</div>
-            <v-autocomplete :value="origin && origin.key" :items="places" item-text="name" item-value="key" :filter="filterPlace" aria-label="From" dense outlined hide-details auto-select-first @change="setFrom">
-              <template #item="{ item }">
-                <v-icon small class="mr-3">{{ item.icon }}</v-icon>
-                <v-list-item-content>
-                  <v-list-item-title>{{ item.name }}</v-list-item-title>
-                  <v-list-item-subtitle>{{ item.subtitle }}</v-list-item-subtitle>
-                </v-list-item-content>
-              </template>
-            </v-autocomplete>
-          </div>
-          <div class="tool tool--swap">
-            <v-btn icon :disabled="!destination" aria-label="Swap From and To" title="Swap From and To" @click="swap"><v-icon>mdi-swap-horizontal</v-icon></v-btn>
-          </div>
-          <div class="tool tool--place">
-            <div class="tool__label caption text--secondary">To</div>
-            <v-autocomplete :value="destination && destination.key" :items="places" item-text="name" item-value="key" :filter="filterPlace" aria-label="To" placeholder="A system, colony or fleet" dense outlined hide-details clearable auto-select-first @change="setTo">
-              <template #item="{ item }">
-                <v-icon small class="mr-3">{{ item.icon }}</v-icon>
-                <v-list-item-content>
-                  <v-list-item-title>{{ item.name }}</v-list-item-title>
-                  <v-list-item-subtitle>{{ item.subtitle }}</v-list-item-subtitle>
-                </v-list-item-content>
-              </template>
-            </v-autocomplete>
-          </div>
           <div class="tool">
             <div class="tool__label caption text--secondary">Route</div>
             <v-btn-toggle v-model="order" mandatory dense>
@@ -82,17 +57,25 @@
               </v-card>
             </v-menu>
           </div>
+          <div class="tool tool--actions">
+            <v-btn icon :disabled="stopKeys.length < 2" aria-label="Reverse the stops" title="Reverse the stops" @click="reverse"><v-icon>mdi-swap-vertical</v-icon></v-btn>
+          </div>
         </div>
 
         <stat-tiles :tiles="tiles" class="mt-1" />
 
         <v-row>
-          <v-col cols="12" :xl="legRows.length ? 6 : 12">
+          <v-col cols="12" lg="5" xl="4">
+            <stop-list :rows="stopRows" :cycle="cycle" :groups="pickerGroups" @insert="insertStop" @replace="replaceStop" @remove="removeStop" @move="moveStop" @need="ensureLarge" @update:cycle="(value) => (cycle = value)">
+              <template #foot>Each leg is routed on its own over the jump points your race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Bodies, fleets, waypoints and the rest are where the save has them now.</template>
+            </stop-list>
+          </v-col>
+          <v-col cols="12" lg="7" xl="8">
             <v-card class="panel" elevation="1">
               <div class="panel-head">
                 <span>Route map</span>
                 <span class="legend">
-                  <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />From and To</span>
+                  <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />Stops</span>
                   <span class="legend-item"><span class="line" :style="{ background: colors.route }" />Route</span>
                   <span class="legend-item"><span class="dot" :style="{ background: colors.near }" /><span class="dot" :style="{ background: withAlpha(colors.near, 0.35) }" />Near to far</span>
                   <span class="legend-item"><span class="dot" :style="{ background: colors.avoided }" />Avoided</span>
@@ -100,47 +83,54 @@
                 </span>
               </div>
               <div class="panel-body">
-                <system-map :systems="mapNodes" :links="links" :route="routeSystems" :route-color="colors.route" :selected="destination ? destination.SystemID : null" aria-label="Known systems by distance from the origin, with the route" @select="(systemId) => setTo(`system:${systemId}`)" />
-                <div class="caption text--secondary">Positions as on the game's galactic map. Click a system to route there.</div>
+                <system-map :systems="mapNodes" :links="links" :route="plan.systems" :route-color="colors.route" :selected="lastStop ? lastStop.SystemID : null" aria-label="Known systems by distance from the first stop, with the route" @select="(systemId) => insertStop(stopKeys.length, { key: `system:${systemId}`, kind: 'system' })" />
               </div>
-            </v-card>
-          </v-col>
-          <v-col v-if="legRows.length" cols="12" xl="6">
-            <v-card class="panel" elevation="1">
-              <div class="panel-head">
-                <span>{{ origin.name }} to {{ destination.name }}</span>
-              </div>
-              <v-data-table :headers="legHeaders" :items="legRows" item-key="index" disable-pagination disable-sort hide-default-footer dense>
-                <template #[`item.SystemName`]="{ item }">
-                  <span class="font-weight-medium">{{ item.SystemName }}</span>
-                  <page-link v-if="item.SystemID" class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
-                </template>
-                <template #[`item.way`]="{ item }">
-                  <div class="py-1">
-                    <div>{{ item.from }}</div>
-                    <div class="leg-next">
-                      <v-icon x-small>mdi-arrow-right</v-icon>
-                      <span v-if="item.gate">{{ lastWord(item.to)[0] }}<span class="text-no-wrap">{{ lastWord(item.to)[1] }} <v-icon x-small :color="colors.route" title="A stabilised jump point: ships without a jump drive can transit">mdi-gate</v-icon></span></span>
-                      <span v-else>{{ item.to }}</span>
-                    </div>
-                    <div v-if="item.via" class="caption text--secondary">Lagrange jump from {{ item.via[0] }} to {{ item.via[1] }}</div>
-                  </div>
-                </template>
-                <template #[`item.km`]="{ item }"><span class="text-no-wrap">{{ distance(item.km) }}</span></template>
-                <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ distance(item.total) }}</span></template>
-                <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ travelTime(item.total) }}</span></template>
-              </v-data-table>
-              <div class="panel-foot caption text--secondary">Times are flying at {{ count(effectiveSpeed) }} km/s. Jumps take no time here; the jump shock after each and nebula speed limits are left out. Bodies and fleets are where the save has them now.</div>
+              <div class="panel-foot caption text--secondary">Positions as on the game's galactic map, shaded by distance from the first stop. Numbers mark the stops. Click a system to add it as the last stop. A leg with no explored route is bridged by a straight line.</div>
             </v-card>
           </v-col>
         </v-row>
+
+        <v-card v-if="detailRows.length" class="panel" elevation="1">
+          <div class="panel-head">
+            <span>Route detail</span>
+          </div>
+          <v-data-table :headers="legHeaders" :items="detailRows" item-key="id" group-by="leg" disable-pagination disable-sort hide-default-footer dense>
+            <template #[`group.header`]="{ group, headers, toggle, isOpen }">
+              <td :colspan="headers.length" class="leg-group">
+                <v-btn icon x-small :aria-label="isOpen ? 'Collapse this leg' : 'Expand this leg'" class="mr-2" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
+                <span class="font-weight-medium">{{ group + 1 }}. {{ legTitle(group) }}</span>
+                <span class="text--secondary ml-3">{{ legFigures(group) }}</span>
+              </td>
+            </template>
+            <template #[`item.SystemName`]="{ item }">
+              <span class="font-weight-medium">{{ item.SystemName }}</span>
+              <page-link v-if="item.SystemID" class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
+            </template>
+            <template #[`item.way`]="{ item }">
+              <div v-if="item.note" class="py-1 text--secondary">{{ item.note }}</div>
+              <div v-else class="py-1">
+                <div>{{ item.from }}</div>
+                <div class="leg-next">
+                  <v-icon x-small>mdi-arrow-right</v-icon>
+                  <span v-if="item.gate">{{ lastWord(item.to)[0] }}<span class="text-no-wrap">{{ lastWord(item.to)[1] }} <v-icon x-small :color="colors.route" title="A stabilised jump point: ships without a jump drive can transit">mdi-gate</v-icon></span></span>
+                  <span v-else>{{ item.to }}</span>
+                </div>
+                <div v-if="item.via" class="caption text--secondary">Lagrange jump from {{ item.via[0] }} to {{ item.via[1] }}</div>
+              </div>
+            </template>
+            <template #[`item.km`]="{ item }"><span class="text-no-wrap">{{ distance(item.km) }}</span></template>
+            <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ distance(item.total) }}</span></template>
+            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ travelTime(item.total) }}</span></template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">Times are flying at {{ count(effectiveSpeed) }} km/s, counted from the first stop. Jumps take no time here; the jump shock after each and nebula speed limits are left out.</div>
+        </v-card>
 
         <v-card class="panel" elevation="1">
           <div class="panel-head">
             <span>Distances from {{ origin ? origin.name : '—' }}</span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => setTo(`system:${row.SystemID}`)">
+          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => insertStop(stopKeys.length, { key: `system:${row.SystemID}`, kind: 'system' })">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
@@ -153,7 +143,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points your race has explored are used. Click a row to route there.
+            To a system, routes end at the jump point they arrive through; from a system, they start at its centre, as the galactic map measures. Only jump points your race has explored are used. Click a row to add that system as the last stop.
           </div>
         </v-card>
       </template>
@@ -169,15 +159,18 @@ import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import StopList from '../components/routes/StopList.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
-import { linkTo, place as placeKey, queryPlace } from '../utilities/deep-links'
+import { linkTo, queryId, queryPlace, queryPlaceKeys } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
-import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
+import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
+import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
+import { planRoute } from '../utilities/route-plan'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -186,6 +179,8 @@ const INPUT_LABELS = {
   fleets: 'your fleets',
   classes: 'your ship classes',
   lagrangePoints: 'the Lagrange points',
+  smallPlaces: 'the waypoints, wrecks and contacts',
+  placeCounts: 'the bodies and survey locations',
 }
 const SECONDS_PER_DAY = 86400
 
@@ -207,16 +202,26 @@ const DISTANCE_PAGE_SIZES = [15, 30, -1]
 // Each movement setting is kept on its own, for every game.
 const OPTION_FIELDS = Object.fromEntries(OPTIONS.map((option) => [option.key, { key: option.config, default: option.default }]))
 
+// The places whose lists are read only when the picker lists them, and the kinds of place key those hold.
+const BODY_GROUPS = ['planet', 'moon', 'asteroid', 'comet']
+const LAZY_GROUPS = [...BODY_GROUPS, 'survey']
+const LAZY_KINDS = ['body', 'survey']
+const EMPTY_LIST = Object.freeze([])
+
+const firstOf = (value) => (Array.isArray(value) ? value[0] : value)
+
+// The route as a list of stops, each a place key of utilities/deep-links.js, planned leg by leg (utilities/route-plan.js), with the stops' places drawn on the map and listed with their legs.
 export default {
   name: 'RoutesPage',
-  components: { LoadState, PageLink, StatTiles, SystemMap },
+  components: { LoadState, PageLink, StatTiles, StopList, SystemMap },
   mixins: [
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
     persistedView({
-      fromKey: { key: 'routesFrom', default: null, scope: 'race' },
-      toKey: { key: 'routesTo', default: null, scope: 'race' },
+      // The stops keep their repeats, and drop what isn't a place key.
+      stopKeys: { key: 'routesStops', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? queryPlaceKeys(stored.join(',')) : undefined) },
+      cycle: { key: 'routesCycle', default: false, scope: 'race', valid: (value) => typeof value === 'boolean' },
       // Only a positive speed is one; anything else is the fleet-class median.
       speed: { key: 'routesSpeed', default: null, scope: 'race', valid: (value) => value > 0 },
       order: { key: 'routesOrder', default: 'jumps', valid: oneOf(ORDERS.map((option) => option.value)) },
@@ -227,8 +232,15 @@ export default {
   ],
   data() {
     return {
-      // The fleet key a link named as the origin, whose speed and movement settings apply once the fleets have loaded.
+      // The fleet key a link named, whose speed and movement settings apply once the fleets have loaded.
       pendingFleet: null,
+      // Whether the capital is to be put in front of the stops: a route that has none yet, or whose link names no first stop.
+      needsOrigin: false,
+      // The bodies and survey locations, by picker group, once read; the places of the stops that are kept without reading those lists; and where each of those stops stands in being read.
+      largePlaces: {},
+      extra: {},
+      lazyState: {},
+      largeProblem: '',
       optionList: OPTIONS,
       orders: ORDERS,
       distancePageSizes: DISTANCE_PAGE_SIZES,
@@ -236,7 +248,11 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+
+    context() {
+      return { GameID: this.GameID, RaceID: this.RaceID }
+    },
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -264,47 +280,97 @@ export default {
       return Object.fromEntries(this.jumpPoints.map((jumpPoint) => [jumpPoint.WarpPointID, jumpPoint]))
     },
 
-    // Where a route can start or end: colonies and fleets at their places in the system, systems at their centre.
+    // The places read with the page: colonies, systems, jump points, Lagrange points, fleets, and the waypoints, wrecks and the rest. Bodies and survey locations wait until the picker lists them.
     places() {
-      const { systemById } = this
-      const systemName = (systemId) => (systemById[systemId] || {}).Name || ''
+      const name = (systemId) => this.systemNameOf(systemId)
 
-      return searchable([
-        ...colonyPlaces(this.colonies, systemName),
-        ...this.fleets.map((fleet) => ({
-          key: `fleet:${fleet.FleetID}`,
-          kind: 'fleet',
-          name: fleet.FleetName,
-          subtitle: `Fleet in ${systemName(fleet.SystemID)}, ${this.count(fleet.Speed)} km/s, ${fleet.Ships} ${fleet.Ships === 1 ? 'ship' : 'ships'}`,
-          icon: 'mdi-rocket-outline',
-          SystemID: fleet.SystemID,
-          Xcor: fleet.Xcor,
-          Ycor: fleet.Ycor,
-          fleet,
-        })),
-        ...systemPlaces(this.systems),
-      ], systemName)
+      return Object.freeze([
+        ...searchable([
+          ...colonyPlaces(this.colonies, name),
+          ...systemPlaces(this.systems),
+          ...jumpPointPlaces(this.jumpPoints, name),
+          ...lagrangePlaces(this.lagrangePoints, name, (point) => this.lagrangeName(point)),
+          ...fleetPlaces(this.fleets, name, this.count),
+        ], name),
+        ...this.smallPlaces,
+      ])
     },
 
+    // A contact is found under each of its rows' keys.
     placeByKey() {
-      return Object.fromEntries(this.places.map((place) => [place.key, place]))
+      const found = {}
+
+      this.places.forEach((place) => {
+        found[place.key] = place
+        ;(place.aliases || EMPTY_LIST).forEach((alias) => {
+          found[alias] = place
+        })
+      })
+
+      return found
     },
 
-    // The saved origin, else the capital.
+    // The picker's types in listing order. A type that is read on demand carries no places until it has been.
+    pickerGroups() {
+      const eager = {}
+
+      this.places.forEach((place) => {
+        ;(eager[place.group] = eager[place.group] || []).push(place)
+      })
+
+      return PLACE_GROUPS.map((group) => {
+        const lazy = LAZY_GROUPS.includes(group.id)
+        const places = lazy ? this.largePlaces[group.id] || null : Object.freeze(eager[group.id] || [])
+
+        return { ...group, count: lazy ? this.placeCounts[group.id] || 0 : places.length, places }
+      })
+    },
+
+    // The stops that name a place the page can tell, in order, each with where it stands in the stored list.
+    routeStops() {
+      return this.stopKeys.map((key, stopIndex) => {
+        const found = this.placeByKey[key] || this.extra[key]
+
+        return found ? { ...found, stopIndex } : null
+      }).filter(Boolean)
+    },
+
     origin() {
-      return this.placeByKey[this.fromKey] || this.places.find((place) => place.Capital) || this.places[0] || null
+      return this.routeStops[0] || null
     },
 
-    destination() {
-      return this.placeByKey[this.toKey] || null
+    lastStop() {
+      return this.routeStops[this.routeStops.length - 1] || null
+    },
+
+    // A route's search options: its order, which jump points it may transit and which systems it may enter, and whether it uses Lagrange points.
+    searchOptions() {
+      const { gatesOnly, civilian, useLagrange } = this.options
+
+      return {
+        order: this.order,
+        canTransit: (jumpPoint) => (!gatesOnly || jumpPoint.JumpGateStrength > 0) && (!civilian || !jumpPoint.MilitaryRestricted),
+        canEnter: (systemId) => !this.avoidReasons[systemId],
+        lagrangePoints: useLagrange ? this.lagrangePoints : [],
+      }
+    },
+
+    plan() {
+      return planRoute(this.routeStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, ...this.searchOptions })
     },
 
     linkQuery() {
-      return this.ready ? linkTo.routes({ from: this.origin && this.origin.key, to: this.destination && this.destination.key }).query : null
+      return this.ready && !this.needsOrigin ? linkTo.routes({ stops: this.stopKeys, cycle: this.cycle && this.stopKeys.length > 1 }).query : null
     },
 
     linkLabel() {
-      return this.origin && (this.destination ? `${this.origin.name} → ${this.destination.name}` : this.origin.name)
+      const stops = this.routeStops
+
+      if (stops.length < 2) {
+        return stops.length ? stops[0].name : null
+      }
+
+      return `${stops[0].name} → ${stops[stops.length - 1].name}${this.cycle ? ' and back' : ''}${stops.length > 2 ? ` (${stops.length} stops)` : ''}`
     },
 
     // Classes in service that move, fastest first, for the speed menu; their median speed until one is picked.
@@ -345,89 +411,89 @@ export default {
       return reasons
     },
 
+    // The search from the first stop, for the distance table and the map's shading.
     routes() {
-      if (!this.origin) {
-        return null
-      }
-
-      const { gatesOnly, civilian, useLagrange } = this.options
-
-      return searchRoutes(this.jumpPoints, [this.origin], {
-        order: this.order,
-        canTransit: (jumpPoint) => (!gatesOnly || jumpPoint.JumpGateStrength > 0) && (!civilian || !jumpPoint.MilitaryRestricted),
-        canEnter: (systemId) => !this.avoidReasons[systemId],
-        lagrangePoints: useLagrange ? this.lagrangePoints : [],
-      })
+      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], this.searchOptions) : null
     },
 
     // The same search with every option's limit lifted, to tell the systems the options cut off from the ones no explored route reaches at all.
     openRoutes() {
-      if (!this.origin) {
-        return null
-      }
-
-      return searchRoutes(this.jumpPoints, [this.origin], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] })
+      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] }) : null
     },
 
-    // What keeps the destination out of reach with these options, when a route without them reaches it.
-    destinationBlockers() {
-      if (this.route || !this.destination || !this.openRoutes) {
-        return []
-      }
+    // For each leg without a route, what keeps it out of reach.
+    legNotes() {
+      const notes = {}
 
-      const open = this.destination.kind === 'system' ? this.openRoutes.toSystem(this.destination.SystemID) : this.openRoutes.toPlace(this.destination)
+      this.plan.legs.filter((leg) => !leg.route).forEach((leg) => {
+        notes[leg.index] = this.legNote(leg)
+      })
 
-      return open ? this.blockers(open) : []
+      return notes
     },
 
-    route() {
-      if (!this.routes || !this.destination) {
-        return null
-      }
+    stopRows() {
+      const legOf = {}
 
-      return this.destination.kind === 'system' ? this.routes.toSystem(this.destination.SystemID) : this.routes.toPlace(this.destination)
+      this.plan.legs.forEach((leg) => {
+        legOf[leg.from.stopIndex] = leg
+      })
+
+      return this.stopKeys.map((key, index) => {
+        const place = this.placeByKey[key] || this.extra[key] || null
+        const leg = legOf[index]
+        const reading = LAZY_KINDS.includes(key.split(':')[0]) && this.lazyState[key] !== 'done'
+
+        return {
+          index,
+          key,
+          status: place ? 'ok' : reading ? 'loading' : 'missing',
+          place,
+          leg: leg ? { closing: leg.closing, toName: leg.to.name, summary: this.figures(leg), note: this.legNotes[leg.index] || '' } : null,
+        }
+      })
     },
 
-    legs() {
-      return this.route ? routeLegs(this.route) : []
-    },
-
-    // The systems the route passes through, in order, for the map.
-    routeSystems() {
-      if (!this.route) {
-        return []
-      }
-
-      return [this.origin.SystemID, ...this.legs.filter((leg) => leg.kind === 'jump').map((leg) => leg.to.SystemID)]
-    },
-
-    // One row per system on the route: where it comes in, where it leaves, and the distance flown there.
-    legRows() {
+    // One row per system a leg crosses: where it comes in, where it leaves, and the distance flown there; the total runs on through the legs.
+    detailRows() {
       const rows = []
       let total = 0
 
-      this.legs.forEach((leg) => {
-        if (leg.kind === 'fly') {
-          total += leg.km
-          rows.push({
-            index: rows.length,
-            SystemID: leg.SystemID,
-            SystemName: this.systemNameOf(leg.SystemID),
-            from: this.pointName(leg.from),
-            to: this.pointName(leg.to),
-            gate: Boolean(leg.to.WarpPointID && leg.to.JumpGateStrength > 0),
-            via: leg.via && leg.via.map((point) => this.lagrangeName(point)),
-            km: leg.km,
-            total,
-          })
+      this.plan.legs.forEach((leg) => {
+        const row = (id, fields) => rows.push({ id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, ...fields })
+
+        if (!leg.route) {
+          row('none', { SystemID: leg.start.SystemID, SystemName: this.systemNameOf(leg.start.SystemID), note: `No explored route${this.legNotes[leg.index] ? `: ${this.legNotes[leg.index]}` : ''}` })
+
+          return
+        }
+
+        if (!leg.steps.length) {
+          row('here', { SystemID: leg.start.SystemID, SystemName: this.systemNameOf(leg.start.SystemID), note: 'Already in the system' })
+        }
+
+        leg.steps.forEach((step, number) => {
+          if (step.kind === 'fly') {
+            total += step.km
+            row(number, {
+              SystemID: step.SystemID,
+              SystemName: this.systemNameOf(step.SystemID),
+              from: this.pointName(step.from, leg),
+              to: this.pointName(step.to, leg),
+              gate: Boolean(step.to.WarpPointID && step.to.JumpGateStrength > 0),
+              via: step.via && step.via.map((point) => this.lagrangeName(point)),
+              km: step.km,
+              total,
+            })
+          }
+        })
+
+        const last = leg.steps[leg.steps.length - 1]
+
+        if (last && last.kind === 'jump') {
+          row('arrived', { SystemID: last.to.SystemID, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to, leg), to: 'Arrived', gate: false, via: null })
         }
       })
-
-      const last = this.legs[this.legs.length - 1]
-
-      if (last && last.kind === 'jump') {
-        rows.push({ index: rows.length, SystemID: last.to.SystemID, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to), to: 'Arrived', gate: false, via: null, km: 0, total })
-      }
 
       return rows
     },
@@ -442,7 +508,7 @@ export default {
 
       return this.systems.map((system) => {
         const route = routes.toSystem(system.SystemID)
-        const isOrigin = origin && system.SystemID === origin.SystemID
+        const isOrigin = system.SystemID === origin.SystemID
         const reason = isOrigin ? null : avoidReasons[system.SystemID] || null
         const blocked = !route && !reason && Boolean(openRoutes.toSystem(system.SystemID))
 
@@ -453,68 +519,76 @@ export default {
           blocked,
           jumpsSort: route ? route.jumps : Infinity,
           kmSort: route ? route.km : Infinity,
-          status: isOrigin ? 'Origin' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
+          status: isOrigin ? 'First stop' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
         }
       })
     },
 
     mapNodes() {
       const { colors, theme, order } = this
-      const onRoute = new Set(this.routeSystems)
-      const ends = new Set([this.origin && this.origin.SystemID, this.destination && this.destination.SystemID])
+      const onRoute = new Set(this.plan.systems)
+      const numbers = {}
+
+      this.routeStops.forEach((stop) => {
+        ;(numbers[stop.SystemID] = numbers[stop.SystemID] || []).push(stop.stopIndex + 1)
+      })
+
       const reachable = this.distanceRows.filter((row) => row.route)
       const farthest = Math.max(1, ...reachable.map((row) => (order === 'jumps' ? row.route.jumps : row.route.km)))
 
       return this.distanceRows.map((row) => {
-        const end = ends.has(row.SystemID)
+        const stop = numbers[row.SystemID]
         const reach = row.route ? (order === 'jumps' ? row.route.jumps : row.route.km) / farthest : null
 
         return {
           SystemID: row.SystemID,
-          Name: row.Name,
+          Name: stop ? `${[...new Set(stop)].join(', ')} · ${row.Name}` : row.Name,
           Xcor: row.Xcor,
           Ycor: row.Ycor,
-          rank: end ? 3 : onRoute.has(row.SystemID) ? 2 : row.route ? 1 : 0,
-          size: end ? 7 : onRoute.has(row.SystemID) ? 5 : 3.5,
+          rank: stop ? 3 : onRoute.has(row.SystemID) ? 2 : row.route ? 1 : 0,
+          size: stop ? 7 : onRoute.has(row.SystemID) ? 5 : 3.5,
           color: row.route ? withAlpha(colors.near, 1 - 0.65 * reach) : row.reason ? colors.avoided : colors.out,
-          ring: end ? theme.ink : null,
-          label: end,
+          ring: stop ? theme.ink : null,
+          label: Boolean(stop),
           title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${this.travelTime(row.route.km)}` : row.status}`,
         }
       }).sort((a, b) => a.rank - b.rank)
     },
 
     tiles() {
+      const { plan } = this
       const reachable = this.distanceRows.filter((row) => row.route).length
       const avoided = this.distanceRows.filter((row) => row.reason).length
       const blocked = this.distanceRows.filter((row) => row.blocked).length
       const out = this.distanceRows.length - reachable - avoided - blocked
-      const route = this.route
-      const stabilised = this.legs.filter((leg) => leg.kind === 'jump' && leg.from.JumpGateStrength > 0).length
-      const lagrange = this.legs.filter((leg) => leg.via).length
-      const blockers = this.destinationBlockers
-      const noRoute = !this.destination ? 'Pick a destination above, on the map or in the table' : this.avoidReasons[this.destination.SystemID] ? `Avoided: ${this.avoidReasons[this.destination.SystemID]}` : blockers.length ? `The options keep it out of reach: ${blockers.length > 3 ? `${blockers.slice(0, 3).join(', ')} and ${blockers.length - 3} more` : joinLabels(blockers)}` : 'No explored jump route reaches it'
+      const steps = plan.legs.flatMap((leg) => leg.steps)
+      const stabilised = steps.filter((step) => step.kind === 'jump' && step.from.JumpGateStrength > 0).length
+      const lagrange = steps.filter((step) => step.via).length
+      const legs = plan.legs.length
+      const unrouted = plan.missing ? `${plan.missing} of ${legs} legs ${plan.missing === 1 ? 'has' : 'have'} no explored route` : ''
 
       return [
         {
           label: 'Jumps',
-          value: route ? this.count(route.jumps) : this.destination ? 'No route' : '—',
-          note: route ? `${stabilised} through stabilised jump points${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}` : noRoute,
+          value: legs ? this.count(plan.jumps) : '—',
+          note: legs ? [`${stabilised} through stabilised jump points${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}`, unrouted].filter(Boolean).join('; ') : 'Add a second stop below, or click a system on the map',
+          icon: plan.missing ? 'mdi-alert-outline' : undefined,
+          iconColor: plan.missing ? 'warning' : undefined,
         },
         {
           label: 'Distance',
-          value: route ? this.distance(route.km) : '—',
-          note: route ? `${this.count(route.km / KM_PER_AU, 1)} AU` : '',
+          value: legs ? this.distance(plan.km) : '—',
+          note: legs ? `${this.count(plan.km / KM_PER_AU, 1)} AU${plan.missing ? ', without the legs that have no route' : ''}` : '',
         },
         {
           label: 'Travel time',
-          value: route ? this.travelTime(route.km) : '—',
+          value: legs ? this.travelTime(plan.km) : '—',
           note: `At ${this.count(this.effectiveSpeed)} km/s`,
         },
         {
           label: 'Reachable systems',
           value: `${this.count(reachable)} of ${this.count(this.distanceRows.length)}`,
-          note: `${avoided} avoided, ${blocked ? `${blocked} cut off by the options, ` : ''}${out} out of reach`,
+          note: this.origin ? `From ${this.origin.name}: ${avoided} avoided, ${blocked ? `${blocked} cut off by the options, ` : ''}${out} out of reach` : 'From the first stop',
         },
       ]
     },
@@ -540,76 +614,240 @@ export default {
     },
   },
   watch: {
-    placeByKey() {
-      this.adoptPendingFleet()
+    ready(ready) {
+      if (ready) {
+        this.ensureOrigin()
+        this.adoptPendingFleet()
+      }
     },
+
+    // Another game or race: its stops are restored by the mixin; a route carried over from the old two-place pair joins them, and a race with none starts from its capital.
+    persistedViewPrefix() {
+      this.needsOrigin = !this.stopKeys.length
+      this.adoptLegacyRoute()
+      this.pendingFleet = null
+    },
+
+    stopKeys: 'readStops',
+    database: 'resetPlaces',
+    GameID: 'resetPlaces',
+    RaceID: 'resetPlaces',
+  },
+  created() {
+    this.largeToken = 0
+    this.largeRequests = {}
+    this.needsOrigin = !this.stopKeys.length
+    this.adoptLegacyRoute()
+    this.readStops()
   },
   methods: {
     withAlpha,
-
-    filterPlace,
 
     filterSystem(_value, query, item) {
       return item.Name.toLowerCase().includes(query.toLowerCase())
     },
 
-    // A fleet as origin brings its speed and movement settings.
-    setFrom(key) {
-      if (!key) {
+    // A route stored as a From and a To becomes the stops, once, and its keys go.
+    adoptLegacyRoute() {
+      const prefix = this.persistedViewPrefix
+
+      if (!prefix) {
         return
       }
 
-      this.pendingFleet = null
-      this.fromKey = key
-      this.adoptFleet(key)
-    },
+      const keys = ['routesFrom', 'routesTo'].map((name) => `${prefix}.${name}`)
+      const [from, to] = keys.map((key) => this.config.get(key))
 
-    setTo(key) {
-      this.toKey = key || null
-    },
-
-    // From and To as the link names them; one it leaves out is cleared, so the origin is the capital.
-    applyLink(query) {
-      const keyOf = (value) => {
-        const found = queryPlace(value)
-
-        return found ? placeKey[found.kind](found.id) : null
+      if (from === undefined && to === undefined) {
+        return
       }
 
-      this.fromKey = keyOf(query.from)
-      this.toKey = keyOf(query.to)
-      this.pendingFleet = this.fromKey && this.fromKey.startsWith('fleet:') ? this.fromKey : null
+      if (this.config.get(`${prefix}.routesStops`) === undefined) {
+        const stops = queryPlaceKeys([from, to].filter(Boolean).join(','))
+
+        if (stops.length) {
+          this.stopKeys = stops
+          this.needsOrigin = !queryPlace(from)
+        }
+      }
+
+      keys.forEach((key) => this.config.delete(key))
+    },
+
+    // The stops, cycle and fleet as the link names them; with no first stop the route starts from the capital.
+    applyLink(query) {
+      const from = queryPlaceKeys(query.from).slice(0, 1)
+      const fleet = queryId(firstOf(query.fleet))
+
+      this.stopKeys = [...from, ...queryPlaceKeys(query.via), ...queryPlaceKeys(query.to)]
+      this.cycle = firstOf(query.cycle) === '1' && this.stopKeys.length > 1
+      this.needsOrigin = !from.length
+      this.pendingFleet = fleet ? `fleet:${fleet}` : from[0] && from[0].startsWith('fleet:') ? from[0] : null
+      this.ensureOrigin()
       this.adoptPendingFleet()
     },
 
-    adoptPendingFleet() {
-      if (this.pendingFleet && this.placeByKey[this.pendingFleet]) {
-        this.adoptFleet(this.pendingFleet)
-        this.pendingFleet = null
+    ensureOrigin() {
+      if (!this.needsOrigin || !this.ready) {
+        return
+      }
+
+      const origin = this.places.find((place) => place.Capital) || this.places[0]
+
+      this.needsOrigin = false
+
+      if (origin) {
+        this.stopKeys = [origin.key, ...this.stopKeys]
       }
     },
 
-    // A fleet as origin brings its speed and movement settings.
-    adoptFleet(key) {
-      const place = this.placeByKey[key]
+    adoptPendingFleet() {
+      if (!this.pendingFleet || !this.ready) {
+        return
+      }
 
+      const place = this.placeByKey[this.pendingFleet]
+
+      this.pendingFleet = null
+      this.adoptFleet(place)
+    },
+
+    // A fleet as the first stop brings its speed and movement settings.
+    adoptFleet(place) {
       if (place && place.fleet) {
-        this.speed = place.fleet.Speed
+        if (place.fleet.Speed > 1) {
+          this.speed = place.fleet.Speed
+        }
+
         this.setOption('avoidDanger', Boolean(place.fleet.AvoidDanger))
         this.setOption('avoidAlien', Boolean(place.fleet.AvoidAlienSystems))
         this.setOption('gatesOnly', !place.fleet.JumpRating)
       }
     },
 
-    swap() {
-      const from = this.origin.key
+    // A picked body or survey location is kept as it is: the lists they come from are only read when asked for.
+    keepPlace(place) {
+      if (LAZY_KINDS.includes(place.kind) && place.name) {
+        this.$set(this.extra, place.key, place)
+        this.$set(this.lazyState, place.key, 'done')
+      }
+    },
 
-      this.setFrom(this.destination.key)
-      this.setTo(from)
+    insertStop(index, place) {
+      const stops = this.stopKeys.slice()
+
+      this.keepPlace(place)
+      stops.splice(index, 0, place.key)
+      this.stopKeys = stops
+
+      if (index === 0) {
+        this.adoptFleet(place)
+      }
+    },
+
+    replaceStop(index, place) {
+      const stops = this.stopKeys.slice()
+
+      this.keepPlace(place)
+      stops[index] = place.key
+      this.stopKeys = stops
+
+      if (index === 0) {
+        this.adoptFleet(place)
+      }
+    },
+
+    removeStop(index) {
+      this.stopKeys = this.stopKeys.filter((_key, at) => at !== index)
+    },
+
+    moveStop(from, to) {
+      const stops = this.stopKeys.slice()
+
+      stops.splice(to, 0, stops.splice(from, 1)[0])
+      this.stopKeys = stops
+    },
+
+    reverse() {
+      this.stopKeys = this.stopKeys.slice().reverse()
     },
 
     setOption(key, value) {
       this[key] = Boolean(value)
+    },
+
+    // Everything read for the lists and the stops belongs to one game and race.
+    resetPlaces() {
+      this.largeToken += 1
+      this.largeRequests = {}
+      this.largePlaces = {}
+      this.extra = {}
+      this.lazyState = {}
+      this.largeProblem = ''
+      this.$nextTick(() => this.readStops())
+    },
+
+    // Reads the bodies or the survey locations for the picker, once.
+    ensureLarge(groupId) {
+      const bodies = BODY_GROUPS.includes(groupId)
+
+      if ((!bodies && groupId !== 'survey') || this.largePlaces[groupId] || this.largeRequests[bodies ? 'bodies' : groupId] || !this.database) {
+        return
+      }
+
+      const token = this.largeToken
+      const request = bodies ? 'bodies' : groupId
+
+      this.largeRequests[request] = true
+      ;(bodies ? loadBodyPlaces : loadSurveyPlaces)(this.database, this.context).then((found) => {
+        if (token === this.largeToken) {
+          this.largeProblem = ''
+
+          if (bodies) {
+            BODY_GROUPS.forEach((group) => this.$set(this.largePlaces, group, Object.freeze(found.filter((place) => place.group === group))))
+          } else {
+            this.$set(this.largePlaces, groupId, found)
+          }
+        }
+      }, (error) => {
+        if (token === this.largeToken) {
+          this.largeRequests[request] = false
+          this.largeProblem = `The ${bodies ? 'bodies' : 'survey locations'} could not be read: ${error.message}`
+        }
+      })
+    },
+
+    // The places of stops that are bodies or survey locations, which the page didn't read with the rest.
+    readStops() {
+      const wanted = this.stopKeys.filter((key) => LAZY_KINDS.includes(key.split(':')[0]) && !this.extra[key] && !this.lazyState[key])
+
+      if (!wanted.length || !this.database || !this.GameID || !this.RaceID) {
+        return
+      }
+
+      const token = this.largeToken
+
+      wanted.forEach((key) => this.$set(this.lazyState, key, 'reading'))
+
+      const settle = () => {
+        if (token === this.largeToken) {
+          wanted.forEach((key) => this.$set(this.lazyState, key, 'done'))
+        }
+      }
+
+      loadPlacesByKeys(this.database, this.context, wanted).then((found) => {
+        if (token === this.largeToken) {
+          found.forEach((place) => this.$set(this.extra, place.key, place))
+        }
+
+        settle()
+      }, (error) => {
+        settle()
+
+        if (token === this.largeToken) {
+          this.largeProblem = `Some stops could not be read: ${error.message}`
+        }
+      })
     },
 
     // Flying time at the chosen speed, in the unit that reads best; nothing to fly is no time.
@@ -627,19 +865,44 @@ export default {
       return `${this.count(km)} km`
     },
 
+    // A leg's jumps, distance and time, or nothing for one with no route.
+    figures(leg) {
+      if (!leg.route) {
+        return ''
+      }
+
+      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.travelTime(leg.route.km)}`
+    },
+
+    legTitle(index) {
+      const leg = this.plan.legs[index]
+
+      return leg ? `${leg.from.name} → ${leg.to.name}${leg.closing ? ', back to the start' : ''}` : ''
+    },
+
+    legFigures(index) {
+      const leg = this.plan.legs[index]
+
+      return leg ? this.figures(leg) || 'No explored route' : ''
+    },
+
     systemNameOf(systemId) {
       return (this.systemById[systemId] || {}).Name || `System #${systemId}`
     },
 
-    // A jump point by the system it leads to, as the game names them; the origin or destination by its name.
-    pointName(point) {
+    // A jump point by the system it leads to, as the game names them; the leg's ends by their names.
+    pointName(point, leg) {
       if (point.WarpPointID) {
         const partner = this.jumpPointById[point.WPLink]
 
         return partner ? `Jump point to ${this.systemNameOf(partner.SystemID)}` : 'Jump point'
       }
 
-      return point.kind === 'system' ? 'System centre' : point.name
+      if (point === leg.start) {
+        return leg.from.kind === 'system' ? (point.Xcor === 0 && point.Ycor === 0 ? 'System centre' : 'Where the route arrived') : leg.from.name
+      }
+
+      return leg.to.name
     },
 
     lagrangeName(point) {
@@ -651,6 +914,22 @@ export default {
       const at = text.lastIndexOf(' ') + 1
 
       return [text.slice(0, at), text.slice(at)]
+    },
+
+    // What keeps a leg from its start to its end out of reach with these options, when a route without them reaches it.
+    legNote(leg) {
+      const { to, start } = leg
+      const reason = to.SystemID !== start.SystemID && this.avoidReasons[to.SystemID]
+
+      if (reason) {
+        return `${this.systemNameOf(to.SystemID)} is avoided: ${reason}`
+      }
+
+      const open = searchRoutes(this.jumpPoints, [start], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] })
+      const found = to.kind === 'system' ? open.toSystem(to.SystemID) : open.toPlace(to)
+      const blockers = found ? this.blockers(found) : []
+
+      return blockers.length ? `kept out of reach by the options: ${blockers.length > 3 ? `${blockers.slice(0, 3).join(', ')} and ${blockers.length - 3} more` : joinLabels(blockers)}` : ''
     },
 
     // What the options would stop on a route found without them: systems they avoid, and jump points they don't transit, in route order.
@@ -711,14 +990,14 @@ export default {
       }),
       default: [],
     },
-    // Your own fleets that move, without the shipping lines', with their movement settings and whether any ship carries a jump drive.
+    // Your own fleets with ships in known systems, with their movement settings and whether any ship carries a jump drive.
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.Speed, FCT_Fleet.AvoidDanger, FCT_Fleet.AvoidAlienSystems, max(FCT_ShipClass.JumpRating) as JumpRating, count(FCT_Ship.ShipID) as Ships from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.ShippingLine = 0 and FCT_Fleet.Speed > 1 group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName`).then(([items]) => items)
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.Speed, FCT_Fleet.AvoidDanger, FCT_Fleet.AvoidAlienSystems, max(FCT_ShipClass.JumpRating) as JumpRating, count(FCT_Ship.ShipID) as Ships from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -739,9 +1018,31 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_LagrangePoint.PlanetID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor, FCT_LagrangePoint.Distance, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_LagrangePoint.PlanetID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_LagrangePoint.PlanetID and FCT_SystemBodyName.RaceID = ${this.RaceID} and FCT_SystemBodyName.GameID = ${this.GameID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
+    },
+    // The waypoints, wrecks, life pods, contacts and aether gates of the known systems.
+    smallPlaces: {
+      get: tracked('smallPlaces', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await loadSmallPlaces(this.database, this.context, this.count)
+      }),
+      default: [],
+    },
+    // How many bodies of each kind and survey locations the known systems hold.
+    placeCounts: {
+      get: tracked('placeCounts', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await countLargePlaces(this.database, this.context)
+      }),
+      default: {},
     },
   },
 }
@@ -765,12 +1066,6 @@ export default {
     line-height: 18px;
   }
 
-  .tool--place {
-    flex: 1 1 240px;
-    max-width: 420px;
-  }
-
-  .tool--swap,
   .tool--actions {
     align-self: flex-end;
   }

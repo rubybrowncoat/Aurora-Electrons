@@ -6,7 +6,7 @@
 // | `/minerals`        | `mineral=<mineral id>`, and `systems=<SystemID,…>` or `bodies=<bodies>`  |
 // | `/habitability`    | `systems=<SystemID,…>` or `bodies=<bodies>`                              |
 // | `/mineral-outlook` | `mineral=<mineral id>`                                                   |
-// | `/routes`          | `from=<place>`, `to=<place>`                                             |
+// | `/routes`          | `from=<place>`, `via=<place,…>`, `to=<place>`, `cycle=1`, `fleet=<FleetID>` |
 // | `/survey-progress` | `system=<SystemID>`                                                      |
 // | `/lagrange`        | `system=<SystemID>`                                                      |
 // | `/intelligence`    | `race=<AlienRaceID>`                                                     |
@@ -18,7 +18,7 @@
 // | `/log`             | `system=<SystemID>` or `colony=<PopulationID>`                           |
 // | `/warnings`        | `check=<check key>`                                                      |
 //
-// A mineral id is the `id` in utilities/minerals.js `MINERALS`. `<bodies>` is a JSON array of `bodyReference`s, which carry the names a page shows before its own reads are in. A `<place>` is `colony:<PopulationID>`, `fleet:<FleetID>` or `system:<SystemID>`, as Route Finder keys its places.
+// A mineral id is the `id` in utilities/minerals.js `MINERALS`. `<bodies>` is a JSON array of `bodyReference`s, which carry the names a page shows before its own reads are in. A `<place>` is `<kind>:<id>`, Route Finder's place key: `colony:<PopulationID>`, `fleet:<FleetID>`, `system:<SystemID>`, `body:<SystemBodyID>`, `jump:<WarpPointID>`, `lagrange:<LagrangePointID>`, `waypoint:<WaypointID>`, `wreck:<WreckID>`, `lifepod:<LifepodID>`, `survey:<SurveyLocationID>`, `contact:<UniqueID of the FCT_Contacts row>` or `aether:<AetherGateID>`. A route is `from`, the `via` places in order, then `to`; `cycle=1` closes it back to `from`, and `fleet` names the fleet whose speed and movement settings apply (a `from` that is a fleet brings its own).
 
 // The query a link carries: the values given, as strings, and nothing for the ones left out.
 export const cleanQuery = (values) => Object.fromEntries(Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => [key, String(value)]))
@@ -67,14 +67,10 @@ export const queryBodies = (value) => {
   }
 }
 
-const PLACE_KINDS = ['colony', 'fleet', 'system']
+const PLACE_KINDS = ['colony', 'fleet', 'system', 'body', 'jump', 'lagrange', 'waypoint', 'wreck', 'lifepod', 'survey', 'contact', 'aether']
 
 // Frozen, as `linkTo` is, so a page can hand them to its template through `data()` without Vue observing them.
-export const place = Object.freeze({
-  colony: (populationId) => `colony:${populationId}`,
-  fleet: (fleetId) => `fleet:${fleetId}`,
-  system: (systemId) => `system:${systemId}`,
-})
+export const place = Object.freeze(Object.fromEntries(PLACE_KINDS.map((kind) => [kind, (id) => `${kind}:${id}`])))
 
 // `fleet:12` as { kind: 'fleet', id: 12 }, or null.
 export const queryPlace = (value) => {
@@ -82,6 +78,12 @@ export const queryPlace = (value) => {
 
   return PLACE_KINDS.includes(kind) && queryId(id) ? { kind, id: queryId(id) } : null
 }
+
+// `jump:3,wreck:7` as place keys, in order and with repeats; anything that isn't a place is left out.
+export const queryPlaceKeys = (value) => String(single(value) || '').split(',').map(queryPlace).filter(Boolean).map(({ kind, id }) => place[kind](id))
+
+// A route's ends in the query's terms: a first place, the places between and a last place. Given as `stops`, an ordered list, the first is `from`, the last (of two or more) is `to` and the rest are `via`; given as `from`, `via` and `to`, each stays as it is, so a link may leave out the origin.
+const routeEnds = ({ from, via, to, stops }) => (stops ? { from: stops[0], via: stops.slice(1, -1), to: stops.length > 1 ? stops[stops.length - 1] : undefined } : { from, via, to })
 
 const ids = (values) => (values && values.length ? [...new Set(values)].join(',') : null)
 const bodies = (values) => (values && values.length ? JSON.stringify(values.map(bodyReference)) : null)
@@ -93,7 +95,11 @@ export const linkTo = Object.freeze({
   minerals: ({ mineral, systems, bodies: picked } = {}) => link('/minerals', { mineral, systems: ids(systems), bodies: bodies(picked) }),
   planner: ({ systems, bodies: picked } = {}) => link('/habitability', { systems: ids(systems), bodies: bodies(picked) }),
   mineralOutlook: (mineralId) => link('/mineral-outlook', { mineral: mineralId }),
-  routes: ({ from, to } = {}) => link('/routes', { from, to }),
+  routes: ({ cycle, fleet, ...ends } = {}) => {
+    const { from, via, to } = routeEnds(ends)
+
+    return link('/routes', { from, via: via && via.length ? via.join(',') : null, to, cycle: cycle ? 1 : null, fleet })
+  },
   survey: (systemId) => link('/survey-progress', { system: systemId }),
   lagrange: (systemId) => link('/lagrange', { system: systemId }),
   intelligence: (alienRaceId) => link('/intelligence', { race: alienRaceId }),
