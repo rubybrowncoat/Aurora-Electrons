@@ -97,6 +97,7 @@ import LoadState from '../components/page/LoadState.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -154,8 +155,12 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     ready() {
@@ -516,7 +521,7 @@ export default {
     font-weight: 500;
     padding-bottom: 4px;
     margin-bottom: 4px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--ae-rule);
     font-variant-numeric: tabular-nums;
   }
 
@@ -539,7 +544,7 @@ export default {
   .category-meter {
     height: 8px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--ae-track-soft);
     overflow: hidden;
   }
 
@@ -556,16 +561,6 @@ export default {
 
   td {
     font-variant-numeric: tabular-nums;
-  }
-}
-
-.theme--dark .finances-page {
-  .category-group-head {
-    border-bottom-color: rgba(255, 255, 255, 0.12);
-  }
-
-  .category-meter {
-    background: rgba(255, 255, 255, 0.1);
   }
 }
 </style>

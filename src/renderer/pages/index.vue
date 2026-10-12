@@ -17,6 +17,7 @@ import { mapGetters, mapState } from 'vuex'
 
 import EmpireList from '../components/navigation/EmpireList.vue'
 import { sectionStyle } from '../components/navigation/section-style'
+import { activeAppearance } from '../utilities/appearance'
 import { pageByRoute } from '../utilities/navigation'
 
 const DEFAULT_PAGE = '/production'
@@ -42,7 +43,7 @@ export default {
     ]),
 
     neutralStyle () {
-      return sectionStyle(this.$vuetify.theme.dark)
+      return sectionStyle(activeAppearance())
     },
     // The page a pick opens.
     target () {

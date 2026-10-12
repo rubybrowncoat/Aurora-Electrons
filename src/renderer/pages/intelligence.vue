@@ -196,6 +196,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance, toneColor } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { historyConfig } from '../utilities/history'
@@ -292,17 +293,25 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     rows() {
-      return this.races.map((race) => ({
-        ...race,
-        status: contactStatus(race.ContactStatus),
-        communication: COMM_STATUS[race.CommStatus] || `Status ${race.CommStatus}`,
-        standing: standing(race.DiplomaticPoints),
-      }))
+      return this.races.map((race) => {
+        const status = contactStatus(race.ContactStatus)
+
+        return {
+          ...race,
+          status: { ...status, color: toneColor(this.appearance, status.color) },
+          communication: COMM_STATUS[race.CommStatus] || `Status ${race.CommStatus}`,
+          standing: standing(race.DiplomaticPoints),
+        }
+      })
     },
 
     selected() {
@@ -730,7 +739,7 @@ export default {
   }
 
   .selected-row {
-    background: rgba(24, 103, 192, 0.08);
+    background: color-mix(in srgb, var(--ae-primary) 8%, transparent);
   }
 
   .stale-value {

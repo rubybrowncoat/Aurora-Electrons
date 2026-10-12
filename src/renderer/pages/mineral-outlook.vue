@@ -211,6 +211,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import { activeAppearance } from '../utilities/appearance'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -285,8 +286,12 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     mineralItems() {
@@ -753,7 +758,7 @@ export default {
     },
 
     flowColor(key) {
-      return flowColor(this.$vuetify.theme.dark, key)
+      return flowColor(this.appearance, key)
     },
 
     tons(value) {
@@ -1135,14 +1140,14 @@ export default {
     flex: 0 0 64px;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
     overflow: hidden;
   }
 
   .meter-fill {
     height: 100%;
     border-radius: 3px;
-    background-color: #6a6a6a;
+    background-color: var(--ae-muted);
   }
 
   .trend {
@@ -1155,7 +1160,7 @@ export default {
     align-items: center;
     height: 8px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--ae-track-soft);
   }
 
   .timeline-full {
@@ -1174,25 +1179,7 @@ export default {
   }
 
   tr.is-focus-row {
-    background-image: repeating-linear-gradient(-45deg, rgba(33, 150, 243, 0.12) 0, rgba(33, 150, 243, 0.12) 12px, rgba(33, 150, 243, 0.04) 12px, rgba(33, 150, 243, 0.04) 24px);
-  }
-}
-
-.theme--dark .mineral-outlook {
-  .meter {
-    background: rgba(255, 255, 255, 0.12);
-  }
-
-  .meter-fill {
-    background-color: #b0b0b0;
-  }
-
-  .timeline {
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  tr.is-focus-row {
-    background-image: repeating-linear-gradient(-45deg, rgba(33, 150, 243, 0.22) 0, rgba(33, 150, 243, 0.22) 12px, rgba(33, 150, 243, 0.1) 12px, rgba(33, 150, 243, 0.1) 24px);
+    background-image: repeating-linear-gradient(-45deg, var(--ae-row-stripe) 0, var(--ae-row-stripe) 12px, var(--ae-row-stripe-soft) 12px, var(--ae-row-stripe-soft) 24px);
   }
 }
 </style>

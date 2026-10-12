@@ -10,6 +10,7 @@
 </template>
 
 <script>
+import { activeAppearance } from '../../utilities/appearance'
 import { chartTheme } from '../charts/theme'
 import { wheelZoom } from '../../utilities/map-minimap'
 import { placeUnplaced } from '../../utilities/map-placement'
@@ -50,8 +51,12 @@ export default {
     }
   },
   computed: {
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     placed() {
@@ -151,7 +156,7 @@ export default {
     this.labelWidths = new Map()
   },
   mounted() {
-    this.unwatchDrawing = this.$watch(() => [this.nodes, this.drawnLinks, this.routeLine, this.routeColor, this.selected, this.theme], () => this.queueFrame())
+    this.unwatchDrawing = this.$watch(() => [this.nodes, this.drawnLinks, this.routeLine, this.routeColor, this.selected, this.appearance.key], () => this.queueFrame())
     // The first observation comes once the page is laid out, with the canvas's size.
     this.resizeObserver = new ResizeObserver(([entry]) => this.resize(entry.contentRect))
     this.resizeObserver.observe(this.$refs.canvas)

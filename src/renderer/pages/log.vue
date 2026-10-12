@@ -122,6 +122,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { eventColorToRGBA, gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
@@ -399,8 +400,12 @@ export default {
       return !!this.database && !!this.contextKey && this.inputsLoaded
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     activeOptionCount() {

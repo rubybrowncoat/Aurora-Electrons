@@ -1,6 +1,6 @@
 // The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette, titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
 
-// `slot` indexes `chartTheme(dark).categorical` in components/charts/theme.js.
+// `slot` indexes `chartTheme(appearance).categorical` in components/charts/theme.js.
 const SECTIONS = [
   { id: 'command', title: 'Command', icon: 'mdi-view-dashboard-outline', slot: 0 },
   { id: 'economy', title: 'Economy', icon: 'mdi-pickaxe', slot: 1 },

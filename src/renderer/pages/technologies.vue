@@ -47,6 +47,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { gameTime, toBoolean } from '../utilities/aurora'
 import { SERVING_COMMANDER } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -99,9 +100,9 @@ export default {
     ...mapGetters(['database', 'GameID', 'RaceID']),
 
     rootStyle() {
-      const dark = this.$vuetify.theme.dark
+      const appearance = activeAppearance()
 
-      return { ...sectionStyle(dark, sectionById.research), ...statusStyle(dark) }
+      return { ...sectionStyle(appearance, sectionById.research), ...statusStyle(appearance) }
     },
 
     startPoints() {

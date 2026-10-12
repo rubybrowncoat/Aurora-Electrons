@@ -194,6 +194,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
@@ -234,7 +235,6 @@ const TYPES = [
   { id: 'terraforming', label: 'Terraforming', slot: 4 },
 ]
 const TYPE_IDS = TYPES.map((type) => type.id)
-const SHORT_SLOT = 7
 
 // A job's status, in the order the Status column sorts by.
 const STATUS = {
@@ -435,8 +435,12 @@ export default {
     ...mapGetters(['database', 'GameID', 'RaceID', 'StartYear', 'GameTime']),
     ...mapState(['RaceNPR']),
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     typeColors() {
@@ -856,7 +860,7 @@ export default {
 
       const series = [
         ...TYPES.map((type) => ({ id: type.id, label: type.label, color: this.typeColors[type.id] })),
-        { id: 'short', label: 'Short of minerals', color: this.theme.categorical[SHORT_SLOT] },
+        { id: 'short', label: 'Short of minerals', color: this.appearance.status.shortfall },
       ].filter((entry) => counts[entry.id].some((value) => value > 0))
 
       const labels = Array.from({ length: option.bins }, (_, index) => gameTime(this.StartYear, this.GameTime + index * binDays * SECONDS_PER_DAY).format(option.format))

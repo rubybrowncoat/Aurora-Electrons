@@ -901,7 +901,7 @@ export default {
     font-size: 12px;
     line-height: 20px;
     white-space: nowrap;
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--ae-track-soft);
   }
 
   .career-line {
@@ -912,12 +912,6 @@ export default {
   .career-date {
     display: inline-block;
     width: 96px;
-  }
-}
-
-.theme--dark .commanders-page {
-  .bonus-chip {
-    background: rgba(255, 255, 255, 0.1);
   }
 }
 </style>

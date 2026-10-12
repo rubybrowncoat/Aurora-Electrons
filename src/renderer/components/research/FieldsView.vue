@@ -169,6 +169,7 @@
 <script>
 import countFormat from '../../mixins/count-format'
 import persistedView, { tableView } from '../../mixins/persisted-view'
+import { activeAppearance } from '../../utilities/appearance'
 import { gameTime } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
@@ -215,7 +216,7 @@ export default {
   },
   computed: {
     colors() {
-      return statusColors(this.$vuetify.theme.dark)
+      return statusColors(activeAppearance())
     },
 
     field() {
@@ -464,7 +465,7 @@ export default {
     display: flex;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
     overflow: hidden;
     margin-bottom: 2px;
   }
@@ -578,12 +579,6 @@ export default {
   .panel {
     margin-top: 0;
     margin-bottom: 16px;
-  }
-}
-
-.theme--dark .fields-view {
-  .meter {
-    background: rgba(255, 255, 255, 0.12);
   }
 }
 </style>

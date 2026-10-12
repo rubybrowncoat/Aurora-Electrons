@@ -172,6 +172,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, augmentComponent, augmentMissile, augmentSpecies, categoryNote, columnsFor, isMountable, tagsOf } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
@@ -573,7 +574,7 @@ export default {
     },
 
     verdictClass(verdict) {
-      return verdict === 'best' ? ['success--text', this.$vuetify.theme.dark ? '' : 'text--darken-2'] : verdict === 'worst' ? 'error--text' : ''
+      return verdict === 'best' ? ['success--text', activeAppearance().mode === 'dark' ? '' : 'text--darken-2'] : verdict === 'worst' ? 'error--text' : ''
     },
 
     resetFilters() {
@@ -754,11 +755,11 @@ export default {
   }
 
   .compare-differs td {
-    background: rgba(33, 150, 243, 0.1);
+    background: var(--ae-row-differs);
   }
 
   .compare-differs td:first-child {
-    box-shadow: inset 3px 0 0 #1e88e5;
+    box-shadow: inset 3px 0 0 var(--ae-row-differs-mark);
     font-weight: 500;
   }
 
@@ -767,13 +768,7 @@ export default {
   }
 
   .differs-dot {
-    background: rgba(33, 150, 243, 0.45);
-  }
-}
-
-.theme--dark .designed-tech-page {
-  .compare-differs td {
-    background: rgba(33, 150, 243, 0.2);
+    background: var(--ae-row-differs-dot);
   }
 }
 </style>

@@ -146,6 +146,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import { activeAppearance } from '../utilities/appearance'
 import { populationName } from '../utilities/aurora'
 import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -195,8 +196,12 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     workerColors() {
@@ -592,13 +597,13 @@ function percent(fraction, decimals) {
     max-width: 240px;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
   }
 
   .meter-fill {
     height: 100%;
     border-radius: 3px;
-    background-color: #6a6a6a;
+    background-color: var(--ae-muted);
   }
 
   .meter-tick {
@@ -626,7 +631,7 @@ function percent(fraction, decimals) {
     height: 10px;
     border-radius: 2px;
     overflow: hidden;
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--ae-track-soft);
   }
 
   .worker-segment {
@@ -635,23 +640,12 @@ function percent(fraction, decimals) {
 
   .segment-short,
   .swatch-short {
-    background-image: repeating-linear-gradient(-45deg, #e34948 0, #e34948 3px, transparent 3px, transparent 6px) !important;
+    background-image: repeating-linear-gradient(-45deg, var(--ae-shortfall) 0, var(--ae-shortfall) 3px, transparent 3px, transparent 6px) !important;
   }
 
   .worker-table td,
   .worker-table th {
     font-variant-numeric: tabular-nums;
-  }
-}
-
-.theme--dark .outlook-page {
-  .meter,
-  .worker-bar {
-    background: rgba(255, 255, 255, 0.12);
-  }
-
-  .meter-fill {
-    background-color: #b0b0b0;
   }
 }
 </style>

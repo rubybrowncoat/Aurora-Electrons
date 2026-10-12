@@ -671,14 +671,15 @@ export default {
 
     colors() {
       const { categorical, inkMuted, surface, ink, primary } = this.theme
+      const { contacts, survey, habitability } = this.appearance
       const [blue, orange, green, amber, pink, , violet, red] = categorical
       const outpost = blend(blue, surface, 0.35)
 
       return {
-        done: this.layer === 'colonies' ? blue : green,
-        left: this.layer === 'colonies' ? outpost : orange,
-        ground: pink,
-        unexplored: amber,
+        done: this.layer === 'colonies' ? blue : survey.done,
+        left: this.layer === 'colonies' ? outpost : survey.left,
+        ground: survey.ground,
+        unexplored: survey.unexplored,
         colony: blue,
         outpost,
         none: blend(inkMuted, surface, 0.3),
@@ -695,9 +696,9 @@ export default {
         discovery: orange,
         yours: violet,
         // Alien contacts by how the race regards their race.
-        contacts: { hostile: red, unknown: red, neutral: amber, friendly: green, allied: blue, civilian: inkMuted },
+        contacts,
         // Habitability's shades, the best band first.
-        bands: [blue, blend(blue, surface, 0.55), blend(blue, surface, 0.25)],
+        bands: [habitability.band, blend(habitability.band, surface, 0.55), blend(habitability.band, surface, 0.25)],
         stars: { hole: violet, giant: green, hot: blue, yellow: amber, orange, red, white: blend(blue, '#ffffff', 0.35), brown: blend(orange, '#000000', 0.6) },
       }
     },
@@ -1641,6 +1642,11 @@ export default {
         this.graph.style(this.stylesheet())
         this.createMenu()
         this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
       }
     },
   },
@@ -2871,9 +2877,9 @@ export default {
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
         drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
         context.setTransform(1, 0, 0, 1, 0, 0)
-        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour, not transparency or the card surface.
+        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour (the appearance's page background, as the stage draws it), not transparency or the card surface.
         context.globalCompositeOperation = 'destination-over'
-        context.fillStyle = window.getComputedStyle(this.$refs.stage).backgroundColor
+        context.fillStyle = this.appearance.surfaces.background
         context.fillRect(0, 0, canvas.width, canvas.height)
         context.globalCompositeOperation = 'source-over'
         context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))

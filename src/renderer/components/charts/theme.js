@@ -1,12 +1,12 @@
-import { activeAppearance, asAppearance } from '../../utilities/appearance'
+import { activeAppearance } from '../../utilities/appearance'
 
 // Chart colours, taken from the resolved appearance (utilities/appearance.js): its card surface, inks, axis colour, tooltip and nine categorical slots. The palette's validation notes are there.
 
 const themes = new WeakMap()
 
-// The chart tokens of an appearance: `surface`, `ink`, `inkMuted`, `border` (axes), `primary`, `tooltip`, `tooltipInk` and `categorical`. Without an argument, the appearance in force; a caller that has not moved over yet passes the dark flag. Read inside a computed property, it follows a preset switch.
+// The chart tokens of an appearance: `surface`, `ink`, `inkMuted`, `border` (axes), `primary`, `tooltip`, `tooltipInk` and `categorical`. Without an argument, the appearance in force. Read inside a computed property, it follows a preset switch.
 export const chartTheme = (appearance = activeAppearance()) => {
-  const { surfaces, inks, focus, charts } = asAppearance(appearance)
+  const { surfaces, inks, focus, charts } = appearance
 
   if (!themes.has(charts)) {
     themes.set(charts, { surface: surfaces.card, ink: inks.body, inkMuted: inks.muted, border: charts.axis, primary: focus.primary, tooltip: charts.tooltip, tooltipInk: inks.onTooltip, categorical: charts.categorical })

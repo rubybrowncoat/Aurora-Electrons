@@ -209,6 +209,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
@@ -263,8 +264,12 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     raceFuelProduction() {
@@ -694,7 +699,7 @@ export default {
     font-weight: 500;
     padding-bottom: 4px;
     margin-bottom: 4px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid var(--ae-rule);
     font-variant-numeric: tabular-nums;
   }
 
@@ -711,7 +716,7 @@ export default {
   .balance-meter {
     height: 8px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--ae-track-soft);
     overflow: hidden;
   }
 
@@ -735,29 +740,14 @@ export default {
     flex: 0 0 72px;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
     overflow: hidden;
   }
 
   .meter-fill {
     height: 100%;
     border-radius: 3px;
-    background-color: #6a6a6a;
-  }
-}
-
-.theme--dark .logistics-page {
-  .balance-head {
-    border-bottom-color: rgba(255, 255, 255, 0.12);
-  }
-
-  .balance-meter,
-  .meter {
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .meter-fill {
-    background-color: #b0b0b0;
+    background-color: var(--ae-muted);
   }
 }
 </style>

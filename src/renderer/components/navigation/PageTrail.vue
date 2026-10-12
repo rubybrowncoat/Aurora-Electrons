@@ -16,6 +16,7 @@
 <script>
 import { mapActions, mapGetters } from 'vuex'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { sectionById, pageByRoute } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
@@ -32,7 +33,7 @@ export default {
 
     // The trail's pages, each with its section's colours.
     steps () {
-      return this.trail.map((step) => ({ ...step, page: pageByRoute[step.path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(this.$vuetify.theme.dark, sectionById[step.page.section]) }))
+      return this.trail.map((step) => ({ ...step, page: pageByRoute[step.path.split('?')[0]] })).filter(({ page }) => page).map((step) => ({ ...step, style: sectionStyle(activeAppearance(), sectionById[step.page.section]) }))
     },
   },
   watch: {

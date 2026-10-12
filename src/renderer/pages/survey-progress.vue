@@ -155,6 +155,7 @@
 import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import { activeAppearance } from '../utilities/appearance'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -221,14 +222,18 @@ export default {
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     colors() {
-      const [blue, orange, , , , , purple] = this.theme.categorical
+      const { geological, gravitational, both } = this.appearance.survey
 
-      return { geo: blue, grav: orange, both: purple, done: withAlpha(this.theme.inkMuted, 0.45) }
+      return { geo: geological, grav: gravitational, both, done: withAlpha(this.theme.inkMuted, 0.45) }
     },
 
     mapLegend() {
@@ -668,7 +673,7 @@ export default {
     flex: 0 0 72px;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
     overflow: hidden;
   }
 
@@ -678,17 +683,7 @@ export default {
   }
 
   tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.08);
-  }
-}
-
-.theme--dark .survey-page {
-  .meter {
-    background: rgba(255, 255, 255, 0.12);
-  }
-
-  tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.16);
+    background: var(--ae-row-selected);
   }
 }
 </style>

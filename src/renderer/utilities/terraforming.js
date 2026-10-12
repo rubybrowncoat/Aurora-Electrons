@@ -16,14 +16,14 @@ const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
 
-// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists.
+// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists. `color` is a tone (`toneColor` in appearance.js).
 export const OUTCOMES = {
   done: { label: 'Done', description: 'Already liveable for this species; nothing to terraform.', color: 'success' },
   yes: { label: 'Yes', description: 'Terraforming makes it free to colonise.', color: 'success' },
   partial: { label: 'Partial', description: 'Free to colonise at part of its orbit.', color: 'info' },
-  near: { label: 'Near', description: 'Ends under 2: cheap, but not free.', color: 'teal' },
+  near: { label: 'Near', description: 'Ends under 2: cheap, but not free.', color: 'cheap' },
   limited: { label: 'Limited', description: 'Ends under 4.', color: 'warning' },
-  insufficient: { label: 'Insufficient', description: 'Terraforming helps, but the colony stays expensive.', color: 'deep-orange' },
+  insufficient: { label: 'Insufficient', description: 'Terraforming helps, but the colony stays expensive.', color: 'insufficient' },
   no: { label: 'No', description: 'Can not be terraformed to suit this species.', color: 'error' },
 }
 

@@ -23,6 +23,7 @@ import { color, hsl } from 'd3-color'
 import Quadtree from '@timohausmann/quadtree-js'
 import { Viewport } from 'pixi-viewport'
 import { mapGetters } from 'vuex'
+import { activeAppearance } from '~/utilities/appearance'
 import { starName, systemBodyName, toNumber } from '~/utilities/aurora'
 import { approximatelyEquals, safeModulo360 } from '~/utilities/math'
 
@@ -234,9 +235,19 @@ const pickBodyColor = (body) => {
 const unitsToPx = (u) => u * PX_PER_AU * WORLD_MAGNIFICATION
 const kmToPx = (km) => unitsToPx(km / AU_KM)
 
-const TEXT_STYLES = {
+// The system view's sky colours as the numbers Pixi takes, from the appearance's `space` role.
+const hexInt = (hex) => Number.parseInt(hex.slice(1), 16)
+const spaceColors = (space) => ({
+  background: hexInt(space.background),
+  label: hexInt(space.label),
+  bodyOrbit: hexInt(space.bodyOrbit),
+  jumpUnexplored: hexInt(space.jumpUnexplored),
+  jumpExplored: hexInt(space.jumpExplored),
+})
+
+const textStyles = (label) => ({
   body: new PIXI.TextStyle({
-    fill: 0xffffff,
+    fill: label,
     fontSize: 12,
     // align: 'left',
 
@@ -246,14 +257,14 @@ const TEXT_STYLES = {
     // dropShadowAlpha: 1,
   }),
   star: new PIXI.TextStyle({
-    fill: 0xffffff,
+    fill: label,
     fontSize: 16,
     fontWeight: 'bold',
 
     dropShadow: true,
     dropShadowDistance: 2,
   }),
-}
+})
 
 // Get WORLD rotation by summing ancestor local rotations (stable even with y-down & scales)
 const getWorldRotation = (displayObject) => {
@@ -351,9 +362,14 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
+
+    appearance() {
+      return activeAppearance()
+    },
   },
   watch: {
     elements: 'scheduleInitPixi',
+    'appearance.key': 'scheduleInitPixi',
   },
   mounted() {
     window.addEventListener('resize', this._onResize, { passive: true })
@@ -1178,7 +1194,7 @@ export default {
       this.redrawPhysicalBodyMarkers()
     },
 
-    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { color: 0x6aa7ff, alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, labelPadPx = 8, markerProvider = null } = {}) {
+    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, labelPadPx = 8, markerProvider = null } = {}) {
       const root = new PIXI.Container()
       root.position.set(toNumber(origin.x), toNumber(origin.y))
       this.worldLayer.addChild(root)
@@ -1265,7 +1281,7 @@ export default {
 
         // Label for star (bigger, always shown)
         const labelText = starName(index, system)
-        const starLabel = new PIXI.Text(labelText, TEXT_STYLES.star)
+        const starLabel = new PIXI.Text(labelText, this._textStyles.star)
         starLabel.anchor.set(0, 0.5)
         // starLabel.position.set(anchor.position.x + radiusPx + labelPadPx, anchor.position.y)
         starLabel._baseWpx = starLabel.width
@@ -1296,7 +1312,7 @@ export default {
       return { root, byStarID: Object.fromEntries(byStarID), byComponent: Object.fromEntries(drawnByComponent) }
     },
 
-    drawBodiesForSystem(bodies, { style = { color: 0x32cd32, alpha: 1, width: 2 }, sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, keepLabelUpright = true, labelPadPx = 8, minBodyRadius = 4, markerProvider = null } = {}) {
+    drawBodiesForSystem(bodies, { style = { color: this._space.bodyOrbit, alpha: 1, width: 2 }, sizeOpts = { radiusUnits: 'km', exaggeration: 1 }, keepLabelUpright = true, labelPadPx = 8, minBodyRadius = 4, markerProvider = null } = {}) {
       // index bodies and a depth function that climbs ParentBodyID
       const byId = new Map()
       for (const b of bodies) byId.set(toNumber(b.SystemBodyID, -1), b)
@@ -1365,7 +1381,7 @@ export default {
       return out
     },
 
-    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: 0x8aa1ff, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null, deferredRegistration = false } = {}) {
+    drawOrbit(bodyLike, { parentContainer = this.worldLayer, position = { x: 0, y: 0 }, style = { color: this._space.bodyOrbit, alpha: 0.55, width: 2 }, orbitLine = true, keepLabelUpright = true, nameText = undefined, parentWorldXkm = undefined, parentWorldYkm = undefined, computedBodyPixelRadius = null, minBodyRadius = 3, labelPadPx = 8, markerProvider = null, deferredRegistration = false } = {}) {
       const orbitContainer = new PIXI.Container()
       orbitContainer.position.set(toNumber(position.x), toNumber(position.y))
       orbitContainer.cullable = true
@@ -1434,12 +1450,12 @@ export default {
         if (orbitLine && aRaw > 0) {
           const g = new PIXI.Graphics()
           const w = style.width ?? 1
-          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.lineStyle(w, style.color ?? this._space.bodyOrbit, style.alpha ?? 0.55)
           g.drawCircle(0, 0, ax)
           g.cullable = true
           g._orbitMeta = {
             baseWidth: w,
-            color: style.color ?? 0x8aa1ff,
+            color: style.color ?? this._space.bodyOrbit,
             alpha: style.alpha ?? 0.55,
             isCircle: true,
             r: ax,
@@ -1479,12 +1495,12 @@ export default {
         if (orbitLine && (ax > 0 || by > 0)) {
           const g = new PIXI.Graphics()
           const w = style.width ?? 1
-          g.lineStyle(w, style.color ?? 0x8aa1ff, style.alpha ?? 0.55)
+          g.lineStyle(w, style.color ?? this._space.bodyOrbit, style.alpha ?? 0.55)
           g.drawEllipse(cxSigned, 0, ax, by)
           g.cullable = true
           g._orbitMeta = {
             baseWidth: w,
-            color: style.color ?? 0x8aa1ff,
+            color: style.color ?? this._space.bodyOrbit,
             alpha: style.alpha ?? 0.55,
             isCircle: false,
             ax,
@@ -1594,7 +1610,7 @@ export default {
       // Label
       let label = null
       if (nameText) {
-        label = new PIXI.Text(String(nameText), TEXT_STYLES.body)
+        label = new PIXI.Text(String(nameText), this._textStyles.body)
         label.anchor.set(0, 0.5)
         // label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
         label._baseWpx = label.width
@@ -1639,8 +1655,8 @@ export default {
       const circleTex = this._getShapeTexture('circle')
       const squareOutlineTex = this._getShapeTexture('squareOutline')
 
-      const COLOR_RED = 0xff3b30
-      const COLOR_ORANGE = 0xffa500
+      const COLOR_RED = this._space.jumpUnexplored
+      const COLOR_ORANGE = this._space.jumpExplored
 
       // tiny physical size; min-screen clamp makes it visible
       const physR = 1e-6
@@ -1721,7 +1737,7 @@ export default {
         // label (optional; uses Name if present)
         let label = null
         const labelText = (jp.DestinationName && String(jp.DestinationName).trim()) || 'Unexplored'
-        label = new PIXI.Text(labelText, TEXT_STYLES.body)
+        label = new PIXI.Text(labelText, this._textStyles.body)
         label.anchor.set(0, 0.5)
         label._baseWpx = label.width
         label._baseHpx = label.height
@@ -1768,6 +1784,9 @@ export default {
         return
       }
 
+      this._space = spaceColors(this.appearance.space)
+      this._textStyles = textStyles(this._space.label)
+
       console.log('SystemView initPixi', this.$props)
 
       const host = document.getElementById('pixi-container')
@@ -1782,7 +1801,7 @@ export default {
       this.pixi = new PIXI.Application({
         width,
         height,
-        backgroundColor: 0x000040,
+        backgroundColor: this._space.background,
         antialias: false,
         autoDensity: true,
         resolution: Math.max(window.devicePixelRatio || 1, 1),
@@ -1823,14 +1842,14 @@ export default {
 
       this._starsResult = this.drawSystem(this.elements.system, this.elements.stars, {
         origin: { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 },
-        orbitStyle: { color: 0x00ff00, alpha: 1, width: 1 },
+        orbitStyle: { alpha: 1, width: 1 },
         starSize: { exaggeration: 1, minPx: 0, maxPx: 1e7 },
         minStarRadius: 8,
         markerProvider: this._markerSpecForBody,
       })
 
       this.drawBodiesForSystem(this.elements.systemBodies, {
-        style: { color: 0x32cd32, alpha: 1, width: 2 },
+        style: { color: this._space.bodyOrbit, alpha: 1, width: 2 },
         sizeOpts: {
           // choose what you prefer:
           // radiusUnits: 'km', exaggeration: 1,  minPx: 0,    // strict physical realism
@@ -2068,8 +2087,8 @@ export default {
 
 .title {
   margin: 0;
-  color: #fff;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+  color: var(--ae-space-ink);
+  text-shadow: 2px 2px 4px var(--ae-space-shadow);
   font-weight: 600;
 }
 </style>

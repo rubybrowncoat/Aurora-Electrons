@@ -194,7 +194,7 @@
                 </v-tooltip>
                 <v-tooltip v-if="item.body.complexes" top max-width="360">
                   <template #activator="{ on }">
-                    <v-chip x-small label color="teal darken-1" dark v-on="on"><v-icon x-small left>mdi-pickaxe</v-icon>CMC ×{{ item.body.complexes }}</v-chip>
+                    <v-chip x-small label :color="appearance.plan.cmc" dark v-on="on"><v-icon x-small left>mdi-pickaxe</v-icon>CMC ×{{ item.body.complexes }}</v-chip>
                   </template>
                   <span>{{ cmcText(item.body) }}</span>
                 </v-tooltip>
@@ -342,6 +342,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadRoutes } from '../utilities/colonization-data'
@@ -369,11 +370,11 @@ const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: '
 // Tonnes a year per mass driver.
 const MASS_DRIVER_TONS = 5000
 
-// Accessibility bands, best first, with their slot in the chart palette.
+// Accessibility bands, best first; their colours are the appearance's `accessibility` roles of the same id.
 const BANDS = [
-  { id: 'good', label: '0.7 and up', min: 0.7, slot: 2 },
-  { id: 'fair', label: '0.4 to 0.7', min: 0.4, slot: 3 },
-  { id: 'poor', label: 'Under 0.4', min: 0, slot: 1 },
+  { id: 'good', label: '0.7 and up', min: 0.7 },
+  { id: 'fair', label: '0.4 to 0.7', min: 0.4 },
+  { id: 'poor', label: 'Under 0.4', min: 0 },
 ]
 const bandOf = (accessibility) => BANDS.find((band) => accessibility >= band.min).id
 
@@ -457,12 +458,16 @@ export default {
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     bandColors() {
-      return Object.fromEntries(BANDS.map((band) => [band.id, this.theme.categorical[band.slot]]))
+      return Object.fromEntries(BANDS.map((band) => [band.id, this.appearance.accessibility[band.id]]))
     },
 
     mutedColor() {
@@ -1305,7 +1310,7 @@ export default {
   }
 
   tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.08);
+    background: var(--ae-row-selected);
   }
 
   .band-cell {
@@ -1320,7 +1325,7 @@ export default {
     flex: 0 0 72px;
     height: 6px;
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--ae-track);
     overflow: hidden;
   }
 
@@ -1385,17 +1390,6 @@ export default {
 
   .detail-links {
     margin-top: 8px;
-  }
-}
-
-.theme--dark .minerals-page {
-  .band-meter,
-  .meter {
-    background: rgba(255, 255, 255, 0.12);
-  }
-
-  tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.16);
   }
 }
 </style>

@@ -34,6 +34,7 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { sectionById } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
@@ -98,7 +99,7 @@ export default {
     },
     // Display rows with group headings, each page row numbered for the keyboard selection.
     rows () {
-      const describe = (page, index) => ({ page, index, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]), section: page.section ? sectionById[page.section].title : '' })
+      const describe = (page, index) => ({ page, index, style: sectionStyle(activeAppearance(), sectionById[page.section]), section: page.section ? sectionById[page.section].title : '' })
 
       if (this.matches) {
         return this.matches.map(describe)

@@ -165,6 +165,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, queryId, queryPlace, queryPlaceKeys } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
@@ -258,14 +259,18 @@ export default {
       return { GameID: this.GameID, RaceID: this.RaceID }
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     colors() {
       const [blue, , green] = this.theme.categorical
 
-      return { near: blue, route: green, avoided: this.theme.categorical[7], out: withAlpha(this.theme.inkMuted, 0.35) }
+      return { near: blue, route: green, avoided: this.appearance.status.shortfall, out: withAlpha(this.theme.inkMuted, 0.35) }
     },
 
     options() {

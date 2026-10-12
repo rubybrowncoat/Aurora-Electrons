@@ -1,6 +1,6 @@
 <template>
   <div>
-    <v-container fluid class="planner-page">
+    <v-container fluid class="planner-page" :style="sectionColors">
       <div class="toolbar">
         <div class="tool tool--species">
           <div class="tool__label caption text--secondary">Species</div>
@@ -79,7 +79,7 @@
               <template #activator="{ on, attrs }">
                 <v-btn outlined aria-label="Ranking" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon><span class="tool__btn-label">Ranking</span></v-btn>
               </template>
-              <v-card class="pa-4 planner-menu">
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
                   A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before the race's colonisation tech, so the scale means the same for every race), years of terraforming, and AU from the nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
@@ -102,7 +102,7 @@
               <template #activator="{ on, attrs }">
                 <v-btn outlined aria-label="Plan states" v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon><span class="tool__btn-label">Plan states</span></v-btn>
               </template>
-              <v-card class="pa-4 planner-menu">
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
                 <div class="subtitle-2 mb-1">What each plan state means</div>
                 <div class="caption text--secondary mb-3">
                   The Plan column says what it takes to settle a body. Colony cost bands are read before the race's colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what the race actually pays. Click a state to show only those bodies.
@@ -110,7 +110,7 @@
                 <div v-for="group in stateGroups" :key="group.group" class="mb-2">
                   <div class="overline">{{ group.group }}</div>
                   <div v-for="state in group.states" :key="state.id" class="legend-row" :class="{ 'legend-row--on': stateFilter.includes(state.id) }" @click="toggleStateFilter(state.id)">
-                    <v-chip small label :color="state.color" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
+                    <v-chip small label :color="tone(state.color)" class="legend-chip" dark><v-icon x-small left>{{ state.icon }}</v-icon>{{ state.label }}</v-chip>
                     <span class="legend-rule">{{ state.rule }}</span>
                     <span class="legend-count">{{ separatedNumber(stateCounts[state.id] || 0, separator) }}</span>
                   </div>
@@ -136,14 +136,14 @@
           <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on">
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
-          <v-chip v-for="id in stateFilter" :key="id" small label close :color="stateById[id].color" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
+          <v-chip v-for="id in stateFilter" :key="id" small label close :color="tone(stateById[id].color)" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
           <v-spacer />
           <span class="caption text--secondary summary-line">{{ summaryLine }}</span>
         </v-col>
         <v-col v-if="selectedBodies.length || filterBySelectedBodies" cols="12">
           <v-row dense>
             <v-col cols="auto">
-              <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
+              <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? tone('selected') : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
               <v-btn :to="linkTo.minerals({ bodies: selectedBodies })" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
               <v-btn class="d-block mt-4" style="width: 100%" small outlined @click="clearSelection">Clear Selection</v-btn>
             </v-col>
@@ -161,7 +161,7 @@
         <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
             <td class="text-no-wrap">
-              <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
+              <v-btn v-if="isSelected(item.body)" :color="tone('selected')" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
               <v-btn v-else icon small @click.stop="select(item.body)"><v-icon>mdi-playlist-plus</v-icon></v-btn>
               <v-btn icon small @click.stop="expand(!isExpanded)"><v-icon>{{ isExpanded ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon></v-btn>
             </td>
@@ -192,7 +192,7 @@
           <template #[`item.stateOrder`]="{ item }">
             <v-tooltip top max-width="360">
               <template #activator="{ on }">
-                <v-chip small label :color="item.row.state.color" :dark="item.row.state.target" :outlined="!item.row.state.target" class="plan-chip" v-on="on"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.chip(item.row.facts) }}</v-chip>
+                <v-chip small label :color="tone(item.row.state.color)" :dark="item.row.state.target" :outlined="!item.row.state.target" class="plan-chip" v-on="on"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.chip(item.row.facts) }}</v-chip>
               </template>
               <span>{{ stateTooltip(item.row) }}</span>
             </v-tooltip>
@@ -226,7 +226,7 @@
                 <span>{{ mineralTooltip(item.row) }}</span>
               </v-tooltip>
               <span v-else class="text--secondary">None</span>
-              <v-chip v-if="item.row.minerals.rich" x-small label color="amber darken-3" dark class="ml-1 px-1">Rich</v-chip>
+              <v-chip v-if="item.row.minerals.rich" x-small label :color="tone('rich')" dark class="ml-1 px-1">Rich</v-chip>
               <v-tooltip v-if="item.row.minerals.cmc.length" top max-width="340">
                 <template #activator="{ on }">
                   <v-chip x-small label outlined class="ml-1 px-1" v-on="on">CMC</v-chip>
@@ -237,7 +237,7 @@
             </div>
             <v-tooltip v-else top>
               <template #activator="{ on }">
-                <span class="orange--text" v-on="on">Unsurveyed</span>
+                <span :style="{ color: tone('unsurveyed') }" v-on="on">Unsurveyed</span>
               </template>
               <span>{{ groundSurveyText(item.body) }}</span>
             </v-tooltip>
@@ -277,11 +277,13 @@
 import Vue from 'vue'
 import { mapGetters } from 'vuex'
 
+import { sectionStyle } from '../components/navigation/section-style'
 import LoadState from '../components/page/LoadState.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance, toneColor } from '../utilities/appearance'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
@@ -294,6 +296,7 @@ import { tracked } from '../utilities/load-tracking'
 import { ENTRY_BYTES, derive, estimateBytes } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
+import { sectionById } from '../utilities/navigation'
 import { terraformCapacity } from '../utilities/terraforming'
 
 const INPUT_LABELS = {
@@ -401,6 +404,14 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+
+    appearance() {
+      return activeAppearance()
+    },
+
+    sectionColors() {
+      return sectionStyle(this.appearance, sectionById.colonies)
+    },
 
     goals: () => GOALS,
     viewOptions: () => VIEWS,
@@ -606,6 +617,11 @@ export default {
     }
   },
   methods: {
+    // The colour of a plan state's or outcome's tone under the appearance in force.
+    tone(name) {
+      return toneColor(this.appearance, name)
+    },
+
     applyLink(query) {
       const bodies = queryBodies(query.bodies)
 
@@ -932,7 +948,7 @@ export default {
     i {
       display: block;
       height: 100%;
-      background: var(--sc, #1baf7a);
+      background: var(--sc);
     }
   }
 
@@ -946,7 +962,7 @@ export default {
   }
 
   .mineral-high {
-    color: var(--sc, #1baf7a);
+    color: var(--sc);
   }
 
   .view-count {
@@ -956,7 +972,7 @@ export default {
   }
 
   .class-chip-on {
-    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+    background: var(--sc-soft);
   }
 
   tr.v-data-table__expanded__content {
@@ -983,7 +999,7 @@ export default {
   }
 
   .legend-row--on {
-    background: var(--sc-soft, rgba(27, 175, 122, 0.15));
+    background: var(--sc-soft);
   }
 
   .legend-rule {

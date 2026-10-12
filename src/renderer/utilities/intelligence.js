@@ -1,18 +1,18 @@
 // Intelligence: what one race knows about the others, decoded. Codes and thresholds come from the maintainer's reference for Aurora 2.7.1, references/mechanics/intelligence.md; the queries and their sample checks are in docs/plans/aurcalcs/sql-fleet.md § 7.
 // Every read goes through the viewing race's own intelligence tables. The `Actual*` columns (and alien ship or population IDs) point at the real objects, so they're never joined.
 
-// FCT_AlienRace.ContactStatus
+// FCT_AlienRace.ContactStatus. `color` is a tone (see `toneColor` in appearance.js).
 export const CONTACT_STATUS = {
   0: { label: 'Hostile', color: 'error', icon: 'mdi-sword-cross' },
-  1: { label: 'Neutral', color: 'grey', icon: 'mdi-minus-circle-outline' },
+  1: { label: 'Neutral', color: 'inactive', icon: 'mdi-minus-circle-outline' },
   2: { label: 'Friendly', color: 'success', icon: 'mdi-handshake-outline' },
   3: { label: 'Allied', color: 'primary', icon: 'mdi-shield-star-outline' },
-  4: { label: 'Civilian', color: 'grey', icon: 'mdi-ferry' },
-  5: { label: 'None', color: 'grey', icon: 'mdi-help-circle-outline' },
+  4: { label: 'Civilian', color: 'inactive', icon: 'mdi-ferry' },
+  5: { label: 'None', color: 'inactive', icon: 'mdi-help-circle-outline' },
   6: { label: 'Combat', color: 'error', icon: 'mdi-flash-alert-outline' },
 }
 
-export const contactStatus = (code) => CONTACT_STATUS[code] || { label: `Status ${code}`, color: 'grey', icon: 'mdi-help-circle-outline' }
+export const contactStatus = (code) => CONTACT_STATUS[code] || { label: `Status ${code}`, color: 'inactive', icon: 'mdi-help-circle-outline' }
 
 // FCT_AlienRace.CommStatus
 export const COMM_STATUS = {

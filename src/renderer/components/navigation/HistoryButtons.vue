@@ -26,6 +26,7 @@
 <script>
 import { mapActions, mapGetters } from 'vuex'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { pageByRoute, sectionById } from '../../utilities/navigation'
 import { sectionStyle } from './section-style'
 
@@ -60,7 +61,7 @@ export default {
       return entries.map(({ index, path, label, disabled }) => {
         const page = pageByRoute[path.split('?')[0]]
 
-        return { index, disabled, title: label ? `${page.title} · ${label}` : page.title, icon: page.icon, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]) }
+        return { index, disabled, title: label ? `${page.title} · ${label}` : page.title, icon: page.icon, style: sectionStyle(activeAppearance(), sectionById[page.section]) }
       })
     },
 

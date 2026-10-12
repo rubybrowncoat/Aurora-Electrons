@@ -1,7 +1,7 @@
 <template>
   <div class="body-detail">
     <div class="d-flex align-center mb-3">
-      <v-chip small label :color="item.row.state.color" :dark="item.row.state.target" :outlined="!item.row.state.target" class="mr-3 flex-none"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.label }}</v-chip>
+      <v-chip small label :color="tone(item.row.state.color)" :dark="item.row.state.target" :outlined="!item.row.state.target" class="mr-3 flex-none"><v-icon x-small left>{{ item.row.state.icon }}</v-icon>{{ item.row.state.label }}</v-chip>
       <span class="text--secondary">{{ item.row.state.text(item.row.facts) }}</span>
     </div>
     <div class="d-flex align-center flex-wrap mb-3">
@@ -12,7 +12,7 @@
           <v-icon v-if="evaluation.species.SpeciesID === item.best.species.SpeciesID && item.best.strategy !== 'none'" x-small right title="Best for the goal">mdi-star</v-icon>
         </v-btn>
       </v-btn-toggle>
-      <v-chip v-if="assessment.cost.colonisable" small label class="ml-3" :color="outcome.color" outlined>{{ plan ? `Terraformed: ${outcome.label}` : outcome.label }}</v-chip>
+      <v-chip v-if="assessment.cost.colonisable" small label class="ml-3" :color="tone(outcome.color)" outlined>{{ plan ? `Terraformed: ${outcome.label}` : outcome.label }}</v-chip>
       <span v-if="assessment.cost.colonisable" class="caption text--secondary ml-2">{{ outcome.description }}</span>
     </div>
 
@@ -140,6 +140,7 @@
 
 <script>
 import PageLink from '../page/PageLink.vue'
+import { activeAppearance, toneColor } from '../../utilities/appearance'
 import { systemBodyName } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
@@ -285,6 +286,10 @@ export default {
   },
   methods: {
     people,
+    // The colour of a plan state's or outcome's tone under the appearance in force.
+    tone(name) {
+      return toneColor(activeAppearance(), name)
+    },
     round: roundToDecimal,
     cost(value) {
       return value === null || value === undefined ? 'N/A' : roundToDecimal(value, 2).toString()
@@ -345,7 +350,7 @@ export default {
     font-weight: 500;
 
     .factor-bar i {
-      background: var(--sc, #1baf7a);
+      background: var(--sc);
     }
   }
 
@@ -381,7 +386,7 @@ export default {
 
   .scarce {
     font-weight: 500;
-    color: var(--sc, #1baf7a);
+    color: var(--sc);
   }
 
   .flex-none {

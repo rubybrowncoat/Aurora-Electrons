@@ -212,9 +212,9 @@
             <div v-if="!tradeRows.length && !tradeSaved" class="caption text--secondary">No sets to compare yet.</div>
             <template v-else-if="tradeView === 'chart'">
               <div class="legend">
-                <span class="legend-item"><span class="dot" :style="{ background: theme.categorical[0] }" />Military</span>
-                <span class="legend-item"><span class="dot" :style="{ background: theme.categorical[1] }" />Commercial</span>
-                <span v-if="tradeSaved" class="legend-item"><span class="dot" :style="{ background: theme.categorical[2] }" />Saved class</span>
+                <span class="legend-item"><span class="dot" :style="{ background: kindColors.military }" />Military</span>
+                <span class="legend-item"><span class="dot" :style="{ background: kindColors.commercial }" />Commercial</span>
+                <span v-if="tradeSaved" class="legend-item"><span class="dot" :style="{ background: kindColors.saved }" />Saved class</span>
               </div>
               <chart-canvas type="line" :data="tradeChart.data" :options="tradeChart.options" :height="340" :label="`Share of the ship the propulsion takes against ${tradeMetric === 'speed' ? 'speed' : 'range'}`" />
             </template>
@@ -361,6 +361,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClasses } from '../utilities/design-data'
 import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, thermalSignature } from '../utilities/design-rules'
@@ -583,8 +584,19 @@ export default {
       return { GameID: this.GameID, RaceID: this.RaceID }
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
+    },
+
+    // The trade-off chart's three series and its legend: military and commercial sets, and the saved class.
+    kindColors() {
+      const [military, commercial, saved] = this.theme.categorical
+
+      return { military, commercial, saved }
     },
 
     splits() {
@@ -957,7 +969,7 @@ export default {
 
     tradeChart() {
       const speed = this.tradeMetric === 'speed'
-      const [military, commercial, saved] = this.theme.categorical
+      const { military, commercial, saved } = this.kindColors
       const value = (row) => (speed ? row.speed : row.rangeBn)
       const plotted = (rows) => rows.filter((row) => value(row) !== null)
       const point = (row, label) => ({ x: roundToDecimal(row.share * 100, 2), y: roundToDecimal(value(row), speed ? 0 : 2), label })
@@ -1434,7 +1446,7 @@ export default {
   }
 
   tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.08);
+    background: var(--ae-row-selected);
   }
 
   .expand-cell {
@@ -1447,12 +1459,6 @@ export default {
 
   td {
     font-variant-numeric: tabular-nums;
-  }
-}
-
-.theme--dark .propulsion-page {
-  tr.is-selected-row {
-    background: rgba(33, 150, 243, 0.16);
   }
 }
 </style>

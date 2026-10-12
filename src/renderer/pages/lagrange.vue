@@ -116,6 +116,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
@@ -171,8 +172,12 @@ export default {
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     colors() {

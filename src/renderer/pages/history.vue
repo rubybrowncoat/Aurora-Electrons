@@ -107,6 +107,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { MAX_SNAPSHOTS, historyConfig, recordedSpan } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -183,8 +184,12 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     // The game's history file, re-read whenever the recorder writes (store revision) or this page clears it.
