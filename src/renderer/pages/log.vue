@@ -823,6 +823,11 @@ export default {
     font-size: 13px;
   }
 
+  // Vuetify gives every icon a focus wash (an ::after scaled to 130%) that only a link icon ever shows; the hide button has its own. On the icon at the row's end it reaches past the row, so the row's content overflows by two pixels.
+  .event-heading .v-icon::after {
+    display: none;
+  }
+
   .event-type {
     font-weight: 500;
     overflow: hidden;
