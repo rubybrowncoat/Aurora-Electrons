@@ -7,6 +7,7 @@
 // | `/habitability`    | `systems=<SystemID,…>` or `bodies=<bodies>`                              |
 // | `/mineral-outlook` | `mineral=<mineral id>`                                                   |
 // | `/routes`          | `from=<place>`, `via=<place,…>`, `to=<place>`, `cycle=1`, `fleet=<FleetID>` |
+// | `/information`     | `from=<place>`, `to=<place>` (a colony or a system)                      |
 // | `/survey-progress` | `system=<SystemID>`                                                      |
 // | `/lagrange`        | `system=<SystemID>`                                                      |
 // | `/intelligence`    | `race=<AlienRaceID>`                                                     |
@@ -100,6 +101,7 @@ export const linkTo = Object.freeze({
 
     return link('/routes', { from, via: via && via.length ? via.join(',') : null, to, cycle: cycle ? 1 : null, fleet })
   },
+  transport: ({ from, to } = {}) => link('/information', { from, to }),
   survey: (systemId) => link('/survey-progress', { system: systemId }),
   lagrange: (systemId) => link('/lagrange', { system: systemId }),
   intelligence: (alienRaceId) => link('/intelligence', { race: alienRaceId }),

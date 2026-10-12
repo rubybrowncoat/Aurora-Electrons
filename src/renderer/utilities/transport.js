@@ -20,7 +20,7 @@ export const fleetCanTransit = (ships) => {
   return independent.length > 0 && covered(independent.filter((ship) => ship.MilitaryEngines), (ship) => ship.Drive || 0) && covered(independent.filter((ship) => !ship.MilitaryEngines), (ship) => ship.AnyDrive || 0)
 }
 
-const hasGate = (jumpPoint) => jumpPoint.JumpGateStrength > 0
+export const hasGate = (jumpPoint) => jumpPoint.JumpGateStrength > 0
 
 // What a profile of ships may use on a route, for `searchRoutes`. A round trip comes back through every jump point it went through, so a jump point has to be fit to cross from both of its sides. `gates`: only stabilised jump points. `civilian`: no military restricted jump points or systems. `restrictedSystems`: a Set of SystemIDs.
 export const transitRule = ({ gates, civilian }, jumpPointById, restrictedSystems) => ({
@@ -61,8 +61,8 @@ export const routeBlockers = (route, { gates, civilian }, restrictedSystems, sys
 
 const handlingProblem = (reason) => (reason === 'crew' ? 'a ship has no crew aboard' : 'no shuttle bays or station, and too big to land')
 
-// One group of ships (one class in one fleet) on a route of `km` one way: the round trip is 2 x km at top speed plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking the slowest ship's time. `stations`: { origin, destination }, whether the colony there has a spaceport or cargo shuttle station. Returns `status`: 'ok', 'blocked' (a ship can't load or unload, `problems` says where), 'range' (the round trip needs more fuel than the tank holds) or 'none' (nothing to time).
-export const roundTrip = (ships, km, stations, shuttleTechnology) => {
+// One group of ships (one class in one fleet) on a route of `km` one way: the round trip is 2 x km at top speed plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking the slowest ship's time; `colonists: false` times the cargo alone. `stations`: { origin, destination }, whether the colony there has a spaceport or cargo shuttle station. Returns `status`: 'ok', 'blocked' (a ship can't load or unload, `problems` says where), 'range' (the round trip needs more fuel than the tank holds) or 'none' (nothing to time).
+export const roundTrip = (ships, km, stations, shuttleTechnology, { colonists = true } = {}) => {
   const [shipClass] = ships
   const handled = ships.map((ship) => ({
     CargoCapacity: shipClass.CargoCapacity,
@@ -74,10 +74,10 @@ export const roundTrip = (ships, km, stations, shuttleTechnology) => {
   }))
   const stops = [
     { where: 'origin', order: LOAD_CARGO, station: stations.origin },
-    { where: 'origin', order: LOAD_COLONISTS, station: stations.origin },
+    { where: 'origin', order: LOAD_COLONISTS, station: stations.origin, colonists: true },
     { where: 'destination', order: UNLOAD_CARGO, station: stations.destination },
-    { where: 'destination', order: UNLOAD_COLONISTS, station: stations.destination },
-  ].map((stop) => ({ ...stop, ...stopHandling({ MoveActionID: stop.order, Station: stop.station }, handled, shuttleTechnology) }))
+    { where: 'destination', order: UNLOAD_COLONISTS, station: stations.destination, colonists: true },
+  ].filter((stop) => colonists || !stop.colonists).map((stop) => ({ ...stop, ...stopHandling({ MoveActionID: stop.order, Station: stop.station }, handled, shuttleTechnology) }))
   const problems = stops.filter((stop) => stop.blocked).map((stop) => ({ where: stop.where, reason: stop.blocked, text: `${stop.where === 'origin' ? 'loading at the origin' : 'unloading at the destination'}: ${handlingProblem(stop.blocked)}` })).filter((problem, index, all) => all.findIndex((other) => other.text === problem.text) === index)
   const handlingSeconds = stops.reduce((total, stop) => total + stop.seconds, 0)
   const travelSeconds = (2 * km) / shipClass.MaxSpeed

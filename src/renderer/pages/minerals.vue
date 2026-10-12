@@ -346,6 +346,7 @@ import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
+import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
@@ -363,7 +364,6 @@ const INPUT_LABELS = {
   aliens: 'the alien colonies',
 }
 
-const MINERAL_NAMES = MINERALS.map((mineral) => mineral.name)
 const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: 'Ve', 8: 'So', 9: 'Ur', 10: 'Cr', 11: 'Ga' }
 
 // Tonnes a year per mass driver.
@@ -405,33 +405,7 @@ const ACCESSIBILITY_STEPS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
 
 const PAGE_SIZES = [15, 30, -1]
 
-// A colony's state for one mineral, most pressing first. Differences under a tonne are rounding.
-const STOCK_STATES = {
-  short: { order: 0, label: 'Short for queue', icon: 'mdi-alert-circle-outline', color: 'error' },
-  exported: { order: 1, label: 'Driver ships queue stock', icon: 'mdi-arrow-top-right-thick', color: 'warning' },
-  below: { order: 2, label: 'Below reserve', icon: 'mdi-arrow-down-bold-circle-outline', color: 'warning' },
-  surplus: { order: 3, label: 'Free to move', icon: 'mdi-check-circle-outline', color: 'success' },
-  held: { order: 4, label: 'All reserved', icon: 'mdi-lock-outline', color: undefined },
-  empty: { order: 5, label: 'Nothing held', icon: 'mdi-circle-outline', color: undefined },
-}
-const PRESSING = ['short', 'exported', 'below']
-
-const stockState = ({ stock, reserve, needs }, exporting) => {
-  if (needs - stock >= 1) {
-    return 'short'
-  } else if (exporting && needs - reserve >= 1 && stock - reserve >= 1) {
-    return 'exported'
-  } else if (reserve - stock >= 1) {
-    return 'below'
-  } else if (stock - reserve >= 1) {
-    return 'surplus'
-  }
-
-  return stock >= 1 ? 'held' : 'empty'
-}
-
 const sum = (items, key) => items.reduce((total, item) => total + (item[key] || 0), 0)
-const sums = (table) => MINERAL_NAMES.map((name) => `sum(${table}.${name}) as ${name}`).join(', ')
 const byPopulation = (rows) => Object.fromEntries(rows.map((row) => [row.PopulationID, row]))
 
 // Deposits ranked for an untapped site: the higher potential (to a tenth, as shown), then accessibility, then size.
@@ -517,14 +491,6 @@ export default {
 
     coloniesById() {
       return byPopulation(this.colonies)
-    },
-
-    needsById() {
-      return byPopulation(this.needs)
-    },
-
-    packetsById() {
-      return byPopulation(this.packets)
     },
 
     colonySystemIds() {
@@ -695,26 +661,11 @@ export default {
 
     // Per colony and mineral: stock, reserve, what moves, what the queue needs and what is on its way.
     colonyStocks() {
-      const { needsById, packetsById } = this
+      const { needs, packets } = this
       return this.colonies.map((colony) => {
-        const needs = needsById[colony.PopulationID] || {}
-        const inbound = packetsById[colony.PopulationID] || {}
         const exporting = colony.MassDrivers > 0 && colony.MassDriverDest > 0
 
-        return {
-          colony,
-          exporting,
-          minerals: MINERALS.map((mineral) => {
-            const values = {
-              stock: colony[mineral.name] || 0,
-              reserve: colony[`Reserve${mineral.name}`] || 0,
-              needs: needs[mineral.name] || 0,
-              inbound: inbound[mineral.name] || 0,
-            }
-
-            return { ...mineral, ...values, free: Math.max(0, values.stock - values.reserve), state: stockState(values, exporting) }
-          }),
-        }
+        return { colony, exporting, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], exporting) }
       })
     },
 
@@ -1208,39 +1159,35 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${MINERAL_NAMES.map((name) => `FCT_Population.${name}, FCT_Population.Reserve${name}`).join(', ')}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),
       default: [],
     },
 
-    // What each colony's queue still needs: industrial projects (per unit, times the units left) and shipyard tasks (their full cost, times the share of build points left).
+    // What each colony's queue still needs, by colony.
     needs: {
       get: tracked('needs', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return []
+          return {}
         }
 
-        const [needs] = await this.database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${MINERAL_NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} union all select FCT_ShipyardTask.PopulationID, ${MINERAL_NAMES.map((name) => `FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID} and FCT_ShipyardTask.TotalBP > 0) as VIR_Needs group by VIR_Needs.PopulationID`)
-
-        return Object.freeze(needs)
+        return await loadQueueNeeds(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
-      default: [],
+      default: {},
     },
 
     // Mass-driver packets in flight, by the colony they are bound for.
     packets: {
       get: tracked('packets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return []
+          return {}
         }
 
-        const [packets] = await this.database.query(`select FCT_MassDriverPackets.DestID as PopulationID, ${sums('FCT_MassDriverPackets')} from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID} group by FCT_MassDriverPackets.DestID`)
-
-        return Object.freeze(packets)
+        return await loadPacketsInFlight(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
-      default: [],
+      default: {},
     },
 
     // The race's ships with mining modules, by the body their fleet orbits.

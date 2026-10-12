@@ -170,9 +170,10 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
-import { linkTo } from '../utilities/deep-links'
+import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
@@ -216,6 +217,7 @@ export default {
   components: { LoadState, PageLink, StatTiles },
   mixins: [
     countFormat,
+    deepLink,
     loadState(INPUT_LABELS),
     persistedView({
       fromKey: { key: 'transportFrom', default: null, scope: 'race' },
@@ -279,6 +281,19 @@ export default {
       const place = this.placeByKey[this.toKey]
 
       return place && this.origin && place.key !== this.origin.key ? place : null
+    },
+
+    // The run as a link names it: the origin, and the destination once there is one. Not known until the places are read.
+    linkQuery() {
+      return this.ready && this.origin ? linkTo.transport({ from: this.origin.key, to: this.destination && this.destination.key }).query : null
+    },
+
+    linkLabel() {
+      if (!this.origin) {
+        return ''
+      }
+
+      return this.destination ? `${this.origin.name} → ${this.destination.name}` : this.origin.name
     },
 
     routesLink() {
@@ -551,6 +566,20 @@ export default {
 
     filterOrder(_value, query, item) {
       return `${item.colonyName} ${item.systemName} ${item.InstallationName}`.toLowerCase().includes(query.toLowerCase())
+    },
+
+    // The picks the query names; one it leaves out stays as it is. They are plain keys, so a link that arrives before the places are read lands on its pair once they load.
+    applyLink(query) {
+      const [from] = queryPlaceKeys(query.from)
+      const [to] = queryPlaceKeys(query.to)
+
+      if (from) {
+        this.fromKey = from
+      }
+
+      if (to) {
+        this.toKey = to
+      }
     },
 
     setFrom(key) {
