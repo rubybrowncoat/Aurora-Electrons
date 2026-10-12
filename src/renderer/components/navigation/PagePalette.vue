@@ -105,10 +105,9 @@ export default {
       }
 
       const recent = this.recents.map((path) => this.pages.find(({ route }) => route === path)).filter(Boolean).slice(0, RECENT_COUNT)
-      const rest = this.pages.filter((page) => !recent.includes(page))
       const rows = recent.length ? [{ group: 'Recent' }] : []
 
-      return [...rows, ...recent.map(describe), { group: 'All pages' }, ...rest.map((page, index) => describe(page, recent.length + index))]
+      return [...rows, ...recent.map(describe), { group: 'All pages' }, ...this.pages.map((page, index) => describe(page, recent.length + index))]
     },
     selectable () {
       return this.rows.filter(({ page }) => page)
