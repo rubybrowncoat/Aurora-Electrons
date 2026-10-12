@@ -82,6 +82,38 @@ export const checks = [
     },
   },
   {
+    key: 'idle-ground-training',
+    group: group.key,
+    severity: 'info',
+    title: (count) => `${amount(count, 'population')} with idle ground training capacity`,
+    rule: 'A colony with people on it has ground force construction complexes staffed at its efficiency while the ground unit training tasks under way (not queued) take under 100% of that capacity, so the rest trains nothing; a colony with no training task at all counts as fully idle.',
+    columns: [
+      { key: 'colony', text: 'Colony' },
+      { key: 'installed', text: 'GFCCs installed', align: 'end' },
+      { key: 'staffed', text: 'GFCCs staffed', align: 'end' },
+      { key: 'allocated', text: 'Allocated', align: 'end' },
+      { key: 'idle', text: 'GFCCs unallocated', align: 'end' },
+    ],
+    async read(ctx) {
+      const { GameID, RaceID } = ctx
+
+      const populations = await rowsOf(ctx, `select VIR_Training.*, VIR_Training.Staffed * (100 - min(100, VIR_Training.Allocated)) / 100 as Unallocated from (select FCT_Population.PopulationID, FCT_Population.PopName, VIR_Complexes.Installed, VIR_Complexes.Installed * min(1, FCT_Population.Efficiency) as Staffed, coalesce(VIR_Tasks.Allocated, 0) as Allocated, coalesce(VIR_Tasks.Tasks, 0) as Tasks, coalesce(VIR_Queue.Queued, 0) as Queued, ${COLONY_COLUMNS} from FCT_Population inner join (select VIR_Types.PopID, SUM(VIR_Types.Amount * DIM_PlanetaryInstallation.GroundTrainingValue) as Installed from (select FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID, MAX(FCT_PopulationInstallations.Amount) as Amount from FCT_PopulationInstallations where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID, FCT_PopulationInstallations.PlanetaryInstallationID) as VIR_Types inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = VIR_Types.PlanetaryInstallationID where DIM_PlanetaryInstallation.GroundTrainingValue > 0 group by VIR_Types.PopID) as VIR_Complexes on VIR_Complexes.PopID = FCT_Population.PopulationID left join (select FCT_GroundUnitTraining.PopulationID, SUM(FCT_GroundUnitTraining.TaskPercentage) as Allocated, COUNT(*) as Tasks from FCT_GroundUnitTraining where FCT_GroundUnitTraining.GameID = ${GameID} and FCT_GroundUnitTraining.RaceID = ${RaceID} group by FCT_GroundUnitTraining.PopulationID) as VIR_Tasks on VIR_Tasks.PopulationID = FCT_Population.PopulationID left join (select FCT_GroundUnitTrainingQueue.PopulationID, COUNT(*) as Queued from FCT_GroundUnitTrainingQueue where FCT_GroundUnitTrainingQueue.GameID = ${GameID} group by FCT_GroundUnitTrainingQueue.PopulationID) as VIR_Queue on VIR_Queue.PopulationID = FCT_Population.PopulationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_Population.Population > 0) as VIR_Training where VIR_Training.Staffed * (100 - min(100, VIR_Training.Allocated)) / 100 > 0.005 order by Unallocated desc, VIR_Training.PopName`)
+
+      return populations.map((population) => ({
+        id: `colony:${population.PopulationID}`,
+        cells: {
+          colony: colonyText(population),
+          installed: ctx.count(population.Installed, 1),
+          staffed: ctx.count(population.Staffed, 1),
+          allocated: `${ctx.count(Math.min(100, population.Allocated), 1)}%`,
+          idle: ctx.count(population.Unallocated, 1),
+        },
+        caption: [population.Tasks ? amount(population.Tasks, 'training task') : 'No training task', population.Queued ? `${amount(population.Queued, 'formation')} queued` : ''].filter(Boolean).join(' · '),
+        link: linkTo.production(population.PopulationID),
+      }))
+    },
+  },
+  {
     key: 'paused-industrial-projects',
     group: group.key,
     severity: 'info',
