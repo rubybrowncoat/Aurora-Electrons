@@ -688,8 +688,8 @@ function moveSet(state, set, targets) {
   return true
 }
 
-// Tries each candidate layout of `set` and keeps the cheapest if it beats the current one. While the search is warm a worse layout can win too, with a chance that shrinks with how much worse it is, so the search can climb out of a dead end (simulated annealing).
-function tryCandidates(state, set, candidates, rng, temperature = 0) {
+// Tries each candidate layout of `set` and keeps the cheapest if it beats the current one. While the search is warm a worse layout can win too, with a chance that shrinks with how much worse it is, so the search can climb out of a dead end (simulated annealing). Given a `report` (a { phase, progress } step), it yields that between candidates, as pricing a big set takes a while.
+function* tryCandidates(state, set, candidates, rng, temperature = 0, report = null) {
   const before = localCost(state, set)
   const original = snapshot(state, set)
 
@@ -707,6 +707,10 @@ function tryCandidates(state, set, candidates, rng, temperature = 0) {
     }
 
     moveSet(state, set, original)
+
+    if (report) {
+      yield report
+    }
   }
 
   if (!best) {
@@ -738,10 +742,17 @@ function translations(state, set, cells) {
   })
 }
 
+// The work done between two yields in the long loops below, in steps (a step is about a multiply-add of one matrix cell), so the page can paint and answer Stop between advances however big the map.
+const SLICE_STEPS = 150000
+
+// How many rows of an n-wide matrix make a slice when each cell costs `cost` steps.
+const rowsPerSlice = (n, cost = 1) => Math.max(1, Math.floor(SLICE_STEPS / (n * cost)))
+
 // Hops between every pair of systems, a link to a nexus counting as far as its ring so the systems round it start out there. Pairs in different pieces of the map get one more than the longest path; systems of one group sit a little closer and of two groups a little further, so groups start out together.
-function hopDistances(state) {
+function* hopDistances(state) {
   const { n, neighbours, group, ring } = state
   const distances = new Float64Array(n * n).fill(-1)
+  const searches = rowsPerSlice(n, 10)
   let longest = 1
   for (let source = 0; source < n; source += 1) {
     const row = source * n
@@ -766,8 +777,13 @@ function hopDistances(state) {
         }
       }
     }
+
+    if ((source + 1) % searches === 0) {
+      yield { phase: 'stress', progress: (0.03 * (source + 1)) / n }
+    }
   }
 
+  const rows = rowsPerSlice(n)
   for (let i = 0; i < n; i += 1) {
     for (let j = 0; j < n; j += 1) {
       const k = i * n + j
@@ -779,6 +795,10 @@ function hopDistances(state) {
         distances[k] *= group[i] === group[j] ? 0.8 : 1.25
       }
     }
+
+    if ((i + 1) % rows === 0) {
+      yield { phase: 'stress', progress: 0.03 + (0.01 * (i + 1)) / n }
+    }
   }
 
   return distances
@@ -787,7 +807,8 @@ function hopDistances(state) {
 // A stress layout (Gansner, Koren and North 2004), started from the two leading axes of the distances (classical scaling by power iteration) so it doesn't depend on a random start.
 function* stressCoordinates(state, rng) {
   const { n } = state
-  const distances = hopDistances(state)
+  const distances = yield * hopDistances(state)
+  const rows = rowsPerSlice(n)
 
   const centred = new Float64Array(n * n)
   const rowMean = new Float64Array(n)
@@ -800,19 +821,28 @@ function* stressCoordinates(state, rng) {
     }
 
     mean += rowMean[i] / n
+
+    if ((i + 1) % rows === 0) {
+      yield { phase: 'stress', progress: 0.04 }
+    }
   }
 
   for (let i = 0; i < n; i += 1) {
     for (let j = 0; j < n; j += 1) {
       centred[i * n + j] = -0.5 * (centred[i * n + j] - rowMean[i] - rowMean[j] + mean)
     }
+
+    if ((i + 1) % rows === 0) {
+      yield { phase: 'stress', progress: 0.04 }
+    }
   }
 
   const axes = []
+  const iterations = 60
   for (let axis = 0; axis < 2; axis += 1) {
     let vector = Float64Array.from({ length: n }, () => rng() - 0.5)
     let value = 0
-    for (let iteration = 0; iteration < 60; iteration += 1) {
+    for (let iteration = 0; iteration < iterations; iteration += 1) {
       const next = new Float64Array(n)
       for (let i = 0; i < n; i += 1) {
         let sum = 0
@@ -821,6 +851,10 @@ function* stressCoordinates(state, rng) {
         }
 
         next[i] = sum
+
+        if ((i + 1) % rows === 0) {
+          yield { phase: 'stress', progress: 0.04 + (0.16 * (axis + (iteration + (i + 1) / n) / iterations)) / 2 }
+        }
       }
 
       for (const previous of axes) {
@@ -845,15 +879,15 @@ function* stressCoordinates(state, rng) {
     }
 
     axes.push({ vector, value })
-    yield { phase: 'stress', progress: 0.1 * (axis + 1) }
   }
 
   const sx = Float64Array.from(axes[0].vector, (component) => component * Math.sqrt(axes[0].value) + (rng() - 0.5) * 1e-3)
   const sy = Float64Array.from(axes[1].vector, (component) => component * Math.sqrt(axes[1].value) + (rng() - 0.5) * 1e-3)
 
   // Stress majorization one system at a time, with weights 1 / d².
-  const iterations = 300
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
+  const majorizations = 300
+  const stressRows = rowsPerSlice(n, 10)
+  for (let iteration = 0; iteration < majorizations; iteration += 1) {
     let moved = 0
     for (let i = 0; i < n; i += 1) {
       let nx = 0
@@ -879,10 +913,10 @@ function* stressCoordinates(state, rng) {
       moved = Math.max(moved, Math.abs(nx - sx[i]) + Math.abs(ny - sy[i]))
       sx[i] = nx
       sy[i] = ny
-    }
 
-    if (iteration % 10 === 0) {
-      yield { phase: 'stress', progress: 0.2 + (0.8 * iteration) / iterations }
+      if ((i + 1) % stressRows === 0) {
+        yield { phase: 'stress', progress: 0.2 + (0.8 * (iteration + (i + 1) / n)) / majorizations }
+      }
     }
 
     if (moved < 1e-4) {
@@ -974,6 +1008,7 @@ function* placeNear(state, targetX, targetY, rng) {
       continue
     }
 
+    const step = { phase: 'place', progress: done / n }
     const cx = Math.round(targetX[v])
     const cy = Math.round(targetY[v])
     let bestCost = Infinity
@@ -989,6 +1024,7 @@ function* placeNear(state, targetX, targetY, rng) {
           place(state, v, cx + dx, cy + dy)
           const cost = localCost(state, [v]) + rng() * 1e-6
           unplace(state, v)
+          yield step
           if (cost < bestCost) {
             bestCost = cost
             bestX = cx + dx
@@ -999,9 +1035,7 @@ function* placeNear(state, targetX, targetY, rng) {
     }
 
     place(state, v, bestX, bestY)
-    if (done % 8 === 0) {
-      yield { phase: 'place', progress: done / n }
-    }
+    yield step
   }
 
   state.guided = false
@@ -1029,7 +1063,7 @@ function inRing(state, v, x, y) {
 }
 
 // The pieces that hang off the map by a single system: take that system away and they come loose from the capital. Each can turn about the system it hangs from, or shift, as a whole. A piece with no link to the capital's piece hangs from nothing (anchor -1).
-function pendantPieces(state) {
+function* pendantPieces(state) {
   const { n, neighbours, capital } = state
   const pieces = []
   const label = new Int32Array(n)
@@ -1087,6 +1121,8 @@ function pendantPieces(state) {
       if (label[capital] !== stamp && members.length > 1 && members.length <= n / 2 && !members.some((w) => state.pinned[w])) {
         pieces.push({ anchor, members })
       }
+
+      yield { phase: 'improve', progress: 0 }
     }
   }
 
@@ -1094,7 +1130,7 @@ function pendantPieces(state) {
 }
 
 // Runs of systems with two links each inside the map's loops (its 2-core), with whatever hangs off them: shifting one stretches or shrinks a loop without bending its corners.
-function loopRuns(state, pieces) {
+function* loopRuns(state, pieces) {
   const { n, neighbours } = state
   const degree = Int32Array.from(neighbours, (list) => list.length)
   const removed = new Uint8Array(n)
@@ -1130,6 +1166,8 @@ function loopRuns(state, pieces) {
   const runs = []
   const seen = new Uint8Array(n)
   for (let v = 0; v < n; v += 1) {
+    yield { phase: 'improve', progress: 0 }
+
     if (removed[v] || degree[v] !== 2 || seen[v]) {
       continue
     }
@@ -1224,8 +1262,8 @@ function fanLayouts(state, v, carry) {
 
 function* improve(state, rng, { heated, settle, warmth }) {
   const { n, neighbours } = state
-  const pieces = pendantPieces(state)
-  const runs = loopRuns(state, pieces)
+  const pieces = yield * pendantPieces(state)
+  const runs = yield * loopRuns(state, pieces)
 
   // What a system drags along when it moves: the pieces that hang from it.
   const hanging = Array.from({ length: n }, () => [])
@@ -1250,6 +1288,7 @@ function* improve(state, rng, { heated, settle, warmth }) {
     const order = shuffled(n, rng)
     for (let k = 0; k < n; k += 1) {
       const v = order[k]
+      const step = { phase: 'improve', progress: (round + (0.8 * k) / n) / rounds }
       if (state.pinned[v]) {
         continue
       }
@@ -1270,11 +1309,11 @@ function* improve(state, rng, { heated, settle, warmth }) {
         }
       }
 
-      gain += tryCandidates(state, [v], translations(state, [v], cells), rng, temperature)
+      gain += yield * tryCandidates(state, [v], translations(state, [v], cells), rng, temperature)
 
       if (carried[v].length && carried[v].length < carryLimit) {
         const set = [v, ...carried[v]]
-        gain += tryCandidates(state, set, translations(state, set, cells), rng, temperature)
+        gain += yield * tryCandidates(state, set, translations(state, set, cells), rng, temperature, step)
       }
 
       // Trade places with a system that sits where this one would rather be.
@@ -1283,13 +1322,11 @@ function* improve(state, rng, { heated, settle, warmth }) {
         const w = state.occupied.get(cellKey(x, y))
         if (w !== undefined && w !== v && !state.pinned[w] && !traded.has(w)) {
           traded.add(w)
-          gain += tryCandidates(state, [v, w], [Int32Array.of(state.x[w], state.y[w], state.x[v], state.y[v])], rng, temperature)
+          gain += yield * tryCandidates(state, [v, w], [Int32Array.of(state.x[w], state.y[w], state.x[v], state.y[v])], rng, temperature)
         }
       }
 
-      if (k % 4 === 0) {
-        yield { phase: 'improve', progress: (round + (0.8 * k) / n) / rounds }
-      }
+      yield step
     }
 
     for (let p = 0; p < pieces.length; p += 1) {
@@ -1312,20 +1349,21 @@ function* improve(state, rng, { heated, settle, warmth }) {
         candidates.push(targets)
       }
 
-      gain += tryCandidates(state, members, candidates, rng, temperature)
-
-      if (p % 4 === 0) {
-        yield { phase: 'improve', progress: (round + 0.8 + (0.1 * p) / pieces.length) / rounds }
-      }
+      const step = { phase: 'improve', progress: (round + 0.8 + (0.1 * p) / pieces.length) / rounds }
+      gain += yield * tryCandidates(state, members, candidates, rng, temperature, step)
+      yield step
     }
 
-    for (const members of runs) {
+    for (let r = 0; r < runs.length; r += 1) {
+      const members = runs[r]
       const cells = []
       for (const [dx, dy] of NEIGHBOUR_CELLS) {
         cells.push([state.x[members[0]] + dx, state.y[members[0]] + dy], [state.x[members[0]] + dx * 2, state.y[members[0]] + dy * 2])
       }
 
-      gain += tryCandidates(state, members, translations(state, members, cells), rng, temperature)
+      const step = { phase: 'improve', progress: (round + 0.9 + (0.05 * r) / runs.length) / rounds }
+      gain += yield * tryCandidates(state, members, translations(state, members, cells), rng, temperature, step)
+      yield step
     }
 
     // Each nexus's links fanned out round it, alone and then with what hangs off them (but not the nexus itself, where it hangs off one of them).
@@ -1333,12 +1371,14 @@ function* improve(state, rng, { heated, settle, warmth }) {
       for (const carry of [() => [], (w) => hanging[w].filter((members) => members.length < carryLimit && !members.includes(v)).flat()]) {
         const fan = fanLayouts(state, v, carry)
         if (fan) {
-          gain += tryCandidates(state, fan.set, fan.candidates, rng, temperature)
+          gain += yield * tryCandidates(state, fan.set, fan.candidates, rng, temperature, { phase: 'improve', progress: (round + 0.95) / rounds })
         }
       }
     }
 
     const cost = totalCost(state)
+    yield { phase: 'improve', progress: (round + 0.98) / rounds }
+
     if (cost < best.cost - 1e-6) {
       best = { cost, cells: snapshot(state, all) }
     }
