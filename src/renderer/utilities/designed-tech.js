@@ -399,8 +399,11 @@ export const augmentSpecies = (species) => {
   return item
 }
 
-// A name's second line: the kind of component, then what marks it.
-export const tagsOf = (item) => {
+// Whether a component can be mounted on a class, which a missile type or a species cannot.
+export const isMountable = (item) => item.CategoryID !== MISSILE_CATEGORY_ID && item.CategoryID !== SPECIES_CATEGORY_ID
+
+// What marks a design beyond its kind. Every ship component is military or commercial: the name's second line names only a commercial one, as the row's icon tells them apart, and `role` names a military one too.
+export const tagsOf = (item, { role = false } = {}) => {
   const tags = []
 
   if (item.Baseline) {
@@ -415,8 +418,8 @@ export const tagsOf = (item) => {
     tags.push('Spinal')
   }
 
-  if (item.Commercial && item.CategoryID !== MISSILE_CATEGORY_ID && item.CategoryID !== SPECIES_CATEGORY_ID) {
-    tags.push('Commercial')
+  if (isMountable(item) && (role || item.Commercial)) {
+    tags.push(item.Commercial ? 'Commercial' : 'Military')
   }
 
   if (item.Civilian) {
@@ -429,6 +432,3 @@ export const tagsOf = (item) => {
 
   return tags
 }
-
-// Whether a component can be mounted on a class, which a missile type or a species cannot.
-export const isMountable = (item) => item.CategoryID !== MISSILE_CATEGORY_ID && item.CategoryID !== SPECIES_CATEGORY_ID

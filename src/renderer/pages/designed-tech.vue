@@ -437,7 +437,10 @@ export default {
         return { key, label, title: '', differs: new Set(texts).size > 1, cells: texts.map((value) => ({ text: value, note: '', none: false, mark: null, verdict: null, markTitle: '' })) }
       }
 
-      return [...attributes, textRow('status', 'Status', (row) => (row.Obsolete ? 'Obsolete' : 'Current')), textRow('marks', 'Marked as', (row) => tagsOf(row).join(', ') || 'None')]
+      // A missile or a species has no marks, so only a ship component's compare shows them, its role always among them.
+      const marks = this.mountable ? [textRow('marks', 'Marked as', (row) => tagsOf(row, { role: true }).join(', '))] : []
+
+      return [...attributes, textRow('status', 'Status', (row) => (row.Obsolete ? 'Obsolete' : 'Current')), ...marks]
     },
 
     // Whether the table is sorted on a column it doesn't show: another category's, or a per hull space one turned off.
