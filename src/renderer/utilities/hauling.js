@@ -16,7 +16,7 @@ const HANDLING_SECONDS = { minerals: 20, installations: 20, colonists: 10 }
 // Craft up to this size can land, so they load without shuttles (docs `logistics`, Cargo Shuttle Bays).
 const SMALL_CRAFT_TONS = 500
 
-// Where an order sends the fleet (`X`, `Y`, `SystemID`) and where it is afterwards (`ExitX`, `ExitY`, `ExitSystemID`): the same point for a body, the far side for a jump point or a Lagrange point jump. Positions are in-system km, bodies at their current place in orbit.
+// Where an order sends the fleet (`X`, `Y`, `SystemID`) and where it is afterwards (`ExitX`, `ExitY`, `ExitSystemID`): the same point, unless the order goes through a jump point or jumps between Lagrange points and leaves it on the far side. Positions are in-system km, each destination where the save has it now. An order whose destination the save no longer holds (or a jump point whose far side is uncharted) has none.
 const hasPoint = (order) => order.X !== null && order.X !== undefined && order.ExitX !== null && order.ExitX !== undefined
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
