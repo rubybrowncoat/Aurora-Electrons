@@ -12,7 +12,7 @@
           <v-icon x-small left>{{ group.icon }}</v-icon>{{ group.title }}<span class="place-picker__count">{{ countOf(group) }}</span>
         </v-chip>
       </div>
-      <div :id="`${uid}-list`" ref="list" class="place-picker__list" role="listbox" :aria-label="label" @scroll.passive="scrolled">
+      <div :id="`${uid}-list`" :key="openings" ref="list" class="place-picker__list" role="listbox" :aria-label="label" @scroll.passive="scrolled">
         <div class="place-picker__space" :style="{ height: `${rows.length * rowHeight}px` }">
           <div v-for="entry in visible" :id="`${uid}-row-${entry.index}`" :key="entry.index" class="place-picker__row" :class="{ 'place-picker__row--header': entry.row.type === 'header', 'place-picker__row--note': entry.row.type === 'note', 'place-picker__row--active': entry.index === activeIndex }" :style="{ top: `${entry.index * rowHeight}px`, height: `${rowHeight}px` }" :role="isSelectable(entry.row) ? 'option' : 'presentation'" :aria-selected="isSelectable(entry.row) ? String(entry.index === activeIndex) : null" @click="activate(entry.row)" @mousemove="hover(entry.index)">
             <template v-if="entry.row.type === 'place'">
@@ -70,6 +70,8 @@ export default {
       groupId: null,
       activeIndex: -1,
       scrollTop: 0,
+      // Counts the times the picker was opened: each opening gets a new list element, as one kept hidden shows its old scroll position again when the menu reopens.
+      openings: 0,
       rowHeight: ROW_HEIGHT,
     }
   },
@@ -124,6 +126,7 @@ export default {
         this.query = ''
         this.term = ''
         this.groupId = null
+        this.openings += 1
         this.scrollTop = 0
         this.$nextTick(() => {
           this.activeIndex = this.firstSelectable()

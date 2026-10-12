@@ -234,6 +234,8 @@ export default {
     return {
       // The fleet key a link named, whose speed and movement settings apply once the fleets have loaded.
       pendingFleet: null,
+      // The fleet key whose speed and movement settings the route took; it goes into the link while the route still has them (`linkedFleetId`).
+      routeFleet: null,
       // Whether the capital is to be put in front of the stops: a route that has none yet, or whose link names no first stop.
       needsOrigin: false,
       // The bodies and survey locations, by picker group, once read; the places of the stops that are kept without reading those lists; and where each of those stops stands in being read.
@@ -326,13 +328,23 @@ export default {
       })
     },
 
-    // The stops that name a place the page can tell, in order, each with where it stands in the stored list.
-    routeStops() {
+    // Every stop in order, each with where it stands in the stored list; one the page can't tell stands in as unavailable, so the route breaks there instead of joining its neighbours. A body or survey location the page is still reading is marked `reading`.
+    plannedStops() {
       return this.stopKeys.map((key, stopIndex) => {
         const found = this.placeByKey[key] || this.extra[key]
 
-        return found ? { ...found, stopIndex } : null
-      }).filter(Boolean)
+        return found ? { ...found, stopIndex } : { key, name: 'Unavailable stop', unavailable: true, reading: LAZY_KINDS.includes(key.split(':')[0]) && this.lazyState[key] !== 'done', stopIndex }
+      })
+    },
+
+    // The stops that name a place the page can tell.
+    routeStops() {
+      return this.plannedStops.filter((stop) => !stop.unavailable)
+    },
+
+    // Whether a stop is still being read, so a leg it breaks isn't reported as having no route yet.
+    readingStops() {
+      return this.plannedStops.some((stop) => stop.reading)
     },
 
     origin() {
@@ -356,11 +368,27 @@ export default {
     },
 
     plan() {
-      return planRoute(this.routeStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, ...this.searchOptions })
+      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, ...this.searchOptions })
     },
 
+    // The ID of the route's fleet while its speed and movement settings are still the page's. Setting a speed or an option by hand, or taking another fleet's, ends that; editing the stops doesn't.
+    linkedFleetId() {
+      const place = this.routeFleet && this.placeByKey[this.routeFleet]
+      const fleet = place && place.fleet
+      const { avoidDanger, avoidAlien, gatesOnly } = this.options
+
+      if (!fleet || (fleet.Speed > 1 && this.speed !== fleet.Speed) || avoidDanger !== Boolean(fleet.AvoidDanger) || avoidAlien !== Boolean(fleet.AvoidAlienSystems) || gatesOnly !== !fleet.JumpRating) {
+        return null
+      }
+
+      return place.key.split(':')[1]
+    },
+
+    // A first stop that is the fleet already names it.
     linkQuery() {
-      return this.ready && !this.needsOrigin ? linkTo.routes({ stops: this.stopKeys, cycle: this.cycle && this.stopKeys.length > 1 }).query : null
+      const fleet = this.routeFleet !== this.stopKeys[0] ? this.linkedFleetId : null
+
+      return this.ready && !this.needsOrigin && !this.pendingFleet ? linkTo.routes({ stops: this.stopKeys, cycle: this.cycle && this.stopKeys.length > 1, fleet }).query : null
     },
 
     linkLabel() {
@@ -436,7 +464,7 @@ export default {
       const legOf = {}
 
       this.plan.legs.forEach((leg) => {
-        legOf[leg.from.stopIndex] = leg
+        legOf[leg.index] = leg
       })
 
       return this.stopKeys.map((key, index) => {
@@ -463,7 +491,7 @@ export default {
         const row = (id, fields) => rows.push({ id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, ...fields })
 
         if (!leg.route) {
-          row('none', { SystemID: leg.start.SystemID, SystemName: this.systemNameOf(leg.start.SystemID), note: `No explored route${this.legNotes[leg.index] ? `: ${this.legNotes[leg.index]}` : ''}` })
+          row('none', { SystemID: leg.start ? leg.start.SystemID : null, SystemName: leg.start ? this.systemNameOf(leg.start.SystemID) : leg.from.name, note: `No explored route${this.legNotes[leg.index] ? `: ${this.legNotes[leg.index]}` : ''}` })
 
           return
         }
@@ -478,8 +506,8 @@ export default {
             row(number, {
               SystemID: step.SystemID,
               SystemName: this.systemNameOf(step.SystemID),
-              from: this.pointName(step.from, leg),
-              to: this.pointName(step.to, leg),
+              from: this.pointName(step.from, leg, 'from'),
+              to: this.pointName(step.to, leg, 'to'),
               gate: Boolean(step.to.WarpPointID && step.to.JumpGateStrength > 0),
               via: step.via && step.via.map((point) => this.lagrangeName(point)),
               km: step.km,
@@ -491,7 +519,7 @@ export default {
         const last = leg.steps[leg.steps.length - 1]
 
         if (last && last.kind === 'jump') {
-          row('arrived', { SystemID: last.to.SystemID, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to, leg), to: 'Arrived', gate: false, via: null })
+          row('arrived', { SystemID: last.to.SystemID, SystemName: this.systemNameOf(last.to.SystemID), from: this.pointName(last.to, leg, 'from'), to: 'Arrived', gate: false, via: null })
         }
       })
 
@@ -565,20 +593,21 @@ export default {
       const stabilised = steps.filter((step) => step.kind === 'jump' && step.from.JumpGateStrength > 0).length
       const lagrange = steps.filter((step) => step.via).length
       const legs = plan.legs.length
-      const unrouted = plan.missing ? `${plan.missing} of ${legs} legs ${plan.missing === 1 ? 'has' : 'have'} no explored route` : ''
+      const unrouted = this.readingStops ? 'reading the stops' : plan.missing ? `${plan.missing} of ${legs} legs ${plan.missing === 1 ? 'has' : 'have'} no explored route` : ''
+      const warn = plan.missing > 0 && !this.readingStops
 
       return [
         {
           label: 'Jumps',
           value: legs ? this.count(plan.jumps) : '—',
           note: legs ? [`${stabilised} through stabilised jump points${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}`, unrouted].filter(Boolean).join('; ') : 'Add a second stop below, or click a system on the map',
-          icon: plan.missing ? 'mdi-alert-outline' : undefined,
-          iconColor: plan.missing ? 'warning' : undefined,
+          icon: warn ? 'mdi-alert-outline' : undefined,
+          iconColor: warn ? 'warning' : undefined,
         },
         {
           label: 'Distance',
           value: legs ? this.distance(plan.km) : '—',
-          note: legs ? `${this.count(plan.km / KM_PER_AU, 1)} AU${plan.missing ? ', without the legs that have no route' : ''}` : '',
+          note: legs ? `${this.count(plan.km / KM_PER_AU, 1)} AU${warn ? ', without the legs that have no route' : ''}` : '',
         },
         {
           label: 'Travel time',
@@ -626,6 +655,7 @@ export default {
       this.needsOrigin = !this.stopKeys.length
       this.adoptLegacyRoute()
       this.pendingFleet = null
+      this.routeFleet = null
     },
 
     stopKeys: 'readStops',
@@ -682,6 +712,7 @@ export default {
       this.stopKeys = [...from, ...queryPlaceKeys(query.via), ...queryPlaceKeys(query.to)]
       this.cycle = firstOf(query.cycle) === '1' && this.stopKeys.length > 1
       this.needsOrigin = !from.length
+      this.routeFleet = null
       this.pendingFleet = fleet ? `fleet:${fleet}` : from[0] && from[0].startsWith('fleet:') ? from[0] : null
       this.ensureOrigin()
       this.adoptPendingFleet()
@@ -712,9 +743,11 @@ export default {
       this.adoptFleet(place)
     },
 
-    // A fleet as the first stop brings its speed and movement settings.
+    // A fleet as the first stop, or the one a link names, brings its speed and movement settings, and is the route's fleet until they change.
     adoptFleet(place) {
       if (place && place.fleet) {
+        this.routeFleet = place.key
+
         if (place.fleet.Speed > 1) {
           this.speed = place.fleet.Speed
         }
@@ -890,16 +923,16 @@ export default {
       return (this.systemById[systemId] || {}).Name || `System #${systemId}`
     },
 
-    // A jump point by the system it leads to, as the game names them; the leg's ends by their names.
-    pointName(point, leg) {
+    // A jump point by the system it leads to, as the game names them; the leg's ends by their names. `end` is which end of a flight inside a system the point is: the route's searches are shared between legs that start in the same place, so a point is told by the end it is, not by being the leg's own start.
+    pointName(point, leg, end) {
       if (point.WarpPointID) {
         const partner = this.jumpPointById[point.WPLink]
 
         return partner ? `Jump point to ${this.systemNameOf(partner.SystemID)}` : 'Jump point'
       }
 
-      if (point === leg.start) {
-        return leg.from.kind === 'system' ? (point.Xcor === 0 && point.Ycor === 0 ? 'System centre' : 'Where the route arrived') : leg.from.name
+      if (end === 'from') {
+        return leg.from.kind === 'system' ? (leg.start.Xcor === 0 && leg.start.Ycor === 0 ? 'System centre' : 'Where the route arrived') : leg.from.name
       }
 
       return leg.to.name
@@ -918,6 +951,14 @@ export default {
 
     // What keeps a leg from its start to its end out of reach with these options, when a route without them reaches it.
     legNote(leg) {
+      if (leg.unavailable) {
+        const stops = [leg.from, leg.to].filter((stop) => stop.unavailable)
+        const names = joinLabels(stops.map((stop) => `stop ${stop.stopIndex + 1}`))
+        const verb = stops.length > 1 ? 'are' : 'is'
+
+        return stops.some((stop) => stop.reading) ? `${names} ${verb} being read` : `${names} ${verb} not available`
+      }
+
       const { to, start } = leg
       const reason = to.SystemID !== start.SystemID && this.avoidReasons[to.SystemID]
 
