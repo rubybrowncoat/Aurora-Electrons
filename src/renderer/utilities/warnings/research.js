@@ -3,6 +3,22 @@ import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, rowsOf } from './comm
 
 export const group = { key: 'research', title: 'Research', summary: 'Idle labs, dead or forgotten projects and scientists working outside their field, so the race\'s research makes full use of what it has.' }
 
+// One row per research project of the race, from `FCT_ResearchProject` (its own `ProjectID` is the row id), with the lab total of its colony: the Amount of the colony's installations that carry a `ResearchValue`, 0 where it has none. The colony and the technology are left joins, so a project whose colony or technology the save lacks still shows.
+const researchProjectQuery = ({ GameID, RaceID }, condition) => `select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, coalesce(FCT_ResearchProject.Pause, 0) as Paused, FCT_TechSystem.Name as ResearchName, FCT_Population.PopulationID as ColonyID, FCT_Population.PopName, ${COLONY_COLUMNS}, coalesce(VIR_Labs.Labs, 0) as Labs from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID and FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} ${COLONY_JOINS} left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_PopulationInstallations.PopID, SUM(FCT_PopulationInstallations.Amount) as Labs from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} and DIM_PlanetaryInstallation.ResearchValue > 0 group by FCT_PopulationInstallations.PopID) as VIR_Labs on VIR_Labs.PopID = FCT_ResearchProject.PopulationID where FCT_ResearchProject.GameID = ${GameID} and FCT_ResearchProject.RaceID = ${RaceID} and ${condition} order by FCT_Population.PopName, FCT_ResearchProject.ProjectID`
+
+// A project's labs are unknown, not none, when the save leaves them empty.
+const assignedLabs = (ctx, project) => (project.Facilities === null || project.Facilities === undefined ? '—' : ctx.count(project.Facilities))
+
+const projectRow = (project, cells) => ({
+  id: `project:${project.ProjectID}`,
+  cells: {
+    colony: project.ColonyID ? colonyText(project) : `Colony ${project.PopulationID} (missing from the save)`,
+    project: project.ResearchName || `Unnamed technology ${project.TechID}`,
+    ...cells,
+  },
+  link: linkTo.techTree(),
+})
+
 export const checks = [
   {
     key: 'idle-research-labs',
@@ -36,24 +52,35 @@ export const checks = [
     group: group.key,
     severity: 'needs-action',
     title: (count) => amount(count, 'dead research project'),
-    rule: 'A colony has a research project but its labs add up to no research, so the project never advances.',
+    rule: 'A research project that is not paused sits at a colony with no research facilities installed (none at all, or only other installations, or labs of zero amount), so it never advances. Paused projects and projects with no labs assigned are listed apart.',
     columns: [
       { key: 'colony', text: 'Colony' },
       { key: 'project', text: 'Project' },
+      { key: 'labs', text: 'Labs installed', align: 'end' },
+      { key: 'assigned', text: 'Labs assigned', align: 'end' },
     ],
     async read(ctx) {
-      const { GameID, RaceID } = ctx
+      const projects = await rowsOf(ctx, researchProjectQuery(ctx, 'coalesce(FCT_ResearchProject.Pause, 0) = 0 and coalesce(VIR_Labs.Labs, 0) <= 0'))
 
-      const populations = await rowsOf(ctx, `select VIR_ResearchProductionPopulation.*, FCT_TechSystem.Name as ResearchName from (select FCT_Population.PopulationID, FCT_Population.PopName, SUM(FCT_PopulationInstallations.Amount) as ResearchProductionAmount, ${COLONY_COLUMNS} from FCT_Population join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID left join DIM_PlanetaryInstallation ON FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID ${COLONY_JOINS} where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and DIM_PlanetaryInstallation.ResearchValue > 0 GROUP BY FCT_Population.PopulationID) as VIR_ResearchProductionPopulation left join FCT_ResearchProject on VIR_ResearchProductionPopulation.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID where ResearchName is not null group by VIR_ResearchProductionPopulation.PopulationID having SUM(VIR_ResearchProductionPopulation.ResearchProductionAmount) = 0`)
+      return projects.map((project) => projectRow(project, { labs: ctx.count(project.Labs), assigned: assignedLabs(ctx, project) }))
+    },
+  },
+  {
+    key: 'stalled-research-projects',
+    group: group.key,
+    severity: 'info',
+    title: (count) => amount(count, 'paused or unassigned research project'),
+    rule: 'A research project is paused, or sits at a colony with labs while none of them are assigned to it, so it makes no progress until the player acts. A project at a colony with no labs at all is a dead project instead.',
+    columns: [
+      { key: 'colony', text: 'Colony' },
+      { key: 'project', text: 'Project' },
+      { key: 'status', text: 'Status' },
+      { key: 'assigned', text: 'Labs assigned', align: 'end' },
+    ],
+    async read(ctx) {
+      const projects = await rowsOf(ctx, researchProjectQuery(ctx, '(coalesce(FCT_ResearchProject.Pause, 0) <> 0 or (coalesce(VIR_Labs.Labs, 0) > 0 and FCT_ResearchProject.Facilities = 0))'))
 
-      return populations.map((population) => ({
-        id: `colony:${population.PopulationID}`,
-        cells: {
-          colony: colonyText(population),
-          project: population.ResearchName,
-        },
-        link: linkTo.techTree(),
-      }))
+      return projects.map((project) => projectRow(project, { status: project.Paused ? 'Paused' : 'No labs assigned', assigned: assignedLabs(ctx, project) }))
     },
   },
   {
