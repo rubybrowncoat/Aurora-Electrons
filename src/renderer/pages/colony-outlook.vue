@@ -29,10 +29,10 @@
             </span>
             <span class="legend">
               <span class="legend-item">Workers<provenance-mark rule="colonies.workers" /></span>
-              <span class="legend-item"><span class="swatch" :style="{ background: workerColors.service }" />Services</span>
-              <span class="legend-item"><span class="swatch" :style="{ background: workerColors.agriculture }" />Agriculture</span>
-              <span class="legend-item"><span class="swatch" :style="{ background: workerColors.employed }" />Working</span>
-              <span class="legend-item"><span class="swatch" :style="{ background: workerColors.free }" />Free</span>
+              <span class="legend-item"><series-key :color="workerColors.service" />Services</span>
+              <span class="legend-item"><series-key :color="workerColors.agriculture" />Agriculture</span>
+              <span class="legend-item"><series-key :color="workerColors.employed" />Working</span>
+              <span class="legend-item"><series-key :color="workerColors.free" />Free</span>
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
@@ -78,7 +78,7 @@
             <template #[`item.workersSort`]="{ item }">
               <div class="worker-cell">
                 <div v-if="item.workersNow" class="worker-bar" :title="workerTitle(item.workersNow)">
-                  <div v-for="segment in workerSegments(item.workersNow)" :key="segment.key" class="worker-segment" :class="segment.className" :style="{ width: `${segment.width}%`, background: segment.color }" />
+                  <div v-for="segment in workerSegments(item.workersNow)" :key="segment.key" class="worker-segment" :class="segment.className" :style="segment.style" />
                 </div>
                 <span class="caption text-no-wrap" :class="{ 'error--text': item.shortNow }">{{ freeLabel(item.freeNow) }}<provenance-mark :result="item.r.workersNow" /></span>
               </div>
@@ -140,7 +140,8 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
-import { chartTheme, withAlpha } from '../components/charts/theme'
+import SeriesKey from '../components/charts/SeriesKey.vue'
+import { chartTheme, patternImage, seriesIdentity, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -170,7 +171,7 @@ const COLONY_PAGE_SIZES = [25, 50, -1]
 
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -212,6 +213,17 @@ export default {
       const [blue, , green, , pink] = this.theme.categorical
 
       return { service: withAlpha(blue, 0.45), agriculture: withAlpha(pink, 0.6), employed: blue, free: green }
+    },
+
+    // Each worker segment's colour under its slot's texture, as its legend key draws it.
+    workerStyles() {
+      const surface = this.appearance.surfaces.card
+
+      return Object.fromEntries(Object.entries(this.workerColors).map(([key, color]) => {
+        const texture = patternImage(seriesIdentity(this.appearance, color), surface)
+
+        return [key, { backgroundColor: color, ...(texture ? { backgroundImage: texture, backgroundSize: '8px 8px' } : {}) }]
+      }))
     },
 
     multiSpecies() {
@@ -498,14 +510,14 @@ export default {
 
       const employed = Math.min(workers.available, workers.required)
       const segments = [
-        { key: 'service', value: workers.service, color: this.workerColors.service },
-        { key: 'agriculture', value: workers.agriculture, color: this.workerColors.agriculture },
-        { key: 'employed', value: employed, color: this.workerColors.employed },
-        { key: 'free', value: Math.max(0, workers.free), color: this.workerColors.free },
+        { key: 'service', value: workers.service },
+        { key: 'agriculture', value: workers.agriculture },
+        { key: 'employed', value: employed },
+        { key: 'free', value: Math.max(0, workers.free) },
         { key: 'short', value: Math.max(0, -workers.free), className: 'segment-short' },
       ]
 
-      return segments.filter((segment) => segment.value > 0).map((segment) => ({ ...segment, width: (segment.value / total) * 100 }))
+      return segments.filter((segment) => segment.value > 0).map((segment) => ({ ...segment, style: { ...this.workerStyles[segment.key], width: `${(segment.value / total) * 100}%` } }))
     },
     workerTitle(workers) {
       return `${this.millions(workers.available)} M can work, ${this.millions(workers.required)} M needed`

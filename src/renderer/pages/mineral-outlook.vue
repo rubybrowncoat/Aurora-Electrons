@@ -129,7 +129,7 @@
               <template v-if="flowsView === 'chart'">
                 <div class="legend">
                   <span v-for="group in presentFlowGroups" :key="group.key" class="legend-item">
-                    <span class="swatch" :style="{ background: flowColor(group.key) }" />{{ group.label }}
+                    <series-key :color="flowColor(group.key)" />{{ group.label }}
                   </span>
                 </div>
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
@@ -213,6 +213,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -265,7 +266,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas, LoadState, ProvenanceMark, StatTiles },
+  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -1199,14 +1200,6 @@ export default {
 
   .legend {
     margin-bottom: 8px;
-  }
-
-  .swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    margin-right: 6px;
   }
 
   .runway-table td {

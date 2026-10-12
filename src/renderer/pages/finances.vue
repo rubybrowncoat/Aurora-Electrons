@@ -40,7 +40,7 @@
               <template v-if="flowsView === 'chart'">
                 <div class="legend">
                   <span v-for="category in categories" :key="category.id" class="legend-item">
-                    <span class="swatch" :style="{ background: category.color }" />{{ category.label }}
+                    <series-key :color="category.color" />{{ category.label }}
                   </span>
                   <span class="legend-item"><span class="swatch swatch-line" :style="{ background: theme.ink }" />Net</span>
                 </div>
@@ -103,6 +103,7 @@
 import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -140,7 +141,7 @@ const compact = (value) => {
 
 export default {
   name: 'FinancesPage',
-  components: { ChartCanvas, LoadState, ProvenanceMark },
+  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey },
   mixins: [
     loadState(INPUT_LABELS),
     persistedView({
