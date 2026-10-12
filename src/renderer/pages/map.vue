@@ -91,8 +91,11 @@
                 <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :text="item.text" :color="item.color" :hollow="item.hollow" :offset="item.offset" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
                 <template v-else-if="item.kind === 'slider'">
-                  <span class="mr-2">{{ discoveryAsOf.text }}</span>
                   <v-slider class="discovery-slider" :value="discoveryAsOf.year" :min="discoveryAsOf.min" :max="discoveryAsOf.max" step="1" dense hide-details thumb-label aria-label="The map as the race knew it at the end of a year" @input="setDiscoveryYear" />
+                  <span class="discovery-text">
+                    <span>{{ discoveryAsOf.text }}</span>
+                    <span class="discovery-text__widest" aria-hidden="true">{{ discoveryAsOf.widest }}</span>
+                  </span>
                 </template>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
@@ -1094,7 +1097,9 @@ export default {
       const cutoff = year < max ? start.set('year', year + 1).diff(start, 'second') : null
       const known = cutoff === null ? this.systemRows.length : this.systemRows.filter((row) => !(row.DiscoveredTime >= cutoff)).length
 
-      return { min, max, year, cutoff, text: `As of ${start.set('year', year).format('YYYY')}: ${this.count(known)} of ${this.count(this.systemRows.length)} systems known` }
+      const text = (shown, systems) => `As of ${start.set('year', shown).format('YYYY')}: ${this.count(systems)} of ${this.count(this.systemRows.length)} systems known`
+
+      return { min, max, year, cutoff, text: text(year, known), widest: text(max, this.systemRows.length) }
     },
 
     discoveryCutoff() {
@@ -3122,16 +3127,29 @@ export default {
     font-variant-numeric: tabular-nums;
   }
 
-  // The Discovery era's As of, in the legend's row.
+  // The Discovery era's As of, in the legend's row: the slider comes first so that it stays put as the year moves, and the text after it keeps the width of its longest reading (every system known, in the last year, with tabular figures) so the row never rewraps.
   .discovery-slider {
     flex: none;
     width: 160px;
-    margin: 0 6px 0 0;
+    margin: 0 8px 0 0;
     padding: 0;
 
     .v-input__slot {
       margin: 0;
     }
+  }
+
+  .discovery-text {
+    display: inline-grid;
+    font-variant-numeric: tabular-nums;
+
+    > span {
+      grid-area: 1 / 1;
+    }
+  }
+
+  .discovery-text__widest {
+    visibility: hidden;
   }
 
   .map-controls,
