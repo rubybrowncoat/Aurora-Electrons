@@ -90,7 +90,7 @@ const sizeCostCrewHTK = [
   column('Size (t)', 'Size', (item, f) => f.count(item.Size * TONS_PER_HULL_SPACE, 2), { better: LOW, hint: 'Tons. One hull space is 50 tons.' }),
   column('Cost', 'Cost', unit('Cost', 2), { better: LOW, title: materialsTitle, hint: 'Build points. Hover a cost for its materials.' }),
   plain('Crew', 'Crew', 0, { better: LOW }),
-  plain('HTK', 'HTK', 0, { better: HIGH, hint: 'Hits to kill: the damage the component takes to destroy.' }),
+  plain('HTK', 'HTK', 0, { better: HIGH, hint: 'Hits to kill. A hit of at least this much damage destroys the component and spends that much of itself on it; a smaller hit destroys it with a chance of damage / HTK and goes no further. At 0 or 1 any hit destroys it, and at 0 the whole hit carries on to the next component.' }),
 ]
 
 const activeSensorColumns = [
