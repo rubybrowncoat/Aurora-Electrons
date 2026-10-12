@@ -8,6 +8,7 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const { loadUtilities } = require('./lib/utilities')
 
 const RULES = ['engine', 'speed', 'range', 'jump']
 
@@ -74,21 +75,8 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
   database.all(sql, parameters, (error, rows) => (error ? reject(error) : resolve(rows)))
 })
 
-// design-rules.js and provenance.js are ES modules in a package without "type": "module", which Node would reparse with a warning; each loads from its own source as a data URL, design-rules.js importing provenance.js by the URL, so both share one rule registry.
-const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-
 const loadRules = async () => {
-  const directory = path.resolve(__dirname, '..', 'src', 'renderer', 'utilities')
-  const provenanceUrl = dataUrl(fs.readFileSync(path.join(directory, 'provenance.js'), 'utf8'))
-  const importLine = "from './provenance'"
-  const rulesSource = fs.readFileSync(path.join(directory, 'design-rules.js'), 'utf8')
-
-  if (!rulesSource.includes(importLine)) {
-    throw new Error(`design-rules.js no longer imports ${importLine}; the check script loads it by that line`)
-  }
-
-  const rules = await import(dataUrl(rulesSource.replace(importLine, `from '${provenanceUrl}'`)))
-  const registry = await import(provenanceUrl)
+  const { 'design-rules': rules, provenance: registry } = await loadUtilities(['design-rules', 'provenance'])
 
   return { ...rules, registry }
 }

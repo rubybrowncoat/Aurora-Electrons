@@ -12,6 +12,7 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const { loadUtilities } = require('./lib/utilities')
 
 // Game constants of the rule: component type ids (harvester, fuel storage), the Sorium material id, the commander's Mining bonus id, the ship command type, body types that can be harvested, the race type of the Ancients, litres per tonne of Sorium and seconds per year, and the racial rate a race has before it researches a better one.
 const HARVESTER_TYPE = 32
@@ -76,29 +77,10 @@ const all = (database, sql, parameters = []) => new Promise((resolve, reject) =>
   database.all(sql, parameters, (error, rows) => (error ? reject(error) : resolve(rows)))
 })
 
-// The app's modules are ES modules in a package without "type": "module", which Node would reparse with a warning; each loads from its own source as a data URL, its relative imports replaced by the data URLs of those modules, so every module is one instance and they share one rule registry.
-const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-
-const utilities = path.resolve(__dirname, '..', 'src', 'renderer', 'utilities')
-
-const moduleUrl = (name, urls = new Map()) => {
-  if (!urls.has(name)) {
-    const source = fs.readFileSync(path.join(utilities, `${name}.js`), 'utf8')
-
-    urls.set(name, dataUrl(source.replace(/from '\.\/([\w-]+)'/g, (_match, dependency) => `from '${moduleUrl(dependency, urls)}'`)))
-  }
-
-  return urls.get(name)
-}
-
 const loadApp = async () => {
-  const urls = new Map()
-  const logistics = await import(moduleUrl('logistics', urls))
-  const minerals = await import(moduleUrl('minerals', urls))
-  const navalAdmins = await import(moduleUrl('naval-admins', urls))
-  const registry = await import(moduleUrl('provenance', urls))
+  const { logistics, minerals, 'naval-admins': navalAdmins, provenance: registry, 'design-rules': designRules } = await loadUtilities(['logistics', 'minerals', 'naval-admins', 'provenance', 'design-rules'])
 
-  return { ...logistics, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: (await import(moduleUrl('design-rules', urls))).roundHalfEven }
+  return { ...logistics, navalAdminChainBonus: minerals.navalAdminChainBonus, loadNavalAdmins: navalAdmins.loadNavalAdmins, registry, roundHalfEven: designRules.roundHalfEven }
 }
 
 // The page's own harvesters query, read from its source so the check compares what the page runs, not a copy of it.
