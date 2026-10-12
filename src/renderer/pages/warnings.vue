@@ -29,7 +29,7 @@
         </v-menu>
       </div>
 
-      <stat-tiles dense class="my-2" :tiles="tiles" />
+      <stat-tiles dense class="my-2" :tiles="tiles" @select="(tile) => selectSeverity(tile.key)" />
 
       <v-row v-if="panels.length">
         <v-col v-for="(stack, stackIndex) in columns" :key="stackIndex" cols="12" xl="6" class="panel-column">
@@ -293,16 +293,22 @@ export default {
       return { severities, mutedRows, mutedChecks }
     },
 
+    // The three severity tiles filter the checks to their severity, and a second click shows them all again; a tile is pressed while its severity is the filter and no single check is focused.
     tiles() {
       const tile = (severity, empty) => {
         const { rows, checks } = this.summary.severities[severity.key]
+        const active = this.checkFilter === null && this.filters.severity === severity.key
 
         return {
+          key: severity.key,
           label: severity.label,
           value: this.count(rows),
           icon: severity.icon,
           iconColor: severity.color,
           note: rows ? `${this.count(checks)} ${checks === 1 ? 'check' : 'checks'}` : empty,
+          selectable: true,
+          active,
+          selectTitle: active ? 'Show every severity' : `Show only ${severity.label}`,
         }
       }
 
@@ -459,6 +465,14 @@ export default {
 
     resetFilters() {
       this.filters = { severity: null, group: null, search: '' }
+      this.checkFilter = null
+    },
+
+    // A severity tile's click: the checks of that severity, leaving a focused check, or every severity again when it is already the filter.
+    selectSeverity(key) {
+      const active = this.checkFilter === null && this.filters.severity === key
+
+      this.filters = { ...this.filters, severity: active ? null : key }
       this.checkFilter = null
     },
 
