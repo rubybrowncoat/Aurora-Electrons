@@ -24,10 +24,11 @@
         <v-card class="panel" data-summary="Each colony with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
-              <span>Colonies</span>
+              <span>Colonies<provenance-mark rule="colonies.populationProjection" label /></span>
               <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
             </span>
             <span class="legend">
+              <span class="legend-item">Workers<provenance-mark rule="colonies.workers" /></span>
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.service }" />Services</span>
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.agriculture }" />Agriculture</span>
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.employed }" />Working</span>
@@ -35,7 +36,7 @@
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
-          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or does not belong to the race.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :custom-sort="sortRows" :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or does not belong to the race.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.name`]="{ item }">
               <div class="py-2 d-flex align-center">
                 <div>
@@ -53,37 +54,37 @@
             </template>
             <template #[`item.populationSort`]="{ item }">
               <div class="text-no-wrap">{{ people(item.Population) }}</div>
-              <div class="caption text--secondary text-no-wrap">{{ people(item.projection.final) }} in {{ horizon }} y</div>
+              <div class="caption text--secondary text-no-wrap">{{ people(item.final) }} in {{ horizon }} y<provenance-mark :result="item.r.projection" /></div>
             </template>
             <template #[`item.growthSort`]="{ item }">
-              <span class="text-no-wrap" :class="{ 'text--secondary': item.growth <= 0 }">{{ percent(item.growth, 2) }}</span>
+              <span class="text-no-wrap" :class="{ 'text--secondary': !(item.growth > 0) }">{{ percent(item.growth, 2) }}</span><provenance-mark :result="item.r.growth" />
             </template>
             <template #[`item.fillSort`]="{ item }">
-              <div class="fill-cell" :title="`Body holds ${people(item.capacity)}; growth slows past a third`">
+              <div class="fill-cell" :title="fillTitle(item)">
                 <div class="meter">
-                  <div class="meter-fill" :class="{ warning: item.fill > 1 / 3 }" :style="{ width: `${Math.min(100, item.fill * 100)}%` }" />
+                  <div v-if="item.fill !== null" class="meter-fill" :class="{ warning: item.fill > 1 / 3 }" :style="{ width: `${Math.min(100, item.fill * 100)}%` }" />
                   <div class="meter-tick" />
                 </div>
-                <span class="caption text-no-wrap">{{ percent(item.fill, 0) }} of {{ people(item.capacity) }}</span>
+                <span class="caption text-no-wrap">{{ fillCaption(item) }}<provenance-mark :result="item.r.fill" /></span>
               </div>
             </template>
             <template #[`item.infrastructureSort`]="{ item }">
               <span class="text-no-wrap" :class="{ 'text--secondary': item.infrastructureStatus.muted }">
                 <v-icon v-if="item.infrastructureStatus.icon" small :color="item.infrastructureStatus.color">{{ item.infrastructureStatus.icon }}</v-icon>
                 {{ item.infrastructureStatus.label }}
-              </span>
+              </span><provenance-mark :result="item.infrastructureStatus.mark" />
               <div v-if="item.infrastructureStatus.note" class="caption text--secondary text-no-wrap">{{ item.infrastructureStatus.note }}</div>
             </template>
             <template #[`item.workersSort`]="{ item }">
               <div class="worker-cell">
-                <div class="worker-bar" :title="workerTitle(item.workersNow)">
+                <div v-if="item.workersNow" class="worker-bar" :title="workerTitle(item.workersNow)">
                   <div v-for="segment in workerSegments(item.workersNow)" :key="segment.key" class="worker-segment" :class="segment.className" :style="{ width: `${segment.width}%`, background: segment.color }" />
                 </div>
-                <span class="caption text-no-wrap" :class="{ 'error--text': item.workersNow.free < -0.005 }">{{ freeLabel(item.workersNow.free) }}</span>
+                <span class="caption text-no-wrap" :class="{ 'error--text': item.shortNow }">{{ freeLabel(item.freeNow) }}<provenance-mark :result="item.r.workersNow" /></span>
               </div>
             </template>
             <template #[`item.futureSort`]="{ item }">
-              <span class="caption text-no-wrap" :class="{ 'error--text': item.workersLater.free < -0.005 }">{{ freeLabel(item.workersLater.free) }}</span>
+              <span class="caption text-no-wrap" :class="{ 'error--text': item.shortLater }">{{ freeLabel(item.freeLater) }}</span><provenance-mark :result="item.r.workersLater" />
             </template>
             <template #[`item.inboundSort`]="{ item }">
               <span v-if="item.inbound" class="caption">{{ inboundLabel(item.inbound) }}</span>
@@ -96,9 +97,10 @@
                 </div>
                 <v-row>
                   <v-col cols="12" md="7">
-                    <div class="chart-title">Population over {{ horizon }} years</div>
-                    <chart-canvas type="line" :data="projectionChart(item)" :options="projectionOptions()" :height="220" :label="`Projected population of ${item.name}`" />
-                    <div class="caption text--secondary mt-1">{{ projectionNote(item) }}</div>
+                    <div class="chart-title">Population over {{ horizon }} years<provenance-mark :result="item.r.projection" /></div>
+                    <chart-canvas v-if="item.projection" type="line" :data="projectionChart(item)" :options="projectionOptions()" :height="220" :label="`Projected population of ${item.name}`" />
+                    <div v-else class="caption text--secondary">No projection: {{ missingText(item.r.projection) }}.</div>
+                    <div class="caption text--secondary mt-1"><span v-for="(part, index) in projectionNote(item)" :key="index" class="note-part">{{ part.text }}<provenance-mark v-for="(result, at) in part.results" :key="at" :result="result" /></span></div>
                   </v-col>
                   <v-col cols="12" md="5">
                     <div class="chart-title">Workers (millions)</div>
@@ -106,15 +108,15 @@
                       <thead>
                         <tr>
                           <th />
-                          <th class="text-right">Now</th>
-                          <th class="text-right">In {{ horizon }} y</th>
+                          <th class="text-right">Now<provenance-mark :result="item.r.workersNow" /></th>
+                          <th class="text-right">In {{ horizon }} y<provenance-mark :result="item.r.workersLater" /></th>
                         </tr>
                       </thead>
                       <tbody>
                         <tr v-for="line in workerLines" :key="line.key">
                           <td>{{ line.label }}</td>
-                          <td class="text-right" :class="line.key === 'free' && item.workersNow.free < -0.005 ? 'error--text' : ''">{{ millions(item.workersNow[line.key]) }}</td>
-                          <td class="text-right" :class="line.key === 'free' && item.workersLater.free < -0.005 ? 'error--text' : ''">{{ millions(item.workersLater[line.key]) }}</td>
+                          <td class="text-right" :class="line.key === 'free' && item.shortNow ? 'error--text' : ''">{{ millions(workerValue(item.workersNow, line.key, item.Population)) }}</td>
+                          <td class="text-right" :class="line.key === 'free' && item.shortLater ? 'error--text' : ''">{{ millions(workerValue(item.workersLater, line.key, item.final)) }}</td>
                         </tr>
                       </tbody>
                     </v-simple-table>
@@ -125,7 +127,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. Colonies short of workers today are also on the
+            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the
             <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
           </div>
         </v-card>
@@ -141,6 +143,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -148,10 +151,11 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
 import { populationName } from '../utilities/aurora'
-import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
+import { WORKER_TOLERANCE, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { describeResult, valueOrNull } from '../utilities/provenance'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -166,7 +170,7 @@ const COLONY_PAGE_SIZES = [25, 50, -1]
 
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -215,68 +219,52 @@ export default {
     },
 
     rows() {
-      const inbound = Object.fromEntries(this.inbound.map((row) => [row.PopulationID, row]))
-
-      const members = this.colonies.map((colony) => {
-        const arriving = inbound[colony.PopulationID] || null
-        const inboundInfrastructure = arriving ? arriving.Infrastructure : 0
-        // Pre-2.6 saves: a low-gravity body counts only low-gravity infrastructure.
-        const infrastructure = (colony.LegacyLowGravity ? colony.LGInfrastructure : colony.Infrastructure + colony.LGInfrastructure) + inboundInfrastructure
-
-        return { colony, arriving, infrastructure, capacity: bodyCapacity(colony), inboundColonists: arriving ? arriving.Colonists : 0, infrastructureCap: infrastructureCapacity(colony, infrastructure) }
-      })
-      // Populations of the race on one body grow into the same capacity, so they're projected together.
-      const bodies = {}
-
-      members.forEach((member) => (bodies[member.colony.SystemBodyID] = bodies[member.colony.SystemBodyID] || []).push(member))
-
-      return members.map((member) => {
-        const { colony, arriving, infrastructure, capacity, infrastructureCap } = member
-        const group = bodies[colony.SystemBodyID]
-        const otherPopulation = Math.max(0, colony.BodyPopulation - colony.Population)
-        const projections = projectBody(group, this.horizon)
-        const projection = projections[group.indexOf(member)]
-        // The rest of the body's population, month by month, as it grows alongside this colony.
-        const otherSeries = projection.series.map((_, month) => projections.reduce((sum, other, index) => sum + (group[index] === member ? 0 : other.series[month]), 0))
-        // Unconstrained by infrastructure: what it would take to keep growing.
-        const potential = infrastructureCap === Infinity ? projection : projectBody(group.map((other) => (other === member ? { ...other, infrastructureCap: Infinity } : other)), this.horizon)[group.indexOf(member)]
-        const perMillion = infrastructurePerMillion(colony)
-        const infrastructureNeeded = perMillion ? Math.max(0, Math.ceil(potential.final * perMillion - infrastructure)) : 0
-        const workersNow = workerSplit(colony, colony.Population)
-        const workersLater = workerSplit(colony, projection.final)
-        const growth = growthRate(colony, colony.Population, colony.BodyPopulation, capacity)
+      return outlookColonies(this.colonies, this.inbound, this.horizon).map(({ colony, arriving, otherSeries, results }) => {
+        const r = { ...results, construction: this.populationCapacityResult(colony.PopulationID, 'construction') }
+        const projection = valueOrNull(r.projection)
+        const workersNow = valueOrNull(r.workersNow)
+        const workersLater = valueOrNull(r.workersLater)
+        const perMillion = valueOrNull(r.rate)
+        const growth = valueOrNull(r.growth)
+        const fill = valueOrNull(r.fill)
+        const freeNow = workersNow ? workersNow.free : null
+        const freeLater = workersLater ? workersLater.free : null
         const row = {
           ...colony,
           name: colony.PopName,
           place: stripHtml(populationName(colony)).replace(` — ${colony.PopName}`, ''),
-          capacity,
-          otherPopulation,
+          r,
+          capacity: valueOrNull(r.capacity),
           otherSeries,
-          fill: (otherPopulation + colony.Population) / capacity,
+          fill,
           growth,
           projection,
+          final: projection ? projection.final : null,
           perMillion,
-          infrastructure,
-          infrastructureCap,
-          infrastructureNeeded,
-          infrastructureBP: infrastructureNeeded * (colony.InfrastructureCost || 0),
-          constructionBP: this.populationConstructionCapacity(colony.PopulationID),
+          infrastructureCap: valueOrNull(r.cap),
+          infrastructureNeeded: valueOrNull(r.needed),
+          infrastructureBP: valueOrNull(r.neededCost),
+          constructionBP: valueOrNull(r.construction),
           workersNow,
           workersLater,
+          freeNow,
+          freeLater,
+          shortNow: freeNow === null ? null : freeNow < -WORKER_TOLERANCE,
+          shortLater: freeLater === null ? null : freeLater < -WORKER_TOLERANCE,
+          attention: valueOrNull(r.attention),
           inbound: arriving && (arriving.Colonists || arriving.Infrastructure || arriving.Installations) ? arriving : null,
         }
 
         row.infrastructureStatus = this.infrastructureStatus(row)
-        row.attention = workersNow.free < -0.005 || workersLater.free < -0.005 || projection.infrastructureAt !== null
 
         return {
           ...row,
           populationSort: colony.Population,
           growthSort: growth,
-          fillSort: row.fill,
-          infrastructureSort: projection.infrastructureAt === null ? (perMillion ? 1e6 : 2e6) : projection.infrastructureAt,
-          workersSort: workersNow.free,
-          futureSort: workersLater.free,
+          fillSort: fill,
+          infrastructureSort: perMillion === null ? null : perMillion === 0 ? 2e6 : projection ? (projection.infrastructureAt === null ? 1e6 : projection.infrastructureAt) : null,
+          workersSort: freeNow,
+          futureSort: freeLater,
           inboundSort: arriving ? arriving.Colonists * 1e6 + arriving.Infrastructure + arriving.Installations : 0,
         }
       })
@@ -305,47 +293,78 @@ export default {
 
       const search = (this.search || '').toLowerCase()
 
-      return this.rows.filter((row) => (!this.attentionOnly || row.attention) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
+      return this.rows.filter((row) => (!this.attentionOnly || row.attention === true) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
     },
 
     tiles() {
       const rows = this.rows
+      const horizon = this.horizon
+      const total = rows.length
+
+      if (!total) {
+        return ['Population', 'Colonies short of workers', `Growth capped within ${horizon} y`, `Infrastructure for ${horizon} years of growth`].map((label) => ({ label, value: '—', note: 'No colonies with a population' }))
+      }
+
+      const results = (name) => rows.map((row) => row.r[name])
+      const countOf = (name, test) => totalResult({ results: results(name), pick: (value) => (test(value) ? 1 : 0), partial: true })
+      const sumOf = (name, units) => totalResult({ results: results(name), pick: (value) => value, partial: true, units })
       const now = rows.reduce((sum, row) => sum + row.Population, 0)
-      const later = rows.reduce((sum, row) => sum + row.projection.final, 0)
-      const shortNow = rows.filter((row) => row.workersNow.free < -0.005)
-      const shortLater = rows.filter((row) => row.workersLater.free < -0.005)
-      const free = rows.reduce((sum, row) => sum + Math.max(0, row.workersNow.free), 0)
-      const capped = rows.filter((row) => row.projection.infrastructureAt !== null)
-      const crowded = rows.filter((row) => row.fill > 1 / 3)
-      const infrastructure = rows.reduce((sum, row) => sum + row.infrastructureNeeded, 0)
-      const infrastructureBP = rows.reduce((sum, row) => sum + row.infrastructureBP, 0)
-      const annual = now > 0 ? (later / now) ** (1 / this.horizon) - 1 : 0
+      const later = totalResult({ results: results('projection'), pick: (projection) => projection.final, units: 'M people' })
+      const laterValue = valueOrNull(later.result)
+      const annual = laterValue !== null && now > 0 ? (laterValue / now) ** (1 / horizon) - 1 : null
+      const isShort = (workers) => workers.free < -WORKER_TOLERANCE
+      const shortNow = countOf('workersNow', isShort)
+      const shortLater = countOf('workersLater', isShort)
+      const free = totalResult({ results: results('workersNow'), pick: (workers) => Math.max(0, workers.free), partial: true, units: 'M workers' })
+      const capped = countOf('projection', (projection) => projection.infrastructureAt !== null)
+      const crowded = countOf('fill', (fill) => fill > 1 / 3)
+      const needed = sumOf('needed', 'infrastructure')
+      const cost = sumOf('neededCost', 'BP')
+      const shortNowValue = valueOrNull(shortNow.result)
+      const shortLaterValue = valueOrNull(shortLater.result)
+      const freeValue = valueOrNull(free.result)
+      const cappedValue = valueOrNull(capped.result)
+      const crowdedValue = valueOrNull(crowded.result)
+      const neededValue = valueOrNull(needed.result)
+      const costValue = valueOrNull(cost.result)
+      const unknownWorkers = rows.filter((row) => !row.workersNow || !row.workersLater).length
+      const unknownGrowth = Math.max(capped.unknown, crowded.unknown)
+      const unknownInfrastructure = Math.max(needed.unknown, cost.unknown)
+      const tile = (value, parts, fields) => ({ ...fields, value, title: `${value}. ${parts.map(describeResult).join('. ')}` })
+      let neededNote = 'Infrastructure needed is unavailable'
+      let neededText = '—'
+
+      if (neededValue > 0) {
+        neededText = this.count(neededValue)
+        neededNote = `${costValue === null ? 'Cost unavailable' : `${this.count(costValue)} BP`}, beyond what's built or on its way`
+      } else if (neededValue === 0 && !needed.unknown) {
+        neededText = 'None needed'
+        neededNote = 'Every colony with a colony cost has enough'
+      } else if (neededValue === 0) {
+        neededNote = 'None needed by the colonies that can be read'
+      }
 
       return [
-        {
+        tile(`${this.people(now)} → ${this.people(laterValue)}`, [later.result], {
           label: 'Population',
-          value: `${people(now)} → ${people(later)}`,
-          note: `In ${this.horizon} years, about ${percent(annual, 2)} a year`,
-        },
-        {
+          note: later.unknown ? `${later.unknown} of ${total} colonies have no projection` : `In ${horizon} years, about ${percent(annual, 2)} a year`,
+        }),
+        tile(shortNowValue === null && shortLaterValue === null ? '—' : `${shortNowValue === null ? '—' : shortNowValue} now, ${shortLaterValue === null ? '—' : shortLaterValue} in ${horizon} y`, [shortNow.result, shortLater.result], {
           label: 'Colonies short of workers',
-          value: `${shortNow.length} now, ${shortLater.length} in ${this.horizon} y`,
-          note: `${this.millions(free)} M free workers elsewhere`,
-          icon: shortNow.length ? 'mdi-account-alert' : 'mdi-check-circle',
-          iconColor: shortNow.length ? 'warning' : 'success',
-        },
-        {
-          label: `Growth capped within ${this.horizon} y`,
-          value: `${capped.length}`,
-          note: `${capped.length ? 'By infrastructure. ' : ''}${crowded.length} past a third of their body's capacity`,
-          icon: capped.length ? 'mdi-alert' : null,
+          note: `${freeValue === null ? 'Free workers elsewhere unavailable' : `${this.millions(freeValue)} M free workers elsewhere`}${leftOut(unknownWorkers, total)}`,
+          icon: shortNowValue > 0 ? 'mdi-account-alert' : shortNowValue === 0 && !unknownWorkers ? 'mdi-check-circle' : null,
+          iconColor: shortNowValue > 0 ? 'warning' : 'success',
+        }),
+        tile(cappedValue === null ? '—' : `${cappedValue}`, [capped.result, crowded.result], {
+          label: `Growth capped within ${horizon} y`,
+          note: `${cappedValue > 0 ? 'By infrastructure. ' : ''}${crowdedValue === null ? 'Crowding unavailable' : `${crowdedValue} past a third of their body's capacity`}${leftOut(unknownGrowth, total)}`,
+          icon: cappedValue > 0 ? 'mdi-alert' : null,
           iconColor: 'warning',
-        },
-        {
-          label: `Infrastructure for ${this.horizon} years of growth`,
-          value: infrastructure ? `${this.count(infrastructure)}` : 'None needed',
-          note: infrastructure ? `${this.count(infrastructureBP)} BP, beyond what's built or on its way` : 'Every colony with a colony cost has enough',
-        },
+        }),
+        tile(neededText, [needed.result, cost.result], {
+          label: `Infrastructure for ${horizon} years of growth`,
+          note: `${neededNote}${leftOut(unknownInfrastructure, total)}`,
+        }),
       ]
     },
 
@@ -392,41 +411,82 @@ export default {
     },
 
     count(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
+      return Number.isFinite(value) ? separatedNumber(roundToDecimal(value, 0), this.separator) : '—'
     },
     millions(value) {
-      return separatedNumber(roundToDecimal(value || 0, Math.abs(value) < 10 ? 2 : 1), this.separator)
+      return Number.isFinite(value) ? separatedNumber(roundToDecimal(value, Math.abs(value) < 10 ? 2 : 1), this.separator) : '—'
     },
-    people,
+    people(millions) {
+      return Number.isFinite(millions) ? peopleOf(millions) : '—'
+    },
     percent,
     years(months) {
       return months < 12 ? `${Math.max(1, months)} mo` : `${roundToDecimal(months / 12, 1)} y`
     },
     freeLabel(free) {
-      if (Math.abs(free) < 0.005) {
+      if (!Number.isFinite(free)) {
+        return '—'
+      } else if (Math.abs(free) < WORKER_TOLERANCE) {
         return 'Balanced'
       }
 
-      return free < 0 ? `${people(-free)} short` : `${people(free)} free`
+      return free < 0 ? `${this.people(-free)} short` : `${this.people(free)} free`
     },
     inboundLabel(inbound) {
-      return [inbound.Colonists ? `${people(inbound.Colonists)} colonists` : null, inbound.Infrastructure ? `${this.count(inbound.Infrastructure)} infrastructure` : null, inbound.Installations ? `${this.count(inbound.Installations)} installations` : null].filter(Boolean).join(', ')
+      return [inbound.Colonists ? `${this.people(inbound.Colonists)} colonists` : null, inbound.Infrastructure ? `${this.count(inbound.Infrastructure)} infrastructure` : null, inbound.Installations ? `${this.count(inbound.Installations)} installations` : null].filter(Boolean).join(', ')
+    },
+    missingText(result) {
+      return result.inputs.missing.length ? `missing ${result.inputs.missing.join(', ')}` : 'an input is missing'
+    },
+    fillTitle(row) {
+      return row.capacity === null ? 'Body capacity is unavailable' : `Body holds ${this.people(row.capacity)}; growth slows past a third`
+    },
+    fillCaption(row) {
+      return row.capacity === null ? '—' : `${percent(row.fill, 0)} of ${this.people(row.capacity)}`
+    },
+    // A column of null-last values: an unavailable figure sorts after every number, in either direction, never as 0.
+    sortRows(items, sortBy, sortDesc) {
+      const [by] = sortBy
+
+      if (!by) {
+        return items
+      }
+
+      const direction = sortDesc[0] ? -1 : 1
+      const missing = (value) => value === null || value === undefined
+
+      return [...items].sort((a, b) => {
+        const x = a[by]
+        const y = b[by]
+
+        if (missing(x) || missing(y)) {
+          return missing(x) === missing(y) ? 0 : missing(x) ? 1 : -1
+        }
+
+        return (typeof x === 'string' || typeof y === 'string' ? String(x).localeCompare(String(y)) : x - y) * direction
+      })
     },
 
     infrastructureStatus(row) {
-      if (!row.perMillion) {
-        return { label: 'Not needed', note: 'No colony cost', icon: null, muted: true }
+      if (row.perMillion === null) {
+        return { label: '—', note: '', icon: null, muted: true, mark: row.r.rate }
+      } else if (row.perMillion === 0) {
+        return { label: 'Not needed', note: 'No colony cost', icon: null, muted: true, mark: row.r.rate }
+      } else if (row.infrastructureCap === null) {
+        return { label: '—', note: '', icon: null, muted: true, mark: row.r.cap }
       }
 
-      const supports = `Supports ${people(row.infrastructureCap)}`
+      const supports = `Supports ${this.people(row.infrastructureCap)}`
 
-      if (row.projection.infrastructureAt === 0) {
-        return { label: 'At its cap', note: supports, icon: 'mdi-alert-octagon', color: 'error' }
+      if (!row.projection) {
+        return { label: supports, note: `${this.count(row.perMillion)} per million, no projection`, icon: null, mark: row.r.projection }
+      } else if (row.projection.infrastructureAt === 0) {
+        return { label: 'At its cap', note: supports, icon: 'mdi-alert-octagon', color: 'error', mark: row.r.projection }
       } else if (row.projection.infrastructureAt !== null) {
-        return { label: `Cap in ${this.years(row.projection.infrastructureAt)}`, note: supports, icon: 'mdi-alert', color: 'warning' }
+        return { label: `Cap in ${this.years(row.projection.infrastructureAt)}`, note: supports, icon: 'mdi-alert', color: 'warning', mark: row.r.projection }
       }
 
-      return { label: supports, note: `${this.count(row.perMillion)} per million`, icon: null }
+      return { label: supports, note: `${this.count(row.perMillion)} per million`, icon: null, mark: row.r.projection }
     },
 
     workerSegments(workers) {
@@ -450,16 +510,21 @@ export default {
     workerTitle(workers) {
       return `${this.millions(workers.available)} M can work, ${this.millions(workers.required)} M needed`
     },
+    workerValue(workers, key, population) {
+      return workers ? workers[key] : key === 'population' ? population : null
+    },
     workerNote(row) {
-      const later = row.workersLater.free
-
-      if (later < -0.005) {
-        return `Short of ${people(-later)} in ${this.horizon} years at today's installations: hold off on new ones, or bring colonists.`
-      } else if (row.workersNow.free < -0.005) {
+      if (row.freeNow === null) {
+        return 'The worker split is unavailable for this colony.'
+      } else if (row.freeLater === null) {
+        return `${row.shortNow ? `Short of ${this.people(-row.freeNow)} now. ` : ''}The worker split in ${this.horizon} years is unavailable.`
+      } else if (row.shortLater) {
+        return `Short of ${this.people(-row.freeLater)} in ${this.horizon} years at today's installations: hold off on new ones, or bring colonists.`
+      } else if (row.shortNow) {
         return `Growth closes the gap within ${this.horizon} years.`
       }
 
-      return `Room for about ${this.count(Math.floor(Math.max(0, later) / 0.05))} more factories, mines or similar (50,000 workers each) by then.`
+      return `Room for about ${this.count(Math.floor(Math.max(0, row.freeLater) / 0.05))} more factories, mines or similar (50,000 workers each) by then.`
     },
 
     projectionChart(row) {
@@ -495,38 +560,47 @@ export default {
       return {
         scales: {
           x: { type: 'linear', min: 0, max: this.horizon, title: { display: true, text: 'Years from now' } },
-          y: { grace: '5%', ticks: { callback: (value) => people(value) } },
+          y: { grace: '5%', ticks: { callback: (value) => peopleOf(value) } },
         },
         plugins: {
           tooltip: {
             callbacks: {
               title: (items) => `Year ${roundToDecimal(items[0].parsed.x, 1)}`,
-              label: (item) => `${item.dataset.label}: ${people(item.parsed.y)}`,
+              label: (item) => `${item.dataset.label}: ${peopleOf(item.parsed.y)}`,
             },
           },
         },
       }
     },
+    // The note under the chart as parts, each with the results whose marks follow it.
     projectionNote(row) {
       const notes = []
+      const r = row.r
 
-      if (row.infrastructureCap !== Infinity) {
-        notes.push(row.projection.infrastructureAt !== null ? `Infrastructure stops growth at ${people(row.infrastructureCap)}.` : `Infrastructure supports ${people(row.infrastructureCap)}.`)
-
-        if (row.infrastructureNeeded) {
-          const share = row.constructionBP > 0 ? ` (${this.years(Math.max(1, Math.ceil((row.infrastructureBP / row.constructionBP) * 12)))} of this colony's construction)` : ''
-
-          notes.push(`${this.count(row.infrastructureNeeded)} more infrastructure, ${this.count(row.infrastructureBP)} BP${share}, keeps it growing for ${this.horizon} years.`)
-        }
+      if (row.infrastructureCap !== null && row.infrastructureCap !== Infinity) {
+        notes.push({ text: row.projection && row.projection.infrastructureAt !== null ? `Infrastructure stops growth at ${this.people(row.infrastructureCap)}.` : `Infrastructure supports ${this.people(row.infrastructureCap)}.`, results: [row.projection ? r.projection : r.cap] })
       }
 
-      notes.push(row.fill > 1 / 3 ? 'Past a third of the body\'s capacity, so growth is slowing.' : `Growth starts slowing at ${people(row.capacity / 3)} on this body.`)
+      if (row.infrastructureNeeded === null) {
+        notes.push({ text: 'The infrastructure to keep it growing is unavailable.', results: [r.needed] })
+      } else if (row.infrastructureNeeded > 0) {
+        const bp = row.infrastructureBP
+        const share = bp !== null && row.constructionBP > 0 ? ` (${this.years(Math.max(1, Math.ceil((bp / row.constructionBP) * 12)))} of this colony's construction)` : ''
+
+        notes.push({ text: `${this.count(row.infrastructureNeeded)} more infrastructure, ${bp === null ? 'cost unavailable' : `${this.count(bp)} BP${share}`}, keeps it growing for ${this.horizon} years.`, results: [r.needed, ...(bp === null ? [r.neededCost] : share ? [r.construction] : [])] })
+      }
+
+      if (row.capacity === null) {
+        notes.push({ text: 'Body capacity is unavailable, so crowding is unknown.', results: [r.capacity] })
+      } else {
+        notes.push({ text: row.fill !== null && row.fill > 1 / 3 ? 'Past a third of the body\'s capacity, so growth is slowing.' : `Growth starts slowing at ${this.people(row.capacity / 3)} on this body.`, results: [row.fill === null ? r.capacity : r.fill] })
+      }
 
       if (row.inbound && row.inbound.Colonists) {
-        notes.push(`Includes ${people(row.inbound.Colonists)} colonists on their way.`)
+        notes.push({ text: `Includes ${this.people(row.inbound.Colonists)} colonists on their way.`, results: [] })
       }
 
-      return notes.join(' ')
+      return notes
     },
   },
   asyncComputed: {
@@ -554,8 +628,12 @@ export default {
   },
 }
 
+function leftOut(unknown, total) {
+  return unknown ? ` · ${unknown} of ${total} colonies not counted` : ''
+}
+
 function percent(fraction, decimals) {
-  return `${roundToDecimal((fraction || 0) * 100, decimals).toFixed(decimals)}%`
+  return Number.isFinite(fraction) ? `${roundToDecimal(fraction * 100, decimals).toFixed(decimals)}%` : '—'
 }
 </script>
 
@@ -569,6 +647,10 @@ function percent(fraction, decimals) {
     font-size: 14px;
     font-weight: 500;
     margin-bottom: 8px;
+  }
+
+  .note-part:not(:last-child) {
+    margin-right: 6px;
   }
 
   .swatch {

@@ -32,12 +32,13 @@
           <div class="panel-head">
             <span>{{ focusRow.name }} outlook</span>
             <span class="d-flex align-center flex-wrap">
-              <v-chip small class="mr-2">
-                <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
+              <v-chip small class="mr-1">
+                <v-icon v-if="statusIcon(projection.status)" small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
               </v-chip>
+              <provenance-mark :result="projection.result" class="mr-3" />
               <v-chip small class="mr-3">{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
               <v-btn small outlined class="mr-2" :to="linkTo.minerals({ mineral: focusMineralId })"><v-icon small left>mdi-diamond-stone</v-icon>Mineral Breakdown</v-btn>
-              <v-btn small outlined @click="flowsOpen = true"><v-icon small left>mdi-chart-bar</v-icon>Sources and uses</v-btn>
+              <v-btn v-if="flowsKnown" small outlined @click="flowsOpen = true"><v-icon small left>mdi-chart-bar</v-icon>Sources and uses</v-btn>
             </span>
           </div>
           <div class="panel-body">
@@ -46,11 +47,11 @@
                 <div class="caption text--secondary">{{ figure.label }}</div>
                 <div class="figure-value text-no-wrap">
                   <v-icon v-if="figure.icon" small :color="figure.iconColor">{{ figure.icon }}</v-icon>
-                  {{ figure.value }}
+                  {{ figure.value }}<provenance-mark :result="figure.result" />
                 </div>
               </div>
             </div>
-            <v-row dense>
+            <v-row v-if="projectionKnown" dense>
               <v-col cols="12" md="6">
                 <div class="chart-title">Projected stockpile</div>
                 <chart-canvas type="line" :data="stockChart" :options="stockOptions" :height="210" :label="`Projected ${focusRow.name} stockpile over ${horizon} years`" />
@@ -60,6 +61,7 @@
                 <chart-canvas type="line" :data="outputChart" :options="outputOptions" :height="210" :label="`Projected ${focusRow.name} mining output over ${horizon} years`" />
               </v-col>
             </v-row>
+            <v-alert v-else type="info" outlined dense class="mb-2">{{ projectionUnavailableText }}</v-alert>
             <div class="caption text--secondary">
               Mining follows each deposit's accessibility as it's worked down; other income and all uses stay at today's rates. In transit counts as stock.
             </div>
@@ -67,23 +69,23 @@
         </v-card>
         <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last, to see which minerals are heading for a shortage." elevation="1">
           <div class="panel-head">
-            <span>Mineral runway</span>
+            <span>Mineral runway<provenance-mark rule="mineral.runway" label /></span>
             <v-chip small>{{ coverageLabel }}</v-chip>
           </div>
-          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwayTable.sortBy" :sort-desc.sync="runwayTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
+          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :custom-sort="sortNullLast" :sort-by.sync="runwayTable.sortBy" :sort-desc.sync="runwayTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
             <template #[`item.name`]="{ item }">
               <span class="font-weight-medium">{{ item.name }}</span>
             </template>
-            <template #[`item.stock`]="{ item }">{{ tons(item.stock) }}</template>
+            <template #[`item.stock`]="{ item }"><span class="text-no-wrap">{{ tons(item.stock) }}</span><provenance-mark v-if="item.stock === null" :result="item.results.stock" /></template>
             <template #[`item.transit`]="{ item }">
-              <span :class="{ 'text--secondary': !item.transit }">{{ tons(item.transit) }}</span>
+              <span :class="{ 'text--secondary': !item.transit }">{{ tons(item.transit) }}</span><provenance-mark v-if="item.transit === null" :result="item.results.transit" />
             </template>
-            <template #[`item.produced`]="{ item }">{{ tons(item.produced) }}</template>
-            <template #[`item.used`]="{ item }">{{ tons(item.used) }}</template>
+            <template #[`item.produced`]="{ item }"><span class="text-no-wrap">{{ tons(item.produced) }}</span><provenance-mark :result="item.results.produced" /></template>
+            <template #[`item.used`]="{ item }"><span class="text-no-wrap">{{ tons(item.used) }}</span><provenance-mark :result="item.results.used" /></template>
             <template #[`item.net`]="{ item }">
               <span class="text-no-wrap">
-                <v-icon small :color="item.net < 0 ? 'error' : 'success'">{{ item.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up' }}</v-icon>
-                {{ signedTons(item.net) }}
+                <v-icon v-if="item.net !== null" small :color="item.net < 0 ? 'error' : 'success'">{{ item.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up' }}</v-icon>
+                {{ signedTons(item.net) }}<provenance-mark :result="item.results.net" />
               </span>
             </template>
             <template #[`item.runwaySort`]="{ item }">
@@ -92,13 +94,13 @@
                   <div class="meter-fill" :class="statusColor(item.status)" :style="{ width: `${meterWidth(item)}%` }" />
                 </div>
                 <span class="text-no-wrap">
-                  <v-icon small :color="statusColor(item.status)">{{ statusIcon(item.status) }}</v-icon>
-                  {{ runwayLabel(item) }}
+                  <v-icon v-if="statusIcon(item.status)" small :color="statusColor(item.status)">{{ statusIcon(item.status) }}</v-icon>
+                  {{ runwayLabel(item) }}<provenance-mark :result="item.results.runway" />
                 </span>
               </div>
             </template>
             <template #[`item.queue`]="{ item }">
-              <span :class="{ 'text--secondary': !item.queue }">{{ tons(item.queue) }}</span>
+              <span :class="{ 'text--secondary': !item.queue }">{{ tons(item.queue) }}</span><provenance-mark :result="item.results.queue" />
             </template>
             <template #[`item.trend`]="{ item }">
               <v-sparkline v-if="item.trend.length > 1" :value="item.trend" :color="theme.inkMuted" :line-width="2" :padding="3" :smooth="2" height="24" width="120" class="trend" />
@@ -113,7 +115,7 @@
         <v-dialog v-model="flowsOpen" max-width="960" scrollable content-class="mineral-outlook">
           <v-card>
             <div class="panel-head">
-              <span>Where minerals come from and go</span>
+              <span>Where minerals come from and go<provenance-mark rule="mineral.flowPerYear" label /></span>
               <span class="d-flex align-center">
                 <v-btn-toggle v-model="flowsView" mandatory dense>
                   <v-btn value="chart" small><v-icon small>mdi-chart-bar</v-icon></v-btn>
@@ -133,7 +135,11 @@
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
                 <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
               </template>
-              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :sort-by.sync="flowsTable.sortBy" :sort-desc.sync="flowsTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
+              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :custom-sort="sortNullLast" :sort-by.sync="flowsTable.sortBy" :sort-desc.sync="flowsTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense>
+                <template v-for="group in presentFlowGroups" #[`item.${group.key}`]="{ item }">
+                  <span :key="group.key" class="text-no-wrap">{{ tons(item[group.key]) }}</span>
+                </template>
+              </v-data-table>
             </v-card-text>
           </v-card>
         </v-dialog>
@@ -141,13 +147,13 @@
 
       <v-card v-if="depositsReady" class="panel" data-summary="Each deposit worked by mines and miners, with its yield and when it will run down, to plan new deposits before the old ones empty." elevation="1">
         <div class="panel-head">
-          <span>Deposits being mined</span>
+          <span>Deposits being mined<provenance-mark rule="mineral.depositForecast" label /></span>
           <span class="d-flex align-center">
             <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" />
             <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" />
           </span>
         </div>
-        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositTable.sortBy" :sort-desc.sync="depositTable.sortDesc" :items-per-page.sync="depositTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: depositPageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :custom-sort="sortNullLast" :sort-by.sync="depositTable.sortBy" :sort-desc.sync="depositTable.sortDesc" :items-per-page.sync="depositTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: depositPageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.place`]="{ item }">
             <div class="py-2">
               <div>{{ item.bodyName }}</div>
@@ -165,14 +171,15 @@
             </v-tooltip>
           </template>
           <template #[`item.rate`]="{ item }">
-            <span v-if="item.rate > 0">{{ tons(item.rate) }}</span>
-            <span v-else class="text--secondary">Idle</span>
+            <span v-if="item.rate === null" class="text--secondary">—</span>
+            <span v-else-if="item.rate > 0">{{ tons(item.rate) }}</span>
+            <span v-else class="text--secondary">Idle</span><provenance-mark v-if="item.rate !== 0" :result="item.rateResult" />
           </template>
-          <template #[`item.halfSort`]="{ item }">{{ halfLabel(item) }}</template>
+          <template #[`item.halfSort`]="{ item }"><span class="text-no-wrap">{{ halfLabel(item) }}</span><provenance-mark v-if="!item.known" :result="item.forecastResult" /></template>
           <template #[`item.emptySort`]="{ item }">
             <span class="text-no-wrap">
               <v-icon v-if="emptyingSoon(item)" small color="warning">mdi-alert</v-icon>
-              {{ emptyLabel(item) }}
+              {{ emptyLabel(item) }}<provenance-mark :result="item.forecastResult" />
             </span>
           </template>
           <template #[`item.timeline`]="{ item }">
@@ -184,8 +191,10 @@
           </template>
           <template #expanded-item="{ headers, item }">
             <td :colspan="headers.length" class="py-4">
-              <div class="chart-title">Output of {{ item.mineral }} at {{ item.bodyName }}</div>
-              <chart-canvas type="line" :data="depositChart(item)" :options="depositOptions(item)" :height="200" :label="`${item.mineral} output at ${item.bodyName} over time`" />
+              <template v-if="item.known">
+                <div class="chart-title">Output of {{ item.mineral }} at {{ item.bodyName }}</div>
+                <chart-canvas type="line" :data="depositChart(item)" :options="depositOptions(item)" :height="200" :label="`${item.mineral} output at ${item.bodyName} over time`" />
+              </template>
               <div class="caption text--secondary mt-1">
                 {{ depositNote(item) }}
               </div>
@@ -206,6 +215,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -216,9 +226,11 @@ import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { COMPACT_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
+import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
+import { depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
 import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { describeResult, describeRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
 
 const BUCKET_DAYS = 5
 // The production cycle when the ledger has too few production ticks to measure it (the game's default).
@@ -239,8 +251,12 @@ const INPUT_LABELS = {
 }
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 
-const CRITICAL_YEARS = 5
-const WARNING_YEARS = 25
+// One column per mineral summing the table's rows, but only when every row records the mineral: a sum that leaves a missing amount out would read as complete (null here, so the holdings say which amount is missing).
+const completeSums = (table) => MINERALS.map((mineral) => `case when count(${table}.${mineral.name}) = count(*) then sum(${table}.${mineral.name}) end as ${mineral.name}`).join(', ')
+
+const NO_FORECAST = Object.freeze({ yearsToHalf: null, yearsToDepletion: null, idle: false, unknown: true })
+const INCOME_GROUPS = FLOW_GROUPS.filter((group) => group.income).map((group) => group.key)
+const SPEND_GROUPS = FLOW_GROUPS.filter((group) => !group.income).map((group) => group.key)
 
 const DEPOSIT_PAGE_SIZES = [15, 30, 60, -1]
 const FLOWS_VIEWS = ['chart', 'table']
@@ -249,7 +265,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas, LoadState, StatTiles },
+  components: { ChartCanvas, LoadState, ProvenanceMark, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -328,29 +344,46 @@ export default {
       })
     },
 
+    // Whether the ledger covers any days: the flows are annualised from them, so without any they are not known.
+    flowsKnown() {
+      return this.hasLedger && this.coverageDays > 0
+    },
+
     coverageText() {
-      return `${roundToDecimal(this.coverageDays, 0)} days`
+      return this.flowsKnown ? `${roundToDecimal(this.coverageDays, 0)} days` : 'unknown number of days'
     },
 
     coverageLabel() {
-      return this.hasLedger ? `Ledger: last ${this.coverageText}` : 'No ledger'
+      if (!this.hasLedger) {
+        return 'No ledger'
+      }
+
+      return this.flowsKnown ? `Ledger: last ${this.coverageText}` : 'Ledger covers no days'
     },
 
     perYear() {
-      return this.coverageDays ? 365 / this.coverageDays : 0
+      return this.flowsKnown ? 365 / this.coverageDays : null
     },
 
-    // Mining the ledger leaves out (colonies shipping their civilian complexes' output by mass driver), t/yr.
-    unlogged() {
-      return unloggedMining({ surface: this.surfaceMining, orbital: this.orbitalMining, navalAdmins: this.navalAdmins })
+    // Mining the ledger leaves out (colonies shipping their civilian complexes' output by mass driver), t/yr, as a mining-rate result by MaterialID.
+    unloggedResults() {
+      const results = {}
+      const add = (row, result) => {
+        (results[row.MaterialID] = results[row.MaterialID] || []).push(result)
+      }
+
+      this.surfaceMining.filter((row) => row.MassDriverExport).forEach((row) => add(row, surfaceRateResult(row)))
+      this.orbitalMining.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalRateResult(row, this.navalAdmins)))
+
+      return Object.fromEntries(Object.entries(results).map(([materialId, list]) => [materialId, miningSum(list)]))
     },
 
-    // { [MaterialID]: { [groupKey]: t/yr } }
-    flowsByMineral() {
+    // { [MaterialID]: { [groupKey]: t/yr } } from the ledger alone, annualised: all 0 while the ledger covers no days (`flowsKnown`).
+    ledgerFlows() {
       const flows = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, 0]))]))
       const { perYear } = this
 
-      if (!this.hasLedger) {
+      if (!this.flowsKnown) {
         return flows
       }
 
@@ -362,16 +395,21 @@ export default {
         }
       })
 
-      Object.entries(this.unlogged).forEach(([materialId, rate]) => {
-        if (flows[materialId]) {
-          flows[materialId].mining += rate
-        }
-      })
-
       return flows
     },
 
-    // Mined deposits: every colony and orbital miner on the same body and mineral summed.
+    // { [MaterialID]: { [groupKey]: t/yr } } as shown: the ledger's flows with the unlogged mining added to mining. A flow that is not known (no ledger days, or a mining rate missing an input) is null.
+    flowsByMineral() {
+      return Object.fromEntries(MINERALS.map((mineral) => {
+        const ledgerFlows = this.ledgerFlows[mineral.id]
+        const unlogged = this.unloggedResults[mineral.id]
+        const mining = unlogged ? valueOrNull(unlogged) : 0
+
+        return [mineral.id, Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, !this.flowsKnown || (group.key === 'mining' && mining === null) ? null : ledgerFlows[group.key] + (group.key === 'mining' ? mining : 0)]))]
+      }))
+    },
+
+    // Mined deposits: every colony and orbital miner on the same body and mineral summed. `rate` and `delivered` (t/yr, null when a source's input is missing) come from the mining-rate results `rateResult` and `deliveredResult`; `forecastResult` is the deposit-forecast result and `known` says it, and the delivered rate, are available.
     deposits() {
       const deposits = {}
       const { navalAdmins } = this
@@ -391,80 +429,83 @@ export default {
             HalfOriginalAmount: row.HalfOriginalAmount,
             OriginalAcc: row.OriginalAcc,
             sources: [],
-            rate: 0,
-            delivered: 0,
           }
         }
 
         deposits[key].sources.push(source)
-        deposits[key].rate += source.rate
-        deposits[key].delivered += source.delivered
       }
 
       this.surfaceMining.forEach((row) => {
-        add(row, { name: stripHtml(populationName(row, '', true)), kind: 'surface', rate: surfaceRate(row, false), delivered: surfaceRate(row, true) })
+        add(row, { name: stripHtml(populationName(row, '', true)), kind: 'surface', rateResult: surfaceRateResult(row, false), deliveredResult: surfaceRateResult(row, true) })
       })
 
       this.orbitalMining.forEach((row) => {
-        const rate = orbitalMinerRate(row, navalAdmins)
+        const result = orbitalRateResult(row, navalAdmins)
 
-        add(row, { name: row.ShipName, kind: 'orbital', rate, delivered: rate })
+        add(row, { name: row.ShipName, kind: 'orbital', rateResult: result, deliveredResult: result })
       })
 
       return Object.values(deposits).map((deposit) => {
-        const forecast = depositForecast(deposit, deposit.rate)
+        const rateResult = miningSum(deposit.sources.map((source) => source.rateResult))
+        const deliveredResult = miningSum(deposit.sources.map((source) => source.deliveredResult))
+        const forecastResult = depositForecastResult(deposit, rateResult)
+        const rate = valueOrNull(rateResult)
+        const delivered = valueOrNull(deliveredResult)
+        const known = isAvailable(forecastResult) && delivered !== null
+        const forecast = known ? forecastResult.value : NO_FORECAST
 
         return {
           ...deposit,
+          rate,
+          delivered,
+          rateResult,
+          deliveredResult,
+          forecastResult,
+          known,
           amount: deposit.Amount,
           accessibility: deposit.Accessibility,
           forecast,
           sourceNames: deposit.sources.filter((source) => source.name !== deposit.bodyName).map((source) => (source.kind === 'orbital' ? `${source.name} (orbital)` : source.name)).join(', '),
-          deliveredShare: deposit.rate > 0 ? deposit.delivered / deposit.rate : 0,
-          halfSort: forecast.yearsToHalf ?? Infinity,
-          emptySort: forecast.idle ? Infinity : forecast.yearsToDepletion,
+          deliveredShare: known && rate > 0 ? delivered / rate : 0,
+          halfSort: known ? forecast.yearsToHalf ?? Infinity : null,
+          emptySort: known && !forecast.idle ? forecast.yearsToDepletion : null,
         }
       })
     },
 
+    // `annualQueueDemand`'s { demand, unknown }: a colony whose production capacity is not known leaves the demand of the minerals its queue uses unknown.
     queueDemand() {
-      return annualQueueDemand(this.industrialProjects, (populationId, productionType) => {
-        if (productionType === 1) {
-          return this.populationOrdnanceCapacity(populationId)
-        } else if (productionType === 2) {
-          return this.populationFighterCapacity(populationId)
-        }
-
-        return this.populationConstructionCapacity(populationId)
-      })
+      return annualQueueDemand(this.industrialProjects, (populationId, productionType) => valueOrNull(this.populationCapacityResult(populationId, productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')))
     },
 
+    // One row per mineral: plain figures (null when unknown, `runway` the years of a falling stock and null otherwise, `runwaySort` also Infinity for one that holds or grows) beside the provenance results in `results`.
     mineralRows() {
-      const { flowsByMineral, stockpile, cargo, packets, deposits, hasLedger, queueDemand } = this
+      const { stockpile, cargo, packets, deposits, hasLedger, coverageDays, queueDemand } = this
+
       return MINERALS.map((mineral) => {
-        const flows = flowsByMineral[mineral.id]
-        const stock = (stockpile && stockpile[mineral.name]) || 0
-        const transit = (cargo[mineral.id] || 0) + ((packets && packets[mineral.name]) || 0)
-        const mined = deposits.filter((deposit) => deposit.MaterialID === mineral.id).reduce((sum, deposit) => sum + deposit.delivered, 0)
-        const produced = hasLedger ? FLOW_GROUPS.filter((group) => group.income).reduce((sum, group) => sum + flows[group.key], 0) : mined
-        const used = hasLedger ? FLOW_GROUPS.filter((group) => !group.income).reduce((sum, group) => sum + flows[group.key], 0) : queueDemand[mineral.name]
-        const net = produced - used
-        const runway = net < 0 ? (stock + transit) / -net : null
+        const holdings = holdingsResult({ stockpile, cargo, packets, mineral })
+        const queue = queueDemandResult(queueDemand, mineral.name)
+        const mined = miningSum(deposits.filter((deposit) => deposit.MaterialID === mineral.id).map((deposit) => deposit.deliveredResult))
+        const flows = flowResults({ hasLedger, coverageDays, ledger: this.ledgerFlows[mineral.id], incomeGroups: INCOME_GROUPS, spendGroups: SPEND_GROUPS, unlogged: this.unloggedResults[mineral.id] || null, mined, queue })
+        const runway = runwayResult(holdings.held, flows.net)
+        const state = runwayStateResult(runway, flows.produced, flows.used)
+        const years = valueOrNull(runway)
+        const held = valueOrNull(holdings.held)
 
         return {
           id: mineral.id,
           name: mineral.name,
-          stock,
-          transit,
-          produced,
-          used,
-          net,
-          runway,
-          status: this.runwayStatus(runway, produced, used),
-          runwaySort: runway ?? Infinity,
-          queue: queueDemand[mineral.name],
-          trend: this.trendFor(mineral.id, stock + transit),
-          otherIncome: hasLedger ? produced - flows.mining : 0,
+          stock: valueOrNull(holdings.stock),
+          transit: valueOrNull(holdings.transit),
+          produced: valueOrNull(flows.produced),
+          used: valueOrNull(flows.used),
+          net: valueOrNull(flows.net),
+          runway: Number.isFinite(years) ? years : null,
+          status: isAvailable(state) ? state.value : 'unknown',
+          runwaySort: years,
+          queue: valueOrNull(queue),
+          trend: this.trendFor(mineral.id, held),
+          results: { stock: holdings.stock, transit: holdings.transit, held: holdings.held, produced: flows.produced, used: flows.used, net: flows.net, mining: flows.mining, otherIncome: flows.otherIncome, runway, state, queue },
         }
       })
     },
@@ -482,13 +523,13 @@ export default {
       }
 
       return [
-        { label: 'Stockpile (t)', value: this.tons(row.stock) },
-        { label: 'In transit (t)', value: this.tons(row.transit) },
-        { label: 'Produced / yr', value: this.tons(row.produced) },
-        { label: 'Used / yr', value: this.tons(row.used) },
-        { label: 'Net / yr', value: this.signedTons(row.net), icon: row.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up', iconColor: row.net < 0 ? 'error' : 'success' },
-        { label: 'Runway', value: this.runwayLabel(row), icon: this.statusIcon(row.status), iconColor: this.statusColor(row.status) },
-        { label: 'Industry queue (12 mo)', value: this.tons(row.queue) },
+        { label: 'Stockpile (t)', value: this.tons(row.stock), result: row.results.stock },
+        { label: 'In transit (t)', value: this.tons(row.transit), result: row.results.transit },
+        { label: 'Produced / yr', value: this.tons(row.produced), result: row.results.produced },
+        { label: 'Used / yr', value: this.tons(row.used), result: row.results.used },
+        { label: 'Net / yr', value: this.signedTons(row.net), icon: row.net === null ? null : row.net < 0 ? 'mdi-arrow-down' : 'mdi-arrow-up', iconColor: row.net < 0 ? 'error' : 'success', result: row.results.net },
+        { label: 'Runway', value: this.runwayLabel(row), icon: this.statusIcon(row.status), iconColor: this.statusColor(row.status), result: row.results.runway },
+        { label: 'Industry queue (12 mo)', value: this.tons(row.queue), result: row.results.queue },
       ]
     },
 
@@ -497,7 +538,7 @@ export default {
     },
 
     visibleDeposits() {
-      return this.deposits.filter((deposit) => (this.allDeposits || deposit.MaterialID === this.focusMineralId) && (!this.onlyEmptying || (!deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon)))
+      return this.deposits.filter((deposit) => (this.allDeposits || deposit.MaterialID === this.focusMineralId) && (!this.onlyEmptying || this.emptyingSoon(deposit)))
     },
 
     linkQuery() {
@@ -510,37 +551,58 @@ export default {
       return mineral ? mineral.name : ''
     },
 
+    // The tiles' counts leave out what is not known and say how much that is; each tile's title carries the status of its figure.
     tiles() {
-      const declining = this.mineralRows.filter((row) => row.runway !== null)
+      const rows = this.mineralRows
+      const unknown = rows.filter((row) => row.status === 'unknown')
+      const declining = rows.filter((row) => row.runway !== null)
       const shortest = declining.slice().sort((a, b) => a.runway - b.runway)[0]
-      const active = this.deposits.filter((deposit) => !deposit.forecast.idle)
+      const active = this.deposits.filter((deposit) => deposit.known && !deposit.forecast.idle)
+      const idle = this.deposits.filter((deposit) => deposit.known && deposit.forecast.idle)
+      const noForecast = this.deposits.filter((deposit) => !deposit.known)
       const emptying = active.filter((deposit) => deposit.forecast.yearsToDepletion <= this.horizon)
-      const minedPerYear = this.hasLedger ? this.mineralRows.reduce((sum, row) => sum + this.flowsByMineral[row.id].mining, 0) : this.deposits.reduce((sum, deposit) => sum + deposit.delivered, 0)
+      const mined = sumResults({ rule: 'mineral.flowPerYear', results: rows.map((row) => row.results.mining) })
+      const unknownNote = unknown.length ? `${unknown.length} of ${MINERALS.length} minerals without a figure` : ''
+      const depositNote = [`Of ${active.length} mined deposits`, idle.length ? `${idle.length} not being mined` : '', noForecast.length ? `${noForecast.length} without a forecast` : ''].filter(Boolean).join(', ')
+      let runwayValue = 'None running down'
+      let runwayNote = 'Every mineral breaks even or grows'
+
+      if (shortest) {
+        runwayValue = `${shortest.name} · ${this.years(shortest.runway)}`
+        runwayNote = ['Stock and transit at today\'s net rate', unknownNote].filter(Boolean).join(' · ')
+      } else if (unknown.length) {
+        runwayValue = '—'
+        runwayNote = unknownNote
+      }
 
       return [
         {
           label: 'Shortest runway',
-          value: shortest ? `${shortest.name} · ${this.years(shortest.runway)}` : 'None running down',
-          note: shortest ? 'Stock and transit at today\'s net rate' : 'Every mineral breaks even or grows',
-          icon: shortest ? this.statusIcon(shortest.status) : 'mdi-check-circle',
+          title: shortest ? describeResult(shortest.results.runway) : unknown.length ? describeResult(unknown[0].results.runway) : describeRule('mineral.runway'),
+          value: runwayValue,
+          note: runwayNote,
+          icon: shortest ? this.statusIcon(shortest.status) : unknown.length ? null : 'mdi-check-circle',
           iconColor: shortest ? this.statusColor(shortest.status) : 'success',
         },
         {
           label: 'Minerals running down',
-          value: `${declining.length} of ${MINERALS.length}`,
-          note: declining.length ? declining.map((row) => row.name).join(', ') : 'None',
+          title: describeRule('mineral.runway'),
+          value: `${declining.length} of ${rows.length - unknown.length}`,
+          note: [declining.length ? declining.map((row) => row.name).join(', ') : 'None', unknownNote].filter(Boolean).join(' · '),
         },
         {
           label: `Deposits emptying within ${this.horizon} y`,
-          value: `${emptying.length}`,
-          note: `Of ${active.length} mined deposits`,
+          title: describeRule('mineral.depositForecast'),
+          value: !active.length && !idle.length && noForecast.length ? '—' : `${emptying.length}`,
+          note: depositNote,
           icon: emptying.length ? 'mdi-alert' : null,
           iconColor: 'warning',
         },
         {
           label: 'Mined per year',
-          value: this.tons(minedPerYear),
-          note: !this.hasLedger ? 'From mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
+          title: describeResult(mined),
+          value: this.tons(valueOrNull(mined)),
+          note: !this.hasLedger ? 'From mines, all minerals' : Object.keys(this.unloggedResults).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
         },
       ]
     },
@@ -555,7 +617,7 @@ export default {
         { text: 'Net / yr', value: 'net', align: 'end' },
         { text: 'Runway', value: 'runwaySort' },
         { text: 'Industry queue (12 mo)', value: 'queue', align: 'end' },
-        { text: `Stock, last ${this.coverageText}`, value: 'trend', sortable: false },
+        { text: this.flowsKnown ? `Stock, last ${this.coverageText}` : 'Stock trend', value: 'trend', sortable: false },
       ]
     },
 
@@ -564,7 +626,7 @@ export default {
     },
 
     flowRows() {
-      return MINERALS.map((mineral) => ({ id: mineral.id, name: mineral.name, ...Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, this.tons(this.flowsByMineral[mineral.id][group.key])])) }))
+      return MINERALS.map((mineral) => ({ id: mineral.id, name: mineral.name, ...Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, this.flowsByMineral[mineral.id][group.key]])) }))
     },
 
     flowsHeaders() {
@@ -576,7 +638,7 @@ export default {
         labels: MINERALS.map((mineral) => mineral.name),
         datasets: this.presentFlowGroups.map((group) => ({
           label: group.label,
-          data: MINERALS.map((mineral) => (group.income ? 1 : -1) * this.flowsByMineral[mineral.id][group.key]),
+          data: MINERALS.map((mineral) => (this.flowsByMineral[mineral.id][group.key] === null ? null : (group.income ? 1 : -1) * this.flowsByMineral[mineral.id][group.key])),
           backgroundColor: this.flowColor(group.key),
           borderColor: this.theme.surface,
           borderWidth: { left: 1, right: 1, top: 0, bottom: 0 },
@@ -613,27 +675,35 @@ export default {
       return yearSteps(this.horizon, 100)
     },
 
+    // The focused mineral's stockpile and output over the horizon, as `result` (a 'mineral.stockProjection' result) with its `stock`, `output` and `runOut`; empty and `status` 'unknown' while the result is unavailable.
     projection() {
       const row = this.focusRow
       const steps = this.projectionSteps
 
       if (!row) {
-        return { stock: [], output: [], status: 'ok', summary: '' }
+        return { stock: [], output: [], runOut: null, firstEmpty: null, status: 'ok', summary: '', result: null }
       }
 
-      const { stock, output, runOut } = stockProjection({
-        start: row.stock + row.transit,
-        otherNet: row.otherIncome - row.used,
-        deposits: this.focusDeposits.map((deposit) => ({ deposit, rate: deposit.rate, share: deposit.deliveredShare })),
-        steps,
-      })
+      const result = projectionResult({ held: row.results.held, otherIncome: row.results.otherIncome, used: row.results.used, deposits: this.focusDeposits.map((deposit) => ({ deposit, rate: deposit.rateResult, forecast: deposit.forecastResult, share: deposit.deliveredShare })), steps })
 
-      const firstEmpty = this.focusDeposits.filter((deposit) => !deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon).sort((a, b) => a.forecast.yearsToDepletion - b.forecast.yearsToDepletion)[0]
+      if (!isAvailable(result)) {
+        return { stock: [], output: [], runOut: null, firstEmpty: null, status: 'unknown', summary: 'Projection not available', result }
+      }
 
+      const { stock, output, runOut } = result.value
+      const firstEmpty = this.focusDeposits.filter((deposit) => this.emptyingSoon(deposit)).sort((a, b) => a.forecast.yearsToDepletion - b.forecast.yearsToDepletion)[0]
       const summary = runOut !== null ? `Runs out in ${this.years(runOut)}` : stock[stock.length - 1] < stock[0] ? `Falling, ${compact(stock[stock.length - 1])} left in ${this.horizon} y` : `Lasts past ${this.horizon} y`
-      const status = runOut !== null ? (runOut < CRITICAL_YEARS ? 'critical' : 'warning') : stock[stock.length - 1] < stock[0] ? 'ok' : 'growing'
+      const status = runOut !== null ? (runOut < CRITICAL_RUNWAY_YEARS ? 'critical' : 'warning') : stock[stock.length - 1] < stock[0] ? 'ok' : 'growing'
 
-      return { stock, output, runOut, firstEmpty, summary, status }
+      return { stock, output, runOut, firstEmpty, summary, status, result }
+    },
+
+    projectionKnown() {
+      return isAvailable(this.projection.result)
+    },
+
+    projectionUnavailableText() {
+      return this.projection.result ? `The projection is not available. ${describeResult(this.projection.result)}.` : ''
     },
 
     stockChart() {
@@ -749,7 +819,7 @@ export default {
         this.fallbackFocusId = null
         this.setUnsaved('focusMineralId', declining ? declining.id : rows[0].id)
       } else if (!this.focusMineralId && this.depositsReady) {
-        const emptiest = this.deposits.reduce((first, deposit) => (first && first.emptySort <= deposit.emptySort ? first : deposit), null)
+        const emptiest = this.deposits.filter((deposit) => deposit.emptySort !== null).reduce((first, deposit) => (first && first.emptySort <= deposit.emptySort ? first : deposit), null)
         const id = emptiest ? emptiest.MaterialID : rows[0].id
 
         this.fallbackFocusId = id
@@ -761,14 +831,28 @@ export default {
       return flowColor(this.appearance, key)
     },
 
+    // Tonnes, or a dash for a figure that is not known (a real 0 shows as 0).
     tons(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
+      return value !== null && value !== undefined && isFinite(value) ? separatedNumber(roundToDecimal(value, 0), this.separator) : '—'
     },
     signedTons(value) {
-      return `${value < 0 ? '−' : '+'}${this.tons(Math.abs(value))}`
+      return value !== null && value !== undefined && isFinite(value) ? `${value < 0 ? '−' : '+'}${this.tons(Math.abs(value))}` : '—'
     },
     fixed(value, decimals) {
-      return roundToDecimal(value, decimals).toFixed(decimals)
+      return value !== null && value !== undefined && isFinite(value) ? roundToDecimal(value, decimals).toFixed(decimals) : '—'
+    },
+    sortNullLast(items, sortBy, sortDesc) {
+      const [key] = sortBy
+
+      if (!key) {
+        return items
+      }
+
+      const direction = sortDesc[0] ? -1 : 1
+      const known = (item) => item[key] !== null && item[key] !== undefined
+      const sorted = items.filter(known).sort((a, b) => (typeof a[key] === 'string' ? a[key].localeCompare(b[key]) : a[key] - b[key]) * direction)
+
+      return sorted.concat(items.filter((item) => !known(item)))
     },
     years(value) {
       if (value === null || value === undefined) {
@@ -784,19 +868,10 @@ export default {
       return `${compactYears(value, this.separator)} y`
     },
 
-    runwayStatus(runway, produced, used) {
-      if (runway === null) {
-        return produced === 0 && used === 0 ? 'idle' : 'growing'
-      } else if (runway < CRITICAL_YEARS) {
-        return 'critical'
-      } else if (runway < WARNING_YEARS) {
-        return 'warning'
-      }
-
-      return 'ok'
-    },
     runwayLabel(row) {
-      if (row.status === 'idle') {
+      if (row.status === 'unknown') {
+        return '—'
+      } else if (row.status === 'idle') {
         return 'No activity'
       } else if (row.status === 'growing') {
         return 'Growing'
@@ -805,10 +880,10 @@ export default {
       return this.years(row.runway)
     },
     statusIcon(status) {
-      return { critical: 'mdi-alert-octagon', warning: 'mdi-alert', ok: 'mdi-trending-down', growing: 'mdi-trending-up', idle: 'mdi-minus' }[status]
+      return { critical: 'mdi-alert-octagon', warning: 'mdi-alert', ok: 'mdi-trending-down', growing: 'mdi-trending-up', idle: 'mdi-minus' }[status] || null
     },
     statusColor(status) {
-      return { critical: 'error', warning: 'warning', ok: '', growing: 'success', idle: '' }[status]
+      return { critical: 'error', warning: 'warning', ok: '', growing: 'success', idle: '' }[status] || ''
     },
     meterWidth(row) {
       if (row.runway === null) {
@@ -820,7 +895,9 @@ export default {
 
     // Stock (with transit) at the end of each ledger bucket, oldest first.
     trendFor(materialId, current) {
-      if (!this.hasLedger) {
+      const unloggedResult = this.unloggedResults[materialId]
+
+      if (!this.hasLedger || !this.flowsKnown || current === null || (unloggedResult && !isAvailable(unloggedResult))) {
         return []
       }
 
@@ -840,7 +917,7 @@ export default {
 
       const buckets = Math.ceil(this.coverageDays / BUCKET_DAYS)
       // The mining the ledger leaves out, at today's rate, as if it had run the whole time.
-      const unlogged = ((this.unlogged[materialId] || 0) * BUCKET_DAYS) / 365
+      const unlogged = ((unloggedResult ? unloggedResult.value : 0) * BUCKET_DAYS) / 365
       const points = [current]
       let level = current
 
@@ -855,7 +932,7 @@ export default {
     halfLabel(deposit) {
       const { forecast } = deposit
 
-      if (forecast.idle) {
+      if (!deposit.known || forecast.idle) {
         return '—'
       } else if (forecast.yearsToHalf === null) {
         return 'No decline'
@@ -866,15 +943,19 @@ export default {
       return this.years(forecast.yearsToHalf)
     },
     emptyLabel(deposit) {
+      if (!deposit.known) {
+        return '—'
+      }
+
       return deposit.forecast.idle ? 'Not being mined' : this.years(deposit.forecast.yearsToDepletion)
     },
     emptyingSoon(deposit) {
-      return !deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon
+      return deposit.known && !deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon
     },
     timelineWidth(deposit, part) {
       const { forecast } = deposit
 
-      if (forecast.idle) {
+      if (!deposit.known || forecast.idle) {
         return 0
       }
 
@@ -932,6 +1013,10 @@ export default {
       })
     },
     depositNote(deposit) {
+      if (!deposit.known) {
+        return `No forecast. ${describeResult(deposit.forecastResult)}.`
+      }
+
       const { forecast } = deposit
 
       if (forecast.idle) {
@@ -989,7 +1074,7 @@ export default {
           return null
         }
 
-        return await this.database.query(`select sum(FCT_Population.Duranium) as Duranium, sum(FCT_Population.Neutronium) as Neutronium, sum(FCT_Population.Corbomite) as Corbomite, sum(FCT_Population.Tritanium) as Tritanium, sum(FCT_Population.Boronide) as Boronide, sum(FCT_Population.Mercassium) as Mercassium, sum(FCT_Population.Vendarite) as Vendarite, sum(FCT_Population.Sorium) as Sorium, sum(FCT_Population.Uridium) as Uridium, sum(FCT_Population.Corundium) as Corundium, sum(FCT_Population.Gallicite) as Gallicite from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
+        return await this.database.query(`select ${completeSums('FCT_Population')} from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
       }),
       default: null,
     },
@@ -999,7 +1084,7 @@ export default {
           return {}
         }
 
-        const rows = await this.database.query(`select FCT_ShipCargo.CargoID as MaterialID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`).then(([items]) => items)
+        const rows = await this.database.query(`select FCT_ShipCargo.CargoID as MaterialID, case when count(FCT_ShipCargo.Amount) = count(*) then sum(FCT_ShipCargo.Amount) end as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`).then(([items]) => items)
 
         return Object.fromEntries(rows.map((row) => [row.MaterialID, row.Amount]))
       }),
@@ -1011,7 +1096,7 @@ export default {
           return null
         }
 
-        return await this.database.query(`select sum(FCT_MassDriverPackets.Duranium) as Duranium, sum(FCT_MassDriverPackets.Neutronium) as Neutronium, sum(FCT_MassDriverPackets.Corbomite) as Corbomite, sum(FCT_MassDriverPackets.Tritanium) as Tritanium, sum(FCT_MassDriverPackets.Boronide) as Boronide, sum(FCT_MassDriverPackets.Mercassium) as Mercassium, sum(FCT_MassDriverPackets.Vendarite) as Vendarite, sum(FCT_MassDriverPackets.Sorium) as Sorium, sum(FCT_MassDriverPackets.Uridium) as Uridium, sum(FCT_MassDriverPackets.Corundium) as Corundium, sum(FCT_MassDriverPackets.Gallicite) as Gallicite from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
+        return await this.database.query(`select ${completeSums('FCT_MassDriverPackets')}, count(*) as Packets from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
       }),
       default: null,
     },

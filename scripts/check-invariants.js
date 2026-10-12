@@ -3,7 +3,7 @@
 
   node scripts/check-invariants.js
 
-  Every case names the invariant it states and builds its own rows; none copies a helper's arithmetic, so a case records what the planners agreed the helper must do, not what it happens to compute. Four areas: routes over explored jump links (utilities/jump-graph.js, route-plan.js), stock allocation across queued demands (haul-plan.js planHauls), history capture, superseded passes and rewinds (history.js recordHistory, mergeGame) and terraforming at the boundaries of an atmosphere (terraforming.js).
+  Every case names the invariant it states and builds its own rows; none copies a helper's arithmetic, so a case records what the planners agreed the helper must do, not what it happens to compute. Five areas: routes over explored jump links (utilities/jump-graph.js, route-plan.js), stock allocation across queued demands (haul-plan.js planHauls), history capture, superseded passes and rewinds (history.js recordHistory, mergeGame), terraforming at the boundaries of an atmosphere (terraforming.js) and the industry queue's yearly mineral demand with unknown inputs (minerals.js annualQueueDemand, mineral-outlook.js queueDemandResult).
 
   A case that fails is a mismatch and sets exit code 1. A case marked `known` documents an invariant a helper is known to break today: it names why and the backlog task that fixes it, prints as KNOWN instead of FAIL and does not set the exit code. When a known case starts to pass the run says so, so the mark can be removed.
 */
@@ -39,7 +39,7 @@ const deepFreeze = (value) => {
 }
 
 const defineCases = (modules) => {
-  const { jumpGraph, routePlan, haulPlan, history, terraforming, habitability } = modules
+  const { jumpGraph, routePlan, haulPlan, history, terraforming, habitability, minerals, mineralOutlook } = modules
 
   // ---- Routes over explored jump links -------------------------------------------------------------------------
   // Three systems in a chain, A (1) to B (2) to C (3), all explored; and a direct A to C link that is much shorter in distance and in jumps. The link's two ends carry their own Explored flags.
@@ -436,8 +436,9 @@ const defineCases = (modules) => {
   const gas = (AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount) => ({ AtmosGasID, AtmosGasName, GasAtm, AtmosGasAmount, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, FrozenOut: 0 })
   const earthlike = (extra = {}) => ({ BodyClass: 1, BodyTypeID: 1, FixedBody: 0, TidalLock: 0, Radius: 6371, Gravity: 1, SurfaceTemp: 288, BaseTemp: 255, Albedo: 0.3, StarLuminosity: 1, DustLevel: 0, HydroExt: 50, HydroID: 3, AtmosPress: 1, Eccentricity: 0, OrbitalDistance: 1, Atmosphere: [gas(2, 'Oxygen', 0.2, 20), gas(7, 'Nitrogen', 0.8, 80)], ...extra })
   const airless = (extra = {}) => earthlike({ SurfaceTemp: 255, HydroExt: 0, HydroID: 1, AtmosPress: 0, Atmosphere: [], ...extra })
-  // The DIM_Gases rows the plan needs: Aestusium warms, Frigusium cools, the rest are neutral.
-  const GASES = { 2: { AtmosGasName: 'Oxygen' }, 5: { AtmosGasName: 'Water Vapour' }, 7: { AtmosGasName: 'Nitrogen' }, 20: { AtmosGasName: 'Aestusium', GHGas: 1 }, 22: { AtmosGasName: 'Frigusium', AntiGHGas: 1 } }
+  // The DIM_Gases rows the plan needs: Aestusium warms, Frigusium cools, the rest are neutral. Every row holds all the figures a plan prices a gas with; a row without them makes the plan unknown (see the cases below).
+  const gasRow = (AtmosGasName, extra = {}) => ({ AtmosGasName, BoilingPoint: 0, GHGas: 0, AntiGHGas: 0, Dangerous: 0, DangerousLevel: 0, ...extra })
+  const GASES = { 2: gasRow('Oxygen'), 5: gasRow('Water Vapour'), 7: gasRow('Nitrogen'), 20: gasRow('Aestusium', { GHGas: 1 }), 22: gasRow('Frigusium', { AntiGHGas: 1 }) }
   const assess = (body) => terraforming.assessTerraforming(deepFreeze(body), species, 1, (id) => GASES[id])
   const BOUNDARY_BODIES = {
     'an airless body': airless(),
@@ -524,12 +525,83 @@ const defineCases = (modules) => {
     assert.ok(terraforming.planYears(work, capacity(4)) <= terraforming.planYears(work, capacity(2)))
     assert.ok(terraforming.planYears(work, capacity(2)) <= terraforming.planYears(work, capacity(0)))
   })
+
+  // A plan prices its end state with the DIM_Gases figures of every gas it adds. A table without them leaves the plan unknown, whatever the figures it would have priced at (zeros would turn an improving plan into "would make it worse"), and a gas the plan does not add is not asked for.
+  const withoutGas = (id) => (gasId) => (gasId === id ? undefined : GASES[gasId])
+  const assessWith = (body, gasInfo) => terraforming.assessTerraforming(deepFreeze(body), species, 1, gasInfo)
+
+  invariant('terraforming', 'a plan that adds a gas DIM_Gases holds no figures of is unknown and names the gas, not priced with zeros', () => {
+    const assessment = assessWith(airless(), withoutGas(20))
+
+    assert.deepEqual(assessment.missing, ['DIM_Gases row of gas 20'])
+    assert.equal(assessment.plan, null)
+  })
+
+  invariant('terraforming', 'a gas row without its figures (a boiling point, say) is as missing as an absent row', () => {
+    const assessment = assessWith(airless(), (id) => (id === 20 ? { AtmosGasName: 'Aestusium', GHGas: 1 } : GASES[id]))
+
+    assert.deepEqual(assessment.missing, ['DIM_Gases row of gas 20'])
+  })
+
+  invariant('terraforming', 'a plan the full table rejects as making things worse is unknown, not worse, when it adds a gas the table lacks', () => {
+    const body = earthlike({ SurfaceTemp: 200, BaseTemp: 180 })
+
+    assert.equal(assessWith(body, (id) => GASES[id]).reason, 'Terraforming would make it worse', 'control: the complete table rejects this plan')
+    assert.deepEqual(assessWith(body, withoutGas(20)).missing, ['DIM_Gases row of gas 20'])
+  })
+
+  invariant('terraforming', 'a gas the plan does not add is not asked for: the plan stands without its row', () => {
+    const assessment = assessWith(airless(), withoutGas(7))
+
+    assert.equal(assessment.missing, undefined)
+    assert.ok(assessment.plan, 'the plan is gone')
+  })
+
+  // ---- Industry queue demand ----------------------------------------------------------------------------------
+  // One queued project at a colony: 10 units of 100 BP each costing 5 t Duranium a unit, the whole of the colony's capacity.
+  const queued = (extra = {}) => ({ PopulationID: 1, ProductionType: 0, Percentage: 100, Queue: 1, Amount: 10, ProdPerUnit: 100, Duranium: 5, Neutronium: 0, Corbomite: 0, Tritanium: 0, Boronide: 0, Mercassium: 0, Vendarite: 0, Sorium: 0, Uridium: 0, Corundium: 0, Gallicite: 0, ...extra })
+  const demandOf = (project, capacity) => mineralOutlook.queueDemandResult(minerals.annualQueueDemand([project], () => capacity), 'Duranium')
+
+  invariant('queue demand', 'a complete project at a known capacity gives its tonnes (control)', () => {
+    const result = demandOf(queued(), 1000)
+
+    assert.equal(result.status, 'estimated')
+    assert.equal(result.value, 50)
+  })
+
+  invariant('queue demand', 'a project with an unrecorded mineral cost at a colony of unknown capacity is unavailable for that mineral, both reasons kept', () => {
+    const result = demandOf(queued({ Duranium: null }), null)
+
+    assert.equal(result.status, 'unavailable')
+    assert.ok(result.inputs.missing.some((name) => name.includes('Duranium cost')), `missing: ${result.inputs.missing}`)
+    assert.ok(result.inputs.missing.some((name) => name.includes('production capacity')), `missing: ${result.inputs.missing}`)
+  })
+
+  invariant('queue demand', 'an unknown capacity and a recorded cost keep only the capacity reason', () => {
+    const result = demandOf(queued(), null)
+
+    assert.equal(result.status, 'unavailable')
+    assert.deepEqual(result.inputs.missing, ['the production capacity of a colony with queued projects'])
+  })
+
+  invariant('queue demand', 'a project missing its units, share or place leaves the demand unknown at a colony of known capacity', () => {
+    ;['Amount', 'ProdPerUnit', 'Percentage', 'Queue'].forEach((field) => assert.equal(demandOf(queued({ [field]: null }), 1000).status, 'unavailable', field))
+  })
+
+  invariant('queue demand', 'a recorded capacity of 0 demands nothing, whatever the queue lacks: no work gets done', () => {
+    ;[{}, { Amount: null }, { ProdPerUnit: null }, { Percentage: null }, { Queue: null }, { Duranium: null }].forEach((patch) => {
+      const result = demandOf(queued(patch), 0)
+
+      assert.equal(result.status, 'estimated', JSON.stringify(patch))
+      assert.equal(result.value, 0, JSON.stringify(patch))
+    })
+  })
 }
 
 const main = async () => {
-  const modules = await loadUtilities(['jump-graph', 'route-plan', 'haul-plan', 'history', 'terraforming', 'habitability'], { stubs: STUBS })
+  const modules = await loadUtilities(['jump-graph', 'route-plan', 'haul-plan', 'history', 'terraforming', 'habitability', 'minerals', 'mineral-outlook'], { stubs: STUBS })
 
-  defineCases({ jumpGraph: modules['jump-graph'], routePlan: modules['route-plan'], haulPlan: modules['haul-plan'], history: modules.history, terraforming: modules.terraforming, habitability: modules.habitability })
+  defineCases({ jumpGraph: modules['jump-graph'], routePlan: modules['route-plan'], haulPlan: modules['haul-plan'], history: modules.history, terraforming: modules.terraforming, habitability: modules.habitability, minerals: modules.minerals, mineralOutlook: modules['mineral-outlook'] })
 
   const totals = { ok: 0, fail: 0, known: 0, fixed: 0 }
   let area = null

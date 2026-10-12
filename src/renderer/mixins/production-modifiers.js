@@ -1,34 +1,60 @@
 import { tracked } from '../utilities/load-tracking'
+import { registerRule, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
+
+registerRule({
+  id: 'production.populationCapacity',
+  versions: ['2.7.x'],
+  units: 'BP/yr',
+  verification: 'estimated',
+  structure: ['FCT_Race.ConstructionProduction, OrdnanceProduction, FighterProduction, EconomicProdModifier', 'FCT_Population.Efficiency, UnrestPoints', 'FCT_SystemBody.RadiationLevel', 'DIM_PlanetaryInstallation.ConstructionValue, OrdnanceProductionValue, FighterProductionValue', 'FCT_PopulationInstallations.Amount', 'FCT_Commander, FCT_CommanderBonuses', 'FCT_GroundUnitClass.ConstructionRating'],
+  note: 'A colony\'s yearly capacity for construction, ordnance or fighters: the race\'s production rate times the installations\' rating times the colony\'s overall modifier (governor and sector bonus, species rate, economy, efficiency, radiation, stability and political status); construction adds the engineer formations\' share. The ordnance figure matched the saved build rate of ordnance projects to within 0.15%; the construction and fighter figures are the same product on other columns and have no saved case. A colony the modifier read does not cover has no figure.',
+})
+
+// The columns each capacity multiplies together; a null one leaves the capacity unknown.
+const CAPACITY_TERMS = {
+  construction: ['ConstructionProduction', 'OverallProductionModifier', 'ConstructionPower', 'EngineerProductionModifier', 'GroundConstructionPower'],
+  ordnance: ['OrdnanceProduction', 'OverallProductionModifier', 'OrdnanceProductionPower'],
+  fighter: ['FighterProduction', 'OverallProductionModifier', 'FighterProductionPower'],
+}
+
+const CAPACITY = {
+  construction: (modifiers) => (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower),
+  ordnance: (modifiers) => modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower,
+  fighter: (modifiers) => modifiers.FighterProduction * modifiers.OverallProductionModifier * modifiers.FighterProductionPower,
+}
+
+const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // Per-population production modifiers and the capacity helpers built on them, shared by the Production, Mineral Outlook, Colony Outlook and Logistics pages. The host component provides `database`, `GameID` and `RaceID` (mapGetters), and can list `populationProductionModifiers` among its tracked reads (`loadErrors`).
+// `populationCapacityResult(populationId, kind)` ('construction', 'ordnance' or 'fighter') is a provenance result of 'production.populationCapacity': unavailable, naming what is missing, for a colony without a modifier row or with a null column. The three `population...Capacity` methods return its value, or 0 for a colony with none, for the callers that sum a figure they present as an estimate; one that must tell none from unknown reads the result.
 export default {
   methods: {
-    populationConstructionCapacity (populationId) {
+    populationCapacityResult (populationId, kind) {
       const modifiers = this.populationProductionModifiers[populationId]
+      const terms = CAPACITY_TERMS[kind]
 
       if (!modifiers) {
-        return 0
+        return unavailable({ rule: 'production.populationCapacity', missing: ['the colony\'s production modifiers'] })
       }
 
-      return (modifiers.ConstructionProduction * modifiers.OverallProductionModifier * modifiers.ConstructionPower) + (modifiers.ConstructionProduction * modifiers.EngineerProductionModifier * modifiers.GroundConstructionPower)
+      const missing = terms.filter((term) => !isNumber(modifiers[term]))
+      const present = terms.filter((term) => isNumber(modifiers[term]))
+
+      return missing.length ? unavailable({ rule: 'production.populationCapacity', missing, present }) : ofRule({ rule: 'production.populationCapacity', value: CAPACITY[kind](modifiers), inputs: { present } })
+    },
+    populationConstructionCapacity (populationId) {
+      return this.populationCapacityOrZero(populationId, 'construction')
     },
     populationOrdnanceCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.OrdnanceProduction * modifiers.OverallProductionModifier * modifiers.OrdnanceProductionPower
+      return this.populationCapacityOrZero(populationId, 'ordnance')
     },
     populationFighterCapacity (populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
+      return this.populationCapacityOrZero(populationId, 'fighter')
+    },
+    populationCapacityOrZero (populationId, kind) {
+      const value = valueOrNull(this.populationCapacityResult(populationId, kind))
 
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.FighterProduction * modifiers.OverallProductionModifier * modifiers.FighterProductionPower
+      return value === null ? 0 : value
     },
   },
   asyncComputed: {

@@ -8,11 +8,12 @@
 // A body only gets a rank when it is a place to settle at all and worth the trip: it holds the smallest colony worth planning for, or its deposits are worth mining, or it is a civilian mining complex site.
 
 import { bodyCapacity } from './colonies'
-import { STATE_BY_ID, routeFacts, stateOf } from './colonization-states'
+import { routeFacts, stateOf } from './colonization-states'
 import { KM_PER_AU } from './jump-graph'
-import { CMC_MINERAL_IDS, DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, NOT_SCARCE, depositValue, qualifiesForCmc } from './minerals'
+import { CMC_MINERAL_IDS, DEPOSIT_MINIMUM_AMOUNT, MINERALS, RICH_DEPOSIT_VALUE, WORTH_MINING_VALUE, depositValueResult, qualifiesForCmc, scarcityResult } from './minerals'
+import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 import { assessTerraforming, planYears, terraformCapacity } from './terraforming'
-import { infrastructurePerMillion, limitingFactor, speciesLimits } from './habitability'
+import { infrastructurePerMillion, infrastructurePerMillionResult, limitingFactor, missingBodyInputs, missingSpeciesInputs, speciesLimits } from './habitability'
 
 export const GOALS = [
   { id: 'people', label: 'People', icon: 'mdi-account-group-outline', hint: 'Rank by how many people the body holds' },
@@ -43,6 +44,110 @@ const GAS_GIANT_TYPES = [4, 5]
 
 export const NO_OUTLOOK = { known: false, minerals: {} }
 
+// A mineral the outlook says nothing of (no outlook read yet) counts once, as holding; `rankBodies` reports that as an assumption while the outlook is not known.
+const HOLDING = scarcityResult(Infinity)
+
+const VERSIONS = ['2.7.x']
+
+// The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The colony cost and the infrastructure per million are in habitability.js, the species' population in colonization-data.js.
+registerRule({
+  id: 'habitability.terraformRate',
+  versions: VERSIONS,
+  units: 'atm of an Earth-sized body a year',
+  verification: 'estimated',
+  structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed'],
+  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered. The save stores no capacity to compare with. The governor, efficiency, radiation and stability modifiers, orbital modules and the installation\'s own output are not modelled (the modifier counts as 1), so a colony with a modifier works at another rate.',
+  assumptions: ['no output modifier on the terraformers'],
+})
+
+registerRule({
+  id: 'habitability.bodyCapacity',
+  versions: VERSIONS,
+  units: 'M people',
+  verification: 'estimated',
+  structure: ['FCT_SystemBody.Radius, HydroExt, TidalLock, BodyClass', 'FCT_Species.PopulationDensityModifier'],
+  note: 'Millions of people a body holds before growth stops: surface area times the species\' density, less above 75% water and a fifth on a tide-locked planet (colonies.js bodyCapacity, the rule of docs/DATABASE.md). The save stores no capacity to compare with, so the figure is not checked against saved values.',
+})
+
+registerRule({
+  id: 'habitability.mineralValue',
+  versions: VERSIONS,
+  units: 'deposit value',
+  verification: 'assumed',
+  structure: ['FCT_MineralDeposit.Amount, Accessibility', 'FCT_SystemBodySurveys', 'FCT_RaceMineralData'],
+  note: 'The sum over a body\'s surveyed deposits of the deposit value (accessibility, raised for a big easy deposit and halved for a small one; minerals.js depositValue) times the mineral\'s weight set in Ranking times the race\'s scarcity factor from the Mineral Outlook runway. A deposit with no recorded amount (or, over the minimum amount, no accessibility), or of a mineral whose runway is unknown, leaves the sum unknown; a mineral weighted 0 counts for nothing. The weights and the scarcity bands are the Planner\'s choice, and the deposit value is not compared with a stored value.',
+  assumptions: ['mineral weights as set in Ranking'],
+})
+
+registerRule({
+  id: 'habitability.distance',
+  versions: VERSIONS,
+  units: 'km, jumps',
+  verification: 'estimated',
+  structure: ['FCT_RaceJumpPointSurvey.Charted, Explored, IgnoreForDistance', 'FCT_JumpPoint', 'FCT_Population.Capital, Population', 'FCT_SystemBody.Xcor, Ycor'],
+  note: 'The kilometres and jumps of the shortest route over the race\'s charted and explored jump points from the nearest colony with people, the capital included (jump-graph.js). The fewest-jump search reproduced 109 of 110 transit chains stored in move orders (docs/DATABASE.md, Routes); the kilometre route and the choice of the nearest colony as the place to measure from are the Planner\'s reading and have no stored value.',
+})
+
+registerRule({
+  id: 'habitability.score',
+  versions: VERSIONS,
+  units: '% of the best target',
+  verification: 'assumed',
+  structure: ['FCT_SystemBody', 'FCT_Species', 'FCT_MineralDeposit', 'FCT_Population', 'FCT_RaceJumpPointSurvey'],
+  note: 'A planner ranking, not a game rule. Worth is the prize (the share of 1,000 M people the body holds and the share of a deposit value of 6, the game\'s mining-colony threshold, that its deposits are worth, or both added) times a discount 1 / (1 + x / scale) for each of the colony cost before the skill, the years of terraforming and the AU from the nearest colony. Each body takes the better of settling it as it is and waiting for its terraforming, and the best species. The score is the share of the best target\'s worth; a target ranks from 10% and is best from 25%. The weights, scales and thresholds are the Planner\'s choice. The whole path was read in colonization.js; none of it is compared with a game value.',
+  assumptions: ['mineral weights, discount scales and thresholds as set in Ranking'],
+})
+
+registerRule({
+  id: 'habitability.filterCount',
+  versions: VERSIONS,
+  units: 'bodies',
+  verification: 'confirmed',
+  structure: ['FCT_SystemBody', 'FCT_Population'],
+  note: 'The number of bodies of the loaded list that pass a view, plan state, body class, system or filter test. The counting is exact; which body falls in a view or a state follows its rank and colony cost, so a count built on them takes their status.',
+})
+
+// The colonisation skill an assessment uses when the race row has none. A figure worked out with it says so.
+const ASSUMED_SKILL = 1
+const SKILL_ASSUMPTION = 'a colonisation skill of 1, the race row has none'
+
+const NOTHING = Object.freeze([])
+
+// What a pair of a body and a species is when the save lacks a figure of either that the cost reads: not colonisable on paper, but the entry's `missing` names the figures, so it reads as unknown, not as N/A.
+const UNKNOWN_ASSESSMENT = Object.freeze({ cost: Object.freeze({ colonisable: false, reason: 'Figures missing' }), lowGravity: false, plan: null, work: 0, after: null, outcome: 'no', reason: null })
+
+// The plan state of a body whose best route cannot be told: the figures it needs are missing. It stands apart from the table of states (colonization-states.js) and is listed beside it.
+export const UNKNOWN_STATE = Object.freeze({
+  id: 'unknown',
+  label: 'Unknown',
+  group: 'Not worked out',
+  color: 'warning',
+  icon: 'mdi-help-circle-outline',
+  target: false,
+  rule: 'A figure the plan needs is missing from the save (a body or species figure, or the terraforming capacity), so no state is given.',
+  when: () => false,
+  text: ({ unknown }) => `Not worked out: missing ${unknown.join(', ')}.`,
+  chip: () => 'Unknown',
+})
+
+const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+
+// The yearly terraforming capacity of `terraformers` as a result. A missing race rate or speed setting, or a count that is not a positive number, makes it unavailable; a rate of 0 (a race without the tech) is a real capacity of 0.
+export const terraformCapacityResult = (rules, terraformers) => {
+  const inputs = [['FCT_Race.TerraformingRate', isNumber(rules.TerraformingRate)], ['FCT_Game.TerraformingSpeed', isNumber(rules.TerraformingSpeed)], ['terraformers', isNumber(terraformers) && terraformers > 0]]
+  const present = inputs.filter(([, known]) => known).map(([name]) => name)
+  const missing = inputs.filter(([, known]) => !known).map(([name]) => name)
+
+  if (missing.length) {
+    return unavailable({ rule: 'habitability.terraformRate', missing, present })
+  }
+
+  return ofRule({ rule: 'habitability.terraformRate', value: terraformCapacity(rules, terraformers), inputs: { present }, assumptions: [`${terraformers} terraformers`] })
+}
+
+// Where the places travel is measured from, when the race has none.
+export const NO_ORIGINS = Object.freeze({ colonies: 0, capital: false })
+
 const positive = (value, fallback) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback)
 const atLeastZero = (value, fallback) => (value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : fallback)
 
@@ -68,15 +173,23 @@ export const normaliseRanking = (stored) => {
 }
 
 // What a body's deposits are worth to this race: each deposit by the game's own value (accessibility, raised for a big easy one, halved for a small one), times the mineral's weight and the race's scarcity of it (`outlook`, from minerals.js `mineralOutlook`). Civilian mining complex candidates per the game's deposit rule (minerals.js `qualifiesForCmc`).
+// A deposit with no recorded amount or accessibility, or of a mineral whose runway is unknown, has no value (`value` null on its line); a body with any such line has `value` null and `missing` naming what is lacking, never a sum that counts the line as 0. A mineral weighted 0 counts for nothing whatever its deposit. A line keeps the results it was worked out from (`baseResult`, `scarcityResult`) for `rowProvenance`.
 export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
   const lines = body.Minerals.map((deposit) => {
     const mineral = MINERALS.find((candidate) => candidate.id === deposit.MaterialID)
-    const scarcity = (outlook.minerals[deposit.MaterialID] || {}).scarcity || NOT_SCARCE
-    const base = depositValue(deposit, ranking.minimumDeposit)
+    const weight = ranking.weights[mineral.id] || 0
+    const entry = outlook.minerals[deposit.MaterialID]
+    const tier = entry ? entry.scarcityResult : HOLDING
+    const baseResult = depositValueResult(deposit, ranking.minimumDeposit)
+    const base = valueOrNull(baseResult)
+    const scarcity = valueOrNull(tier)
+    const value = weight === 0 || base === 0 ? 0 : base === null || scarcity === null ? null : base * weight * scarcity.factor
+    const missing = value === null ? [...(base === null ? baseResult.inputs.missing.map((input) => `${input} of ${mineral.name}`) : []), ...(scarcity === null ? [`the ${mineral.name} runway`] : [])] : NOTHING
 
-    return { id: mineral.id, name: mineral.name, amount: deposit.Amount, accessibility: deposit.Accessibility, base, scarcity, value: base * (ranking.weights[mineral.id] || 0) * scarcity.factor }
-  }).sort((a, b) => b.value - a.value || b.amount - a.amount)
-  const value = lines.reduce((total, line) => total + line.value, 0)
+    return { id: mineral.id, name: mineral.name, amount: deposit.Amount, accessibility: deposit.Accessibility, base, scarcity, value, weight, baseResult, scarcityResult: tier, missing }
+  }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || b.amount - a.amount)
+  const unknown = lines.filter((line) => line.value === null)
+  const value = unknown.length ? null : lines.reduce((total, line) => total + line.value, 0)
   const cmc = body.Minerals.filter((deposit) => CMC_MINERAL_IDS.includes(deposit.MaterialID) && qualifiesForCmc(deposit)).map((deposit) => MINERALS.find((mineral) => mineral.id === deposit.MaterialID).name)
 
   return {
@@ -84,9 +197,10 @@ export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
     deposits: body.Minerals.length,
     lines,
     value,
+    missing: unknown.length ? [...new Set(unknown.flatMap((line) => line.missing))] : NOTHING,
     rich: !!body.BodySurveyed && value >= RICH_DEPOSIT_VALUE,
     worthMining: !!body.BodySurveyed && value >= WORTH_MINING_VALUE,
-    total: body.Minerals.reduce((sum, deposit) => sum + deposit.Amount, 0),
+    total: body.Minerals.every((deposit) => isNumber(deposit.Amount)) ? body.Minerals.reduce((sum, deposit) => sum + deposit.Amount, 0) : null,
     cmc,
   }
 }
@@ -172,29 +286,45 @@ const mapBodies = async (bodies, transform) => {
   return result
 }
 
-// Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan doesn't depend on the colony's capacity, so changing the terraformers doesn't redo any of this.
+// Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan doesn't depend on the colony's capacity, so changing the terraformers doesn't redo any of this. A body or species the save lacks a figure of that the cost or the plan reads is not assessed: its entry is unknown (`missing` names the figures), never a cost worked out from a default. That includes a gas the plan introduces that DIM_Gases holds no figures of (`assessTerraforming` says so before pricing the plan, whatever it would have priced at); a gas the plan does not use is not asked for. A race row without a colonisation skill is assessed at 1, which `rankBodies` reports as an assumption.
 export const assessBodies = async (bodies, speciesRows, rules, gasInfo) => {
   const species = speciesRows.map(speciesLimits)
+  const speciesMissing = species.map(missingSpeciesInputs)
+  const skill = isNumber(rules.ColonizationSkill) ? rules.ColonizationSkill : ASSUMED_SKILL
 
-  return mapBodies(bodies, (body) => ({
-    body,
-    byspecies: species.map((one) => {
-      const assessment = assessTerraforming(body, one, rules.ColonizationSkill, gasInfo)
-      const capacityOf = (hydroExt) => (assessment.cost.colonisable ? bodyCapacity({ Radius: body.Radius, HydroExt: hydroExt, TidalLock: body.TidalLock, BodyClass: body.BodyClass, PopulationDensityModifier: one.PopulationDensityModifier }) : 0)
+  return mapBodies(bodies, (body) => {
+    const bodyMissing = missingBodyInputs(body)
 
-      return {
-        species: one,
-        assessment,
-        capacityNow: capacityOf(body.HydroExt),
-        capacityAfter: assessment.plan ? capacityOf(assessment.plan.target.hydroExt) : null,
-      }
-    }),
-  }))
+    return {
+      body,
+      byspecies: species.map((one, index) => {
+        if (bodyMissing.length || speciesMissing[index].length) {
+          return { species: one, assessment: UNKNOWN_ASSESSMENT, capacityNow: null, capacityAfter: null, missing: [...bodyMissing, ...speciesMissing[index]] }
+        }
+
+        const assessment = assessTerraforming(body, one, skill, gasInfo)
+
+        if (assessment.missing) {
+          return { species: one, assessment: UNKNOWN_ASSESSMENT, capacityNow: null, capacityAfter: null, missing: assessment.missing }
+        }
+
+        const capacityOf = (hydroExt) => (assessment.cost.colonisable ? bodyCapacity({ Radius: body.Radius, HydroExt: hydroExt, TidalLock: body.TidalLock, BodyClass: body.BodyClass, PopulationDensityModifier: one.PopulationDensityModifier }) : 0)
+
+        return {
+          species: one,
+          assessment,
+          capacityNow: capacityOf(body.HydroExt),
+          capacityAfter: assessment.plan ? capacityOf(assessment.plan.target.hydroExt) : null,
+          missing: NOTHING,
+        }
+      }),
+    }
+  })
 }
 
 // What one outcome of colonising is worth to the goal, as the parts that multiply into it: the size of the prize (people and mining, each 0 to 1), discounted by the colony cost, the years of terraforming and the distance. Each discount is 1 at zero and 1/2 at its scale.
 const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcReady }) => {
-  const mineralBase = minerals.surveyed ? minerals.value + (cmcReady ? ranking.cmcBonus : 0) : 0
+  const mineralBase = minerals.surveyed ? (minerals.value ?? 0) + (cmcReady ? ranking.cmcBonus : 0) : 0
   const people = capacity / (capacity + PEOPLE_REFERENCE)
   const mining = mineralBase / (mineralBase + MINERAL_REFERENCE)
   const prize = goal === 'people' ? people : goal === 'minerals' ? mining : people + mining
@@ -205,9 +335,10 @@ const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcR
   return { people, mining, prize, cost, time, distance, value: prize * cost * time * distance }
 }
 
-// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming. `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming.
-export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }) => {
-  const base = { species, assessment, capacityNow, capacityAfter }
+// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming, or null when that is unknown (no terraforming option is weighed then). `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming. An unknown entry (`missing`) is worth nothing and has no strategy. With a goal that counts the deposits and a deposit value that is unknown (`mineralsUnknown`), the mining part and the prize are null and the value only orders the species: the row is unknown (`rankBodies`).
+export const evaluate = ({ species, assessment, capacityNow, capacityAfter, missing = NOTHING }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }) => {
+  const mineralsUnknown = goal !== 'people' && minerals.surveyed && minerals.value === null
+  const base = { species, assessment, capacityNow, capacityAfter, missing, mineralsUnknown }
 
   if (!assessment.cost.colonisable) {
     return { ...base, value: 0, parts: null, strategy: 'none', years: null, cost: null, raw: null, capacity: 0, infrastructure: null, nowInfrastructure: null, afterInfrastructure: null }
@@ -217,7 +348,7 @@ export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { 
   const options = [{ strategy: 'now', years: 0, cost: assessment.cost.worst, raw: assessment.cost.raw, capacity: capacityNow, lowGravity: assessment.cost.lowGravity, infrastructure: nowInfrastructure }]
   let afterInfrastructure = null
 
-  if (assessment.plan && assessment.after) {
+  if (assessment.plan && assessment.after && terraformCapacityPerYear !== null) {
     afterInfrastructure = infrastructurePerMillion(assessment.after.worst, species, assessment.lowGravity)
     options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, infrastructure: afterInfrastructure })
   }
@@ -228,14 +359,17 @@ export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { 
     return { ...option, parts, value: parts.value }
   }).sort((a, b) => b.value - a.value || a.years - b.years)[0]
 
-  return { ...base, ...best, nowInfrastructure, afterInfrastructure }
+  return { ...base, ...best, parts: mineralsUnknown ? { ...best.parts, mining: null, prize: null } : best.parts, nowInfrastructure, afterInfrastructure }
 }
 
 const sumPeople = (populations) => populations.reduce((total, population) => total + population.Population, 0)
 
-// One row per body for the table and chart: the best species for it (or the chosen one), its alternatives, its plan state, and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`, so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook; `cmcRules` is what `cmcSite` needs of the race.
-export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
-  const terraformCapacityPerYear = terraformCapacity(rules, terraformers)
+// One row per body for the table and chart: the best species for it (or the chosen one), its alternatives, its plan state, and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`, so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from the nearest sizeable colony, `capitalDistanceOf` from the capital, and `origins` says how many such places the race has (`NO_ORIGINS` for none), so a missing distance can say why; `outlook` is the race's mineral outlook; `cmcRules` is what `cmcSite` needs of the race.
+// What cannot be told stays unknown: a row whose best route needs a figure the save lacks (a body or species figure, or the terraforming capacity when a plan is in play) has the `UNKNOWN_STATE`, no score and no rank, and `unknown` names the figures. `basis` is what every row was worked out under, for `rowProvenance`.
+export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK, origins = NO_ORIGINS }) => {
+  const capacity = terraformCapacityResult(rules, terraformers)
+  const terraformCapacityPerYear = valueOrNull(capacity)
+  const basis = Object.freeze({ skillAssumed: !isNumber(rules.ColonizationSkill), capacity, outlookKnown: !!outlook.known, origins, goal })
 
   const rows = await mapBodies(assessed.filter(({ byspecies }) => byspecies.length), ({ body, byspecies }) => {
     const minerals = mineralSummary(body, ranking, outlook)
@@ -246,12 +380,30 @@ export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, te
     const capital = capitalDistanceOf(body)
     const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }))
     const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
-    const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
+    const considered = chosen.length ? chosen : evaluations
+    const [best] = [...considered].sort((a, b) => b.value - a.value || (b.missing.length > 0) - (a.missing.length > 0) || (a.cost ?? Infinity) - (b.cost ?? Infinity))
+    const unknownSpecies = considered.some((evaluation) => evaluation.missing.length) ? considered.filter((evaluation) => evaluation.missing.length).map((evaluation) => evaluation.species.SpeciesName) : NOTHING
+    const planUnknown = terraformCapacityPerYear === null && considered.some((evaluation) => evaluation.assessment.plan && evaluation.assessment.after)
     const settled = { people: sumPeople(body.OwnPopulations), colonies: body.OwnPopulations.length, alien: body.AlienPopulations.length }
-    const route = routeFacts(best, planYears(best.assessment.work, terraformCapacityPerYear))
-    const facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
-    const state = stateOf(facts)
+    const route = routeFacts(best, terraformCapacityPerYear === null ? null : planYears(best.assessment.work, terraformCapacityPerYear))
+    let facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
+    let state = stateOf(facts)
+    let unknown = NOTHING
     const room = route ? Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0) : 0
+
+    if (best.missing.length && state.id === 'unfit') {
+      unknown = best.missing
+    } else if (planUnknown && state.target) {
+      unknown = capacity.inputs.missing
+    } else if (minerals.surveyed && minerals.value === null && mineralsDecide(facts, state, goal, room, ranking)) {
+      unknown = minerals.missing
+    }
+
+    if (unknown.length) {
+      facts = { ...facts, unknown }
+      state = UNKNOWN_STATE
+    }
+
     const worthwhile = !!route && (room >= ranking.minimumPeople || minerals.worthMining || cmcReady)
 
     return {
@@ -266,7 +418,10 @@ export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, te
       settled: settled.colonies > 0,
       facts,
       state,
-      target: STATE_BY_ID[state.id].target && worthwhile,
+      target: state.target && worthwhile,
+      unknown,
+      unknownSpecies,
+      basis,
       rank: null,
       score: null,
     }
@@ -288,3 +443,36 @@ export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, te
 
 // The factor that sets a cost, as a label for the list ("Water 1.4"), or null.
 export const costDriver = (assessmentCost) => (assessmentCost.colonisable ? limitingFactor(assessmentCost.factors) : null)
+
+const COST_INPUTS = ['body environment', 'species ranges', 'colonisation skill']
+
+// Whether a deposit value that is unknown could change a row: its state (a rich deposit makes a mining target), whether it is worth the trip, or the score of a goal that counts the deposits. A people-only goal on a body that holds the smallest colony whatever its deposits is not affected, and neither is a body that is no target either way.
+const mineralsDecide = (facts, state, goal, room, ranking) => {
+  const rich = stateOf({ ...facts, richDeposit: true })
+
+  return (state.target || rich.target) && (goal !== 'people' || rich !== state || room < ranking.minimumPeople)
+}
+
+const lineResult = (line) => (line.value !== null && (line.weight === 0 || line.base === 0) ? ofRule({ rule: 'habitability.mineralValue', value: 0, inputs: { present: [line.weight === 0 ? 'the mineral weight (0)' : 'the deposit amount (under the minimum)'] } }) : combine({ rule: 'habitability.mineralValue', parts: { deposit: line.baseResult, scarcity: line.scarcityResult }, compute: (values) => values.deposit * line.weight * values.scarcity.factor }))
+
+// The deposit value of a surveyed body as a result: unavailable, naming the deposit figures or the runway that is lacking, when any deposit has no value.
+const mineralsResult = (minerals, assumptions) => combine({ rule: 'habitability.mineralValue', parts: Object.fromEntries(minerals.lines.map((line, index) => [`${line.name} ${index + 1}`, lineResult(line)])), compute: () => minerals.value, inputs: { present: ['surveyed deposits'] }, assumptions })
+
+// The results behind the figures one row shows, worked out when the row is shown: each is null where the figure does not exist by rule (a body no species can live on, a body that is not a target, an unsurveyed body), a result with the figure where it does, and unavailable, naming the missing inputs, where the save lacks them. The figures are those of the row; this only wraps them.
+export const rowProvenance = (row) => {
+  const { best, basis } = row
+  const colonisable = best.strategy !== 'none'
+  const skill = basis.skillAssumed ? [SKILL_ASSUMPTION] : []
+  const lacking = best.missing.length ? best.missing : null
+  const assumptions = [...(!row.distance && row.score !== null ? [`a body with no charted route keeps ${Math.round(NO_ROUTE_FACTOR * 100)}% of its worth`] : []), ...(!basis.outlookKnown && basis.goal !== 'people' ? ['no mineral ledger in the save: every mineral counts once'] : []), ...(row.unknownSpecies.length ? [`species left out for missing figures: ${row.unknownSpecies.join(', ')}`] : [])]
+  const scored = row.score === null ? null : best.assessment.plan && best.assessment.after ? combine({ rule: 'habitability.score', parts: { capacity: basis.capacity }, compute: () => row.score, assumptions }) : ofRule({ rule: 'habitability.score', value: row.score, assumptions })
+
+  return {
+    cost: lacking ? unavailable({ rule: 'habitability.colonyCost', missing: lacking }) : colonisable ? ofRule({ rule: 'habitability.colonyCost', value: best.cost, inputs: { present: COST_INPUTS }, assumptions: [...skill, ...(best.strategy === 'terraform' ? ['the terraforming plan is carried out'] : [])] }) : null,
+    infrastructure: lacking ? unavailable({ rule: 'habitability.infraPerMillion', missing: lacking }) : colonisable ? infrastructurePerMillionResult(best.assessment.cost.worst, best.species, best.assessment.cost.lowGravity, skill) : null,
+    capacity: lacking ? unavailable({ rule: 'habitability.bodyCapacity', missing: lacking }) : colonisable ? ofRule({ rule: 'habitability.bodyCapacity', value: best.capacity, inputs: { present: ['body size and water', 'species density'] } }) : null,
+    score: row.unknown.length ? unavailable({ rule: 'habitability.score', missing: row.unknown }) : scored,
+    distance: row.distance ? ofRule({ rule: 'habitability.distance', value: row.distance, inputs: { present: ['charted jump points', 'colony places'] } }) : unavailable({ rule: 'habitability.distance', missing: [basis.origins.colonies ? 'a charted, explored route from a colony' : 'a capital or colony with people to measure from'] }),
+    minerals: row.minerals.surveyed ? mineralsResult(row.minerals, basis.outlookKnown ? [] : ['no mineral ledger in the save: every mineral counts once']) : null,
+  }
+}

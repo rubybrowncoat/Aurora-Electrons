@@ -7,8 +7,12 @@ import { loadJumpPoints } from './jump-graph'
 import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
 import { loadNavalAdmins } from './naval-admins'
+import { ofRule, registerRule, unavailable } from './provenance'
 
 const rows = (database, sql) => database.query(sql).then(([items]) => items)
+
+// A SQL sum that is null, not smaller, when any row of the group has no value (`sum` skips nulls). A group with no rows at all sums to a real 0.
+const completeSum = (column) => `case when count(*) = count(${column}) then coalesce(sum(${column}), 0) else null end`
 
 // Every colonisable-looking body of a known system, with the atmosphere, the deposits of a surveyed body and the colonies on it. Gas giants and jump points never appear; asteroids and comets do. Each body also gets `CmcStarInReach` (colonization.js `cmcStarInReach` for its star), and each own colony `BlocksCmc`: whether the game would keep a civilian mining complex off its body (people, automated mines, complexes or ex-complexes, or no orbital miners of the race assigned to it there).
 export const loadBodies = async (database, { GameID, RaceID }) => {
@@ -24,7 +28,7 @@ left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.Sys
 where FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5)`),
     rows(database, `select FCT_AtmosphericGas.SystemBodyID, FCT_AtmosphericGas.AtmosGasID, FCT_AtmosphericGas.AtmosGasAmount, FCT_AtmosphericGas.GasAtm, FCT_AtmosphericGas.FrozenOut, DIM_Gases.Name as AtmosGasName, DIM_Gases.BoilingPoint, DIM_Gases.GHGas, DIM_Gases.AntiGHGas, DIM_Gases.Dangerous, DIM_Gases.DangerousLevel
 from FCT_AtmosphericGas
-inner join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
+left join DIM_Gases on DIM_Gases.GasID = FCT_AtmosphericGas.AtmosGasID
 where FCT_AtmosphericGas.GameID = ${GameID}`),
     rows(database, `select FCT_MineralDeposit.SystemBodyID, FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc
 from FCT_MineralDeposit
@@ -79,7 +83,7 @@ where FCT_LagrangePoint.GameID = ${GameID}`),
 }
 
 // The species the race lives as (one row per species with a colony of its own), with what the game derives its colony cost from.
-export const loadSpecies = (database, { GameID, RaceID }) => rows(database, `select FCT_Population.SpeciesID, FCT_Species.SpeciesName, sum(FCT_Population.Population) as TotalPopulation, FCT_Species.BreatheID, DIM_Gases.Name as BreatheName, FCT_Species.Oxygen as IdealBreathePressure, FCT_Species.OxyDev as BreathePressureDeviation, FCT_Species.PressMax as MaximumPressure, FCT_Species.Temperature as IdealTemperature, FCT_Species.TempDev as TemperatureDeviation, FCT_Species.Gravity as IdealGravity, FCT_Species.GravDev as GravityDeviation, FCT_Species.PopulationDensityModifier
+export const loadSpecies = (database, { GameID, RaceID }) => rows(database, `select FCT_Population.SpeciesID, FCT_Species.SpeciesName, ${completeSum('FCT_Population.Population')} as TotalPopulation, FCT_Species.BreatheID, DIM_Gases.Name as BreatheName, FCT_Species.Oxygen as IdealBreathePressure, FCT_Species.OxyDev as BreathePressureDeviation, FCT_Species.PressMax as MaximumPressure, FCT_Species.Temperature as IdealTemperature, FCT_Species.TempDev as TemperatureDeviation, FCT_Species.Gravity as IdealGravity, FCT_Species.GravDev as GravityDeviation, FCT_Species.PopulationDensityModifier
 from FCT_Population
 inner join FCT_Species on FCT_Species.SpeciesID = FCT_Population.SpeciesID
 left join DIM_Gases on DIM_Gases.GasID = FCT_Species.BreatheID
@@ -87,11 +91,26 @@ where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID}
 group by FCT_Population.SpeciesID
 order by TotalPopulation desc`)
 
-// The race's tech multipliers and the game's terraforming speed setting (a percentage), as one row.
+registerRule({
+  id: 'habitability.speciesPopulation',
+  versions: ['2.7.x'],
+  units: 'M people',
+  verification: 'confirmed',
+  structure: ['FCT_Population.Population, SpeciesID, RaceID'],
+  note: 'The sum of the stored FCT_Population.Population over the race\'s colonies of the species, as saved; no calculation beyond the sum.',
+})
+
+// A species' population (millions) as a result: unavailable when any of its colonies has no recorded population (the sum would be partial), never 0. A species whose colonies hold no people is a real 0.
+export const speciesPopulationResult = (species) => (Number.isFinite(species.TotalPopulation) ? ofRule({ rule: 'habitability.speciesPopulation', value: species.TotalPopulation, inputs: { present: ['FCT_Population.Population'] } }) : unavailable({ rule: 'habitability.speciesPopulation', missing: ['FCT_Population.Population'] }))
+
+// What the race rules are while unread, and when the save has no race row: nothing is known, so no default stands in for a missing rate or skill (colonization.js `terraformCapacityResult` and `assessBodies` say what each missing one does).
+export const NO_RACE_RULES = Object.freeze({ ColonizationSkill: null, TerraformingRate: null, TerraformingSpeed: null })
+
+// The race's tech multipliers and the game's terraforming speed setting (a percentage), as one row. Without a race row, or with a column that holds nothing, the figure is null.
 export const loadRaceRules = (database, { GameID, RaceID }) => rows(database, `select FCT_Race.ColonizationSkill, FCT_Race.TerraformingRate, FCT_Game.TerraformingSpeed
 from FCT_Race
 inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID
-where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`).then(([row]) => row || { ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
+where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`).then(([row]) => row || NO_RACE_RULES)
 
 // Whether a game founds civilian mining complexes, from its `FCT_Game` row. The switch (`AllowCMC`) came with Aurora 2.7; a 2.6 game has no such column and founds them regardless, so a row without it counts as switched on.
 export const cmcAllowedOf = (game) => (game.AllowCMC === undefined ? true : game.AllowCMC === 1)
@@ -132,8 +151,8 @@ where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} an
 }
 
 const MINERAL_COLUMNS = MINERALS.map((mineral) => mineral.name)
-const sumOf = (table) => MINERAL_COLUMNS.map((name) => `sum(${table}.${name}) as ${name}`).join(', ')
-const byMineralId = (row) => Object.fromEntries(MINERALS.map((mineral) => [mineral.id, (row && row[mineral.name]) || 0]))
+const sumOf = (table) => MINERAL_COLUMNS.map((name) => `${completeSum(`${table}.${name}`)} as ${name}`).join(', ')
+const byMineralId = (row) => Object.fromEntries(MINERALS.map((mineral) => [mineral.id, row ? row[mineral.name] ?? null : null]))
 
 // How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets over the year's net loss, from the game's mineral ledger), read once for the Planner. The same reads as the page's, over the last 365 days.
 const LEDGER_DAYS = 365
@@ -146,7 +165,7 @@ const loadLedger = async (database, { GameID, RaceID }) => {
     return []
   }
 
-  return rows(database, `select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick
+  return rows(database, `select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, ${completeSum('FCT_RaceMineralData.Amount')} as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick
 from FCT_RaceMineralData
 inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID
 cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${GameID} and VIR_Production.RaceID = ${RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${LEDGER_DAYS * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks
@@ -154,20 +173,26 @@ where FCT_RaceMineralData.GameID = ${GameID} and FCT_RaceMineralData.RaceID = ${
 group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`)
 }
 
-// How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets over the year's net loss, from the game's mineral ledger and the mining it leaves out), read once for the Planner with the page's own reads.
+// How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets over the year's net loss, from the game's mineral ledger and the mining it leaves out), read once for the Planner with the page's own reads. A sum with a row that has no value (a colony's stock, a cargo line, a packet column, a ledger amount) is null, not the smaller sum of the others: `mineralOutlook` reads null as unknown.
 export const loadMineralOutlook = async (database, ids) => {
   const { GameID, RaceID } = ids
   const [[game], [stock], cargo, [packets], ledger, surface, orbital, navalAdmins] = await Promise.all([
     rows(database, `select GameTime from FCT_Game where GameID = ${GameID}`),
     rows(database, `select ${sumOf('FCT_Population')} from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID}`),
-    rows(database, `select FCT_ShipCargo.CargoID as MaterialID, sum(FCT_ShipCargo.Amount) as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
+    rows(database, `select FCT_ShipCargo.CargoID as MaterialID, ${completeSum('FCT_ShipCargo.Amount')} as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
     rows(database, `select ${sumOf('FCT_MassDriverPackets')} from FCT_MassDriverPackets where GameID = ${GameID} and RaceID = ${RaceID}`),
     loadLedger(database, ids),
     rows(database, surfaceMiningQuery(ids)),
     rows(database, orbitalMiningQuery(ids)),
     loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial' }),
   ])
-  const carried = (mineral) => ((cargo.find((row) => row.MaterialID === mineral.id) || {}).Amount || 0) + ((packets && packets[mineral.name]) || 0)
+  const carried = (mineral) => {
+    const aboard = cargo.find((row) => row.MaterialID === mineral.id)
+    const onShips = aboard ? aboard.Amount : 0
+    const driven = packets ? packets[mineral.name] : null
+
+    return onShips === null || driven === null || driven === undefined ? null : onShips + driven
+  }
 
   return mineralOutlook({
     ledger,

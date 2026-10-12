@@ -1,6 +1,114 @@
 // Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
 import { roundToDecimal, separatedNumber } from './math'
+import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
+
+const MINERALS_VERSIONS = ['2.7.x']
+const DEPOSIT_COLUMNS = ['FCT_MineralDeposit.Amount', 'FCT_MineralDeposit.Accessibility']
+
+// The rules of the Minerals page's deposit scores, site ranking, distances and stockpile checks, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The flow, forecast and runway rules are registered further down; the colony stock rules in colony-minerals.js.
+registerRule({
+  id: 'minerals.potential',
+  versions: MINERALS_VERSIONS,
+  units: 'points (0 to 10)',
+  verification: 'estimated',
+  structure: DEPOSIT_COLUMNS,
+  note: 'The page\'s own score of a deposit: atan of (amount over 20,000 t) to the power r times r squared, with r = sin(π/2 × accessibility), scaled to 0 to 10. An approximation of how the game\'s own AI weighs a deposit; not compared with any stored game value. A deposit with no recorded amount or accessibility has no score.',
+})
+
+registerRule({
+  id: 'minerals.bodyPotential',
+  versions: MINERALS_VERSIONS,
+  units: 'points (0 to 10)',
+  verification: 'estimated',
+  structure: DEPOSIT_COLUMNS,
+  note: 'The mean of the deposit scores of a body over the 11 minerals, by the same approximation as the deposit score. A body with a deposit that has no recorded amount or accessibility has no score.',
+  assumptions: ['a mineral with no deposit on the body, or outside the options, counts as 0'],
+})
+
+registerRule({
+  id: 'minerals.depositValue',
+  versions: MINERALS_VERSIONS,
+  units: 'value',
+  verification: 'estimated',
+  structure: DEPOSIT_COLUMNS,
+  note: 'Accessibility times a size factor (1 by default, 0.5 under 10,000 t, 1.25, 1.5 and 2 above 100,000, 250,000 and 1,000,000 t at accessibility over 0.4), as the game\'s own AI is understood to value a deposit; nothing under the minimum amount (2,000 t unless given) counts. Not compared with any stored game value. A deposit under the minimum is worth 0, which stays apart from a deposit with no recorded amount or accessibility, which has no value.',
+})
+
+registerRule({
+  id: 'minerals.scarcity',
+  versions: MINERALS_VERSIONS,
+  units: 'tier',
+  verification: 'assumed',
+  structure: ['the mineral\'s runway'],
+  note: 'The planner\'s own policy, not a game rule: a runway under 5 years is critical (factor 3), under 25 short (factor 2) and under 100 running down (factor 1.5); a mineral that holds, grows or lasts a century counts once. A mineral with no known runway has no tier.',
+  assumptions: ['runway thresholds of 5, 25 and 100 years', 'a mineral that holds or grows counts once'],
+})
+
+registerRule({
+  id: 'minerals.siteOrder',
+  versions: MINERALS_VERSIONS,
+  units: 'site',
+  verification: 'assumed',
+  structure: DEPOSIT_COLUMNS,
+  note: 'The page\'s own order for an untapped site: the higher potential to a tenth, then the higher accessibility, then the larger amount. A deposit with no recorded amount or accessibility cannot be ranked and is left out, and the result says how many were.',
+  assumptions: ['sites are ordered by potential, then accessibility, then amount'],
+})
+
+registerRule({
+  id: 'minerals.distance',
+  versions: MINERALS_VERSIONS,
+  units: 'km',
+  verification: 'estimated',
+  structure: ['FCT_JumpPoint.Xcor, Ycor, WPLink', 'FCT_RaceJumpPointSurvey.Explored, Charted', 'FCT_Population.SystemID, Capital, Population', 'FCT_SystemBody.Xcor, Ycor'],
+  note: 'The shortest charted route in km from the nearest capital or sizeable colony to the body: straight lines inside a system and no distance through a jump point, over explored jump points the race did not mark to ignore. The route search is not compared with a route the game plans. A body that no explored route reaches, or a race with no colony to start from, has no distance.',
+  assumptions: ['routes start at the capital and colonies of the supply base size'],
+})
+
+registerRule({
+  id: 'minerals.perMine',
+  versions: MINERALS_VERSIONS,
+  units: 't/yr',
+  verification: 'estimated',
+  structure: ['FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility'],
+  note: 'What one mine digs a year at the deposit\'s current accessibility: the race\'s mine production times accessibility, before the colony\'s efficiency, stability, governor and radiation. The full surface rate of this product reproduced the logged mining of 385 colony-by-mineral series in the sample save (docs/plans/aurcalcs/sql-mining.md); this page\'s product on its own was not re-checked. A race with no mine production recorded has no figure.',
+})
+
+registerRule({
+  id: 'minerals.depletion',
+  versions: MINERALS_VERSIONS,
+  units: 'deposit state',
+  verification: 'estimated',
+  structure: ['FCT_MineralDeposit.Amount, HalfOriginalAmount'],
+  note: 'A deposit is past half when its amount is under its stored half of the original amount, and accessibility then falls with what is left; above it, the amount above half holds accessibility. The decline model fit 37 declining deposits within 0.005 (docs/plans/aurcalcs/sql-mining.md); deposits upgraded by a ground survey keep a stale original amount, which this page reads as stored. A deposit with no recorded half has no state.',
+})
+
+registerRule({
+  id: 'minerals.orbitalReach',
+  versions: MINERALS_VERSIONS,
+  units: 'yes or no',
+  verification: 'estimated',
+  structure: ['FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter'],
+  note: 'A body is open to orbital miners when its diameter (twice the radius) is no more than the race\'s maximum orbital mining diameter. Compared on stored values; the game\'s own check was not compared. A body with no radius, or a race with no maximum recorded, is neither open nor closed.',
+})
+
+registerRule({
+  id: 'minerals.cmcCandidate',
+  versions: MINERALS_VERSIONS,
+  units: 'yes or no',
+  verification: 'estimated',
+  structure: ['FCT_MineralDeposit.Amount, Accessibility', 'FCT_Game.AllowCMC'],
+  note: 'A body could host a civilian mining complex on its mineral deposits alone when it holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better. The body\'s other conditions are not checked here (the Colonization Planner checks them per body). Thresholds as the game\'s rules state them; not reproduced against a saved founding.',
+})
+
+registerRule({
+  id: 'minerals.massDriverRate',
+  versions: MINERALS_VERSIONS,
+  units: 't/yr',
+  verification: 'estimated',
+  structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'],
+  note: 'What a colony\'s mass drivers can send a year: 5,000 t per driver. The constant is the game\'s rule as documented; it was not compared with saved packets. A colony with no driver sends nothing, and one with no destination sends nothing whatever its drivers.',
+})
 
 export const MINERALS = [
   { id: 1, name: 'Duranium' },
@@ -59,6 +167,93 @@ export const SCARCITY = [
 export const NOT_SCARCE = { id: 'ok', label: 'Holding', years: null, factor: 1 }
 
 export const scarcityOf = (runway) => (Number.isFinite(runway) && SCARCITY.find((tier) => runway < tier.years)) || NOT_SCARCE
+
+// A recorded figure: a finite number, not negative. Null, undefined and NaN are unknown, and unknown is never read as 0.
+const known = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const inputsOfDeposit = (deposit, columns = ['Amount', 'Accessibility']) => ({
+  present: columns.filter((column) => deposit && known(deposit[column])).map((column) => `FCT_MineralDeposit.${column}`),
+  missing: columns.filter((column) => !deposit || !known(deposit[column])).map((column) => `FCT_MineralDeposit.${column}`),
+})
+
+// Whether a deposit has the amount and accessibility every score of it reads.
+export const depositReadable = (deposit) => inputsOfDeposit(deposit).missing.length === 0
+
+// `depositPotential` as a provenance result: unavailable, naming what is missing, for a deposit without a recorded amount or accessibility.
+export const depositPotentialResult = (deposit) => {
+  const inputs = inputsOfDeposit(deposit)
+
+  return inputs.missing.length ? unavailable({ rule: 'minerals.potential', ...inputs }) : ofRule({ rule: 'minerals.potential', value: depositPotential(deposit), inputs })
+}
+
+// A body's potential: the mean over the 11 minerals of the potential of its `deposits` (those in view), a mineral without one counting as 0. `unreadable` is how many of the body's deposits have no recorded amount or accessibility: with any, the mean is unknown.
+export const bodyPotentialResult = (deposits, unreadable = 0) => (unreadable ? unavailable({ rule: 'minerals.bodyPotential', missing: [`Amount or Accessibility of ${unreadable} ${unreadable === 1 ? 'deposit' : 'deposits'}`] }) : ofRule({ rule: 'minerals.bodyPotential', value: deposits.reduce((total, deposit) => total + depositPotential(deposit), 0) / MINERALS.length, inputs: { present: DEPOSIT_COLUMNS } }))
+
+// `depositValue` as a provenance result. A deposit under the minimum amount is worth 0, a known figure that needs no accessibility; one without a recorded amount, or without an accessibility when the amount passes, has no value.
+export const depositValueResult = (deposit, minimumAmount = DEPOSIT_MINIMUM_AMOUNT) => {
+  const inputs = inputsOfDeposit(deposit)
+  const assumptions = [`the minimum deposit is ${minimumAmount} t`]
+
+  if (deposit && known(deposit.Amount) && deposit.Amount < minimumAmount) {
+    return ofRule({ rule: 'minerals.depositValue', value: 0, inputs: { present: ['FCT_MineralDeposit.Amount'] }, assumptions })
+  }
+
+  return inputs.missing.length ? unavailable({ rule: 'minerals.depositValue', ...inputs, assumptions }) : ofRule({ rule: 'minerals.depositValue', value: depositValue(deposit, minimumAmount), inputs, assumptions })
+}
+
+const tierOf = (runway) => SCARCITY.find((tier) => runway < tier.years) || NOT_SCARCE
+
+// `scarcityOf` as a provenance result whose value is the tier ({ id, label, years, factor }). `runway` is the years the stock lasts, as a number or a provenance result of one; Infinity is a mineral that holds, grows or has no net loss. Null, undefined, NaN and an unavailable result are an unknown runway, which has no tier: it is not the same as holding.
+export const scarcityResult = (runway) => {
+  if (runway && typeof runway === 'object') {
+    return combine({ rule: 'minerals.scarcity', parts: { runway }, compute: (values) => tierOf(values.runway) })
+  }
+
+  return typeof runway === 'number' && !Number.isNaN(runway) ? ofRule({ rule: 'minerals.scarcity', value: tierOf(runway), inputs: { present: ['runway'] } }) : unavailable({ rule: 'minerals.scarcity', missing: ['runway'] })
+}
+
+// Deposits and bodies ranked for an untapped site: the higher potential (to a tenth, as shown), then accessibility, then size. Positive when `a` is the better site.
+export const betterSite = (a, b) => roundToDecimal(a.potential, 1) - roundToDecimal(b.potential, 1) || a.accessibility - b.accessibility || a.amount - b.amount
+
+// The best untapped `site` as a result (value: the site) with its `potential` result. `unranked` is how many untapped deposits could not be ranked for want of a recorded amount, accessibility or mining on their body. No site and none unranked is a result of nothing to rank: null. No site but some unranked is unknown.
+export const bestSiteResult = (site, potential, unranked = 0) => {
+  const assumptions = unranked ? [`${unranked} untapped ${unranked === 1 ? 'deposit' : 'deposits'} with no recorded amount, accessibility or mining left out of the ranking`] : []
+
+  if (!site) {
+    return unranked ? unavailable({ rule: 'minerals.siteOrder', missing: DEPOSIT_COLUMNS, assumptions }) : null
+  }
+
+  return combine({ rule: 'minerals.siteOrder', parts: { potential }, compute: () => site, assumptions })
+}
+
+// Whether a deposit is past half its original amount, so its accessibility falls with what is left: true or false, or null when the amount or the half is not recorded. A half of 0 means no decline.
+export const pastHalf = (deposit) => (known(deposit.Amount) && known(deposit.HalfOriginalAmount) ? deposit.Amount < deposit.HalfOriginalAmount : null)
+
+// Whether orbital miners can work a body: true or false, or null when the diameter or the race's maximum is not recorded.
+export const withinOrbitalReach = (diameter, maximum) => (known(diameter) && known(maximum) ? diameter <= maximum : null)
+
+// What one mine digs a year at each of `deposits`' accessibility, summed, at the race's `mineProduction`: unavailable when the race's mine production or a deposit's accessibility is not recorded.
+export const perMineResult = (mineProduction, deposits) => {
+  const missing = [...(known(mineProduction) ? [] : ['FCT_Race.MineProduction']), ...(deposits.every((deposit) => known(deposit.Accessibility)) ? [] : ['FCT_MineralDeposit.Accessibility'])]
+
+  return missing.length ? unavailable({ rule: 'minerals.perMine', missing }) : ofRule({ rule: 'minerals.perMine', value: deposits.reduce((total, deposit) => total + mineProduction * deposit.Accessibility, 0), inputs: { present: ['FCT_Race.MineProduction', 'FCT_MineralDeposit.Accessibility'] } })
+}
+
+// A body's distance from the race's colonies as a result (value: { km, jumps, from } of `buildDistanceMap`). `route` is the route found or null; `origins` how many capitals and colonies the routes start from; `placed` whether the body has a position.
+export const miningDistanceResult = (route, { origins, placed }) => {
+  if (!placed) {
+    return unavailable({ rule: 'minerals.distance', missing: ['FCT_SystemBody.Xcor, Ycor'] })
+  } else if (!origins) {
+    return unavailable({ rule: 'minerals.distance', missing: ['a capital or colony to route from'] })
+  }
+
+  return route ? ofRule({ rule: 'minerals.distance', value: route, inputs: { present: ['explored jump routes', 'colonies to route from'] } }) : unavailable({ rule: 'minerals.distance', missing: ['an explored route from a colony'], present: ['colonies to route from'] })
+}
+
+// Tonnes a year per mass driver.
+export const MASS_DRIVER_TONS = 5000
+
+// What a colony's `drivers` can send a year, as a result; unavailable when the driver count is not recorded, or when `gaps` of the installations it sums over (an amount or a driver value not recorded) are.
+export const massDriverRateResult = (drivers, gaps = 0) => (known(drivers) && !(gaps > 0) ? ofRule({ rule: 'minerals.massDriverRate', value: drivers * MASS_DRIVER_TONS, inputs: { present: ['FCT_PopulationInstallations.Amount'] } }) : unavailable({ rule: 'minerals.massDriverRate', missing: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue'] }))
 
 export const SECONDS_PER_DAY = 86400
 
@@ -256,24 +451,31 @@ const ledgerCoverage = (ledger, gameTime, windowDays) => {
   })
 }
 
-// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }. Without a ledger (a save before Aurora 2.6) nothing is known and every mineral counts as holding.
+// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }, where a stock or transit that is null or absent is unknown, never 0. Without a ledger (a save before Aurora 2.6) nothing is known of the flows and every mineral counts as holding (`known` is false).
+// A mineral's `runway` is the years its stock lasts over a net loss; Infinity when it has no net loss (it holds or grows, whatever the stock); null when it is not known: a loss over a stock or transit that is unknown, or a ledger row of the mineral with no amount (then `net` is null too). `scarcityResult` is the provenance result of the tier, `scarcity` its value (null while unknown), and `stock` is null while the stock or the cargo in transit is unknown.
 export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit, unlogged = {} }) => {
   const coverageDays = ledgerCoverage(ledger, gameTime, windowDays)
   const perYear = coverageDays ? DAYS_PER_YEAR / coverageDays : 0
-  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: (stock[mineral.id] || 0) + (transit[mineral.id] || 0), produced: coverageDays ? unlogged[mineral.id] || 0 : 0, used: 0 }]))
+  const held = (id) => (Number.isFinite(stock[id]) && Number.isFinite(transit[id]) ? stock[id] + transit[id] : null)
+  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: held(mineral.id), produced: coverageDays ? unlogged[mineral.id] || 0 : 0, used: 0, flowKnown: true }]))
 
   ledger.forEach((row) => {
     const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)
 
     if (group && outlook[row.MaterialID]) {
-      outlook[row.MaterialID][group.income ? 'produced' : 'used'] += row.Amount * perYear
+      if (Number.isFinite(row.Amount)) {
+        outlook[row.MaterialID][group.income ? 'produced' : 'used'] += row.Amount * perYear
+      } else {
+        outlook[row.MaterialID].flowKnown = false
+      }
     }
   })
 
   Object.values(outlook).forEach((mineral) => {
-    mineral.net = mineral.produced - mineral.used
-    mineral.runway = mineral.net < 0 ? mineral.stock / -mineral.net : null
-    mineral.scarcity = scarcityOf(mineral.runway)
+    mineral.net = mineral.flowKnown ? mineral.produced - mineral.used : null
+    mineral.runway = !mineral.flowKnown ? null : mineral.net < 0 ? (mineral.stock === null ? null : mineral.stock / -mineral.net) : Infinity
+    mineral.scarcityResult = scarcityResult(mineral.runway)
+    mineral.scarcity = valueOrNull(mineral.scarcityResult)
   })
 
   return { known: coverageDays > 0, minerals: outlook }
@@ -282,10 +484,21 @@ export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, s
 const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
 // Minerals the industrial queue will consume over the next year: each project's cost scaled to one year of work at its share of the colony's capacity; queued entries count only while the year has capacity left (as "mineral use.sql" does), and only for the capacity earlier entries leave.
-// `capacityOf(PopulationID, ProductionType)`: BP/yr at 100%.
+// `capacityOf(PopulationID, ProductionType)`: BP/yr at 100%, or null when the colony's capacity is not known. Returns `{ demand, unknown, incomplete }`: `demand` is t by mineral name, over the projects whose inputs are known; `unknown` lists by mineral name the colonies (PopulationID) whose queued projects use that mineral but have no known capacity; `incomplete` lists by mineral name the project inputs a queued project lacks: the mineral's own cost (also at a colony with unknown capacity), or at a colony with known capacity its place in the queue, units left, build points per unit or share, which set how much of the year each project gets. The demand of a mineral with either is not known. A real capacity of 0 means no work gets done and demands nothing, whatever the queue lacks.
+const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
+
+const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
+
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
+  const unknown = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
+  const incomplete = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, []]))
   const groups = {}
+  const lack = (mineral, input) => {
+    if (!incomplete[mineral.name].includes(input)) {
+      incomplete[mineral.name].push(input)
+    }
+  }
 
   projects.forEach((project) => {
     const key = `${project.PopulationID}-${facilityOf(project.ProductionType)}`
@@ -294,6 +507,40 @@ export const annualQueueDemand = (projects, capacityOf) => {
   })
 
   Object.values(groups).forEach((group) => {
+    const capacity = capacityOf(group[0].PopulationID, group[0].ProductionType)
+
+    if (capacity === null || capacity === undefined || Number.isNaN(capacity)) {
+      MINERALS.forEach((mineral) => {
+        if (group.some((project) => !recorded(project[mineral.name]) || project[mineral.name] > 0) && !unknown[mineral.name].includes(group[0].PopulationID)) {
+          unknown[mineral.name].push(group[0].PopulationID)
+        }
+
+        if (group.some((project) => !recorded(project[mineral.name]))) {
+          lack(mineral, `a queued project's ${mineral.name} cost`)
+        }
+      })
+
+      return
+    }
+
+    // A colony that does no work builds nothing, whatever its queue lacks.
+    if (capacity === 0) {
+      return
+    }
+
+    // A project missing what sets its share of the year leaves the share of every later one open too, so every mineral the colony's queue may use is unknown.
+    const gaps = SCHEDULE_INPUTS.filter(([field]) => group.some((project) => !recorded(project[field])))
+
+    if (gaps.length) {
+      MINERALS.forEach((mineral) => {
+        if (group.some((project) => !recorded(project[mineral.name]) || project[mineral.name] > 0)) {
+          gaps.forEach(([, label]) => lack(mineral, `a queued project's ${label}`))
+        }
+      })
+
+      return
+    }
+
     // The year's capacity spent so far, in percent of a full year at 100%.
     let usedPercent = 0
 
@@ -303,7 +550,6 @@ export const annualQueueDemand = (projects, capacityOf) => {
       }
 
       group.filter((project) => project.Queue === queue).forEach((project) => {
-        const capacity = capacityOf(project.PopulationID, project.ProductionType)
         const remainingBP = project.Amount * project.ProdPerUnit
 
         if (!capacity || !project.Percentage || !remainingBP) {
@@ -316,7 +562,13 @@ export const annualQueueDemand = (projects, capacityOf) => {
         const oneYearFactor = builtBP / remainingBP
 
         MINERALS.forEach((mineral) => {
-          demand[mineral.name] += project.Amount * (project[mineral.name] || 0) * oneYearFactor
+          if (!recorded(project[mineral.name])) {
+            lack(mineral, `a queued project's ${mineral.name} cost`)
+
+            return
+          }
+
+          demand[mineral.name] += project.Amount * project[mineral.name] * oneYearFactor
         })
 
         usedPercent += (100 * builtBP) / capacity
@@ -324,7 +576,7 @@ export const annualQueueDemand = (projects, capacityOf) => {
     })
   })
 
-  return demand
+  return { demand, unknown, incomplete }
 }
 
 // What a colony's stock can't cover of an industrial project's remaining units, the material that runs out first leading: each mineral, then the fuel, with the units the stock covers. Each cycle the game cuts a build to what the colony's stock covers, minerals first and then fuel. The project's mineral columns are per unit, with the stock as `Stock<Mineral>` and `StockFuel`.

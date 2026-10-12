@@ -16,7 +16,9 @@
       <span v-if="assessment.cost.colonisable" class="caption text--secondary ml-2">{{ outcome.description }}</span>
     </div>
 
-    <v-alert v-if="!assessment.cost.colonisable" type="error" outlined dense class="mb-0">{{ shown.species.SpeciesName }} can't live on this body: {{ assessment.reason.toLowerCase() }}.</v-alert>
+    <v-alert v-if="shown.missing.length" type="warning" outlined dense class="mb-0">Not worked out for {{ shown.species.SpeciesName }}: {{ shown.missing.join(', ') }} missing from the save, so the colony cost, the plan and what the body holds are unknown.<provenance-mark :result="missingResult" /></v-alert>
+
+    <v-alert v-else-if="!assessment.cost.colonisable" type="error" outlined dense class="mb-0">{{ shown.species.SpeciesName }} can't live on this body: {{ reasonText }}.</v-alert>
 
     <v-row v-else>
       <v-col cols="12" md="4">
@@ -126,12 +128,12 @@
         <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by this race yet. Ground survey potential: {{ groundSurvey }}.</div>
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
-          <v-chip v-for="deposit in deposits" :key="deposit.id" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.value <= 0 }">
-            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.amount) }} · {{ round(deposit.accessibility, 2) }} → {{ round(deposit.value, 1) }}<span v-if="deposit.scarcity.factor > 1" class="ml-1 scarce">×{{ deposit.scarcity.factor }} {{ deposit.scarcity.label.toLowerCase() }}</span>
+          <v-chip v-for="deposit in deposits" :key="deposit.id" small label outlined class="mr-2 mb-2" :class="{ 'text--disabled': deposit.value !== null && deposit.value <= 0 }">
+            <b class="mr-1">{{ deposit.name }}</b> {{ tons(deposit.amount) }} · {{ figure(deposit.accessibility, 2) }} → {{ figure(deposit.value, 1) }}<provenance-mark v-if="deposit.value === null" :result="unknownResult(deposit)" /><span v-if="deposit.scarcity && deposit.scarcity.factor > 1" class="ml-1 scarce">×{{ deposit.scarcity.factor }} {{ deposit.scarcity.label.toLowerCase() }}</span>
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
-        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short the race is of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
+        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ figure(item.row.minerals.value, 1) }}<provenance-mark v-if="item.row.minerals.value === null" :result="mineralsResult" />: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short the race is of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
         <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ distanceLine }}</div>
       </v-col>
     </v-row>
@@ -140,14 +142,16 @@
 
 <script>
 import PageLink from '../page/PageLink.vue'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 import { activeAppearance, toneColor } from '../../utilities/appearance'
 import { systemBodyName } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
-import { cmcNote } from '../../utilities/colonization'
+import { cmcNote, rowProvenance } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
+import { isAvailable, unavailable } from '../../utilities/provenance'
 import { OUTCOMES, planYears } from '../../utilities/terraforming'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
@@ -155,7 +159,7 @@ const INSTALLATION_YEARS = [5, 10, 25, 50]
 
 export default {
   name: 'BodyDetail',
-  components: { PageLink },
+  components: { PageLink, ProvenanceMark },
   props: {
     item: { type: Object, required: true },
     shown: { type: Object, required: true },
@@ -176,6 +180,16 @@ export default {
     },
     afterCapacity() {
       return this.shown.capacityAfter
+    },
+    // What is missing for the species shown, as a result for the mark in the unavailable notice.
+    missingResult() {
+      return unavailable({ rule: 'habitability.colonyCost', missing: this.shown.missing })
+    },
+    reasonText() {
+      return (this.assessment.reason || this.assessment.cost.reason || 'no reason recorded').toLowerCase()
+    },
+    mineralsResult() {
+      return rowProvenance(this.item.row).minerals
     },
     groundSurvey() {
       return GROUND_SURVEY[this.item.body.GroundMineralSurvey] || 'unknown'
@@ -257,7 +271,7 @@ export default {
         return null
       }
 
-      const fixed = (value) => roundToDecimal(value, 2).toString()
+      const fixed = (value) => (value === null ? '—' : roundToDecimal(value, 2).toString())
 
       return { people: fixed(parts.people), mining: fixed(parts.mining), prize: fixed(parts.prize), cost: fixed(parts.cost), time: fixed(parts.time), distance: fixed(parts.distance) }
     },
@@ -269,6 +283,10 @@ export default {
     rankText() {
       const { row } = this.item
       const score = row.score === null || !(this.item.best.value > 0) ? '' : ` ${roundToDecimal((this.shown.value * row.score) / this.item.best.value, 0)}% of the best target's worth.`
+
+      if (this.shown.mineralsUnknown) {
+        return `Worth is not worked out for ${this.shown.species.SpeciesName}: deposit figures are missing from the save.${row.rank ? ` Rank ${row.rank}.` : ''}`
+      }
 
       return `Worth ${roundToDecimal(this.shown.value, 3)} for ${this.shown.species.SpeciesName}${this.shown.strategy === 'terraform' ? ' after terraforming' : ', settled as it is'}.${row.rank ? ` Rank ${row.rank}.` : ''}${score}`
     },
@@ -298,7 +316,13 @@ export default {
       return Math.abs(cost.periapsis - cost.current) > 0.005 || Math.abs(cost.apoapsis - cost.current) > 0.005
     },
     tons(value) {
-      return compact(value)
+      return Number.isFinite(value) ? compact(value) : '—'
+    },
+    figure(value, places) {
+      return Number.isFinite(value) ? roundToDecimal(value, places) : '—'
+    },
+    unknownResult(deposit) {
+      return isAvailable(deposit.baseResult) ? deposit.scarcityResult : deposit.baseResult
     },
     years(value) {
       return value === 0 ? 'no time' : !Number.isFinite(value) ? 'forever without terraformers' : value < 0.1 ? 'under 0.1 years' : `${separatedNumber(roundToDecimal(value, value < 10 ? 2 : 1), this.separator)} years`

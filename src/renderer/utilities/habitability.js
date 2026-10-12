@@ -2,6 +2,8 @@
 //
 // A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, ParentOrbitalDistance, ParentEccentricity, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`. A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
 
+import { ofRule, registerRule, unavailable } from './provenance'
+
 export const BODY_CLASS = { PLANET: 1, MOON: 2, ASTEROID: 3, COMET: 5 }
 export const BODY_TYPE = { GAS_GIANT: 4, SUPERJOVIAN: 5 }
 export const HYDROSPHERE = { NONE: 1, VAPOUR: 2, LIQUID: 3, ICE_SHEET: 4 }
@@ -17,6 +19,61 @@ export const LOW_GRAVITY_INFRASTRUCTURE = 2
 const ICE_SHEET_ALBEDO_STEP = 0.0015
 const WATER_BOILING_KELVIN = 369
 const WATER_FREEZING_KELVIN = 245
+
+const VERSIONS = ['2.7.x']
+
+// The rules this module implements, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js).
+registerRule({
+  id: 'habitability.colonyCost',
+  versions: VERSIONS,
+  units: 'colony cost',
+  verification: 'estimated',
+  structure: ['FCT_SystemBody.Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroExt, TidalLock, Eccentricity', 'FCT_AtmosphericGas', 'DIM_Gases', 'FCT_Species', 'FCT_Race.ColonizationSkill'],
+  note: 'The largest of six environment factors (docs/DATABASE.md, Colony cost), worst of now, periapsis and apoapsis, times the race\'s colonisation skill. Checked against FCT_Population.ReqInf of the race\'s own colonies: the requirement per million people equals the cost now times the skill, times 100 (200 on low gravity), over PopulationDensityModifier, within 0.1% on 23 of 27 colonies of two saves and within 3.4% on the other four, all low gravity (the stored requirement may predate a change of population; not checked). Periapsis, apoapsis and the worst case have no stored value, and no unsettled body is checked.',
+})
+
+registerRule({
+  id: 'habitability.infraPerMillion',
+  versions: VERSIONS,
+  units: 'infrastructure per million people',
+  verification: 'estimated',
+  structure: ['FCT_Species.PopulationDensityModifier', 'FCT_SystemBody.Gravity'],
+  note: 'ceil(colony cost x 100 x 2 on low gravity / PopulationDensityModifier), float noise rounded off first. Before the ceiling the figure matches FCT_Population.ReqInf over Population for the cost now (the check of habitability.colonyCost); the ceiling and the use of the worst cost of the orbit are the Planner\'s reading and have no stored value.',
+})
+
+const NOTHING = Object.freeze([])
+
+const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+
+// What a body's cost reads: [column, name, must be positive]. A moon and a body on an eccentric orbit also read what the swing between periapsis and apoapsis needs; a body that is not a moon reads its tidal lock; every atmosphere row reads its pressure, share and gas properties (the terraforming plan reads the same ones).
+const BODY_INPUTS = [['Gravity', 'gravity'], ['SurfaceTemp', 'surface temperature'], ['AtmosPress', 'atmospheric pressure'], ['HydroExt', 'water extent'], ['HydroID', 'hydrosphere'], ['Radius', 'radius'], ['Eccentricity', 'orbital eccentricity'], ['FixedBody', 'fixed body flag'], ['BaseTemp', 'base temperature'], ['Albedo', 'albedo']]
+const TIDAL_INPUTS = [['TidalLock', 'tidal lock']]
+const SWING_INPUTS = [['BaseTemp', 'base temperature', true], ['Albedo', 'albedo', true], ['StarLuminosity', 'star luminosity', true]]
+const ECCENTRIC_INPUTS = [...SWING_INPUTS, ['OrbitalDistance', 'orbital distance', true]]
+const MOON_INPUTS = [...SWING_INPUTS, ['ParentOrbitalDistance', 'planet orbital distance', true], ['ParentEccentricity', 'planet eccentricity']]
+const DUST_INPUTS = [['DustLevel', 'dust level']]
+const GAS_INPUTS = [['AtmosGasID', 'gas'], ['GasAtm', 'gas pressure'], ['AtmosGasAmount', 'gas share'], ['FrozenOut', 'frozen-out flag'], ['BoilingPoint', 'boiling point'], ['GHGas', 'greenhouse flag'], ['AntiGHGas', 'anti-greenhouse flag'], ['Dangerous', 'danger'], ['DangerousLevel', 'danger level']]
+const SPECIES_INPUTS = [['IdealTemperature', 'ideal temperature'], ['TemperatureDeviation', 'temperature deviation', true], ['IdealBreathePressure', 'breathing gas pressure'], ['BreathePressureDeviation', 'breathing gas deviation'], ['MaximumPressure', 'maximum pressure', true], ['IdealGravity', 'ideal gravity'], ['GravityDeviation', 'gravity deviation'], ['PopulationDensityModifier', 'population density', true], ['BreatheID', 'breathing gas']]
+
+const usable = (source, [key, , positive]) => isNumber(source[key]) && (!positive || source[key] > 0)
+
+const lacking = (source, inputs, owner) => (inputs.every((input) => usable(source, input)) ? NOTHING : inputs.filter((input) => !usable(source, input)).map(([, name]) => `${owner} ${name}`))
+
+// The figures of a body that its colony cost and terraforming plan need and the save lacks, by name; the shared empty list when it has them all. A missing figure makes the cost unavailable, never a default (a missing tidal lock is not "not locked", a missing gas pressure is not 0).
+export const missingBodyInputs = (body) => {
+  const isMoon = body.BodyClass === BODY_CLASS.MOON
+  const atmosphere = body.Atmosphere || NOTHING
+  const missing = [...lacking(body, BODY_INPUTS, 'body'), ...(isMoon ? NOTHING : lacking(body, TIDAL_INPUTS, 'body')), ...(isMoon ? lacking(body, MOON_INPUTS, 'body') : body.Eccentricity > 0 ? lacking(body, ECCENTRIC_INPUTS, 'body') : NOTHING), ...(atmosphere.length ? lacking(body, DUST_INPUTS, 'body') : NOTHING)]
+
+  for (let index = 0; index < atmosphere.length; index += 1) {
+    missing.push(...lacking(atmosphere[index], GAS_INPUTS, 'atmosphere'))
+  }
+
+  return missing.length ? [...new Set(missing)] : NOTHING
+}
+
+// The same for a species row (the names the loader gives it): the ranges and the density the cost divides by, which must be positive.
+export const missingSpeciesInputs = (species) => lacking(species, SPECIES_INPUTS, 'species')
 
 export const FACTORS = [
   { key: 'temperature', label: 'Temperature' },
@@ -220,3 +277,22 @@ export const limitingFactor = (factors) => {
 
 // Infrastructure per million people at a colony cost. A low-gravity colony needs twice as much. The game does this in decimals, so float noise is rounded off before the ceiling.
 export const infrastructurePerMillion = (cost, species, lowGravity) => Math.ceil(Number(((cost * 100 * (lowGravity ? LOW_GRAVITY_INFRASTRUCTURE : 1)) / species.PopulationDensityModifier).toFixed(6)))
+
+// The infrastructure per million people at a colony cost as a result: unavailable when the cost is not a number or the species has no positive population density to divide by, never 0 or NaN. `assumptions` are the ones the cost was worked out under.
+export const infrastructurePerMillionResult = (cost, species, lowGravity, assumptions = []) => {
+  const missing = []
+
+  if (!isNumber(cost)) {
+    missing.push('colony cost')
+  }
+
+  if (!isNumber(species.PopulationDensityModifier) || species.PopulationDensityModifier <= 0) {
+    missing.push('species population density')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule: 'habitability.infraPerMillion', missing })
+  }
+
+  return ofRule({ rule: 'habitability.infraPerMillion', value: infrastructurePerMillion(cost, species, lowGravity), inputs: { present: ['colony cost', 'species population density', 'gravity'] }, assumptions })
+}
