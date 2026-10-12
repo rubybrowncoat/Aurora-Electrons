@@ -293,7 +293,7 @@ import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
-import { ENTRY_BYTES, derive, estimateBytes } from '../utilities/query-cache'
+import { derive } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
 import { sectionById } from '../utilities/navigation'
@@ -361,11 +361,8 @@ const SystemSelect = {
   },
 }
 
-// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on.
+// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on; `derive` keeps nothing whose result and inputs together pass its cap, so a huge save's assessment and ranking are worked out but not kept.
 const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}`, inputs, compute)
-
-// What is worked out of the bodies is kept only while the bodies themselves fit the cap a read does (query-cache.js `ENTRY_BYTES`): assessing and ranking a huge save costs several times its bodies' heap.
-const keptFromBodies = (vm, bodies, slot, inputs, compute) => (estimateBytes(bodies) > ENTRY_BYTES ? compute() : kept(vm, slot, inputs, compute))
 
 export default {
   components: { BodyDetail, LoadState, SystemSelect },
@@ -773,7 +770,7 @@ export default {
 
         const [bodies, species, raceRules, gases] = inputs()
 
-        return keptFromBodies(this, bodies, 'assessed', [bodies, species, raceRules, gases], async () => {
+        return kept(this, 'assessed', [bodies, species, raceRules, gases], async () => {
           const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
 
           return Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id)))
@@ -790,7 +787,7 @@ export default {
           return null
         }
 
-        return keptFromBodies(this, this.bodies, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules, outlook })))
+        return kept(this, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules, outlook })))
       },
       default: null,
     },
