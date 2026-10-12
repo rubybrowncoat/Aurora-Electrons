@@ -345,14 +345,21 @@ def build(audit_result, destination, game_id, race_id, seed=None):
     visible = db.execute('SELECT COUNT(*) FROM FCT_RaceSysSurvey WHERE GameID=? AND RaceID=?', (game_id, race_id)).fetchone()[0]
     assert visible == result['systems'], (visible, result['systems'])
     assert db.execute('SELECT COUNT(*) FROM FCT_RaceJumpPointSurvey WHERE GameID=? AND RaceID=? AND Charted=1', (game_id, race_id)).fetchone()[0] == result['jump_points']
-    # Every original base table row must be preserved byte-for-byte at SQL level, except the selected race's jump visibility flags, intentionally revealed.
+    # Every original base table row must be preserved byte-for-byte at SQL level, except the selected race's jump visibility flags, intentionally revealed, and its system positions: the layout gives places to the systems the save left at the (0,0) placeholder or without coordinates, so only those two columns may differ, and only for such systems.
     db.execute('ATTACH DATABASE ? AS original', (Path(audit_result['base']).resolve().as_uri() + '?mode=ro',))
     for row in db.execute("SELECT name FROM original.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall():
         table = row[0]
-        where = ' WHERE NOT (GameID=? AND RaceID=?)' if table == 'FCT_RaceJumpPointSurvey' else ''
+        where = ' WHERE NOT (GameID=? AND RaceID=?)' if table in ('FCT_RaceJumpPointSurvey', 'FCT_RaceSysSurvey') else ''
         params = (game_id, race_id) if where else ()
         missing = db.execute(f'SELECT COUNT(*) FROM (SELECT * FROM original."{table}"{where} EXCEPT SELECT * FROM main."{table}")', params).fetchone()[0]
         assert missing == 0, (table, missing)
+    scope = ' FROM {}."FCT_RaceSysSurvey" WHERE GameID=? AND RaceID=?'
+    others = ','.join(f'"{r[1]}"' for r in db.execute('PRAGMA original.table_info("FCT_RaceSysSurvey")') if r[1] not in ('Xcor', 'Ycor'))
+    missing = db.execute(f'SELECT COUNT(*) FROM (SELECT {others}{scope.format("original")} EXCEPT SELECT {others}{scope.format("main")})', (game_id, race_id) * 2).fetchone()[0]
+    assert missing == 0, ('FCT_RaceSysSurvey', 'columns other than Xcor and Ycor', missing)
+    recorded = ' AND Xcor BETWEEN -1e308 AND 1e308 AND Ycor BETWEEN -1e308 AND 1e308 AND NOT (Xcor=0 AND Ycor=0)'
+    moved = db.execute(f'SELECT COUNT(*) FROM (SELECT SystemID,Xcor,Ycor{scope.format("original")}{recorded} EXCEPT SELECT SystemID,Xcor,Ycor{scope.format("main")})', (game_id, race_id) * 2).fetchone()[0]
+    assert moved == 0, ('FCT_RaceSysSurvey', 'recorded positions', moved)
     manifest['validation'] = dict(sqlite_integrity=integrity, target=result, visible_systems=visible, base_rows_preserved=True, source_files_unchanged=True)
     (destination / 'merge-manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     (destination / 'merge-manifest.pending.json').unlink()
