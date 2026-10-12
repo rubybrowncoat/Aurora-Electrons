@@ -3,9 +3,23 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and theme. Use it to set the app up." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and the colour preset. Use it to set the app up, and to preview a preset on every page before keeping it." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
+              <div class="setting setting--block">
+                <div class="setting__text">
+                  <div class="body-2">Colour preset</div>
+                  <div class="caption text--secondary">{{ presetNote }}</div>
+                </div>
+                <div class="presets" role="group" aria-label="Colour presets">
+                  <preset-card v-for="preset in presets" :key="preset.id" :appearance="preset" :active="preset.id === activeId" :applied="preset.id === appliedId" @select="preview" />
+                </div>
+                <div class="presets__actions">
+                  <v-btn small depressed color="primary" :disabled="!previewing" data-preset-action="apply" @click="applyDraft">Apply</v-btn>
+                  <v-btn small outlined :disabled="!previewing" data-preset-action="cancel" @click="cancelDraft">Cancel</v-btn>
+                  <v-btn small text :disabled="activeId === defaultId" data-preset-action="reset" @click="resetDraft">Reset to {{ defaultName }}</v-btn>
+                </div>
+              </div>
               <div class="setting">
                 <div class="setting__text">
                   <div class="body-2">Thousands separator</div>
@@ -16,7 +30,7 @@
               <div class="setting">
                 <div class="setting__text">
                   <div class="body-2">Dark theme</div>
-                  <div class="caption text--secondary">The lamp in the app bar switches it too.</div>
+                  <div class="caption text--secondary">Applies the Light or Dark preset at once, as the lamp in the app bar does.</div>
                 </div>
                 <v-switch :input-value="dark" aria-label="Dark theme" class="setting__switch" inset dense hide-details @change="setDark" />
               </div>
@@ -28,7 +42,7 @@
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each setting applies at once, on every page, and is kept in the settings file; About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
 
@@ -77,13 +91,14 @@
 <script>
 import { mapActions, mapGetters, mapState } from 'vuex'
 
+import PresetCard from '../components/settings/PresetCard.vue'
 import countFormat from '../mixins/count-format'
-import { APPEARANCE_KEY, activeAppearance, baselinePresetId, selectPreset } from '../utilities/appearance'
+import { APPEARANCE_KEY, DEFAULT_PRESET_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, cancelPreview, isPreviewing, listAppearances, previewPreset, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
-// The settings the Display panel holds. A reset keeps them.
+// The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
 const APP_SETTINGS = [APPEARANCE_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
 // What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
 const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
@@ -121,6 +136,7 @@ const values = (number) => (number === 1 ? 'value' : 'values')
 
 export default {
   name: 'SettingsPage',
+  components: { PresetCard },
   mixins: [countFormat],
   data() {
     return {
@@ -145,6 +161,50 @@ export default {
 
     dark() {
       return activeAppearance().mode === 'dark'
+    },
+
+    presets() {
+      return listAppearances()
+    },
+
+    // The preset in force (the previewed one while a preview is open) and the kept one.
+    activeId() {
+      return activeAppearance().id
+    },
+
+    appliedId() {
+      return appliedPresetId()
+    },
+
+    previewing() {
+      return isPreviewing()
+    },
+
+    defaultId() {
+      return DEFAULT_PRESET_ID
+    },
+
+    defaultName() {
+      return resolveAppearance(DEFAULT_PRESET_ID).name
+    },
+
+    // A saved id this version has no preset for: it stays in the file until a preset is applied.
+    unsupportedId() {
+      return this.appliedId && unsupportedPresetId(this.config)
+    },
+
+    presetNote() {
+      const applied = resolveAppearance(this.appliedId).name
+
+      if (this.previewing) {
+        return `Previewing ${activeAppearance().name} on every page. Apply keeps it; Cancel returns to ${applied}.`
+      }
+
+      if (this.unsupportedId) {
+        return `The saved preset "${this.unsupportedId}" isn't available in this version, so ${applied} is shown. Applying a preset replaces it.`
+      }
+
+      return `${applied} is applied. Choose a preset to preview it on every page before keeping it.`
     },
 
     empireName() {
@@ -195,6 +255,9 @@ export default {
       },
     },
   },
+  beforeDestroy() {
+    cancelPreview()
+  },
   methods: {
     ...mapActions(['reinstantiateConfig']),
     ...mapActions('snackbar', ['activateSnackbar']),
@@ -210,10 +273,26 @@ export default {
     },
 
     setDark(value) {
-      const id = baselinePresetId(value ? 'dark' : 'light')
+      applyMode(this.config, value ? 'dark' : 'light')
+      this.reinstantiateConfig()
+    },
 
-      selectPreset(id)
-      this.save(APPEARANCE_KEY, id)
+    preview(id) {
+      previewPreset(id)
+    },
+
+    applyDraft() {
+      applyPreset(this.config, this.activeId)
+      this.reinstantiateConfig()
+    },
+
+    cancelDraft() {
+      cancelPreview()
+    },
+
+    // The bundled default as a draft: Apply keeps it, and nothing but the `appearance` key is ever written.
+    resetDraft() {
+      previewPreset(DEFAULT_PRESET_ID)
     },
 
     setSpyNPR(value) {
@@ -247,6 +326,24 @@ export default {
   & + & {
     border-top: 1px solid var(--ae-border);
   }
+}
+
+.setting--block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.presets__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .setting__text {

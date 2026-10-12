@@ -61,7 +61,7 @@ export const DEFAULT_PRESET_ID = LIGHT.id
 // The preset each mode falls back to: the lamp in the app bar and the Dark theme switch move between modes, and land on these.
 const BASELINE_BY_MODE = { light: LIGHT.id, dark: DARK.id }
 
-// The settings key the chosen preset's id is kept under. Settings from before presets hold a boolean `darkMode` instead, which is read only while this key is missing.
+// The settings key the chosen preset's id is kept under: app-wide, written only by `applyPreset`. Settings from before presets hold a boolean `darkMode` instead; `loadAppearance` turns it into this key once and nothing writes `darkMode` any more.
 export const APPEARANCE_KEY = 'appearance'
 
 // Categorical slots of the contacts, by how the race regards them; `muted` is the preset's muted ink.
@@ -97,21 +97,69 @@ export const resolveAppearance = (id) => {
   return resolved.get(preset)
 }
 
-const state = Vue.observable({ id: DEFAULT_PRESET_ID })
+// `id` is the preset in force (what every renderer draws with), `applied` the last one chosen and kept. They differ while a preview is open.
+const state = Vue.observable({ id: DEFAULT_PRESET_ID, applied: DEFAULT_PRESET_ID })
 
 // The appearance in force. Read inside a computed property, a render or a watcher, it makes that one depend on the chosen preset, so a switch (light to dark, or dark to another dark) redraws what read it.
 export const activeAppearance = () => resolveAppearance(state.id)
 
-// Puts a preset in force (an unknown id gives the default). Vuetify's theme follows through the watcher in plugins/vuetify.js.
-export const selectPreset = (id) => {
-  state.id = PRESETS[id] ? id : DEFAULT_PRESET_ID
+// The id of the last preset applied (reactive). It is what a cancelled preview, and leaving Settings with a preview open, go back to.
+export const appliedPresetId = () => state.applied
+
+// Whether a preview is open: the preset in force is not the applied one (reactive).
+export const isPreviewing = () => state.id !== state.applied
+
+// Every preset, resolved, in the order they are listed.
+export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))
+
+// Puts a preset in force without keeping it, so every page shows it (Vuetify's theme follows through the watcher in plugins/vuetify.js). An unknown id changes nothing. Writes nothing.
+export const previewPreset = (id) => {
+  if (PRESETS[id]) {
+    state.id = id
+  }
 }
 
-// The preset to start with: the stored id, else what a `darkMode` setting from before presets said. `config` is the settings store.
-export const storedPresetId = (config) => {
+// Drops the preview: the applied preset is in force again.
+export const cancelPreview = () => {
+  state.id = state.applied
+}
+
+// Keeps a preset: puts it in force, makes it the applied one and writes its id to the settings (`config` is the settings store). An unknown id changes nothing and returns false. The settings are written first, so a failed write leaves the selection as it was.
+export const applyPreset = (config, id) => {
+  if (!PRESETS[id]) {
+    return false
+  }
+
+  config.set(APPEARANCE_KEY, id)
+  state.id = id
+  state.applied = id
+
+  return true
+}
+
+// The one path the app bar's lamp and the Settings switch share: applies the baseline preset of a mode ('light' or 'dark').
+export const applyMode = (config, mode) => applyPreset(config, baselinePresetId(mode))
+
+// The saved id when it names no preset this version has (a preset from a newer version, or a damaged value), else null.
+export const unsupportedPresetId = (config) => {
   const id = config.get(APPEARANCE_KEY)
 
-  return PRESETS[id] ? id : BASELINE_BY_MODE[config.get('darkMode', false) ? 'dark' : 'light']
+  return id === undefined || PRESETS[id] ? null : id
+}
+
+// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. `config` is the settings store.
+export const loadAppearance = (config) => {
+  const stored = config.get(APPEARANCE_KEY)
+  const legacy = config.get('darkMode')
+
+  if (stored === undefined && typeof legacy === 'boolean') {
+    applyMode(config, legacy ? 'dark' : 'light')
+  } else if (PRESETS[stored]) {
+    state.id = stored
+    state.applied = stored
+  } else {
+    cancelPreview()
+  }
 }
 
 // The baseline preset of a mode.

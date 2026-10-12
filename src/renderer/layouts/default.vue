@@ -111,7 +111,7 @@ import SaveStatus from '../components/navigation/SaveStatus.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import SectionNav from '../components/page/SectionNav.vue'
-import { APPEARANCE_KEY, activeAppearance, appearanceStyle, baselinePresetId, selectPreset, storedPresetId } from '../utilities/appearance'
+import { activeAppearance, appearanceStyle, applyMode, loadAppearance } from '../utilities/appearance'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -265,7 +265,7 @@ export default {
     spyNPR: 'loadEmpires',
   },
   created() {
-    selectPreset(storedPresetId(this.config))
+    loadAppearance(this.config)
     this.loadEmpires()
   },
   mounted() {
@@ -322,11 +322,9 @@ export default {
       }
     },
 
+    // The lamp and the Display panel's Dark theme switch both apply the baseline preset of a mode, through the one helper that writes `appearance`.
     setDarkMode(dark) {
-      const id = baselinePresetId(dark ? 'dark' : 'light')
-
-      selectPreset(id)
-      this.config.set(APPEARANCE_KEY, id)
+      applyMode(this.config, dark ? 'dark' : 'light')
     },
 
     go (path) {

@@ -13,7 +13,7 @@ import './mainWindow'
 // The renderer's electron-store instances get their folder from here. Without it, settings fell back to conf's own default (electron-store-nodejs) and the history files couldn't be written at all. A packaged build carries the settings it kept there over once. Other apps with the same omission share that file, so it's only taken when it holds one of this app's keys, and a failed copy only costs the old settings, never the launch.
 const settingsPath = path.join(app.getPath('userData'), 'config.json')
 const legacySettingsPath = path.join(envPaths('electron-store', { suffix: 'nodejs' }).config, 'config.json')
-const isOwnSettings = (settings) => Object.keys(settings).some((key) => ['darkMode', 'spyNPR', 'selectedSeparator'].includes(key) || key.startsWith('game.'))
+const isOwnSettings = (settings) => Object.keys(settings).some((key) => ['appearance', 'darkMode', 'spyNPR', 'selectedSeparator'].includes(key) || key.startsWith('game.'))
 
 if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettingsPath)) {
   try {
