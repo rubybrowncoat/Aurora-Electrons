@@ -1,5 +1,6 @@
 // Mineral maths shared by the Mineral Outlook page: deposit depletion, the game's mineral ledger and the industrial queue's demand. Validated against the sample save; see docs/plans/aurcalcs/sql-mining.md §§ 1–2.
 
+import { crewFraction } from './crew'
 import { roundToDecimal, separatedNumber } from './math'
 import { combine, ofRule, registerRule, unavailable, valueOrNull } from './provenance'
 
@@ -270,11 +271,12 @@ export const surfaceRate = (row, owned = true) => {
   return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
-// A ship short of crew runs its mining modules at Current Crew / Class Crew (docs: crew-and-commanders, v2.6). Over-crewed ships don't mine faster; uncrewed classes always run.
-export const crewFraction = (row) => (row.ClassCrew > 0 ? Math.min(1, Math.max(0, row.CurrentCrew) / row.ClassCrew) : 1)
+// The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save; unverified, the sample has no player orbital miners.
+export const orbitalRate = (row, adminBonus = 1) => {
+  const crew = crewFraction(row)
 
-// The workbook's orbital formula, plus the crew rule; unverified, the sample has no player orbital miners.
-export const orbitalRate = (row, adminBonus = 1) => row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crewFraction(row) * row.Accessibility
+  return crew === null ? null : row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crew * row.Accessibility
+}
 
 // t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit.
 export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
