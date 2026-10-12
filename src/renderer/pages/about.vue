@@ -104,6 +104,40 @@
         </v-col>
 
         <v-col cols="12">
+          <v-card class="panel" data-summary="The fonts and icons the app ships, who made them and the terms they come under. Open a notice to read the license text bundled with the app." elevation="1" data-credits>
+            <div class="panel-head"><span>Credits</span></div>
+            <v-simple-table class="credits-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Author</th>
+                  <th>Source</th>
+                  <th>License</th>
+                  <th>Changes</th>
+                  <th>Notices</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
+                  <td class="py-2">
+                    <div class="font-weight-medium">{{ credit.name }}</div>
+                    <div class="caption text--secondary">{{ credit.kind }} · {{ credit.covers }}</div>
+                  </td>
+                  <td>{{ credit.author }}</td>
+                  <td><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
+                  <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
+                  <td class="caption">{{ credit.modifications }}</td>
+                  <td class="text-no-wrap">
+                    <v-btn v-for="item in credit.notices" :key="item.title" x-small text color="primary" class="d-block" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</v-btn>
+                  </td>
+                </tr>
+              </tbody>
+            </v-simple-table>
+            <div class="panel-foot caption text--secondary">Each notice is the license text as it comes with the asset's package, bundled into the app. Code libraries carry their licenses in their own packages; they are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12">
           <v-card class="panel" data-summary="How to help improve the app with pull requests and issues. Follow the steps to get a change in." elevation="1">
             <div class="panel-head"><span>Contribute</span></div>
             <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
@@ -123,6 +157,19 @@
           </v-card>
         </v-col>
       </v-row>
+
+      <v-dialog v-model="noticeOpen" max-width="760" scrollable>
+        <v-card v-if="notice" data-notice-dialog>
+          <v-card-title class="subtitle-1">{{ notice.asset }}: {{ notice.title }}</v-card-title>
+          <v-card-text>
+            <pre class="notice-text">{{ notice.text }}</pre>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn text @click="noticeOpen = false">Close</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-container>
   </div>
 </template>
@@ -132,6 +179,7 @@ import { shell } from 'electron'
 import { mapActions, mapGetters } from 'vuex'
 
 import ExternalLink from '../components/ExternalLink.vue'
+import { CREDITS } from '../utilities/credits'
 import { historyConfig } from '../utilities/history'
 import { FORUM_URL } from '../utilities/navigation'
 import { version } from '../../../package.json'
@@ -171,6 +219,11 @@ export default {
         { name: 'Cytoscape.js 3', href: 'https://js.cytoscape.org/' },
         { name: 'PixiJS 6', href: 'https://pixijs.com/' },
       ],
+
+      credits: CREDITS,
+      // The notice the dialog shows: { asset, title, text }.
+      notice: null,
+      noticeOpen: false,
 
       // Each step is a list of text and `{ code }` parts.
       steps: [
@@ -213,6 +266,11 @@ export default {
   },
   methods: {
     ...mapActions('snackbar', ['activateSnackbar']),
+
+    openNotice(credit, item) {
+      this.notice = { asset: credit.name, title: item.title, text: item.text }
+      this.noticeOpen = true
+    },
 
     // The system's file manager opens the folder; it answers with an error message, empty when it opened.
     async openDataFolder() {
@@ -260,6 +318,18 @@ export default {
   justify-content: center;
   color: #fff;
   font-size: 12px;
+}
+
+.credits-table td {
+  vertical-align: top;
+  padding-top: 8px;
+}
+
+.notice-text {
+  font-family: var(--ae-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--ae-ink);
 }
 
 code {
