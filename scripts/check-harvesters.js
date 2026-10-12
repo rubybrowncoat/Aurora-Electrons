@@ -1,11 +1,11 @@
 /*
-  Checks the Sorium harvester rule against a save: for every harvester ship of one race it recomputes the annual potential and the fuel one harvesting step can add from the save's own rows, compares the stored inputs it can (the racial rate, the class module and tank totals, the deposit accessibility, the tank level) and compares the Fuel & Maintenance page's helpers (utilities/logistics.js harvesterOutput and harvesterIdleReason, fed by the page's own query) with the rule.
+  Checks the Sorium harvester rule against a save: for every harvester ship of one race it recomputes the annual potential and the fuel one harvesting step can add from the save's own rows, compares the stored inputs it can (the racial rate, the class module and tank totals, the deposit accessibility, the tank level) and compares the Fuel & Maintenance page's own figures (utilities/logistics.js harvesterReport, harvesterBasis, harvesterObtainable and harvesterAdminBonus, fed by the page's own query) with the rule.
 
   node scripts/check-harvesters.js <save.db> --race <RaceID> [--years <n>] [--since <older.db>] [--list]
 
   Two kinds of result stay apart. Rule verification: the rule below is the game's 2.7.1 per-step harvesting rule, read from its source (docs/plans/backlog/evidence/AE-079-01.md § 2); the worked cases at the end run it on in-memory rows and the stored-input checks compare it with what the game wrote. Observed reconciliation: --since reads an older save of the same campaign and replays the construction cycles between the two from the increment ledger, to see whether a ship's fuel gain is what the rule predicts; a ship that moved, or whose tank is full, or that cannot be told from a transfer, gives no clean observation, and when none is clean the check says so.
 
-  A stored value the rule does not reproduce, a page figure that differs for a reason the check does not name, and a worked case that fails are mismatches and set exit code 1. A page figure that differs for a named reason (the class total used for damaged modules, the orbit ID used for the body, the 99.9% tank test, a fleet without a command, survey gating) is counted as explained with that reason: these are the known gaps of the page's current helpers.
+  A stored value the rule does not reproduce, a page figure that differs from the rule, and a worked case that fails are mismatches and set exit code 1. The page follows the rule on the undamaged module and tank counts, the body found by coordinates, any room in the tanks, the root command for a fleet without one, and an unknown output where the body is unsurveyed, so no page difference is explained away: the explained classes that remain are only the stored-input ones (a deposit raised outside the game, fuel above the capacity of damaged tanks).
 
   --years sets the horizon of the obtainable-output column (default 1). --list prints one line per ship. Read-only: the save is opened read-only and nothing is written.
 */
@@ -29,7 +29,8 @@ const SECONDS_PER_YEAR = 31536000
 const RELATIVE_TOLERANCE = 1e-9
 const ABSOLUTE_TOLERANCE = 1e-6
 const SHAPE_COLUMNS = ['AllowCMC', 'AncientRelics']
-const APP_RULES = ['logistics.harvesterOutput']
+const APP_RULES = ['logistics.harvesterOutput', 'logistics.harvesterObtainable']
+const FORMULA_VERSION = '2.7.x'
 
 const fail = (message) => {
   console.error(message)
@@ -247,10 +248,12 @@ const loadWorld = async (database, raceId, app) => {
   const surveyed = new Set((await query(database, 'select SystemBodyID from FCT_SystemBodySurveys where GameID = :game and RaceID = :race', parameters)).map((row) => row.SystemBodyID))
   const admins = await app.loadNavalAdmins({ query: (sql) => all(database, sql).then((rows) => [rows]) }, { GameID: race.GameID, RaceID: race.RaceID, bonusId: MINING_BONUS, share: 'Industrial' })
   const rootAdmin = Object.values(admins).find((admin) => !admin.ParentCommandID) || null
-  const pageRows = new Map((await all(database, pageQuery(race.GameID, race.RaceID)).then((rows) => rows)).map((row) => [row.ShipID, row]))
 
-  return { race, game, shape, tech, classes, ships: harvesterShips, damaged, commanders, bodies, bodyTypes, deposits, surveyed, admins, rootAdmin, pageRows }
+  return { race, game, shape, tech, classes, ships: harvesterShips, damaged, commanders, bodies, bodyTypes, deposits, surveyed, admins, rootAdmin, pageRows: new Map() }
 }
+
+// The page's rows for the race: the query of logistics.vue run on the save.
+const loadPageRows = async (database, world) => new Map((await all(database, pageQuery(world.race.GameID, world.race.RaceID))).map((row) => [row.ShipID, row]))
 
 // The undamaged count of one class component of a ship: the game takes the first damaged row of the component, and a ship without damage rows has every module.
 const undamagedCount = (world, ship, row) => {
@@ -293,90 +296,54 @@ const readShip = (world, ship, app) => {
   return { id: ship.ShipID, name: ship.ShipName, ship, shipClass, modules, classModules, capacity, candidates, body, deposit, known, commander, admin, command, input, perYear, status, step: { modules, fuel: ship.Fuel, capacity, perYear, depositTons: deposit ? deposit.Amount : null } }
 }
 
-// One ship's page figures as logistics.vue computes them: its idle reason, and the output of harvesterOutput with the naval admin chain's bonus.
-const pageFigures = (world, ship, app) => {
-  const row = world.pageRows.get(ship.ShipID)
+// The page's report as logistics.vue builds it: harvesterReport over every row of the page's query, for `years`. Its rows by ShipID.
+const pageReport = (world, app, years) => new Map(app.harvesterReport([...world.pageRows.values()], { admins: world.admins, horizon: years, version: world.shape === '2.7' ? FORMULA_VERSION : null }).rows.map((row) => [row.ShipID, row]))
 
-  if (!row) {
-    return null
-  }
+// What the page shows of one ship, in the rule's three states: it works, it does not, or the output is unknown (an unsurveyed body, or a missing module or tank count).
+const pageState = (page) => (page.unknown ? 'unknown' : page.idle === null ? 'works' : 'idle')
 
-  const admin = app.navalAdminChainBonus(world.admins, row.SystemID, row.NavalAdminCommandID)
-  const idle = app.harvesterIdleReason(row)
+// The same three states for the rule: a body the race has not surveyed hides the deposit, so a ship that would otherwise be working or lack Sorium is unknown there.
+const ruleState = (state) => (state.body && !state.known && (state.status === 'works' || state.status === 'no Sorium') ? 'unknown' : state.status === 'works' ? 'works' : 'idle')
 
-  return { row, admin, idle, output: idle ? 0 : app.harvesterOutput(row, admin) }
-}
+// The litres of one step the page can show: 0 where the ship cannot work for a reason the race can see, null (unknown) over a body it has not surveyed, otherwise the rule's step.
+const ruleLitres = (state, years) => (['ancients', 'no undamaged module', 'tanks full', 'no gas giant here'].includes(state.status) ? 0 : !state.known ? null : harvestStep(state.step, years).litres)
 
-const damagedOn = (world, ship, rows) => rows.some((row) => undamagedCount(world, ship, row) !== row.NumComponent)
+const reconcileShips = (world, read, app, reports, years) => {
+  const report = pageReport(world, app, years)
 
-const reconcileShips = (world, read, app, reports) => {
   for (const state of read) {
-    const page = pageFigures(world, state.ship, app)
-    const shipClass = state.shipClass
+    const row = report.get(state.id)
 
     reports.page.checked++
 
-    if (!page) {
-      reports.page.explained.push({ id: state.id, name: state.name, field: 'row', stored: '-', computed: '-', reason: 'a harvester component the class column Harvesters does not count: the page query leaves the ship out' })
+    if (!row) {
+      reports.page.mismatches.push({ id: state.id, name: state.name, field: 'row', stored: '-', computed: 'a harvester ship the page query leaves out' })
       continue
     }
 
     reports.page.same++
 
-    const { row } = page
     const rowId = { id: state.id, name: state.name }
-    const hurtModules = damagedOn(world, state.ship, shipClass.harvesterRows)
-    const hurtTanks = damagedOn(world, state.ship, shipClass.tankRows)
-    const explained = new Set()
-    const note = (kind, reason) => {
-      explained.add(kind)
-
-      return reason
-    }
+    const pageRoom = row.capacity === null ? null : Math.max(0, row.capacity - row.Fuel)
+    const ruleRoom = Math.max(0, state.capacity - state.ship.Fuel)
 
     reports.rate.compare(rowId, 'racial rate', row.FuelProduction, state.input.rate, 'decimal')
-    reports.modules.compare(rowId, 'modules', row.Harvesters, state.modules, 'exact', () => (hurtModules ? note('modules', 'a damaged harvester module: the page counts the class total') : shipClass.Harvesters !== state.classModules ? note('modules', 'the class column keeps the last harvester row, the ship has several') : null))
+    reports.modules.compare(rowId, 'modules', row.Harvesters, state.modules, 'exact')
     reports.commander.compare(rowId, 'Mining bonus', row.MiningBonus, state.commander, 'decimal')
-    reports.admin.compare(rowId, 'admin bonus', page.admin, state.admin, 'decimal', () => (!state.ship.ParentCommandID ? note('admin', 'a fleet without a command: the game applies the race\'s root command, the page applies none') : null))
-    reports.crew.compare(rowId, 'crew fraction', row.ClassCrew > 0 ? Math.min(1, Math.max(0, row.CurrentCrew) / row.ClassCrew) : 1, crewFraction(state.input.crew, state.input.classCrew), 'decimal')
-    reports.accessibility.compare(rowId, 'accessibility', row.SoriumAccessibility === null ? null : row.SoriumAccessibility, state.known && state.deposit ? state.deposit.Accessibility : state.known ? 0 : null, 'exact', () => (row.SystemBodyID !== (state.body ? state.body.SystemBodyID : null) ? note('accessibility', 'the page reads the deposit of the orbit ID body, the game reads the body at the fleet\'s coordinates') : null))
-    reports.capacity.compare(rowId, 'tank capacity', row.FuelCapacity, state.capacity, 'exact', () => (hurtTanks ? note('capacity', 'a damaged fuel tank: the page uses the class capacity') : null))
-    reports.body.compare(rowId, 'body', row.SystemBodyID || 0, state.body ? state.body.SystemBodyID : 0, 'exact', () => (!state.ship.OrbitBodyID && state.body ? note('body', 'the fleet is at a gas giant\'s coordinates without an orbit ID: the page sees deep space') : state.ship.OrbitBodyID && !state.body ? note('body', 'the fleet has an orbit ID but is not at the body\'s coordinates: the game harvests nothing') : state.candidates.length > 1 ? note('body', 'several gas giants at one position') : null))
+    reports.admin.compare(rowId, 'admin bonus', app.harvesterAdminBonus(world.admins, row), state.admin, 'decimal')
+    reports.crew.compare(rowId, 'crew fraction', app.harvesterCrewShare(row), crewFraction(state.input.crew, state.input.classCrew), 'decimal')
+    reports.accessibility.compare(rowId, 'accessibility', row.SoriumAccessibility, state.known && state.deposit ? state.deposit.Accessibility : state.known ? 0 : null, 'exact')
+    reports.capacity.compare(rowId, 'tank capacity', row.capacity, state.capacity, 'exact')
+    reports.room.compare(rowId, 'tank room', pageRoom, ruleRoom, 'exact')
+    reports.body.compare(rowId, 'body', row.SystemBodyID || 0, state.body ? state.body.SystemBodyID : 0, 'exact')
+    reports.status.compare(rowId, 'harvesting state', pageState(row), ruleState(state), 'exact')
 
-    const works = state.status === 'works'
-    const pageWorks = page.idle === null
-
-    reports.status.compare(rowId, 'harvests', works, pageWorks, 'exact', () => {
-      if (page.idle === 'Not surveyed') {
-        return note('status', `survey gating: the body is not surveyed, the page shows 0 where the output is unknown (the game ${works ? 'harvests' : 'does not harvest'}: ${state.status})`)
-      }
-
-      if (page.idle === 'Tanks full' && works) {
-        return note('status', state.capacity !== shipClass.FuelCapacity ? 'a damaged fuel tank lowers the capacity the page uses' : 'the 99.9% tank test: room is left, the game still harvests')
-      }
-
-      if (page.idle === 'Not at a gas giant' && state.body) {
-        return note('status', 'the fleet has no orbit ID at the gas giant: the page sees deep space')
-      }
-
-      if (pageWorks && state.status === 'tanks full') {
-        return note('status', hurtTanks ? 'a damaged fuel tank: the page measures the tanks against the class capacity' : 'the page measures the tanks against the class capacity')
-      }
-
-      if (pageWorks && state.status === 'no undamaged module') {
-        return note('status', 'every harvester module is damaged: the page counts the class total')
-      }
-
-      if (pageWorks && state.status === 'no gas giant here') {
-        return note('status', 'the fleet has an orbit ID but is not at the body\'s coordinates')
-      }
-
-      return null
-    })
-
-    if (works && pageWorks && state.perYear !== null) {
-      reports.output.compare(rowId, 'annual output', page.output, state.perYear, 'decimal', () => (explained.size ? note('output', `follows the ${[...explained].join(' and ')} difference above`) : null))
+    // The rate is compared wherever the race can see the deposit, tanks full or not; the unconstrained figure is the rate the harvester works at.
+    if (state.known && state.deposit && state.perYear !== null) {
+      reports.output.compare(rowId, 'annual rate', row.perYear, state.perYear, 'decimal')
     }
+
+    reports.obtainable.compare(rowId, `obtainable over ${years} yr`, row.obtainableLitres, ruleLitres(state, years), 'decimal')
   }
 }
 
@@ -431,63 +398,90 @@ const checkStoredInputs = (world, app) => {
 // Worked cases on synthetic in-memory rows, labelled as such: each has its expected value written out by hand and must hold, or the check fails. Where the page's helper gives a different answer for the same case, `page` records it (a known gap, not a failure).
 const workedCases = (app) => {
   const cases = []
-  const add = (name, actual, expected, kind = 'exact', page = null) => cases.push({ name, actual, expected, kind, page })
+  const add = (name, actual, expected, kind = 'exact') => cases.push({ name, actual, expected, kind })
   const base = { modules: 10, fuel: 0, capacity: 1000000, perYear: 400000, depositTons: 1000 }
   const step = (overrides, years = 1) => harvestStep({ ...base, ...overrides }, years)
   const potential = (overrides) => annualPotential({ modules: 10, rate: 40000, commander: 1, admin: 1, crew: 100, classCrew: 100, accessibility: 1, ...overrides })
-  const row = (overrides) => ({ ClassCrew: 100, CurrentCrew: 100, Harvesters: 10, FuelProduction: 40000, MiningBonus: 1, SoriumAccessibility: 1, SoriumAmount: 1000, Surveyed: 1, BodyTypeID: 4, Fuel: 0, FuelCapacity: 1000000, ...overrides })
-  const pageOutput = (overrides) => {
-    const page = row(overrides)
-    const idle = app.harvesterIdleReason(page)
+  const row = (overrides) => ({ ClassCrew: 100, CurrentCrew: 100, Harvesters: 10, ClassHarvesters: 10, FuelProduction: 40000, MiningBonus: 1, SoriumAccessibility: 1, SoriumAmount: 1000, Surveyed: 1, SystemBodyID: 1, Fuel: 0, FuelCapacity: 1000000, ...overrides })
+  // The page's helpers on the same case: its basis and the step over `years` (with a version the rule is stated for unless given).
+  const page = (overrides, years = 1, version = FORMULA_VERSION) => {
+    const basis = app.harvesterBasis(row(overrides), { version })
 
-    return idle ? `idle "${idle}", output 0` : `output ${format(app.harvesterOutput(page))} L/yr`
+    return { basis, taken: app.harvesterObtainable(basis, years, version) }
   }
   const root = { 1: { NavalAdminCommandID: 1, SystemID: 5, ParentCommandID: 0, BonusValue: 1.2, Share: 0.05, Eligible: true, Systems: new Set([5]) } }
 
-  add('full tanks: the step is exactly 0', step({ fuel: 1000000 }).litres, 0, 'exact', [pageOutput({ Fuel: 1000000 }), true])
+  add('full tanks: the step is exactly 0', step({ fuel: 1000000 }).litres, 0)
   add('full tanks: the limit named is the tanks', step({ fuel: 1000000 }).limit, 'tanks full')
   add('fuel above the capacity (damaged tanks): the step is 0', step({ fuel: 1200000 }).litres, 0)
-  add('1 L of room, a huge rate: the step is exactly 1 L', step({ fuel: 999999, perYear: 4e9 }).litres, 1, 'exact', [pageOutput({ Fuel: 999999 }), false])
-  add('99.95% full, a huge rate: the step is the 500 L of room, not 0', step({ fuel: 999500, perYear: 4e9 }).litres, 500, 'exact', [pageOutput({ Fuel: 999500 }), false])
+  add('1 L of room, a huge rate: the step is exactly 1 L', step({ fuel: 999999, perYear: 4e9 }).litres, 1)
+  add('99.95% full, a huge rate: the step is the 500 L of room, not 0', step({ fuel: 999500, perYear: 4e9 }).litres, 500)
   add('600,000 L of room under a 400,000 L step: the rate limits', step({ fuel: 400000 }).limit, 'rate')
   add('300,000 L of room under a 400,000 L step: the tank room limits', step({ fuel: 700000 }).litres, 300000)
   add('deposit exhaustion: 0.5 t left caps the step at 1,000 L', step({ depositTons: 0.5 }).litres, 1000)
   add('deposit exhaustion: the limit named is the deposit', step({ depositTons: 0.5 }).limit, 'deposit')
-  add('an exhausted deposit (0 t): the step is 0', step({ depositTons: 0 }).litres, 0, 'exact', [pageOutput({ SoriumAmount: 0 }), true])
+  add('an exhausted deposit (0 t): the step is 0', step({ depositTons: 0 }).litres, 0)
   add('a quarter year at 400,000 L a year: 100,000 L', step({}, 0.25).litres, 100000)
-  add('one module: 40,000 L a year at accessibility 1', potential({ modules: 1 }), 40000, 'exact', [pageOutput({ Harvesters: 1 }), true])
+  add('one module: 40,000 L a year at accessibility 1', potential({ modules: 1 }), 40000)
   add('one module at accessibility 0.5 and a 1.5 commander: 30,000 L a year', potential({ modules: 1, accessibility: 0.5, commander: 1.5 }), 30000)
-  add('damaged modules: 7 of 10 undamaged give 280,000 L a year', potential({ modules: 7 }), 280000, 'exact', [pageOutput({ Harvesters: 10 }), false])
-  add('every module damaged: the step is 0 and the limit says so', step({ modules: 0 }).limit, 'no undamaged module', 'exact', [pageOutput({ Harvesters: 10 }), false])
-  add('uncharted body: the potential is unknown (null), not 0', potential({ accessibility: null }), null, 'exact', [pageOutput({ Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }), false])
+  add('damaged modules: 7 of 10 undamaged give 280,000 L a year', potential({ modules: 7 }), 280000)
+  add('every module damaged: the step is 0 and the limit says so', step({ modules: 0 }).limit, 'no undamaged module')
+  add('uncharted body: the potential is unknown (null), not 0', potential({ accessibility: null }), null)
   add('uncharted body: the step is unknown (null), not 0', step({ perYear: null, depositTons: null }).litres, null)
-  add('crew at 50%: half the output', potential({ crew: 50 }), 200000, 'exact', [pageOutput({ CurrentCrew: 50 }), true])
-  add('crew above the class crew: capped at the full output', potential({ crew: 150 }), 400000, 'exact', [pageOutput({ CurrentCrew: 150 }), true])
-  add('class crew 0: the full output, no division by 0', potential({ classCrew: 0, crew: 0 }), 400000, 'exact', [pageOutput({ ClassCrew: 0, CurrentCrew: 0 }), true])
+  add('crew at 50%: half the output', potential({ crew: 50 }), 200000)
+  add('crew above the class crew: capped at the full output', potential({ crew: 150 }), 400000)
+  add('class crew 0: the full output, no division by 0', potential({ classCrew: 0, crew: 0 }), 400000)
   add('naval admin 1.2 at a 5% share in range: 1.01', app.navalAdminChainBonus(root, 5, 1), 1.01, 'decimal')
   add('naval admin out of range: 1', app.navalAdminChainBonus(root, 6, 1), 1)
   add('Mining bonus and admin multiply: 10 modules, 1.5 and 1.01: 606,000 L a year', potential({ commander: 1.5, admin: 1.01 }), 606000, 'decimal')
   add('the accessibility decline: 0.7 original, a quarter of the half amount left: 0.25', declinedAccessibility(app.roundHalfEven, { amount: 25, half: 100, original: 0.7 }), 0.25, 'decimal')
+
+  // The page's helpers on the cases that used to differ, each held to the rule's answer.
+  add('page: full tanks: 0 litres, "Tanks full"', `${page({ Fuel: 1000000 }).taken.litres} ${page({ Fuel: 1000000 }).basis.idle}`, '0 Tanks full')
+  add('page: 1 L of room, a huge rate: exactly 1 L', page({ Fuel: 999999, FuelProduction: 4e8 }).taken.litres, 1)
+  add('page: 99.95% full, a huge rate: the 500 L of room, not "Tanks full"', page({ Fuel: 999500, FuelProduction: 4e8 }).taken.litres, 500)
+  add('page: 600,000 L of room under a 400,000 L step: the rate limits', page({ Fuel: 400000 }).taken.limit, 'rate')
+  add('page: 300,000 L of room under a 400,000 L step: the tanks limit, 300,000 L', `${page({ Fuel: 700000 }).taken.litres} ${page({ Fuel: 700000 }).taken.limit}`, '300000 tanks')
+  add('page: 0.5 t left: 1,000 L, the deposit limits', `${page({ SoriumAmount: 0.5 }).taken.litres} ${page({ SoriumAmount: 0.5 }).taken.limit}`, '1000 deposit')
+  add('page: an exhausted deposit (0 t): 0 litres, "No Sorium"', `${page({ SoriumAmount: 0 }).taken.litres} ${page({ SoriumAmount: 0 }).basis.idle}`, '0 No Sorium')
+  add('page: a quarter year at 400,000 L a year: 100,000 L', page({}, 0.25).taken.litres, 100000)
+  add('page: one module: 40,000 L a year', page({ Harvesters: 1 }).basis.perYear, 40000)
+  add('page: damaged modules, 7 of 10 undamaged: 280,000 L a year', page({ Harvesters: 7 }).basis.perYear, 280000)
+  add('page: every module damaged: 0 litres, "No working module"', `${page({ Harvesters: 0 }).taken.litres} ${page({ Harvesters: 0 }).basis.idle}`, '0 No working module')
+  add('page: crew at 50%: 200,000 L a year', page({ CurrentCrew: 50 }).basis.perYear, 200000)
+  add('page: crew above the class crew: 400,000 L a year', page({ CurrentCrew: 150 }).basis.perYear, 400000)
+  add('page: class crew 0: 400,000 L a year', page({ ClassCrew: 0, CurrentCrew: 0 }).basis.perYear, 400000)
+  add('page: uncharted body: the rate and the step are unknown (null), not 0', `${page({ Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).basis.perYear} ${page({ Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).taken.litres} ${page({ Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).taken.result.status}`, 'null null unavailable')
+  add('page: uncharted body with full tanks: exactly 0, which needs no deposit', page({ Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null, Fuel: 1000000 }).taken.litres, 0)
+  add('page: not at a gas giant: 0 litres, the rate unknown', `${page({ SystemBodyID: null, Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).taken.litres} ${page({ SystemBodyID: null, Surveyed: 0, SoriumAmount: null, SoriumAccessibility: null }).basis.perYear}`, '0 null')
+  add('page: unknown tank capacity (damaged-capacity data missing): the step is unknown, the rate and the fuel in the tanks stay', `${page({ FuelCapacity: null }).taken.litres} ${page({ FuelCapacity: null }).basis.perYear} ${page({ FuelCapacity: null }).basis.room}`, 'null 400000 null')
+  add('page: unknown module count: the rate and the step are unknown', `${page({ Harvesters: null }).basis.perYear} ${page({ Harvesters: null }).taken.litres}`, 'null null')
+  add('page: a result is confirmed for a 2.7-shaped save and estimated otherwise', `${page({}).basis.rate.status} ${page({}, 1, null).basis.rate.status} ${page({}).taken.result.status} ${page({}, 1, null).taken.result.status}`, 'confirmed estimated confirmed estimated')
+  add('page: a fleet with no command takes the root command: 1.01', app.harvesterAdminBonus(root, { SystemID: 5, NavalAdminCommandID: 0 }), 1.01, 'decimal')
+  add('page: a fleet out of the root command\'s range: 1', app.harvesterAdminBonus(root, { SystemID: 6, NavalAdminCommandID: 0 }), 1)
+
+  // A deposit of 0.75 t (1,500 L) shared by two ships that would each fill 400,000 L: the body's total is the deposit, not twice it.
+  const shared = app.harvesterReport([row({ ShipID: 1, SoriumAmount: 0.75 }), row({ ShipID: 2, SoriumAmount: 0.75 })], { admins: {}, horizon: 1, version: FORMULA_VERSION })
+
+  add('page: two ships over a 1,500 L deposit: the body gives 1,500 L, not 3,000 L', shared.litres, 1500)
+  add('page: two ships over a deposit that cannot cover them: each is flagged', shared.rows.every((entry) => entry.overDeposit), true)
 
   return cases
 }
 
 const printWorkedCases = (cases) => {
   let failed = 0
-  let gaps = 0
 
   console.log('worked cases (synthetic in-memory rows, not save rows):')
 
   for (const entry of cases) {
     const ok = entry.kind === 'decimal' ? close(entry.actual, entry.expected) : entry.actual === entry.expected
-    const gap = entry.page && !entry.page[1]
 
     failed += ok ? 0 : 1
-    gaps += gap ? 1 : 0
-    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${entry.name}: ${format(entry.actual)}${ok ? '' : ` (expected ${entry.expected})`}${entry.page ? `; the page gives ${entry.page[0]}${gap ? ' - differs' : ''}` : ''}`)
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${entry.name}: ${format(entry.actual)}${ok ? '' : ` (expected ${entry.expected})`}`)
   }
 
-  console.log(`  ${cases.length} cases, ${failed} failed; the page differs from the rule on ${gaps}`)
+  console.log(`  ${cases.length} cases, ${failed} failed`)
 
   return failed
 }
@@ -630,6 +624,7 @@ const main = async () => {
   const database = await open(path.resolve(options.save)).catch((error) => fail(`Cannot open the save: ${error.message}`))
   const app = await loadApp()
   const world = await loadWorld(database, options.race, app).catch((error) => fail(error.message))
+  world.pageRows = await loadPageRows(database, world).catch((error) => fail(`The page's harvesters query fails on this save: ${error.message}`))
   const read = world.ships.map((ship) => readShip(world, ship, app))
 
   console.log(`${path.basename(options.save)}: race ${world.race.RaceID} "${world.race.RaceName}"${world.race.NPR ? ' (NPR)' : ''}, game ${world.game.GameID} "${world.game.GameName}", ${world.shape === '2.7' ? 'a 2.7-shaped save (AllowCMC and AncientRelics present): the rule holds as the 2.7.x harvesting rule' : 'not a 2.7-shaped save: the 2.7.x rule is unverified for it, treat every figure as an estimate'}`)
@@ -646,16 +641,18 @@ const main = async () => {
     crew: new Report('crew fraction on the page', APP_RULES),
     accessibility: new Report('accessibility on the page', APP_RULES),
     capacity: new Report('tank capacity on the page', APP_RULES),
+    room: new Report('tank room on the page', APP_RULES),
     body: new Report('body on the page', APP_RULES),
     status: new Report('harvesting state on the page', APP_RULES),
-    output: new Report('annual output on the page', APP_RULES),
+    output: new Report('annual rate on the page', APP_RULES),
+    obtainable: new Report(`fuel that fits over ${options.years} yr on the page`, APP_RULES),
   }
 
-  reconcileShips(world, read, app, reports)
+  reconcileShips(world, read, app, reports, options.years)
 
   console.log('\nstored inputs against the rule (rule verification against what the game wrote):')
   stored.forEach((report) => report.print(app.registry))
-  console.log('\nthe page\'s helpers against the rule (logistics.vue harvesters query, harvesterOutput, harvesterIdleReason, navalAdminChainBonus):')
+  console.log('\nthe page\'s figures against the rule (logistics.vue harvesters query, harvesterReport, harvesterBasis, harvesterObtainable, harvesterAdminBonus):')
   Object.values(reports).forEach((report) => report.print(app.registry))
 
   const potential = read.reduce((sum, state) => sum + (state.status === 'works' && state.perYear !== null ? state.perYear : 0), 0)

@@ -94,10 +94,16 @@
             </div>
           </v-card>
 
-          <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with what each makes a year and how long its deposit will last. Use it to judge which harvesters are worth keeping where they are." elevation="1">
+          <v-card v-if="harvesterRows.length" class="panel" data-summary="Fuel harvester ships, with the rate each works at, the fuel that fits into its tanks and the deposit over a chosen period, and how soon its tanks fill or its deposit runs out. Use it to judge which harvesters are worth keeping where they are." elevation="1">
             <div class="panel-head">
-              <span>Sorium harvesters</span>
-              <provenance-mark rule="logistics.harvesterOutput" label />
+              <span>Sorium harvesters<provenance-mark rule="logistics.harvesterOutput" label /><provenance-mark rule="logistics.harvesterObtainable" /></span>
+              <span class="d-flex align-center">
+                <v-chip small class="mr-3">{{ formulaVersion ? 'Rates follow the 2.7 rules' : 'Rates are estimates' }}</v-chip>
+                <span class="caption text--secondary mr-2">Fits over</span>
+                <v-btn-toggle v-model="harvesterHorizon" mandatory dense>
+                  <v-btn v-for="option in horizonOptions" :key="option.years" :value="option.years" small>{{ option.label }}</v-btn>
+                </v-btn-toggle>
+              </span>
             </div>
             <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :sort-by.sync="harvestersTable.sortBy" :sort-desc.sync="harvestersTable.sortDesc" :items-per-page.sync="harvestersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.ShipName`]="{ item }">
@@ -106,17 +112,39 @@
                   <div class="caption text--secondary">{{ item.FleetName }}</div>
                 </div>
               </template>
-              <template #[`item.output`]="{ item }">
-                <span v-if="item.idleReason === 'Tanks full'" class="warning--text text-no-wrap">Tanks full</span>
-                <span v-else-if="item.idleReason" class="text--secondary text-no-wrap">{{ item.idleReason }}</span>
-                <span v-else class="text-no-wrap">{{ litres(item.output) }}</span>
+              <template #[`item.modules`]="{ item }">
+                <span v-if="item.modules === null" class="text--secondary">—<provenance-mark :result="item.rate" /></span>
+                <span v-else class="text-no-wrap">{{ item.modules === item.classModules ? item.modules : `${item.modules} of ${item.classModules}` }}</span>
               </template>
+              <template #[`item.perYear`]="{ item }">
+                <span v-if="item.perYear === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.rate" /></span>
+                <span v-else class="text-no-wrap">{{ litres(item.perYear) }}</span>
+              </template>
+              <template #[`item.obtainableLitres`]="{ item }">
+                <template v-if="item.unknown">
+                  <span class="text--secondary text-no-wrap">—<provenance-mark :result="item.obtainable" /></span>
+                  <div class="caption text--secondary">{{ item.idle }}</div>
+                </template>
+                <span v-else-if="item.idle === 'Tanks full'" class="warning--text text-no-wrap">Tanks full</span>
+                <span v-else-if="item.idle" class="text--secondary text-no-wrap">{{ item.idle }}</span>
+                <template v-else>
+                  <div class="text-no-wrap">{{ litres(item.obtainableLitres) }}</div>
+                  <div class="caption text--secondary">{{ limitText(item) }}</div>
+                </template>
+              </template>
+              <template #[`item.room`]="{ item }">
+                <span v-if="item.room === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.obtainable" /></span>
+                <template v-else>
+                  <div class="text-no-wrap">{{ litres(item.room) }}</div>
+                  <div class="caption text--secondary">{{ percent(item.tanks) }} full</div>
+                </template>
+              </template>
+              <template #[`item.fillYears`]="{ item }">{{ item.fillYears === null ? '—' : item.fillYears === 0 ? 'Full' : years(item.fillYears) }}</template>
               <template #[`item.SoriumAmount`]="{ item }">{{ item.SoriumAmount === null ? '—' : tons(item.SoriumAmount) }}</template>
               <template #[`item.depositYears`]="{ item }">{{ item.depositYears === null ? '—' : years(item.depositYears) }}</template>
-              <template #[`item.tanks`]="{ item }">{{ percent(item.tanks) }}</template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Output uses the Aur_Calcs workbook's rule (each module runs at the racial refinery rate, times the deposit's accessibility, commander and naval-admin Mining bonuses and the share of crew aboard); the wiki gives a different base rate, so treat it as an estimate. A harvester only works at a gas giant or super-Jovian with Sorium in it, and stops when its tanks are full.
+              Rate is what a harvester makes while it works: each undamaged module at the racial Fuel Production rate, times the commander's and naval admin Mining bonuses (a fleet with no command takes the race's root command), the deposit's accessibility and the share of crew aboard when short-crewed. It is not fuel that fits. The fuel that fits over the chosen period is held to the Sorium in the deposit and to the room in the undamaged tanks, and a ship with any room left keeps harvesting. The deposit is the gas giant or super-Jovian at the fleet's coordinates; where the race has not surveyed it the output is unknown (—), not 0. Ships over one deposit share it, and the fall in accessibility once less than half of it is left is not applied. {{ versionNote }}
             </div>
           </v-card>
         </template>
@@ -213,10 +241,10 @@ import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
+import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterReport, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
-import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { loadFormulaVersion } from '../utilities/transport'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -226,11 +254,20 @@ const INPUT_LABELS = {
   shipFuel: 'fuel on ships',
   navalAdmins: 'naval admin commands',
   populationProductionModifiers: 'production modifiers',
+  formulaVersion: 'the save\'s schema',
 }
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
 const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
 const PAGE_SIZES = [15, 30, -1]
+// How far ahead the harvesters' obtainable fuel looks, in years.
+const HARVESTER_HORIZONS = [
+  { years: 0.25, label: '3 mo' },
+  { years: 0.5, label: '6 mo' },
+  { years: 1, label: '1 y' },
+  { years: 2, label: '2 y' },
+  { years: 5, label: '5 y' },
+]
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
@@ -244,6 +281,7 @@ export default {
     persistedView({
       view: { key: 'logisticsView', default: 'fuel', valid: oneOf(Object.keys(VIEW_NAMES)) },
       showIdleLocations: { key: 'logisticsShowIdleLocations', default: false },
+      harvesterHorizon: { key: 'logisticsHarvesterHorizon', default: 1, valid: oneOf(HARVESTER_HORIZONS.map((option) => option.years)) },
       refineriesTable: tableView('logisticsRefineriesTable', { sortBy: ['FuelStockpile'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       harvestersTable: tableView('logisticsHarvestersTable', { itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
@@ -253,6 +291,7 @@ export default {
   data() {
     return {
       pageSizes: PAGE_SIZES,
+      horizonOptions: HARVESTER_HORIZONS,
     }
   },
   computed: {
@@ -306,27 +345,24 @@ export default {
     },
 
     harvesterRows() {
-      const rows = this.harvesters.map((ship) => {
-        const tanksFull = ship.FuelCapacity > 0 && ship.Fuel >= ship.FuelCapacity * 0.999
-        const idleReason = harvesterIdleReason(ship)
-        const output = idleReason ? 0 : harvesterOutput(ship, navalAdminChainBonus(this.navalAdmins, ship.SystemID, ship.NavalAdminCommandID))
+      return harvesterReport(this.harvesters, { admins: this.navalAdmins, horizon: this.harvesterHorizon, version: this.formulaVersion }).rows.map((row) => ({
+        ...row,
+        body: row.SystemBodyID ? (row.SystemBodyName ? `${row.SystemName} · ${row.SystemBodyName}` : systemBodyName(row, { Name: row.SystemName })) : `${row.SystemName}, deep space`,
+        tanks: row.capacity > 0 ? row.Fuel / row.capacity : 0,
+      }))
+    },
 
-        return {
-          ...ship,
-          body: ship.SystemBodyID ? (ship.SystemBodyName ? `${ship.SystemName} · ${ship.SystemBodyName}` : systemBodyName(ship, { Name: ship.SystemName })) : `${ship.SystemName}, deep space`,
-          output,
-          idleReason,
-          tanksFull,
-          tanks: ship.FuelCapacity > 0 ? ship.Fuel / ship.FuelCapacity : 0,
-        }
-      })
-      const byBody = {}
+    // What the harvesters can fit into their tanks within a year, for the fuel balance: the stock is made per year, so it is held to the room left, not the rate.
+    harvesterYear() {
+      return harvesterReport(this.harvesters, { admins: this.navalAdmins, horizon: 1, version: this.formulaVersion })
+    },
 
-      rows.forEach((row) => {
-        byBody[row.SystemBodyID] = (byBody[row.SystemBodyID] || 0) + row.output
-      })
+    horizonLabel() {
+      return HARVESTER_HORIZONS.find((option) => option.years === this.harvesterHorizon).label
+    },
 
-      return rows.map((row) => ({ ...row, depositYears: row.SoriumAmount !== null && byBody[row.SystemBodyID] > 0 ? row.SoriumAmount / (byBody[row.SystemBodyID] / LITRES_PER_TON) : null }))
+    versionNote() {
+      return this.formulaVersion ? 'The save has the 2.7 schema and no version label, so the 2.7 rules apply: the stored inputs agree with them on sample saves, but no fuel gain between two saves has been observed.' : 'The save has no version label and not the 2.7 schema, so the rules are not verified for its game version and every figure is an estimate.'
     },
 
     burnRows() {
@@ -342,11 +378,11 @@ export default {
       const tankers = this.shipFuel.filter((row) => row.FuelTanker).reduce((sum, row) => sum + row.Fuel, 0)
       const ships = this.shipFuel.filter((row) => !row.FuelTanker).reduce((sum, row) => sum + row.Fuel, 0)
       const refineries = this.refineryRows.reduce((sum, row) => sum + row.output, 0)
-      const harvesters = this.harvesterRows.reduce((sum, row) => sum + row.output, 0)
+      const harvesters = this.harvesterYear.litres
       const lifetime = this.burnRows.reduce((sum, row) => sum + row.lifetime, 0)
       const moving = this.burnRows.reduce((sum, row) => sum + row.moving, 0)
 
-      return { colonies, tankers, ships, stock: colonies + tankers + ships, refineries, harvesters, production: refineries + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
+      return { colonies, tankers, ships, stock: colonies + tankers + ships, refineries, harvesters, harvestersUnknown: this.harvesterYear.unknown, production: refineries + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
     },
 
     fuelBalance() {
@@ -358,7 +394,7 @@ export default {
         {
           label: 'Made',
           total: this.litres(totals.production),
-          lines: [line('Refineries', totals.refineries, 'success'), ...(this.harvesterRows.length ? [line('Harvesters (estimate)', totals.harvesters, 'success')] : [])],
+          lines: [line('Refineries', totals.refineries, 'success'), ...(this.harvesterRows.length ? [line(`Harvesters, fit in tanks${totals.harvestersUnknown ? ` (${totals.harvestersUnknown} unknown)` : ''}`, totals.harvesters, 'success')] : [])],
         },
         {
           label: 'Burned (estimate)',
@@ -464,7 +500,7 @@ export default {
         {
           label: 'Fuel per year',
           value: this.signedLitres(fuelNet),
-          note: `Made ${this.litres(fuel.production)}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelNet < 0 && fuel.stock > 0 ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
+          note: `Made ${this.litres(fuel.production)}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters unknown)` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelNet < 0 && fuel.stock > 0 ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
           icon: fuelNet < 0 ? 'mdi-trending-down' : 'mdi-trending-up',
           iconColor: fuelNet < 0 ? 'error' : 'success',
         },
@@ -501,11 +537,13 @@ export default {
       return [
         { text: 'Ship', value: 'ShipName' },
         { text: 'At', value: 'body' },
-        { text: 'Modules', value: 'Harvesters', align: 'end' },
-        { text: 'Makes / yr', value: 'output', align: 'end' },
+        { text: 'Modules', value: 'modules', align: 'end' },
+        { text: 'Rate / yr (uncapped)', value: 'perYear', align: 'end' },
+        { text: `Fits in ${this.horizonLabel}`, value: 'obtainableLitres', align: 'end' },
+        { text: 'Tank room', value: 'room', align: 'end' },
+        { text: 'Tanks fill in', value: 'fillYears', align: 'end' },
         { text: 'Sorium left (t)', value: 'SoriumAmount', align: 'end' },
         { text: 'Deposit lasts', value: 'depositYears', align: 'end' },
-        { text: 'Tanks', value: 'tanks', align: 'end' },
       ]
     },
 
@@ -547,6 +585,12 @@ export default {
 
     colonyLink(populationId) {
       return linkTo.colonyOutlook(populationId)
+    },
+
+    limitText(row) {
+      const text = { tanks: 'Limited by tank room', deposit: 'Limited by the deposit', rate: 'At the full rate' }[row.limit]
+
+      return row.overDeposit ? `${text}; the ${row.ships} ships on it share a deposit that cannot cover them all` : text
     },
 
     fleetRoutesLink(fleetId) {
@@ -628,16 +672,27 @@ export default {
       }),
       default: [],
     },
-    // The race's harvesters; deposit figures only where the race has surveyed the body.
+    // The race's harvesters: the undamaged modules and tank capacity (class components less the first damage row of each component), the gas giant or super-Jovian at the fleet's coordinates (the first body within 1 unit on both axes), and its deposit only where the race has surveyed the body. A class whose component rows are missing gives unknown modules or capacity (null).
     harvesters: {
       get: tracked('harvesters', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.Harvesters, FCT_ShipClass.FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and FCT_ShipClass.Harvesters > 0 inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_Fleet.OrbitBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.Harvesters end as Harvesters, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.ClassHarvesters end as ClassHarvesters, case when VIR_Parts.TankRows > 0 then VIR_Parts.FuelCapacity when FCT_ShipClass.FuelCapacity > 0 then null else 0 end as FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join (select VIR_Ship.ShipID, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then 1 else 0 end) as HarvesterRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent else 0 end) as ClassHarvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0) else 0 end) as Harvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then 1 else 0 end) as TankRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then (FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue else 0 end) as FuelCapacity from FCT_Ship as VIR_Ship inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = VIR_Ship.ShipClassID and FCT_ClassComponent.GameID = VIR_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID in (3, 32) left join (select FCT_DamagedComponent.ShipID, FCT_DamagedComponent.ComponentID, FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.rowid in (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.GameID = ${this.GameID} group by VIR_First.ShipID, VIR_First.ComponentID)) as VIR_Damage on VIR_Damage.ShipID = VIR_Ship.ShipID and VIR_Damage.ComponentID = FCT_ClassComponent.ComponentID where VIR_Ship.GameID = ${this.GameID} and VIR_Ship.RaceID = ${this.RaceID} and VIR_Ship.ShippingLineID = 0 and VIR_Ship.ShipClassID in (select VIR_Harvester.ClassID from FCT_ClassComponent as VIR_Harvester inner join FCT_ShipDesignComponents as VIR_Type on VIR_Type.SDComponentID = VIR_Harvester.ComponentID and VIR_Type.ComponentTypeID = 32 where VIR_Harvester.GameID = ${this.GameID}) group by VIR_Ship.ShipID) as VIR_Parts on VIR_Parts.ShipID = FCT_Ship.ShipID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = (select VIR_Body.SystemBodyID from FCT_SystemBody as VIR_Body where VIR_Body.GameID = FCT_Ship.GameID and VIR_Body.BodyTypeID in (4, 5) and abs(VIR_Body.Xcor - FCT_Fleet.Xcor) < 1 and abs(VIR_Body.Ycor - FCT_Fleet.Ycor) < 1 order by VIR_Body.SystemBodyID limit 1) left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Harvesters > 0 or VIR_Parts.HarvesterRows > 0) order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
       }),
       default: [],
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
     // Per class with engines and tanks (docked craft aside): ships moving in the last increment, and the sum of each ship's lifetime duty cycle (distance / (age x top speed), age at least a quarter year).
     burn: {

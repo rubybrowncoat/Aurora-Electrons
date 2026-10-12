@@ -1,7 +1,8 @@
 // Fuel and maintenance-supply maths for the Logistics page. Sources and checks: docs/plans/aurcalcs/build-2.md § Logistics.
 
 import { roundToDecimal } from './math'
-import { registerRule } from './provenance'
+import { navalAdminChainBonus } from './minerals'
+import { envelope, getRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 // The racial "Maintenance Production Rate" is BP per facility per year; 1 MSP is 0.25 BP.
 export const MSP_PER_BP = 4
@@ -14,8 +15,6 @@ export const MSP_MINERALS = [
   { name: 'Uridium', perMsp: 0.05 },
   { name: 'Gallicite', perMsp: 0.1 },
 ]
-// Body types a Sorium harvester can work: FCT_SystemBody.BodyTypeID 4 is a gas giant, 5 a super-Jovian.
-export const HARVESTER_BODY_TYPES = [4, 5]
 
 // L/yr while production is on: refineries x racial rate x the colony's production modifier. Matches the game's mineral ledger (Sorium for fuel refining) on every sample colony.
 export const refineryOutput = (colony, modifier) => (colony.FuelProdStatus ? colony.Refineries * colony.FuelProduction * modifier : 0)
@@ -89,16 +88,37 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
 // Fuel a class burns per ship and year at full power: engine power x litres per EP-hour.
 export const fullPowerBurn = (shipClass) => shipClass.EnginePower * shipClass.FuelEfficiency * HOURS_PER_YEAR
 
-// A harvester's fuel per year: modules x the racial refinery rate x commander and admin Mining bonuses x the deposit's accessibility x the share of its crew aboard. The workbook's formula (the wiki gives a different base rate), so it's an estimate.
-export const harvesterOutput = (ship, adminBonus = 1) => {
-  const crew = ship.ClassCrew > 0 ? Math.min(1, Math.max(0, ship.CurrentCrew) / ship.ClassCrew) : 1
+// The share of its crew a harvester has aboard: 1 at full crew or more, and a class without crew always runs.
+export const harvesterCrewShare = (ship) => (ship.ClassCrew > 0 && ship.CurrentCrew < ship.ClassCrew ? Math.max(0, ship.CurrentCrew) / ship.ClassCrew : 1)
 
-  return ship.Harvesters * ship.FuelProduction * ship.MiningBonus * adminBonus * (ship.SoriumAccessibility || 0) * crew
+// The naval admin Mining multiplier a harvester earns: its fleet's command up the chain, and for a fleet with no command the race's root command. `admins`: as `loadNavalAdmins` gives them; `ship`: { SystemID, NavalAdminCommandID }.
+export const harvesterAdminBonus = (admins, ship) => {
+  const root = Object.values(admins).find((admin) => !admin.ParentCommandID)
+
+  return navalAdminChainBonus(admins, ship.SystemID, ship.NavalAdminCommandID || (root ? root.NavalAdminCommandID : 0))
 }
 
-// Why a harvester isn't producing, or null when it is: the deposit has to be known, on a gas giant or super-Jovian, and hold Sorium, and the tanks need room.
+// Reasons a harvester gives no fuel now, in the order the game tests them: no undamaged module, no room in the undamaged tanks (any room at all is filled), not at a gas giant or super-Jovian (found by the fleet's coordinates), no Sorium in the deposit. Null when it harvests.
+// Three reasons mean an input is not known, and then the output is unknown rather than 0: modules or tanks the class rows do not give, and a body the race has not surveyed (the game harvests there; the deposit is not visible).
+// `ship`: { Harvesters (undamaged modules, null when unknown), FuelCapacity (undamaged tanks, null when unknown), Fuel, SystemBodyID, Surveyed, SoriumAmount }.
 export const harvesterIdleReason = (ship) => {
-  if (!HARVESTER_BODY_TYPES.includes(ship.BodyTypeID)) {
+  if (!Number.isFinite(ship.Harvesters)) {
+    return 'Modules unknown'
+  }
+
+  if (ship.Harvesters <= 0) {
+    return 'No working module'
+  }
+
+  if (!Number.isFinite(ship.FuelCapacity)) {
+    return 'Tanks unknown'
+  }
+
+  if (!(ship.Fuel < ship.FuelCapacity)) {
+    return 'Tanks full'
+  }
+
+  if (!ship.SystemBodyID) {
     return 'Not at a gas giant'
   }
 
@@ -106,11 +126,130 @@ export const harvesterIdleReason = (ship) => {
     return 'Not surveyed'
   }
 
-  if (!(ship.SoriumAmount > 0)) {
-    return 'No Sorium'
+  return ship.SoriumAmount > 0 ? null : 'No Sorium'
+}
+
+const UNKNOWN_REASONS = ['Modules unknown', 'Tanks unknown', 'Not surveyed']
+
+// Whether an idle reason stands for a missing input (the output is then unknown, not 0).
+export const harvesterReasonIsUnknown = (reason) => UNKNOWN_REASONS.includes(reason)
+
+// A rule's status for a save: the rule's own verification where it holds for the save's formula version (`loadFormulaVersion`, null when the save is not 2.7-shaped), otherwise an estimate.
+const statusFor = (rule, version) => (ruleSupports(rule, version) === true ? getRule(rule).verification : 'estimated')
+
+const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so the rule is not checked for its game version.'
+
+const assumptionsFor = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])
+
+// The inputs of the unconstrained rate the save does not give.
+const rateMissing = (ship) => [
+  ...(Number.isFinite(ship.Harvesters) ? [] : ['the undamaged harvester modules']),
+  ...(!ship.SystemBodyID ? ['a gas giant or super-Jovian under the fleet'] : !ship.Surveyed ? ['the Sorium deposit (the body is not surveyed)'] : []),
+]
+
+// A harvester's unconstrained fuel per year, as a provenance result of 'logistics.harvesterOutput': undamaged modules x the racial rate x the commander's and naval admin Mining bonuses x the deposit's accessibility x the crew share. Unavailable (not 0) while the modules or the deposit are not known. Ignores the tanks: it is the rate at which the harvester works, not fuel that fits.
+const harvesterRate = (ship, admin, version) => {
+  const rule = 'logistics.harvesterOutput'
+  const missing = rateMissing(ship)
+
+  if (missing.length) {
+    return unavailable({ rule, missing, present: ['the racial rate', 'the commander and naval admin bonuses', 'the crew'] })
   }
 
-  return ship.FuelCapacity > 0 && ship.Fuel >= ship.FuelCapacity * 0.999 ? 'Tanks full' : null
+  const value = ship.Harvesters * ship.FuelProduction * ship.MiningBonus * admin * harvesterCrewShare(ship) * (ship.SoriumAccessibility || 0)
+
+  return envelope({ value, status: statusFor(rule, version), rule, inputs: { present: ['the undamaged modules', 'the racial rate', 'the commander and naval admin bonuses', 'the crew', 'the deposit'] }, assumptions: assumptionsFor(rule, version) })
+}
+
+// One harvester's standing: why it works or not, its undamaged modules, tank room, unconstrained rate (a result and its value, null when unknown) and the years the rate takes to fill the room and the deposit's litres. `ship` is a row of the page's harvesters query; `admin` the naval admin multiplier (`harvesterAdminBonus`); `version` the formula version.
+export const harvesterBasis = (ship, { admin = 1, version = null } = {}) => {
+  const idle = harvesterIdleReason(ship)
+  const room = Number.isFinite(ship.FuelCapacity) ? Math.max(0, ship.FuelCapacity - ship.Fuel) : null
+  const rate = harvesterRate(ship, admin, version)
+  const perYear = rate.value
+  const depositLitres = ship.Surveyed && Number.isFinite(ship.SoriumAmount) ? ship.SoriumAmount * LITRES_PER_TON : null
+
+  return {
+    idle,
+    unknown: harvesterReasonIsUnknown(idle),
+    modules: ship.Harvesters,
+    classModules: ship.ClassHarvesters,
+    capacity: ship.FuelCapacity,
+    room,
+    rate,
+    perYear,
+    depositLitres,
+    fillYears: room === null || perYear === null ? null : room === 0 ? 0 : perYear > 0 ? room / perYear : null,
+  }
+}
+
+// The fuel a harvester can add over `horizon` years, as { result, litres, limit }: its rate times the horizon, held first to the Sorium the deposit has and then to the room in its tanks (the game's order). `limit`: 'tanks', 'deposit' or 'rate' for what binds, null when the harvester gives nothing now. A harvester that cannot work for a known reason gives 0 litres; a missing module count, tank capacity or deposit gives an unavailable result with null litres, never 0. Each ship is taken against the whole deposit: `harvesterReport` holds a shared deposit to what it has.
+export const harvesterObtainable = (basis, horizon, version = null) => {
+  const rule = 'logistics.harvesterObtainable'
+
+  if (basis.unknown) {
+    const missing = [
+      ...(Number.isFinite(basis.modules) ? [] : ['the undamaged harvester modules']),
+      ...(Number.isFinite(basis.capacity) ? [] : ['the undamaged tank capacity']),
+      ...(basis.idle === 'Not surveyed' ? ['the Sorium deposit (the body is not surveyed)'] : []),
+    ]
+
+    return { result: unavailable({ rule, missing, present: ['the tank level', 'the harvester modules'] }), litres: null, limit: null }
+  }
+
+  const status = statusFor(rule, version)
+  const assumptions = assumptionsFor(rule, version)
+  const inputs = { present: ['the undamaged modules', 'the undamaged tanks', 'the tank level', 'the deposit'] }
+
+  if (basis.idle) {
+    return { result: envelope({ value: 0, status, rule, inputs, assumptions }), litres: 0, limit: null }
+  }
+
+  const litres = Math.min(basis.perYear * horizon, basis.depositLitres, basis.room)
+  const limit = litres === basis.room ? 'tanks' : litres === basis.depositLitres ? 'deposit' : 'rate'
+
+  return { result: envelope({ value: litres, status, rule, inputs, assumptions }), litres, limit }
+}
+
+// A race's harvesters over `horizon` years, one row per ship: the row of the query with `basis` fields, `obtainable` (a result), `obtainableLitres`, `limit`, `depositYears` (how long the body's deposit lasts at the rate of the ships that can fill their tanks now, null when any ship there is unknown) and `ships` and `overDeposit` for bodies shared by several. Ships over one body take from one deposit: the report's `litres` holds each body's total to the deposit. `unknown` counts ships whose output is unknown. `admins`: as `loadNavalAdmins` gives them.
+export const harvesterReport = (ships, { admins, horizon, version = null }) => {
+  const entries = ships.map((ship) => {
+    const basis = harvesterBasis(ship, { admin: harvesterAdminBonus(admins, ship), version })
+
+    return { ship, basis, taken: harvesterObtainable(basis, horizon, version) }
+  })
+  const bodies = {}
+
+  entries.filter(({ ship }) => ship.SystemBodyID).forEach(({ ship, basis, taken }) => {
+    const body = (bodies[ship.SystemBodyID] = bodies[ship.SystemBodyID] || { ships: 0, demand: 0, perYear: 0, unknown: 0, depositLitres: basis.depositLitres })
+
+    body.ships++
+
+    if (taken.litres === null) {
+      body.unknown++
+    } else {
+      body.demand += taken.litres
+    }
+
+    if (basis.idle === null) {
+      body.perYear += basis.perYear
+    }
+  })
+
+  Object.values(bodies).forEach((body) => {
+    body.litres = body.depositLitres === null ? body.demand : Math.min(body.demand, body.depositLitres)
+    body.years = !body.unknown && body.depositLitres !== null && body.perYear > 0 ? body.depositLitres / body.perYear : null
+  })
+
+  return {
+    rows: entries.map(({ ship, basis, taken }) => {
+      const body = bodies[ship.SystemBodyID] || null
+
+      return { ...ship, ...basis, obtainable: taken.result, obtainableLitres: taken.litres, limit: taken.limit, depositYears: body ? body.years : null, ships: body ? body.ships : 0, overDeposit: body !== null && body.depositLitres !== null && body.demand > body.depositLitres }
+    }),
+    litres: Object.values(bodies).reduce((sum, body) => sum + body.litres, 0),
+    unknown: entries.filter(({ taken }) => taken.litres === null).length,
+  }
 }
 
 // Litres or items at a readable precision: 2.5 bn, 1.2 M, 3.4 k.
@@ -193,7 +332,17 @@ registerRule({
   id: 'logistics.harvesterOutput',
   versions: LOGISTICS_VERSIONS,
   units: 'L/yr per ship',
-  verification: 'estimated',
-  structure: ['FCT_Ship Harvesters, MiningBonus, CurrentCrew', 'FCT_ShipClass.FuelProduction, Crew', 'the deposit\'s Sorium accessibility'],
-  note: 'Modules times the racial refinery rate times the commander and admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard: the community workbook\'s rule, where the wiki gives a different base rate, so it is not confirmed.',
+  verification: 'confirmed',
+  structure: ['FCT_ClassComponent and FCT_DamagedComponent (the undamaged harvester modules)', 'FCT_Race.FuelProduction', 'FCT_Ship.CurrentCrew, FCT_ShipClass.Crew', 'FCT_CommanderBonuses (Mining) and the naval admin chain', 'FCT_MineralDeposit.Accessibility of the body at the fleet\'s coordinates'],
+  note: 'Undamaged modules times the racial Fuel Production rate (not the component\'s own value) times the commander\'s and naval admin Mining bonuses times the deposit\'s accessibility times the share of the crew aboard when it is short; a fleet with no command takes the race\'s root naval admin command. This is the game\'s 2.7.1 rule: its stored inputs (racial rate, class modules, accessibility, tank levels) were reconciled on two saves, but no clean fuel increment between saves has been observed, so the rate itself rests on the rule and those inputs.',
+})
+
+registerRule({
+  id: 'logistics.harvesterObtainable',
+  versions: LOGISTICS_VERSIONS,
+  units: 'L',
+  verification: 'confirmed',
+  structure: ['logistics.harvesterOutput', 'FCT_Ship.Fuel and the undamaged FuelStorage components (FCT_ClassComponent, FCT_DamagedComponent)', 'FCT_MineralDeposit.Amount'],
+  note: 'The unconstrained rate times the horizon, held first to the tonnes of Sorium the deposit has (2,000 L each) and then to the free room in the undamaged tanks; a ship with any room is filled and one with none gives nothing. The game\'s 2.7.1 order. The tank cap was observed on a save pair (35 of 36 ships ended at capacity); the rate was not, and the deposit\'s decline per cycle is not modelled.',
+  assumptions: ['The deposit\'s accessibility holds over the horizon: it falls once less than half of the original amount is left, and that is not applied', 'Ships over one deposit take it in turn, so a body\'s total is held to the deposit and each ship\'s own figure is taken against all of it', 'The ship stays where it is, with its modules, crew and commanders, over the horizon'],
 })
