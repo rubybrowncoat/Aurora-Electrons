@@ -322,7 +322,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Freighters, load and unload to reserve orders and mass drivers move only what a colony holds above its reserve. Industrial projects, shipyards and ground training draw on the whole stock, reserve included, so a reserve keeps a queue's minerals from being carried off but never holds them back from it. A mass driver sends up to {{ count(MASS_DRIVER_TONS) }} t a year to the colony set as its destination, and nothing with none set; packets bound for a colony that is gone are lost. Queue needs are what the colony's industrial projects (paused and queued ones too) and shipyard tasks still need. Expand a colony for each mineral and the nearest colony with stock free to move.
+            Freighters, load and unload to reserve orders and mass drivers move only what a colony holds above its reserve. Industrial projects, shipyards and ground training draw on the whole stock, reserve included, so a reserve keeps a queue's minerals from being carried off but never holds them back from it. A mass driver sends up to {{ count(MASS_DRIVER_TONS) }} t a year to the colony set as its destination, and nothing with none set; packets bound for a colony that is gone are lost. Queue needs are what the colony's industrial projects (paused and queued ones too) and shipyard tasks that build, repair or refit still need; a scrap task needs no minerals. Expand a colony for each mineral and the nearest colony with stock free to move.
           </div>
         </v-card>
       </template>

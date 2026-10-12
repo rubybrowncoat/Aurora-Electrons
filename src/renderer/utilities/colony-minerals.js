@@ -6,6 +6,9 @@ const NAMES = MINERALS.map((mineral) => mineral.name)
 const sums = (table) => NAMES.map((name) => `sum(${table}.${name}) as ${name}`).join(', ')
 const byPopulation = (rows) => Object.freeze(Object.fromEntries(rows.map((row) => [row.PopulationID, row])))
 
+// FCT_ShipyardTask.TaskTypeID of a scrap task.
+const SCRAP_TASK = 3
+
 // The stock and reserve of every mineral, for a read of FCT_Population.
 export const STOCK_COLUMNS = NAMES.map((name) => `FCT_Population.${name}, FCT_Population.Reserve${name}`).join(', ')
 
@@ -46,9 +49,9 @@ export const colonyMinerals = (colony, needs = {}, inbound = {}, exporting = fal
   return { ...mineral, ...values, free: Math.max(0, values.stock - values.reserve), state: stockState(values, exporting) }
 })
 
-// What each colony's queue still needs, by PopulationID: its industrial projects (per unit, times the units left; paused and queued ones too) and its shipyard tasks (their full cost, times the share of build points left).
+// What each colony's queue still needs, by PopulationID: its industrial projects (per unit, times the units left; paused and queued ones too) and its shipyard tasks (their full cost, times the share of build points left). A scrap task needs nothing: the game neither checks the stock against its mineral figures nor spends them, and the other task types (construction, repair, refit) draw them.
 export const loadQueueNeeds = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, ${NAMES.map((name) => `FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and FCT_ShipyardTask.TotalBP > 0) as VIR_Needs group by VIR_Needs.PopulationID`)
+  const [rows] = await database.query(`select VIR_Needs.PopulationID, ${sums('VIR_Needs')} from (select FCT_IndustrialProjects.PopulationID, ${NAMES.map((name) => `FCT_IndustrialProjects.${name} * FCT_IndustrialProjects.Amount as ${name}`).join(', ')} from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${GameID} and FCT_IndustrialProjects.RaceID = ${RaceID} union all select FCT_ShipyardTask.PopulationID, ${NAMES.map((name) => `FCT_ShipyardTask.${name} * (FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP) / FCT_ShipyardTask.TotalBP as ${name}`).join(', ')} from FCT_ShipyardTask where FCT_ShipyardTask.GameID = ${GameID} and FCT_ShipyardTask.RaceID = ${RaceID} and FCT_ShipyardTask.TotalBP > 0 and FCT_ShipyardTask.TaskTypeID <> ${SCRAP_TASK}) as VIR_Needs group by VIR_Needs.PopulationID`)
 
   return byPopulation(rows)
 }
