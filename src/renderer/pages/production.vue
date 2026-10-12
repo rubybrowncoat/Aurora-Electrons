@@ -68,7 +68,7 @@
             </template>
             <template #[`item.name`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree(item.TechSystemID)" :name="item.name" /></div>
+                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>

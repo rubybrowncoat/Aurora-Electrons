@@ -185,19 +185,44 @@ export default {
       return first ? first[0].id : null
     },
 
-    // The Path view's target, or nothing in the other views. Null while the target is still being worked out.
+    // What is on show: the Fields view's field, the Lines view, or the Path view's target. Null while the field or target is still being worked out.
     linkQuery() {
-      if (this.shownView !== 'path') {
-        return {}
-      } else if (this.research) {
-        return linkTo.techTree(this.activeTargetId).query
+      if (this.shownView === 'lines') {
+        return linkTo.techTree({ view: 'lines' }).query
       }
 
-      return this.targetId ? linkTo.techTree(this.targetId).query : null
+      if (this.shownView === 'fields') {
+        if (this.research) {
+          return linkTo.techTree({ field: this.activeFieldId }).query
+        }
+
+        return this.fieldId ? linkTo.techTree({ field: this.fieldId }).query : null
+      }
+
+      if (this.research) {
+        return linkTo.techTree({ tech: this.activeTargetId }).query
+      }
+
+      return this.targetId ? linkTo.techTree({ tech: this.targetId }).query : null
     },
 
+    // The history menus and the trail name the field, the Lines view or the technology on show.
     linkLabel() {
-      const tech = this.shownView === 'path' && this.research ? this.research.graph.techs.get(this.activeTargetId) : null
+      if (this.shownView === 'lines') {
+        return 'Lines'
+      }
+
+      if (!this.research) {
+        return null
+      }
+
+      if (this.shownView === 'fields') {
+        const field = this.research.fields.find((row) => row.ResearchFieldID === this.activeFieldId)
+
+        return field ? field.FieldName : null
+      }
+
+      const tech = this.research.graph.techs.get(this.activeTargetId)
 
       return tech ? tech.name : null
     },
@@ -241,12 +266,18 @@ export default {
     },
   },
   methods: {
-    // A tech in the query opens its path; without one the page shows the view it remembers.
+    // A tech in the query opens its path, a field the Fields view on that field, and `view=lines` the Lines view; without any the page shows the view it remembers. A field or view from Back or Forward is remembered as if picked, a linked tech only for the visit.
     applyLink(query) {
       const techId = queryId(query.tech)
+      const fieldId = queryId(query.field)
 
       if (techId) {
         this.setUnsaved('targetId', techId)
+      } else if (fieldId) {
+        this.view = 'fields'
+        this.fieldId = fieldId
+      } else if ([].concat(query.view)[0] === 'lines') {
+        this.view = 'lines'
       }
 
       this.pathOpen = !!techId

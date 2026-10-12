@@ -10,7 +10,7 @@
 // | `/survey-progress` | `system=<SystemID>`                                                      |
 // | `/lagrange`        | `system=<SystemID>`                                                      |
 // | `/intelligence`    | `race=<AlienRaceID>`                                                     |
-// | `/technologies`    | `tech=<TechSystemID>`, the Path view on that technology                  |
+// | `/technologies`    | `tech=<TechSystemID>` (Path view), `field=<ResearchFieldID>` (Fields view) or `view=lines` |
 // | `/colony-outlook`  | `colony=<PopulationID>`                                                  |
 // | `/production`      | `colony=<PopulationID>`                                                  |
 // | `/commanders`      | `commander=<CommanderID>`, or `colony=<PopulationID>` for its governor   |
@@ -103,7 +103,7 @@ export const linkTo = Object.freeze({
   survey: (systemId) => link('/survey-progress', { system: systemId }),
   lagrange: (systemId) => link('/lagrange', { system: systemId }),
   intelligence: (alienRaceId) => link('/intelligence', { race: alienRaceId }),
-  techTree: (techSystemId) => link('/technologies', { tech: techSystemId }),
+  techTree: ({ tech, field, view } = {}) => link('/technologies', { tech, field, view }),
   colonyOutlook: (populationId) => link('/colony-outlook', { colony: populationId }),
   production: (populationId) => link('/production', { colony: populationId }),
   commanders: ({ commander, colony } = {}) => link('/commanders', { commander, colony }),

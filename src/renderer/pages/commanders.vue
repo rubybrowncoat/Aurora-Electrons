@@ -640,7 +640,7 @@ export default {
       return linkTo.map(systemId)
     },
     techLink(techSystemId) {
-      return linkTo.techTree(techSystemId)
+      return linkTo.techTree({ tech: techSystemId })
     },
     count(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
