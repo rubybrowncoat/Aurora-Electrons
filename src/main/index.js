@@ -5,6 +5,8 @@ import { app, dialog, ipcMain } from 'electron'
 import Store from 'electron-store'
 import envPaths from 'env-paths'
 
+// Before the window and its handlers, so their errors are reported too.
+import './sentry'
 import './boot'
 import './mainWindow'
 

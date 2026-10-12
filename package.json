@@ -25,7 +25,8 @@
   "devDependencies": {
     "@mdi/font": "^7.4.47",
     "@nuxtjs/eslint-config-typescript": "8.0.0",
-    "@sentry/vue": "^11.5.0",
+    "@sentry/electron": "8.1.0",
+    "@sentry/vue": "11.4.0",
     "@timohausmann/quadtree-js": "^1.2.6",
     "@vitejs/plugin-vue2": "^2.3.4",
     "chart.js": "^4.5.1",
