@@ -267,8 +267,11 @@ const run = async () => {
         await settle()
       }
 
-      if (!(await page.evaluate(pageLoading.arrived, route))) {
-        problems.push(`navigation: ${route} was asked for, but the page on screen is ${await page.evaluate(() => window.$app.$route.path)}`)
+      // A page that hasn't arrived when the wait gives up fails, even if it turns up a moment later: it was never settled. One that arrived and then left fails too.
+      if (!arrived) {
+        problems.push(`navigation: ${route} was asked for, but it hadn't arrived after ${PAGE_TIMEOUT_MS / 1000} s (the page on screen is ${await page.evaluate(() => window.$app.$route.path)})`)
+      } else if (!(await page.evaluate(pageLoading.arrived, route))) {
+        problems.push(`navigation: ${route} arrived, then the page on screen became ${await page.evaluate(() => window.$app.$route.path)}`)
       }
 
       const name = route === '/' ? 'empires' : route.slice(1)
