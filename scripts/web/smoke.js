@@ -32,13 +32,14 @@ const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
 
 /*
-  LAYOUT_CHECK runs in the page and returns what it can see of the window-size rule (docs/ARCHITECTURE.md, Layout):
+  LAYOUT_CHECK runs in the page and returns what it can see of the window-size rule (docs/ARCHITECTURE.md, Layout) and of the section summaries:
   - overflow: the document, the body or .v-main scrolls sideways.
   - wide: an element in the content reaches past the window edge and no ancestor scrolls it.
   - clipped: an element with overflow hidden holds text wider than itself and doesn't ellipsise it.
   - small chart: a canvas under 240 x 120 px.
   - tight: a short label (a header, button, chip, tab or label of at most 24 characters) that wraps onto a second line.
   - island: from 1904 px up, the content stops short of 80% of the width, so the layout isn't filling the window.
+  - summary: a section panel (a top-level .panel whose .panel-head has a title, as the section nav reads it) has no data-summary for its card.
   Also lists the containers that scroll sideways on their own, as information, never a problem.
  */
 const LAYOUT_CHECK = () => {
@@ -121,6 +122,16 @@ const LAYOUT_CHECK = () => {
 
     if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0) {
       problems.push(`small chart: canvas ${Math.round(rect.width)} x ${Math.round(rect.height)}`)
+    }
+  })
+
+  container.querySelectorAll('.panel').forEach((panel) => {
+    const head = [...panel.querySelectorAll('.panel-head')].find((part) => part.closest('.panel') === panel)
+    const holder = head && head.firstElementChild
+    const title = holder && !holder.matches('.legend, .v-btn, .v-input') ? (holder.innerText || '').trim().replace(/\s+/g, ' ') : ''
+
+    if (title && !panel.parentElement.closest('.panel') && panel.getClientRects().length && !(panel.dataset.summary || '').trim()) {
+      problems.push(`summary: section "${title.slice(0, 40)}" has no data-summary`)
     }
   })
 

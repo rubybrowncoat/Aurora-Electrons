@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="The fleets of mine that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1">
           <div class="panel-head">
             <span>Repeating routes</span>
             <v-chip small>Estimates</v-chip>
@@ -76,7 +76,7 @@
 
         <v-row>
           <v-col cols="12" xl="6">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="What my repeating routes bring to each colony every year, by cargo. Use it to see which colonies depend most on hauling." elevation="1">
               <div class="panel-head"><span>Deliveries by destination</span></div>
               <v-data-table :headers="deliveryHeaders" :items="deliveryRows" item-key="key" :sort-by.sync="deliveriesTable.sortBy" :sort-desc.sync="deliveriesTable.sortDesc" :items-per-page.sync="deliveriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.destination`]="{ item }">
@@ -88,7 +88,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="My freighter classes with their capacity, speed and yearly distance and fuel. Use it to compare which classes haul most efficiently." elevation="1">
               <div class="panel-head"><span>Freighter classes</span></div>
               <v-data-table :headers="classHeaders" :items="classRows" item-key="ShipClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: summaryPageSizes }" dense>
                 <template #[`item.ClassName`]="{ item }">

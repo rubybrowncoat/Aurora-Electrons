@@ -5,7 +5,7 @@ import { linkTo } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, bodyText, rowsOf } from './common'
 
-export const group = { key: 'space', title: 'Contacts and space' }
+export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in space I have surveyed, such as rifts, lifepods, wrecks and ancient constructs, that may need a response.' }
 
 const SECONDS_PER_TWO_WEEKS = 1209600
 

@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and theme. Use it to set the app up to suit me." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting">
@@ -33,7 +33,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="The options, filters and table layouts each page has remembered for me. Use it to clear them when I want every page back to its defaults." elevation="1">
             <div class="panel-head">
               <span>Remembered views</span>
               <v-chip small>{{ count(totalCount) }} {{ totalCount === 1 ? 'value' : 'values' }}</v-chip>

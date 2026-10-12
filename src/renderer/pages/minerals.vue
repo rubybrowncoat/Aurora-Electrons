@@ -54,7 +54,7 @@
 
         <v-row>
           <v-col cols="12" xl="7">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="Each mineral with what lies in the ground, what is mined, what I hold and which colonies are short, to pick the one to focus on." elevation="1">
               <div class="panel-head">
                 <span>By mineral</span>
                 <router-link v-if="focus" :to="outlookLink" class="body-2">{{ focus.name }} runway in Mineral Outlook</router-link>
@@ -110,7 +110,7 @@
             </v-card>
           </v-col>
           <v-col cols="12" xl="5">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="A map of the known systems sized by how much of the chosen mineral their deposits hold, to see where it lies and how reachable it is." elevation="1">
               <div class="panel-head">
                 <span>Where it lies</span>
                 <span class="legend">
@@ -127,7 +127,7 @@
           </v-col>
         </v-row>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Surveyed bodies with mineral deposits, their accessibility and mining potential, to choose where to open new mines or send miners." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} deposits` : 'Bodies with deposits' }}</span>
             <span class="head-tools">
@@ -263,7 +263,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="What each of my colonies holds, reserves and needs of minerals, to find shortages and stock that can be moved." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} in my colonies` : 'Minerals in my colonies' }}</span>
             <v-text-field v-model="colonySearch" label="Search" placeholder="Colony or system" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />

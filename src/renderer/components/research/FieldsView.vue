@@ -19,7 +19,7 @@
     </v-col>
 
     <v-col cols="12" md="8" lg="9" xl="10">
-      <v-card v-if="search" class="panel" elevation="1">
+      <v-card v-if="search" class="panel" data-summary="Technologies from every field whose name matches my search, with their status and remaining cost. Click one to open it." elevation="1">
         <div class="panel-head">
           <span>{{ matches.length }} {{ matches.length === 1 ? 'technology matches' : 'technologies match' }} "{{ search }}"</span>
           <span v-if="matches.length > MATCH_LIMIT" class="caption text--secondary">Showing the first {{ MATCH_LIMIT }}</span>

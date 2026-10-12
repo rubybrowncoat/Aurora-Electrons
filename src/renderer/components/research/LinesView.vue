@@ -8,7 +8,7 @@
     </div>
     <div class="caption text--secondary mb-4">A line is one kind of upgrade: each square is a level, cheapest first. A slim square comes free with the level before it.</div>
 
-    <v-card v-for="group in groups" :key="group.field.ResearchFieldID" class="panel" elevation="1">
+    <v-card v-for="group in groups" :key="group.field.ResearchFieldID" class="panel" data-summary="The upgrade lines of one research field, level by level, with the next technology of each. Use it to see how far each line has advanced and what to research next." elevation="1">
       <div class="panel-head">
         <span><span class="abbreviation mr-2">{{ group.field.Abbreviation }}</span>{{ group.field.FieldName }}</span>
         <span class="caption text--secondary">{{ group.lines.length }} {{ group.lines.length === 1 ? 'line' : 'lines' }}</span>

@@ -21,7 +21,7 @@
 
           <stat-tiles :tiles="tiles" />
 
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="Every alien race I have met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
             <div class="panel-head">
               <span>Known races</span>
             </div>
@@ -53,7 +53,7 @@
           </v-card>
 
           <template v-if="selected">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="The selected race's status, and what I have learned about it so far." elevation="1">
               <div class="panel-head">
                 <span>
                   {{ selected.AlienRaceName }}
@@ -74,7 +74,7 @@
 
             <v-row>
               <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="4">
-                <v-card class="panel chart-panel" elevation="1">
+                <v-card class="panel chart-panel" :data-summary="chart.summary" elevation="1">
                   <div class="panel-head">
                     <span>{{ chart.title }}</span>
                     <span class="legend">
@@ -89,7 +89,7 @@
               </v-col>
             </v-row>
 
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species I have observed for the selected race. Switch views to see each kind." elevation="1">
               <div class="panel-head">
                 <span>Observed</span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
@@ -419,6 +419,7 @@ export default {
         {
           key: 'diplomacy',
           title: 'Diplomatic points',
+          summary: 'How the diplomatic points of the selected race have moved over time, against the levels where treaties and statuses change.',
           note: `${recordedNote} Dashed lines are where treaties and statuses change.`,
           data: { datasets: [line('Diplomatic points', at('points'), 0)] },
           options: this.options({ y: (value) => this.count(value) }, { levels: DIPLOMACY_LINES }, { suggestedMax: lineAbove ? lineAbove.y : undefined, suggestedMin: lineBelow ? lineBelow.y : undefined }),
@@ -426,6 +427,7 @@ export default {
         {
           key: 'fleet',
           title: 'Ships tracked',
+          summary: 'How many ships of the selected race I have tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
           note: fleet.length ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'No ships tracked.',
           data: {
             datasets: [
@@ -439,6 +441,7 @@ export default {
         {
           key: 'intelligence',
           title: translating ? 'Intelligence and translation' : 'Race intelligence',
+          summary: 'The intelligence points I have gathered on the selected race over time, with translation progress while contact is being attempted.',
           note: `${recordedNote} Marks show where points were spent on a discovery.`,
           data: { datasets: intelDatasets },
           options: this.options({ y: (value) => this.count(value), y1: translating ? (value) => this.count(value) : null }, { markers: rewardAttempts(timeline).map((t) => ({ x: this.year(t), label: 'Discovery' })) }, { min: 0, suggestedMax: REWARD_COST, ticks: { precision: 0 } }),

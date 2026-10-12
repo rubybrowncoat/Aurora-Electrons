@@ -21,7 +21,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" class="mt-2" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Each of my colonies with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Colonies</span>

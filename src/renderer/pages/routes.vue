@@ -71,7 +71,7 @@
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="The known systems shaded by distance from the first stop, with the planned route drawn across them. Click a system to extend the route." elevation="1">
               <div class="panel-head">
                 <span>Route map</span>
                 <span class="legend">
@@ -90,7 +90,7 @@
           </v-col>
         </v-row>
 
-        <v-card v-if="detailRows.length" class="panel" elevation="1">
+        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way. It shows how long the whole journey will take." elevation="1">
           <div class="panel-head">
             <span>Route detail</span>
           </div>
@@ -125,7 +125,7 @@
           <div class="panel-foot caption text--secondary">Times are flying at {{ count(effectiveSpeed) }} km/s, counted from the first stop. Jumps take no time here; the jump shock after each and nebula speed limits are left out.</div>
         </v-card>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time. Click a row to add it as a stop." elevation="1">
           <div class="panel-head">
             <span>Distances from {{ origin ? origin.name : '—' }}</span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />

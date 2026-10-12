@@ -1,7 +1,7 @@
 import { linkTo } from '../deep-links'
 import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, rowsOf } from './common'
 
-export const group = { key: 'research', title: 'Research' }
+export const group = { key: 'research', title: 'Research', summary: 'Idle labs, dead or forgotten projects and scientists working outside their field, so my research makes full use of what I have.' }
 
 export const checks = [
   {

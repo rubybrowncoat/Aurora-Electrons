@@ -10,7 +10,7 @@
 
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Unassigned officers who would do a post better than its current holder: governors, specialist ships and research projects. Use it to improve my assignments." elevation="1">
           <div class="panel-head">
             <span>Better assignments</span>
             <v-btn-toggle v-model="suggestionView" mandatory dense>
@@ -109,7 +109,7 @@
           </template>
         </v-card>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Every commander of mine with rank, post, bonuses and health. Use it to find who is available, who is best suited and who is ageing." elevation="1">
           <div class="panel-head">
             <span>Roster</span>
             <v-btn-toggle v-model="typeId" mandatory dense>
@@ -165,7 +165,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Commanders who are prisoners, retired or dead, with their careers. Use it to look back at who served me and who is held captive." elevation="1">
           <div class="panel-head">
             <span>Former commanders</span>
             <v-btn-toggle :value="formerGroup" mandatory dense @change="(value) => (formerView = value)">

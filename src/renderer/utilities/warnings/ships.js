@@ -2,7 +2,7 @@ import { linkTo, place } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, levelTone, rowsOf } from './common'
 
-export const group = { key: 'ships', title: 'Ships' }
+export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems, so I can repair or refit them before they matter.' }
 
 const fleetLink = (ship) => (ship.FleetID ? linkTo.routes({ from: place.fleet(ship.FleetID) }) : undefined)
 

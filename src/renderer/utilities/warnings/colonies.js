@@ -2,7 +2,7 @@ import { linkTo } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, colonyText, COLONY_COLUMNS, COLONY_JOINS, levelTone, rowsOf } from './common'
 
-export const group = { key: 'colonies', title: 'Colonies' }
+export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so I can fix what holds them back.' }
 
 // One row per colony from a query with a row per installation: `valueKey` is the installation's output per unit.
 const installationRows = (ctx, items, valueKey, link) => {

@@ -33,7 +33,7 @@
 
       <stat-tiles dense class="my-2" :tiles="tiles" />
 
-      <v-card class="panel mb-3" elevation="1">
+      <v-card class="panel mb-3" data-summary="How many events my game log holds for each month, to find busy periods and narrow the list below to one." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Timeline</div>
           <div class="date-fields">
@@ -52,7 +52,7 @@
         </div>
       </v-card>
 
-      <v-card class="panel" elevation="1">
+      <v-card class="panel" data-summary="The events in my game log, newest first, to review what happened and read any message in full." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Events <span class="caption text--secondary">{{ count(filteredEvents.length) }} of {{ count(logEvents.length) }}</span></div>
           <div class="caption text--secondary">

@@ -3,7 +3,7 @@
     <v-container fluid class="about-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release I am running." elevation="1">
             <div class="panel-head">
               <span class="d-flex align-center">
                 <span>Aurora Electrons</span>
@@ -39,7 +39,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Places to report bugs, follow updates and discuss the app. Use them to get help or share feedback." elevation="1">
             <div class="panel-head"><span>Links</span></div>
             <v-list dense>
               <v-list-item>
@@ -72,7 +72,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Where the app keeps my settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
             <div class="panel-head">
               <span>My data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
@@ -93,7 +93,7 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="The libraries and tools this app is built on. Use the links to read about any of them." elevation="1">
             <div class="panel-head"><span>Built with</span></div>
             <div class="panel-body">
               <external-link v-for="item in stack" :key="item.name" :href="item.href" class="stack-link mr-2 mb-2">
@@ -104,7 +104,7 @@
         </v-col>
 
         <v-col cols="12">
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="How to help improve the app with pull requests and issues. Follow the steps to get a change in." elevation="1">
             <div class="panel-head"><span>Contribute</span></div>
             <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
             <v-list dense>

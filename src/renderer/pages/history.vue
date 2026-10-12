@@ -43,7 +43,7 @@
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
 
-        <v-card v-if="view === 'charts' && rivals" class="panel" elevation="1">
+        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time, to see who is ahead of me and who is catching up." elevation="1">
           <div class="panel-head">
             <span>Rivals <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
@@ -60,7 +60,7 @@
 
         <v-row v-if="view === 'charts'">
           <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="6">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" :data-summary="chart.summary" elevation="1">
               <div class="panel-head">
                 <span>{{ chart.title }}</span>
                 <span class="legend">
@@ -276,30 +276,35 @@ export default {
         {
           key: 'population',
           title: 'Population',
+          summary: 'How my population and number of colonies have grown over the years, to show whether my expansion keeps pace.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
           options: this.options({ y: people, y1: (value) => `${value}` }),
         },
         {
           key: 'wealth',
           title: 'Wealth',
+          summary: 'My treasury and annual income over time, to show whether I am saving, spending or running short.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
           options: this.options({ y: compact, y1: compact }),
         },
         {
           key: 'fleet',
           title: 'Fleet tonnage',
+          summary: 'The military and commercial tonnage I have fielded over time, to show how my fleet has grown or shrunk.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
           options: this.options({ y: (value) => `${compact(value)} t` }),
         },
         {
           key: 'research',
           title: 'Research and exploration',
+          summary: 'My research output and the number of systems I know of over time, to show how fast I advance and explore.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           options: this.options({ y: compact, y1: (value) => `${value}` }),
         },
         {
           key: 'minerals',
           title: 'Mineral stockpiles',
+          summary: 'Stockpiles of the minerals I pick, over time, to spot shortages or surpluses before they hold up production.',
           picker: { model: this.mineralIds, options: MINERALS.map((mineral) => ({ value: mineral.id, text: mineral.name })), change: this.setMinerals },
           data: { datasets: this.mineralIds.map((id, index) => line(MINERALS.find((mineral) => mineral.id === id).name, this.snapshots.map((snapshot) => (snapshot.minerals || [])[id - 1] || 0), index)) },
           options: this.options({ y: (value) => `${compact(value)} t` }),
@@ -307,6 +312,7 @@ export default {
         {
           key: 'installations',
           title: 'Installations',
+          summary: 'How many installations of the types I pick I have built over time, to track my industrial growth.',
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
           data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => (snapshot.installations || {})[id] || 0), index)) },
           options: this.options({ y: compact }),
@@ -314,6 +320,7 @@ export default {
         {
           key: 'logistics',
           title: 'Fuel and maintenance supplies',
+          summary: 'My fuel and maintenance supply stocks over time, to show whether my fleets can keep operating.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),
         },

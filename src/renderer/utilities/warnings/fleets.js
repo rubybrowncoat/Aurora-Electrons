@@ -1,7 +1,7 @@
 import { linkTo, place } from '../deep-links'
 import { amount, bodyText, rowsOf } from './common'
 
-export const group = { key: 'fleets', title: 'Fleets' }
+export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so I can give them something to do.' }
 
 export const IDLE_FLEETS_KEY = 'idle-fleets'
 

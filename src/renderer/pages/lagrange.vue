@@ -6,7 +6,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="A map of the systems I know, shaded by how many stable Lagrange points each has. Use it to see where my ships can already jump between points and where more would help." elevation="1">
           <div class="panel-head">
             <span>Lagrange map</span>
             <span class="legend">
@@ -20,7 +20,7 @@
           </div>
         </v-card>
 
-        <v-card ref="bodiesPanel" class="panel" elevation="1">
+        <v-card ref="bodiesPanel" class="panel" data-summary="The planets and moons that have, or could be given, a stable Lagrange point, and how long I would need to stabilise each. Use it to choose which to stabilise." elevation="1">
           <div class="panel-head">
             <span>Planets and moons</span>
             <span class="d-flex align-center flex-wrap controls">
@@ -70,7 +70,7 @@
           </div>
         </v-card>
 
-        <v-card v-if="shipRows.length" class="panel" elevation="1">
+        <v-card v-if="shipRows.length" class="panel" data-summary="My ships with a jump point stabilisation module, their captains and crews, and what each is doing now. It shows which ship to send to stabilise a point." elevation="1">
           <div class="panel-head">
             <span>Stabilisation ships</span>
           </div>

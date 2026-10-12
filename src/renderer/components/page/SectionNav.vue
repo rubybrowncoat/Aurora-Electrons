@@ -7,13 +7,13 @@
     <div v-if="card" ref="card" class="section-nav__card" :style="{ top: `${cardTop}px` }" aria-hidden="true">
       <div class="section-nav__title">{{ card.title }}</div>
       <div v-if="card.meta" class="section-nav__meta">{{ card.meta }}</div>
-      <div v-if="card.note" class="section-nav__note">{{ card.note }}</div>
+      <div v-if="card.summary" class="section-nav__summary">{{ card.summary }}</div>
     </div>
   </nav>
 </template>
 
 <script>
-// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one is clicked and shows its title and figures when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss): its title is the text of the head's first element, its figures the chips and secondary notes in the head, the size of its table and the caption in its foot. The ticks show once a page has two sections and is too long for the window.
+// A column of ticks at the right edge of the window, one for each section of the page, that scrolls to a section when one is clicked and shows its title, figures and summary when one is hovered. A section is a `.panel` with a `.panel-head` (styles/page-chrome.scss): its title is the text of the head's first element, its figures the chips and secondary notes in the head and the size of its table, and its summary the panel's `data-summary` attribute, shown in full. The ticks show once a page has two sections and is too long for the window.
 
 const SCAN_DELAY = 200
 
@@ -70,12 +70,11 @@ const rowsOf = (panel, figures) => {
 const describe = (panel) => {
   const head = partOf(panel, 'panel-head')
   const figures = figuresOf(head)
-  const foot = partOf(panel, 'panel-foot')
 
   return {
     title: titleOf(head),
     meta: [...figures, ...rowsOf(panel, figures)].join(' · '),
-    note: foot ? squash(foot.textContent) : '',
+    summary: squash(panel.dataset.summary || ''),
   }
 }
 
@@ -350,24 +349,22 @@ export default {
   white-space: nowrap;
 }
 
-.section-nav__meta,
-.section-nav__note {
+.section-nav__meta {
   display: -webkit-box;
   overflow: hidden;
+  margin-top: 2px;
   font-size: 12px;
   line-height: 17px;
-  color: var(--ae-muted);
+  color: var(--ae-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.section-nav__meta {
-  margin-top: 2px;
-  color: var(--ae-ink);
-}
-
-.section-nav__note {
+.section-nav__summary {
   margin-top: 4px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ae-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

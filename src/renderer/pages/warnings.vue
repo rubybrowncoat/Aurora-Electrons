@@ -33,7 +33,7 @@
 
       <v-row v-if="panels.length">
         <v-col v-for="(stack, stackIndex) in columns" :key="stackIndex" cols="12" xl="6" class="panel-column">
-          <v-card v-for="panel in stack" :key="panel.group.key" class="panel" elevation="1">
+          <v-card v-for="panel in stack" :key="panel.group.key" class="panel" :data-summary="panel.group.summary" elevation="1">
             <div class="panel-head">
               <div class="subtitle-2">{{ panel.group.title }} <span class="caption text--secondary">{{ count(panel.total) }} {{ panel.total === 1 ? 'warning' : 'warnings' }} in {{ count(panel.sections.length) }} {{ panel.sections.length === 1 ? 'check' : 'checks' }}</span></div>
             </div>

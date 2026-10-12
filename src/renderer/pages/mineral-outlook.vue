@@ -28,7 +28,7 @@
       <template v-if="forecastReady">
         <stat-tiles :tiles="tiles" compact class="mt-2" />
 
-        <v-card v-if="focusRow" class="panel" elevation="1">
+        <v-card v-if="focusRow" class="panel" data-summary="How long the chosen mineral will last at current rates, with projected stockpile and mining output, to decide when to expand supply or cut use." elevation="1">
           <div class="panel-head">
             <span>{{ focusRow.name }} outlook</span>
             <span class="d-flex align-center flex-wrap">
@@ -65,7 +65,7 @@
             </div>
           </div>
         </v-card>
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last, to see which minerals are heading for a shortage." elevation="1">
           <div class="panel-head">
             <span>Mineral runway</span>
             <v-chip small>{{ coverageLabel }}</v-chip>
@@ -139,7 +139,7 @@
         </v-dialog>
       </template>
 
-      <v-card v-if="depositsReady" class="panel" elevation="1">
+      <v-card v-if="depositsReady" class="panel" data-summary="Each deposit my mines and miners work, with its yield and when it will run down, to plan new deposits before the old ones empty." elevation="1">
         <div class="panel-head">
           <span>Deposits being mined</span>
           <span class="d-flex align-center">
