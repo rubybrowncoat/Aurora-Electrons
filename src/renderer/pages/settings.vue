@@ -78,12 +78,13 @@
 import { mapActions, mapGetters, mapState } from 'vuex'
 
 import countFormat from '../mixins/count-format'
+import { APPEARANCE_KEY, activeAppearance, baselinePresetId, selectPreset } from '../utilities/appearance'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
 // The settings the Display panel holds. A reset keeps them.
-const APP_SETTINGS = ['darkMode', 'spyNPR', 'selectedSeparator']
+const APP_SETTINGS = [APPEARANCE_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
 // What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
 const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
 
@@ -143,7 +144,7 @@ export default {
     },
 
     dark() {
-      return this.$vuetify.theme.dark
+      return activeAppearance().mode === 'dark'
     },
 
     empireName() {
@@ -209,8 +210,10 @@ export default {
     },
 
     setDark(value) {
-      this.$vuetify.theme.dark = Boolean(value)
-      this.save('darkMode', Boolean(value))
+      const id = baselinePresetId(value ? 'dark' : 'light')
+
+      selectPreset(id)
+      this.save(APPEARANCE_KEY, id)
     },
 
     setSpyNPR(value) {

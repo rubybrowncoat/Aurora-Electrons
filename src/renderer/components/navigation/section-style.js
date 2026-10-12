@@ -1,14 +1,14 @@
-import { chartTheme, withAlpha } from '../charts/theme'
+import { activeAppearance, asAppearance } from '../../utilities/appearance'
+import { withAlpha } from '../charts/theme'
 
-const NEUTRAL = { light: '#546e7a', dark: '#90a4ae' }
-
-// The CSS custom properties that colour a navigation element for a section: `--sc` the section colour, `--sc-soft` an active wash, `--sc-tint` a hover wash. Without a section (settings), a neutral blue-grey.
-export const sectionStyle = (dark, section) => {
-  const color = section ? chartTheme(dark).categorical[section.slot] : NEUTRAL[dark ? 'dark' : 'light']
+// The CSS custom properties that colour a navigation element for a section: `--sc` the section colour (its slot of the appearance's categorical list), `--sc-soft` an active wash, `--sc-tint` a hover wash. Without a section (settings), the appearance's neutral accent. Without an appearance, the one in force; a caller that has not moved over yet passes the dark flag.
+export const sectionStyle = (appearance = activeAppearance(), section) => {
+  const { charts, sections, washes } = asAppearance(appearance)
+  const color = section ? charts.categorical[section.slot] : sections.neutral
 
   return {
     '--sc': color,
-    '--sc-soft': withAlpha(color, dark ? 0.2 : 0.14),
-    '--sc-tint': withAlpha(color, dark ? 0.12 : 0.08),
+    '--sc-soft': withAlpha(color, washes.sectionSoft),
+    '--sc-tint': withAlpha(color, washes.sectionTint),
   }
 }

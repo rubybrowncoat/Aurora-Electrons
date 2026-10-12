@@ -1,5 +1,5 @@
 <template>
-  <v-app>
+  <v-app :style="rootStyle">
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
       <div class="rail__empire" :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }" :style="neutralStyle" role="link" tabindex="0" @click="goEmpires" @keydown.enter="goEmpires" @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)" @mouseleave="leaveRail">
         <empire-avatar :race="selectedRace" :size="40" />
@@ -56,10 +56,10 @@
         <kbd class="hidden-xs-only">Ctrl K</kbd>
       </div>
 
-      <v-btn v-if="$vuetify.theme.dark" icon @click="setDarkMode(false)">
+      <v-btn v-if="appearance.mode === 'dark'" icon title="Light theme" data-theme-toggle="light" @click="setDarkMode(false)">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
-      <v-btn v-else icon @click="setDarkMode(true)">
+      <v-btn v-else icon title="Dark theme" data-theme-toggle="dark" @click="setDarkMode(true)">
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
 
@@ -111,6 +111,7 @@ import SaveStatus from '../components/navigation/SaveStatus.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import SectionNav from '../components/page/SectionNav.vue'
+import { APPEARANCE_KEY, activeAppearance, appearanceStyle, baselinePresetId, selectPreset, storedPresetId } from '../utilities/appearance'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -171,6 +172,14 @@ export default {
       'historyRecorded',
     ]),
 
+    // The appearance in force, and the custom properties it sets on the root; everything below that took the dark flag reads it, so a switch between presets of one mode redraws too.
+    appearance () {
+      return activeAppearance()
+    },
+    rootStyle () {
+      return appearanceStyle(this.appearance)
+    },
+
     // The trail replaces the tagline once a page beyond the one the app started on has been opened.
     hasMoved () {
       return this.entries.length > 1
@@ -191,7 +200,7 @@ export default {
       return this.tabs.findIndex(({ route }) => route === this.page.route)
     },
     neutralStyle () {
-      return sectionStyle(this.$vuetify.theme.dark)
+      return sectionStyle(this.appearance)
     },
     pageStyle () {
       return this.currentSection ? this.currentSection.style : this.neutralStyle
@@ -216,7 +225,7 @@ export default {
       return SECTIONS.map((section) => ({
         ...section,
         pages: this.pages.filter(({ section: id }) => id === section.id),
-        style: sectionStyle(this.$vuetify.theme.dark, section),
+        style: sectionStyle(this.appearance, section),
       }))
     },
     flyoutSection () {
@@ -256,7 +265,7 @@ export default {
     spyNPR: 'loadEmpires',
   },
   created() {
-    this.$vuetify.theme.dark = this.config.get('darkMode', false)
+    selectPreset(storedPresetId(this.config))
     this.loadEmpires()
   },
   mounted() {
@@ -313,9 +322,11 @@ export default {
       }
     },
 
-    setDarkMode(value) {
-      this.$vuetify.theme.dark = value
-      this.config.set('darkMode', value)
+    setDarkMode(dark) {
+      const id = baselinePresetId(dark ? 'dark' : 'light')
+
+      selectPreset(id)
+      this.config.set(APPEARANCE_KEY, id)
     },
 
     go (path) {
@@ -418,28 +429,9 @@ export default {
   }
 }
 
+// The colour custom properties (--ae-bg, --ae-chrome, --ae-card, --ae-border, --ae-ink, --ae-muted, --ae-primary, --ae-hover) are set inline on the root from the appearance in force (utilities/appearance.js).
 .v-application {
-  --ae-chrome: #f6f7f9;
-  --ae-ink: #212121;
-  --ae-muted: #6a6a6a;
-  --ae-border: #e0e3e8;
-  --ae-primary: #1867c0;
-  --ae-hover: rgba(24, 103, 192, .07);
   --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
-
-  &.theme--light {
-    --ae-bg: #ffffff;
-  }
-
-  &.theme--dark {
-    --ae-bg: #121212;
-    --ae-chrome: #1e1e1e;
-    --ae-ink: #f5f5f5;
-    --ae-muted: #b0b0b0;
-    --ae-border: #333333;
-    --ae-primary: #2196f3;
-    --ae-hover: rgba(33, 150, 243, .10);
-  }
 
   // Both theme classes, to outrank Vuetify's own kbd styling.
   &.theme--light kbd,

@@ -1,0 +1,16 @@
+// Vuetify paints the app, its cards and its tables from constants of its own (#ffffff and #121212, #ffffff and #1e1e1e). These rules take those surfaces from the appearance in force (the custom properties on the root, utilities/appearance.js), with the specificity of Vuetify's own rules and after them, so a preset can change them. The baseline presets hold Vuetify's constants.
+
+.v-application {
+  &.theme--light,
+  &.theme--dark {
+    background: var(--ae-bg);
+  }
+}
+
+.v-card,
+.v-data-table {
+  &.theme--light,
+  &.theme--dark {
+    background-color: var(--ae-card);
+  }
+}

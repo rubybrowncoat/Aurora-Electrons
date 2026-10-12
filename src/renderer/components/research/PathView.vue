@@ -86,6 +86,7 @@
 import cytoscape from 'cytoscape'
 
 import countFormat from '../../mixins/count-format'
+import { activeAppearance } from '../../utilities/appearance'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, prerequisiteChain, QUEUED, STATUS_LABELS } from '../../utilities/research'
 import { chartTheme, withAlpha } from '../charts/theme'
 
@@ -113,8 +114,13 @@ export default {
     }
   },
   computed: {
+    // The appearance in force; the graph redraws on its key, so a switch between two dark presets redraws it too.
+    appearance() {
+      return activeAppearance()
+    },
+
     colors() {
-      return statusColors(this.$vuetify.theme.dark)
+      return statusColors(this.appearance)
     },
 
     tech() {
@@ -195,7 +201,7 @@ export default {
   },
   watch: {
     chain: 'draw',
-    '$vuetify.theme.dark': 'draw',
+    'appearance.key': 'draw',
   },
   mounted() {
     this.draw()
@@ -239,9 +245,8 @@ export default {
         }
 
         const { graph, info } = this.research
-        const dark = this.$vuetify.theme.dark
-        const theme = chartTheme(dark)
-        const colors = statusColors(dark)
+        const theme = chartTheme(this.appearance)
+        const colors = statusColors(this.appearance)
         const elements = [
           ...this.chain.nodes.map((node) => {
             const tech = graph.techs.get(node.id)

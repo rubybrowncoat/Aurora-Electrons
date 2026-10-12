@@ -259,6 +259,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
+import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
@@ -659,8 +660,13 @@ export default {
       return race ? race.RaceTitle : ''
     },
 
+    // The appearance in force: a switch of preset, light to dark or between two darks, restyles the graph (the `appearance.key` watcher).
+    appearance() {
+      return activeAppearance()
+    },
+
     theme() {
-      return chartTheme(this.$vuetify.theme.dark)
+      return chartTheme(this.appearance)
     },
 
     colors() {
@@ -1630,7 +1636,7 @@ export default {
       }
     },
 
-    '$vuetify.theme.dark'() {
+    'appearance.key'() {
       if (this.graph) {
         this.graph.style(this.stylesheet())
         this.createMenu()

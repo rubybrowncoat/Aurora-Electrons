@@ -243,8 +243,10 @@ const run = async () => {
   const setupProblems = problems
   const results = []
 
+  // The app bar's lamp, as a player switches: it puts the dark baseline preset in force, which the whole app reads (utilities/appearance.js).
   if (DARK) {
-    await page.evaluate(() => { window.$app.$vuetify.theme.dark = true })
+    await page.click('[data-theme-toggle="dark"]')
+    await page.waitForSelector('[data-theme-toggle="light"]')
   }
 
   for (const viewport of VIEWPORTS || [null]) {

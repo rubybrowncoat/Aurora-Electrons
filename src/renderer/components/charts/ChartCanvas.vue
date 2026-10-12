@@ -7,6 +7,7 @@
 <script>
 import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip } from 'chart.js'
 
+import { activeAppearance } from '../../utilities/appearance'
 import { chartTheme } from './theme'
 
 Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip)
@@ -107,11 +108,11 @@ export default {
     label: { type: String, default: '' },
   },
   computed: {
-    dark () {
-      return this.$vuetify.theme.dark
+    appearance () {
+      return activeAppearance()
     },
     theme () {
-      return chartTheme(this.dark)
+      return chartTheme(this.appearance)
     },
   },
   watch: {
@@ -121,7 +122,7 @@ export default {
     options () {
       this.update()
     },
-    dark () {
+    appearance () {
       this.update()
     },
   },
@@ -147,7 +148,7 @@ export default {
       }
     },
     resolvedOptions () {
-      const { ink, inkMuted, border, tooltip } = this.theme
+      const { ink, inkMuted, border, tooltip, tooltipInk } = this.theme
       const line = this.type === 'line'
       const axis = {
         grid: { color: `${border}99`, drawTicks: false },
@@ -168,8 +169,8 @@ export default {
           legend: { display: false },
           tooltip: {
             backgroundColor: tooltip,
-            titleColor: '#ffffff',
-            bodyColor: '#ffffff',
+            titleColor: tooltipInk,
+            bodyColor: tooltipInk,
             padding: 8,
             cornerRadius: 4,
             boxWidth: 12,
