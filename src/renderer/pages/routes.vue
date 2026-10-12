@@ -152,6 +152,7 @@
 </template>
 
 <script>
+import groupBy from 'lodash/groupBy'
 import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
@@ -171,6 +172,7 @@ import { joinLabels, tracked } from '../utilities/load-tracking'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { planRoute } from '../utilities/route-plan'
+import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -190,7 +192,7 @@ const OPTIONS = [
   { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by a race I have no trade treaty with.' },
   { key: 'skipNoAutoRoute', config: 'routesSkipNoAutoRoute', default: false, label: 'Skip "no auto-route" systems', hint: 'Skips the systems I flagged to keep auto-routes out.' },
   { key: 'civilian', config: 'routesCivilian', default: false, label: 'Civilian shipping', hint: 'Keeps out of military restricted systems and jump points, as shipping lines do.' },
-  { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'For ships without a jump drive: transits only where the jump point is stabilised on the near side.' },
+  { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'For ships that cannot make their own jump (no jump drive, or one too small for the largest ship): transits only where the jump point is stabilised on the near side.' },
   { key: 'useLagrange', config: 'routesUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter, as fleets do unless told not to.' },
 ]
 
@@ -377,7 +379,7 @@ export default {
       const fleet = place && place.fleet
       const { avoidDanger, avoidAlien, gatesOnly } = this.options
 
-      if (!fleet || (fleet.Speed > 1 && this.speed !== fleet.Speed) || avoidDanger !== Boolean(fleet.AvoidDanger) || avoidAlien !== Boolean(fleet.AvoidAlienSystems) || gatesOnly !== !fleet.JumpRating) {
+      if (!fleet || (fleet.Speed > 1 && this.speed !== fleet.Speed) || avoidDanger !== Boolean(fleet.AvoidDanger) || avoidAlien !== Boolean(fleet.AvoidAlienSystems) || gatesOnly !== !fleet.CanTransit) {
         return null
       }
 
@@ -754,7 +756,7 @@ export default {
 
         this.setOption('avoidDanger', Boolean(place.fleet.AvoidDanger))
         this.setOption('avoidAlien', Boolean(place.fleet.AvoidAlienSystems))
-        this.setOption('gatesOnly', !place.fleet.JumpRating)
+        this.setOption('gatesOnly', !place.fleet.CanTransit)
       }
     },
 
@@ -1031,14 +1033,20 @@ export default {
       }),
       default: [],
     },
-    // The race's own fleets with ships in known systems, with their movement settings and whether any ship carries a jump drive.
+    // The race's own fleets with ships in known systems, with their movement settings and `CanTransit`, whether the fleet's jump drives carry its ships through a jump point that is not stabilised (`fleetCanTransit`, which reads every ship of the fleet).
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.Speed, FCT_Fleet.AvoidDanger, FCT_Fleet.AvoidAlienSystems, max(FCT_ShipClass.JumpRating) as JumpRating, count(FCT_Ship.ShipID) as Ships from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName`).then(([items]) => Object.freeze(items))
+        const [[fleets], [ships]] = await Promise.all([
+          this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, FCT_Fleet.Speed, FCT_Fleet.AvoidDanger, FCT_Fleet.AvoidAlienSystems, count(FCT_Ship.ShipID) as Ships from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} group by FCT_Fleet.FleetID order by FCT_Fleet.FleetName`),
+          this.database.query(`select FCT_Ship.FleetID, FCT_Ship.MothershipID, FCT_ShipClass.Size, FCT_ShipClass.MilitaryEngines, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`),
+        ])
+        const shipsByFleet = groupBy(ships, 'FleetID')
+
+        return Object.freeze(fleets.map((fleet) => ({ ...fleet, CanTransit: fleetCanTransit(shipsByFleet[fleet.FleetID] || []) })))
       }),
       default: [],
     },

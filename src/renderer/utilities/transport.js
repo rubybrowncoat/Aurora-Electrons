@@ -20,6 +20,9 @@ export const fleetCanTransit = (ships) => {
   return independent.length > 0 && covered(independent.filter((ship) => ship.MilitaryEngines), (ship) => ship.Drive || 0) && covered(independent.filter((ship) => !ship.MilitaryEngines), (ship) => ship.AnyDrive || 0)
 }
 
+// The columns `fleetCanTransit` reads from a ship's class, for a query that joins FCT_ShipClass: the largest jump drive of the class, `Drive` among the ordinary ones (component type 16 is a jump drive, special function 0 an ordinary one) and `AnyDrive` among every kind, each as the size of ship it carries (0 for none).
+export const JUMP_DRIVE_COLUMNS = 'coalesce((select max(FCT_ShipDesignComponents.ComponentValue) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = 16 and FCT_ShipDesignComponents.SpecialFunction = 0), 0) as Drive, coalesce((select max(FCT_ShipDesignComponents.ComponentValue) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = 16), 0) as AnyDrive'
+
 export const hasGate = (jumpPoint) => jumpPoint.JumpGateStrength > 0
 
 // What a profile of ships may use on a route, for `searchRoutes`. A round trip comes back through every jump point it went through, so a jump point has to be fit to cross from both of its sides. `gates`: only stabilised jump points. `civilian`: no military restricted jump points or systems. `restrictedSystems`: a Set of SystemIDs.
