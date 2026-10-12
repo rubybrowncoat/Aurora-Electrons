@@ -1,8 +1,6 @@
 import { historyConfig } from '../utilities/history'
 
-// Empire History: `revision` is bumped each time snapshots are written, so pages re-read the history
-// file; `failures` lists the games whose latest snapshots the recorder couldn't read or write,
-// [{ GameID, stage: 'read' | 'write' }], GameID null when the whole save couldn't be read.
+// Empire History: `revision` is bumped each time snapshots are written, so pages re-read the history file; `failures` lists the games whose latest snapshots the recorder couldn't read or write, [{ GameID, stage: 'read' | 'write' }], GameID null when the whole save couldn't be read.
 export const state = () => {
   return {
     revision: 0,
@@ -11,9 +9,7 @@ export const state = () => {
 }
 
 export const getters = {
-  // (GameID, RaceID) => { count, latest } for a race's snapshots, `latest` being the last one's game time in seconds,
-  // or null while the history file can't be trusted. A getter's result lasts until `revision` or `failures` changes, so
-  // each race's file is read once per revision, not once per look.
+  // (GameID, RaceID) => { count, latest } for a race's snapshots, `latest` being the last one's game time in seconds, or null while the history file can't be trusted. A getter's result lasts until `revision` or `failures` changes, so each race's file is read once per revision, not once per look.
   snapshotSummary (state) {
     const { revision, failures } = state
     const summaries = {}

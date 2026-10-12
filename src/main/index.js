@@ -5,14 +5,12 @@ import { app, dialog, ipcMain } from 'electron'
 import Store from 'electron-store'
 import envPaths from 'env-paths'
 
+// Before the window and its handlers, so their errors are reported too.
+import './sentry'
 import './boot'
 import './mainWindow'
 
-// The renderer's electron-store instances get their folder from here. Without it, settings fell
-// back to conf's own default (electron-store-nodejs) and the history files couldn't be written at
-// all. A packaged build carries the settings it kept there over once. Other apps with the same
-// omission share that file, so it's only taken when it holds one of this app's keys, and a failed
-// copy only costs the old settings, never the launch.
+// The renderer's electron-store instances get their folder from here. Without it, settings fell back to conf's own default (electron-store-nodejs) and the history files couldn't be written at all. A packaged build carries the settings it kept there over once. Other apps with the same omission share that file, so it's only taken when it holds one of this app's keys, and a failed copy only costs the old settings, never the launch.
 const settingsPath = path.join(app.getPath('userData'), 'config.json')
 const legacySettingsPath = path.join(envPaths('electron-store', { suffix: 'nodejs' }).config, 'config.json')
 const isOwnSettings = (settings) => Object.keys(settings).some((key) => ['darkMode', 'spyNPR', 'selectedSeparator'].includes(key) || key.startsWith('game.'))
@@ -31,29 +29,23 @@ if (app.isPackaged && !fs.existsSync(settingsPath) && fs.existsSync(legacySettin
 Store.initRenderer()
 
 const storagePath = () => {
+  if (!app.isPackaged && process.env.AURORA_DB) {
+    return path.resolve(process.env.AURORA_DB)
+  }
+
   const exePath = path.dirname(app.getPath('exe'))
   const isMac = exePath.includes('MacOS')
 
   const headGame = process.env.NODE_ENV === 'development' && false
 
-  return app.isPackaged
-    ? isMac
-      ? path.join(exePath, '../../../', 'AuroraDB.db')
-      : process.env.PORTABLE_EXECUTABLE_DIR
-        ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db')
-        : path.join(exePath, 'AuroraDB.db')
-    : headGame
-      ? path.join('../', 'AuroraDB.db')
-      : 'AuroraDB.db'
+  return app.isPackaged ? isMac ? path.join(exePath, '../../../', 'AuroraDB.db') : process.env.PORTABLE_EXECUTABLE_DIR ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db') : path.join(exePath, 'AuroraDB.db') : headGame ? path.join('../', 'AuroraDB.db') : 'AuroraDB.db'
 }
 
 ipcMain.handle('request-storage-path', async () => storagePath())
 
 const FLAG_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp' }
 
-// A race's flag from Aurora's `Flags` folder, beside the save, as a data URL; null when it is missing or unreadable.
-// The name comes from the save, so only its base name is used and it never leaves that folder. On a case-sensitive
-// file system, a name that differs only in case still matches.
+// A race's flag from Aurora's `Flags` folder, beside the save, as a data URL; null when it is missing or unreadable. The name comes from the save, so only its base name is used and it never leaves that folder. On a case-sensitive file system, a name that differs only in case still matches.
 ipcMain.handle('read-flag', async (_event, name) => {
   const file = typeof name === 'string' ? path.basename(name) : ''
   const type = FLAG_TYPES[path.extname(file).toLowerCase()]
@@ -98,7 +90,6 @@ ipcMain.handle('save-png', (_event, imageData, filePath) => {
 
 // Quit when all windows are closed.
 app.on('window-all-closed', function () {
-  // On macOS it is common for applications and their menu bar
-  // to stay active until the user quits explicitly with Cmd + Q
+  // On macOS it is common for applications and their menu bar to stay active until the user quits explicitly with Cmd + Q
   if (process.platform !== 'darwin') app.quit()
 })

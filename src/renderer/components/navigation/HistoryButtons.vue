@@ -57,10 +57,10 @@ export default {
     ]),
 
     describe (entries) {
-      return entries.map(({ index, path, disabled }) => {
+      return entries.map(({ index, path, label, disabled }) => {
         const page = pageByRoute[path.split('?')[0]]
 
-        return { index, disabled, title: page.title, icon: page.icon, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]) }
+        return { index, disabled, title: label ? `${page.title} · ${label}` : page.title, icon: page.icon, style: sectionStyle(this.$vuetify.theme.dark, sectionById[page.section]) }
       })
     },
 

@@ -1,9 +1,7 @@
 import { thousandsSeparator } from '../utilities/math'
 import { peeks } from '../utilities/peeks'
 
-// The lines under each page in the section flyout (utilities/peeks.js), `lines[route]` being a string, or null when
-// the peek has nothing to say or failed. They last for one database instance, game, race, history revision and
-// separator setting: a save change (the app replaces the database), a race switch or a recorded snapshot starts over.
+// The lines under each page in the section flyout (utilities/peeks.js), `lines[route]` being a string, or null when the peek has nothing to say or failed. They last for one database instance, game, race, history revision and separator setting: a save change (the app replaces the database), a race switch or a recorded snapshot starts over.
 export const state = () => {
   return {
     key: null,

@@ -1,12 +1,6 @@
-// What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of
-// its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony
-// cost).
+// What a body costs a species to live on, from the game's own rules: the colony cost now and at the extremes of its orbit, checked against the infrastructure the game stores for every own colony (docs/DATABASE.md § Colony cost).
 //
-// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock,
-// BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, ParentOrbitalDistance,
-// ParentEccentricity, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount
-// (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`.
-// A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
+// A body is `{ Gravity, SurfaceTemp, BaseTemp, Albedo, AtmosPress, DustLevel, HydroID, HydroExt, TidalLock, BodyClass, BodyTypeID, FixedBody, OrbitalDistance, Eccentricity, ParentOrbitalDistance, ParentEccentricity, StarLuminosity, Atmosphere: [gas] }` and a gas `{ AtmosGasID, GasAtm, AtmosGasAmount (percent of the atmosphere), FrozenOut, BoilingPoint, GHGas, AntiGHGas, Dangerous, DangerousLevel }`. A species is a row of FCT_Species under the names the loader gives it (see `speciesLimits`).
 
 export const BODY_CLASS = { PLANET: 1, MOON: 2, ASTEROID: 3, COMET: 5 }
 export const BODY_TYPE = { GAS_GIANT: 4, SUPERJOVIAN: 5 }
@@ -47,24 +41,17 @@ export const speciesLimits = (species) => ({
 // The temperature a body would have with no atmosphere at `distance` AU from its star, in kelvin.
 export const equilibriumTemperature = (distance, luminosity) => Math.max(255 / Math.sqrt(distance / Math.sqrt(luminosity)), 4)
 
-// The base temperature the game works with, which is not the saved BaseTemp column. The game works it out
-// again from where a body is now and a moon takes its planet's; the column is only written when a body changes, so it is stale for most eccentric
-// orbits. The saved SurfaceTemp follows the recomputed value on every planet, asteroid, comet and moon of
-// the sample and of three other saves (docs/DATABASE.md § Colony cost). Needs DistanceToParent, the star's
-// luminosity and, for a moon, the parent's DistanceToParent.
+// The base temperature the game works with, which is not the saved BaseTemp column. The game works it out again from where a body is now and a moon takes its planet's; the column is only written when a body changes, so it is stale for most eccentric orbits. The saved SurfaceTemp follows the recomputed value on every planet, asteroid, comet and moon of the sample and of three other saves (docs/DATABASE.md § Colony cost). Needs DistanceToParent, the star's luminosity and, for a moon, the parent's DistanceToParent.
 export const climateBaseTemp = (body) => equilibriumTemperature(body.BodyClass === BODY_CLASS.MOON && body.ParentDistanceToParent > 0 ? body.ParentDistanceToParent : body.DistanceToParent, body.StarLuminosity)
 
 const round4 = (value) => Math.round(value * 10000) / 10000
 
 export const hydrosphereAtTemperature = (temperature) => (temperature > WATER_BOILING_KELVIN ? HYDROSPHERE.VAPOUR : temperature > WATER_FREEZING_KELVIN ? HYDROSPHERE.LIQUID : HYDROSPHERE.ICE_SHEET)
 
-// A gas is frozen out below its boiling point. A saved body carries the game's flag; a body that doesn't
-// exist yet (a terraforming target) gets the rule the game applies after every change.
+// A gas is frozen out below its boiling point. A saved body carries the game's flag; a body that doesn't exist yet (a terraforming target) gets the rule the game applies after every change.
 const frozenOut = (gas, temperature, planned) => (planned ? temperature < gas.BoilingPoint : !!gas.FrozenOut)
 
-// The surface temperature the body would settle at `distance` AU from its star, with its present
-// atmosphere. It reads the stored BaseTemp: the game never recomputes it from the
-// moving orbit, so the ratio of surface to base temperature is the atmosphere's alone.
+// The surface temperature the body would settle at `distance` AU from its star, with its present atmosphere. It reads the stored BaseTemp: the game never recomputes it from the moving orbit, so the ratio of surface to base temperature is the atmosphere's alone.
 export const temperatureAtDistance = (body, distance) => {
   const equilibrium = equilibriumTemperature(distance, body.StarLuminosity)
   const ratio = body.SurfaceTemp / (body.BaseTemp * body.Albedo)
@@ -121,9 +108,7 @@ const dangerousGas = (body, species, temperature, planned) => {
   return worst
 }
 
-// The six things that add to a colony cost, each as the game's colony cost factor, and which one decides.
-// The cost is the largest factor, not their sum (the breathable-gas rule only applies below 2).
-// `planned` marks a body that doesn't exist yet. Returns the cost before the race's colonisation skill.
+// The six things that add to a colony cost, each as the game's colony cost factor, and which one decides. The cost is the largest factor, not their sum (the breathable-gas rule only applies below 2). `planned` marks a body that doesn't exist yet. Returns the cost before the race's colonisation skill.
 export const costFactors = (body, species, temperature, planned = false) => {
   const tidal = body.TidalLock && body.BodyClass !== BODY_CLASS.MOON ? 5 : 1
   let temperatureCost = 0
@@ -191,9 +176,7 @@ export const uncolonisableReason = (body, species) => {
 // The orbit that sets the temperature swing: a moon follows its parent planet.
 export const orbitOf = (body) => (body.BodyClass === BODY_CLASS.MOON ? { distance: body.ParentOrbitalDistance, eccentricity: body.ParentEccentricity } : { distance: body.OrbitalDistance, eccentricity: body.Eccentricity })
 
-// Colony cost now, at periapsis and apoapsis, and the worst of them, all times the race's colonisation
-// skill (a tech multiplier, 1 without it). `raw` is the same worst case before the skill, the cost the
-// environment alone sets. `planned` is for a body that doesn't exist yet.
+// Colony cost now, at periapsis and apoapsis, and the worst of them, all times the race's colonisation skill (a tech multiplier, 1 without it). `raw` is the same worst case before the skill, the cost the environment alone sets. `planned` is for a body that doesn't exist yet.
 export const colonyCost = (body, species, skill, planned = false) => {
   const reason = uncolonisableReason(body, species)
 
@@ -235,6 +218,5 @@ export const limitingFactor = (factors) => {
   return first && first.value > 0 ? first : null
 }
 
-// Infrastructure per million people at a colony cost. A low-gravity colony needs
-// twice as much. The game does this in decimals, so float noise is rounded off before the ceiling.
+// Infrastructure per million people at a colony cost. A low-gravity colony needs twice as much. The game does this in decimals, so float noise is rounded off before the ceiling.
 export const infrastructurePerMillion = (cost, species, lowGravity) => Math.ceil(Number(((cost * 100 * (lowGravity ? LOW_GRAVITY_INFRASTRUCTURE : 1)) / species.PopulationDensityModifier).toFixed(6)))

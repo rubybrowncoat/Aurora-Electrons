@@ -1,25 +1,11 @@
 <template>
   <div class="empire-list">
     <template v-for="game in games">
-      <div
-        :key="`game-${game.GameID}`"
-        class="empire-list__game"
-        :class="{ 'empire-list__game--pick': game.Races.length === 1 }"
-        @click="game.Races.length === 1 ? pick(game) : null"
-      >
+      <div :key="`game-${game.GameID}`" class="empire-list__game" :class="{ 'empire-list__game--pick': game.Races.length === 1 }" @click="game.Races.length === 1 ? pick(game) : null">
         {{ game.GameName }} · {{ game.date }}
       </div>
       <div :key="`races-${game.GameID}`" class="empire-list__races">
-        <div
-          v-for="race in game.Races"
-          :key="`race-${race.RaceID}`"
-          class="empire-list__race"
-          :class="{ 'empire-list__race--active': game.GameID === GameID && race.RaceID === RaceID }"
-          role="link"
-          tabindex="0"
-          @click="pick(game, race)"
-          @keydown.enter="pick(game, race)"
-        >
+        <div v-for="race in game.Races" :key="`race-${race.RaceID}`" class="empire-list__race" :class="{ 'empire-list__race--active': game.GameID === GameID && race.RaceID === RaceID }" role="link" tabindex="0" @click="pick(game, race)" @keydown.enter="pick(game, race)">
           <empire-avatar :race="race" :size="36" class="empire-list__avatar" />
           <div class="empire-list__title">{{ race.RaceTitle }}</div>
           <div>
@@ -41,9 +27,7 @@ import { empireDetails } from '../../utilities/empires'
 import { thousandsSeparator } from '../../utilities/math'
 import EmpireAvatar from './EmpireAvatar.vue'
 
-// Every game with its races: the flyout from the rail's Empires entry and the Empires page. Picking a race selects it
-// (a game with one race can be picked from its header). A game's races take as many columns as fit, one in the flyout.
-// Coloured by `--sc` / `--sc-soft` of whoever styles it.
+// Every game with its races: the flyout from the rail's Empires entry and the Empires page. Picking a race selects it (a game with one race can be picked from its header). A game's races take as many columns as fit, one in the flyout. Coloured by `--sc` / `--sc-soft` of whoever styles it.
 export default {
   components: {
     EmpireAvatar,

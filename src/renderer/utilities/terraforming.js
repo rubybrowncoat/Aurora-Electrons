@@ -1,17 +1,11 @@
-// Terraforming plans: which gases to add or remove to make a body liveable for a species, how much work
-// that is, and what the body costs afterwards. The game terraforms one gas at a time per colony, adding or
-// removing atm at the colony's capacity scaled by the body's surface area,
-// so a plan's work is the sum over its gases. See docs/DATABASE.md § Terraforming.
+// Terraforming plans: which gases to add or remove to make a body liveable for a species, how much work that is, and what the body costs afterwards. The game terraforms one gas at a time per colony, adding or removing atm at the colony's capacity scaled by the body's surface area, so a plan's work is the sum over its gases. See docs/DATABASE.md § Terraforming.
 //
-// The plan itself is the page's long-standing heuristic (a target atmosphere that centres the species'
-// temperature and breathing ranges, found by iterating the greenhouse balance). It is checked against the
-// game's formulas, not against a played-out terraform.
+// The plan itself is the page's long-standing heuristic (a target atmosphere that centres the species' temperature and breathing ranges, found by iterating the greenhouse balance). It is checked against the game's formulas, not against a played-out terraform.
 
 import { GAS, HYDROSPHERE, MINIMUM_TERRAFORMING_GRAVITY, colonyCost, hydrosphereAtTemperature, infrastructurePerMillion, orbitOf } from './habitability'
 
 export const EARTH_SURFACE_AREA = 511187128
-// Water vapour condenses at this many atm a year and evaporates at this many; a hydro
-// extent of 1 % is 1/40 atm of vapour.
+// Water vapour condenses at this many atm a year and evaporates at this many; a hydro extent of 1 % is 1/40 atm of vapour.
 export const CONDENSATION_RATE = 0.1
 export const EVAPORATION_RATE = 4
 export const HYDRO_PER_ATM = 40
@@ -22,8 +16,7 @@ const GAS_AESTUSIUM = 20
 const GAS_FRIGUSIUM = 22
 const GAS_NITROGEN = 7
 
-// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so
-// the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists.
+// How a body ends up after terraforming, best first. An outcome reads the colony costs the player pays, so the race's colonisation skill (a multiplier under 1 with the tech) counts, as in the game's own lists.
 export const OUTCOMES = {
   done: { label: 'Done', description: 'Already liveable for this species; nothing to terraform.', color: 'success' },
   yes: { label: 'Yes', description: 'Terraforming makes it free to colonise.', color: 'success' },
@@ -70,8 +63,7 @@ const swingRatios = (body) => {
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
 
-// Pressures by role: the species' breathing gas, other dangerous gases, water vapour, greenhouse and
-// anti-greenhouse gases, and everything else (neutrals).
+// Pressures by role: the species' breathing gas, other dangerous gases, water vapour, greenhouse and anti-greenhouse gases, and everything else (neutrals).
 const summariseAtmosphere = (body, species) => {
   const summary = { breathable: 0, breathableGas: null, toxic: 0, toxics: [], greenhouse: 0, greenhouses: [], antiGreenhouse: 0, antiGreenhouses: [], waterVapour: 0, waterVapourGas: null, neutral: 0, neutrals: [], total: 0 }
 
@@ -112,8 +104,7 @@ const hydrosphereState = (temperature, pressure) => {
   return hydrosphereAtTemperature(temperature)
 }
 
-// Aim for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and
-// 75 % (above 75 % the body holds fewer people), ice anywhere.
+// Aim for 20 % water (no colony cost), then for what keeps the most people: liquid water between 50 and 75 % (above 75 % the body holds fewer people), ice anywhere.
 const targetHydroExtent = (current, hydrosphere) => {
   if (current < 20) {
     return 20
@@ -228,8 +219,7 @@ const solveAtmosphere = (body, species, albedo, goal, keepNeutralGas) => {
     }
 
     if (Math.abs(error) >= TOLERANCE) {
-      // Too warm: cut the greenhouse gas, or add anti-greenhouse gas. Too cold: the other way round.
-      // A multiplier stops at 3, so each gas has a ceiling.
+      // Too warm: cut the greenhouse gas, or add anti-greenhouse gas. Too cold: the other way round. A multiplier stops at 3, so each gas has a ceiling.
       const maxGreenhouse = Math.max(0, 2 - total / 10)
       const maxAnti = Math.max(0, 2 - dust)
 
@@ -319,9 +309,7 @@ const hydrosphereSettling = (body, solution) => {
   return evaporating > TOLERANCE ? { process: 'Evaporate', years: evaporating / EVAPORATION_RATE } : { process: 'Stable', years: 0 }
 }
 
-// The plan for one body and species, or null when there is no atmosphere that suits the species. Work is
-// in Earth-equivalent atm: the atm to add or remove times the body's surface area over the Earth's.
-// Divide by a colony's yearly capacity (atm of an Earth-sized body) for the years.
+// The plan for one body and species, or null when there is no atmosphere that suits the species. Work is in Earth-equivalent atm: the atm to add or remove times the body's surface area over the Earth's. Divide by a colony's yearly capacity (atm of an Earth-sized body) for the years.
 export const planTerraforming = (body, species) => {
   const area = 4 * Math.PI * body.Radius ** 2
   const areaRatio = area / EARTH_SURFACE_AREA
@@ -476,29 +464,18 @@ export const terraformedBody = (body, species, plan, gasInfo) => {
   return { ...body, SurfaceTemp: surface, Albedo: target.albedo, AtmosPress: target.pressure, HydroExt: target.hydroExt, HydroID: target.hydrosphere, Atmosphere: atmosphere }
 }
 
-// Whether the body suits the species as it is: gravity, both ends of the temperature swing, the breathing gas, the
-// pressure and no toxic gas.
+// Whether the body suits the species as it is: gravity, both ends of the temperature swing, the breathing gas, the pressure and no toxic gas.
 const isLiveable = (body, species) => {
   const { low, high } = swingRatios(body)
   const summary = summariseAtmosphere(body, species)
   const breatheMin = Math.max(0, species.MinimumBreathablePressure)
 
-  return (
-    body.Gravity >= species.MinimumGravity &&
-    body.Gravity <= species.MaximumGravity &&
-    body.SurfaceTemp * low >= species.MinimumTemperature &&
-    body.SurfaceTemp * high <= species.MaximumTemperature &&
-    summary.breathable >= breatheMin - TOLERANCE &&
-    summary.breathable <= species.MaximumBreathablePressure + TOLERANCE &&
-    summary.total <= species.MaximumPressure + TOLERANCE &&
-    summary.toxic <= TOLERANCE
-  )
+  return body.Gravity >= species.MinimumGravity && body.Gravity <= species.MaximumGravity && body.SurfaceTemp * low >= species.MinimumTemperature && body.SurfaceTemp * high <= species.MaximumTemperature && summary.breathable >= breatheMin - TOLERANCE && summary.breathable <= species.MaximumBreathablePressure + TOLERANCE && summary.total <= species.MaximumPressure + TOLERANCE && summary.toxic <= TOLERANCE
 }
 
 const equalCosts = (a, b) => Math.abs(a.current - b.current) < 0.01 && Math.abs(a.periapsis - b.periapsis) < 0.01 && Math.abs(a.apoapsis - b.apoapsis) < 0.01
 
-// Everything to know about terraforming one body for one species, whatever the colony's capacity:
-// the plan, its work, the cost after it and the outcome. `gasInfo(id)` is the DIM_Gases row of a gas.
+// Everything to know about terraforming one body for one species, whatever the colony's capacity: the plan, its work, the cost after it and the outcome. `gasInfo(id)` is the DIM_Gases row of a gas.
 export const assessTerraforming = (body, species, skill, gasInfo) => {
   const cost = colonyCost(body, species, skill)
   const lowGravity = body.Gravity < species.MinimumGravity
@@ -550,8 +527,7 @@ export const assessTerraforming = (body, species, skill, gasInfo) => {
 // Years a plan takes at a yearly capacity (atm of an Earth-sized body); Infinity without capacity.
 export const planYears = (work, capacity) => (work <= 0 ? 0 : capacity > 0 ? work / capacity : Infinity)
 
-// The Earth-equivalent atm a colony of `terraformers` installations or orbital modules can move in a year:
-// racial rate times the game's terraforming speed setting (as a percentage).
+// The Earth-equivalent atm a colony of `terraformers` installations or orbital modules can move in a year: racial rate times the game's terraforming speed setting (as a percentage).
 export const terraformCapacity = ({ TerraformingRate, TerraformingSpeed }, terraformers, modifier = 1) => TerraformingRate * (TerraformingSpeed / 100) * terraformers * modifier
 
 // Infrastructure per million people on the colony the plan leaves.

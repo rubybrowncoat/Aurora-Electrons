@@ -2,6 +2,7 @@ import Config from 'electron-store'
 
 import { resetDatabase, retireDatabase } from '../utilities/database'
 import { recordsHistory } from '../utilities/history'
+import { cacheQueries, dropQueryCache } from '../utilities/query-cache'
 
 const configConfiguration = {}
 
@@ -105,17 +106,15 @@ export const actions = {
     })
   },
 
-  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or
-  // running on it can't hold the app up.
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go.
   renew ({ commit, state }, { storagePath }) {
     const previous = state.database
     let database = null
     let message = null
 
-    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on
-    // as if the save held no games.
+    // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on as if the save held no games.
     try {
-      database = resetDatabase(storagePath)
+      database = cacheQueries(resetDatabase(storagePath))
     } catch (error) {
       console.error(`Couldn't open ${storagePath}`, error)
       message = error.message.split(/\r?\n/)[0]
@@ -123,6 +122,7 @@ export const actions = {
 
     commit('replaceDatabase', { database })
     commit('setDatabaseError', { message })
+    dropQueryCache(previous)
 
     return retireDatabase(previous)
   },

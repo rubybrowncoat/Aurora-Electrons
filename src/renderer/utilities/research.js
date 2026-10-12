@@ -1,10 +1,6 @@
 // The research domain: the tech catalogue as a graph, and what each tech is to one race.
 //
-// The game lists a project as researchable when its field matches, it is not ruin-only, it belongs to
-// nobody or to the race (or the race made it eligible), its prerequisites are researched, and it is not
-// researched, running or queued. A prerequisite id
-// that has no tech row can never be researched, so a tech that needs one is out of reach for good.
-// `evaluateResearch` computes that once for every tech, with the path to it, so the page only reads.
+// The game lists a project as researchable when its field matches, it is not ruin-only, it belongs to nobody or to the race (or the race made it eligible), its prerequisites are researched, and it is not researched, running or queued. A prerequisite id that has no tech row can never be researched, so a tech that needs one is out of reach for good. `evaluateResearch` computes that once for every tech, with the path to it, so the page only reads.
 
 import { toBoolean } from './aurora'
 import { roundToDecimal } from './math'
@@ -33,8 +29,7 @@ export const STATUS_LABELS = {
   [BLOCKED]: 'Out of reach',
 }
 
-// The catalogue as `rows` from FCT_TechSystem (GameID 0, plus the race's eligible alien projects) with
-// DIM_TechType's Description (TypeName) and FieldID: tech by id, with its prerequisites and dependents.
+// The catalogue as `rows` from FCT_TechSystem (GameID 0, plus the race's eligible alien projects) with DIM_TechType's Description (TypeName) and FieldID: tech by id, with its prerequisites and dependents.
 export const buildTechGraph = (rows) => {
   const techs = new Map()
 
@@ -66,9 +61,7 @@ export const buildTechGraph = (rows) => {
   return { techs }
 }
 
-// Everything the race's rows say about its research, as the sets and maps `evaluateResearch` takes:
-// `researched` and `eligible` are sets of tech ids, `projects` maps a running tech to its RP left,
-// `queued` is a set of queued tech ids, `paused` maps a tech to the RP already banked.
+// Everything the race's rows say about its research, as the sets and maps `evaluateResearch` takes: `researched` and `eligible` are sets of tech ids, `projects` maps a running tech to its RP left, `queued` is a set of queued tech ids, `paused` maps a tech to the RP already banked.
 export const researchState = ({ raceId, researched, eligible = [], projects = [], queued = [], paused = [] }) => ({
   raceId,
   researched: new Set(researched),
@@ -79,10 +72,7 @@ export const researchState = ({ raceId, researched, eligible = [], projects = []
 })
 
 // Per tech: { status, reason, remaining, missing, pathRp, unlocks }.
-//   remaining  RP still to pay for this tech (a running project's RP left, else its cost less banked points)
-//   missing    ids of the unresearched techs it needs, deepest prerequisite first, itself not included
-//   pathRp     remaining of the tech plus all of `missing`: the game's "Path RP", less progress already made
-//   unlocks    direct dependents that are not researched yet
+//   remaining  RP still to pay for this tech (a running project's RP left, else its cost less banked points) missing    ids of the unresearched techs it needs, deepest prerequisite first, itself not included pathRp     remaining of the tech plus all of `missing`: the game's "Path RP", less progress already made unlocks    direct dependents that are not researched yet
 export const evaluateResearch = (graph, state) => {
   const { techs } = graph
   const { raceId, researched, eligible, projects, queued, paused } = state
@@ -169,8 +159,7 @@ export const evaluateResearch = (graph, state) => {
   return info
 }
 
-// The catalogue as lines: a tech type's techs from the cheapest up, with the race's progress on each.
-// `visible` filters the techs that belong on the page (the displayed fields).
+// The catalogue as lines: a tech type's techs from the cheapest up, with the race's progress on each. `visible` filters the techs that belong on the page (the displayed fields).
 export const buildLines = (graph, info, visible = () => true) => {
   const lines = new Map()
 
@@ -229,9 +218,7 @@ export const countStatuses = (graph, info, visible = () => true) => {
   return counts
 }
 
-// A target's prerequisite chain as layers for drawing: the target, its unresearched prerequisites, and the
-// researched techs it leans on directly, each in a column by its longest path from the left. Returns
-// { nodes: [{ id, layer, row }], edges: [{ from, to }], layers }.
+// A target's prerequisite chain as layers for drawing: the target, its unresearched prerequisites, and the researched techs it leans on directly, each in a column by its longest path from the left. Returns { nodes: [{ id, layer, row }], edges: [{ from, to }], layers }.
 export const prerequisiteChain = (graph, info, targetId) => {
   const target = graph.techs.get(targetId)
   const open = [targetId, ...info.get(targetId).missing]
@@ -296,16 +283,13 @@ export const prerequisiteChain = (graph, info, targetId) => {
   }
 }
 
-// A scientist on a project of the scientist's own field counts the Research bonus four times over
-// (1.15 becomes 1.60); the field's ancient-construct bonus applies when the colony sits on the construct.
+// A scientist on a project of the scientist's own field counts the Research bonus four times over (1.15 becomes 1.60); the field's ancient-construct bonus applies when the colony sits on the construct.
 export const researchMultiplier = (bonus, specialised) => (specialised ? 4 * bonus - 3 : bonus)
 
-// The race-wide bonus per field from its active ancient constructs: each adds a tenth of its bonus above 1.
-// `constructs` has one row per populated colony on a construct, as the game counts them.
+// The race-wide bonus per field from its active ancient constructs: each adds a tenth of its bonus above 1. `constructs` has one row per populated colony on a construct, as the game counts them.
 export const fieldBonuses = (constructs) => constructs.reduce((bonuses, row) => ({ ...bonuses, [row.FieldID]: (bonuses[row.FieldID] || 1) + (row.ResearchBonus - 1) / 10 }), {})
 
-// RP a year the project's labs make on a tech of `fieldId`, as the game's research list shows it.
-// A project with no scientist makes none.
+// RP a year the project's labs make on a tech of `fieldId`, as the game's research list shows it. A project with no scientist makes none.
 export const annualResearchPoints = (project, fieldId, bonuses = {}) => {
   if (!project.CommanderID) {
     return 0
@@ -316,25 +300,19 @@ export const annualResearchPoints = (project, fieldId, bonuses = {}) => {
   return project.OutputPerLab * project.Facilities * researchMultiplier(project.ResearchBonus, project.ScientistField === fieldId) * local * (bonuses[fieldId] || 1)
 }
 
-// Each running project and what is queued behind it, as years from now. A queued tech starts when the one
-// before it lands and is paid at the project's labs and scientist, at the queued tech's own field. A paused
-// project, or one making no RP, never lands (`years` is null), and nothing behind it does.
-// `projects` and `queue` are the rows as the page reads them; `paused` maps a tech id to RP already banked.
+// Each running project and what is queued behind it, as years from now. A queued tech starts when the one before it lands and is paid at the project's labs and scientist, at the queued tech's own field. A paused project, or one making no RP, never lands (`years` is null), and nothing behind it does. `projects` and `queue` are the rows as the page reads them; `paused` maps a tech id to RP already banked.
 export const scheduleProjects = (projects, queue, paused, bonuses = {}) => projects.map((project) => {
   const rate = annualResearchPoints(project, project.FieldID, bonuses)
   const running = !toBoolean(project.Pause) && rate > 0
   let years = running ? project.ResearchPointsRequired / rate : null
-  const entries = queue
-    .filter((entry) => entry.CurrentProjectID === project.ProjectID)
-    .sort((a, b) => a.ResearchOrder - b.ResearchOrder)
-    .map((entry) => {
-      const queuedRate = annualResearchPoints(project, entry.FieldID, bonuses)
-      const remaining = Math.max(0, entry.DevelopCost - (paused.get(entry.TechID) || 0))
-      const start = years
-      years = years !== null && queuedRate > 0 ? years + remaining / queuedRate : null
+  const entries = queue.filter((entry) => entry.CurrentProjectID === project.ProjectID).sort((a, b) => a.ResearchOrder - b.ResearchOrder).map((entry) => {
+    const queuedRate = annualResearchPoints(project, entry.FieldID, bonuses)
+    const remaining = Math.max(0, entry.DevelopCost - (paused.get(entry.TechID) || 0))
+    const start = years
+    years = years !== null && queuedRate > 0 ? years + remaining / queuedRate : null
 
-      return { ...entry, remaining, rate: queuedRate, start, years }
-    })
+    return { ...entry, remaining, rate: queuedRate, start, years }
+  })
 
   return { ...project, rate, running, years: running ? project.ResearchPointsRequired / rate : null, queue: entries }
 })

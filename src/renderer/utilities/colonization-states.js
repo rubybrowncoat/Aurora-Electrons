@@ -1,16 +1,10 @@
-// The Colonization Planner's plan states: what a body is to the race looking at it, and what it takes to settle
-// it. One table, read by the ranking (can it be a target), the page (chip, tooltip, legend, counts, filter) and
-// docs/DATABASE.md, so a state is defined here and nowhere else.
+// The Colonization Planner's plan states: what a body is to the race looking at it, and what it takes to settle it. One table, read by the ranking (can it be a target), the page (chip, tooltip, legend, counts, filter) and docs/DATABASE.md, so a state is defined here and nowhere else.
 //
-// A state is decided from facts about the body (see `routeFacts` and `stateOf`), first match in table order. The
-// route is the one the ranking prefers for the best species: settle it as it is, or wait for terraforming.
+// A state is decided from facts about the body (see `routeFacts` and `stateOf`), first match in table order. The route is the one the ranking prefers for the best species: settle it as it is, or wait for terraforming.
 //   - who lives there: an own colony with people, an own colony without, a known alien colony;
 //   - whether any species can live there, and what a colony costs now against after terraforming;
 //   - whether its deposits are rich enough for a mining colony, whatever people could do there.
-// Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown
-// under 6 times the race's colonisation skill, so they are read on the cost before the skill
-// (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really
-// pays is the infrastructure per million people, shown beside the band.
+// Colony cost bands are the game's own: the Minerals window colours a body blue under 2, cyan under 3 and brown under 6 times the race's colonisation skill, so they are read on the cost before the skill (`raw`), and a race with the cost-cutting tech lands in the same band as one without. What a colony really pays is the infrastructure per million people, shown beside the band.
 
 import { RICH_DEPOSIT_VALUE } from './minerals'
 import { roundToDecimal } from './math'
@@ -25,10 +19,7 @@ const years = (value) => (!Number.isFinite(value) ? 'never with these terraforme
 const perMillion = (infrastructure) => `${infrastructure} infrastructure per million people`
 const people = (millions) => (millions >= 1000 ? `${number(millions / 1000, 1)} billion` : `${number(millions, millions < 10 ? 2 : 0)} million`)
 
-// What the states read about one body, `facts`: `settled` is { people (millions), colonies (own populations),
-// alien (known alien populations) }; `route` the best species' numbers (see `routeFacts`), or null when no
-// species can live there; `richDeposit` whether its deposits reach the game's mining-colony value;
-// `peopleMinimum` the smallest colony worth planning for, in millions.
+// What the states read about one body, `facts`: `settled` is { people (millions), colonies (own populations), alien (known alien populations) }; `route` the best species' numbers (see `routeFacts`), or null when no species can live there; `richDeposit` whether its deposits reach the game's mining-colony value; `peopleMinimum` the smallest colony worth planning for, in millions.
 
 // The numbers of one species on one body, before and after terraforming.
 export const routeFacts = (evaluation, terraformYears) => {
@@ -52,39 +43,37 @@ export const routeFacts = (evaluation, terraformYears) => {
   }
 }
 
-// A body is a terraforming state when the ranking's best route for it is to wait for the plan (`route.plan` is
-// only there then): its worth after the years of work beats settling it as it is.
+// A body is a terraforming state when the ranking's best route for it is to wait for the plan (`route.plan` is only there then): its worth after the years of work beats settling it as it is.
 const terraforms = (route) => !!route.plan
 
 const peopleRoom = (route) => Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0)
 
 const settleNow = (route, extra = '') => `Costs ${number(route.cost, 2)} for ${route.species}${extra}, which is ${perMillion(route.infrastructure)}${route.lowGravity ? ' (low gravity doubles it)' : ''}. It holds ${people(route.capacity)}.`
 
-// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target`
-// is whether the state can be ranked as a place to settle next. `group` orders the legend.
+// The table. `when` decides, `text` says it for one body with its numbers, `rule` says it in general. `target` is whether the state can be ranked as a place to settle next. `group` orders the legend.
 export const PLAN_STATES = [
   {
     id: 'colony',
     label: 'Colony',
-    group: 'Already yours',
+    group: 'Already mine',
     color: 'success',
     icon: 'mdi-home-city',
     target: false,
-    rule: 'You have an own colony here with people on it.',
+    rule: 'I have a colony of my own here with people on it.',
     when: ({ settled }) => settled.people > 0,
-    text: ({ settled }) => `Your own colony: ${people(settled.people)} live here${settled.colonies > 1 ? ` across ${settled.colonies} colonies` : ''}.`,
+    text: ({ settled }) => `My own colony: ${people(settled.people)} live here${settled.colonies > 1 ? ` across ${settled.colonies} colonies` : ''}.`,
     chip: ({ settled }) => `Colony · ${people(settled.people)}`,
   },
   {
     id: 'outpost',
     label: 'Outpost',
-    group: 'Already yours',
+    group: 'Already mine',
     color: 'info',
     icon: 'mdi-tent',
     target: false,
-    rule: 'You have an own colony here with no people yet (installations only).',
+    rule: 'I have a colony of my own here with no people yet (installations only).',
     when: ({ settled }) => settled.colonies > 0,
-    text: () => 'Your own colony with no people on it yet: installations only.',
+    text: () => 'My own colony with no people on it yet: installations only.',
     chip: () => 'Outpost',
   },
   {
@@ -94,7 +83,7 @@ export const PLAN_STATES = [
     color: 'error',
     icon: 'mdi-flag-variant',
     target: false,
-    rule: 'Your intelligence shows an alien colony here.',
+    rule: 'My intelligence shows an alien colony here.',
     when: ({ settled }) => settled.alien > 0,
     text: ({ settled }) => `A known alien colony${settled.alien > 1 ? `s (${settled.alien})` : ''} is here.`,
     chip: () => 'Alien colony',
@@ -106,9 +95,9 @@ export const PLAN_STATES = [
     color: 'error',
     icon: 'mdi-cancel',
     target: false,
-    rule: 'No species of yours can live here: too heavy for all of them, or a fixed body. A rich deposit can still be mined with a civilian complex or ships.',
+    rule: 'No species of mine can live here: too heavy for all of them, or a fixed body. A rich deposit can still be mined with a civilian complex or ships.',
     when: ({ route }) => route === null,
-    text: ({ richDeposit }) => `No species of yours can live here (gravity or a fixed body).${richDeposit ? ' The deposits are rich: a civilian mining complex or orbital miners can still work them.' : ''}`,
+    text: ({ richDeposit }) => `No species of mine can live here (gravity or a fixed body).${richDeposit ? ' The deposits are rich: a civilian mining complex or orbital miners can still work them.' : ''}`,
     chip: () => 'Not habitable',
   },
   {
@@ -132,7 +121,7 @@ export const PLAN_STATES = [
     target: true,
     rule: 'The best route is to terraform first, and the plan makes the colony cost 0 at every point of the orbit, so it needs no infrastructure afterwards.',
     when: ({ route }) => terraforms(route) && route.plan.outcome === 'yes',
-    text: ({ route }) => `Terraforming takes ${years(route.plan.years)} with your terraformers and leaves the colony free, against ${perMillion(route.infrastructure)} now. It then holds ${people(route.plan.capacity)}.`,
+    text: ({ route }) => `Terraforming takes ${years(route.plan.years)} with my terraformers and leaves the colony free, against ${perMillion(route.infrastructure)} now. It then holds ${people(route.plan.capacity)}.`,
     chip: ({ route }) => `To free · ${years(route.plan.years)}`,
   },
   {
@@ -178,7 +167,7 @@ export const PLAN_STATES = [
     color: 'teal',
     icon: 'mdi-home-plus',
     target: true,
-    rule: `Colony cost under ${COST_BANDS.cheap} before your colonisation tech (the game's blue band). Settle it as it is and build the infrastructure it needs.`,
+    rule: `Colony cost under ${COST_BANDS.cheap} before my colonisation tech (the game's blue band). Settle it as it is and build the infrastructure it needs.`,
     when: ({ route }) => costBand(route.raw) === 'cheap',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Cheap · ${route.infrastructure}/M`,
@@ -190,7 +179,7 @@ export const PLAN_STATES = [
     color: 'light-blue darken-1',
     icon: 'mdi-home-plus',
     target: true,
-    rule: `Colony cost ${COST_BANDS.cheap} to ${COST_BANDS.moderate} before your colonisation tech (the game's cyan band). The usual price of a breathable-gas or dry world: settle it and build the infrastructure.`,
+    rule: `Colony cost ${COST_BANDS.cheap} to ${COST_BANDS.moderate} before my colonisation tech (the game's cyan band). The usual price of a breathable-gas or dry world: settle it and build the infrastructure.`,
     when: ({ route }) => costBand(route.raw) === 'moderate',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Moderate · ${route.infrastructure}/M`,
@@ -202,7 +191,7 @@ export const PLAN_STATES = [
     color: 'orange darken-2',
     icon: 'mdi-home-alert',
     target: true,
-    rule: `Colony cost ${COST_BANDS.moderate} to ${COST_BANDS.costly} before your colonisation tech (the game's brown band). Possible, but each million people needs a lot of infrastructure.`,
+    rule: `Colony cost ${COST_BANDS.moderate} to ${COST_BANDS.costly} before my colonisation tech (the game's brown band). Possible, but each million people needs a lot of infrastructure.`,
     when: ({ route }) => costBand(route.raw) === 'costly',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Costly · ${route.infrastructure}/M`,
@@ -214,7 +203,7 @@ export const PLAN_STATES = [
     color: 'deep-orange darken-3',
     icon: 'mdi-home-alert',
     target: true,
-    rule: `Colony cost ${COST_BANDS.costly} or more before your colonisation tech. Hostile: only a very large body or a rich deposit makes it worth the infrastructure.`,
+    rule: `Colony cost ${COST_BANDS.costly} or more before my colonisation tech. Hostile: only a very large body or a rich deposit makes it worth the infrastructure.`,
     when: ({ route }) => costBand(route.raw) === 'severe',
     text: ({ route }) => settleNow(route),
     chip: ({ route }) => `Severe · ${route.infrastructure}/M`,

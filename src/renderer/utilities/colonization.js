@@ -1,18 +1,11 @@
-// The Colonization Planner's model: every body of the race's known systems, assessed for each of its
-// species (what it costs now, what terraforming gets it to, what it holds), given a plan state, and ranked by
-// what the player wants from it. The rules live in habitability.js (cost), terraforming.js (plans) and
-// colonies.js (capacity); colonization-states.js defines the plan states; this file joins them with minerals and
-// distance and holds the ranking.
+// The Colonization Planner's model: every body of the race's known systems, assessed for each of its species (what it costs now, what terraforming gets it to, what it holds), given a plan state, and ranked by what the player wants from it. The rules live in habitability.js (cost), terraforming.js (plans) and colonies.js (capacity); colonization-states.js defines the plan states; this file joins them with minerals and distance and holds the ranking.
 //
-// What makes a body worth settling next, in the order the ranking weighs it (sources in docs/DATABASE.md,
-// "Colonization Planner ranking"):
-//   - the prize: the people it holds (surface area and the species' density, the game's capacity rule) and/or
-//     what its deposits are worth (the game's own deposit value, scaled by how short the race is of each mineral);
+// What makes a body worth settling next, in the order the ranking weighs it (sources in docs/DATABASE.md, "Colonization Planner ranking"):
+//   - the prize: the people it holds (surface area and the species' density, the game's capacity rule) and/or what its deposits are worth (the game's own deposit value, scaled by how short the race is of each mineral);
 //   - the colony cost it takes to live there, on the game's own scale (the cost before the colonisation tech);
 //   - the years of terraforming, when it needs them;
 //   - the distance to the nearest sizeable colony, which is how far a freighter flies to supply it.
-// A body only gets a rank when it is a place to settle at all and worth the trip: it holds the smallest colony
-// worth planning for, or its deposits are worth mining, or it is a civilian mining complex site.
+// A body only gets a rank when it is a place to settle at all and worth the trip: it holds the smallest colony worth planning for, or its deposits are worth mining, or it is a civilian mining complex site.
 
 import { bodyCapacity } from './colonies'
 import { STATE_BY_ID, routeFacts, stateOf } from './colonization-states'
@@ -27,23 +20,16 @@ export const GOALS = [
   { id: 'both', label: 'Both', icon: 'mdi-scale-balance', hint: 'People and minerals, each as a share of a good colony' },
 ]
 
-// What a point of a mineral's deposit value is worth before the race's scarcity of it. The game's own AI weighs
-// every mineral alike, and so does the Planner: scarcity, not a
-// fixed table, says which are wanted.
+// What a point of a mineral's deposit value is worth before the race's scarcity of it. The game's own AI weighs every mineral alike, and so does the Planner: scarcity, not a fixed table, says which are wanted.
 export const DEFAULT_MINERAL_WEIGHTS = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, 1]))
 
-// The knobs of the ranking. A deposit counts from `minimumDeposit` tonnes. `cmcBonus` is the deposit value a
-// civilian mining complex site adds. `minimumPeople` is the smallest colony (millions) worth planning for; a
-// smaller body is only a target for its deposits. Each scale is where its factor halves: a colony cost (before
-// the colonisation tech), the years of terraforming, the AU from the nearest colony.
+// The knobs of the ranking. A deposit counts from `minimumDeposit` tonnes. `cmcBonus` is the deposit value a civilian mining complex site adds. `minimumPeople` is the smallest colony (millions) worth planning for; a smaller body is only a target for its deposits. Each scale is where its factor halves: a colony cost (before the colonisation tech), the years of terraforming, the AU from the nearest colony.
 export const DEFAULT_RANKING = { minimumDeposit: DEPOSIT_MINIMUM_AMOUNT, cmcBonus: 2, minimumPeople: 50, costScale: 3, yearsScale: 25, distanceScale: 60, weights: DEFAULT_MINERAL_WEIGHTS }
 
-// Saved knobs from before this version (a different cost scale, workbook weights, a mineral score) are dropped
-// rather than carried over: they meant other things.
+// Saved knobs from before this version (a different cost scale, workbook weights, a mineral score) are dropped rather than carried over: they meant other things.
 export const RANKING_VERSION = 2
 
-// A good colony: 1,000 M people, a deposit value at the game's mining-colony threshold. Each is worth half a
-// prize at that size. A body with no charted route from any colony keeps this share of its worth.
+// A good colony: 1,000 M people, a deposit value at the game's mining-colony threshold. Each is worth half a prize at that size. A body with no charted route from any colony keeps this share of its worth.
 const PEOPLE_REFERENCE = 1000
 const MINERAL_REFERENCE = RICH_DEPOSIT_VALUE
 const NO_ROUTE_FACTOR = 0.3
@@ -81,10 +67,7 @@ export const normaliseRanking = (stored) => {
   }
 }
 
-// What a body's deposits are worth to this race: each deposit by the game's own value (accessibility, raised for
-// a big easy one, halved for a small one), times the mineral's weight and the race's scarcity of it
-// (`outlook`, from minerals.js `mineralOutlook`). Civilian mining complex candidates per the game's deposit rule
-// (minerals.js `qualifiesForCmc`).
+// What a body's deposits are worth to this race: each deposit by the game's own value (accessibility, raised for a big easy one, halved for a small one), times the mineral's weight and the race's scarcity of it (`outlook`, from minerals.js `mineralOutlook`). Civilian mining complex candidates per the game's deposit rule (minerals.js `qualifiesForCmc`).
 export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
   const lines = body.Minerals.map((deposit) => {
     const mineral = MINERALS.find((candidate) => candidate.id === deposit.MaterialID)
@@ -108,9 +91,7 @@ export const mineralSummary = (body, ranking, outlook = NO_OUTLOOK) => {
   }
 }
 
-// Whether the game counts a body as near enough to its star for a civilian mining complex
-// (SystemBody.IsWithinApoapsisDistance(80, false)): an asteroid, comet or planet that is not a gas giant needs its
-// farthest point under 80 AU; a moon goes by its planet's orbital distance.
+// Whether the game counts a body as near enough to its star for a civilian mining complex: an asteroid, comet or planet that is not a gas giant needs its farthest point under 80 AU; a moon goes by its planet's orbital distance.
 export const cmcBodyInReach = (body) => {
   if (body.BodyClass === 2) {
     return body.ParentOrbitalDistance < CMC_REACH_AU
@@ -123,11 +104,7 @@ export const cmcBodyInReach = (body) => {
   return [1, 3, 5].includes(body.BodyClass) && body.OrbitalDistance * (1 + (body.Eccentricity || 0)) < CMC_REACH_AU
 }
 
-// Whether the game lets a body of this star host a civilian mining complex (Star.CheckNearbyLagrangePoints(80)).
-// The primary star always does. A companion does when it, or for a companion of a companion the star it circles,
-// keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU
-// and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its
-// Lagrange points with their star's OrbitingComponent and their planet's apoapsis.
+// Whether the game lets a body of this star host a civilian mining complex. The primary star always does. A companion does when it, or for a companion of a companion the star it circles, keeps under 80 AU from what it orbits, or else when the primary has a Lagrange point on a planet within 80 AU and so does the companion (or the star it circles). `stars` are the system's stars, `lagrangePoints` its Lagrange points with their star's OrbitingComponent and their planet's apoapsis.
 export const cmcStarInReach = (star, stars, lagrangePoints) => {
   if (star.Component === 1) {
     return true
@@ -149,12 +126,8 @@ export const cmcStarInReach = (star, stars, lagrangePoints) => {
 // Before the race's rules load, no body is a ready site.
 export const NO_CMC_RULES = { allowed: false, shipyard: false, settledColonies: 0, largestColony: {} }
 
-// What the game also wants for a civilian mining complex, beyond the deposit (Game.ProcessNewCivilianMiningColonyCreation
-// and TryEstablishCivilianMiningColony). Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes
-// switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the
-// race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
-// A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count
-// (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
+// What the game also wants for a civilian mining complex, beyond the deposit. Of the race (`rules`, from colonization-data.js `loadCmcRules`): complexes switched on for the game, a shipyard, more than one colony with people or infrastructure. Of the body: one of the race's colonies in the system over 10 M people, the body and its star in reach, not banned, and no colony on it.
+// A colony of the race that has no people, no automated mines or complexes and orbital miners at work doesn't count (`BlocksCmc`); the game counts every race's colonies, and the race knows the alien ones it has intelligence on.
 export const cmcSite = (body, rules) => ({
   allowed: rules.allowed,
   shipyard: rules.shipyard,
@@ -170,11 +143,11 @@ const CMC_NEEDS = {
   allowed: 'civilian mining complexes switched on for the game',
   shipyard: 'a shipyard',
   settledColonies: 'more than one colony with people or infrastructure',
-  populatedSystem: 'one of your colonies in the system with over 10 M people',
+  populatedSystem: 'one of my colonies in the system with over 10 M people',
   nearStar: 'a body under 80 AU from its star at its farthest (a moon: its planet\'s orbit), and not a gas giant',
   starInReach: 'a star the game counts as in reach (a companion within 80 AU of what it orbits, or linked by Lagrange points within 80 AU)',
   notBanned: 'a body that is not banned',
-  uncolonised: 'a body with no colony on it (yours with only orbital miners is fine)',
+  uncolonised: 'a body with no colony on it (mine with only orbital miners is fine)',
 }
 
 // The site's unmet conditions as one sentence.
@@ -184,12 +157,26 @@ export const cmcNote = (site) => {
   return missing.length ? `The game also needs ${missing.join(', ')}.` : 'It meets the game\'s other conditions.'
 }
 
-// Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan
-// doesn't depend on the colony's capacity, so changing the terraformers doesn't redo any of this.
-export const assessBodies = (bodies, speciesRows, rules, gasInfo) => {
+// Give rendering and input a turn between batches on large saves.
+const mapBodies = async (bodies, transform) => {
+  const result = new Array(bodies.length)
+
+  for (let index = 0; index < bodies.length; index += 1) {
+    result[index] = transform(bodies[index])
+
+    if ((index + 1) % 512 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+
+  return result
+}
+
+// Every body assessed for every species, once: costs now and after terraforming, outcome and plan. The plan doesn't depend on the colony's capacity, so changing the terraformers doesn't redo any of this.
+export const assessBodies = async (bodies, speciesRows, rules, gasInfo) => {
   const species = speciesRows.map(speciesLimits)
 
-  return bodies.map((body) => ({
+  return mapBodies(bodies, (body) => ({
     body,
     byspecies: species.map((one) => {
       const assessment = assessTerraforming(body, one, rules.ColonizationSkill, gasInfo)
@@ -205,9 +192,7 @@ export const assessBodies = (bodies, speciesRows, rules, gasInfo) => {
   }))
 }
 
-// What one outcome of colonising is worth to the goal, as the parts that multiply into it: the size of the prize
-// (people and mining, each 0 to 1), discounted by the colony cost, the years of terraforming and the distance.
-// Each discount is 1 at zero and 1/2 at its scale.
+// What one outcome of colonising is worth to the goal, as the parts that multiply into it: the size of the prize (people and mining, each 0 to 1), discounted by the colony cost, the years of terraforming and the distance. Each discount is 1 at zero and 1/2 at its scale.
 const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcReady }) => {
   const mineralBase = minerals.surveyed ? minerals.value + (cmcReady ? ranking.cmcBonus : 0) : 0
   const people = capacity / (capacity + PEOPLE_REFERENCE)
@@ -220,8 +205,7 @@ const worth = (goal, ranking, { capacity, raw, years, distanceAU, minerals, cmcR
   return { people, mining, prize, cost, time, distance, value: prize * cost * time * distance }
 }
 
-// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming. `strategy` is
-// whether the worth is highest settling as the body is, or waiting for terraforming.
+// A species on a body, read for the goal at `terraformCapacityPerYear` atm a year of terraforming. `strategy` is whether the worth is highest settling as the body is, or waiting for terraforming.
 export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }) => {
   const base = { species, assessment, capacityNow, capacityAfter }
 
@@ -238,77 +222,66 @@ export const evaluate = ({ species, assessment, capacityNow, capacityAfter }, { 
     options.push({ strategy: 'terraform', years: planYears(assessment.work, terraformCapacityPerYear), cost: assessment.after.worst, raw: assessment.after.raw, capacity: capacityAfter, lowGravity: assessment.lowGravity, infrastructure: afterInfrastructure })
   }
 
-  const best = options
-    .map((option) => {
-      const parts = worth(goal, ranking, { ...option, distanceAU, minerals, cmcReady })
+  const best = options.map((option) => {
+    const parts = worth(goal, ranking, { ...option, distanceAU, minerals, cmcReady })
 
-      return { ...option, parts, value: parts.value }
-    })
-    .sort((a, b) => b.value - a.value || a.years - b.years)[0]
+    return { ...option, parts, value: parts.value }
+  }).sort((a, b) => b.value - a.value || a.years - b.years)[0]
 
   return { ...base, ...best, nowInfrastructure, afterInfrastructure }
 }
 
 const sumPeople = (populations) => populations.reduce((total, population) => total + population.Population, 0)
 
-// One row per body for the table and chart: the best species for it (or the chosen one), its alternatives, its
-// plan state, and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`,
-// so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from
-// the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook;
-// `cmcRules` is what `cmcSite` needs of the race.
-export const rankBodies = (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
+// One row per body for the table and chart: the best species for it (or the chosen one), its alternatives, its plan state, and the numbers the columns show. `speciesId` null means the best of all. Every row has a `best`, so a race with no species (nothing to compare bodies against) gets no rows at all. `distanceOf` measures from the nearest sizeable colony, `capitalDistanceOf` from the capital; `outlook` is the race's mineral outlook; `cmcRules` is what `cmcSite` needs of the race.
+export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, terraformers, distanceOf, capitalDistanceOf, cmcRules = NO_CMC_RULES, outlook = NO_OUTLOOK }) => {
   const terraformCapacityPerYear = terraformCapacity(rules, terraformers)
 
-  const rows = assessed
-    .filter(({ byspecies }) => byspecies.length)
-    .map(({ body, byspecies }) => {
-      const minerals = mineralSummary(body, ranking, outlook)
-      const site = cmcSite(body, cmcRules)
-      const cmcReady = minerals.cmc.length > 0 && Object.values(site).every(Boolean)
-      const distance = distanceOf(body)
-      const distanceAU = distance ? distance.km / KM_PER_AU : null
-      const capital = capitalDistanceOf(body)
-      const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }))
-      const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
-      const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
-      const settled = { people: sumPeople(body.OwnPopulations), colonies: body.OwnPopulations.length, alien: body.AlienPopulations.length }
-      const route = routeFacts(best, planYears(best.assessment.work, terraformCapacityPerYear))
-      const facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
-      const state = stateOf(facts)
-      const room = route ? Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0) : 0
-      const worthwhile = !!route && (room >= ranking.minimumPeople || minerals.worthMining || cmcReady)
+  const rows = await mapBodies(assessed.filter(({ byspecies }) => byspecies.length), ({ body, byspecies }) => {
+    const minerals = mineralSummary(body, ranking, outlook)
+    const site = cmcSite(body, cmcRules)
+    const cmcReady = minerals.cmc.length > 0 && Object.values(site).every(Boolean)
+    const distance = distanceOf(body)
+    const distanceAU = distance ? distance.km / KM_PER_AU : null
+    const capital = capitalDistanceOf(body)
+    const evaluations = byspecies.map((entry) => evaluate(entry, { goal, ranking, terraformCapacityPerYear, distanceAU, minerals, cmcReady }))
+    const chosen = evaluations.filter((evaluation) => evaluation.species.SpeciesID === speciesId)
+    const [best] = [...(chosen.length ? chosen : evaluations)].sort((a, b) => b.value - a.value || (a.cost ?? Infinity) - (b.cost ?? Infinity))
+    const settled = { people: sumPeople(body.OwnPopulations), colonies: body.OwnPopulations.length, alien: body.AlienPopulations.length }
+    const route = routeFacts(best, planYears(best.assessment.work, terraformCapacityPerYear))
+    const facts = { settled, route, richDeposit: minerals.rich, peopleMinimum: ranking.minimumPeople }
+    const state = stateOf(facts)
+    const room = route ? Math.max(route.capacity, route.plan ? route.plan.capacity || 0 : 0) : 0
+    const worthwhile = !!route && (room >= ranking.minimumPeople || minerals.worthMining || cmcReady)
 
-      return {
-        body,
-        minerals,
-        distance: distance ? { ...distance, au: distanceAU } : null,
-        capitalDistance: capital ? { ...capital, au: capital.km / KM_PER_AU } : null,
-        evaluations,
-        best,
-        cmcSite: site,
-        cmcReady,
-        settled: settled.colonies > 0,
-        facts,
-        state,
-        target: STATE_BY_ID[state.id].target && worthwhile,
-        rank: null,
-        score: null,
-      }
-    })
+    return {
+      body,
+      minerals,
+      distance: distance ? { ...distance, au: distanceAU } : null,
+      capitalDistance: capital ? { ...capital, au: capital.km / KM_PER_AU } : null,
+      evaluations,
+      best,
+      cmcSite: site,
+      cmcReady,
+      settled: settled.colonies > 0,
+      facts,
+      state,
+      target: STATE_BY_ID[state.id].target && worthwhile,
+      rank: null,
+      score: null,
+    }
+  })
 
   const targets = rows.filter((row) => row.target)
-  const top = Math.max(0, ...targets.map((row) => row.best.value))
+  const top = targets.reduce((maximum, row) => Math.max(maximum, row.best.value), 0)
 
   targets.forEach((row) => {
     row.score = top > 0 ? (100 * row.best.value) / top : null
   })
 
-  targets
-    .filter((row) => row.score >= MINIMUM_TARGET_SCORE)
-    .sort((a, b) => b.score - a.score)
-    .forEach((row, index) => {
-      row.rank = index + 1
-    })
+  targets.filter((row) => row.score >= MINIMUM_TARGET_SCORE).sort((a, b) => b.score - a.score).forEach((row, index) => {
+    row.rank = index + 1
+  })
 
   return rows
 }

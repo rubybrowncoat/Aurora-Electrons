@@ -8,3 +8,5 @@ node_modules
 AuroraDB*.db
 docs/
 CLAUDE.md
+artifacts/
+__pycache__/

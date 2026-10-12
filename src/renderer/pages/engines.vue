@@ -585,16 +585,13 @@ export default {
       return [...(researched.length ? [{ header: 'Researched' }, ...researched] : []), ...(unresearched.length ? [{ header: 'Unresearched' }, ...unresearched] : [])]
     },
     splitResearched(techs = [], researchedTechIds = []) {
-      return techs.reduce(
-        ([researched, unresearched], tech) => {
-          const split = researchedTechIds.includes(tech.TechSystemID) ? researched : unresearched
+      return techs.reduce(([researched, unresearched], tech) => {
+        const split = researchedTechIds.includes(tech.TechSystemID) ? researched : unresearched
 
-          split.push(tech)
+        split.push(tech)
 
-          return [researched, unresearched]
-        },
-        [[], []]
-      )
+        return [researched, unresearched]
+      }, [[], []])
     },
 
     modifyRange(amount) {
@@ -606,165 +603,162 @@ export default {
     calculateCombinations() {
       this.isCalculating = true
 
-      const [tonnageCombinations, engineSizeCombinations] = this.usableThrustModifiers.reduce(
-        ([tonnageAggregate, engineSizeAggregate], thrustModifier) => {
-          this.usableEngineSizes.forEach((engineSize) => {
-            const enginePower = this.selectedEngine * engineSize * thrustModifier
-            const shipSizePerEngine = (enginePower / this.selectedSpeed) * 1000
+      const [tonnageCombinations, engineSizeCombinations] = this.usableThrustModifiers.reduce(([tonnageAggregate, engineSizeAggregate], thrustModifier) => {
+        this.usableEngineSizes.forEach((engineSize) => {
+          const enginePower = this.selectedEngine * engineSize * thrustModifier
+          const shipSizePerEngine = (enginePower / this.selectedSpeed) * 1000
 
-            if (engineSize > shipSizePerEngine) {
+          if (engineSize > shipSizePerEngine) {
+            return [tonnageAggregate, engineSizeAggregate]
+          }
+
+          const shipSizePerEngineTons = shipSizePerEngine * 50
+
+          if (shipSizePerEngineTons <= this.selectedTonnage / this.selectedMinimumEngine) {
+            const fuelConsumptionPerEngine = this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5)
+            const roundedFuelConsumptionPerEngine = roundToDecimal(fuelConsumptionPerEngine, 4)
+
+            const fuelPerEngineRounder = Math.ceil((((this.selectedRange * Math.pow(10, 9)) / this.selectedSpeed / 3600) * fuelConsumptionPerEngine * this.selectedEngine * engineSize * thrustModifier) / 5000)
+
+            const fuelPerEngine = fuelPerEngineRounder * 5000
+            const fuelSizePerEngine = fuelPerEngine / 50000
+
+            const propulsionSizePerEngine = engineSize + fuelSizePerEngine
+
+            if (propulsionSizePerEngine > shipSizePerEngine) {
               return [tonnageAggregate, engineSizeAggregate]
             }
 
-            const shipSizePerEngineTons = shipSizePerEngine * 50
+            const usableSizePerEngine = shipSizePerEngine - propulsionSizePerEngine
 
-            if (shipSizePerEngineTons <= this.selectedTonnage / this.selectedMinimumEngine) {
-              const fuelConsumptionPerEngine = this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5)
-              const roundedFuelConsumptionPerEngine = roundToDecimal(fuelConsumptionPerEngine, 4)
+            const engineNumber = Math.max(Math.round(this.selectedTonnage / shipSizePerEngineTons - this.selectedHardTonnage), 1)
 
-              const fuelPerEngineRounder = Math.ceil((((this.selectedRange * Math.pow(10, 9)) / this.selectedSpeed / 3600) * fuelConsumptionPerEngine * this.selectedEngine * engineSize * thrustModifier) / 5000)
+            const recommendedSize = engineNumber * shipSizePerEngine
+            const roundedRecommendedSize = roundToDecimal(recommendedSize, recommendedSize > 10 ? 0 : 1)
 
-              const fuelPerEngine = fuelPerEngineRounder * 5000
-              const fuelSizePerEngine = fuelPerEngine / 50000
+            const recommendedTonnage = recommendedSize * 50
+            const roundedRecommendedTonnage = roundedRecommendedSize * 50
 
-              const propulsionSizePerEngine = engineSize + fuelSizePerEngine
+            const recommendedFuel = engineNumber * fuelPerEngine
 
-              if (propulsionSizePerEngine > shipSizePerEngine) {
-                return [tonnageAggregate, engineSizeAggregate]
-              }
+            const preStep = (engineSize + fuelPerEngineRounder / 10) / shipSizePerEngine
 
-              const usableSizePerEngine = shipSizePerEngine - propulsionSizePerEngine
+            const isCommercial = engineSize >= 25 && thrustModifier <= 0.5
+            const isJumpCommercial = this.selectedJump ? this.selectedJump > 1 : isCommercial
 
-              const engineNumber = Math.max(Math.round(this.selectedTonnage / shipSizePerEngineTons - this.selectedHardTonnage), 1)
-
-              const recommendedSize = engineNumber * shipSizePerEngine
-              const roundedRecommendedSize = roundToDecimal(recommendedSize, recommendedSize > 10 ? 0 : 1)
-
-              const recommendedTonnage = recommendedSize * 50
-              const roundedRecommendedTonnage = roundedRecommendedSize * 50
-
-              const recommendedFuel = engineNumber * fuelPerEngine
-
-              const preStep = (engineSize + fuelPerEngineRounder / 10) / shipSizePerEngine
-
-              const isCommercial = engineSize >= 25 && thrustModifier <= 0.5
-              const isJumpCommercial = this.selectedJump ? this.selectedJump > 1 : isCommercial
-
-              if (isCommercial !== isJumpCommercial) {
-                return [tonnageAggregate, engineSizeAggregate]
-              }
-
-              // Jump Drive Calculations
-
-              const jumpDriveSizeForTonnage = this.selectedJump ? Math.ceil(recommendedTonnage / this.selectedJumpEfficiency / this.selectedJump / 50) * (this.selectedJump === 1 ? 1 : 10) : 0
-              const jumpDriveCapacity = (jumpDriveSizeForTonnage * this.selectedJumpEfficiency * this.selectedJump * 50) / (this.selectedJump === 1 ? 1 : 10)
-
-              const jumpDriveSize = Math.round(jumpDriveSizeForTonnage * this.selectedSquadronSize * this.selectedSquadronRadius)
-              const jumpDriveSizeTons = Math.round(jumpDriveSize * 50)
-
-              // Armor
-
-              const armorArea = Math.pow((recommendedSize * 0.75) / Math.PI, 2 / 3) * Math.PI
-              const armorWidth = Math.round(armorArea)
-              const armorStrength = (armorArea * this.selectedLayers) / 4
-              const armorColumns = Math.floor(armorArea / 4)
-              const armorSize = this.selectedArmor ? ceilToDecimal(armorStrength / this.selectedArmor, 1) : 0
-
-              // Usable Size
-
-              const usableSizeAfterPropulsion = roundedRecommendedSize - propulsionSizePerEngine * engineNumber
-              const roundedUsableSizeAfterPropulsion = roundToDecimal(usableSizeAfterPropulsion, 1)
-              const roundedUsableSizeAfterPropulsionTons = Math.round(roundedUsableSizeAfterPropulsion * 50)
-
-              if (usableSizeAfterPropulsion < 0) {
-                return [tonnageAggregate, engineSizeAggregate]
-              }
-
-              const usableSizeAfterArmor = usableSizeAfterPropulsion - armorSize
-              const roundedUsableSizeAfterArmor = roundToDecimal(usableSizeAfterArmor, 1)
-              const roundedUsableSizeAfterArmorTons = Math.round(roundedUsableSizeAfterArmor * 50)
-
-              if (usableSizeAfterArmor < 0) {
-                return [tonnageAggregate, engineSizeAggregate]
-              }
-
-              const usableSizeAfterJumpDrive = usableSizeAfterArmor - jumpDriveSize
-              const roundedUsableSizeAfterJumpDrive = roundToDecimal(usableSizeAfterJumpDrive, 1)
-              const roundedUsableSizeAfterJumpDriveTons = Math.round(roundedUsableSizeAfterJumpDrive * 50)
-
-              if (usableSizeAfterJumpDrive < 0) {
-                return [tonnageAggregate, engineSizeAggregate]
-              }
-
-              const calculationRecap = {
-                thrustModifier,
-                engineSize,
-
-                isCommercial,
-
-                enginePower,
-                engineNumber,
-                recommendedSize,
-                roundedRecommendedSize,
-                recommendedTonnage,
-                roundedRecommendedTonnage,
-                recommendedFuel,
-                roundedFuelConsumptionPerEngine,
-                fuelPerEngine,
-                fuelSizePerEngine,
-                shipSizePerEngine,
-                shipSizePerEngineTons,
-                propulsionSizePerEngine,
-
-                jumpDriveSizeForTonnage,
-                jumpDriveCapacity,
-                jumpDriveSize,
-                jumpDriveSizeTons,
-
-                armorArea,
-                armorStrength,
-                armorColumns,
-                armorSize,
-
-                roundedUsableSizeAfterPropulsion,
-                roundedUsableSizeAfterPropulsionTons,
-                roundedUsableSizeAfterArmor,
-                roundedUsableSizeAfterArmorTons,
-                roundedUsableSizeAfterJumpDrive,
-                roundedUsableSizeAfterJumpDriveTons,
-              }
-
-              // By Tonnage
-              const tonnageCalculation = ((Math.abs(this.selectedTonnage - engineNumber * shipSizePerEngineTons) / this.selectedTonnage) * this.remainingUsableWeight + preStep) * 10 * this.selectedUsableWeight
-
-              // const tonnageCalculationFull = (Math.pow(Math.abs(this.selectedTonnage - Math.max(Math.round(this.selectedTonnage / 50 / (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000) - this.selectedHardTonnage), 1) * (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000 * 50)) / this.selectedTonnage, 1) * this.remainingUsableWeight + Math.pow((engineSize + Math.ceil(this.selectedRange * Math.pow(10, 9) / this.selectedSpeed / 3600 * this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5) / 5000 * this.selectedEngine * engineSize * thrustModifier) / 10) / (this.selectedEngine * engineSize * thrustModifier / this.selectedSpeed * 1000), 1)) * 10 * this.selectedUsableWeight
-
-              if (shipSizePerEngineTons * 2 * this.selectedHardTonnage <= this.selectedTonnage) {
-                tonnageAggregate.push({
-                  ...calculationRecap,
-
-                  calculation: tonnageCalculation,
-                })
-              }
-
-              // By Engine Size
-              const engineSizeCalculation = 1 - preStep
-              if (engineSizeCalculation > 0) {
-                const sizeScore = Math.pow((Math.abs(recommendedTonnage - this.selectedTonnage) / this.selectedTonnage) * 10, 2) + Math.pow(1 - engineSizeCalculation, 4)
-
-                engineSizeAggregate.push({
-                  ...calculationRecap,
-
-                  calculation: engineSizeCalculation,
-                })
-              }
+            if (isCommercial !== isJumpCommercial) {
+              return [tonnageAggregate, engineSizeAggregate]
             }
-          })
 
-          return [tonnageAggregate, engineSizeAggregate]
-        },
-        [[], []]
-      )
+            // Jump Drive Calculations
+
+            const jumpDriveSizeForTonnage = this.selectedJump ? Math.ceil(recommendedTonnage / this.selectedJumpEfficiency / this.selectedJump / 50) * (this.selectedJump === 1 ? 1 : 10) : 0
+            const jumpDriveCapacity = (jumpDriveSizeForTonnage * this.selectedJumpEfficiency * this.selectedJump * 50) / (this.selectedJump === 1 ? 1 : 10)
+
+            const jumpDriveSize = Math.round(jumpDriveSizeForTonnage * this.selectedSquadronSize * this.selectedSquadronRadius)
+            const jumpDriveSizeTons = Math.round(jumpDriveSize * 50)
+
+            // Armor
+
+            const armorArea = Math.pow((recommendedSize * 0.75) / Math.PI, 2 / 3) * Math.PI
+            const armorWidth = Math.round(armorArea)
+            const armorStrength = (armorArea * this.selectedLayers) / 4
+            const armorColumns = Math.floor(armorArea / 4)
+            const armorSize = this.selectedArmor ? ceilToDecimal(armorStrength / this.selectedArmor, 1) : 0
+
+            // Usable Size
+
+            const usableSizeAfterPropulsion = roundedRecommendedSize - propulsionSizePerEngine * engineNumber
+            const roundedUsableSizeAfterPropulsion = roundToDecimal(usableSizeAfterPropulsion, 1)
+            const roundedUsableSizeAfterPropulsionTons = Math.round(roundedUsableSizeAfterPropulsion * 50)
+
+            if (usableSizeAfterPropulsion < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const usableSizeAfterArmor = usableSizeAfterPropulsion - armorSize
+            const roundedUsableSizeAfterArmor = roundToDecimal(usableSizeAfterArmor, 1)
+            const roundedUsableSizeAfterArmorTons = Math.round(roundedUsableSizeAfterArmor * 50)
+
+            if (usableSizeAfterArmor < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const usableSizeAfterJumpDrive = usableSizeAfterArmor - jumpDriveSize
+            const roundedUsableSizeAfterJumpDrive = roundToDecimal(usableSizeAfterJumpDrive, 1)
+            const roundedUsableSizeAfterJumpDriveTons = Math.round(roundedUsableSizeAfterJumpDrive * 50)
+
+            if (usableSizeAfterJumpDrive < 0) {
+              return [tonnageAggregate, engineSizeAggregate]
+            }
+
+            const calculationRecap = {
+              thrustModifier,
+              engineSize,
+
+              isCommercial,
+
+              enginePower,
+              engineNumber,
+              recommendedSize,
+              roundedRecommendedSize,
+              recommendedTonnage,
+              roundedRecommendedTonnage,
+              recommendedFuel,
+              roundedFuelConsumptionPerEngine,
+              fuelPerEngine,
+              fuelSizePerEngine,
+              shipSizePerEngine,
+              shipSizePerEngineTons,
+              propulsionSizePerEngine,
+
+              jumpDriveSizeForTonnage,
+              jumpDriveCapacity,
+              jumpDriveSize,
+              jumpDriveSizeTons,
+
+              armorArea,
+              armorStrength,
+              armorColumns,
+              armorSize,
+
+              roundedUsableSizeAfterPropulsion,
+              roundedUsableSizeAfterPropulsionTons,
+              roundedUsableSizeAfterArmor,
+              roundedUsableSizeAfterArmorTons,
+              roundedUsableSizeAfterJumpDrive,
+              roundedUsableSizeAfterJumpDriveTons,
+            }
+
+            // By Tonnage
+            const tonnageCalculation = ((Math.abs(this.selectedTonnage - engineNumber * shipSizePerEngineTons) / this.selectedTonnage) * this.remainingUsableWeight + preStep) * 10 * this.selectedUsableWeight
+
+            // const tonnageCalculationFull = (Math.pow(Math.abs(this.selectedTonnage - Math.max(Math.round(this.selectedTonnage / 50 / (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000) - this.selectedHardTonnage), 1) * (this.selectedEngine * thrustModifier * engineSize / this.selectedSpeed * 1000 * 50)) / this.selectedTonnage, 1) * this.remainingUsableWeight + Math.pow((engineSize + Math.ceil(this.selectedRange * Math.pow(10, 9) / this.selectedSpeed / 3600 * this.selectedFuelConsumption * Math.sqrt(10 / engineSize) * Math.pow(thrustModifier, 2.5) / 5000 * this.selectedEngine * engineSize * thrustModifier) / 10) / (this.selectedEngine * engineSize * thrustModifier / this.selectedSpeed * 1000), 1)) * 10 * this.selectedUsableWeight
+
+            if (shipSizePerEngineTons * 2 * this.selectedHardTonnage <= this.selectedTonnage) {
+              tonnageAggregate.push({
+                ...calculationRecap,
+
+                calculation: tonnageCalculation,
+              })
+            }
+
+            // By Engine Size
+            const engineSizeCalculation = 1 - preStep
+            if (engineSizeCalculation > 0) {
+              const sizeScore = Math.pow((Math.abs(recommendedTonnage - this.selectedTonnage) / this.selectedTonnage) * 10, 2) + Math.pow(1 - engineSizeCalculation, 4)
+
+              engineSizeAggregate.push({
+                ...calculationRecap,
+
+                calculation: engineSizeCalculation,
+              })
+            }
+          }
+        })
+
+        return [tonnageAggregate, engineSizeAggregate]
+      }, [[], []])
 
       tonnageCombinations.sort((alpha, beta) => {
         return alpha.calculation - beta.calculation
@@ -794,21 +788,17 @@ export default {
           return []
         }
 
-        return await this.database
-          .query(
-            `
+        return await this.database.query(`
           select FCT_RaceTech.TechID, FCT_Race.RaceID, FCT_Race.RaceTitle from FCT_RaceTech
           
           join FCT_Race on FCT_Race.GameID = FCT_RaceTech.GameID and FCT_RaceTech.RaceID = FCT_Race.RaceID
           
           where FCT_RaceTech.GameID = ${this.GameID} and FCT_RaceTech.RaceID = ${this.RaceID}
-        `
-          )
-          .then(([items]) => {
-            console.log('Researched Technologies', items)
+        `).then(([items]) => {
+          console.log('Researched Technologies', items)
 
-            return items
-          })
+          return items
+        })
       },
       default: [],
     },

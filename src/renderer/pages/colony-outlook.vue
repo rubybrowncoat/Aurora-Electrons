@@ -4,42 +4,29 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Horizon</span>
-          <v-btn-toggle v-model="horizon" mandatory dense @change="(value) => config.set('colonyOutlookHorizon', value)">
+          <v-btn-toggle v-model="horizon" mandatory dense>
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
         <v-col cols="auto" class="mr-4">
-          <v-switch v-model="attentionOnly" label="Only colonies that need attention" dense hide-details class="mt-0" @change="(value) => config.set('colonyOutlookAttentionOnly', !!value)" />
+          <v-switch v-model="attentionOnly" label="Only colonies that need attention" dense hide-details class="mt-0" />
         </v-col>
         <v-col cols="12" sm="auto" class="search-field">
           <v-text-field v-model="search" label="Search colonies" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable />
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="Each of my colonies with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
           <div class="panel-head">
-            <span>Colonies</span>
+            <span class="d-flex align-center">
+              <span>Colonies</span>
+              <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
+            </span>
             <span class="legend">
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.service }" />Services</span>
               <span class="legend-item"><span class="swatch" :style="{ background: workerColors.agriculture }" />Agriculture</span>
@@ -48,13 +35,20 @@
               <span class="legend-item"><span class="swatch swatch-short" />Short</span>
             </span>
           </div>
-          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, -1] }" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+          <v-data-table :headers="headers" :items="visibleRows" item-key="PopulationID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="colonyTable.sortBy" :sort-desc.sync="colonyTable.sortDesc" :items-per-page.sync="colonyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" :no-data-text="focusId ? 'This colony has no population, or is not one of mine.' : undefined" class="colony-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.name`]="{ item }">
-              <div class="py-2">
-                <div class="font-weight-medium">
-                  <v-icon v-if="item.Capital" small class="mr-1" title="Capital">mdi-star</v-icon>{{ item.name }}
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div class="font-weight-medium">
+                    <v-icon v-if="item.Capital" small class="mr-1" title="Capital">mdi-star</v-icon>{{ item.name }}
+                  </div>
+                  <div class="caption text--secondary">{{ item.place }}<span v-if="multiSpecies"> · {{ item.SpeciesName }}</span></div>
                 </div>
-                <div class="caption text--secondary">{{ item.place }}<span v-if="multiSpecies"> · {{ item.SpeciesName }}</span></div>
+                <span class="ml-2 text-no-wrap">
+                  <page-link :to="linkTo.production(item.PopulationID)" :name="item.name" />
+                  <page-link :to="linkTo.planner({ bodies: [item] })" :name="item.place" />
+                  <page-link :to="linkTo.commanders({ colony: item.PopulationID })" :name="item.name" />
+                </span>
               </div>
             </template>
             <template #[`item.populationSort`]="{ item }">
@@ -97,6 +91,9 @@
             </template>
             <template #expanded-item="{ headers: columns, item }">
               <td :colspan="columns.length" class="py-4">
+                <div v-if="!focusId" class="mb-2">
+                  <v-btn small text @click="focusId = item.PopulationID"><v-icon small left>mdi-filter-outline</v-icon>Only this colony</v-btn>
+                </div>
                 <v-row>
                   <v-col cols="12" md="7">
                     <div class="chart-title">Population over {{ horizon }} years</div>
@@ -129,7 +126,7 @@
           </v-data-table>
           <div class="panel-foot caption text--secondary">
             Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. Colonies short of workers today are also on the
-            <router-link to="/warnings">Warnings</router-link> page.
+            <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
           </div>
         </v-card>
       </template>
@@ -142,10 +139,17 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName } from '../utilities/aurora'
 import { bodyCapacity, growthRate, infrastructureCapacity, infrastructurePerMillion, people, projectBody, workerSplit } from '../utilities/colonies'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { linkTo, queryId } from '../utilities/deep-links'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const INPUT_LABELS = {
@@ -153,24 +157,33 @@ const INPUT_LABELS = {
   inbound: 'cargo on its way',
   populationProductionModifiers: 'production modifiers',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
+const HORIZONS = [5, 10, 25, 50]
+const COLONY_PAGE_SIZES = [25, 50, -1]
+
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      horizon: { key: 'colonyOutlookHorizon', default: 10, valid: oneOf(HORIZONS) },
+      attentionOnly: { key: 'colonyOutlookAttentionOnly', default: false },
+      search: { key: 'colonyOutlookSearch', default: '', scope: 'race' },
+      colonyTable: tableView('colonyOutlookTable', { sortBy: ['populationSort'], sortDesc: [true], itemsPerPage: 25, itemsPerPageOptions: COLONY_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      horizonOptions: [5, 10, 25, 50],
-      horizon: 10,
-      attentionOnly: false,
-      search: '',
+      horizonOptions: HORIZONS,
+      colonyPageSizes: COLONY_PAGE_SIZES,
+      focusId: null,
+      linkTo,
       expanded: [],
-      sortBy: ['populationSort'],
-      sortDesc: [true],
-      loadErrors: {},
     }
   },
   computed: {
@@ -190,18 +203,6 @@ export default {
       const [blue, , green, , pink] = this.theme.categorical
 
       return { service: withAlpha(blue, 0.45), agriculture: withAlpha(pink, 0.6), employed: blue, free: green }
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     multiSpecies() {
@@ -276,7 +277,27 @@ export default {
       })
     },
 
+    focusRow() {
+      return this.focusId ? this.rows.find((row) => row.PopulationID === this.focusId) || null : null
+    },
+
+    focusName() {
+      return this.focusRow ? this.focusRow.name : `Colony #${this.focusId}`
+    },
+
+    linkQuery() {
+      return linkTo.colonyOutlook(this.focusId).query
+    },
+
+    linkLabel() {
+      return this.focusRow ? this.focusRow.name : ''
+    },
+
     visibleRows() {
+      if (this.focusId) {
+        return this.rows.filter((row) => row.PopulationID === this.focusId)
+      }
+
       const search = (this.search || '').toLowerCase()
 
       return this.rows.filter((row) => (!this.attentionOnly || row.attention) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
@@ -349,13 +370,20 @@ export default {
       ]
     },
   },
-  created() {
-    this.horizon = this.config.get('colonyOutlookHorizon', 10)
-    this.attentionOnly = this.config.get('colonyOutlookAttentionOnly', false)
+  watch: {
+    // A colony picked by a link opens expanded.
+    focusRow(row, previous) {
+      if (row && (!previous || previous.PopulationID !== row.PopulationID)) {
+        this.expanded = [row]
+      }
+    },
+    RaceID() {
+      this.focusId = null
+    },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
+    applyLink(query) {
+      this.focusId = queryId(query.colony)
     },
 
     count(value) {
@@ -446,8 +474,7 @@ export default {
       })
       const datasets = [{ label: 'Population', data: points, borderColor: color, backgroundColor: withAlpha(color, 0.1), fill: 'origin', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0 }]
 
-      // Only limits near the curve: one far above it would flatten it (the note names it instead).
-      // Other populations on the body grow too, so the body's limits for this colony move with them.
+      // Only limits near the curve: one far above it would flatten it (the note names it instead). Other populations on the body grow too, so the body's limits for this colony move with them.
       const near = (values) => values.some((value) => value > 0 && value !== Infinity && value <= peak * 2)
       const limits = [
         ['Growth slows', row.otherSeries.map((other) => row.capacity / 3 - other), [2, 3]],
@@ -533,57 +560,10 @@ function percent(fraction, decimals) {
     min-width: 240px;
   }
 
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
   .chart-title {
     font-size: 14px;
     font-weight: 500;
     margin-bottom: 8px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

@@ -1,22 +1,14 @@
 /*
-  Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app
-  with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it
-  runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the
-  renderer over app:// as the package does. Then launches Electron through Playwright on a copy of
-  the save and a fresh user-data folder, so your save, settings and history are never touched.
-  Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path
-  IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher
-  reloading the database. Database calls run in the renderer, so they're counted by wrapping the
-  Sequelize instance.
+  Smoke test for the Electron app (`bun run electron:smoke`, through run-vite.js). Builds the app with electron-vite into out/smoke in the `smoke` mode (a production build with Sentry off), so it runs alongside `bun run dev`, `bun run web` or a packaged build without touching theirs, and loads the renderer over app:// as the package does. Then launches Electron through Playwright on a copy of the save and a fresh user-data folder, so your save, settings and history are never touched. Besides visiting every page like web:smoke, it checks what only Electron has: the storage-path IPC, the race-flag IPC, the electron-store files in user data (settings and Empire History), and the save watcher reloading the database. Database calls run in the renderer, so they're counted by wrapping the Sequelize instance.
 
-  Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample
-  defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES
-  (comma-separated routes, default the list in smoke-pages.js).
+  Env: AURORA_DB (the save to copy, default ./AuroraDB.db), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-electron-smoke), SMOKE_PAGES (comma-separated routes, default the list in smoke-pages.js). SMOKE_MAP_EXPORT=1 checks complete PNG export, high-DPI borders and layout restoration on /map.
  */
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
+
+const pageLoading = require('./page-loading')
 
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
@@ -56,8 +48,7 @@ const stopTree = (app) => {
   return app.close()
 }
 
-// Counts the renderer's database calls and keeps their failures, re-wrapping each database the
-// store swaps in when the save changes.
+// Counts the renderer's database calls and keeps their failures, re-wrapping each database the store swaps in when the save changes.
 const instrument = () => {
   const smoke = (window.__smoke = window.__smoke || { pending: new Map(), next: 0, last: Date.now(), errors: [], counts: {}, done: [], blockedMs: 0, databases: 0 })
 
@@ -101,8 +92,7 @@ const run = async () => {
   const { build } = await import('electron-vite')
   const SAVE = path.resolve(process.env.AURORA_DB || path.join(PROJECT_ROOT, 'AuroraDB.db'))
 
-  // Under the project, so the preload's requires (sequelize) find node_modules.
-  // The run folder (the save copy and user data) is kept until the next run for inspection.
+  // Under the project, so the preload's requires (sequelize) find node_modules. The run folder (the save copy and user data) is kept until the next run for inspection.
   const builds = path.join(PROJECT_ROOT, 'out', 'smoke')
   const work = path.join(builds, 'run')
   const userData = path.join(work, 'user-data')
@@ -124,6 +114,9 @@ const run = async () => {
 
   // Without the dev server's address, the app loads the built renderer.
   const env = { ...process.env }
+
+  // The app's development override must point at the smoke copy as well.
+  env.AURORA_DB = save
 
   delete env.ELECTRON_RENDERER_URL
 
@@ -183,12 +176,12 @@ const run = async () => {
 
       state.errors.forEach((error) => problems.push(`db: ${error}`))
 
-      if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS) {
+      if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS && !(await page.evaluate(pageLoading))) {
         return
       }
 
       if (Date.now() - started > PAGE_TIMEOUT_MS) {
-        problems.push(`timeout: ${state.inFlight} database calls still pending`)
+        problems.push(state.inFlight > 0 ? `timeout: ${state.inFlight} database calls still pending` : 'timeout: the page is still loading')
         state.oldest.forEach((call) => problems.push(`pending ${call}`))
         // What kept the page busy: queries it repeats, its slowest ones, and a blocked main thread.
         const busy = await page.evaluate(() => ({
@@ -211,16 +204,17 @@ const run = async () => {
   try {
     await page.waitForFunction(() => window.$app && window.$app.$store && window.$app.$store.state.database, null, { timeout: PAGE_TIMEOUT_MS })
     await page.evaluate(instrument)
-    // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
-    const picker = page.locator('.game-picker')
+    // The Empires page shows dated game headings and each race's title. A game with one visible race selects that race from its heading.
+    const picker = page.locator('.empire-list').first()
 
-    await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+    await picker.locator('.empire-list__game').filter({ hasText: `${GAME} ·` }).first().click({ timeout: PAGE_TIMEOUT_MS })
 
-    const raceItem = picker.getByText(RACE, { exact: true })
-
-    if (await raceItem.count()) {
-      await raceItem.last().click()
+    if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+      await picker.getByText(RACE, { exact: true }).last().click()
     }
+
+    // The pages need the race, and each push to one is sent back to the Empires page until it is set.
+    await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: PAGE_TIMEOUT_MS })
 
     await settle()
   } catch (error) {
@@ -236,15 +230,100 @@ const run = async () => {
   const setupProblems = problems
   const results = []
 
+  if (process.env.SMOKE_MAP_EXPORT === '1') {
+    // Capture the export in the smoke process without opening a native save dialog. Decode and write the real PNG produced by the renderer.
+    await app.evaluate(({ ipcMain, nativeImage }, output) => {
+      globalThis.__mapExports = []
+      ipcMain.removeHandler('save-png')
+      ipcMain.handle('save-png', (_event, data) => {
+        const buffer = Buffer.from(data, 'base64')
+        const image = nativeImage.createFromBuffer(buffer)
+        const filePath = `${output}/map-export-${globalThis.__mapExports.length + 1}.png`
+
+        globalThis.__mapExports.push({ ...image.getSize(), bytes: buffer.length, empty: image.isEmpty(), filePath, data })
+
+        return { canceled: false, filePath }
+      })
+    }, OUT)
+  }
+
   for (const route of PAGES) {
     problems = []
 
+    // The router's push returns no promise and a page loads on its first visit, so the route on screen stays the previous page's, already settled, until the new one commits. Wait for the new one, then for its reads.
     await page.evaluate((target) => {
       Object.assign(window.__smoke, { counts: {}, done: [], blockedMs: 0 })
       window.$app.$router.push(target)
     }, route)
-    await wait(250)
-    await settle()
+
+    const arrived = await page.waitForFunction(pageLoading.arrived, route, { timeout: PAGE_TIMEOUT_MS }).then(() => true, () => false)
+
+    if (arrived) {
+      await page.evaluate(() => { window.__smoke.last = Date.now() })
+      await wait(250)
+      await settle()
+    }
+
+    // A page that hasn't arrived when the wait gives up fails, even if it turns up a moment later: it was never settled. One that arrived and then left fails too.
+    if (!arrived) {
+      problems.push(`navigation: ${route} was asked for, but it hadn't arrived after ${PAGE_TIMEOUT_MS / 1000} s (the page on screen is ${await page.evaluate(() => window.$app.$route.path)})`)
+    } else if (!(await page.evaluate(pageLoading.arrived, route))) {
+      problems.push(`navigation: ${route} arrived, then the page on screen became ${await page.evaluate(() => window.$app.$route.path)}`)
+    }
+
+    if (route === '/map' && process.env.SMOKE_MAP_EXPORT === '1') {
+      // Each export has to leave the positions, zoom and marker sizes as it found them. The second runs at DPR 2 with sector borders. Their legend narrows the stage, which refits a map nobody has moved, so each snapshot is taken right around its own export.
+      const exportOnce = () => page.evaluate(async () => {
+        const map = window.__smoke.map
+        const state = () => JSON.stringify([map.graphPositions(), map.graph.zoom(), map.markerMinimum])
+        const before = state()
+        const bounds = map.graph.elements().boundingBox()
+
+        await map.exportPng()
+
+        return { systems: map.graph.nodes().length, bounds, restored: before === state() }
+      })
+
+      await page.evaluate(() => {
+        const findMap = (component) => (component.$options.name === 'MapPage' ? component : component.$children.map(findMap).find(Boolean))
+
+        window.__smoke.map = findMap(window.$app)
+      })
+
+      const first = await exportOnce()
+      let second
+
+      try {
+        await page.evaluate(() => {
+          const map = window.__smoke.map
+
+          window.__smoke.exportRestore = { borders: map.borders, dpi: Object.getOwnPropertyDescriptor(window, 'devicePixelRatio') }
+          Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 })
+          map.borders = 'sectors'
+        })
+        await wait(250)
+        await settle()
+        second = await exportOnce()
+      } finally {
+        await page.evaluate(() => {
+          const { borders, dpi } = window.__smoke.exportRestore
+
+          window.__smoke.map.borders = borders
+          if (dpi) {
+            Object.defineProperty(window, 'devicePixelRatio', dpi)
+          } else {
+            delete window.devicePixelRatio
+          }
+        })
+      }
+
+      const exported = await app.evaluate(() => globalThis.__mapExports)
+
+      exported.forEach((image) => fs.writeFileSync(image.filePath, Buffer.from(image.data, 'base64')))
+      check('PNG exports decode', exported.length === 2 && exported.every((image) => !image.empty && image.bytes > 0), JSON.stringify(exported, (key, value) => key === 'data' ? undefined : value))
+      check('PNG export bounded', exported.length === 2 && exported.every((image) => image.width <= 8192 && image.height <= 8192 && image.width * image.height <= 32 * 1024 * 1024), `${first.systems} systems; source bounds ${Math.round(first.bounds.w)} × ${Math.round(first.bounds.h)}`)
+      check('PNG preserves layout', first.restored && second.restored, 'positions, zoom and marker sizes restored after each export')
+    }
 
     const name = route === '/' ? 'empires' : route.slice(1)
     const screenshot = path.join(OUT, `${name}.png`)
@@ -281,10 +360,12 @@ const run = async () => {
 
   check('history file written', snapshotCount(before) > 0, before ? `${historyPath}: ${snapshotCount(before)} snapshots for race ${RaceID}` : `${historyPath} missing`)
 
-  // Rewrite the save with the same content: the watcher reloads the database and the recorder runs again.
+  // Touch the unchanged save: the watcher reloads it and the recorder runs again. Copying over an open SQLite file truncates it first, so a concurrent reader can see an incomplete database even though the completed copy is identical.
   const databases = await page.evaluate(() => window.__smoke.databases)
 
-  fs.copyFileSync(SAVE, save)
+  const reloadTime = new Date()
+
+  fs.utimesSync(save, reloadTime, reloadTime)
 
   try {
     await page.waitForFunction((count) => window.__smoke.databases > count, databases, { timeout: 30000 })

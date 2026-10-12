@@ -1,6 +1,4 @@
-// Builds the main process (src/main), the preload script (src/preload) and the renderer (src/renderer) into out/.
-// `bun run dev` serves the renderer from Vite's dev server instead, on PORT (default 9080). Both run through
-// scripts/run-vite.js, which picks the directory Vite works from.
+// Builds the main process (src/main), the preload script (src/preload) and the renderer (src/renderer) into out/. `bun run dev` serves the renderer from Vite's dev server instead, on PORT (default 9080). Both run through scripts/run-vite.js, which picks the directory Vite works from.
 import path from 'path'
 
 import { defineConfig } from 'electron-vite'

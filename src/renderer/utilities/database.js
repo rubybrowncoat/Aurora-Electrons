@@ -11,11 +11,7 @@ const RETIRE_SETTLE_MS = 5000
 
 const guards = new WeakMap()
 
-// Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a
-// time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a
-// statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is
-// running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. Transaction
-// queries have a connection of their own and pass straight through.
+// Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. Transaction queries have a connection of their own and pass straight through.
 const guardQueries = (sequelize) => {
   const query = sequelize.query.bind(sequelize)
   const waiting = []
@@ -26,8 +22,7 @@ const guardQueries = (sequelize) => {
   const { connectionManager } = sequelize
   const getConnection = connectionManager.getConnection.bind(connectionManager)
 
-  // Sequelize caches a connection before it has opened and keeps it when the open fails. Left there, the failed handle
-  // would answer every later read (each waiting out QUERY_TIMEOUT_MS) and close() would wait on it forever.
+  // Sequelize caches a connection before it has opened and keeps it when the open fails. Left there, the failed handle would answer every later read (each waiting out QUERY_TIMEOUT_MS) and close() would wait on it forever.
   Object.defineProperty(connectionManager, 'getConnection', {
     configurable: true,
     writable: true,
@@ -91,8 +86,7 @@ const guardQueries = (sequelize) => {
     active.then(resolve, reject).then(finish)
   }
 
-  // Not enumerable: Vue would otherwise make the property reactive, and wrapping it again (the smoke test does) would
-  // count as the store state being mutated outside a mutation.
+  // Not enumerable: Vue would otherwise make the property reactive, and wrapping it again (the smoke test does) would count as the store state being mutated outside a mutation.
   Object.defineProperty(sequelize, 'query', {
     configurable: true,
     writable: true,
@@ -112,9 +106,7 @@ const guardQueries = (sequelize) => {
     },
   })
 
-  // sqlite3 runs a close only after the open before it succeeds, and a statement on a connection that is still opening
-  // can't be interrupted. So retiring first lets the opens and the running statement settle (an open that fails drops
-  // its handle above), then closes; each wait is bounded by RETIRE_SETTLE_MS so retiring can't hang.
+  // sqlite3 runs a close only after the open before it succeeds, and a statement on a connection that is still opening can't be interrupted. So retiring first lets the opens and the running statement settle (an open that fails drops its handle above), then closes; each wait is bounded by RETIRE_SETTLE_MS so retiring can't hang.
   guards.set(sequelize, async () => {
     retired = true
     waiting.splice(0).forEach(({ reject }) => reject(new Error('The save was reloaded; this read belongs to the old copy')))
@@ -133,8 +125,7 @@ const guardQueries = (sequelize) => {
   })
 }
 
-// Drop a database the app has replaced: its waiting reads are rejected, the statements running on it are interrupted
-// and its connections closed, so the old copy neither keeps working nor holds the file. Never rejects.
+// Drop a database the app has replaced: its waiting reads are rejected, the statements running on it are interrupted and its connections closed, so the old copy neither keeps working nor holds the file. Never rejects.
 export const retireDatabase = async (sequelize) => {
   const retire = sequelize && guards.get(sequelize)
 

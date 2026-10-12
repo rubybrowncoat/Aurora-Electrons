@@ -4,13 +4,13 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Ledger window</span>
-          <v-btn-toggle v-model="windowDays" mandatory dense @change="(value) => config.set('mineralOutlookWindowDays', value)">
+          <v-btn-toggle v-model="windowDays" mandatory dense>
             <v-btn v-for="days in windowOptions" :key="days" :value="days" small>{{ days }} d</v-btn>
           </v-btn-toggle>
         </v-col>
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Horizon</span>
-          <v-btn-toggle v-model="horizon" mandatory dense @change="(value) => config.set('mineralOutlookHorizon', value)">
+          <v-btn-toggle v-model="horizon" mandatory dense>
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
@@ -19,32 +19,16 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!forecastReady" class="mt-3" @retry="retryFailedInputs" />
+      <v-alert v-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
+        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from my mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
       </v-alert>
-      <v-alert v-else-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
-        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from your mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
-      </v-alert>
-      <v-progress-linear v-else-if="!forecastReady" indeterminate class="mt-3" />
 
       <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
       <template v-if="forecastReady">
-        <v-row dense class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" md="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="stat-note caption text--secondary" :title="tile.note">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" compact class="mt-2" />
 
-        <v-card v-if="focusRow" class="panel" elevation="1">
+        <v-card v-if="focusRow" class="panel" data-summary="How long the chosen mineral will last at current rates, with projected stockpile and mining output, to decide when to expand supply or cut use." elevation="1">
           <div class="panel-head">
             <span>{{ focusRow.name }} outlook</span>
             <span class="d-flex align-center flex-wrap">
@@ -52,6 +36,7 @@
                 <v-icon small left :color="statusColor(projection.status)">{{ statusIcon(projection.status) }}</v-icon>{{ projection.summary }}
               </v-chip>
               <v-chip small class="mr-3">{{ focusDeposits.length }} {{ focusDeposits.length === 1 ? 'deposit' : 'deposits' }} mined</v-chip>
+              <v-btn small outlined class="mr-2" :to="linkTo.minerals({ mineral: focusMineralId })"><v-icon small left>mdi-diamond-stone</v-icon>Mineral Breakdown</v-btn>
               <v-btn small outlined @click="flowsOpen = true"><v-icon small left>mdi-chart-bar</v-icon>Sources and uses</v-btn>
             </span>
           </div>
@@ -80,12 +65,12 @@
             </div>
           </div>
         </v-card>
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="For every mineral, its stock, production, use and how long the stock will last, to see which minerals are heading for a shortage." elevation="1">
           <div class="panel-head">
             <span>Mineral runway</span>
             <v-chip small>{{ coverageLabel }}</v-chip>
           </div>
-          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwaySortBy" :sort-desc.sync="runwaySortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
+          <v-data-table :headers="runwayHeaders" :items="mineralRows" item-key="id" :sort-by.sync="runwayTable.sortBy" :sort-desc.sync="runwayTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense class="runway-table" @click:row="(item) => (focusMineralId = item.id)">
             <template #[`item.name`]="{ item }">
               <span class="font-weight-medium">{{ item.name }}</span>
             </template>
@@ -121,8 +106,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between your colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from your mines; used is the industry queue over the next 12 months.' }}
-            Click a row to see its outlook.
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between my colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from my mines; used is the industry queue over the next 12 months.' }} Click a row to see its outlook.
           </div>
         </v-card>
 
@@ -149,21 +133,21 @@
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="380" label="Mineral sources and uses per year, by purpose" />
                 <div class="caption text--secondary mt-2">Tonnes per year. Sources to the right of zero, uses to the left.</div>
               </template>
-              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
+              <v-data-table v-else :headers="flowsHeaders" :items="flowRows" item-key="id" :sort-by.sync="flowsTable.sortBy" :sort-desc.sync="flowsTable.sortDesc" :item-class="(item) => (item.id === focusMineralId ? 'is-focus-row' : '')" disable-pagination hide-default-footer dense />
             </v-card-text>
           </v-card>
         </v-dialog>
       </template>
 
-      <v-card v-if="depositsReady" class="panel" elevation="1">
+      <v-card v-if="depositsReady" class="panel" data-summary="Each deposit my mines and miners work, with its yield and when it will run down, to plan new deposits before the old ones empty." elevation="1">
         <div class="panel-head">
           <span>Deposits being mined</span>
           <span class="d-flex align-center">
-            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" @change="(value) => config.set('mineralOutlookAllDeposits', !!value)" />
-            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" @change="(value) => config.set('mineralOutlookOnlyEmptying', !!value)" />
+            <v-switch v-model="allDeposits" label="All minerals" dense hide-details class="mt-0 mr-6" />
+            <v-switch v-model="onlyEmptying" :label="`Empty within ${horizon} y`" dense hide-details class="mt-0" />
           </span>
         </div>
-        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositSortBy" :sort-desc.sync="depositSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, 60, -1] }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+        <v-data-table :headers="depositHeaders" :items="visibleDeposits" item-key="key" :expanded.sync="expandedDeposits" show-expand single-expand :sort-by.sync="depositTable.sortBy" :sort-desc.sync="depositTable.sortDesc" :items-per-page.sync="depositTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: depositPageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.place`]="{ item }">
             <div class="py-2">
               <div>{{ item.bodyName }}</div>
@@ -221,11 +205,17 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
-import { joinLabels, tracked } from '../utilities/load-tracking'
-import { ENDLESS_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
+import { linkTo, queryId } from '../utilities/deep-links'
+import { tracked } from '../utilities/load-tracking'
+import { COMPACT_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositForecast, depositStateAt, flowGroupOf, ledgerCoverageDays, orbitalMinerRate, stockProjection, surfaceRate, unloggedMining, yearSteps } from '../utilities/minerals'
 import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 
@@ -246,38 +236,44 @@ const INPUT_LABELS = {
   industrialProjects: 'the industry queue',
   populationProductionModifiers: 'production modifiers',
 }
-const FORECAST_INPUTS = Object.keys(INPUT_LABELS)
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 
 const CRITICAL_YEARS = 5
 const WARNING_YEARS = 25
 
+const DEPOSIT_PAGE_SIZES = [15, 30, 60, -1]
+const FLOWS_VIEWS = ['chart', 'table']
+
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      windowDays: { key: 'mineralOutlookWindowDays', default: 365 },
+      horizon: { key: 'mineralOutlookHorizon', default: 50 },
+      allDeposits: { key: 'mineralOutlookAllDeposits', default: false },
+      onlyEmptying: { key: 'mineralOutlookOnlyEmptying', default: false },
+      focusMineralId: { key: 'mineralOutlookFocus', default: null, scope: 'race', valid: oneOf(MINERALS.map((mineral) => mineral.id)) },
+      flowsView: { key: 'mineralOutlookFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
+      runwayTable: tableView('mineralOutlookRunwayTable', { sortBy: ['runwaySort'], sortDesc: [false] }),
+      flowsTable: tableView('mineralOutlookFlowsTable', {}),
+      depositTable: tableView('mineralOutlookDepositsTable', { sortBy: ['emptySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: DEPOSIT_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
       windowOptions: [30, 90, 180, 365],
       horizonOptions: [25, 50, 100, 250],
-      windowDays: 365,
-      // Each read's outcome, by async-computed key: null once it succeeds, the error message while
-      // it fails (see `tracked`).
-      loadErrors: {},
-      horizon: 50,
-      focusMineralId: null,
+      linkTo,
       fallbackFocusId: null,
-      flowsView: 'chart',
       flowsOpen: false,
-      allDeposits: false,
-      onlyEmptying: false,
       expandedDeposits: [],
-      runwaySortBy: ['runwaySort'],
-      runwaySortDesc: [false],
-      depositSortBy: ['emptySort'],
-      depositSortDesc: [false],
+      depositPageSizes: DEPOSIT_PAGE_SIZES,
     }
   },
   computed: {
@@ -301,18 +297,9 @@ export default {
       return !!(this.ledger && this.ledger.length)
     },
 
-    failedInputs() {
-      return FORECAST_INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last,
-    // possibly stale, value, so it doesn't count).
+    // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last, possibly stale, value, so it doesn't count).
     forecastReady() {
-      return FORECAST_INPUTS.every((key) => this.loadErrors[key] === null) && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
+      return this.inputsLoaded && this.game !== null && this.stockpile !== null && this.packets !== null && this.ledger !== null
     },
 
     depositsReady() {
@@ -324,8 +311,7 @@ export default {
         return 0
       }
 
-      // The production ticks (distinct times of production-phase rows, counted in SQL) set the
-      // cycle; the history starts at the earliest row of any kind.
+      // The production ticks (distinct times of production-phase rows, counted in SQL) set the cycle; the history starts at the earliest row of any kind.
       const [{ ProductionTicks: ticks, FirstTick: firstTick, LastTick: lastTick }] = this.ledger
 
       return ledgerCoverageDays({
@@ -357,6 +343,7 @@ export default {
     // { [MaterialID]: { [groupKey]: t/yr } }
     flowsByMineral() {
       const flows = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, Object.fromEntries(FLOW_GROUPS.map((group) => [group.key, 0]))]))
+      const { perYear } = this
 
       if (!this.hasLedger) {
         return flows
@@ -366,7 +353,7 @@ export default {
         const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)
 
         if (group && flows[row.MaterialID]) {
-          flows[row.MaterialID][group.key] += row.Amount * this.perYear
+          flows[row.MaterialID][group.key] += row.Amount * perYear
         }
       })
 
@@ -382,6 +369,7 @@ export default {
     // Mined deposits: every colony and orbital miner on the same body and mineral summed.
     deposits() {
       const deposits = {}
+      const { navalAdmins } = this
       const add = (row, source) => {
         const key = `${row.SystemBodyID}-${row.MaterialID}`
 
@@ -413,7 +401,7 @@ export default {
       })
 
       this.orbitalMining.forEach((row) => {
-        const rate = orbitalMinerRate(row, this.navalAdmins)
+        const rate = orbitalMinerRate(row, navalAdmins)
 
         add(row, { name: row.ShipName, kind: 'orbital', rate, delivered: rate })
       })
@@ -447,13 +435,14 @@ export default {
     },
 
     mineralRows() {
+      const { flowsByMineral, stockpile, cargo, packets, deposits, hasLedger, queueDemand } = this
       return MINERALS.map((mineral) => {
-        const flows = this.flowsByMineral[mineral.id]
-        const stock = (this.stockpile && this.stockpile[mineral.name]) || 0
-        const transit = (this.cargo[mineral.id] || 0) + ((this.packets && this.packets[mineral.name]) || 0)
-        const mined = this.deposits.filter((deposit) => deposit.MaterialID === mineral.id).reduce((sum, deposit) => sum + deposit.delivered, 0)
-        const produced = this.hasLedger ? FLOW_GROUPS.filter((group) => group.income).reduce((sum, group) => sum + flows[group.key], 0) : mined
-        const used = this.hasLedger ? FLOW_GROUPS.filter((group) => !group.income).reduce((sum, group) => sum + flows[group.key], 0) : this.queueDemand[mineral.name]
+        const flows = flowsByMineral[mineral.id]
+        const stock = (stockpile && stockpile[mineral.name]) || 0
+        const transit = (cargo[mineral.id] || 0) + ((packets && packets[mineral.name]) || 0)
+        const mined = deposits.filter((deposit) => deposit.MaterialID === mineral.id).reduce((sum, deposit) => sum + deposit.delivered, 0)
+        const produced = hasLedger ? FLOW_GROUPS.filter((group) => group.income).reduce((sum, group) => sum + flows[group.key], 0) : mined
+        const used = hasLedger ? FLOW_GROUPS.filter((group) => !group.income).reduce((sum, group) => sum + flows[group.key], 0) : queueDemand[mineral.name]
         const net = produced - used
         const runway = net < 0 ? (stock + transit) / -net : null
 
@@ -468,9 +457,9 @@ export default {
           runway,
           status: this.runwayStatus(runway, produced, used),
           runwaySort: runway ?? Infinity,
-          queue: this.queueDemand[mineral.name],
+          queue: queueDemand[mineral.name],
           trend: this.trendFor(mineral.id, stock + transit),
-          otherIncome: this.hasLedger ? produced - flows.mining : 0,
+          otherIncome: hasLedger ? produced - flows.mining : 0,
         }
       })
     },
@@ -506,6 +495,16 @@ export default {
       return this.deposits.filter((deposit) => (this.allDeposits || deposit.MaterialID === this.focusMineralId) && (!this.onlyEmptying || (!deposit.forecast.idle && deposit.forecast.yearsToDepletion <= this.horizon)))
     },
 
+    linkQuery() {
+      return linkTo.mineralOutlook(this.focusMineralId).query
+    },
+
+    linkLabel() {
+      const mineral = MINERALS.find((item) => item.id === this.focusMineralId)
+
+      return mineral ? mineral.name : ''
+    },
+
     tiles() {
       const declining = this.mineralRows.filter((row) => row.runway !== null)
       const shortest = declining.slice().sort((a, b) => a.runway - b.runway)[0]
@@ -536,7 +535,7 @@ export default {
         {
           label: 'Mined per year',
           value: this.tons(minedPerYear),
-          note: !this.hasLedger ? 'From your mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
+          note: !this.hasLedger ? 'From my mines, all minerals' : Object.keys(this.unlogged).length ? 'Ledger plus unlogged mining, all minerals' : 'From the ledger, all minerals',
         },
       ]
     },
@@ -717,17 +716,21 @@ export default {
         this.fallbackFocusId = null
       }
     },
-  },
-  created() {
-    this.windowDays = this.config.get('mineralOutlookWindowDays', 365)
-    this.horizon = this.config.get('mineralOutlookHorizon', 50)
-    this.allDeposits = this.config.get('mineralOutlookAllDeposits', false)
-    this.onlyEmptying = this.config.get('mineralOutlookOnlyEmptying', false)
+    // A mineral restored for another race is the user's pick, not the stand-in of the race before.
+    RaceID() {
+      this.fallbackFocusId = null
+    },
   },
   methods: {
-    // Focus the mineral that runs out first, once the forecast can say which. The deposits panel
-    // filters by the focus and doesn't wait for the forecast, so until then the mineral whose
-    // deposit empties first stands in (and gives way to the runway pick).
+    applyLink(query) {
+      const id = queryId(query.mineral)
+
+      this.fallbackFocusId = null
+      this.setUnsaved('focusMineralId', MINERALS.some((mineral) => mineral.id === id) ? id : null)
+      this.pickFocusMineral()
+    },
+
+    // Focus the mineral that runs out first, once the forecast can say which. The deposits panel filters by the focus and doesn't wait for the forecast, so until then the mineral whose deposit empties first stands in (and gives way to the runway pick).
     pickFocusMineral() {
       const rows = this.mineralRows
 
@@ -739,18 +742,14 @@ export default {
         const declining = rows.filter((row) => row.runway !== null).sort((a, b) => a.runway - b.runway)[0]
 
         this.fallbackFocusId = null
-        this.focusMineralId = declining ? declining.id : rows[0].id
+        this.setUnsaved('focusMineralId', declining ? declining.id : rows[0].id)
       } else if (!this.focusMineralId && this.depositsReady) {
         const emptiest = this.deposits.reduce((first, deposit) => (first && first.emptySort <= deposit.emptySort ? first : deposit), null)
         const id = emptiest ? emptiest.MaterialID : rows[0].id
 
         this.fallbackFocusId = id
-        this.focusMineralId = id
+        this.setUnsaved('focusMineralId', id)
       }
-    },
-
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
     },
 
     flowColor(key) {
@@ -769,15 +768,15 @@ export default {
     years(value) {
       if (value === null || value === undefined) {
         return '—'
-      } else if (value > ENDLESS_YEARS) {
-        return `> ${separatedNumber(ENDLESS_YEARS, this.separator)} y`
       } else if (value < 1) {
         return `${Math.max(1, Math.round(value * 12))} mo`
       } else if (value < 100) {
         return `${roundToDecimal(value, 1)} y`
+      } else if (value < COMPACT_YEARS) {
+        return `${separatedNumber(Math.round(value), this.separator)} y`
       }
 
-      return `${separatedNumber(Math.round(value), this.separator)} y`
+      return `${compactYears(value, this.separator)} y`
     },
 
     runwayStatus(runway, produced, used) {
@@ -880,10 +879,11 @@ export default {
       return part === 'half' ? (half / this.horizon) * 100 : (Math.max(0, end - half) / this.horizon) * 100
     },
 
+    // A deposit's whole life, however long: its output holds, then falls once accessibility starts to.
     depositSpan(deposit) {
       const { forecast } = deposit
 
-      return forecast.idle || forecast.endless ? this.horizon : Math.max(1, forecast.yearsToDepletion * 1.05)
+      return forecast.idle ? this.horizon : Math.max(1, forecast.yearsToDepletion * 1.05)
     },
     depositChart(deposit) {
       const color = this.theme.primary
@@ -915,7 +915,7 @@ export default {
         markers.push({ x: forecast.yearsToHalf, label: 'Half mined' })
       }
 
-      if (!forecast.idle && !forecast.endless) {
+      if (!forecast.idle) {
         markers.push({ x: forecast.yearsToDepletion, label: 'Empty' })
       }
 
@@ -923,6 +923,7 @@ export default {
         unit: 't/yr',
         markers,
         extraLabel: (raw) => [`Accessibility ${this.fixed(raw.accessibility, 2)}`, `${this.tons(raw.amount)} t left`],
+        span: this.depositSpan(deposit),
       })
     },
     depositNote(deposit) {
@@ -930,8 +931,6 @@ export default {
 
       if (forecast.idle) {
         return 'Nothing is being mined here at the moment (no workers or a colony at zero efficiency).'
-      } else if (forecast.endless) {
-        return `At today's rate this deposit lasts more than ${separatedNumber(ENDLESS_YEARS, this.separator)} years.`
       } else if (forecast.yearsToHalf === null) {
         return `Accessibility doesn't decline here; at today's rate it's empty in ${this.years(forecast.yearsToDepletion)}.`
       }
@@ -939,14 +938,17 @@ export default {
       return `Accessibility holds at ${this.fixed(deposit.OriginalAcc, 2)} until half the deposit is mined, then falls toward 0.10, slowing output until it's empty in ${this.years(forecast.yearsToDepletion)}.`
     },
 
-    lineOptions({ unit, markers = [], extraLabel = null }) {
+    lineOptions({ unit, markers = [], extraLabel = null, span = this.horizon }) {
+      // A chart spanning COMPACT_YEARS or more counts its years in k, M and bn.
+      const year = (value) => (span >= COMPACT_YEARS ? compactYears(value, this.separator) : separatedNumber(roundToDecimal(value, 1), this.separator))
+
       return {
         scales: {
           x: {
             type: 'linear',
             min: 0,
             title: { display: true, text: 'Years from now' },
-            ticks: { callback: (value) => separatedNumber(roundToDecimal(value, 1), this.separator) },
+            ticks: { callback: year },
           },
           y: {
             beginAtZero: true,
@@ -956,7 +958,7 @@ export default {
         plugins: {
           tooltip: {
             callbacks: {
-              title: (items) => `Year ${roundToDecimal(items[0].parsed.x, 1)}`,
+              title: (items) => `Year ${year(items[0].parsed.x)}`,
               label: (item) => [`${this.tons(item.parsed.y)} ${unit}`, ...(extraLabel ? extraLabel(item.raw) : [])],
             },
           },
@@ -1008,9 +1010,7 @@ export default {
       }),
       default: null,
     },
-    // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now.
-    // Older saves don't have the table: null means "not loaded", [] means "none". Any other
-    // failure (the game holding a lock while it saves, say) rejects, and the page says so.
+    // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now. Older saves don't have the table: null means "not loaded", [] means "none". Any other failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {
       get: tracked('ledger', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -1021,7 +1021,7 @@ export default {
         const windowDays = Number(this.windowDays) || 365
         const [[table]] = await this.database.query("select count(*) as Present from sqlite_master where type = 'table' and name = 'FCT_RaceMineralData'")
 
-        return table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => items) : []
+        return table.Present ? await this.database.query(`select FCT_RaceMineralData.MineralID as MaterialID, FCT_RaceMineralData.MineralDataType, cast((FCT_Game.GameTime - FCT_RaceMineralData.Time) / ${BUCKET_DAYS * SECONDS_PER_DAY} as integer) as Bucket, sum(FCT_RaceMineralData.Amount) as Amount, min(FCT_RaceMineralData.Time) as FirstTime, max(FCT_RaceMineralData.Time) as LastTime, max(VIR_Ticks.ProductionTicks) as ProductionTicks, max(VIR_Ticks.FirstTick) as FirstTick, max(VIR_Ticks.LastTick) as LastTick from FCT_RaceMineralData inner join FCT_Game on FCT_Game.GameID = FCT_RaceMineralData.GameID cross join (select count(distinct VIR_Production.Time) as ProductionTicks, min(VIR_Production.Time) as FirstTick, max(VIR_Production.Time) as LastTick from FCT_RaceMineralData as VIR_Production inner join FCT_Game as VIR_Now on VIR_Now.GameID = VIR_Production.GameID where VIR_Production.GameID = ${this.GameID} and VIR_Production.RaceID = ${this.RaceID} and VIR_Production.Time > VIR_Now.GameTime - ${windowDays * SECONDS_PER_DAY} and VIR_Production.MineralDataType in (${PRODUCTION_TYPES.join(', ')})) as VIR_Ticks where FCT_RaceMineralData.GameID = ${this.GameID} and FCT_RaceMineralData.RaceID = ${this.RaceID} and FCT_RaceMineralData.Time > FCT_Game.GameTime - ${windowDays * SECONDS_PER_DAY} group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType, Bucket`).then(([items]) => Object.freeze(items)) : []
       }),
       default: null,
     },
@@ -1031,7 +1031,7 @@ export default {
           return []
         }
 
-        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
+        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1041,7 +1041,7 @@ export default {
           return []
         }
 
-        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => items)
+        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1062,7 +1062,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => items)
+        return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1074,29 +1074,6 @@ export default {
 .mineral-outlook {
   .mineral-select {
     min-width: 220px;
-  }
-
-  .stat-tile {
-    padding: 10px 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 20px;
-    line-height: 28px;
-    font-weight: 400;
-    margin: 2px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .stat-note {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-height: 1.3;
   }
 
   .panel {
@@ -1117,22 +1094,11 @@ export default {
   }
 
   .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
     padding: 8px 24px;
-    font-size: 16px;
-    line-height: 28px;
   }
 
   .panel-body {
     padding: 0 24px 12px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
   }
 
   .chart-title {
@@ -1142,16 +1108,7 @@ export default {
   }
 
   .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
     margin-bottom: 8px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

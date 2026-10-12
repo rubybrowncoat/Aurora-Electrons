@@ -1,28 +1,12 @@
 <template>
   <div>
     <v-container fluid class="survey-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row>
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="A map of the systems I know, shaded by how much survey work each has left. Use it to pick where to send my survey ships next." elevation="1">
           <div class="panel-head">
             <span>Survey map</span>
             <span class="legend">
@@ -31,32 +15,23 @@
             </span>
           </div>
           <div class="panel-body">
-            <svg class="survey-map" :viewBox="map.viewBox" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Known systems coloured by the survey work left">
-              <g :stroke="theme.border" :stroke-width="map.unit * 0.9">
-                <line v-for="link in map.links" :key="link.key" :x1="link.x1" :y1="link.y1" :x2="link.x2" :y2="link.y2" />
-              </g>
-              <g v-for="node in map.nodes" :key="node.SystemID" class="map-node" @click="selectSystem(node.SystemID)">
-                <title>{{ node.title }}</title>
-                <circle :cx="node.x" :cy="node.y" :r="node.r" :fill="node.color" :stroke="node.SystemID === selectedSystemId ? theme.primary : theme.surface" :stroke-width="map.unit * (node.SystemID === selectedSystemId ? 3 : 1)" />
-                <circle v-if="node.ships" :cx="node.x" :cy="node.y" :r="node.r + map.unit * 4" fill="none" :stroke="theme.ink" :stroke-width="map.unit * 1.5" />
-                <text v-if="node.label" :x="node.x" :y="node.y - node.r - map.unit * 5" :font-size="map.unit * 11" text-anchor="middle" :fill="theme.ink">{{ node.Name }}</text>
-              </g>
-            </svg>
+            <system-map :systems="mapNodes" :links="links" :selected="selectedSystemId" aria-label="Known systems coloured by the survey work left" @select="selectSystem" />
             <div class="caption text--secondary">Positions as on the game's galactic map. Size shows the survey points left; click a system for its details below.</div>
           </div>
         </v-card>
 
-        <v-card ref="systemsPanel" class="panel" elevation="1">
+        <v-card ref="systemsPanel" class="panel" data-summary="Each system's gravitational and geological survey progress, the points left and how long my ships there would take. It shows which systems still need surveying." elevation="1">
           <div class="panel-head">
             <span>Systems</span>
             <span class="d-flex align-center">
-              <v-switch v-model="showSurveyed" label="Show fully surveyed" dense hide-details class="mt-0 mr-4" @change="(value) => config.set('surveyShowSurveyed', !!value)" />
+              <v-switch v-model="showSurveyed" label="Show fully surveyed" dense hide-details class="mt-0 mr-4" />
               <v-text-field v-model="search" label="Search systems" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
             </span>
           </div>
-          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" @click:row="onSystemClick">
+          <v-data-table :headers="systemHeaders" :items="visibleSystems" item-key="SystemID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="systemsTable.sortBy" :sort-desc.sync="systemsTable.sortDesc" :item-class="(item) => (item.SystemID === selectedSystemId ? 'is-selected-row' : '')" :page.sync="page" :items-per-page.sync="systemsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="onSystemClick">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
+              <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
             <template #[`item.gravSort`]="{ item }">
               <div class="progress-cell">
@@ -105,17 +80,21 @@
           </div>
         </v-card>
 
-        <v-card class="panel" elevation="1">
+        <v-card class="panel" data-summary="My survey fleets, where they are, what they are doing and how fast they survey. It shows whether my survey ships are used well." elevation="1">
           <div class="panel-head">
             <span>Survey fleets</span>
             <v-chip small>Rates are estimates</v-chip>
           </div>
-          <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" disable-pagination hide-default-footer>
+          <v-data-table :headers="fleetHeaders" :items="fleetRows" item-key="FleetID" :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}</div>
+                <div class="font-weight-medium">{{ item.FleetName }}<page-link class="ml-1" :to="linkTo.routes({ from: place.fleet(item.FleetID) })" :name="item.FleetName" /></div>
                 <div class="caption text--secondary">{{ item.shipNames }}</div>
               </div>
+            </template>
+            <template #[`item.SystemName`]="{ item }">
+              {{ item.SystemName }}
+              <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
             </template>
             <template #[`item.geoRate`]="{ item }">
               <span :class="{ 'text--secondary': !item.geoRate }">{{ item.geoRate ? count(item.geoRate) : '—' }}</span>
@@ -136,12 +115,12 @@
           </div>
         </v-card>
 
-        <v-card v-if="groundRows.length" class="panel" elevation="1">
+        <v-card v-if="groundRows.length" class="panel" data-summary="Bodies with mineral potential that could be surveyed on the ground, with progress and time left. It shows where ground survey teams would pay off." elevation="1">
           <div class="panel-head">
             <span>Ground surveys</span>
             <v-chip small>{{ groundRows.length }} {{ groundRows.length === 1 ? 'body' : 'bodies' }} with potential</v-chip>
           </div>
-          <v-data-table :headers="groundHeaders" :items="groundRows" item-key="SystemBodyID" disable-pagination hide-default-footer>
+          <v-data-table :headers="groundHeaders" :items="groundRows" item-key="SystemBodyID" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" disable-pagination hide-default-footer>
             <template #[`item.name`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium">{{ item.name }}</div>
@@ -174,9 +153,18 @@
 import { mapGetters } from 'vuex'
 
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import SystemMap from '../components/exploration/SystemMap.vue'
+import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { linkTo, place, queryId } from '../utilities/deep-links'
+import { tracked } from '../utilities/load-tracking'
+import { roundToDecimal } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { surveyDays } from '../utilities/survey-eta'
@@ -192,35 +180,40 @@ const INPUT_LABELS = {
   groundSurveys: 'ground surveys',
   navalAdmins: 'naval admin commands',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 const HOURS_PER_DAY = 24
 // FCT_SystemBody.GroundMineralSurvey, as the Minerals page labels it.
 const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const SURVEY_ORDERS = new Set([9, 12])
+const PAGE_SIZES = [15, 30, -1]
 
 export default {
   name: 'SurveyProgressPage',
+  components: { LoadState, PageLink, StatTiles, SystemMap },
+  mixins: [
+    countFormat,
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      showSurveyed: { key: 'surveyShowSurveyed', default: false },
+      search: { key: 'surveySearch', default: '', scope: 'race' },
+      systemsTable: tableView('surveySystemsTable', { sortBy: ['remaining'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      fleetsTable: tableView('surveyFleetsTable', {}),
+      groundTable: tableView('surveyGroundTable', {}),
+    }),
+  ],
   data() {
     return {
-      showSurveyed: false,
-      search: '',
+      pageSizes: PAGE_SIZES,
       expanded: [],
       page: 1,
-      itemsPerPage: 15,
       selectedSystemId: null,
-      sortBy: ['remaining'],
-      sortDesc: [true],
-      loadErrors: {},
+      revealPending: false,
+      linkTo,
+      place,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
-
-    separator() {
-      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
-
-      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-    },
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
@@ -239,18 +232,6 @@ export default {
         { key: 'geo', label: 'Geological left', color: this.colors.geo },
         { key: 'done', label: 'Fully surveyed', color: this.colors.done },
       ]
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     surveySpeed() {
@@ -300,9 +281,12 @@ export default {
       return bySystem
     },
 
+    // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again, which is every unsurveyed body.
     systemRows() {
+      const { fleetRows, bodiesBySystem } = this
+
       return this.systems.map((system) => {
-        const fleets = this.fleetRows.filter((fleet) => fleet.SystemID === system.SystemID)
+        const fleets = fleetRows.filter((fleet) => fleet.SystemID === system.SystemID)
         const gravPoints = Math.max(0, system.Locations - system.LocationsSurveyed) * system.PointsPerLocation
         const geoPoints = system.GeoPoints || 0
         const eta = gravPoints || geoPoints ? surveyDays(gravPoints, geoPoints, fleets) : null
@@ -320,7 +304,7 @@ export default {
           shipsHere: fleets.length,
           eta,
           etaSort: eta ?? Infinity,
-          unsurveyedBodies: this.bodiesBySystem[system.SystemID] || [],
+          unsurveyedBodies: bodiesBySystem[system.SystemID] || [],
         }
       })
     },
@@ -331,55 +315,22 @@ export default {
       return this.systemRows.filter((system) => (this.showSurveyed || system.remaining > 0 || system.SystemID === this.selectedSystemId) && (!search || system.Name.toLowerCase().includes(search)))
     },
 
-    map() {
-      const systems = this.systemRows.filter((system) => system.Xcor !== null && system.Ycor !== null)
+    // Surveyed systems first, so the ones with work left draw on top.
+    mapNodes() {
+      const maxRemaining = Math.max(...this.systemRows.map((system) => system.remaining), 1)
 
-      if (!systems.length) {
-        return { viewBox: '0 0 100 100', unit: 1, nodes: [], links: [] }
-      }
-
-      const xs = systems.map((system) => system.Xcor)
-      const ys = systems.map((system) => system.Ycor)
-      const width = Math.max(...xs) - Math.min(...xs) || 100
-      const height = Math.max(...ys) - Math.min(...ys) || 100
-      // About one screen pixel in map units (the map is drawn up to ~1100 x 600 px), so strokes
-      // and labels keep their size whatever the galaxy's extent.
-      const unit = Math.max(width / 1100, height / 560)
-      const pad = unit * 30
-      const maxRemaining = Math.max(...systems.map((system) => system.remaining), 1)
-      const byId = Object.fromEntries(systems.map((system) => [system.SystemID, system]))
-      const nodes = systems.map((system) => {
+      return this.systemRows.map((system) => {
         const status = system.gravPoints && system.geoPoints ? 'both' : system.gravPoints ? 'grav' : system.geoPoints ? 'geo' : 'done'
 
         return {
           ...system,
-          x: system.Xcor,
-          y: system.Ycor,
-          r: unit * (system.remaining ? 5 + 9 * Math.sqrt(system.remaining / maxRemaining) : 3.5),
+          size: system.remaining ? 5 + 9 * Math.sqrt(system.remaining / maxRemaining) : 3.5,
           color: this.colors[status],
-          ships: system.shipsHere,
+          ring: system.shipsHere ? this.theme.ink : null,
           label: system.remaining > 0 || system.shipsHere > 0,
           title: `${system.Name}: ${system.remaining ? `${this.count(system.remaining)} survey points left` : 'fully surveyed'}${system.shipsHere ? `, ${system.fleetsHere.join(', ')}` : ''}`,
         }
-      })
-      const seen = new Set()
-      const links = []
-
-      this.links.forEach((link) => {
-        const key = [link.SystemID, link.DestinationID].sort((a, b) => a - b).join('-')
-        const from = byId[link.SystemID]
-        const to = byId[link.DestinationID]
-
-        if (from && to && !seen.has(key)) {
-          seen.add(key)
-          links.push({ key, x1: from.Xcor, y1: from.Ycor, x2: to.Xcor, y2: to.Ycor })
-        }
-      })
-
-      // Surveyed systems first, so the ones with work left draw on top.
-      nodes.sort((a, b) => a.remaining - b.remaining)
-
-      return { viewBox: `${Math.min(...xs) - pad} ${Math.min(...ys) - pad} ${width + 2 * pad} ${height + 2 * pad}`, unit, nodes, links }
+      }).sort((a, b) => a.remaining - b.remaining)
     },
 
     groundRows() {
@@ -470,41 +421,55 @@ export default {
         { text: 'Time left', value: 'etaSort', align: 'end' },
       ]
     },
+
+    selectedSystem() {
+      return this.systems.find((system) => system.SystemID === this.selectedSystemId) || null
+    },
+
+    linkQuery() {
+      return linkTo.survey(this.selectedSystemId).query
+    },
+
+    linkLabel() {
+      return this.selectedSystem && this.selectedSystem.Name
+    },
   },
-  created() {
-    this.showSurveyed = this.config.get('surveyShowSurveyed', false)
+  watch: {
+    // A system a link names is shown once the reads have it.
+    systemRows() {
+      this.revealLinked()
+    },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
+    applyLink(query) {
+      this.selectedSystemId = queryId(query.system)
+      this.revealPending = this.selectedSystemId !== null
+
+      if (this.revealPending) {
+        this.revealLinked()
+      } else {
+        this.expanded = []
+      }
+    },
+
+    revealLinked() {
+      if (this.revealPending && this.revealSystem(this.selectedSystemId)) {
+        this.revealPending = false
+      }
     },
 
     onSystemClick(item, { expand, isExpanded }) {
       this.selectedSystemId = item.SystemID
+      this.revealPending = false
       expand(!isExpanded)
     },
 
     selectSystem(systemId) {
       this.selectedSystemId = systemId
+      this.revealPending = false
 
-      const row = this.systemRows.find((system) => system.SystemID === systemId)
-
-      if (row) {
-        this.search = ''
-        this.sortBy = ['remaining']
-        this.sortDesc = [true]
-        this.expanded = [row]
-
-        // The row's page in the order the table will show: unfiltered, most work left first (the
-        // table's numeric sort is a stable subtraction too, so ties keep the same order).
-        const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
-        const target = this.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.itemsPerPage) + 1 : 1
-
-        this.page = target
+      if (this.revealSystem(systemId)) {
         this.$nextTick(() => {
-          // The table clamps the page to the pages it has before the cleared search widens the list.
-          this.page = target
-
           const panel = this.$refs.systemsPanel
 
           if (panel && panel.$el) {
@@ -512,6 +477,31 @@ export default {
           }
         })
       }
+    },
+
+    // Expands the system's row, on the page of the table it falls on; false while the system isn't among the rows.
+    revealSystem(systemId) {
+      const row = this.systemRows.find((system) => system.SystemID === systemId)
+
+      if (!row) {
+        return false
+      }
+
+      this.setUnsaved('search', '')
+      this.setUnsaved('systemsTable', { ...this.systemsTable, sortBy: ['remaining'], sortDesc: [true] })
+      this.expanded = [row]
+
+      // The row's page in the order the table will show: unfiltered, most work left first (the table's numeric sort is a stable subtraction too, so ties keep the same order).
+      const sorted = this.visibleSystems.slice().sort((a, b) => b.remaining - a.remaining)
+      const target = this.systemsTable.itemsPerPage > 0 ? Math.floor(sorted.findIndex((system) => system.SystemID === systemId) / this.systemsTable.itemsPerPage) + 1 : 1
+
+      this.page = target
+      // The table clamps the page to the pages it has before the cleared search widens the list.
+      this.$nextTick(() => {
+        this.page = target
+      })
+
+      return true
     },
 
     activity(fleet) {
@@ -533,22 +523,8 @@ export default {
     potentialLabel(value) {
       return POTENTIAL[value] || '—'
     },
-    count(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
-    },
     fixed(value, decimals) {
       return roundToDecimal(value, decimals).toFixed(decimals)
-    },
-    duration(days) {
-      if (days < 1) {
-        return `${Math.max(1, Math.round(days * 24))} h`
-      } else if (days < 60) {
-        return `${roundToDecimal(days, 1)} d`
-      } else if (days < 730) {
-        return `${roundToDecimal(days / 30.4, 1)} mo`
-      }
-
-      return `${roundToDecimal(days / 365, 1)} y`
     },
   },
   asyncComputed: {
@@ -562,15 +538,14 @@ export default {
       }),
       default: null,
     },
-    // Known systems with their gravitational locations (done of all) and geological bodies
-    // (planets, moons, asteroids, comets; points left on the ones neither surveyed nor banned).
+    // Known systems with their gravitational locations (done of all) and geological bodies (planets, moons, asteroids, comets; points left on the ones neither surveyed nor banned). The large reads are frozen: read-only rows Vue needn't observe.
     systems: {
       get: tracked('systems', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_System.JumpPointSurveyPoints as PointsPerLocation, coalesce(VIR_Locations.Locations, 0) as Locations, coalesce(VIR_Surveyed.Locations, 0) as LocationsSurveyed, coalesce(VIR_Bodies.Bodies, 0) as Bodies, coalesce(VIR_Bodies.Surveyed, 0) as BodiesSurveyed, coalesce(VIR_Bodies.Points, 0) as GeoPoints from FCT_RaceSysSurvey inner join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations from FCT_SurveyLocation where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_Locations on VIR_Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_RaceSurveyLocation.SystemID, count(*) as Locations from FCT_RaceSurveyLocation where FCT_RaceSurveyLocation.GameID = ${this.GameID} and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} group by FCT_RaceSurveyLocation.SystemID) as VIR_Surveyed on VIR_Surveyed.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end) as Surveyed, sum(case when FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null then FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) else 0 end) as Points from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) group by FCT_SystemBody.SystemID) as VIR_Bodies on VIR_Bodies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_System.JumpPointSurveyPoints as PointsPerLocation, coalesce(VIR_Locations.Locations, 0) as Locations, coalesce(VIR_Surveyed.Locations, 0) as LocationsSurveyed, coalesce(VIR_Bodies.Bodies, 0) as Bodies, coalesce(VIR_Bodies.Surveyed, 0) as BodiesSurveyed, coalesce(VIR_Bodies.Points, 0) as GeoPoints from FCT_RaceSysSurvey inner join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations from FCT_SurveyLocation where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as VIR_Locations on VIR_Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_RaceSurveyLocation.SystemID, count(*) as Locations from FCT_RaceSurveyLocation where FCT_RaceSurveyLocation.GameID = ${this.GameID} and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} group by FCT_RaceSurveyLocation.SystemID) as VIR_Surveyed on VIR_Surveyed.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end) as Surveyed, sum(case when FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null then FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) else 0 end) as Points from FCT_SystemBody left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) group by FCT_SystemBody.SystemID) as VIR_Bodies on VIR_Bodies.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -580,7 +555,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) as Points from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null order by FCT_SystemBody.SystemID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber`).then(([items]) => items)
+        return await this.database.query(`select FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius / 100.0 * (case when FCT_SystemBody.BodyTypeID in (4, 5) then 1 else 10 end) as Points from FCT_SystemBody inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_BannedBodies on FCT_BannedBodies.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_BannedBodies.RaceID = ${this.RaceID} and FCT_BannedBodies.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBodySurveys.SystemBodyID is null and FCT_BannedBodies.SystemBodyID is null order by FCT_SystemBody.SystemID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -591,12 +566,11 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_JumpPoint.GameID = ${this.GameID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_JumpPoint.SystemID, VIR_Destination.SystemID as DestinationID from FCT_JumpPoint inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${this.RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 inner join FCT_JumpPoint as VIR_Destination on VIR_Destination.WarpPointID = FCT_JumpPoint.WPLink inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = VIR_Destination.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_JumpPoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
-    // Ships with geological or gravitational sensors, with their captain's (CommandType 1) and
-    // science officer's (CommandType 10) Survey bonus.
+    // Ships with geological or gravitational sensors, with their captain's (CommandType 1) and science officer's (CommandType 10) Survey bonus.
     ships: {
       get: tracked('ships', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -627,8 +601,7 @@ export default {
       }),
       default: [],
     },
-    // Geologically surveyed bodies with ground-survey potential left, with the race's colony there
-    // (progress in GroundGeoSurvey) and its geosurvey formations' points a day.
+    // Geologically surveyed bodies with ground-survey potential left, with the race's colony there (progress in GroundGeoSurvey) and its geosurvey formations' points a day.
     groundSurveys: {
       get: tracked('groundSurveys', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -658,82 +631,6 @@ export default {
 .survey-page {
   .search-field {
     min-width: 220px;
-  }
-
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .dot-ring {
-    background: transparent;
-    border: 2px solid;
-  }
-
-  .survey-map {
-    display: block;
-    width: 100%;
-    // 480 px at 1280 x 720, 780 at 1080p, and it keeps growing to 1000 so a 1440p window isn't left with a small map in the middle.
-    height: clamp(480px, calc(100vh - 300px), 1000px);
-  }
-
-  .map-node {
-    cursor: pointer;
-  }
-
-  .map-node text {
-    pointer-events: none;
-    font-family: Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
 
   td {

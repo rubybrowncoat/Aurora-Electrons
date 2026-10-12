@@ -19,12 +19,12 @@
     </v-col>
 
     <v-col cols="12" md="8" lg="9" xl="10">
-      <v-card v-if="search" class="panel" elevation="1">
+      <v-card v-if="search" class="panel" data-summary="Technologies from every field whose name matches my search, with their status and remaining cost. Click one to open it." elevation="1">
         <div class="panel-head">
           <span>{{ matches.length }} {{ matches.length === 1 ? 'technology matches' : 'technologies match' }} "{{ search }}"</span>
           <span v-if="matches.length > MATCH_LIMIT" class="caption text--secondary">Showing the first {{ MATCH_LIMIT }}</span>
         </div>
-        <v-data-table :headers="matchHeaders" :items="matches.slice(0, MATCH_LIMIT)" item-key="id" dense :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, 100] }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+        <v-data-table :headers="matchHeaders" :items="matches.slice(0, MATCH_LIMIT)" item-key="id" dense :sort-by.sync="matchesTable.sortBy" :sort-desc.sync="matchesTable.sortDesc" :items-per-page.sync="matchesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: MATCH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
           <template #[`item.status`]="{ item }">
             <span class="status-chip"><v-icon x-small :color="statusColor(item.status)">{{ icons[item.status] }}</v-icon> {{ labels[item.status] }}</span>
           </template>
@@ -60,7 +60,7 @@
                     <span v-if="!project.running" class="caption warning--text ml-2">{{ pausedLabel(project) }}</span>
                   </div>
                   <div class="caption text--secondary">
-                    {{ project.PopName }} · {{ scientistLabel(project) }} · {{ project.Facilities }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year
+                    {{ project.PopName }}<page-link :to="colonyLink(project.PopulationID)" :name="project.PopName" class="ml-1" /> · {{ scientistLabel(project) }}<page-link v-if="project.CommanderID" :to="commanderLink(project.CommanderID)" :name="project.ScientistName" class="ml-1" /> · {{ project.Facilities }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year
                   </div>
                 </div>
                 <div class="project-progress">
@@ -92,7 +92,7 @@
             <v-expansion-panel-content>
               <div v-if="scientistNote" class="caption text--secondary mb-2">{{ scientistNote }}</div>
               <div v-if="!group.available.length" class="empty">Nothing to start here: every project is running, queued or waits on a prerequisite.</div>
-              <v-data-table v-else :headers="availableHeaders" :items="availableRows" item-key="id" dense :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :sort-by="['remaining']" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="availableHeaders" :items="availableRows" item-key="id" dense :sort-by.sync="availableTable.sortBy" :sort-desc.sync="availableTable.sortDesc" :items-per-page.sync="availableTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.name`]="{ item }">
                   <div class="font-weight-medium">{{ item.name }}</div>
                   <div class="caption text--secondary">{{ item.line }}<span v-if="item.automatic"> · free with its prerequisite</span></div>
@@ -115,7 +115,7 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div v-if="!group.locked.length" class="empty">Nothing here waits on a prerequisite.</div>
-              <v-data-table v-else :headers="lockedHeaders" :items="lockedRows" item-key="id" dense :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" :sort-by="['pathRp']" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="lockedHeaders" :items="lockedRows" item-key="id" dense :sort-by.sync="lockedTable.sortBy" :sort-desc.sync="lockedTable.sortDesc" :items-per-page.sync="lockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.name`]="{ item }">
                   <div class="font-weight-medium">{{ item.name }}</div>
                   <div class="caption text--secondary">{{ item.line }}</div>
@@ -139,7 +139,7 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div v-if="!group.done.length" class="empty">Nothing researched in this field yet.</div>
-              <v-data-table v-else :headers="doneHeaders" :items="doneRows" item-key="id" dense :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 50, -1] }" :sort-by="['line']" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="doneHeaders" :items="doneRows" item-key="id" dense :sort-by.sync="doneTable.sortBy" :sort-desc.sync="doneTable.sortDesc" :items-per-page.sync="doneTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: DONE_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.cost`]="{ item }">
                   <span class="text-no-wrap">{{ count(item.cost) }} RP</span>
                 </template>
@@ -153,7 +153,7 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div class="caption text--secondary mb-2">Techs this empire has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide.</div>
-              <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :sort-by.sync="blockedTable.sortBy" :sort-desc.sync="blockedTable.sortDesc" :items-per-page.sync="blockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.cost`]="{ item }">
                   <span class="text-no-wrap">{{ count(item.cost) }} RP</span>
                 </template>
@@ -168,19 +168,35 @@
 
 <script>
 import countFormat from '../../mixins/count-format'
+import persistedView, { tableView } from '../../mixins/persisted-view'
 import { gameTime } from '../../utilities/aurora'
+import { linkTo } from '../../utilities/deep-links'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import PageLink from '../page/PageLink.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
 
 const SECONDS_PER_YEAR = 31536000
 const MATCH_LIMIT = 300
+const MATCH_PAGE_SIZES = [25, 50, 100]
+const TECH_PAGE_SIZES = [15, 30, -1]
+const DONE_PAGE_SIZES = [25, 50, -1]
 // Search results list what is happening first, what is finished last.
 const STATUS_ORDER = [ACTIVE, QUEUED, AVAILABLE, LOCKED, DONE, BLOCKED]
 
 export default {
   name: 'FieldsView',
-  mixins: [countFormat],
+  components: { PageLink },
+  mixins: [
+    countFormat,
+    persistedView({
+      matchesTable: tableView('techTreeMatchesTable', { itemsPerPage: 25, itemsPerPageOptions: MATCH_PAGE_SIZES }),
+      availableTable: tableView('techTreeAvailableTable', { sortBy: ['remaining'], itemsPerPage: 15, itemsPerPageOptions: TECH_PAGE_SIZES }),
+      lockedTable: tableView('techTreeLockedTable', { sortBy: ['pathRp'], itemsPerPage: 15, itemsPerPageOptions: TECH_PAGE_SIZES }),
+      doneTable: tableView('techTreeDoneTable', { sortBy: ['line'], itemsPerPage: 25, itemsPerPageOptions: DONE_PAGE_SIZES }),
+      blockedTable: tableView('techTreeBlockedTable', { itemsPerPage: 15, itemsPerPageOptions: TECH_PAGE_SIZES }),
+    }),
+  ],
   props: {
     research: { type: Object, required: true },
     fieldId: { type: Number, default: null },
@@ -189,6 +205,9 @@ export default {
   data() {
     return {
       MATCH_LIMIT,
+      MATCH_PAGE_SIZES,
+      TECH_PAGE_SIZES,
+      DONE_PAGE_SIZES,
       icons: STATUS_ICONS,
       labels: STATUS_LABELS,
       open: [0, 1],
@@ -343,6 +362,14 @@ export default {
         unlocks: entry.unlocks,
         automatic: tech.automatic,
       }
+    },
+
+    colonyLink(populationId) {
+      return linkTo.colonyOutlook(populationId)
+    },
+
+    commanderLink(commanderId) {
+      return linkTo.commanders({ commander: commanderId })
     },
 
     scientistLabel(project) {
@@ -549,18 +576,8 @@ export default {
   }
 
   .panel {
+    margin-top: 0;
     margin-bottom: 16px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
   }
 }
 

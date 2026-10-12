@@ -1,15 +1,6 @@
 <template>
   <flyout-panel class="section-flyout" :title="section.title" :meta="`${pages.filter(({ planned }) => !planned).length} pages · Ctrl ${shortcut}`">
-    <div
-      v-for="page in pages"
-      :key="page.route"
-      class="section-flyout__item"
-      :class="{ 'section-flyout__item--active': page.route === activeRoute, 'section-flyout__item--disabled': page.disabled || page.planned }"
-      role="link"
-      :tabindex="page.disabled || page.planned ? -1 : 0"
-      @click="page.disabled || page.planned || $emit('go', page.route)"
-      @keydown.enter="page.disabled || page.planned || $emit('go', page.route)"
-    >
+    <div v-for="page in pages" :key="page.route" class="section-flyout__item" :class="{ 'section-flyout__item--active': page.route === activeRoute, 'section-flyout__item--disabled': page.disabled || page.planned }" role="link" :tabindex="page.disabled || page.planned ? -1 : 0" @click="page.disabled || page.planned || $emit('go', page.route)" @keydown.enter="page.disabled || page.planned || $emit('go', page.route)">
       <div class="section-flyout__icon">
         <v-icon size="20">{{ page.icon }}</v-icon>
       </div>

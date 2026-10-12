@@ -60,7 +60,7 @@
             <div class="why-line"><span>× {{ distanceText }}</span><span>{{ why.distance }}</span></div>
             <div class="caption text--secondary mt-1">{{ rankText }}</div>
           </template>
-          <div v-else class="caption text--secondary">No species of yours can live here, so there is nothing to rank.</div>
+          <div v-else class="caption text--secondary">No species of mine can live here, so there is nothing to rank.</div>
         </v-card>
       </v-col>
 
@@ -119,7 +119,10 @@
           <div class="mt-1">{{ noPlanText }}</div>
         </div>
 
-        <div class="overline mt-4">Minerals</div>
+        <div class="overline mt-4 d-flex align-center">
+          Minerals
+          <page-link v-if="deposits.length" class="ml-2" :to="mineralsLink" :name="bodyName" />
+        </div>
         <div v-if="!item.row.minerals.surveyed" class="text--secondary">Not surveyed by this race yet. Ground survey potential: {{ groundSurvey }}.</div>
         <div v-else-if="!deposits.length" class="text--secondary">The survey found nothing on this body.</div>
         <div v-else class="d-flex flex-wrap">
@@ -128,7 +131,7 @@
           </v-chip>
         </div>
         <div v-if="item.row.minerals.cmc.length" class="caption text--secondary">Civilian mining complex candidate ({{ item.row.minerals.cmc.join(', ') }}). {{ cmcLine }}</div>
-        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short you are of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
+        <div v-if="item.row.minerals.deposits" class="caption text--secondary">Deposit value {{ round(item.row.minerals.value, 1) }}: each deposit's accessibility (raised for a big one, halved under 10 kt), times its weight and how short I am of the mineral. {{ item.row.minerals.rich ? 'Rich: ' : '' }}The game seeds a mining colony from 6.</div>
         <div v-if="item.row.distance" class="caption text--secondary mt-1">{{ distanceLine }}</div>
       </v-col>
     </v-row>
@@ -136,6 +139,9 @@
 </template>
 
 <script>
+import PageLink from '../page/PageLink.vue'
+import { systemBodyName } from '../../utilities/aurora'
+import { linkTo } from '../../utilities/deep-links'
 import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { cmcNote } from '../../utilities/colonization'
@@ -148,6 +154,7 @@ const INSTALLATION_YEARS = [5, 10, 25, 50]
 
 export default {
   name: 'BodyDetail',
+  components: { PageLink },
   props: {
     item: { type: Object, required: true },
     shown: { type: Object, required: true },
@@ -173,6 +180,13 @@ export default {
       return GROUND_SURVEY[this.item.body.GroundMineralSurvey] || 'unknown'
     },
 
+    mineralsLink() {
+      return linkTo.minerals({ bodies: [this.item.body] })
+    },
+    bodyName() {
+      return `${this.item.body.SystemName} ${systemBodyName(this.item.body)}`
+    },
+
     factors() {
       const { factors } = this.assessment.cost
       const limiting = limitingFactor(factors)
@@ -195,7 +209,7 @@ export default {
     planSummary() {
       const total = planYears(this.assessment.work, this.terraformCapacity)
 
-      return `${this.years(total)} with ${this.terraformCapacity > 0 ? 'the terraformers you set' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
+      return `${this.years(total)} with ${this.terraformCapacity > 0 ? 'the terraformers I set' : 'no terraformers'}, ${roundToDecimal(this.assessment.work, 3)} atm of Earth-equivalent work`
     },
 
     tiles() {

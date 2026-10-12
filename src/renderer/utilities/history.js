@@ -1,7 +1,4 @@
-// Empire History: the app's own record of each race, one snapshot per game save it sees. Aurora
-// keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is the
-// only way to chart growth. Each game has its own electron-store file, `history/game-<GameID>.json`
-// beside the settings, never the save. See docs/plans/aurcalcs/build-3.md § Empire History.
+// Empire History: the app's own record of each race, one snapshot per game save it sees. Aurora keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is the only way to chart growth. Each game has its own electron-store file, `history/game-<GameID>.json` beside the settings, never the save. See docs/plans/aurcalcs/build-3.md § Empire History.
 
 import Config from 'electron-store'
 
@@ -9,8 +6,7 @@ import { toBoolean, toNumber } from './aurora'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 
-// More than this many snapshots per race and the older half is thinned to every other one, so a
-// long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap).
+// More than this many snapshots per race and the older half is thinned to every other one, so a long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap).
 export const MAX_SNAPSHOTS = 2000
 
 const HISTORY_FOLDER = 'history'
@@ -27,8 +23,7 @@ export const historyConfig = (GameID) => {
   return historyStores[GameID]
 }
 
-// Player races and NPR empires are recorded. Aurora's special factions (Precursors, Invaders,
-// Rakhas, Eldar, Ancients and the like, `SpecialNPRID` > 0) have no empire to chart.
+// Player races and NPR empires are recorded. Aurora's special factions (Precursors, Invaders, Rakhas, Eldar, Ancients and the like, `SpecialNPRID` > 0) have no empire to chart.
 export const recordsHistory = ({ NPR, SpecialNPRID }) => !toBoolean(NPR) || !(toNumber(SpecialNPRID) > 0)
 
 // Drop every other snapshot in the older half until the list fits.
@@ -60,14 +55,12 @@ const before = (records, t) => {
   return kept
 }
 
-// Add one save's snapshots to a game's history. `history` is the file's contents (or empty), and
-// everything was taken at game time `t`:
+// Add one save's snapshots to a game's history. `history` is the file's contents (or empty), and everything was taken at game time `t`:
 // - `races`: [{ RaceID, raceName, npr, snapshot }];
 // - `intel`: { [ViewRaceID]: [{ AlienRaceID, name, snapshot }] }, what each race knows of the others.
 // Rules:
 // - Another game under the same GameID (another name) starts over.
-// - Every record loses its snapshots at or after `t`: an older save reloaded means that future
-//   didn't happen, and a save at a recorded time replaces it.
+// - Every record loses its snapshots at or after `t`: an older save reloaded means that future didn't happen, and a save at a recorded time replaces it.
 // - A race (or an alien race) missing from this save keeps its past.
 // - Intelligence changes slowly, so its snapshot is kept only when something besides the time changed.
 export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
@@ -105,9 +98,7 @@ export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
 
 const sum = (rows, key) => rows.reduce((total, row) => total + (row[key] || 0), 0)
 
-// One race's state now, compact enough to keep thousands of: population, treasury, stockpiles,
-// ships, installations, research and exploration. `options` go to every query (the recorder passes
-// its read transaction).
+// One race's state now, compact enough to keep thousands of: population, treasury, stockpiles, ships, installations, research and exploration. `options` go to every query (the recorder passes its read transaction).
 export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) => {
   const query = (sql) => database.query(sql, options).then(([items]) => items)
   const [[race], colonies, ships, installations, [counts]] = await Promise.all([
@@ -152,13 +143,7 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
   }
 }
 
-// Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, taken, intel }] per
-// game, `taken` being [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]:
-// takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. It all
-// happens in one read transaction, so a save written meanwhile can't give one race's snapshot the
-// old save and the next one's the new. In SQLite a read transaction holds a shared lock from its
-// first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads
-// are a few dozen small queries, and the history files are written after it ends.
+// Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, taken, intel }] per game, `taken` being [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries, and the history files are written after it ends.
 const readSave = (database) => database.transaction(async (transaction) => {
   const options = { transaction }
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
@@ -193,15 +178,7 @@ const readSave = (database) => database.transaction(async (transaction) => {
   return { read, failed }
 })
 
-// Snapshot every recorded race in the save, and what each knows of the other races, writing each
-// game's history file once. A game that can't be read or written doesn't stop the others (electron-store
-// throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are
-// lost. `onSaved(GameID)` is called as soon as each game's file is written, so views refresh even if a
-// later game fails. `isCurrent()` is asked right before each write: a pass that was superseded (a
-// newer save was loaded while it read) stops there, because mergeGame trims every snapshot at or
-// after its time, which for an older save would erase the newer pass's. Returns { recorded, failed,
-// superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage:
-// 'read' | 'write', error }], and whether the pass was abandoned.
+// Snapshot every recorded race in the save, and what each knows of the other races, writing each game's history file once. A game that can't be read or written doesn't stop the others (electron-store throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are lost. `onSaved(GameID)` is called as soon as each game's file is written, so views refresh even if a later game fails. `isCurrent()` is asked right before each write: a pass that was superseded (a newer save was loaded while it read) stops there, because mergeGame trims every snapshot at or after its time, which for an older save would erase the newer pass's. Returns { recorded, failed, superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage: 'read' | 'write', error }], and whether the pass was abandoned.
 export const recordHistory = async (database, { onSaved = () => {}, isCurrent = () => true } = {}) => {
   const { read, failed } = await readSave(database)
   let recorded = 0

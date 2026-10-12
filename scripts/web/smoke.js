@@ -1,27 +1,15 @@
 /*
-  Smoke test for web mode (`bun run web` must be running). Needs Playwright's
-  Chromium: run `bunx playwright install chromium` once locally; cloud
-  containers already provide it through PLAYWRIGHT_BROWSERS_PATH.
-  Selects a game/race, visits every page, and reports console errors, page
-  errors, failed database calls, and a screenshot per page.
+  Smoke test for web mode (`bun run web` must be running). Needs Playwright's Chromium: run `bunx playwright install chromium` once locally; cloud containers already provide it through PLAYWRIGHT_BROWSERS_PATH. Selects a game/race, visits every page, and reports console errors, page errors, failed database calls, and a screenshot per page.
 
-  Env: BASE_URL (http://localhost:9080), AURORA_GAME and AURORA_RACE (sample
-  defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-smoke),
-  SMOKE_PAGES (comma-separated routes, default every tab plus settings; the
-  hidden WIP /engines page is opt-in).
-  SMOKE_VIEWPORTS (comma-separated WIDTHxHEIGHT sizes, for example
-  1280x720,1920x1080,2560x1440) turns on the layout check: every page is
-  visited at every size, screenshots are named <page>-<size>.png, and each page
-  reports layout problems at each size (see LAYOUT_CHECK below). SMOKE_THEME=dark
-  runs that check in the dark theme, and SMOKE_FULLPAGE=1 saves the whole scrolled
-  page instead of the visible window. Without SMOKE_VIEWPORTS the run is unchanged.
-  External requests the network blocks (fonts, CDNs) are reported as notes,
-  not failures.
+  Env: BASE_URL (http://localhost:9080), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-smoke), SMOKE_PAGES (comma-separated routes, default every tab plus settings; the hidden WIP /engines page is opt-in).
+  SMOKE_VIEWPORTS (comma-separated WIDTHxHEIGHT sizes, for example 1280x720,1920x1080,2560x1440) turns on the layout check: every page is visited at every size, screenshots are named <page>-<size>.png, and each page reports layout problems at each size (see LAYOUT_CHECK below). SMOKE_THEME=dark runs that check in the dark theme, and SMOKE_FULLPAGE=1 saves the whole scrolled page instead of the visible window. Without SMOKE_VIEWPORTS the run is unchanged. External requests the network blocks (fonts, CDNs) are reported as notes, not failures.
  */
 const os = require('os')
 const fs = require('fs')
 const path = require('path')
 const { chromium } = require('playwright')
+
+const pageLoading = require('../page-loading')
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:9080'
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
@@ -29,30 +17,29 @@ const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-smoke')
 const PAGES = process.env.SMOKE_PAGES ? process.env.SMOKE_PAGES.split(',') : require('../smoke-pages')
 
-const VIEWPORTS = process.env.SMOKE_VIEWPORTS
-  ? process.env.SMOKE_VIEWPORTS.split(',').map((size) => {
-    const [width, height] = size.trim().toLowerCase().split('x').map(Number)
+const VIEWPORTS = process.env.SMOKE_VIEWPORTS ? process.env.SMOKE_VIEWPORTS.split(',').map((size) => {
+  const [width, height] = size.trim().toLowerCase().split('x').map(Number)
 
-    if (!(width > 0 && height > 0)) {
-      throw new Error(`SMOKE_VIEWPORTS: "${size}" is not WIDTHxHEIGHT`)
-    }
+  if (!(width > 0 && height > 0)) {
+    throw new Error(`SMOKE_VIEWPORTS: "${size}" is not WIDTHxHEIGHT`)
+  }
 
-    return { width, height, label: `${width}x${height}` }
-  })
-  : null
+  return { width, height, label: `${width}x${height}` }
+}) : null
 const DARK = process.env.SMOKE_THEME === 'dark'
 
 const SETTLE_MS = 1500
 const PAGE_TIMEOUT_MS = 90000
 
 /*
-  LAYOUT_CHECK runs in the page and returns what it can see of the window-size rule (docs/ARCHITECTURE.md, Layout):
+  LAYOUT_CHECK runs in the page and returns what it can see of the window-size rule (docs/ARCHITECTURE.md, Layout) and of the section summaries:
   - overflow: the document, the body or .v-main scrolls sideways.
   - wide: an element in the content reaches past the window edge and no ancestor scrolls it.
   - clipped: an element with overflow hidden holds text wider than itself and doesn't ellipsise it.
-  - small chart: a canvas under 240 x 120 px.
+  - small chart: a canvas under 240 x 120 px. The Galaxy Map's corner minimap (.map-minimap) is small by design and isn't checked.
   - tight: a short label (a header, button, chip, tab or label of at most 24 characters) that wraps onto a second line.
   - island: from 1904 px up, the content stops short of 80% of the width, so the layout isn't filling the window.
+  - summary: a section panel (a top-level .panel whose .panel-head has a title, as the section nav reads it) has no data-summary for its card.
   Also lists the containers that scroll sideways on their own, as information, never a problem.
  */
 const LAYOUT_CHECK = () => {
@@ -133,8 +120,18 @@ const LAYOUT_CHECK = () => {
       }
     }
 
-    if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0) {
+    if (element.tagName === 'CANVAS' && (rect.width < 240 || rect.height < 120) && rect.width > 0 && !element.closest('.map-minimap')) {
       problems.push(`small chart: canvas ${Math.round(rect.width)} x ${Math.round(rect.height)}`)
+    }
+  })
+
+  container.querySelectorAll('.panel').forEach((panel) => {
+    const head = [...panel.querySelectorAll('.panel-head')].find((part) => part.closest('.panel') === panel)
+    const holder = head && head.firstElementChild
+    const title = holder && !holder.matches('.legend, .v-btn, .v-input') ? (holder.innerText || '').trim().replace(/\s+/g, ' ') : ''
+
+    if (title && !panel.parentElement.closest('.panel') && panel.getClientRects().length && !(panel.dataset.summary || '').trim()) {
+      problems.push(`summary: section "${title.slice(0, 40)}" has no data-summary`)
     }
   })
 
@@ -216,9 +213,9 @@ const run = async () => {
   const settle = async () => {
     const started = Date.now()
 
-    while (isBusy()) {
+    while (isBusy() || await page.evaluate(pageLoading)) {
       if (Date.now() - started > PAGE_TIMEOUT_MS) {
-        problems.push(`timeout: ${inFlight} database calls still pending`)
+        problems.push(inFlight > 0 ? `timeout: ${inFlight} database calls still pending` : 'timeout: the page is still loading')
         break
       }
 
@@ -228,17 +225,18 @@ const run = async () => {
 
   fs.mkdirSync(OUT, { recursive: true })
 
-  await page.goto(BASE_URL)
-  // The app opens on the Empires page. A game with one race selects on click; otherwise the race is next.
-  const picker = page.locator('.game-picker')
+  await page.goto(BASE_URL, { timeout: PAGE_TIMEOUT_MS })
+  // The Empires page shows dated game headings and each race's title. A game with one visible race selects that race from its heading.
+  const picker = page.locator('.empire-list').first()
 
-  await picker.getByText(GAME, { exact: true }).first().click({ timeout: PAGE_TIMEOUT_MS })
+  await picker.locator('.empire-list__game').filter({ hasText: `${GAME} ·` }).first().click({ timeout: PAGE_TIMEOUT_MS })
 
-  const raceItem = picker.getByText(RACE, { exact: true })
-
-  if (await raceItem.count()) {
-    await raceItem.last().click()
+  if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+    await picker.getByText(RACE, { exact: true }).last().click()
   }
+
+  // The pages need the race, and each push to one is sent back to the Empires page until it is set.
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: PAGE_TIMEOUT_MS })
 
   await settle()
 
@@ -259,8 +257,22 @@ const run = async () => {
       problems = []
       lastActivity = Date.now()
 
+      // The router's push returns no promise and a page loads on its first visit, so the route on screen stays the previous page's, already settled, until the new one commits. Wait for the new one, then for its reads.
       await page.evaluate((target) => window.$app.$router.push(target), route)
-      await settle()
+
+      const arrived = await page.waitForFunction(pageLoading.arrived, route, { timeout: PAGE_TIMEOUT_MS }).then(() => true, () => false)
+
+      if (arrived) {
+        lastActivity = Date.now()
+        await settle()
+      }
+
+      // A page that hasn't arrived when the wait gives up fails, even if it turns up a moment later: it was never settled. One that arrived and then left fails too.
+      if (!arrived) {
+        problems.push(`navigation: ${route} was asked for, but it hadn't arrived after ${PAGE_TIMEOUT_MS / 1000} s (the page on screen is ${await page.evaluate(() => window.$app.$route.path)})`)
+      } else if (!(await page.evaluate(pageLoading.arrived, route))) {
+        problems.push(`navigation: ${route} arrived, then the page on screen became ${await page.evaluate(() => window.$app.$route.path)}`)
+      }
 
       const name = route === '/' ? 'empires' : route.slice(1)
       const suffix = viewport ? `-${viewport.label}${DARK ? '-dark' : ''}` : ''

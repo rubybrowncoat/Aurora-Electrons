@@ -4,39 +4,23 @@
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
           <span class="caption text--secondary mr-2">Window</span>
-          <v-btn-toggle v-model="windowDays" mandatory dense @change="(value) => config.set('financesWindowDays', value)">
+          <v-btn-toggle v-model="windowDays" mandatory dense>
             <v-btn v-for="days in windowOptions" :key="days" :value="days" small>{{ days }} d</v-btn>
           </v-btn-toggle>
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <v-alert v-if="!steps.length" type="info" outlined dense class="mt-3">
           The save has no wealth history for this race yet. Aurora logs income and spending every production cycle.
         </v-alert>
 
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <template v-if="steps.length">
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="Wealth my empire earned and spent in each production cycle, by category, with the net, to see whether income covers spending." elevation="1">
             <div class="panel-head">
               <span>Income and spending, every {{ stepLabel }}</span>
               <v-btn-toggle v-model="flowsView" mandatory dense>
@@ -55,13 +39,13 @@
                 <chart-canvas type="bar" :data="flowsChart" :options="flowsOptions" :height="320" label="Wealth income and spending per production cycle, by category" />
                 <div class="caption text--secondary mt-2">Income above zero, spending below. The line is the net of each cycle.</div>
               </template>
-              <v-data-table v-else :headers="stepHeaders" :items="stepRows" item-key="time" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }" dense />
+              <v-data-table v-else :headers="stepHeaders" :items="stepRows" item-key="time" :sort-by.sync="stepsTable.sortBy" :sort-desc.sync="stepsTable.sortDesc" :items-per-page.sync="stepsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: stepPageSizes }" dense />
             </div>
           </v-card>
 
           <v-row>
             <v-col cols="12" lg="6">
-              <v-card class="panel" elevation="1">
+              <v-card class="panel" data-summary="Each source of income and each kind of spending as a yearly total and a share, to see what funds my empire and what costs most." elevation="1">
                 <div class="panel-head">
                   <span>Where it comes from and goes</span>
                   <v-chip small>Per year, last {{ coverageText }}</v-chip>
@@ -86,7 +70,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="6">
-              <v-card class="panel" elevation="1">
+              <v-card class="panel" data-summary="My treasury balance over the window, to see whether wealth is building up or draining away." elevation="1">
                 <div class="panel-head">
                   <span>Treasury</span>
                   <v-chip small>Estimated</v-chip>
@@ -109,20 +93,26 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const SECONDS_PER_DAY = 86400
 // The save keeps one year of wealth history; the cycle length when it holds a single step.
 const HISTORY_DAYS = 365
 const DEFAULT_STEP_DAYS = 5
+const WINDOW_DAYS = [30, 90, 180, 365]
+const FLOWS_VIEWS = ['chart', 'table']
+const STEP_PAGE_SIZES = [15, 30, -1]
 
 const INPUT_LABELS = {
   treasury: 'the treasury',
   wealth: 'the wealth history',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -140,13 +130,19 @@ const compact = (value) => {
 
 export default {
   name: 'FinancesPage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [
+    loadState(INPUT_LABELS),
+    persistedView({
+      windowDays: { key: 'financesWindowDays', default: 365 },
+      flowsView: { key: 'financesFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
+      stepsTable: tableView('financesStepsTable', { itemsPerPage: 15, itemsPerPageOptions: STEP_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      windowOptions: [30, 90, 180, 365],
-      windowDays: 365,
-      flowsView: 'chart',
-      loadErrors: {},
+      windowOptions: WINDOW_DAYS,
+      stepPageSizes: STEP_PAGE_SIZES,
     }
   },
   computed: {
@@ -162,16 +158,8 @@ export default {
       return chartTheme(this.$vuetify.theme.dark)
     },
 
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
     ready() {
-      return allLoaded(this.loadErrors, INPUTS) && !!this.treasury
+      return this.inputsLoaded && !!this.treasury
     },
 
     // Every logged cycle end, the one just before the year included.
@@ -181,7 +169,9 @@ export default {
 
     // The cycle lengths, measured from the history (the game's construction cycle can differ from 5 days, and phases can differ in length).
     gapDays() {
-      return this.times.slice(1).map((time, index) => (time - this.times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
+      const { times } = this
+
+      return times.slice(1).map((time, index) => (time - times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
     },
 
     stepDays() {
@@ -211,17 +201,19 @@ export default {
 
     // Where the first step's cycle began: the logged end before it, else the gap after it (the first cycle of a save), else the default.
     firstStart() {
-      if (!this.steps.length) {
+      const { steps, times } = this
+
+      if (!steps.length) {
         return null
       }
 
-      const before = this.times.filter((time) => time < this.steps[0]).pop()
+      const before = times.filter((time) => time < steps[0]).pop()
 
       if (before !== undefined) {
         return before
       }
 
-      return this.steps[0] - (this.steps.length > 1 ? this.steps[1] - this.steps[0] : DEFAULT_STEP_DAYS * SECONDS_PER_DAY)
+      return steps[0] - (steps.length > 1 ? steps[1] - steps[0] : DEFAULT_STEP_DAYS * SECONDS_PER_DAY)
     },
 
     // The time the steps actually span, so cycles of different lengths count for what they are.
@@ -240,6 +232,7 @@ export default {
     // Every use in the window, income first, in the game's display order, each with its colour.
     categories() {
       const byId = {}
+      const { perYear } = this
 
       this.windowRows.forEach((row) => {
         const category = (byId[row.UseID] = byId[row.UseID] || { id: row.UseID, label: row.Description, income: !!row.Income, order: row.DisplayOrder ?? 999, total: 0 })
@@ -255,7 +248,7 @@ export default {
       return sorted.map((category, index) => ({
         ...category,
         color: index < palette.length ? palette[index] : withAlpha(palette[index % palette.length], 0.55),
-        perYear: category.total * this.perYear,
+        perYear: category.total * perYear,
         share: category.total / ((category.income ? incomeTotal : spendingTotal) || 1),
         // Each bar is the category's share of its own side, so small spending still reads.
         barWidth: (category.total / ((category.income ? incomeTotal : spendingTotal) || 1)) * 100,
@@ -290,7 +283,10 @@ export default {
     },
 
     netByStep() {
-      return this.steps.map((time) => this.categories.reduce((sum, category) => sum + (category.income ? 1 : -1) * ((this.amountsByStep[time] || {})[category.id] || 0), 0))
+      // Read the computed inputs once; Vue otherwise collects the whole ledger's dependencies for every cycle and category.
+      const { steps, categories, amountsByStep } = this
+
+      return steps.map((time) => categories.reduce((sum, category) => sum + (category.income ? 1 : -1) * ((amountsByStep[time] || {})[category.id] || 0), 0))
     },
 
     stepDates() {
@@ -333,11 +329,12 @@ export default {
     },
 
     flowsChart() {
-      const datasets = this.categories.map((category) => ({
+      const { categories, steps, amountsByStep, theme } = this
+      const datasets = categories.map((category) => ({
         label: category.label,
-        data: this.steps.map((time) => (category.income ? 1 : -1) * ((this.amountsByStep[time] || {})[category.id] || 0)),
+        data: steps.map((time) => (category.income ? 1 : -1) * ((amountsByStep[time] || {})[category.id] || 0)),
         backgroundColor: category.color,
-        borderColor: this.theme.surface,
+        borderColor: theme.surface,
         borderWidth: { left: 0, right: 0, top: 1, bottom: 1 },
         borderSkipped: false,
         stack: 'wealth',
@@ -437,22 +434,17 @@ export default {
     },
 
     stepRows() {
-      return this.steps.map((time, index) => ({
+      const { steps, stepDates, categories, amountsByStep, netByStep } = this
+
+      return steps.map((time, index) => ({
         time,
-        date: this.stepDates[index],
-        ...Object.fromEntries(this.categories.map((category) => [`use${category.id}`, this.money(((this.amountsByStep[time] || {})[category.id] || 0) * (category.income ? 1 : -1))])),
-        net: this.signed(this.netByStep[index]),
+        date: stepDates[index],
+        ...Object.fromEntries(categories.map((category) => [`use${category.id}`, this.money(((amountsByStep[time] || {})[category.id] || 0) * (category.income ? 1 : -1))])),
+        net: this.signed(netByStep[index]),
       })).reverse()
     },
   },
-  created() {
-    this.windowDays = this.config.get('financesWindowDays', 365)
-  },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
-
     money(value) {
       return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
     },
@@ -480,17 +472,14 @@ export default {
       }),
       default: null,
     },
-    // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the
-    // window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign.
-    // The game's time is a scalar subquery of its own: reading it from the outer `FCT_Game` join made the cycle lookup re-run for every ledger
-    // row (over two minutes at 50 000 rows, against 0.1 s now), and the stalled read held the connection for every page.
+    // The last year of wealth flows, one row per use and cycle, plus the cycle just before it (its end is where the first cycle began; the window filter drops it). `Amount` is always positive; the use's `Income` flag gives the sign. The game's time is a scalar subquery of its own: reading it from the outer `FCT_Game` join made the cycle lookup re-run for every ledger row (over two minutes at 50 000 rows, against 0.1 s now), and the stalled read held the connection for every page.
     wealth: {
       get: tracked('wealth', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => items)
+        return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, coalesce(DIM_WealthUse.Income, 0) as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, sum(FCT_WealthData.Amount) as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -500,48 +489,8 @@ export default {
 
 <style lang="scss">
 .finances-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
   .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
     margin-bottom: 8px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

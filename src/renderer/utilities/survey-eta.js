@@ -1,9 +1,4 @@
-// Days to finish a system's gravitational and geological survey work with the fleets in it.
-// A fleet follows one order at a time, so a fleet with both sensors surveys one kind of target
-// at a time: its time is split between the two. Fleets with one sensor work their own track in
-// parallel. The time is the shortest one over every way of splitting the dual fleets' time, which
-// is found by giving them to the gravitational track in order of how much better they are at it.
-// Returns 0 with no work, null when some work has no fleet able to do it.
+// Days to finish a system's gravitational and geological survey work with the fleets in it. A fleet follows one order at a time, so a fleet with both sensors surveys one kind of target at a time: its time is split between the two. Fleets with one sensor work their own track in parallel. The time is the shortest one over every way of splitting the dual fleets' time, which is found by giving them to the gravitational track in order of how much better they are at it. Returns 0 with no work, null when some work has no fleet able to do it.
 export const surveyDays = (gravPoints, geoPoints, fleets) => {
   if (!gravPoints && !geoPoints) {
     return 0

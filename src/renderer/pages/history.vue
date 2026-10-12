@@ -13,7 +13,7 @@
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
         </v-col>
         <v-col cols="auto">
-          <v-btn-toggle :value="span" mandatory dense class="mr-2" @change="setSpan">
+          <v-btn-toggle v-model="span" mandatory dense class="mr-2">
             <v-btn v-for="option in spanOptions" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>
           </v-btn-toggle>
           <v-btn-toggle v-model="view" mandatory dense>
@@ -37,21 +37,13 @@
       </v-alert>
 
       <template v-else>
-        <v-row class="mt-1">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">{{ tile.value }}</div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-1" />
 
         <v-alert v-if="allSnapshots.length === 1" type="info" outlined dense class="mt-4">
           History starts here. Charts fill in as Aurora saves: each save while the app is open adds a point.
         </v-alert>
 
-        <v-card v-if="view === 'charts' && rivals" class="panel" elevation="1">
+        <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time, to see who is ahead of me and who is catching up." elevation="1">
           <div class="panel-head">
             <span>Rivals <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
@@ -59,7 +51,7 @@
             </span>
           </div>
           <div class="panel-body">
-            <v-btn-toggle :value="rivalMetric" mandatory dense class="mb-2 flex-wrap" @change="setRivalMetric">
+            <v-btn-toggle v-model="rivalMetric" mandatory dense class="mb-2 flex-wrap">
               <v-btn v-for="metric in rivalMetrics" :key="metric.value" :value="metric.value" small>{{ metric.text }}</v-btn>
             </v-btn-toggle>
             <chart-canvas type="line" :data="rivals.data" :options="rivals.options" :height="280" label="Rivals" />
@@ -68,7 +60,7 @@
 
         <v-row v-if="view === 'charts'">
           <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="6">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" :data-summary="chart.summary" elevation="1">
               <div class="panel-head">
                 <span>{{ chart.title }}</span>
                 <span class="legend">
@@ -88,7 +80,7 @@
         </v-row>
 
         <v-card v-else class="panel" elevation="1">
-          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :items-per-page="25" :footer-props="{ itemsPerPageOptions: [25, 100, -1] }" dense />
+          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :sort-by.sync="historyTable.sortBy" :sort-desc.sync="historyTable.sortDesc" :items-per-page.sync="historyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: historyPageSizes }" dense />
         </v-card>
       </template>
 
@@ -112,6 +104,8 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import StatTiles from '../components/page/StatTiles.vue'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
 import { historyConfig } from '../utilities/history'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -120,6 +114,7 @@ import { MINERALS } from '../utilities/minerals'
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
 const SPAN_OPTIONS = [10, 20, 50].map((years) => ({ value: years, text: `${years} y`, title: `The last ${years} years` })).concat({ value: 0, text: 'All', title: 'Every snapshot' })
+const HISTORY_PAGE_SIZES = [25, 100, -1]
 // Installation types charted when the player hasn't picked any: the largest by count.
 const DEFAULT_INSTALLATIONS = 5
 
@@ -151,18 +146,26 @@ const RIVAL_METRICS = [
   { value: 'wealth', text: 'Treasury', pick: (snapshot) => snapshot.wealth, format: compact },
 ]
 
+const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
+
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, StatTiles },
+  mixins: [
+    persistedView({
+      view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
+      historyTable: tableView('historyTable', { itemsPerPage: 25, itemsPerPageOptions: HISTORY_PAGE_SIZES }),
+      mineralIds: { key: 'historyMinerals', default: [1, 2, 11] },
+      installationIds: { key: 'historyInstallations', default: null, scope: 'race' },
+      rivalMetric: { key: 'historyRivalsMetric', default: 'population', valid: oneOf(RIVAL_METRIC_VALUES) },
+      span: { key: 'historySpan', default: 0, valid: oneOf(SPAN_OPTIONS.map((option) => option.value)) },
+    }),
+  ],
   data() {
     return {
-      view: 'charts',
       confirmClear: false,
-      mineralIds: [1, 2, 11],
-      installationIds: null,
-      rivalMetric: 'population',
+      historyPageSizes: HISTORY_PAGE_SIZES,
       rivalMetrics: RIVAL_METRICS,
-      span: 0,
       spanOptions: SPAN_OPTIONS,
       // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
       spyNPR: false,
@@ -273,30 +276,35 @@ export default {
         {
           key: 'population',
           title: 'Population',
+          summary: 'How my population and number of colonies have grown over the years, to show whether my expansion keeps pace.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
           options: this.options({ y: people, y1: (value) => `${value}` }),
         },
         {
           key: 'wealth',
           title: 'Wealth',
+          summary: 'My treasury and annual income over time, to show whether I am saving, spending or running short.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
           options: this.options({ y: compact, y1: compact }),
         },
         {
           key: 'fleet',
           title: 'Fleet tonnage',
+          summary: 'The military and commercial tonnage I have fielded over time, to show how my fleet has grown or shrunk.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
           options: this.options({ y: (value) => `${compact(value)} t` }),
         },
         {
           key: 'research',
           title: 'Research and exploration',
+          summary: 'My research output and the number of systems I know of over time, to show how fast I advance and explore.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           options: this.options({ y: compact, y1: (value) => `${value}` }),
         },
         {
           key: 'minerals',
           title: 'Mineral stockpiles',
+          summary: 'Stockpiles of the minerals I pick, over time, to spot shortages or surpluses before they hold up production.',
           picker: { model: this.mineralIds, options: MINERALS.map((mineral) => ({ value: mineral.id, text: mineral.name })), change: this.setMinerals },
           data: { datasets: this.mineralIds.map((id, index) => line(MINERALS.find((mineral) => mineral.id === id).name, this.snapshots.map((snapshot) => (snapshot.minerals || [])[id - 1] || 0), index)) },
           options: this.options({ y: (value) => `${compact(value)} t` }),
@@ -304,6 +312,7 @@ export default {
         {
           key: 'installations',
           title: 'Installations',
+          summary: 'How many installations of the types I pick I have built over time, to track my industrial growth.',
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
           data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => (snapshot.installations || {})[id] || 0), index)) },
           options: this.options({ y: compact }),
@@ -311,6 +320,7 @@ export default {
         {
           key: 'logistics',
           title: 'Fuel and maintenance supplies',
+          summary: 'My fuel and maintenance supply stocks over time, to show whether my fleets can keep operating.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),
         },
@@ -374,17 +384,6 @@ export default {
       }))
     },
   },
-  watch: {
-    RaceID: {
-      immediate: true,
-      handler() {
-        this.mineralIds = this.config.get('historyMinerals', [1, 2, 11])
-        this.rivalMetric = this.config.get('historyRivalsMetric', 'population')
-        this.installationIds = this.config.get(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, null)
-        this.span = this.config.get('historySpan', 0)
-      },
-    },
-  },
   created() {
     this.spyNPR = this.config.get('spyNPR', false)
   },
@@ -422,19 +421,9 @@ export default {
     },
     setMinerals(ids) {
       this.mineralIds = ids
-      this.config.set('historyMinerals', ids)
     },
     setInstallations(ids) {
       this.installationIds = ids
-      this.config.set(`game.${this.GameID}.race.${this.RaceID}.historyInstallations`, ids)
-    },
-    setRivalMetric(value) {
-      this.rivalMetric = value
-      this.config.set('historyRivalsMetric', value)
-    },
-    setSpan(value) {
-      this.span = value
-      this.config.set('historySpan', value)
     },
     // Remove this race from the game's history file; other races keep theirs.
     clearHistory() {
@@ -483,49 +472,6 @@ export default {
 
 <style lang="scss">
 .history-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .swatch {
     display: inline-block;
     width: 12px;

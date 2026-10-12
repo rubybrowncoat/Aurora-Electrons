@@ -5,8 +5,7 @@ import router from './router'
 
 Vue.use(Vuex)
 
-// store/index.js is the root module, and every other file in store/ a namespaced module named after it. Each exports
-// `state` (a function), and whichever of `getters`, `mutations` and `actions` it has.
+// store/index.js is the root module, and every other file in store/ a namespaced module named after it. Each exports `state` (a function), and whichever of `getters`, `mutations` and `actions` it has.
 const root = {}
 const modules = {}
 

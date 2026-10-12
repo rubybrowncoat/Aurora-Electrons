@@ -3,38 +3,22 @@
     <v-container fluid class="logistics-page">
       <v-row dense align="center" class="mb-1">
         <v-col cols="auto" class="d-flex align-center mr-4">
-          <v-btn-toggle v-model="view" mandatory dense @change="(value) => config.set('logisticsView', value)">
+          <v-btn-toggle v-model="view" mandatory dense>
             <v-btn value="fuel" small><v-icon small left>mdi-gas-station</v-icon>Fuel</v-btn>
             <v-btn value="maintenance" small><v-icon small left>mdi-wrench</v-icon>Maintenance supplies</v-btn>
           </v-btn-toggle>
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" class="mt-3" @retry="retryFailedInputs" />
 
       <template v-if="ready">
-        <v-row class="mt-2">
-          <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-            <v-card class="stat-tile" elevation="1">
-              <div class="caption text--secondary">{{ tile.label }}</div>
-              <div class="stat-value">
-                <v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon>{{ tile.value }}
-              </div>
-              <div class="caption text--secondary">{{ tile.note }}</div>
-            </v-card>
-          </v-col>
-        </v-row>
+        <stat-tiles :tiles="tiles" class="mt-2" />
 
         <template v-if="view === 'fuel'">
           <v-row>
             <v-col cols="12" lg="5">
-              <v-card class="panel" elevation="1">
+              <v-card class="panel" data-summary="The fuel my refineries and harvesters make each year set against what my ships burn. Use it to see whether my supply keeps up with demand." elevation="1">
                 <div class="panel-head"><span>Fuel balance per year</span></div>
                 <div class="panel-body">
                   <div v-for="group in fuelBalance" :key="group.label" class="balance-group">
@@ -55,7 +39,7 @@
               </v-card>
             </v-col>
             <v-col cols="12" lg="7">
-              <v-card class="panel" elevation="1">
+              <v-card class="panel" data-summary="Estimated yearly fuel burn for each ship class, two ways. Use it to find the classes that drain my fuel the most." elevation="1">
                 <div class="panel-head">
                   <span>Burn by class</span>
                   <span class="legend">
@@ -71,15 +55,15 @@
             </v-col>
           </v-row>
 
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each of my colonies. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
             <div class="panel-head">
               <span>Colony fuel and refineries</span>
               <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining</v-chip>
             </div>
-            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refinerySortBy" :sort-desc.sync="refinerySortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refineriesTable.sortBy" :sort-desc.sync="refineriesTable.sortDesc" :items-per-page.sync="refineriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.PopName }}</div>
+                  <div class="font-weight-medium">{{ item.PopName }}<page-link :to="colonyLink(item.PopulationID)" :name="item.PopName" class="ml-1" /></div>
                   <div class="caption text--secondary">{{ item.place }}</div>
                 </div>
               </template>
@@ -110,12 +94,12 @@
             </div>
           </v-card>
 
-          <v-card v-if="harvesterRows.length" class="panel" elevation="1">
+          <v-card v-if="harvesterRows.length" class="panel" data-summary="My fuel harvester ships, with what each makes a year and how long its deposit will last. Use it to judge which harvesters are worth keeping where they are." elevation="1">
             <div class="panel-head">
               <span>Sorium harvesters</span>
               <v-chip small>Estimate</v-chip>
             </div>
-            <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="harvesterHeaders" :items="harvesterRows" item-key="ShipID" :sort-by.sync="harvestersTable.sortBy" :sort-desc.sync="harvestersTable.sortDesc" :items-per-page.sync="harvestersTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.ShipName`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.ShipName }}</div>
@@ -138,15 +122,15 @@
         </template>
 
         <template v-else>
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="The colonies where my ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
             <div class="panel-head">
               <span>Maintenance locations</span>
-              <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" @change="(value) => config.set('logisticsShowIdleLocations', !!value)" />
+              <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
-            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationSortBy" :sort-desc.sync="locationSortDesc" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 30, -1] }">
+            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
-                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div class="font-weight-medium">{{ item.name }}<page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
                   <div class="caption text--secondary">{{ item.place }}</div>
                 </div>
               </template>
@@ -190,17 +174,19 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using
-              {{ mspMineralsText }}.
+              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}.
             </div>
           </v-card>
 
-          <v-card v-if="supplyFleets.length" class="panel" elevation="1">
+          <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships of mine carrying maintenance supplies, with how much each holds. Use it to see how much spare stock I could send to a colony in need." elevation="1">
             <div class="panel-head">
               <span>Supply ships</span>
               <v-chip small>{{ count(supplyFleets.reduce((sum, fleet) => sum + fleet.SupplyMSP, 0)) }} MSP above their minimums</v-chip>
             </div>
-            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" disable-pagination hide-default-footer dense>
+            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" :sort-by.sync="supplyTable.sortBy" :sort-desc.sync="supplyTable.sortDesc" disable-pagination hide-default-footer dense>
+              <template #[`item.FleetName`]="{ item }">
+                <span>{{ item.FleetName }}</span><page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" />
+              </template>
               <template #[`item.SupplyMSP`]="{ item }">{{ count(item.SupplyMSP) }}</template>
             </v-data-table>
           </v-card>
@@ -215,9 +201,16 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import PageLink from '../components/page/PageLink.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { populationName, systemBodyName } from '../utilities/aurora'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { linkTo, place as placeKey } from '../utilities/deep-links'
+import { tracked } from '../utilities/load-tracking'
 import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterIdleReason, harvesterOutput, maintenanceLocations, refineryOutput } from '../utilities/logistics'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { navalAdminChainBonus } from '../utilities/minerals'
@@ -232,25 +225,32 @@ const INPUT_LABELS = {
   navalAdmins: 'naval admin commands',
   populationProductionModifiers: 'production modifiers',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
+const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
+const PAGE_SIZES = [15, 30, -1]
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas },
-  mixins: [productionModifiers],
+  components: { ChartCanvas, LoadState, PageLink, StatTiles },
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    productionModifiers,
+    persistedView({
+      view: { key: 'logisticsView', default: 'fuel', valid: oneOf(Object.keys(VIEW_NAMES)) },
+      showIdleLocations: { key: 'logisticsShowIdleLocations', default: false },
+      refineriesTable: tableView('logisticsRefineriesTable', { sortBy: ['FuelStockpile'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      harvestersTable: tableView('logisticsHarvestersTable', { itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      supplyTable: tableView('logisticsSupplyTable', {}),
+    }),
+  ],
   data() {
     return {
-      view: 'fuel',
-      showIdleLocations: false,
-      refinerySortBy: ['FuelStockpile'],
-      refinerySortDesc: [true],
-      locationSortBy: ['runwaySort'],
-      locationSortDesc: [false],
-      loadErrors: {},
+      pageSizes: PAGE_SIZES,
     }
   },
   computed: {
@@ -264,18 +264,6 @@ export default {
 
     theme() {
       return chartTheme(this.$vuetify.theme.dark)
-    },
-
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
     },
 
     raceFuelProduction() {
@@ -418,6 +406,7 @@ export default {
 
         return {
           ...location,
+          PopulationID: main ? main.PopulationID : null,
           name: main ? main.PopName : fleets.length ? fleets.map((fleet) => fleet.FleetName).slice(0, 2).join(', ') : location.fleets[0].FleetName,
           place: main ? this.place(main) : `${location.fleets[0].SystemName || 'Unknown system'}, deep space`,
           belowWarning: location.warningLevel > 0 && location.stock < location.warningLevel,
@@ -534,14 +523,28 @@ export default {
         { text: 'MSP above minimum', value: 'SupplyMSP', align: 'end' },
       ]
     },
-  },
-  created() {
-    this.view = this.config.get('logisticsView', 'fuel')
-    this.showIdleLocations = this.config.get('logisticsShowIdleLocations', false)
+
+    linkQuery() {
+      return linkTo.logistics(this.view).query
+    },
+
+    linkLabel() {
+      return VIEW_NAMES[this.view]
+    },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
+    applyLink(query) {
+      const view = [].concat(query.view)[0]
+
+      this.setUnsaved('view', Object.keys(VIEW_NAMES).includes(view) ? view : 'fuel')
+    },
+
+    colonyLink(populationId) {
+      return linkTo.colonyOutlook(populationId)
+    },
+
+    fleetRoutesLink(fleetId) {
+      return linkTo.routes({ from: placeKey.fleet(fleetId) })
     },
 
     modifierOf(populationId) {
@@ -583,20 +586,32 @@ export default {
     },
   },
   asyncComputed: {
-    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or
-    // refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility.
+    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility. Count deposits together: three correlated counts would scan the mineral table three times for every colony.
     colonies: {
       get: tracked('colonies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.MaterialID = 1 and FCT_MineralDeposit.Amount > 0) as DepositDuranium, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.MaterialID = 9 and FCT_MineralDeposit.Amount > 0) as DepositUridium, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.MaterialID = 11 and FCT_MineralDeposit.Amount > 0) as DepositGallicite, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities, coalesce(VIR_Installations.Refineries, 0) as Refineries, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries, sum(DIM_PlanetaryInstallation.MiningProductionValue * FCT_PopulationInstallations.Amount) as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite,
+          coalesce(VIR_Deposits.DepositDuranium, 0) as DepositDuranium,
+          coalesce(VIR_Deposits.DepositUridium, 0) as DepositUridium,
+          coalesce(VIR_Deposits.DepositGallicite, 0) as DepositGallicite,
+          coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities, coalesce(VIR_Installations.Refineries, 0) as Refineries, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
+          left join (
+            select SystemBodyID,
+              sum(case when MaterialID = 1 then 1 else 0 end) as DepositDuranium,
+              sum(case when MaterialID = 9 then 1 else 0 end) as DepositUridium,
+              sum(case when MaterialID = 11 then 1 else 0 end) as DepositGallicite
+            from FCT_MineralDeposit
+            where GameID = ${this.GameID} and MaterialID in (1, 9, 11) and Amount > 0
+            group by SystemBodyID
+          ) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_Population.SystemBodyID
+          left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries, sum(DIM_PlanetaryInstallation.MiningProductionValue * FCT_PopulationInstallations.Amount) as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },
-    // Per fleet: what its ships need maintained (military classes not in a military hangar), the
-    // maintenance modules aboard (scaled by crew), and supply ships' MSP above their minimums.
+    // Per fleet: what its ships need maintained (military classes not in a military hangar), the maintenance modules aboard (scaled by crew), and supply ships' MSP above their minimums.
     fleets: {
       get: tracked('fleets', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -618,9 +633,7 @@ export default {
       }),
       default: [],
     },
-    // Per class with engines and tanks (docked craft aside): ships moving in the last increment,
-    // and the sum of each ship's lifetime duty cycle (distance / (age x top speed), age at least
-    // a quarter year).
+    // Per class with engines and tanks (docked craft aside): ships moving in the last increment, and the sum of each ship's lifetime duty cycle (distance / (age x top speed), age at least a quarter year).
     burn: {
       get: tracked('burn', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -658,53 +671,6 @@ export default {
 
 <style lang="scss">
 .logistics-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .panel-foot {
-    padding: 12px 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
-  }
-
   .swatch {
     display: inline-block;
     width: 12px;

@@ -1,9 +1,5 @@
 /*
-  The app reads the save through sqlite3's native binary, which has to ship inside the package.
-  Without it the database never opens. A tool that replaces the file while a process has it loaded
-  (npm, node-gyp or electron-builder's rebuild, through node-tar) leaves it missing, renamed to
-  node_sqlite3.node.DELETE.<hash>, and nothing about the build says so. These checks make the build
-  say so: one before anything is built, one on every package it produced.
+  The app reads the save through sqlite3's native binary, which has to ship inside the package. Without it the database never opens. A tool that replaces the file while a process has it loaded (npm, node-gyp or electron-builder's rebuild, through node-tar) leaves it missing, renamed to node_sqlite3.node.DELETE.<hash>, and nothing about the build says so. These checks make the build say so: one before anything is built, one on every package it produced.
  */
 const fs = require('fs')
 const path = require('path')
@@ -40,16 +36,10 @@ const checkInstalled = (projectRoot) => {
 
 const subfolders = (folder) => fs.existsSync(folder) ? fs.readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(folder, entry.name)) : []
 
-// The package outputs electron-builder leaves under `buildDir`: win-unpacked, linux-unpacked and their per-arch
-// variants at the top level, and the .app bundles inside mac, mac-arm64, mac-universal and mas*. Each is paired with
-// the folder its app files live in.
+// The package outputs electron-builder leaves under `buildDir`: win-unpacked, linux-unpacked and their per-arch variants at the top level, and the .app bundles inside mac, mac-arm64, mac-universal and mas*. Each is paired with the folder its app files live in.
 const findPackages = (buildDir) => {
   const unpacked = subfolders(buildDir).filter((folder) => path.basename(folder).endsWith('-unpacked')).map((folder) => ({ folder, resources: path.join(folder, 'resources') }))
-  const bundles = subfolders(buildDir)
-    .filter((folder) => /^(mac|mas)/.test(path.basename(folder)))
-    .flatMap(subfolders)
-    .filter((folder) => folder.endsWith('.app'))
-    .map((folder) => ({ folder, resources: path.join(folder, 'Contents', 'Resources') }))
+  const bundles = subfolders(buildDir).filter((folder) => /^(mac|mas)/.test(path.basename(folder))).flatMap(subfolders).filter((folder) => folder.endsWith('.app')).map((folder) => ({ folder, resources: path.join(folder, 'Contents', 'Resources') }))
 
   return [...unpacked, ...bundles]
 }

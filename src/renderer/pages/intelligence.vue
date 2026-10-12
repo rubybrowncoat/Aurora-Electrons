@@ -7,13 +7,7 @@
     </v-container>
 
     <v-container v-else fluid class="intelligence-page">
-      <v-alert v-if="failedInputs.length" type="error" outlined dense>
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate />
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
         <v-alert v-if="!rows.length" type="info" outlined dense>
@@ -25,21 +19,13 @@
             Only what this race has observed: tracked ships aren't the alien fleet, and a colony's details show once intelligence on it is high enough. History is recorded each time Aurora saves while the app is open, when something has changed.
           </div>
 
-          <v-row>
-            <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
-              <v-card class="stat-tile" elevation="1">
-                <div class="caption text--secondary">{{ tile.label }}</div>
-                <div class="stat-value">{{ tile.value }}</div>
-                <div class="caption text--secondary">{{ tile.note }}</div>
-              </v-card>
-            </v-col>
-          </v-row>
+          <stat-tiles :tiles="tiles" />
 
-          <v-card class="panel" elevation="1">
+          <v-card class="panel" data-summary="Every alien race I have met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
             <div class="panel-head">
               <span>Known races</span>
             </div>
-            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :items-per-page="15" :footer-props="{ itemsPerPageOptions: [15, 50, -1] }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
+            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
               <template #[`item.AlienRaceName`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.AlienRaceName }}</div>
@@ -67,7 +53,7 @@
           </v-card>
 
           <template v-if="selected">
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="The selected race's status, and what I have learned about it so far." elevation="1">
               <div class="panel-head">
                 <span>
                   {{ selected.AlienRaceName }}
@@ -88,7 +74,7 @@
 
             <v-row>
               <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="4">
-                <v-card class="panel chart-panel" elevation="1">
+                <v-card class="panel chart-panel" :data-summary="chart.summary" elevation="1">
                   <div class="panel-head">
                     <span>{{ chart.title }}</span>
                     <span class="legend">
@@ -103,7 +89,7 @@
               </v-col>
             </v-row>
 
-            <v-card class="panel" elevation="1">
+            <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species I have observed for the selected race. Switch views to see each kind." elevation="1">
               <div class="panel-head">
                 <span>Observed</span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
@@ -116,7 +102,7 @@
               </div>
 
               <template v-if="detailView === 'classes'">
-                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.ClassName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.ClassName }}</div>
@@ -135,7 +121,7 @@
               </template>
 
               <template v-else-if="detailView === 'colonies'">
-                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :sort-by.sync="populationsTable.sortBy" :sort-desc.sync="populationsTable.sortDesc" :items-per-page.sync="populationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.PopulationName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.PopulationName }}</div>
@@ -160,7 +146,7 @@
               </template>
 
               <template v-else-if="detailView === 'sensors'">
-                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :sort-by.sync="sensorsTable.sortBy" :sort-desc.sync="sensorsTable.sortDesc" :items-per-page.sync="sensorsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.Range`]="{ item }">
                     <span v-if="item.IntelligencePoints > 100">{{ count(item.Range / 1e6, 1) }} M km, resolution {{ count(item.Resolution) }}</span>
                     <span v-else class="text--disabled">unknown until 100 points</span>
@@ -171,7 +157,7 @@
               </template>
 
               <template v-else-if="detailView === 'ground'">
-                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :items-per-page="15" dense>
+                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" :items-per-page.sync="groundTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template v-for="counter in GROUND_COUNTERS" #[`item.${counter.value}`]="{ item }">
                     <span :key="counter.value" :class="{ 'text--disabled': item[counter.value] < GROUND_THRESHOLD }">{{ count(item[counter.value]) }}<span v-if="item[counter.value] < GROUND_THRESHOLD"> / {{ GROUND_THRESHOLD }}</span></span>
                   </template>
@@ -183,7 +169,7 @@
               <div v-else class="panel-body">
                 <div class="caption text--secondary mb-1">Systems where they've been seen</div>
                 <div class="mb-3">
-                  <v-chip v-for="system in selectedSystems" :key="system.SystemID" small outlined class="mr-1 mb-1">{{ system.Name || `System ${system.SystemID}` }}</v-chip>
+                  <v-chip v-for="system in selectedSystems" :key="system.SystemID" small outlined class="mr-1 mb-1" :to="linkTo.map(system.SystemID)">{{ system.Name || `System ${system.SystemID}` }}</v-chip>
                   <span v-if="!selectedSystems.length" class="caption text--secondary">None.</span>
                 </div>
                 <div class="caption text--secondary mb-1">Species</div>
@@ -205,10 +191,16 @@ import { mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import LoadState from '../components/page/LoadState.vue'
+import StatTiles from '../components/page/StatTiles.vue'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { gameTime } from '../utilities/aurora'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { historyConfig } from '../utilities/history'
 import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, COMM_STATUS, DIPLOMACY_LINES, ENGINE_TYPES, POPULATION_LEVELS, REWARD_COST, SPECIES_STATUS, alienRacesSql, contactStatus, intelSnapshot, populationField, populationLevel, rebuildFleet, rewardAttempts, standing, treatyNames } from '../utilities/intelligence'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 
 const SECONDS_PER_YEAR = 31536000
@@ -223,7 +215,6 @@ const INPUT_LABELS = {
   systems: 'the systems they were seen in',
   species: 'the known species',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 // Colony columns, each shown once intelligence has unlocked it.
 const POPULATION_FIELDS = [
@@ -247,6 +238,10 @@ const GROUND_COUNTERS = [
   { text: 'Kills seen (hit points)', value: 'Destroyed' },
 ]
 
+const DETAIL_VIEWS = ['classes', 'colonies', 'sensors', 'ground', 'places']
+const RACE_PAGE_SIZES = [15, 50, -1]
+const DETAIL_PAGE_SIZES = [5, 10, 15, -1]
+
 const compact = (value) => {
   const size = Math.abs(value)
 
@@ -263,15 +258,29 @@ const compact = (value) => {
 
 export default {
   name: 'IntelligencePage',
-  components: { ChartCanvas },
+  components: { ChartCanvas, LoadState, StatTiles },
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      detailView: { key: 'intelligenceDetailView', default: 'classes', valid: oneOf(DETAIL_VIEWS) },
+      savedAlien: { key: 'intelligenceAlien', default: null, scope: 'race' },
+      racesTable: tableView('intelligenceRacesTable', { itemsPerPage: 15, itemsPerPageOptions: RACE_PAGE_SIZES }),
+      classesTable: tableView('intelligenceClassesTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      populationsTable: tableView('intelligencePopulationsTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      sensorsTable: tableView('intelligenceSensorsTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+      groundTable: tableView('intelligenceGroundTable', { itemsPerPage: 15, itemsPerPageOptions: DETAIL_PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
       selectedId: null,
-      detailView: 'classes',
-      loadErrors: {},
+      racePageSizes: RACE_PAGE_SIZES,
+      detailPageSizes: DETAIL_PAGE_SIZES,
       POPULATION_FIELDS,
       GROUND_COUNTERS,
       GROUND_THRESHOLD,
+      linkTo,
     }
   },
   computed: {
@@ -287,18 +296,6 @@ export default {
       return chartTheme(this.$vuetify.theme.dark)
     },
 
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
-    },
-
     rows() {
       return this.races.map((race) => ({
         ...race,
@@ -310,6 +307,14 @@ export default {
 
     selected() {
       return this.rows.find((row) => row.AlienRaceID === this.selectedId) || null
+    },
+
+    linkQuery() {
+      return linkTo.intelligence(this.selectedId).query
+    },
+
+    linkLabel() {
+      return this.selected && this.selected.AlienRaceName
     },
 
     // What the recorder has kept for this race's view of the selected alien race, re-read when it writes.
@@ -368,10 +373,10 @@ export default {
         { label: 'Last ship contact', value: race.LastContact ? this.date(race.LastContact) : 'None' },
         { label: 'Diplomatic points', value: `${this.count(race.DiplomaticPoints)} (${race.standing.toLowerCase()})` },
         { label: 'Communication', value: race.CommEstablished > 0 ? `${race.communication} on ${this.date(race.CommEstablished)}` : race.communication },
-        { label: 'You grant', value: granted.length ? granted.join(', ') : 'No treaties' },
+        { label: 'I grant', value: granted.length ? granted.join(', ') : 'No treaties' },
         { label: 'They grant', value: received.length ? received.join(', ') : 'No treaties' },
         { label: 'Race intelligence', value: `${this.count(race.AlienRaceIntelligencePoints, 1)} points; a discovery each time it passes ${REWARD_COST}` },
-        { label: 'Damage they have done to you', value: this.count(race.DamageCausedByAlienRace) },
+        { label: 'Damage they have done to me', value: this.count(race.DamageCausedByAlienRace) },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
@@ -401,8 +406,7 @@ export default {
       const fleet = rebuildFleet(this.selectedShips, this.selected.Now)
       const translating = timeline.some((snapshot) => snapshot.comm === ATTEMPTING_COMMUNICATION)
       const intelDatasets = [line('Race intelligence', at('intel'), 0)]
-      // Diplomacy's axis reaches the nearest treaty or status line on each side, so where the race
-      // stands relative to them shows even with one point.
+      // Diplomacy's axis reaches the nearest treaty or status line on each side, so where the race stands relative to them shows even with one point.
       const points = timeline.map((snapshot) => snapshot.points)
       const lineAbove = DIPLOMACY_LINES.find((entry) => entry.y >= Math.max(...points))
       const lineBelow = DIPLOMACY_LINES.slice().reverse().find((entry) => entry.y <= Math.min(...points))
@@ -415,6 +419,7 @@ export default {
         {
           key: 'diplomacy',
           title: 'Diplomatic points',
+          summary: 'How the diplomatic points of the selected race have moved over time, against the levels where treaties and statuses change.',
           note: `${recordedNote} Dashed lines are where treaties and statuses change.`,
           data: { datasets: [line('Diplomatic points', at('points'), 0)] },
           options: this.options({ y: (value) => this.count(value) }, { levels: DIPLOMACY_LINES }, { suggestedMax: lineAbove ? lineAbove.y : undefined, suggestedMin: lineBelow ? lineBelow.y : undefined }),
@@ -422,6 +427,7 @@ export default {
         {
           key: 'fleet',
           title: 'Ships tracked',
+          summary: 'How many ships of the selected race I have tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
           note: fleet.length ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'No ships tracked.',
           data: {
             datasets: [
@@ -435,6 +441,7 @@ export default {
         {
           key: 'intelligence',
           title: translating ? 'Intelligence and translation' : 'Race intelligence',
+          summary: 'The intelligence points I have gathered on the selected race over time, with translation progress while contact is being attempted.',
           note: `${recordedNote} Marks show where points were spent on a discovery.`,
           data: { datasets: intelDatasets },
           options: this.options({ y: (value) => this.count(value), y1: translating ? (value) => this.count(value) : null }, { markers: rewardAttempts(timeline).map((t) => ({ x: this.year(t), label: 'Discovery' })) }, { min: 0, suggestedMax: REWARD_COST, ticks: { precision: 0 } }),
@@ -542,24 +549,29 @@ export default {
   },
   watch: {
     rows() {
-      if (!this.selected && this.rows.length) {
-        const saved = this.config.get(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, null)
-        const fallback = this.rows.slice().sort((a, b) => (b.KnownShips + b.DestroyedShips) - (a.KnownShips + a.DestroyedShips))[0]
-
-        this.selectedId = this.rows.some((row) => row.AlienRaceID === saved) ? saved : fallback.AlienRaceID
-      }
+      this.selectDefault()
     },
     RaceID() {
       this.selectedId = null
     },
   },
   methods: {
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
+    applyLink(query) {
+      this.selectedId = queryId(query.race)
+      this.selectDefault()
+    },
+    // The race kept for this race's view, else the one with the most ships seen, when none is selected.
+    selectDefault() {
+      if (!this.selected && this.rows.length) {
+        const saved = this.savedAlien
+        const fallback = this.rows.slice().sort((a, b) => (b.KnownShips + b.DestroyedShips) - (a.KnownShips + a.DestroyedShips))[0]
+
+        this.selectedId = this.rows.some((row) => row.AlienRaceID === saved) ? saved : fallback.AlienRaceID
+      }
     },
     select(AlienRaceID) {
       this.selectedId = AlienRaceID
-      this.config.set(`game.${this.GameID}.race.${this.RaceID}.intelligenceAlien`, AlienRaceID)
+      this.savedAlien = AlienRaceID
     },
     count(value, decimals = 0) {
       return separatedNumber(roundToDecimal(value || 0, decimals), this.separator)
@@ -705,51 +717,8 @@ export default {
 
 <style lang="scss">
 .intelligence-page {
-  .stat-tile {
-    padding: 16px;
-    height: 100%;
-  }
-
-  .stat-value {
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 400;
-    margin: 4px 0;
-  }
-
-  .panel {
-    margin-top: 20px;
-  }
-
   .chart-panel {
     height: calc(100% - 20px);
-  }
-
-  .panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 24px;
-    font-size: 16px;
-    line-height: 28px;
-  }
-
-  .panel-body {
-    padding: 0 24px 16px;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 12px;
-  }
-
-  .legend-item {
-    display: inline-flex;
-    align-items: center;
   }
 
   .swatch {

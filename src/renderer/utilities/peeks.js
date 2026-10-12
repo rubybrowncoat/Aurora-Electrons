@@ -1,8 +1,4 @@
-// The live line under each page in the section flyout: route -> async ({ database, GameID, RaceID, ... }) => string | null.
-// Each peek is a few cheap queries scoped to the selected race, validated against the sample and a large save in
-// docs/plans/aurcalcs/ (see ARCHITECTURE.md). A route with no entry has no peek. Kept apart from the page registry,
-// which Node also requires. The context also carries `StartYear`, `separator` (the thousands separator),
-// `historyRecorded` and `snapshotSummary` (the history store's getter).
+// The live line under each page in the section flyout: route -> async ({ database, GameID, RaceID, ... }) => string | null. Each peek is a few cheap queries scoped to the selected race, validated against the sample and a large save in docs/plans/aurcalcs/ (see ARCHITECTURE.md). A route with no entry has no peek. Kept apart from the page registry, which Node also requires. The context also carries `StartYear`, `separator` (the thousands separator), `historyRecorded` and `snapshotSummary` (the history store's getter).
 
 import { gameTime } from './aurora'
 import { people } from './colonies'
@@ -42,7 +38,8 @@ export const peeks = {
             inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID
             inner join FCT_Population on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID
             where FCT_PopulationInstallations.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID <> 0 and not (FCT_Population.TerraformStatus <> 0 and coalesce(FCT_Population.MaxAtm, 0) = 0))) as Jobs,
-      (select count(*) from FCT_IndustrialProjects where GameID = ${GameID} and RaceID = ${RaceID} and coalesce(Queue, 0) = 0 and Pause = 1)
+      (select count(*) from FCT_ResearchProject where GameID = ${GameID} and RaceID = ${RaceID} and Pause = 1)
+      + (select count(*) from FCT_IndustrialProjects where GameID = ${GameID} and RaceID = ${RaceID} and coalesce(Queue, 0) = 0 and Pause = 1)
       + (select count(*) from FCT_ShipyardTask where GameID = ${GameID} and RaceID = ${RaceID} and Paused = 1)
       + (select count(*) from FCT_Shipyard where GameID = ${GameID} and RaceID = ${RaceID} and TaskType <> 0 and PauseActivity = 1) as Paused`)
 
@@ -148,6 +145,23 @@ export const peeks = {
     return `${counted(Unsurveyed, separator, 'system', 'systems')} to survey`
   },
 
+  '/routes': async ({ database, GameID, RaceID, separator }) => {
+    const { JumpPoints, Stabilised } = await row(database, `select count(*) as JumpPoints, coalesce(sum(case when FCT_JumpPoint.JumpGateStrength > 0 then 1 else 0 end), 0) as Stabilised from FCT_JumpPoint
+      inner join FCT_RaceJumpPointSurvey on FCT_RaceJumpPointSurvey.WarpPointID = FCT_JumpPoint.WarpPointID and FCT_RaceJumpPointSurvey.RaceID = ${RaceID} and FCT_RaceJumpPointSurvey.Charted = 1 and FCT_RaceJumpPointSurvey.Explored = 1
+      inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_JumpPoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+      where FCT_JumpPoint.GameID = ${GameID}`)
+
+    return `${counted(JumpPoints, separator, 'explored jump point', 'explored jump points')}, ${counted(Stabilised, separator, 'stabilised', 'stabilised')}`
+  },
+
+  '/lagrange': async ({ database, GameID, RaceID, separator }) => {
+    const { Points, Systems } = await row(database, `select count(*) as Points, count(distinct FCT_LagrangePoint.SystemID) as Systems from FCT_LagrangePoint
+      inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+      where FCT_LagrangePoint.GameID = ${GameID}`)
+
+    return `${counted(Points, separator, 'stable point', 'stable points')} in ${counted(Systems, separator, 'system', 'systems')}`
+  },
+
   // Special factions have no Intelligence page.
   '/intelligence': async ({ database, GameID, RaceID, historyRecorded }) => {
     if (!historyRecorded) {
@@ -168,9 +182,7 @@ export const peeks = {
       return null
     }
 
-    return summary.count
-      ? `${counted(summary.count, separator, 'snapshot', 'snapshots')}, latest ${gameTime(StartYear, summary.latest).format('YYYY-MM-DD')}`
-      : 'No snapshots yet'
+    return summary.count ? `${counted(summary.count, separator, 'snapshot', 'snapshots')}, latest ${gameTime(StartYear, summary.latest).format('YYYY-MM-DD')}` : 'No snapshots yet'
   },
 
   '/commanders': async ({ database, GameID, RaceID, separator }) => {

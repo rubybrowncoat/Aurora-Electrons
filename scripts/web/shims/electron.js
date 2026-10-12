@@ -1,5 +1,4 @@
-// Web mode stand-in for `electron` in the renderer: answers the IPC calls
-// src/main/index.js would handle.
+// Web mode stand-in for `electron` in the renderer: answers the IPC calls src/main/index.js would handle.
 
 const downloadPng = (base64, fileName) => {
   const link = document.createElement('a')

@@ -1,6 +1,5 @@
 // Web mode stand-in for src/renderer/utilities/database.js.
-// Same surface the pages use (`query` and `models.X.find*`), backed by the
-// dev server's database middleware instead of an in-process Sequelize.
+// Same surface the pages use (`query` and `models.X.find*`), backed by the dev server's database middleware instead of an in-process Sequelize.
 
 import { databaseRequest } from './database-request'
 
@@ -51,8 +50,7 @@ const request = async (route, payload) => {
   return body
 }
 
-// Pages call `toJSON()`/`get()` on results, so give plain objects that much of
-// the Sequelize instance API.
+// Pages call `toJSON()`/`get()` on results, so give plain objects that much of the Sequelize instance API.
 const instanceMethods = {
   toJSON () {
     return { ...this }
@@ -104,8 +102,7 @@ export const resetDatabase = (storagePath) => {
   const models = {}
 
   return {
-    // The middleware shares one connection, so a transaction is only a pass-through here: reads in
-    // it aren't a single snapshot, and the `transaction` option never goes over the wire.
+    // The middleware shares one connection, so a transaction is only a pass-through here: reads in it aren't a single snapshot, and the `transaction` option never goes over the wire.
     transaction: (callback) => callback({}),
     query: (sql, { transaction, ...options } = {}) => ready.then(() => request('/query', { sql, options: encode(options) })),
     models: new Proxy(models, {

@@ -8,7 +8,7 @@
         </div>
         <div class="tool">
           <div class="tool__label caption text--secondary">Goal</div>
-          <v-btn-toggle v-model="goal" mandatory dense @change="(value) => config.set('habitabilityGoal', value)">
+          <v-btn-toggle v-model="goal" mandatory dense>
             <v-tooltip v-for="option in goals" :key="option.id" bottom>
               <template #activator="{ on }">
                 <v-btn :value="option.id" small v-on="on"><v-icon small left>{{ option.icon }}</v-icon>{{ option.label }}</v-btn>
@@ -19,7 +19,7 @@
         </div>
         <div class="tool tool--terraformers">
           <div class="tool__label caption text--secondary">Terraformers</div>
-          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto" @change="config.set('habitabilityTerraformers', terraformers)">
+          <v-text-field v-model.number="terraformers" type="number" min="1" aria-label="Terraformers" :rules="[rules.required, rules.positive]" dense outlined hide-details="auto">
             <template #append>
               <v-tooltip bottom max-width="260">
                 <template #activator="{ on }">
@@ -32,11 +32,11 @@
         </div>
         <div class="tool tool--systems">
           <div class="tool__label caption text--secondary">Active systems</div>
-          <v-autocomplete v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details @change="config.set('habitabilitySystems', systems)">
+          <system-select v-model="systems" :disabled="filterBySelectedBodies" :items="systemNames" aria-label="Active systems" item-text="SystemName" item-value="SystemID" multiple dense outlined hide-details>
             <template #selection="{ item, index }">
-              <v-chip v-if="systems.length === systemNames.length && !index" small label>All {{ systemNames.length }} systems</v-chip>
-              <v-chip v-else-if="systems.length !== systemNames.length && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
-              <span v-else-if="systems.length !== systemNames.length && index === 8" class="caption text--secondary ml-1">+{{ systems.length - 8 }} more</span>
+              <v-chip v-if="systemSelection.all && !index" small label>All {{ systemSelection.total }} systems</v-chip>
+              <v-chip v-else-if="!systemSelection.all && index < 8" small label close @click:close="removeSystem(item.SystemID)">{{ item.SystemName }}</v-chip>
+              <span v-else-if="!systemSelection.all && index === 8" class="caption text--secondary ml-1">+{{ systemSelection.count - 8 }} more</span>
             </template>
             <template #prepend-item>
               <v-list-item ripple @click="toggleSystems">
@@ -57,7 +57,7 @@
               </v-list-item>
               <v-divider class="mt-2" />
             </template>
-          </v-autocomplete>
+          </system-select>
         </div>
         <div class="tool tool--actions">
           <div class="tool__buttons">
@@ -67,7 +67,7 @@
               </template>
               <v-list dense>
                 <v-list-item v-for="filter in filterOptions" :key="filter.key">
-                  <v-checkbox v-model="filters[filter.key]" :label="filter.label" dense hide-details @change="config.set(filter.config, filters[filter.key])" />
+                  <v-checkbox :input-value="filters[filter.key]" :label="filter.label" dense hide-details @change="(value) => setFilter(filter, value)" />
                 </v-list-item>
                 <v-divider class="my-1" />
                 <v-list-item>
@@ -82,14 +82,14 @@
               <v-card class="pa-4 planner-menu">
                 <div class="subtitle-2 mb-1">How targets are ranked</div>
                 <div class="caption text--secondary mb-3">
-                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before your colonisation tech, so the scale means the same for every race), years of terraforming, and AU from your nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
+                  A body's worth is its prize (the people it holds, what its deposits are worth, or both), times three discounts that each halve it at the scale below: colony cost (before my colonisation tech, so the scale means the same for every race), years of terraforming, and AU from my nearest colony. Only a place to settle that holds the smallest colony or has deposits worth mining is ranked, and a target is "best" from {{ bestScore }}% of the top one. The defaults work as they are.
                 </div>
                 <v-row dense>
                   <v-col v-for="field in rankingFields" :key="field.key" cols="12" sm="6">
                     <v-text-field :value="ranking[field.key]" type="number" min="0" :label="field.label" :hint="field.hint" persistent-hint dense outlined @change="(value) => setRanking(field.key, value)" />
                   </v-col>
                 </v-row>
-                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short you are of that mineral.</div>
+                <div class="caption text--secondary mt-2 mb-1">Mineral weights. Each deposit's value (the game's own: accessibility, raised for a big deposit) is multiplied by its weight and by how short I am of that mineral.</div>
                 <v-row dense>
                   <v-col v-for="mineral in minerals" :key="mineral.id" cols="6" sm="4">
                     <v-text-field :value="ranking.weights[mineral.id]" type="number" min="0" step="0.05" :label="mineral.name" :hint="scarcityHint(mineral.id)" persistent-hint dense outlined @change="(value) => setWeight(mineral.id, value)" />
@@ -105,7 +105,7 @@
               <v-card class="pa-4 planner-menu">
                 <div class="subtitle-2 mb-1">What each plan state means</div>
                 <div class="caption text--secondary mb-3">
-                  The Plan column says what it takes to settle a body. Colony cost bands are read before your colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what you actually pay. Click a state to show only those bodies.
+                  The Plan column says what it takes to settle a body. Colony cost bands are read before my colonisation tech{{ raceRules.ColonizationSkill !== 1 ? ` (×${raceRules.ColonizationSkill} here)` : '' }}, as the game's Minerals window colours them; the infrastructure per million people (/M) is what I actually pay. Click a state to show only those bodies.
                 </div>
                 <div v-for="group in stateGroups" :key="group.group" class="mb-2">
                   <div class="overline">{{ group.group }}</div>
@@ -124,7 +124,7 @@
 
       <v-row dense align="center" class="mt-1">
         <v-col cols="12" class="d-flex align-center flex-wrap view-row">
-          <v-btn-toggle v-model="view" mandatory dense class="mr-4" @change="(value) => config.set('habitabilityView', value)">
+          <v-btn-toggle v-model="view" mandatory dense class="mr-4">
             <v-tooltip v-for="option in viewOptions" :key="option.id" bottom max-width="300">
               <template #activator="{ on }">
                 <v-btn :value="option.id" small v-on="on">{{ option.label }}<span class="view-count">{{ separatedNumber(viewCounts[option.id], separator) }}</span></v-btn>
@@ -133,7 +133,7 @@
             </v-tooltip>
           </v-btn-toggle>
           <span class="tool__label caption text--secondary mr-3">Show</span>
-          <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on" @change="config.set('habitabilityBodyClasses', bodyClasses)">
+          <v-chip-group v-model="bodyClasses" multiple active-class="class-chip-on">
             <v-chip v-for="option in bodyClassOptions" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
           </v-chip-group>
           <v-chip v-for="id in stateFilter" :key="id" small label close :color="stateById[id].color" dark class="mr-1" @click:close="toggleStateFilter(id)">{{ stateById[id].label }}</v-chip>
@@ -144,7 +144,7 @@
           <v-row dense>
             <v-col cols="auto">
               <v-btn class="d-block mb-1" style="width: 100%" small outlined :color="filterBySelectedBodies ? 'red' : ''" @click="filterBySelectedBodies = !filterBySelectedBodies">Isolate in Planner</v-btn>
-              <v-btn :to="{ path: 'minerals', query: { bodies: JSON.stringify(selectedBodies.map(bodyReference)) } }" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
+              <v-btn :to="linkTo.minerals({ bodies: selectedBodies })" style="width: 100%" small outlined>Isolate in Minerals</v-btn>
               <v-btn class="d-block mt-4" style="width: 100%" small outlined @click="clearSelection">Clear Selection</v-btn>
             </v-col>
             <v-col>
@@ -154,17 +154,11 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failedInputs.length" type="error" outlined dense class="mt-3">
-        Couldn't read {{ failedInputsText }}: {{ loadErrors[failedInputs[0]] }}. The game may be saving; the page reads the save again when it changes.
-        <template #append>
-          <v-btn small text color="error" @click="retryFailedInputs">Retry</v-btn>
-        </template>
-      </v-alert>
-      <v-progress-linear v-else-if="!ready" indeterminate class="mt-3" />
-      <v-alert v-else-if="!speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
+      <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready || !rows" class="mt-3" @retry="retryFailedInputs" />
+      <v-alert v-if="ready && rows && !speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
-      <v-card v-if="ready && speciesRows.length" class="mt-3" elevation="2">
-        <v-data-table :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="sortBy" :sort-desc.sync="sortDescending" :items-per-page.sync="itemsPerPage" :footer-props="{ itemsPerPageOptions }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+      <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
+        <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
             <td class="text-no-wrap">
               <v-btn v-if="isSelected(item.body)" color="red" icon small @click.stop="deselect(item.body)"><v-icon>mdi-playlist-remove</v-icon></v-btn>
@@ -178,7 +172,7 @@
               <span class="rank-number">{{ item.row.rank }}</span>
               <span class="score-meter" :title="`Worth ${roundToDecimal(item.row.score, 0)}% of the best target`"><i :style="{ width: `${item.row.score}%` }" /></span>
             </div>
-            <span v-else class="caption text--secondary">{{ item.row.settled ? 'Yours' : '' }}</span>
+            <span v-else class="caption text--secondary">{{ item.row.settled ? 'Mine' : '' }}</span>
           </template>
 
           <template #[`item.bodyOrder`]="{ item }">
@@ -280,17 +274,24 @@
 </template>
 
 <script>
+import Vue from 'vue'
 import { mapGetters } from 'vuex'
 
+import LoadState from '../components/page/LoadState.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import deepLink from '../mixins/deep-link'
+import loadState from '../mixins/load-state'
+import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
 import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies } from '../utilities/colonization'
 import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies } from '../utilities/colonization-data'
+import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
-import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { tracked } from '../utilities/load-tracking'
+import { ENTRY_BYTES, derive, estimateBytes } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
 import { terraformCapacity } from '../utilities/terraforming'
@@ -304,30 +305,30 @@ const INPUT_LABELS = {
   routes: 'the jump routes',
   outlook: 'the mineral outlook',
 }
-const INPUTS = Object.keys(INPUT_LABELS)
 
 const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
 const GROUND_SURVEY = { 0: 'Completed', 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const NO_RANK = 1e12
 // Rows per page before the user picks one: 10 fit a 1080 px window, 15 a window of 1200 px or more.
 const DEFAULT_ROWS = 10
+const PAGE_SIZES = [10, 15, 30, 50, 100]
 const DEFAULT_RULES = () => ({ ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
-// The filters the page has always kept, by the config key that carries them.
+// The filters the page keeps, by the data field and the config key that carry them.
 const FILTERS = [
-  { key: 'nonTerraformable', config: 'habitabilityFilterNonTerraformable', label: 'Hide Non-Terraformable' },
-  { key: 'withoutMinerals', config: 'habitabilityFilterWithoutMinerals', label: 'Hide Without Minerals' },
-  { key: 'ownPopulations', config: 'habitabilityFilterOwnPopulations', label: 'Hide Own Populations' },
-  { key: 'otherPopulations', config: 'habitabilityFilterOtherPopulations', label: 'Hide Other Populations' },
-  { key: 'doneTerraforming', config: 'habitabilityFilterDoneTerraforming', label: 'Hide Terraformed' },
-  { key: 'uninhabited', config: 'habitabilityFilterUninhabited', label: 'Hide Uninhabited' },
+  { key: 'nonTerraformable', field: 'filterNonTerraformable', config: 'habitabilityFilterNonTerraformable', label: 'Hide Non-Terraformable' },
+  { key: 'withoutMinerals', field: 'filterWithoutMinerals', config: 'habitabilityFilterWithoutMinerals', label: 'Hide Without Minerals' },
+  { key: 'ownPopulations', field: 'filterOwnPopulations', config: 'habitabilityFilterOwnPopulations', label: 'Hide Own Populations' },
+  { key: 'otherPopulations', field: 'filterOtherPopulations', config: 'habitabilityFilterOtherPopulations', label: 'Hide Other Populations' },
+  { key: 'doneTerraforming', field: 'filterDoneTerraforming', config: 'habitabilityFilterDoneTerraforming', label: 'Hide Terraformed' },
+  { key: 'uninhabited', field: 'filterUninhabited', config: 'habitabilityFilterUninhabited', label: 'Hide Uninhabited' },
 ]
 
 const RANKING_FIELDS = [
   { key: 'minimumPeople', label: 'Smallest colony (M)', hint: 'Under this a body is only a target for its deposits' },
   { key: 'minimumDeposit', label: 'Minimum deposit (t)', hint: 'Smaller deposits are worth nothing' },
   { key: 'cmcBonus', label: 'CMC bonus', hint: 'Deposit value a civilian complex site adds' },
-  { key: 'costScale', label: 'Colony cost scale', hint: 'Worth halves at this cost, before your tech' },
+  { key: 'costScale', label: 'Colony cost scale', hint: 'Worth halves at this cost, before my tech' },
   { key: 'yearsScale', label: 'Terraforming years scale', hint: 'Worth halves after this many years' },
   { key: 'distanceScale', label: 'Distance scale (AU)', hint: 'Worth halves at this distance from a colony' },
 ]
@@ -336,55 +337,66 @@ const RANKING_FIELDS = [
 const VIEWS = [
   { id: 'best', label: 'Best targets', hint: `Places to settle next that are worth at least ${BEST_TARGET_SCORE}% of the best one`, has: (row) => !!row.rank && row.score >= BEST_TARGET_SCORE },
   { id: 'ranked', label: 'All ranked', hint: 'Every ranked place to settle, from the best down', has: (row) => !!row.rank },
-  { id: 'colonies', label: 'Colonies', hint: 'Bodies where you already have a colony or outpost', has: (row) => row.settled },
+  { id: 'colonies', label: 'Colonies', hint: 'Bodies where I already have a colony or outpost', has: (row) => row.settled },
   { id: 'other', label: 'Other bodies', hint: 'Everything else: alien colonies, bodies nobody can live on, and bodies too small or poor to be worth the trip', has: (row) => !row.rank && !row.settled },
 ]
 
-// The bodies or systems another page (the map) sent along in the query, over the defaults in data().
-const selectionFromQuery = (query) => {
-  if (query.bodies) {
-    const selectedBodies = JSON.parse(query.bodies)
+// System IDs are numbers; Vuetify's general selection search scans every item for every selected system.
+const SystemSelect = {
+  extends: Vue.component('VAutocomplete'),
+  methods: {
+    setSelectedItems() {
+      const { allItems, internalValue } = this
+      const byId = new Map(allItems.map((item) => [item.SystemID, item]))
 
-    return { selectedBodies, filterBySelectedBodies: !!selectedBodies.length }
-  } else if (query.systems) {
-    return { systems: query.systems.split(',').map((id) => parseInt(id, 10)) }
-  }
+      this.selectedItems = (Array.isArray(internalValue) ? internalValue : [internalValue]).filter((id) => byId.has(id)).map((id) => byId.get(id))
 
-  return {}
+      if (!this.isFocused) {
+        this.setSearch()
+      }
+    },
+  },
 }
 
+// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on.
+const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}`, inputs, compute)
+
+// What is worked out of the bodies is kept only while the bodies themselves fit the cap a read does (query-cache.js `ENTRY_BYTES`): assessing and ranking a huge save costs several times its bodies' heap.
+const keptFromBodies = (vm, bodies, slot, inputs, compute) => (estimateBytes(bodies) > ENTRY_BYTES ? compute() : kept(vm, slot, inputs, compute))
+
 export default {
-  components: { BodyDetail },
+  components: { BodyDetail, LoadState, SystemSelect },
+  mixins: [
+    deepLink,
+    loadState(INPUT_LABELS),
+    persistedView({
+      selectedSpeciesId: { key: 'habitabilitySpecies', default: null, scope: 'race' },
+      goal: { key: 'habitabilityGoal', default: 'both', valid: oneOf(GOALS.map((option) => option.id)) },
+      view: { key: 'habitabilityView', default: 'best', valid: oneOf(VIEWS.map((option) => option.id)) },
+      stateFilter: { key: 'habitabilityStates', default: [], normalise: (stored) => (Array.isArray(stored) ? stored.filter((id) => STATE_BY_ID[id]) : undefined) },
+      terraformers: { key: 'habitabilityTerraformers', default: 10 },
+      ...Object.fromEntries(FILTERS.map((filter) => [filter.field, { key: filter.config, default: false, normalise: Boolean }])),
+      bodyClasses: { key: 'habitabilityBodyClasses', default: [1, 2, 3, 5], normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => BODY_CLASS_NAMES[value]) : undefined) },
+      systems: { key: 'habitabilitySystems', default: [] },
+      table: tableView('habitabilityTable', { sortBy: ['sortRank'], sortDesc: [false], itemsPerPage: DEFAULT_ROWS, itemsPerPageOptions: PAGE_SIZES }),
+    }),
+  ],
   data() {
     return {
-      selectedSpeciesId: null,
-      goal: 'both',
-      view: 'best',
-      stateFilter: [],
-      terraformers: 10,
-      filters: Object.fromEntries(FILTERS.map((filter) => [filter.key, false])),
-      bodyClasses: [1, 2, 3, 5],
-
-      itemsPerPage: 10,
-      sortBy: ['sortRank'],
-      sortDescending: [false],
+      pageSizes: PAGE_SIZES,
       expandedRows: [],
       detailSpecies: {},
-
-      systems: [],
       selectedBodies: [],
       filterBySelectedBodies: false,
 
       ranking: normaliseRanking(null),
-      loadErrors: {},
 
       rules: {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
       },
 
-      // Bodies or systems the map sent along in the query.
-      ...selectionFromQuery(this.$route.query),
+      linkTo,
     }
   },
   computed: {
@@ -400,29 +412,22 @@ export default {
     rankingFields: () => RANKING_FIELDS,
     bodyClassNames: () => BODY_CLASS_NAMES,
     bodyClassOptions: () => Object.entries(BODY_CLASS_NAMES).map(([value, text]) => ({ value: Number(value), text: `${text}s` })),
-    itemsPerPageOptions: () => [10, 15, 30, 50, 100],
     compactTons: () => compactTons,
 
     separator() {
       return thousandsSeparator(this.config.get('selectedSeparator', 'Tick'))
     },
 
+    filters() {
+      return Object.fromEntries(FILTERS.map((filter) => [filter.key, this[filter.field]]))
+    },
+
     rankingKey() {
       return `game.${this.GameID}.race.${this.RaceID}.targetWeights`
     },
 
-    failedInputs() {
-      return INPUTS.filter((key) => this.loadErrors[key])
-    },
-    failedInputsText() {
-      return joinLabels(this.failedInputs.map((key) => INPUT_LABELS[key]))
-    },
-    ready() {
-      return allLoaded(this.loadErrors, INPUTS)
-    },
-
     activeFilterCount() {
-      return FILTERS.filter((filter) => this.filters[filter.key]).length
+      return FILTERS.filter((filter) => this[filter.field]).length
     },
 
     speciesRows() {
@@ -452,20 +457,41 @@ export default {
       return buildDistanceMap(this.routes.jumpPoints, this.routes.capital ? [this.routes.capital] : [])
     },
 
-    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking.
-    assessed() {
-      return this.ready ? assessBodies(this.bodies, this.species, this.raceRules, (id) => this.gases.find((gas) => gas.GasID === id)) : []
-    },
-    rows() {
-      return rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules: this.cmcRules, outlook: this.outlook })
-    },
-
     systemNames() {
       const names = new Map()
 
       this.bodies.forEach((body) => names.set(body.SystemID, body.SystemName))
 
       return [...names].map(([SystemID, SystemName]) => ({ SystemID, SystemName })).sort((a, b) => (a.SystemName || '').localeCompare(b.SystemName || '', undefined, { numeric: true, sensitivity: 'base' }))
+    },
+    systemSelection() {
+      const count = this.systems.length
+      const total = this.systemNames.length
+
+      return { count, total, all: count === total }
+    },
+
+    linkQuery() {
+      if (this.filterBySelectedBodies && this.selectedBodies.length) {
+        return linkTo.planner({ bodies: this.selectedBodies }).query
+      } else if (!this.systemNames.length) {
+        return null
+      }
+
+      return linkTo.planner({ systems: this.systemSelection.all ? null : this.systems }).query
+    },
+    linkLabel() {
+      if (this.filterBySelectedBodies && this.selectedBodies.length) {
+        const [body] = this.selectedBodies
+
+        return this.selectedBodies.length === 1 ? `${body.SystemName} ${systemBodyName(body)}` : `${this.selectedBodies.length} bodies`
+      } else if (this.systemSelection.all || !this.systems.length) {
+        return ''
+      }
+
+      const names = this.systems.map((id) => (this.systemNames.find((system) => system.SystemID === id) || {}).SystemName).filter(Boolean)
+
+      return names.length === 1 ? names[0] : `${this.systems.length} systems`
     },
     systemPresets() {
       const systemIds = new Set(this.systemNames.map((system) => system.SystemID))
@@ -487,7 +513,7 @@ export default {
       const systems = new Set(this.systems)
       const classes = new Set(this.bodyClasses)
 
-      return this.rows.filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
+      return (this.rows || []).filter((row) => (scope ? scope.has(row.body.SystemBodyID) : systems.has(row.body.SystemID) && classes.has(row.body.BodyClass)))
     },
     viewCounts() {
       return Object.fromEntries(VIEWS.map((view) => [view.id, this.scopedRows.filter(view.has).length]))
@@ -503,7 +529,7 @@ export default {
     },
 
     filteredRows() {
-      const { filters } = this
+      const { filters, filterBySelectedBodies } = this
       const view = VIEWS.find((option) => option.id === this.view) || VIEWS[0]
       const states = new Set(this.stateFilter)
 
@@ -511,15 +537,7 @@ export default {
         const { body, best } = row
         const alienPopulation = body.AlienPopulations.reduce((total, population) => total + population.PopulationAmount, 0)
 
-        return (
-          (this.filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) &&
-          !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) &&
-          !(filters.withoutMinerals && !(row.minerals.total > 0)) &&
-          !(filters.ownPopulations && body.OwnPopulations.length) &&
-          !(filters.otherPopulations && body.AlienPopulations.length) &&
-          !(filters.doneTerraforming && !best.assessment.plan) &&
-          !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
-        )
+        return (filterBySelectedBodies || (view.has(row) && (!states.size || states.has(row.state.id)))) && !(filters.nonTerraformable && (best.strategy === 'none' || best.assessment.outcome === 'no')) && !(filters.withoutMinerals && !(row.minerals.total > 0)) && !(filters.ownPopulations && body.OwnPopulations.length) && !(filters.otherPopulations && body.AlienPopulations.length) && !(filters.doneTerraforming && !best.assessment.plan) && !(filters.uninhabited && !(body.OwnPopulations.reduce((total, population) => total + population.Population, 0) + alienPopulation > 0))
       })
     },
 
@@ -561,26 +579,11 @@ export default {
     },
   },
   watch: {
-    itemsPerPage(value) {
-      this.$store.commit('tables/setHabitabilityItemsPerPage', value)
-    },
-    sortBy: {
-      deep: true,
-      handler(value) {
-        this.$store.commit('tables/setHabitabilitySortBy', value)
-      },
-    },
-    sortDescending: {
-      deep: true,
-      handler(value) {
-        this.$store.commit('tables/setHabitabilitySortDescending', value)
-      },
-    },
     systemNames: {
       immediate: true,
       handler(names) {
         if (names.length && !this.systems.length) {
-          this.systems = names.map((system) => system.SystemID)
+          this.setUnsaved('systems', names.map((system) => system.SystemID))
         }
       },
     },
@@ -592,65 +595,54 @@ export default {
     },
     RaceID(_newRaceID, oldRaceID) {
       if (oldRaceID) {
-        this.config.set('habitabilitySystems', [])
         this.systems = []
-        this.selectedSpeciesId = null
         this.detailSpecies = {}
       }
     },
   },
   created() {
-    this.terraformers = this.config.get('habitabilityTerraformers', 10)
-    this.goal = GOALS.some((option) => option.id === this.config.get('habitabilityGoal')) ? this.config.get('habitabilityGoal') : 'both'
-    this.view = VIEWS.some((option) => option.id === this.config.get('habitabilityView')) ? this.config.get('habitabilityView') : 'best'
-    FILTERS.forEach((filter) => (this.filters[filter.key] = !!this.config.get(filter.config, false)))
-
-    const classes = this.config.get('habitabilityBodyClasses')
-
-    if (Array.isArray(classes)) {
-      this.bodyClasses = classes.filter((value) => BODY_CLASS_NAMES[value])
-    }
-
-    if (!this.systems.length) {
-      this.systems = this.config.get('habitabilitySystems', this.systems)
-    }
-
-    const { tables } = this.$store.state
-
-    if (tables) {
-      this.itemsPerPage = tables.habitabilityItemsPerPage > DEFAULT_ROWS ? tables.habitabilityItemsPerPage : this.rowsToFit()
-
-      if (Array.isArray(tables.habitabilitySortBy) && tables.habitabilitySortBy.length) {
-        this.sortBy = [...tables.habitabilitySortBy]
-        this.sortDescending = Array.isArray(tables.habitabilitySortDescending) ? [...tables.habitabilitySortDescending] : [false]
-      }
+    if (this.config.get('habitabilityTable') === undefined) {
+      this.setUnsaved('table', { ...this.table, itemsPerPage: this.rowsToFit() })
     }
   },
   methods: {
+    applyLink(query) {
+      const bodies = queryBodies(query.bodies)
+
+      this.filterBySelectedBodies = bodies.length > 0
+
+      if (bodies.length) {
+        this.selectedBodies = bodies
+      } else {
+        const systems = queryIds(query.systems)
+
+        this.setUnsaved('systems', systems.length ? systems : this.systemNames.map((system) => system.SystemID))
+      }
+    },
+
     areSetsEqual,
     people,
     roundToDecimal,
     separatedNumber,
     systemBodyName,
 
+    setFilter(filter, value) {
+      this[filter.field] = !!value
+    },
     resetFilters() {
       FILTERS.forEach((filter) => {
-        this.filters[filter.key] = false
-        this.config.set(filter.config, false)
+        this[filter.field] = false
       })
     },
 
     toggleSystems() {
       this.systems = this.systems.length === this.systemNames.length ? [] : this.systemNames.map((system) => system.SystemID)
-      this.config.set('habitabilitySystems', this.systems)
     },
     removeSystem(id) {
       this.systems = this.systems.filter((systemId) => systemId !== id)
-      this.config.set('habitabilitySystems', this.systems)
     },
     selectSystems(ids) {
       this.systems = ids
-      this.config.set('habitabilitySystems', this.systems)
     },
 
     setRanking(key, value) {
@@ -670,7 +662,7 @@ export default {
       return this.selectedBodies.some((selection) => selection.SystemBodyID === body.SystemBodyID)
     },
     select(body) {
-      this.selectedBodies.push(this.bodyReference(body))
+      this.selectedBodies.push(bodyReference(body))
     },
     deselect(body) {
       this.selectedBodies = this.selectedBodies.filter((selection) => selection.SystemBodyID !== body.SystemBodyID)
@@ -678,9 +670,6 @@ export default {
     clearSelection() {
       this.selectedBodies = []
       this.filterBySelectedBodies = false
-    },
-    bodyReference(body) {
-      return { SystemBodyID: body.SystemBodyID, SystemBodyName: body.SystemBodyName, SystemName: body.SystemName, BodyClass: body.BodyClass, Component: body.Component, PlanetNumber: body.PlanetNumber, OrbitNumber: body.OrbitNumber }
     },
 
     // The evaluation the detail panel shows: the species picked there, else the row's best.
@@ -724,7 +713,7 @@ export default {
       const { distance, capitalDistance } = row
       const capital = capitalDistance && distance.from && !distance.from.Capital ? ` The capital is ${roundToDecimal(capitalDistance.au, 1)} AU and ${capitalDistance.jumps} ${capitalDistance.jumps === 1 ? 'jump' : 'jumps'} away.` : ''
 
-      return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'your nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
+      return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'my nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
     },
     scarcityHint(id) {
       const mineral = this.outlook.minerals[id]
@@ -749,19 +738,53 @@ export default {
     groundSurveyText(body) {
       return `No geological survey by this race yet. Ground survey potential: ${GROUND_SURVEY[body.GroundMineralSurvey] || 'unknown'}.`
     },
-
-    retryFailedInputs() {
-      this.failedInputs.forEach((key) => this.$asyncComputed[key].update())
-    },
   },
   asyncComputed: {
+    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking. Both steps run in slices so a large save keeps the window responsive; null until the first pass is done. Each result is kept with the save (`kept`), so the page opened again, with nothing changed, shows it at once.
+    assessed: {
+      async get() {
+        const inputs = () => [this.bodies, this.species, this.raceRules, this.gases]
+
+        // Read before the first await, so a change to any of them runs this again.
+        inputs()
+
+        if (!this.ready) {
+          return null
+        }
+
+        // `ready` turns true a moment before the last of the reads is assigned to its property. Waiting a tick means the inputs are the loaded ones, not the empty values they start as, so the kept result is the one the next visit asks for.
+        await this.$nextTick()
+
+        const [bodies, species, raceRules, gases] = inputs()
+
+        return keptFromBodies(this, bodies, 'assessed', [bodies, species, raceRules, gases], async () => {
+          const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
+
+          return Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id)))
+        })
+      },
+      default: null,
+    },
+    rows: {
+      async get() {
+        const { assessed, activeSpeciesId, goal, ranking, raceRules, routes, cmcRules, outlook } = this
+        const terraformers = this.terraformers > 0 ? this.terraformers : 0
+
+        if (!assessed) {
+          return null
+        }
+
+        return keptFromBodies(this, this.bodies, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules, outlook })))
+      },
+      default: null,
+    },
     bodies: {
       get: tracked('bodies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'bodies', [this.GameID, this.RaceID], () => loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: [],
     },
@@ -771,7 +794,7 @@ export default {
           return []
         }
 
-        return loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'species', [this.GameID, this.RaceID], () => loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: [],
     },
@@ -781,7 +804,7 @@ export default {
           return DEFAULT_RULES()
         }
 
-        return loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'raceRules', [this.GameID, this.RaceID], () => loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: DEFAULT_RULES(),
     },
@@ -791,13 +814,13 @@ export default {
           return NO_CMC_RULES
         }
 
-        return loadCmcRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'cmcRules', [this.GameID, this.RaceID], () => loadCmcRules(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: NO_CMC_RULES,
     },
     gases: {
       get: tracked('gases', async function () {
-        return this.database ? loadGases(this.database) : []
+        return this.database ? kept(this, 'gases', [], () => loadGases(this.database).then(Object.freeze)) : []
       }),
       default: [],
     },
@@ -807,7 +830,7 @@ export default {
           return { jumpPoints: [], capital: null, colonies: [] }
         }
 
-        return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'routes', [this.GameID, this.RaceID], () => loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: { jumpPoints: [], capital: null, colonies: [] },
     },
@@ -817,7 +840,7 @@ export default {
           return NO_OUTLOOK
         }
 
-        return loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'outlook', [this.GameID, this.RaceID], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: NO_OUTLOOK,
     },
@@ -844,8 +867,7 @@ export default {
     line-height: 18px;
   }
 
-  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is
-  // left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
+  // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
   .tool--species {
     flex: 0 1 260px;
     min-width: 180px;

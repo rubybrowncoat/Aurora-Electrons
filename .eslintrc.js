@@ -13,7 +13,7 @@ module.exports = {
   // add your custom rules here
   rules: {
     // StandardJS — The Rules
-    indent: ['error', 2, { 
+    indent: ['error', 2, {
       'SwitchCase': 1,
       offsetTernaryExpressions: true,
     }],
@@ -39,6 +39,16 @@ module.exports = {
 
     // A debugger statement freezes the app whenever DevTools is open, which `bun run dev` always does.
     'no-debugger': 2,
+
+    // Lines keep their natural length and editors soft-wrap them, so nothing is broken across lines to fit a width: a condition, a ternary, an arrow's body and a start tag's attributes stay on one line, and a call's arguments share its line unless each sits on its own.
+    'function-call-argument-newline': ['error', 'consistent'],
+    'function-paren-newline': ['error', 'multiline'],
+    'implicit-arrow-linebreak': ['error', 'beside'],
+    'multiline-ternary': ['error', 'never'],
+    'operator-linebreak': ['error', 'none'],
+    'vue/operator-linebreak': ['error', 'none'],
+    'vue/first-attribute-linebreak': ['error', { singleline: 'beside', multiline: 'beside' }],
+    'vue/html-closing-bracket-newline': ['error', { singleline: 'never', multiline: 'never' }],
 
     'vue/max-attributes-per-line': 'off',
     'vue/multi-word-component-names': 'off',

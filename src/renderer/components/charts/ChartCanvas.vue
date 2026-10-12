@@ -24,10 +24,7 @@ const merge = (base, extra) => {
   return result
 }
 
-// A vertical hairline under the pointer (line charts), labelled vertical
-// markers at fixed x values (`options.plugins.guides.markers`: [{ x, label }])
-// and labelled dashed horizontal levels at fixed y values
-// (`options.plugins.guides.levels`: [{ y, label, axis = 'y' }]).
+// A vertical hairline under the pointer (line charts), labelled vertical markers at fixed x values (`options.plugins.guides.markers`: [{ x, label }]) and labelled dashed horizontal levels at fixed y values (`options.plugins.guides.levels`: [{ y, label, axis = 'y' }]).
 const guides = {
   id: 'guides',
   afterDatasetsDraw (chart, _args, pluginOptions) {

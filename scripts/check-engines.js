@@ -23,8 +23,7 @@ function checkNodeVersion(){
   }
 }
 
-// Installs and scripts must go through bun: it reads bun.lock. Under `bun install` and `bun run`,
-// npm_config_user_agent starts with `bun/` and npm_execpath is the bun executable.
+// Installs and scripts must go through bun: it reads bun.lock. Under `bun install` and `bun run`, npm_config_user_agent starts with `bun/` and npm_execpath is the bun executable.
 function disallowOtherPackageManagers() {
   const userAgent = process.env.npm_config_user_agent || '';
   const execPath = process.env.npm_execpath || '';
