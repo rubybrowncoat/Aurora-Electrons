@@ -62,19 +62,6 @@ export const populationName = (population, prefix = '', suppressSystem = false) 
   return suppressSystem && processedPopulation.PopName.startsWith(processedPopulation.SystemName) ? processedPopulation.PopName : `${systemBodyComponent} &mdash; ${processedPopulation.PopName}`
 }
 
-export const modelSystemBodyName = (systemBody) => {
-  const normalizedModel = {
-    SystemBodyID: systemBody.SystemBodyID,
-    SystemBodyName: systemBody.SystemBodyNames.length ? systemBody.SystemBodyNames[0].Name : null,
-    BodyClass: systemBody.BodyClass,
-    Component: systemBody.Star.Component,
-    PlanetNumber: systemBody.PlanetNumber,
-    OrbitNumber: systemBody.OrbitNumber,
-  }
-
-  return systemBodyName(normalizedModel)
-}
-
 export const eventColorToRGBA = (colorInteger) => {
   colorInteger >>>= 0
   const b = colorInteger & 0xFF

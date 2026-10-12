@@ -291,6 +291,7 @@ import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
+import { ENTRY_BYTES, derive, estimateBytes } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
 import { terraformCapacity } from '../utilities/terraforming'
@@ -356,6 +357,12 @@ const SystemSelect = {
     },
   },
 }
+
+// The page's reads and what it works out of them stay with the save (query-cache.js `derive`) until the save or an input changes. Each `inputs` entry is what the result depends on.
+const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}`, inputs, compute)
+
+// What is worked out of the bodies is kept only while the bodies themselves fit the cap a read does (query-cache.js `ENTRY_BYTES`): assessing and ranking a huge save costs several times its bodies' heap.
+const keptFromBodies = (vm, bodies, slot, inputs, compute) => (estimateBytes(bodies) > ENTRY_BYTES ? compute() : kept(vm, slot, inputs, compute))
 
 export default {
   components: { BodyDetail, LoadState, SystemSelect },
@@ -733,23 +740,41 @@ export default {
     },
   },
   asyncComputed: {
-    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking. Both steps run in slices so a large save keeps the window responsive; null until the first pass is done.
+    // The expensive part: every body assessed for every species. It reads neither the goal nor the ranking. Both steps run in slices so a large save keeps the window responsive; null until the first pass is done. Each result is kept with the save (`kept`), so the page opened again, with nothing changed, shows it at once.
     assessed: {
       async get() {
-        const { ready, bodies, species, raceRules, gases } = this
-        const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
+        const inputs = () => [this.bodies, this.species, this.raceRules, this.gases]
 
-        return ready ? Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id))) : null
+        // Read before the first await, so a change to any of them runs this again.
+        inputs()
+
+        if (!this.ready) {
+          return null
+        }
+
+        // `ready` turns true a moment before the last of the reads is assigned to its property. Waiting a tick means the inputs are the loaded ones, not the empty values they start as, so the kept result is the one the next visit asks for.
+        await this.$nextTick()
+
+        const [bodies, species, raceRules, gases] = inputs()
+
+        return keptFromBodies(this, bodies, 'assessed', [bodies, species, raceRules, gases], async () => {
+          const gasById = new Map(gases.map((gas) => [gas.GasID, gas]))
+
+          return Object.freeze(await assessBodies(bodies, species, raceRules, (id) => gasById.get(id)))
+        })
       },
       default: null,
     },
     rows: {
       async get() {
-        if (!this.assessed) {
+        const { assessed, activeSpeciesId, goal, ranking, raceRules, routes, cmcRules, outlook } = this
+        const terraformers = this.terraformers > 0 ? this.terraformers : 0
+
+        if (!assessed) {
           return null
         }
 
-        return Object.freeze(await rankBodies(this.assessed, { speciesId: this.activeSpeciesId, goal: this.goal, ranking: this.ranking, rules: this.raceRules, terraformers: this.terraformers > 0 ? this.terraformers : 0, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules: this.cmcRules, outlook: this.outlook }))
+        return keptFromBodies(this, this.bodies, 'rows', [assessed, activeSpeciesId, goal, JSON.stringify(ranking), raceRules, terraformers, routes, cmcRules, outlook], async () => Object.freeze(await rankBodies(assessed, { speciesId: activeSpeciesId, goal, ranking, rules: raceRules, terraformers, distanceOf: this.distanceOf, capitalDistanceOf: this.capitalDistanceOf, cmcRules, outlook })))
       },
       default: null,
     },
@@ -759,7 +784,7 @@ export default {
           return []
         }
 
-        return loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
+        return kept(this, 'bodies', [this.GameID, this.RaceID], () => loadBodies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: [],
     },
@@ -769,7 +794,7 @@ export default {
           return []
         }
 
-        return loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
+        return kept(this, 'species', [this.GameID, this.RaceID], () => loadSpecies(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: [],
     },
@@ -779,7 +804,7 @@ export default {
           return DEFAULT_RULES()
         }
 
-        return loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'raceRules', [this.GameID, this.RaceID], () => loadRaceRules(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: DEFAULT_RULES(),
     },
@@ -789,13 +814,13 @@ export default {
           return NO_CMC_RULES
         }
 
-        return loadCmcRules(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return kept(this, 'cmcRules', [this.GameID, this.RaceID], () => loadCmcRules(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
       }),
       default: NO_CMC_RULES,
     },
     gases: {
       get: tracked('gases', async function () {
-        return this.database ? loadGases(this.database).then(Object.freeze) : []
+        return this.database ? kept(this, 'gases', [], () => loadGases(this.database).then(Object.freeze)) : []
       }),
       default: [],
     },
@@ -805,7 +830,7 @@ export default {
           return { jumpPoints: [], capital: null, colonies: [] }
         }
 
-        return loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
+        return kept(this, 'routes', [this.GameID, this.RaceID], () => loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: { jumpPoints: [], capital: null, colonies: [] },
     },
@@ -815,7 +840,7 @@ export default {
           return NO_OUTLOOK
         }
 
-        return loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze)
+        return kept(this, 'outlook', [this.GameID, this.RaceID], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: NO_OUTLOOK,
     },

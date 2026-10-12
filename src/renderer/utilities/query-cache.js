@@ -1,6 +1,6 @@
 // Answers a save's repeated reads from memory. The app opens a save afresh each time Aurora writes it, so until then the same read gives the same rows, unless the app writes to a table it reads (the Galaxy Map saving positions). Pages read again each time they open, and several read the same things, so a page opened again, or a read another page has already made, skips the database and the queue of reads waiting on it.
 //
-// Each consumer gets its own copy of the rows: pages sort, extend and observe what they read, and the kept rows must stay as the database gave them.
+// Each consumer gets its own copy of the rows: pages sort, extend and observe what they read, and the kept rows must stay as the database gave them. `derive` is the other half: a result worked out from those reads is kept too, and handed back as it is.
 
 // What the kept results of one save may take, as estimated by `estimateBytes`. Past it, the reads used longest ago go.
 export const BUDGET_BYTES = 64 * 1024 * 1024
@@ -89,7 +89,7 @@ const copyOf = (result) => {
 export const cacheQueries = (database) => {
   const query = database.query
   // Reads by key, in the order they were last used. `writes` counts writes; `written` has the count at each table's last write, and `cleared` the count at the last write whose tables aren't known, which counts for every table.
-  const cache = { entries: new Map(), bytes: 0, writes: 0, written: new Map(), cleared: 0, committing: new WeakMap(), closed: false }
+  const cache = { entries: new Map(), derived: new Map(), bytes: 0, writes: 0, written: new Map(), cleared: 0, committing: new WeakMap(), closed: false }
 
   const remove = (key, entry) => {
     if (cache.entries.get(key) === entry) {
@@ -219,6 +219,50 @@ export const cacheQueries = (database) => {
   return database
 }
 
+const sameInputs = (a, b) => a.length === b.length && a.every((input, index) => Object.is(input, b[index]))
+
+// What `compute()` works out from reads of `database`, kept in `slot` until a write to the save, or until `inputs` (compared one by one, by identity) differ, so a page opened again with the save unchanged gets it back at once instead of working it out again. Everyone who asks gets the very same result, so it must be treated as read-only; `slot` holds one result, the latest asked for, and a list of rows over `ENTRY_BYTES` isn't kept, as with a read. A save without a cache works it out every time.
+export const derive = (database, slot, inputs, compute) => {
+  const cache = database && caches.get(database)
+
+  if (!cache || cache.closed) {
+    return compute()
+  }
+
+  const known = cache.derived.get(slot)
+
+  if (known && known.writes === cache.writes && sameInputs(known.inputs, inputs)) {
+    return known.result
+  }
+
+  const entry = { inputs, writes: cache.writes, result: null }
+  const forget = () => {
+    if (cache.derived.get(slot) === entry) {
+      cache.derived.delete(slot)
+    }
+  }
+
+  try {
+    entry.result = compute()
+  } catch (error) {
+    forget()
+
+    throw error
+  }
+
+  cache.derived.set(slot, entry)
+
+  if (entry.result && typeof entry.result.then === 'function') {
+    entry.result.then((result) => {
+      if (Array.isArray(result) && estimateBytes(result) > ENTRY_BYTES) {
+        forget()
+      }
+    }, forget)
+  }
+
+  return entry.result
+}
+
 // Lets go of everything kept for `database`, a save the app has replaced, and keeps nothing more for it.
 export const dropQueryCache = (database) => {
   const cache = database && caches.get(database)
@@ -226,6 +270,7 @@ export const dropQueryCache = (database) => {
   if (cache) {
     cache.closed = true
     cache.entries.clear()
+    cache.derived.clear()
     cache.bytes = 0
     caches.delete(database)
   }

@@ -1,7 +1,6 @@
 import _partition from 'lodash/partition'
-import { Op } from 'sequelize'
 
-import { modelSystemBodyName } from '../aurora'
+import { systemBodyName } from '../aurora'
 import { linkTo } from '../deep-links'
 import { roundToDecimal } from '../math'
 import { amount, bodyText, rowsOf } from './common'
@@ -48,7 +47,7 @@ const intruderTotals = (totals) => {
   let hostile = false
 
   Object.entries(totals).forEach(([type, contacts]) => {
-    const [hostiles, neutrals] = _partition(contacts, (contact) => contact.ContactRace.AlienRaces[0].ContactStatus === HOSTILE)
+    const [hostiles, neutrals] = _partition(contacts, (contact) => contact.ContactStatus === HOSTILE)
 
     if (hostiles.length) {
       hostile = true
@@ -63,16 +62,23 @@ const intruderTotals = (totals) => {
   return { text: parts.join(', '), tone: hostile ? 'error' : undefined }
 }
 
-const intruderRaces = (races) => Object.values(races).map((race) => {
-  const alien = race.Race.AlienRaces[0]
-  const types = Object.entries(race.Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ')
+const intruderRaces = (races) => Object.values(races).map(({ Alien, Types }) => {
+  const types = Object.entries(Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ')
 
-  return `${alien.AlienRaceName} — ${types}${alien.ContactStatus === HOSTILE ? ' — Hostile' : ''}`
+  return `${Alien.AlienRaceName} — ${types}${Alien.ContactStatus === HOSTILE ? ' — Hostile' : ''}`
 }).join('; ')
 
 const plural = (count, one, many) => (count === 1 ? `${count} ${one}` : `${count} ${many}`)
 
 const joined = (parts) => parts.filter(Boolean).join(', ')
+
+// How the rift check sorts a colony of the race in the rift's system: with people, or without and then by what it holds (installations, stockpiles, ground units), the first that applies.
+const STOCKPILES = ['FuelStockpile', 'MaintenanceStockpile', 'Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
+const INHABITED = 'coalesce(FCT_Population.Population, 0) != 0'
+const UNINHABITED = 'coalesce(FCT_Population.Population, 0) = 0'
+const HAS_INSTALLATIONS = 'exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID)'
+const HAS_STOCK = `(${STOCKPILES.map((stockpile) => `coalesce(FCT_Population.${stockpile}, 0) != 0`).join(' or ')})`
+const HAS_GROUND_UNITS = 'exists (select 1 from FCT_GroundUnitFormation where FCT_GroundUnitFormation.PopulationID = FCT_Population.PopulationID)'
 
 export const checks = [
   {
@@ -86,70 +92,19 @@ export const checks = [
       { key: 'contacts', text: 'Contacts' },
     ],
     async read(ctx) {
-      const { database, GameID, RaceID } = ctx
+      const { GameID, RaceID } = ctx
 
-      const contacts = await database.models.Contact.findAll({
-        where: {
-          GameID,
-          DetectRaceID: RaceID,
-
-          ContactType: {
-            [Op.in]: [1, 3, 4, 12, 14, 16],
-          },
-        },
-
-        group: 'ContactID',
-        order: [['LastUpdate', 'DESC']],
-
-        include: [
-          {
-            required: true,
-            model: database.models.System,
-            include: [
-              {
-                required: true,
-                model: database.models.RaceSystemSurvey,
-                where: {
-                  RaceID,
-                },
-              },
-            ],
-          },
-          {
-            required: true,
-            model: database.models.Race,
-            as: 'ContactRace',
-
-            where: {
-              RaceID: {
-                [Op.ne]: RaceID,
-              },
-            },
-
-            include: [
-              {
-                model: database.models.AlienRace,
-
-                where: {
-                  ViewRaceID: RaceID,
-                },
-              },
-            ],
-          },
-        ],
-      })
+      const contacts = await rowsOf(ctx, `select FCT_Contacts.ContactID, FCT_Contacts.SystemID, FCT_Contacts.ContactRaceID, FCT_Contacts.ContactType, FCT_RaceSysSurvey.Name as SystemName, FCT_AlienRace.AlienRaceName, FCT_AlienRace.ContactStatus from FCT_Contacts inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Contacts.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID and FCT_AlienRace.ViewRaceID = ${RaceID} where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and FCT_Contacts.ContactType in (1, 3, 4, 12, 14, 16) group by FCT_Contacts.ContactID order by FCT_Contacts.LastUpdate desc`)
 
       const systems = contacts.reduce((aggregate, contact) => {
-        const { ContactStatus } = (contact.ContactRace.AlienRaces[0] || {})
-
-        if (!contact.ContactRace.AlienRaces.length || [2, 3].includes(ContactStatus)) {
+        if ([2, 3].includes(contact.ContactStatus)) {
           return aggregate
         }
 
         if (!aggregate[contact.SystemID]) {
           aggregate[contact.SystemID] = {
             SystemID: contact.SystemID,
-            SystemName: contact.System.RaceSystemSurveys[0].Name,
+            SystemName: contact.SystemName,
 
             Races: {},
             Totals: Object.fromEntries(Object.values(CONTACT_TYPES).map((type) => [type, []])),
@@ -161,7 +116,7 @@ export const checks = [
 
         if (!system.Races[contact.ContactRaceID]) {
           system.Races[contact.ContactRaceID] = {
-            Race: contact.ContactRace,
+            Alien: contact,
 
             Types: Object.fromEntries(Object.values(CONTACT_TYPES).map((name) => [name, []])),
           }
@@ -197,85 +152,27 @@ export const checks = [
       { key: 'colonies', text: 'Colonies' },
     ],
     async read(ctx) {
-      const { database, GameID, RaceID } = ctx
+      const { GameID, RaceID } = ctx
 
-      const rifts = await database.models.AetherRift.findAll({
-        where: {
-          GameID,
-        },
+      const fleets = (condition) => `(select count(*) from FCT_Fleet where FCT_Fleet.SystemID = FCT_AetherRift.SystemID and FCT_Fleet.RaceID = ${RaceID} and ${condition})`
+      const colonies = (condition) => `(select count(*) from FCT_Population where FCT_Population.SystemID = FCT_AetherRift.SystemID and FCT_Population.RaceID = ${RaceID} and ${condition})`
 
-        include: [
-          {
-            required: true,
-            model: database.models.System,
-            include: [
-              {
-                required: true,
-                model: database.models.RaceSystemSurvey,
-                where: {
-                  RaceID,
-                },
-              },
-              {
-                required: false,
-                model: database.models.Population,
-                where: {
-                  RaceID,
-                },
-                include: [
-                  {
-                    model: database.models.PopulationInstallation,
-                  },
-                  {
-                    model: database.models.GroundUnitFormation,
-                  },
-                ],
-              },
-              {
-                required: false,
-                model: database.models.Fleet,
-                where: {
-                  RaceID,
-                },
-              },
-            ],
-          },
-        ],
+      const rifts = await rowsOf(ctx, `select FCT_AetherRift.SystemID, FCT_AetherRift.Xcor, FCT_AetherRift.Ycor, FCT_AetherRift.Diameter, FCT_RaceSysSurvey.Name as SystemName, ${fleets('coalesce(FCT_Fleet.ShippingLine, 0) != 0')} as CivilianFleets, ${fleets('coalesce(FCT_Fleet.ShippingLine, 0) = 0')} as MilitaryFleets, ${colonies(INHABITED)} as InhabitedColonies, ${colonies(`${UNINHABITED} and ${HAS_INSTALLATIONS}`)} as UsedColonies, ${colonies(`${UNINHABITED} and not ${HAS_INSTALLATIONS} and ${HAS_STOCK}`)} as StockedColonies, ${colonies(`${UNINHABITED} and not ${HAS_INSTALLATIONS} and not ${HAS_STOCK} and ${HAS_GROUND_UNITS}`)} as GroundUnitBases from FCT_AetherRift inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_AetherRift.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} where FCT_AetherRift.GameID = ${GameID} order by FCT_AetherRift.Diameter desc`)
 
-        order: [['Diameter', 'DESC']],
-      })
-
-      return rifts.map((rift) => {
-        const [civilianFleets, militaryFleets] = _partition(rift.System.Fleets, (fleet) => fleet.ShippingLine)
-
-        const [inhabitedColonies, uninhabitedColonies] = _partition(rift.System.Populations, (population) => population.Population)
-        const [usedColonies, unusedColonies] = _partition(uninhabitedColonies, (population) => population.PopulationInstallations.length)
-        const [stockedColonies, emptyColonies] = _partition(unusedColonies, (population) => population.FuelStockpile || population.MaintenanceStockpile || population.Duranium || population.Neutronium || population.Corbomite || population.Tritanium || population.Boronide || population.Mercassium || population.Vendarite || population.Sorium || population.Uridium || population.Corundium || population.Gallicite)
-        const [groundUnitBases] = _partition(emptyColonies, (population) => population.GroundUnitFormations.length)
-
-        return {
-          rift,
-          civilianFleets: civilianFleets.length,
-          militaryFleets: militaryFleets.length,
-          inhabitedColonies: inhabitedColonies.length,
-          usedColonies: usedColonies.length,
-          stockedColonies: stockedColonies.length,
-          groundUnitBases: groundUnitBases.length,
-        }
-      }).filter((item) => item.civilianFleets || item.militaryFleets || item.inhabitedColonies || item.usedColonies || item.stockedColonies || item.groundUnitBases).map((item) => ({
-        id: `rift:${item.rift.SystemID}:${item.rift.Xcor}:${item.rift.Ycor}`,
+      return rifts.filter((rift) => rift.CivilianFleets || rift.MilitaryFleets || rift.InhabitedColonies || rift.UsedColonies || rift.StockedColonies || rift.GroundUnitBases).map((rift) => ({
+        id: `rift:${rift.SystemID}:${rift.Xcor}:${rift.Ycor}`,
         cells: {
-          system: item.rift.System.RaceSystemSurveys[0].Name,
-          size: `${ctx.count(item.rift.Diameter / 1000000, 2)} Mkm`,
-          fleets: joined([item.militaryFleets && plural(item.militaryFleets, 'military fleet', 'military fleets'), item.civilianFleets && plural(item.civilianFleets, 'civilian fleet', 'civilian fleets')]),
+          system: rift.SystemName,
+          size: `${ctx.count(rift.Diameter / 1000000, 2)} Mkm`,
+          fleets: joined([rift.MilitaryFleets && plural(rift.MilitaryFleets, 'military fleet', 'military fleets'), rift.CivilianFleets && plural(rift.CivilianFleets, 'civilian fleet', 'civilian fleets')]),
           colonies: joined([
-            item.inhabitedColonies && plural(item.inhabitedColonies, 'inhabited colony', 'inhabited colonies'),
-            item.usedColonies && plural(item.usedColonies, 'used colony', 'used colonies'),
-            item.stockedColonies && plural(item.stockedColonies, 'stocked colony', 'stocked colonies'),
-            item.groundUnitBases && plural(item.groundUnitBases, 'ground unit base', 'ground unit bases'),
+            rift.InhabitedColonies && plural(rift.InhabitedColonies, 'inhabited colony', 'inhabited colonies'),
+            rift.UsedColonies && plural(rift.UsedColonies, 'used colony', 'used colonies'),
+            rift.StockedColonies && plural(rift.StockedColonies, 'stocked colony', 'stocked colonies'),
+            rift.GroundUnitBases && plural(rift.GroundUnitBases, 'ground unit base', 'ground unit bases'),
           ]),
         },
-        link: linkTo.map(item.rift.SystemID),
+        link: linkTo.map(rift.SystemID),
       }))
     },
   },
@@ -352,9 +249,9 @@ export const checks = [
       { key: 'blocker', text: 'Blocked by' },
     ],
     async read(ctx) {
-      const { database, GameID, RaceID } = ctx
+      const { GameID, RaceID } = ctx
 
-      const [orbitalRows] = await database.query(`
+      const [orbitalRows] = await ctx.database.query(`
           select FCT_Fleet.AssignedPopulationID, sum(FCT_ShipCargo.Amount) as LoadedColonistAmount, VIR_StandardBerths.StandardBerthCapacity as StandardBerthCapacity from FCT_Fleet
 
           left join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID
@@ -380,86 +277,39 @@ export const checks = [
         return accumulator
       }, {})
 
-      const constructs = await database.models.AncientConstruct.findAll({
-        where: {
-          GameID,
-        },
+      const rows = await rowsOf(ctx, `select FCT_AncientConstruct.AncientConstructID, FCT_AncientConstruct.Active, FCT_AncientConstruct.ResearchBonus, DIM_ResearchField.FieldName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_Population.PopulationID, FCT_Population.Population from FCT_AncientConstruct inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${RaceID} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_AncientConstruct.ResearchField left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${RaceID} where FCT_AncientConstruct.GameID = ${GameID} group by FCT_AncientConstruct.AncientConstructID, FCT_Population.PopulationID order by FCT_AncientConstruct.AncientConstructID`)
 
-        include: [
-          {
-            model: database.models.ResearchField,
-          },
-          {
-            required: true,
-            model: database.models.SystemBody,
-            include: [
-              {
-                required: false,
-                model: database.models.Population,
-              },
-              {
-                required: true,
-                model: database.models.System,
-                include: [
-                  {
-                    required: true,
-                    model: database.models.RaceSystemSurvey,
-                    where: {
-                      RaceID,
-                    },
-                  },
-                ],
-              },
-              {
-                required: true,
-                model: database.models.SystemBodySurvey,
-                where: {
-                  RaceID,
-                },
-              },
-              {
-                required: false,
-                model: database.models.SystemBodyName,
-                where: {
-                  RaceID,
-                },
-              },
-              {
-                model: database.models.Star,
-              },
-            ],
-          },
-        ],
-      })
+      const constructs = new Map()
 
-      return constructs.map((construct) => {
-        const populations = construct.SystemBody.Populations.filter((population) => population.RaceID === RaceID).map((population) => population.Population + (orbitalPopulations[population.PopulationID] || 0))
-
-        return { construct, populations }
-      }).filter(({ construct, populations }) => !construct.Active || !populations.length || !populations.filter((population) => population > 10).length).map(({ construct, populations }) => {
-        const body = construct.SystemBody
-        const systemName = body.System.RaceSystemSurveys[0].Name
-
-        return {
-          id: `construct:${construct.AncientConstructID}`,
-          cells: {
-            construct: `${systemName} — ${modelSystemBodyName(body)}`,
-            bonus: construct.Active ? `${roundToDecimal((construct.ResearchBonus - 1) * 100)}% ${construct.ResearchField.FieldName}` : 'Dormant',
-            blocker: populations.length ? 'Lacking 10 million population on the body' : 'No population on the body',
-          },
-          link: linkTo.planner({
-            bodies: [{
-              SystemBodyID: body.SystemBodyID,
-              SystemBodyName: body.SystemBodyNames.length ? body.SystemBodyNames[0].Name : null,
-              SystemName: systemName,
-              BodyClass: body.BodyClass,
-              Component: body.Star.Component,
-              PlanetNumber: body.PlanetNumber,
-              OrbitNumber: body.OrbitNumber,
-            }],
-          }),
+      for (const row of rows) {
+        if (!constructs.has(row.AncientConstructID)) {
+          constructs.set(row.AncientConstructID, { construct: row, populations: [] })
         }
-      })
+
+        if (row.PopulationID !== null) {
+          constructs.get(row.AncientConstructID).populations.push(row.Population + (orbitalPopulations[row.PopulationID] || 0))
+        }
+      }
+
+      return [...constructs.values()].filter(({ construct, populations }) => !construct.Active || !populations.length || !populations.filter((population) => population > 10).length).map(({ construct, populations }) => ({
+        id: `construct:${construct.AncientConstructID}`,
+        cells: {
+          construct: `${construct.SystemName} — ${systemBodyName(construct)}`,
+          bonus: construct.Active ? `${roundToDecimal((construct.ResearchBonus - 1) * 100)}% ${construct.FieldName}` : 'Dormant',
+          blocker: populations.length ? 'Lacking 10 million population on the body' : 'No population on the body',
+        },
+        link: linkTo.planner({
+          bodies: [{
+            SystemBodyID: construct.SystemBodyID,
+            SystemBodyName: construct.SystemBodyName,
+            SystemName: construct.SystemName,
+            BodyClass: construct.BodyClass,
+            Component: construct.Component,
+            PlanetNumber: construct.PlanetNumber,
+            OrbitNumber: construct.OrbitNumber,
+          }],
+        }),
+      }))
     },
   },
 ]
