@@ -93,17 +93,20 @@ from FCT_Race
 inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID
 where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`).then(([row]) => row || { ColonizationSkill: 1, TerraformingRate: 0, TerraformingSpeed: 100 })
 
-// What the game asks of the race before it founds a civilian mining complex: complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system the millions of people in the race's largest colony there (for colonization.js `cmcSite`).
+// Whether a game founds civilian mining complexes, from its `FCT_Game` row. The switch (`AllowCMC`) came with Aurora 2.7; a 2.6 game has no such column and founds them regardless, so a row without it counts as switched on.
+export const cmcAllowedOf = (game) => (game.AllowCMC === undefined ? true : game.AllowCMC === 1)
+
+// What the game asks of the race before it founds a civilian mining complex: complexes switched on for the game, a shipyard, more than one colony with people or infrastructure, and per system the millions of people in the race's largest colony there (for colonization.js `cmcSite`). The whole game row is read because a 2.6 save lacks the switch (`cmcAllowedOf`).
 export const loadCmcRules = async (database, { GameID, RaceID }) => {
   const [[race], colonies] = await Promise.all([
-    rows(database, `select FCT_Game.AllowCMC, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
+    rows(database, `select FCT_Game.*, (select count(*) from FCT_Shipyard where FCT_Shipyard.GameID = ${GameID} and FCT_Shipyard.RaceID = ${RaceID}) as Shipyards, (select count(*) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (FCT_Population.Population > 0 or exists (select 1 from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = 9 and FCT_PopulationInstallations.Amount > 0))) as SettledColonies
 from FCT_Game
 where FCT_Game.GameID = ${GameID}`),
     rows(database, `select SystemID, max(Population) as Largest from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID} group by SystemID`),
   ])
 
   return {
-    allowed: !!race && race.AllowCMC === 1,
+    allowed: !!race && cmcAllowedOf(race),
     shipyard: !!race && race.Shipyards > 0,
     settledColonies: race ? race.SettledColonies : 0,
     largestColony: Object.fromEntries(colonies.map((colony) => [colony.SystemID, colony.Largest])),

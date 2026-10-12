@@ -344,7 +344,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
 import { cmcBodyInReach } from '../utilities/colonization'
-import { SUPPLY_BASE_MILLIONS, loadRoutes } from '../utilities/colonization-data'
+import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
 import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
@@ -470,7 +470,7 @@ export default {
     },
 
     raceRules() {
-      return this.race || { MineProduction: 0, MaximumOrbitalMiningDiameter: 0, AllowCMC: 0 }
+      return this.race || { MineProduction: 0, MaximumOrbitalMiningDiameter: 0, AllowCMC: false }
     },
 
     focus() {
@@ -1107,9 +1107,9 @@ export default {
           return null
         }
 
-        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, FCT_Game.AllowCMC from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
+        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, FCT_Game.* from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
 
-        return race || null
+        return race ? { MineProduction: race.MineProduction, MaximumOrbitalMiningDiameter: race.MaximumOrbitalMiningDiameter, AllowCMC: cmcAllowedOf(race) } : null
       }),
       default: null,
     },
