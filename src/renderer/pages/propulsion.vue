@@ -7,7 +7,7 @@
         <div class="toolbar">
           <div class="tool tool--hull">
             <div class="tool__label caption text--secondary">Hull without engines and fuel</div>
-            <v-text-field :value="hullTonsField" :type="selectedClass ? 'text' : 'number'" min="1" suffix="tons" :disabled="!!selectedClass" :hint="selectedClass ? 'From the class' : ''" aria-label="Hull in tons" dense outlined hide-details @input="setHullTons" />
+            <v-text-field :value="hullTonsField" :type="selectedClass ? 'text' : 'number'" min="1" suffix="tons" :disabled="!!selectedClass" aria-label="Hull in tons" dense outlined hide-details @input="setHullTons" />
           </div>
           <div class="tool tool--class">
             <div class="tool__label caption text--secondary">Saved class</div>
@@ -17,13 +17,15 @@
             <div class="tool__label caption text--secondary">Speed at least</div>
             <v-text-field :value="speed" type="number" min="1" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details @input="setSpeed" />
           </div>
+          <div class="tool">
+            <div class="tool__label caption text--secondary">Goal</div>
+            <v-btn-toggle v-model="rangeMode" mandatory dense>
+              <v-btn value="range" small>Range</v-btn>
+              <v-btn value="endurance" small>Endurance</v-btn>
+            </v-btn-toggle>
+          </div>
           <div class="tool tool--goal">
-            <div class="tool__label caption text--secondary">
-              <v-btn-toggle v-model="rangeMode" mandatory dense class="goal-toggle">
-                <v-btn value="range" x-small>Range</v-btn>
-                <v-btn value="endurance" x-small>Endurance</v-btn>
-              </v-btn-toggle>
-            </div>
+            <div class="tool__label caption text--secondary">{{ rangeMode === 'range' ? 'Range at least' : 'Endurance at least' }}</div>
             <v-text-field :value="range[rangeMode]" type="number" min="0" :suffix="rangeMode === 'range' ? 'bn km' : 'days'" :aria-label="rangeMode === 'range' ? 'Range in billions of km' : 'Endurance in days'" dense outlined hide-details @input="setGoal" />
           </div>
           <div class="tool tool--cruise">
@@ -31,50 +33,50 @@
             <v-text-field :value="Math.round(fraction * 100)" type="number" min="1" max="100" suffix="%" aria-label="Cruise power as a share of full power" dense outlined hide-details @input="setCruise" />
           </div>
           <div class="tool tool--actions">
-            <v-menu offset-y left :close-on-content-click="false" max-width="440">
-              <template #activator="{ on, attrs }">
-                <v-btn outlined aria-label="Engine options" v-bind="attrs" v-on="on"><v-icon small left>mdi-engine-outline</v-icon>Engines<span v-if="engineOptionCount">&nbsp;({{ engineOptionCount }})</span></v-btn>
-              </template>
-              <v-card class="pa-4 engines-menu">
-                <div class="subtitle-2">Engines</div>
-                <v-btn-toggle :value="engineOptions.kind" mandatory dense class="mt-2" :disabled="!!existingEngine" @change="(value) => setEngineOption('kind', value)">
-                  <v-btn v-for="option in kinds" :key="option.value" :value="option.value" small>{{ option.text }}</v-btn>
-                </v-btn-toggle>
-                <v-row dense class="mt-2">
-                  <v-col cols="4"><v-text-field :value="engineOptions.min" type="number" min="1" label="Fewest" aria-label="Fewest engines" dense outlined hide-details @input="(value) => setEngineNumber('min', value)" /></v-col>
-                  <v-col cols="4"><v-text-field :value="engineOptions.max" type="number" min="1" label="Most" aria-label="Most engines" dense outlined hide-details @input="(value) => setEngineNumber('max', value)" /></v-col>
-                  <v-col cols="4"><v-text-field :value="Math.round(engineOptions.share * 100)" type="number" min="1" max="100" suffix="%" label="Share" aria-label="Most of the ship the engines and fuel may take, in percent" dense outlined hide-details @input="(value) => setEngineNumber('share', value / 100)" /></v-col>
-                </v-row>
-                <div class="caption text--secondary mt-1">The share is the most of the finished ship the engines and their fuel tanks may take.</div>
-                <v-autocomplete :value="engineId" :items="engineItems" item-text="text" item-value="value" label="Engine" placeholder="Design new engines" prepend-inner-icon="mdi-engine-outline" clearable dense outlined hide-details class="mt-3" @change="(value) => (engineId = value || null)" />
-                <div class="caption text--secondary mt-1">An engine of the race's own fixes the size, thrust and fuel of the set, and only its count is searched.</div>
-              </v-card>
-            </v-menu>
-          </div>
-          <div class="tool tool--actions">
-            <v-menu offset-y left :close-on-content-click="false" max-width="560" max-height="640">
-              <template #activator="{ on, attrs }">
-                <v-btn outlined aria-label="Tech levels" v-bind="attrs" v-on="on"><v-icon small left>mdi-flask-outline</v-icon>Tech<span v-if="techChoiceCount">&nbsp;({{ techChoiceCount }})</span></v-btn>
-              </template>
-              <v-card class="pa-4 tech-menu">
-                <div class="subtitle-2">Tech levels designed with</div>
-                <div class="caption text--secondary mb-2">Each line starts at the level the game designs with. A lower level shows what an engine built before the latest research would be.</div>
-                <div v-for="line in techLines" :key="line.type" class="tech-line">
-                  <v-select :value="line.selected" :items="line.items" item-text="text" item-value="value" :label="line.label" :disabled="!line.items.length" dense outlined hide-details @change="(id) => setTech(line.type, id)" />
-                  <div v-if="line.next" class="tech-next caption text--disabled">Next: {{ line.next.name }} · {{ count(line.next.cost) }} RP<page-link :to="linkTo.techTree({ tech: line.next.id })" :name="line.next.name" class="ml-1" /></div>
-                  <div v-else-if="!line.items.length" class="tech-next caption text--disabled">Not researched</div>
-                </div>
-              </v-card>
-            </v-menu>
+            <div class="tool__buttons">
+              <v-menu offset-y left :close-on-content-click="false" max-width="440">
+                <template #activator="{ on, attrs }">
+                  <v-btn outlined aria-label="Engine options" v-bind="attrs" v-on="on"><v-icon small left>mdi-engine-outline</v-icon><span class="tool__btn-label">Engines</span><span v-if="engineOptionCount">&nbsp;({{ engineOptionCount }})</span></v-btn>
+                </template>
+                <v-card class="pa-4">
+                  <div class="subtitle-2">Engines</div>
+                  <v-btn-toggle :value="engineOptions.kind" mandatory dense class="mt-2" :disabled="!!existingEngine" @change="(value) => setEngineOption('kind', value)">
+                    <v-btn v-for="option in kinds" :key="option.value" :value="option.value" small>{{ option.text }}</v-btn>
+                  </v-btn-toggle>
+                  <v-row dense class="mt-2">
+                    <v-col cols="4"><v-text-field :value="engineOptions.min" type="number" min="1" label="Fewest" aria-label="Fewest engines" dense outlined hide-details @input="(value) => setEngineNumber('min', value)" /></v-col>
+                    <v-col cols="4"><v-text-field :value="engineOptions.max" type="number" min="1" label="Most" aria-label="Most engines" dense outlined hide-details @input="(value) => setEngineNumber('max', value)" /></v-col>
+                    <v-col cols="4"><v-text-field :value="Math.round(engineOptions.share * 100)" type="number" min="1" max="100" suffix="%" label="Share" aria-label="Most of the ship the engines and fuel may take, in percent" dense outlined hide-details @input="(value) => setEngineNumber('share', value / 100)" /></v-col>
+                  </v-row>
+                  <div class="caption text--secondary mt-1">The share is the most of the finished ship the engines and their fuel tanks may take.</div>
+                  <v-autocomplete :value="engineId" :items="engineItems" item-text="text" item-value="value" label="Engine" placeholder="Design new engines" prepend-inner-icon="mdi-engine-outline" clearable dense outlined hide-details class="mt-3" @change="(value) => (engineId = value || null)" />
+                  <div class="caption text--secondary mt-1">An engine of the race's own fixes the size, thrust and fuel of the set, and only its count is searched.</div>
+                </v-card>
+              </v-menu>
+              <v-menu offset-y left :close-on-content-click="false" max-width="560" max-height="640">
+                <template #activator="{ on, attrs }">
+                  <v-btn outlined aria-label="Tech levels" v-bind="attrs" v-on="on"><v-icon small left>mdi-flask-outline</v-icon><span class="tool__btn-label">Tech</span><span v-if="techChoiceCount">&nbsp;({{ techChoiceCount }})</span></v-btn>
+                </template>
+                <v-card class="pa-4">
+                  <div class="subtitle-2">Tech levels designed with</div>
+                  <div class="caption text--secondary mb-2">Each line starts at the level the game designs with. A lower level shows what an engine built before the latest research would be.</div>
+                  <div v-for="line in techLines" :key="line.type" class="mt-3">
+                    <v-select :value="line.selected" :items="line.items" item-text="text" item-value="value" :label="line.label" :disabled="!line.items.length" dense outlined hide-details @change="(id) => setTech(line.type, id)" />
+                    <div v-if="line.next" class="d-flex align-center caption text--disabled pt-1 pl-3">Next: {{ line.next.name }} · {{ count(line.next.cost) }} RP<page-link :to="linkTo.techTree({ tech: line.next.id })" :name="line.next.name" class="ml-1" /></div>
+                    <div v-else-if="!line.items.length" class="caption text--disabled pt-1 pl-3">Not researched</div>
+                  </div>
+                </v-card>
+              </v-menu>
+            </div>
           </div>
         </div>
 
         <v-progress-linear v-if="searching" :value="progress * 100" height="3" class="mt-2" aria-label="Searching propulsion sets" />
-        <v-alert v-if="searchError" type="error" dense text class="mt-2">The search failed: {{ searchError }}</v-alert>
-        <v-alert v-else-if="!engineTechMissing && !hullReady" type="info" dense text class="mt-2">Enter a hull size, or pick a saved class, to search propulsion sets.</v-alert>
-        <v-alert v-else-if="engineTechMissing" type="warning" dense text class="mt-2">The race has no engine or fuel consumption tech to design engines with. A saved class and the race's own engines can still be shown.</v-alert>
-        <v-alert v-else-if="!speedReady" type="info" dense text class="mt-2">Enter a speed between 1 and {{ count(maxSpeed) }} km/s.</v-alert>
-        <v-alert v-else-if="result && !result.sets.length && !searching" type="warning" dense text class="mt-2">No engine set reaches {{ count(speed) }} km/s{{ goalText }} within {{ Math.round(engineOptions.share * 100) }}% of the ship. Raise the share or the most engines, lower the targets, allow both kinds of engine, or pick a higher tech level.</v-alert>
+        <v-alert v-if="searchError" type="error" outlined dense class="mt-3">The search failed: {{ searchError }}</v-alert>
+        <v-alert v-else-if="!engineTechMissing && !hullReady" type="info" outlined dense class="mt-3">Enter a hull size, or pick a saved class, to search propulsion sets.</v-alert>
+        <v-alert v-else-if="engineTechMissing" type="warning" outlined dense class="mt-3">The race has no engine or fuel consumption tech to design engines with. A saved class and the race's own engines can still be shown.</v-alert>
+        <v-alert v-else-if="!speedReady" type="info" outlined dense class="mt-3">Enter a speed between 1 and {{ count(maxSpeed) }} km/s.</v-alert>
+        <v-alert v-else-if="result && !result.sets.length && !searching" type="warning" outlined dense class="mt-3">No engine set reaches {{ count(speed) }} km/s{{ goalText }} within {{ Math.round(engineOptions.share * 100) }}% of the ship. Raise the share or the most engines, lower the targets, allow both kinds of engine, or pick a higher tech level.</v-alert>
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
@@ -86,20 +88,22 @@
               <v-chip v-if="existingEngine" small color="primary" outlined close @click:close="engineId = null">{{ existingEngine.name }}</v-chip>
             </span>
           </div>
-          <v-data-table :headers="setHeaders" :items="rows" item-key="key" show-expand :expanded.sync="expanded" :custom-sort="sortRows" :sort-by.sync="setsTable.sortBy" :sort-desc.sync="setsTable.sortDesc" :items-per-page.sync="setsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: setPageSizes }" :item-class="rowClass" :loading="searching" class="sets-table clickable-rows" dense @click:row="selectRow">
+          <v-data-table :headers="setHeaders" :items="rows" item-key="key" show-expand :expanded.sync="expanded" :custom-sort="sortRows" :sort-by.sync="setsTable.sortBy" :sort-desc.sync="setsTable.sortDesc" :items-per-page.sync="setsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: setPageSizes }" :item-class="rowClass" :loading="searching" :no-data-text="searching ? 'Searching…' : 'No set yet.'" class="clickable-rows" @click:row="selectRow">
             <template #[`item.rank`]="{ item }"><span v-if="item.pinned" class="text--secondary">—</span><span v-else>{{ item.rank }}</span></template>
             <template #[`item.name`]="{ item }">
-              <div class="py-1 text-no-wrap">
-                <span class="font-weight-medium">{{ item.name }}</span>
-                <v-chip v-if="item.pinned" x-small class="ml-1">Saved class</v-chip>
+              <div class="py-2">
+                <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
+                <div class="caption text--secondary text-no-wrap">{{ item.detail }}</div>
               </div>
             </template>
             <template #[`item.count`]="{ item }"><span class="text-no-wrap">{{ count(item.count) }}</span></template>
             <template #[`item.thrust`]="{ item }"><span class="text-no-wrap">{{ item.thrust === null ? '—' : `× ${count(item.thrust, 2)}` }}</span></template>
             <template #[`item.power`]="{ item }"><span class="text-no-wrap">{{ count(item.power, 2) }}</span></template>
             <template #[`item.fuelPerEph`]="{ item }"><span class="text-no-wrap">{{ count(item.fuelPerEph, 4) }}</span></template>
-            <template #[`item.propulsionHS`]="{ item }"><span class="text-no-wrap">{{ count(item.propulsionHS, 2) }}</span></template>
-            <template #[`item.tons`]="{ item }"><span class="text-no-wrap">{{ count(item.tons) }}</span></template>
+            <template #[`item.propulsionHS`]="{ item }">
+              <div class="text-no-wrap">{{ count(item.propulsionHS, 2) }}</div>
+              <div class="caption text--secondary text-no-wrap">{{ count(item.tons) }} tons</div>
+            </template>
             <template #[`item.share`]="{ item }"><span class="text-no-wrap">{{ percent(item.share) }}</span></template>
             <template #[`item.speed`]="{ item }">
               <span class="text-no-wrap">{{ count(item.speed) }}</span>
@@ -110,45 +114,72 @@
             <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ count(item.rangeBn, 2) }}</span></template>
             <template #[`item.enduranceDays`]="{ item }"><span class="text-no-wrap">{{ count(item.enduranceDays, 1) }}</span></template>
             <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ count(item.cost, 1) }}</span></template>
-            <template #[`item.type`]="{ item }"><v-chip x-small :color="item.type === 'Commercial' ? 'info' : null" :outlined="item.type !== 'Commercial'">{{ item.type }}</v-chip></template>
+            <template #[`item.type`]="{ item }"><span class="text-no-wrap">{{ item.type }}</span></template>
             <template #expanded-item="{ headers, item }">
-              <td :colspan="headers.length" class="expanded-cell">
-                <div class="d-flex flex-wrap expanded-body">
-                  <div v-for="card in item.cards" :key="card.name" class="engine-card">
-                    <div class="engine-card__name">{{ card.name }}<span v-if="card.count" class="text--secondary"> × {{ count(card.count) }}</span></div>
-                    <dl class="engine-card__facts">
-                      <div><dt>Engine power</dt><dd>{{ count(card.power, 2) }}</dd></div>
-                      <div><dt>Fuel use per hour</dt><dd>{{ count(card.fuelPerHour, 2) }} L</dd></div>
-                      <div><dt>Fuel per engine power hour</dt><dd>{{ count(card.fuelPerEph, 3) }} L</dd></div>
-                      <div><dt>Size</dt><dd>{{ count(card.sizeHS, 2) }} HS ({{ count(card.tons) }} tons)</dd></div>
-                      <div><dt>HTK</dt><dd>{{ count(card.htk) }}</dd></div>
-                      <div><dt>Thermal signature</dt><dd>{{ count(card.thermal, 1) }}</dd></div>
-                      <div><dt>Explosion chance</dt><dd>{{ count(card.explosionChance) }}%</dd></div>
-                      <div><dt>Max explosion size</dt><dd>{{ count(card.maxExplosion) }}</dd></div>
-                      <div><dt>Cost</dt><dd>{{ count(card.cost, 2) }} BP</dd></div>
-                      <div><dt>Crew</dt><dd>{{ count(card.crew) }}</dd></div>
-                      <div><dt>Type</dt><dd>{{ card.commercial ? 'Commercial Engine' : 'Military Engine' }}</dd></div>
-                    </dl>
-                  </div>
-                  <div class="tank-list">
-                    <div class="engine-card__name">Fuel tanks</div>
-                    <div v-if="!item.tanks.length" class="caption text--secondary">No tanks: the set carries no fuel.</div>
-                    <v-simple-table v-else dense>
-                      <tbody>
-                        <tr v-for="tank in item.tanks" :key="tank.id">
-                          <td>{{ count(tank.count) }} ×</td>
-                          <td>{{ tank.name }}</td>
-                          <td class="text-right text-no-wrap">{{ count(tank.sizeHS * tank.count, 3) }} HS</td>
-                          <td class="text-right text-no-wrap">{{ count(tank.litres * tank.count) }} L</td>
-                          <td class="text-right text-no-wrap">{{ count(tank.cost * tank.count, 2) }} BP</td>
-                        </tr>
-                      </tbody>
-                    </v-simple-table>
-                  </div>
-                </div>
+              <td :colspan="headers.length" class="expand-cell">
+                <div class="caption text--secondary mb-1">{{ item.pinned ? 'The engines as the game designed them' : 'The engine as the game would design it' }}</div>
+                <v-simple-table dense class="detail-table">
+                  <thead>
+                    <tr>
+                      <th>Engine</th>
+                      <th class="text-right">Count</th>
+                      <th class="text-right">Power (EP)</th>
+                      <th class="text-right">Fuel / h (L)</th>
+                      <th class="text-right">L / EP hour</th>
+                      <th class="text-right">Size (HS)</th>
+                      <th class="text-right">Tons</th>
+                      <th class="text-right">HTK</th>
+                      <th class="text-right">Thermal</th>
+                      <th class="text-right">Explosion</th>
+                      <th class="text-right">Max explosion</th>
+                      <th class="text-right">BP</th>
+                      <th class="text-right">Crew</th>
+                      <th>Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(card, index) in item.cards" :key="index">
+                      <td class="text-no-wrap">{{ card.name }}</td>
+                      <td class="text-right">{{ count(card.count) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.power, 2) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.fuelPerHour, 2) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.fuelPerEph, 3) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.sizeHS, 2) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.tons) }}</td>
+                      <td class="text-right">{{ count(card.htk) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.thermal, 1) }}</td>
+                      <td class="text-right">{{ count(card.explosionChance) }}%</td>
+                      <td class="text-right">{{ count(card.maxExplosion) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(card.cost, 2) }}</td>
+                      <td class="text-right">{{ count(card.crew) }}</td>
+                      <td>{{ card.commercial ? 'Commercial' : 'Military' }}</td>
+                    </tr>
+                  </tbody>
+                </v-simple-table>
+                <div class="caption text--secondary mt-3 mb-1">Fuel tanks</div>
+                <div v-if="!item.tanks.length" class="caption text--secondary">None: the set carries no fuel.</div>
+                <v-simple-table v-else dense class="detail-table">
+                  <thead>
+                    <tr>
+                      <th>Tank</th>
+                      <th class="text-right">Count</th>
+                      <th class="text-right">HS</th>
+                      <th class="text-right">Litres</th>
+                      <th class="text-right">BP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="tank in item.tanks" :key="tank.id">
+                      <td>{{ tank.name }}</td>
+                      <td class="text-right">{{ count(tank.count) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(tank.sizeHS * tank.count, 3) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(tank.litres * tank.count) }}</td>
+                      <td class="text-right text-no-wrap">{{ count(tank.cost * tank.count, 2) }}</td>
+                    </tr>
+                  </tbody>
+                </v-simple-table>
               </td>
             </template>
-            <template #no-data>{{ searching ? 'Searching…' : 'No set yet.' }}</template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
             Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; a check mark says the save stores the same speed.
@@ -190,92 +221,117 @@
           <div class="panel-foot caption text--secondary">A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures.</div>
         </v-card>
 
-        <v-card class="panel" data-summary="Fuel tanks, burn per hour and endurance for the chosen set at full power, half power and the cruise share, to size a ship's fuel and see how long it stays out." elevation="1">
-          <div class="panel-head">
-            <span>Fuel</span>
-            <v-chip v-if="selectedRow" small>{{ selectedRow.name }}{{ selectedRow.pinned ? '' : ` × ${count(selectedRow.count)}` }}</v-chip>
-          </div>
-          <div class="panel-body">
-            <div v-if="!selectedRow" class="caption text--secondary">No set to show yet. Click a row of the table to choose the set shown here.</div>
-            <v-row v-else dense>
-              <v-col cols="12" lg="6">
-                <div class="subtitle-2 mb-1">Tanks</div>
-                <div v-if="!selectedRow.tanks.length" class="caption text--secondary">The set carries no fuel.</div>
-                <v-simple-table v-else dense>
-                  <thead>
-                    <tr><th>Tank</th><th class="text-right">Count</th><th class="text-right">HS</th><th class="text-right">Litres</th><th class="text-right">BP</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="tank in selectedRow.tanks" :key="tank.id">
-                      <td>{{ tank.name }}</td>
-                      <td class="text-right">{{ count(tank.count) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(tank.sizeHS * tank.count, 3) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(tank.litres * tank.count) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(tank.cost * tank.count, 2) }}</td>
-                    </tr>
-                    <tr class="font-weight-medium">
-                      <td>Total</td>
-                      <td />
-                      <td class="text-right text-no-wrap">{{ count(selectedRow.tankHS, 3) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(selectedRow.litres) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(selectedRow.tankCost, 2) }}</td>
-                    </tr>
-                  </tbody>
-                </v-simple-table>
-              </v-col>
-              <v-col cols="12" lg="6">
-                <div class="subtitle-2 mb-1">Burn and endurance</div>
-                <v-simple-table dense>
-                  <thead>
-                    <tr><th>Power</th><th class="text-right">Speed (km/s)</th><th class="text-right">Burn (L/h)</th><th class="text-right">Endurance (days)</th><th class="text-right">Range (bn km)</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="level in burnLevels" :key="level.fraction">
-                      <td>{{ percent(level.fraction) }}{{ level.fraction === fraction ? ' (cruise)' : '' }}</td>
-                      <td class="text-right text-no-wrap">{{ count(level.speed) }}</td>
-                      <td class="text-right text-no-wrap">{{ litres(level.burn) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(level.days, 1) }}</td>
-                      <td class="text-right text-no-wrap">{{ count(level.rangeBn, 2) }}</td>
-                    </tr>
-                  </tbody>
-                </v-simple-table>
-              </v-col>
-            </v-row>
-          </div>
-          <div class="panel-foot caption text--secondary">The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600. Tanks are picked from the stock tanks the race holds: from the largest down, each size takes as many as fit and leaves the rest to the smaller ones, or takes one more and holds it all, whichever takes fewer HS, then fewer BP. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
-        </v-card>
+        <v-row>
+          <v-col cols="12" xl="6">
+            <v-card class="panel" data-summary="The stock fuel tanks that hold the chosen set's fuel in the fewest HS, with their litres and cost, to fit the fuel a range or endurance needs." elevation="1">
+              <div class="panel-head">
+                <span>Fuel tanks</span>
+                <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
+              </div>
+              <div v-if="!selectedRow" class="panel-body caption text--secondary">No set to show yet. Click a row of the table to choose the set shown here.</div>
+              <div v-else-if="!selectedRow.tanks.length" class="panel-body caption text--secondary">The set carries no fuel.</div>
+              <v-simple-table v-else dense>
+                <thead>
+                  <tr>
+                    <th>Tank</th>
+                    <th class="text-right">Count</th>
+                    <th class="text-right">HS</th>
+                    <th class="text-right">Litres</th>
+                    <th class="text-right">BP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="tank in selectedRow.tanks" :key="tank.id">
+                    <td>{{ tank.name }}</td>
+                    <td class="text-right">{{ count(tank.count) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(tank.sizeHS * tank.count, 3) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(tank.litres * tank.count) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(tank.cost * tank.count, 2) }}</td>
+                  </tr>
+                  <tr class="font-weight-medium">
+                    <td>Total</td>
+                    <td />
+                    <td class="text-right text-no-wrap">{{ count(selectedRow.tankHS, 3) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(selectedRow.litres) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(selectedRow.tankCost, 2) }}</td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <div class="panel-foot caption text--secondary">Tanks are picked from the stock tanks the race holds: from the largest down, each size takes as many as fit and leaves the rest to the smaller ones, or takes one more and holds it all, whichever takes fewer HS, then fewer BP. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
+            </v-card>
+          </v-col>
+          <v-col cols="12" xl="6">
+            <v-card class="panel" data-summary="How fast the chosen set burns its fuel and how long it lasts at full power, half power and the cruise share, to see what a slower cruise buys." elevation="1">
+              <div class="panel-head">
+                <span>Burn and endurance</span>
+                <v-chip v-if="selectedRow" small>{{ selectedSetLabel }}</v-chip>
+              </div>
+              <div v-if="!selectedRow" class="panel-body caption text--secondary">No set to show yet. Click a row of the table to choose the set shown here.</div>
+              <v-simple-table v-else dense>
+                <thead>
+                  <tr>
+                    <th>Power</th>
+                    <th class="text-right">Speed (km/s)</th>
+                    <th class="text-right">Burn (L/h)</th>
+                    <th class="text-right">Endurance (days)</th>
+                    <th class="text-right">Range (bn km)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="level in burnLevels" :key="level.fraction">
+                    <td>{{ percent(level.fraction) }}{{ level.fraction === fraction ? ' (cruise)' : '' }}</td>
+                    <td class="text-right text-no-wrap">{{ count(level.speed) }}</td>
+                    <td class="text-right text-no-wrap">{{ litres(level.burn) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(level.days, 1) }}</td>
+                    <td class="text-right text-no-wrap">{{ count(level.rangeBn, 2) }}</td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <div class="panel-foot caption text--secondary">The engines burn their power times the fuel per engine power hour every hour, scaled by the share of power in use, so a slower cruise lengthens the endurance and leaves the range as it is. The range is the fuel over the burn at full power, times the speed, times 3,600.</div>
+            </v-card>
+          </v-col>
+        </v-row>
 
         <v-card class="panel" data-summary="The jump drives the game would add to the finished hull, military and commercial, with their size, cost, crew and the ships they move." elevation="1">
           <div class="panel-head">
             <span>Jump drive</span>
             <v-chip v-if="selectedRow" small>Hull with the propulsion: {{ count(jumpHullHS, 2) }} HS</v-chip>
           </div>
-          <div class="panel-body">
-            <div v-if="!selectedRow" class="caption text--secondary">No set to show yet. Click a row of the table to choose the set shown here.</div>
-            <div v-else-if="!jumpDrives" class="caption text--secondary">The race has no jump drive efficiency tech researched.</div>
-            <template v-else>
-              <v-simple-table dense>
-                <thead>
-                  <tr><th>Drive</th><th class="text-right">Drive size (HS)</th><th class="text-right">Designed for (HS)</th><th class="text-right">Moves up to (HS)</th><th class="text-right">Ship with the drive (HS)</th><th class="text-right">Cost (BP)</th><th class="text-right">Crew</th><th class="text-right">HTK</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="drive in jumpDrives" :key="drive.name">
-                    <td>{{ drive.name }}</td>
-                    <td class="text-right text-no-wrap">{{ count(drive.sizeHS, 2) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(drive.designHS) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(drive.capacityHS) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(drive.totalHS, 2) }}</td>
-                    <td class="text-right text-no-wrap">{{ count(drive.cost, 1) }}</td>
-                    <td class="text-right">{{ count(drive.crew) }}</td>
-                    <td class="text-right">{{ count(drive.htk) }}</td>
-                  </tr>
-                </tbody>
-              </v-simple-table>
-              <div class="caption mt-2">Squadron limits of the automatic design: {{ jumpSquadron }}.</div>
-              <div class="caption text--secondary">The race's own techs, as reference: {{ jumpReference }}.</div>
-              <div v-if="selectedClass && selectedClass.drives.length" class="caption text--secondary">The saved class already mounts {{ driveList }}; the figures above are for the hull without them.</div>
-            </template>
-          </div>
+          <div v-if="!selectedRow" class="panel-body caption text--secondary">No set to show yet. Click a row of the table to choose the set shown here.</div>
+          <div v-else-if="!jumpDrives" class="panel-body caption text--secondary">The race has no jump drive efficiency tech researched.</div>
+          <template v-else>
+            <v-simple-table dense>
+              <thead>
+                <tr>
+                  <th>Drive</th>
+                  <th class="text-right">Drive size (HS)</th>
+                  <th class="text-right">Designed for (HS)</th>
+                  <th class="text-right">Moves up to (HS)</th>
+                  <th class="text-right">Ship with the drive (HS)</th>
+                  <th class="text-right">BP</th>
+                  <th class="text-right">Crew</th>
+                  <th class="text-right">HTK</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="drive in jumpDrives" :key="drive.name">
+                  <td>{{ drive.name }}</td>
+                  <td class="text-right text-no-wrap">{{ count(drive.sizeHS, 2) }}</td>
+                  <td class="text-right text-no-wrap">{{ count(drive.designHS) }}</td>
+                  <td class="text-right text-no-wrap">{{ count(drive.capacityHS) }}</td>
+                  <td class="text-right text-no-wrap">{{ count(drive.totalHS, 2) }}</td>
+                  <td class="text-right text-no-wrap">{{ count(drive.cost, 1) }}</td>
+                  <td class="text-right">{{ count(drive.crew) }}</td>
+                  <td class="text-right">{{ count(drive.htk) }}</td>
+                </tr>
+              </tbody>
+            </v-simple-table>
+            <div class="panel-body pt-3 caption text--secondary">
+              <div>Squadron limits of the automatic design: {{ jumpSquadron }}.</div>
+              <div>The race's own techs, as reference: {{ jumpReference }}.</div>
+              <div v-if="selectedClass && selectedClass.drives.length">The saved class already mounts {{ driveList }}; the figures above are for the hull without them.</div>
+            </div>
+          </template>
           <div class="panel-foot caption text--secondary">A drive for a ship of S HS is S over (efficiency × the larger of 1 and (S / 20) to the power 0.25) HS. Its cost is S over the efficiency, times the squadron size and radius cost multipliers, times 5; its crew is twice its size, rounded; its HTK is the square root of its size, cut to a whole number. A commercial drive is five times the size and moves five times the ships. The game's automatic design starts from the hull's size, rounded up (a fifth of it for a commercial drive), and grows the drive by 1 HS until it moves the hull with the drive aboard. It uses the race's highest efficiency tech and the default squadron size and radius techs, whatever else the race has researched, and it leaves the armour as it is.</div>
         </v-card>
       </template>
@@ -360,8 +416,8 @@ const finiteNumber = (value) => {
 
 const sumBy = (items, value) => items.reduce((total, item) => total + value(item), 0)
 
-// One engine as the game prints it on its design window.
-const engineCard = (engine, name, count = 0) => ({
+// One engine as the game prints it on its design window, with how many the row mounts.
+const engineCard = (engine, name, count) => ({
   name,
   count,
   power: engine.power,
@@ -597,6 +653,7 @@ export default {
         pinned: true,
         rank: null,
         name: shipClass.name,
+        detail: `Saved class: ${this.count(shipClass.engineHS, 2)} HS of engines, ${this.count(shipClass.tankHS, 2)} HS of tanks`,
         count: shipClass.engineCount,
         thrust: single ? single.thrust : null,
         power,
@@ -632,6 +689,13 @@ export default {
 
     selectedRow() {
       return this.rows.find((row) => row.key === this.selectedKey) || this.rows.find((row) => !row.pinned) || this.rows[0] || null
+    },
+
+    // The chosen set as the Fuel tanks and Burn and endurance heads name it.
+    selectedSetLabel() {
+      const row = this.selectedRow
+
+      return row ? `${row.name}${row.pinned ? '' : ` × ${this.count(row.count)}`}` : ''
     },
 
     // The finished hull's size without the jump drives the saved class mounts, as the game's automatic design starts from.
@@ -690,14 +754,14 @@ export default {
       const result = this.result
       const none = { value: '—', note: this.searching ? 'Searching…' : 'No set meets the targets' }
       const describe = (set) => `${this.count(set.count)} × ${this.setName(set)}`
-      const tile = (label, icon, set, figure) => ({ label, icon, ...(set ? { value: figure(set), note: describe(set) } : none) })
+      const tile = (label, set, figure) => ({ label, ...(set ? { value: figure(set), note: describe(set) } : none) })
       const tech = this.designTech
 
       return [
-        tile('Fastest set within the share', 'mdi-speedometer', result && result.fastest, (set) => `${this.count(set.speed)} km/s`),
-        tile('Lightest set for the targets', 'mdi-weight', result && result.lightest, (set) => `${this.count(set.propulsionHS, 2)} HS (${this.count(set.tons)} tons)`),
-        tile('Cheapest set', 'mdi-cash-multiple', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`),
-        { label: 'Engine and fuel tech', icon: 'mdi-flask-outline', value: tech ? `${this.count(tech.engineTech, 2)} EP/HS` : '—', note: tech ? `Fuel ${tech.fuelTech} L per EP hour · thrust × ${tech.minThrust} to × ${tech.maxThrust}` : 'None researched' },
+        tile('Fastest set within the share', result && result.fastest, (set) => `${this.count(set.speed)} km/s`),
+        tile('Lightest set for the targets', result && result.lightest, (set) => `${this.count(set.propulsionHS, 2)} HS (${this.count(set.tons)} tons)`),
+        tile('Cheapest set', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`),
+        { label: 'Engine and fuel tech', value: tech ? `${this.count(tech.engineTech, 2)} EP/HS` : '—', note: tech ? `Fuel ${tech.fuelTech} L per EP hour · thrust × ${tech.minThrust} to × ${tech.maxThrust}` : 'None researched' },
       ]
     },
 
@@ -710,7 +774,6 @@ export default {
         { text: 'Power (EP)', value: 'power', align: 'end' },
         { text: 'L / EP hour', value: 'fuelPerEph', align: 'end' },
         { text: 'Propulsion HS', value: 'propulsionHS', align: 'end' },
-        { text: 'Tons', value: 'tons', align: 'end' },
         { text: 'Share', value: 'share', align: 'end' },
         { text: 'Speed (km/s)', value: 'speed', align: 'end' },
         { text: 'Burn (L/h)', value: 'burn', align: 'end' },
@@ -907,6 +970,7 @@ export default {
         rank,
         set,
         name,
+        detail: `${this.count(set.engine.sizeHS, 2)} HS each, ${set.tankHS > 0 ? `${this.count(set.tankHS, 2)} HS of tanks` : 'no tanks'}`,
         count: set.count,
         thrust: set.engine.thrust,
         power: set.power,
@@ -923,7 +987,7 @@ export default {
         crew: set.crew,
         type: set.commercial ? 'Commercial' : 'Military',
         thermal: set.thermal,
-        cards: [engineCard(set.engine, name)],
+        cards: [engineCard(set.engine, name, set.count)],
         tanks: set.tanks,
         tankHS: set.tankHS,
         tankCost: set.tanks.reduce((total, tank) => total + tank.cost * tank.count, 0),
@@ -938,7 +1002,7 @@ export default {
     },
 
     rowClass(row) {
-      return this.selectedRow && row.key === this.selectedRow.key ? 'selected-row' : ''
+      return this.selectedRow && row.key === this.selectedRow.key ? 'is-selected-row' : ''
     },
 
     // The saved class stays on top whatever the sort; the sets are sorted by the column, ties in rank order.
@@ -966,7 +1030,7 @@ export default {
     },
 
     percent(share) {
-      return `${this.count(share * 100, share < 0.1 ? 2 : 1)} %`
+      return `${this.count(share * 100, share < 0.1 ? 2 : 1)}%`
     },
 
     // Litres an hour, with decimals for a small burn.
@@ -1111,112 +1175,81 @@ export default {
     align-self: flex-end;
   }
 
+  // One row from 1280 px up: the numbers keep their size, the class field takes what is left up to 280 px and the buttons lose their labels below 1500 px. Narrower windows wrap.
   .tool--hull {
-    flex: 0 0 200px;
+    flex: 0 0 180px;
   }
 
   .tool--class {
-    flex: 0 0 240px;
+    flex: 1 1 160px;
+    max-width: 280px;
   }
 
   .tool--speed {
-    flex: 0 0 160px;
+    flex: 0 0 150px;
   }
 
   .tool--goal {
-    flex: 0 0 190px;
+    flex: 0 0 150px;
   }
 
   .tool--cruise {
-    flex: 0 0 130px;
+    flex: 0 0 120px;
   }
 
-  .goal-toggle .v-btn {
-    height: 18px !important;
+  @media (max-width: 1499px) {
+    .tool__btn-label {
+      display: none;
+    }
+
+    .tool__buttons .v-btn {
+      min-width: 40px !important;
+      padding: 0 12px !important;
+    }
+
+    .tool__buttons .v-btn .v-icon--left {
+      margin-right: 0;
+    }
   }
 
-  .toolbar .v-btn-toggle .v-btn:not(.v-size--x-small),
-  .tool--actions .v-btn {
-    height: 40px !important;
-  }
-
-  .tech-line {
-    margin-bottom: 10px;
-  }
-
-  .tech-next {
+  .tool__buttons {
     display: flex;
-    align-items: center;
-    padding: 2px 0 0 12px;
+    gap: 8px;
   }
 
-  .panel {
-    margin-top: 8px;
+  .toolbar .v-btn-toggle .v-btn,
+  .tool__buttons .v-btn {
+    height: 40px !important;
   }
 
   .is-searching {
     opacity: 0.6;
   }
 
-  .sets-table {
-    td {
-      font-variant-numeric: tabular-nums;
-    }
-
-    tbody tr {
-      cursor: pointer;
-    }
-
-    tbody tr.selected-row {
-      background: rgba(var(--v-theme-primary, 24, 103, 192), 0.08);
-      box-shadow: inset 3px 0 0 var(--ae-primary, #1867c0);
-    }
+  .clickable-rows tbody tr {
+    cursor: pointer;
   }
 
-  .expanded-cell {
-    padding: 8px 16px 16px;
+  tr.is-selected-row {
+    background: rgba(33, 150, 243, 0.08);
   }
 
-  .expanded-body {
-    gap: 16px 32px;
+  .expand-cell {
+    padding: 8px 24px 16px !important;
   }
 
-  .engine-card {
-    min-width: 320px;
-    max-width: 520px;
-    flex: 1 1 320px;
+  .detail-table {
+    background: transparent !important;
   }
 
-  .engine-card__name {
-    font-weight: 500;
-    margin-bottom: 4px;
-  }
-
-  .engine-card__facts {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 4px 16px;
-    margin: 0;
-
-    dt {
-      font-size: 12px;
-      opacity: 0.7;
-    }
-
-    dd {
-      margin: 0;
-      font-variant-numeric: tabular-nums;
-    }
-  }
-
-  .tank-list {
-    min-width: 360px;
-    flex: 1 1 360px;
-  }
-
-  td,
-  th {
+  td {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+.theme--dark .propulsion-page {
+  tr.is-selected-row {
+    background: rgba(33, 150, 243, 0.16);
   }
 }
 </style>
