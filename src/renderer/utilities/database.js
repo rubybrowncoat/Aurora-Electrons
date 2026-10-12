@@ -9,6 +9,9 @@ export const QUERY_TIMEOUT_MS = 60000
 // How long retiring a database waits for the statement running on it to settle before closing it anyway.
 const RETIRE_SETTLE_MS = 5000
 
+// SQLite's open flag for read and write without create (sqlite3's OPEN_READWRITE). Sequelize's default adds OPEN_CREATE, which turned a missing save path (a save deleted or moved while the app watched it) into a new empty file there. Writes stay possible for the Galaxy Map's Save Positions.
+const OPEN_EXISTING = 0x2
+
 const guards = new WeakMap()
 
 // Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. Transaction queries have a connection of their own and pass straight through.
@@ -146,6 +149,7 @@ export const resetDatabase = (storagePath) => {
     // dialectModule: sqlite3,
 
     storage: storagePath,
+    dialectOptions: { mode: OPEN_EXISTING },
   })
 
   guardQueries(sequelize)
