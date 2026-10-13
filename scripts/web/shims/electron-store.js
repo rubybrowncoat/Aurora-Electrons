@@ -2,10 +2,29 @@
 
 const listeners = {}
 
-const read = (storageKey) => {
+// What the store holds, as a plain read. An absent value, storage the browser does not let the page read, or a value that is not valid JSON (or is JSON null, false or 0) reads as an empty store, which the app's settings and history readers depend on to start. A store opened with `strict: true` (a writer of whole files that must never replace one it could not read: utilities/scenario-records.js) reads as electron-store's does instead: a present value that is not valid JSON throws, naming the store, and a present value is returned as parsed, whatever it is, for the caller's own shape check to refuse; only an absent value, or storage the browser does not let the page read, is empty.
+const read = (storageKey, strict = false) => {
+  let raw = null
+
   try {
-    return JSON.parse(localStorage.getItem(storageKey)) || {}
+    raw = localStorage.getItem(storageKey)
   } catch (e) {
+    return {}
+  }
+
+  if (raw === null) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+
+    return strict ? parsed : (parsed || {})
+  } catch (e) {
+    if (strict) {
+      throw new Error(`The settings file ${storageKey} is damaged and could not be read (${e.message})`)
+    }
+
     return {}
   }
 }
@@ -51,10 +70,11 @@ export default class Store {
   constructor (options = {}) {
     this.storageKey = `aurora-electrons:${options.cwd ? `${options.cwd}/` : ''}${options.name || 'config'}`
     this.path = `localStorage ${this.storageKey}`
+    this.strict = options.strict === true
   }
 
   get store () {
-    return read(this.storageKey)
+    return read(this.storageKey, this.strict)
   }
 
   set store (value) {
@@ -76,13 +96,13 @@ export default class Store {
   }
 
   get (key, defaultValue) {
-    const value = getPath(read(this.storageKey), key)
+    const value = getPath(read(this.storageKey, this.strict), key)
 
     return value === undefined ? defaultValue : value
   }
 
   set (key, value) {
-    const store = read(this.storageKey)
+    const store = read(this.storageKey, this.strict)
     const oldValue = getPath(store, key)
 
     setPath(store, key, value)
@@ -94,7 +114,7 @@ export default class Store {
   }
 
   delete (key) {
-    const store = read(this.storageKey)
+    const store = read(this.storageKey, this.strict)
     const oldValue = getPath(store, key)
 
     deletePath(store, key)
@@ -115,3 +135,6 @@ export default class Store {
     }
   }
 }
+
+// The tabs of one browser share localStorage and `update` is not a compare-and-swap between them (another tab can write between its read and its write), so a writer of whole files that must not lose a write (utilities/scenario-records.js) lets one tab at a time write.
+Store.writesNeedOwner = true
