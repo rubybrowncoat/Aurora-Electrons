@@ -55,6 +55,7 @@
             <template #[`item.populationSort`]="{ item }">
               <div class="text-no-wrap">{{ people(item.Population) }}</div>
               <div class="caption text--secondary text-no-wrap">{{ people(item.final) }} in {{ horizon }} y<provenance-mark :result="item.r.projection" /></div>
+              <div v-if="item.ark" class="caption text--secondary text-no-wrap">{{ arkCaption(item.ark) }}<provenance-mark :result="item.ark.occupied" /></div>
             </template>
             <template #[`item.growthSort`]="{ item }">
               <span class="text-no-wrap" :class="{ 'text--secondary': !(item.growth > 0) }">{{ percent(item.growth, 2) }}</span><provenance-mark :result="item.r.growth" />
@@ -127,8 +128,80 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population in orbit (Ark modules) isn't counted. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the
+            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population aboard Ark ships is not part of these figures: where the race has Arks it is listed apart, with no growth applied to it. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the
             <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
+          </div>
+        </v-card>
+
+        <v-card v-if="ark.ships.length" class="panel" data-summary="Population living aboard Ark ships at colonies, kept apart from surface population, with the species aboard and the berths still empty. Use it to see where orbital population sits and how much room is left for more." elevation="1">
+          <div class="panel-head">
+            <span>Ark population<provenance-mark rule="arks.occupied" label /></span>
+            <span class="caption text--secondary">{{ arkHeadline }}<provenance-mark :result="ark.totals.occupied" /></span>
+          </div>
+          <v-data-table :headers="arkHeaders" :items="arkRows" item-key="SystemBodyID" :expanded.sync="arkExpanded" show-expand single-expand :custom-sort="sortRows" :sort-by.sync="arkTable.sortBy" :sort-desc.sync="arkTable.sortDesc" :items-per-page.sync="arkTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: colonyPageSizes }" no-data-text="No Ark ship of the race is at a colony." class="ark-table" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+            <template #[`item.name`]="{ item }">
+              <div class="py-2">
+                <div class="font-weight-medium">{{ item.name }}</div>
+                <div class="caption text--secondary">{{ item.place }}</div>
+              </div>
+            </template>
+            <template #[`item.speciesSort`]="{ item }"><span class="text-no-wrap">{{ speciesLabel(item.species) }}</span><provenance-mark :result="item.species" /></template>
+            <template #[`item.occupiedSort`]="{ item }"><span class="text-no-wrap">{{ people(item.occupiedSort) }}</span><provenance-mark :result="item.occupied" /></template>
+            <template #[`item.emptySort`]="{ item }"><span class="text-no-wrap">{{ people(item.emptySort) }}</span><provenance-mark :result="item.empty" /></template>
+            <template #[`item.shipsSort`]="{ item }">{{ item.shipsSort }}</template>
+            <template #[`item.surfaceSort`]="{ item }"><span class="text-no-wrap" :class="{ 'text--secondary': !(item.surfaceSort > 0) }">{{ people(item.surfaceSort) }}</span></template>
+            <template #expanded-item="{ headers: columns, item }">
+              <td :colspan="columns.length" class="py-4">
+                <v-simple-table dense class="ark-ships">
+                  <thead>
+                    <tr>
+                      <th>Ship</th>
+                      <th>Fleet</th>
+                      <th class="text-right">Aboard<provenance-mark rule="arks.aboard" /></th>
+                      <th class="text-right">Standard berths<provenance-mark rule="arks.berths" /></th>
+                      <th class="text-right">Empty<provenance-mark rule="arks.emptyBerths" /></th>
+                      <th>Species<provenance-mark rule="arks.species" /></th>
+                      <th>Orbit<provenance-mark rule="arks.orbit" /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="ship in item.ships" :key="ship.ShipID">
+                      <td>{{ ship.ShipName }}<div class="caption text--secondary">{{ ship.ClassName }}</div></td>
+                      <td>{{ ship.FleetName }}</td>
+                      <td class="text-right">{{ people(ship.aboard) }}<provenance-mark :result="ship.results.aboard" /><div v-if="ship.beyondBerths > 0" class="caption text--secondary">{{ people(ship.beyondBerths) }} beyond the berths</div></td>
+                      <td class="text-right">{{ people(ship.berths) }}<provenance-mark :result="ship.results.berths" /></td>
+                      <td class="text-right">{{ people(ship.empty) }}<provenance-mark :result="ship.results.empty" /></td>
+                      <td>{{ speciesLabel(ship.results.species) }}<provenance-mark :result="ship.results.species" /></td>
+                      <td>{{ orbitText(ship) }}<provenance-mark :result="ship.results.orbit" /></td>
+                    </tr>
+                  </tbody>
+                </v-simple-table>
+              </td>
+            </template>
+          </v-data-table>
+          <div v-if="arkAside.length" class="px-6 pb-2">
+            <div class="chart-title">Aboard Ark ships that are not orbital population<provenance-mark :result="ark.totals.aboardElsewhere" /></div>
+            <v-simple-table dense class="ark-ships">
+              <thead>
+                <tr>
+                  <th>Ship</th>
+                  <th>Fleet</th>
+                  <th class="text-right">Aboard<provenance-mark rule="arks.aboard" /></th>
+                  <th>Why<provenance-mark rule="arks.orbit" /></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="ship in arkAside" :key="ship.ShipID">
+                  <td>{{ ship.ShipName }}<div class="caption text--secondary">{{ ship.ClassName }}</div></td>
+                  <td>{{ ship.FleetName }}</td>
+                  <td class="text-right">{{ people(ship.aboard) }}<provenance-mark :result="ship.results.aboard" /></td>
+                  <td>{{ orbitText(ship) }}<provenance-mark :result="ship.results.orbit" /></td>
+                </tr>
+              </tbody>
+            </v-simple-table>
+          </div>
+          <div class="panel-foot caption text--secondary">
+            People aboard an Ark ship count as orbital population only while its fleet sits at its colony's body with no move orders and is not a civilian fleet. Empty berths are room in the standard berths, not people, and stay apart from the population in orbit; people beyond the berths of a damaged ship are not counted. Orbital population is not surface population or workers, and the colony projections above leave it out. Its growth and its transfer to the surface are not verified, so none is applied and no forecast is made for it. A dash is a figure the save cannot support, and the mark beside it names what is missing.
           </div>
         </v-card>
       </template>
@@ -151,6 +224,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
+import { ORBIT_REASONS, arkLayer, loadArks } from '../utilities/arks'
 import { populationName } from '../utilities/aurora'
 import { WORKER_TOLERANCE, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -162,6 +236,7 @@ const INPUT_LABELS = {
   colonies: 'the colonies',
   inbound: 'cargo on its way',
   populationProductionModifiers: 'production modifiers',
+  arks: 'the Ark ships',
 }
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
@@ -181,6 +256,7 @@ export default {
       attentionOnly: { key: 'colonyOutlookAttentionOnly', default: false },
       search: { key: 'colonyOutlookSearch', default: '', scope: 'race' },
       colonyTable: tableView('colonyOutlookTable', { sortBy: ['populationSort'], sortDesc: [true], itemsPerPage: 25, itemsPerPageOptions: COLONY_PAGE_SIZES }),
+      arkTable: tableView('colonyOutlookArkTable', { sortBy: ['occupiedSort'], sortDesc: [true], itemsPerPage: 25, itemsPerPageOptions: COLONY_PAGE_SIZES }),
     }),
   ],
   data() {
@@ -190,6 +266,7 @@ export default {
       focusId: null,
       linkTo,
       expanded: [],
+      arkExpanded: [],
     }
   },
   computed: {
@@ -265,6 +342,7 @@ export default {
           shortLater: freeLater === null ? null : freeLater < -WORKER_TOLERANCE,
           attention: valueOrNull(r.attention),
           inbound: arriving && (arriving.Colonists || arriving.Infrastructure || arriving.Installations) ? arriving : null,
+          ark: this.ark.byPopulation[colony.PopulationID] || null,
         }
 
         row.infrastructureStatus = this.infrastructureStatus(row)
@@ -280,6 +358,52 @@ export default {
           inboundSort: arriving ? arriving.Colonists * 1e6 + arriving.Infrastructure + arriving.Installations : 0,
         }
       })
+    },
+
+    ark() {
+      return arkLayer(this.arks)
+    },
+
+    // One row per body with Ark ships at its colonies, the species as a list for the cell and the sortable values.
+    arkRows() {
+      return this.ark.bodies.map((body) => {
+        const assigned = body.colonies.filter((colony) => body.populationIds.includes(colony.PopulationID))
+        const named = assigned.length ? assigned : body.colonies.slice(0, 1)
+        const speciesList = valueOrNull(body.species)
+
+        return {
+          ...body,
+          name: named.length ? named.map((colony) => colony.PopName).join(', ') : `Body #${body.SystemBodyID}`,
+          place: named.length ? stripHtml(populationName(named[0])).replace(` — ${named[0].PopName}`, '') : '',
+          speciesSort: speciesList === null ? null : speciesList.map((entry) => entry.name).join(', '),
+          occupiedSort: valueOrNull(body.occupied),
+          emptySort: valueOrNull(body.empty),
+          shipsSort: body.ships.length,
+          surfaceSort: body.surface,
+        }
+      })
+    },
+
+    arkAside() {
+      return [...this.ark.elsewhere, ...this.ark.unplaced]
+    },
+
+    arkHeadline() {
+      const { occupied, empty, unknown } = this.ark.totals
+
+      return `${this.people(valueOrNull(occupied))} in orbit · empty berths ${this.people(valueOrNull(empty))}${unknown ? ` · ${unknown} ${unknown === 1 ? 'ship' : 'ships'} left out` : ''}`
+    },
+
+    arkHeaders() {
+      return [
+        { text: 'Colony', value: 'name' },
+        { text: 'Species', value: 'speciesSort' },
+        { text: 'In orbit', value: 'occupiedSort', align: 'end' },
+        { text: 'Empty berths', value: 'emptySort', align: 'end' },
+        { text: 'Ships', value: 'shipsSort', align: 'end' },
+        { text: 'Surface population', value: 'surfaceSort', align: 'end' },
+        { text: '', value: 'data-table-expand' },
+      ]
     },
 
     focusRow() {
@@ -455,6 +579,29 @@ export default {
     },
     fillCaption(row) {
       return row.capacity === null ? '—' : `${percent(row.fill, 0)} of ${this.people(row.capacity)}`
+    },
+    arkCaption(ark) {
+      const occupied = valueOrNull(ark.occupied)
+
+      return occupied === null ? '+ people aboard Arks in orbit: —' : `+ ${this.people(occupied)} aboard Arks in orbit`
+    },
+    speciesLabel(result) {
+      const species = valueOrNull(result)
+
+      if (species === null) {
+        return '—'
+      } else if (!species.length) {
+        return 'None aboard'
+      }
+
+      return species.length === 1 ? species[0].name : species.map((entry) => `${entry.name} ${this.people(entry.amount)}`).join(', ')
+    },
+    orbitText(ship) {
+      if (!ship.orbit) {
+        return `Unknown, ${this.missingText(ship.results.orbit)}`
+      }
+
+      return ship.orbit.counted ? (ship.orbit.PopulationID ? 'At its colony' : 'At a colony, assigned by the game') : ORBIT_REASONS[ship.orbit.reason]
     },
     // A column of null-last values: an unavailable figure sorts after every number, in either direction, never as 0.
     sortRows(items, sortBy, sortDesc) {
@@ -637,6 +784,17 @@ export default {
       }),
       default: [],
     },
+    // The race's Ark ships, their cargo and the colonies they can sit at.
+    arks: {
+      get: tracked('arks', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { ships: [], cargo: [], colonies: [] }
+        }
+
+        return await loadArks(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: () => ({ ships: [], cargo: [], colonies: [] }),
+    },
   },
 }
 
@@ -677,7 +835,8 @@ function percent(fraction, decimals) {
     font-variant-numeric: tabular-nums;
   }
 
-  .colony-table {
+  .colony-table,
+  .ark-table {
     td:first-child,
     th:first-child {
       min-width: 180px;
