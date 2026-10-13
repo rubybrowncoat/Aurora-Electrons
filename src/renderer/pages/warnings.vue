@@ -193,6 +193,7 @@ export default {
     return {
       muted: { checks: [], items: {} },
       lastLook: null,
+      settledContext: null,
 
       checkFilter: null,
 
@@ -202,11 +203,11 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'GameTime']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'GameTime', 'racePrefix']),
     ...mapState(['RaceNPR']),
 
     contextKey() {
-      return this.GameID && this.RaceID ? `game.${this.GameID}.race.${this.RaceID}` : null
+      return this.racePrefix
     },
 
     // Every read has settled: a read that failed still counts, as its check shows the failure in place of rows (a stale or empty read is never a clean zero).
@@ -459,11 +460,14 @@ export default {
     contextKey: {
       immediate: true,
       handler(prefix) {
-        this.expanded = {}
-
-        if (prefix) {
-          this.loadVisitState(prefix)
+        // A campaign that goes unsettled while the save is read again and settles as the same one keeps what the page loaded: the stored last look was just written by this page's own visit, and must not replace the one this visit is compared against.
+        if (!prefix || prefix === this.settledContext) {
+          return
         }
+
+        this.settledContext = prefix
+        this.expanded = {}
+        this.loadVisitState(prefix)
       },
     },
     // A read's load state settles just before the plugin assigns its rows, so the snapshot waits a tick for the last read's rows to land.
@@ -569,6 +573,10 @@ export default {
     },
 
     saveMuted({ checks, items }) {
+      if (!this.contextKey) {
+        return
+      }
+
       const kept = Object.fromEntries(Object.entries(items).filter(([, ids]) => ids.length))
       const next = { checks, items: kept }
 

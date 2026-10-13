@@ -26,12 +26,68 @@
         </v-col>
       </v-row>
 
-      <v-alert v-if="failure && failure.stage === 'write'" type="warning" outlined dense class="mt-3">
+      <v-alert v-if="failure && failure.stage === 'readonly'" type="info" outlined dense class="mt-3">
+        Another window or tab of this app records this database's history and campaigns, so this one shows what is stored and writes nothing: no save is matched to a campaign here, and race settings are not remembered. Recording starts here when the other one is closed.
+      </v-alert>
+      <v-alert v-else-if="failure && failure.stage === 'registry'" type="warning" outlined dense class="mt-3">
+        The campaign registry in the history folder is damaged, so no save was matched to a campaign and nothing was recorded. The file was left as it is, so it can be recovered; the console has the details.
+      </v-alert>
+      <v-alert v-else-if="failure && failure.stage === 'write'" type="warning" outlined dense class="mt-3">
         The latest snapshot couldn't be written to the history file, so this history has stopped growing: the disk or browser storage may be full, or the file locked. The app tries again at the next save. The console has the details.
       </v-alert>
       <v-alert v-else-if="failure" type="warning" outlined dense class="mt-3">
         The latest save couldn't be read for a snapshot (the game may have been writing it), so this history is missing it. The app tries again at the next save. The console has the details.
       </v-alert>
+
+      <v-card v-if="campaignView" class="panel history-campaign" data-summary="Which campaign this save belongs to, the branches of its recorded timeline, the saves attached to it, and any history still waiting for an answer on where it belongs. Saves are matched by what they hold, never by where they sit on disk." elevation="1">
+        <div class="panel-head">
+          <span>Campaign<v-chip v-if="campaignView.carriedOver" x-small outlined class="ml-2" title="The history recorded before campaigns were told apart was assumed to belong to this campaign">carried over</v-chip></span>
+          <span class="caption text--secondary">{{ campaignView.title }}</span>
+        </div>
+        <div class="panel-body">
+          <div v-if="campaignView.names.length > 1" class="caption text--secondary">Named {{ campaignView.names.join(', then ') }} over time.</div>
+          <div v-if="campaignView.carriedOver" class="caption text--secondary mt-1">The history from before campaigns were recorded was assumed to be this campaign's: {{ campaignView.carriedOver }}.<template v-if="campaignView.conflict"> A campaign recognised from a save of the same game id exists as well, so this assumption may be wrong; nothing was merged.</template></div>
+
+          <div v-if="campaignView.branches.length > 1" class="mt-2">
+            <div class="caption text--secondary">Branches: a save that left an earlier timeline at some point is a branch of its own, and its history is kept apart.</div>
+            <v-btn-toggle :value="shownBranchId" mandatory dense class="mt-1 flex-wrap" @change="branchChoice = $event">
+              <v-btn v-for="branch in campaignView.branches" :key="branch.id" :value="branch.id" small :title="branch.title">{{ branch.id }}<span class="caption ml-1">{{ branch.text }}</span></v-btn>
+            </v-btn-toggle>
+          </div>
+
+          <div v-if="campaignView.attachments.length" class="mt-2">
+            <div class="caption text--secondary">Saves recognised as this campaign, newest first:</div>
+            <div v-for="attachment in campaignView.attachments" :key="`${attachment.path}-${attachment.GameID}`" class="history-campaign__path"><span class="path">{{ attachment.path || 'Path not known' }}</span> <span class="caption text--secondary">{{ attachment.text }}</span></div>
+          </div>
+
+          <v-alert v-if="campaignView.pending.length" type="warning" outlined dense class="mt-3">
+            <div>This save shares its game id with {{ campaignView.pending.length === 1 ? 'a recorded campaign' : 'recorded campaigns' }}, and its record is too short to tell whether it is the same campaign. It is kept apart until an answer is given; nothing is merged on a guess.</div>
+            <div v-for="candidate in campaignView.pending" :key="candidate.key" class="history-campaign__candidate mt-2">
+              <div class="font-weight-medium">{{ candidate.name }}, branch {{ candidate.branchId }}</div>
+              <div class="caption">{{ candidate.span }}</div>
+              <div v-if="candidate.same" class="caption text--secondary">Merge into branch: {{ candidate.same }}</div>
+              <div v-if="candidate.newBranch" class="caption text--secondary">New branch: {{ candidate.newBranch }}</div>
+              <v-btn small outlined class="mr-2 mt-1" @click="attachCurrent(candidate, 'same')">Same campaign: merge into the branch</v-btn>
+              <v-btn small outlined class="mt-1" @click="attachCurrent(candidate, 'new-branch')">Same campaign: keep as a new branch</v-btn>
+            </div>
+            <v-btn small text class="mt-2" @click="keepCurrentSeparate">Separate campaign: keep apart</v-btn>
+          </v-alert>
+
+          <div v-if="campaignView.pool.length" class="mt-3">
+            <div class="font-weight-medium">History kept from before campaigns were recorded</div>
+            <div class="caption text--secondary">These records could not be tied to one campaign. They stay where they are, unchanged, until attached to this campaign.</div>
+            <div v-for="entry in campaignView.pool" :key="entry.id" class="history-campaign__candidate mt-2">
+              <div>{{ entry.text }}</div>
+              <div class="caption text--secondary">{{ entry.reason }}</div>
+              <div v-if="entry.same" class="caption text--secondary">Merge into this branch: {{ entry.same }}</div>
+              <v-btn small outlined class="mr-2 mt-1" @click="attachPool(entry, 'same')">Attach to this branch</v-btn>
+              <v-btn small outlined class="mt-1" @click="attachPool(entry, 'new-branch')">Attach as a new branch</v-btn>
+            </div>
+          </div>
+
+          <v-alert v-if="campaignError" type="error" outlined dense class="mt-3">{{ campaignError }}</v-alert>
+        </div>
+      </v-card>
 
       <v-alert v-if="!allSnapshots.length" type="info" outlined dense class="mt-3">
         No history for this race yet. A snapshot is taken as soon as the app reads the save, and another each time Aurora saves the game. For the past year of income and spending, see <router-link to="/finances">Finances</router-link>.
@@ -92,7 +148,7 @@
       <v-dialog v-model="confirmClear" max-width="440">
         <v-card>
           <v-card-title>Clear this race's history?</v-card-title>
-          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race. The save isn't touched, and recording starts again at the next save.</v-card-text>
+          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>. The save isn't touched, and recording starts again at the next save.</v-card-text>
           <v-card-actions>
             <v-spacer />
             <v-btn text @click="confirmClear = false">Cancel</v-btn>
@@ -115,10 +171,13 @@ import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
-import { MAX_SNAPSHOTS, changeResult, historyConfig, installationResult, mineralResult, recordedSpan, snapshotResult, totalResult } from '../utilities/history'
+import { readRegistry } from '../utilities/campaign'
+import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
+import { MAX_SNAPSHOTS, branchStore, campaignStorage, changeResult, clearRaceHistory, installationResult, mineralResult, recordedSpan, shownBranch, snapshotResult, totalResult } from '../utilities/history'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { describeResult, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { withRegistry } from '../utilities/recording-owner'
 
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
@@ -203,6 +262,11 @@ export default {
       spyNPR: false,
       // Bumped when this page clears the history, so `gameHistory` re-reads it.
       cleared: 0,
+      // The branch picked on this page; the settled branch until one is.
+      branchChoice: null,
+      // Bumped when this page changes the campaign registry, so the Campaign panel re-reads it.
+      campaignChanges: 0,
+      campaignError: '',
     }
   },
   computed: {
@@ -222,16 +286,118 @@ export default {
       return chartTheme(this.appearance)
     },
 
-    // The game's history file, re-read whenever the recorder writes (store revision) or this page clears it.
+    // The campaign and branch the recorder settled this game to, null until it has.
+    resolved() {
+      return this.$store.getters['history/campaign']
+    },
+
+    // The branch the page shows: the one picked, if the campaign has it, else the one the save belongs to.
+    shownBranchId() {
+      const picked = this.branchChoice
+
+      return this.resolved ? shownBranch(this.campaignView ? this.campaignView.branches.map((branch) => branch.id) : [], picked, this.resolved.branchId) : null
+    },
+
+    // The shown branch's history file, re-read whenever the recorder writes (store revision) or this page clears it.
     gameHistory() {
       // eslint-disable-next-line no-unused-expressions
-      this.$store.state.history.revision + this.cleared
+      this.$store.state.history.revision + this.cleared + this.campaignChanges
 
-      if (!this.GameID || !this.RaceID || !this.historyRecorded) {
+      if (!this.GameID || !this.RaceID || !this.historyRecorded || !this.resolved) {
         return null
       }
 
-      return historyConfig(this.GameID).store
+      return branchStore(this.resolved.campaignId, this.shownBranchId).store
+    },
+
+    // The Campaign panel: what the registry holds on the settled campaign, as text and as the choices the player has. Null until the game is settled.
+    campaignView() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.campaignChanges
+
+      const resolved = this.resolved
+
+      if (!resolved) {
+        return null
+      }
+
+      const io = campaignStorage(this.config)
+      let registry
+
+      try {
+        registry = readRegistry(io)
+      } catch (error) {
+        return null
+      }
+
+      const campaign = registry.campaigns[resolved.campaignId]
+
+      if (!campaign) {
+        return null
+      }
+
+      const stamp = (milliseconds) => new Date(milliseconds).toISOString().slice(0, 10)
+      const nameOf = (entry) => (entry.names.length ? entry.names[entry.names.length - 1].name : 'Unnamed campaign')
+      const countIn = (file, RaceID) => {
+        const record = file && file.races ? file.races[RaceID] : null
+
+        return record && Array.isArray(record.snapshots) ? record.snapshots.length : 0
+      }
+      const previewText = (details) => `${details.added} snapshot${details.added === 1 ? '' : 's'} added${details.overlaps ? `, ${details.overlaps} at a game time both hold` : ''}; ${details.settingsCopied} remembered setting${details.settingsCopied === 1 ? '' : 's'} copied, ${details.settingsKept} already set kept as they are.`
+      const preview = (from, to, mode) => {
+        try {
+          return previewAttach(io, { from, to, mode })
+        } catch (error) {
+          return null
+        }
+      }
+      // The branch a history from before campaigns is attached to: the one picked on this page, not the one the open save settled to.
+      const here = { campaignId: campaign.id, branchId: shownBranch(Object.keys(campaign.branches), this.branchChoice, resolved.branchId) }
+      const pendingKeys = new Set()
+      const pending = []
+
+      campaign.attachments.filter((attachment) => attachment.answer === null).forEach((attachment) => {
+        attachment.pending.forEach((candidate) => {
+          const key = `${candidate.campaignId}/${candidate.branchId}`
+          const other = registry.campaigns[candidate.campaignId]
+
+          if (pendingKeys.has(key) || !other || other.mergedInto || !other.branches[candidate.branchId]) {
+            return
+          }
+
+          pendingKeys.add(key)
+
+          const to = { campaignId: candidate.campaignId, branchId: candidate.branchId }
+          const sameWith = preview({ campaignId: campaign.id }, to, 'same')
+          const newWith = preview({ campaignId: campaign.id }, to, 'new-branch')
+
+          pending.push({ key, campaignId: candidate.campaignId, branchId: candidate.branchId, name: nameOf(other), span: `Recorded game ${other.gameIds[0]}, ${other.branches[candidate.branchId].tip.n} ledger entries seen`, same: sameWith ? previewText(sameWith) : '', newBranch: newWith ? previewText(newWith) : '' })
+        })
+      })
+
+      const pool = Object.values(registry.pool).filter((entry) => entry.attachedTo === null && entry.GameID === Number(this.GameID)).map((entry) => {
+        const withPreview = preview({ poolId: entry.id }, here, 'same')
+        const span = entry.span && entry.span.snapshots ? `${entry.span.snapshots} snapshot${entry.span.snapshots === 1 ? '' : 's'} from ${this.date(entry.span.first)} to ${this.date(entry.span.last)}` : 'no snapshots'
+
+        return { id: entry.id, text: `Game ${entry.GameID}${entry.gameName ? `, "${entry.gameName}"` : ''}: ${span}`, reason: `Not attached automatically: ${entry.reason}.`, same: withPreview ? previewText(withPreview) : '' }
+      })
+
+      return {
+        title: nameOf(campaign),
+        names: campaign.names.map((entry) => entry.name),
+        carriedOver: campaign.provenance === 'legacy-assumed' && campaign.legacy ? campaign.legacy.reason : '',
+        conflict: !!(campaign.legacy && campaign.legacy.conflict),
+        branches: Object.values(campaign.branches).map((branch) => {
+          const file = branchStore(campaign.id, branch.id).store
+          const count = countIn(file, this.RaceID)
+          const where = branch.fork ? `forked from ${branch.parent}${branch.fork.t === null ? ' at the start' : ` at ${this.date(branch.fork.t)}`}` : branch.parent ? `a branch of ${branch.parent}` : 'the first timeline recorded'
+
+          return { id: branch.id, text: `${count} snapshot${count === 1 ? '' : 's'}${branch.id === resolved.branchId ? ', this save' : ''}`, title: `${where}; last seen ${stamp(branch.seen)}` }
+        }),
+        attachments: campaign.attachments.map((attachment) => ({ path: attachment.path, GameID: attachment.GameID, text: `game ${attachment.GameID}, branch ${attachment.branchId}, last seen ${stamp(attachment.lastSeen)}` })),
+        pending,
+        pool,
+      }
     },
 
     record() {
@@ -488,6 +654,12 @@ export default {
       })
     },
   },
+  watch: {
+    // Another campaign or branch: the picked branch belonged to the last one.
+    'resolved.campaignId'() {
+      this.branchChoice = null
+    },
+  },
   created() {
     this.spyNPR = this.config.get('spyNPR', false)
   },
@@ -556,18 +728,91 @@ export default {
     setInstallations(ids) {
       this.installationIds = ids
     },
-    // Remove this race from the game's history file; other races keep theirs.
-    clearHistory() {
-      const store = historyConfig(this.GameID)
-      const history = store.store
+    // Remove this race from the shown branch's history file; other races keep theirs. The race and branch are the ones shown when the player confirms, taken before any wait for the registry lock.
+    async clearHistory() {
+      const target = this.resolved ? { campaignId: this.resolved.campaignId, branchId: this.shownBranchId, RaceID: this.RaceID } : null
 
-      if (history.races && history.races[this.RaceID]) {
-        delete history.races[this.RaceID]
-        store.store = history
+      this.confirmClear = false
+
+      if (!target) {
+        return
       }
 
-      this.cleared++
-      this.confirmClear = false
+      try {
+        await clearRaceHistory(target)
+        this.cleared++
+      } catch (error) {
+        this.campaignError = `The history could not be cleared: ${error.message}`
+      }
+    },
+    // The game, campaign and branch the recorder settled the open save to, the branch picked on this page and the branch an attachment goes to, null until settled: what an answer on this page is given for. The settled branch is only compared (the save stays where the recorder put it); the picked one is what an attach of a history targets.
+    shown() {
+      const resolved = this.resolved
+
+      return resolved ? { GameID: Number(this.GameID), campaignId: resolved.campaignId, branchId: resolved.branchId, generation: resolved.generation, picked: this.branchChoice, attachTo: this.shownBranchId } : null
+    },
+    // The campaign changed on this page: the pages re-read, and the recorder's answer for the game follows it when the recorder still has the game where the answer was given (the answer waited for the registry lock, and the player may have moved on). The branch picked on this page is reset only when it is still the one picked at the click.
+    campaignChanged(resolution, given, resetBranch = false) {
+      const now = this.shown()
+
+      if (now && now.GameID === given.GameID && now.campaignId === given.campaignId && now.branchId === given.branchId && now.generation === given.generation) {
+        this.$store.commit('history/resolved', { GameID: given.GameID, resolution: { ...this.resolved, ...resolution, pending: [] }, generation: given.generation })
+
+        if (resetBranch && this.branchChoice === given.picked) {
+          this.branchChoice = null
+        }
+
+        this.campaignError = ''
+      }
+
+      this.$store.commit('history/recorded')
+      this.campaignChanges++
+    },
+    // The open save's campaign is the candidate's (or a branch of it): merge into the branch, or keep as a branch of its own.
+    async attachCurrent(candidate, mode) {
+      const given = this.shown()
+
+      if (!given) {
+        return
+      }
+
+      try {
+        const result = await withRegistry(() => attach(campaignStorage(this.config), { from: { campaignId: given.campaignId }, to: { campaignId: candidate.campaignId, branchId: candidate.branchId }, mode }))
+
+        this.campaignChanged(result, given, true)
+      } catch (error) {
+        this.campaignError = `The history could not be attached: ${error.message}`
+      }
+    },
+    // The open save is a campaign of its own; the question is closed and nothing is written to the candidates.
+    async keepCurrentSeparate() {
+      const given = this.shown()
+
+      if (!given) {
+        return
+      }
+
+      try {
+        await withRegistry(() => keepSeparate(campaignStorage(this.config), given.campaignId))
+        this.campaignChanged({}, given)
+      } catch (error) {
+        this.campaignError = `The answer could not be kept: ${error.message}`
+      }
+    },
+    // A history kept from before campaigns were recorded joins this campaign's branch, or becomes a branch of its own under it.
+    async attachPool(entry, mode) {
+      const given = this.shown()
+
+      if (!given) {
+        return
+      }
+
+      try {
+        await withRegistry(() => attach(campaignStorage(this.config), { from: { poolId: entry.id }, to: { campaignId: given.campaignId, branchId: given.attachTo }, mode }))
+        this.campaignChanged({}, given)
+      } catch (error) {
+        this.campaignError = `The history could not be attached: ${error.message}`
+      }
     },
     downloadCsv() {
       const names = Object.fromEntries(this.installationOptions.map((option) => [option.value, option.text]))
@@ -610,6 +855,10 @@ export default {
 .history-page {
   td {
     font-variant-numeric: tabular-nums;
+  }
+
+  .history-campaign__path .path {
+    word-break: break-all;
   }
 }
 </style>

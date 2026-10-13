@@ -387,7 +387,7 @@ export const applyPreset = (config, id) => {
   if (id === DRAFT_ID) {
     const entry = imported.draft
 
-    config.store = { ...config.store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }
+    config.update((store) => ({ ...store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }))
     imported.custom = register(CUSTOM_ID, entry.parsed)
     imported.draft = null
     imported.problem = null
@@ -404,7 +404,7 @@ export const applyPreset = (config, id) => {
   return true
 }
 
-// Forgets the kept imported appearance: removes its document from the settings and, when it was the chosen appearance, falls back to the baseline of its mode, in one write. Returns false when there is none.
+// Forgets the kept imported appearance: removes its document from the settings and, when it was the chosen appearance, falls back to the baseline of its mode, in one write over the settings as they are then. Returns false when there is none.
 export const removeCustom = (config) => {
   const stored = config.get(CUSTOM_KEY)
 
@@ -412,13 +412,15 @@ export const removeCustom = (config) => {
     return false
   }
 
-  const rest = { ...config.store }
-  const chosen = config.get(APPEARANCE_KEY) === CUSTOM_ID
   const fallback = state.applied === CUSTOM_ID ? baselinePresetId(imported.custom ? imported.custom.appearance.mode : DEFAULT_PRESET_ID) : state.applied
 
-  delete rest[CUSTOM_KEY]
+  config.update((store) => {
+    const rest = { ...store }
 
-  config.store = chosen ? { ...rest, [APPEARANCE_KEY]: fallback } : rest
+    delete rest[CUSTOM_KEY]
+
+    return store[APPEARANCE_KEY] === CUSTOM_ID ? { ...rest, [APPEARANCE_KEY]: fallback } : rest
+  })
   imported.custom = null
   imported.problem = null
 

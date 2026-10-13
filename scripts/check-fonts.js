@@ -38,6 +38,9 @@ const fakeConfig = (initial = {}) => ({
   get store() {
     return this.data
   },
+  update(change) {
+    this.store = change(JSON.parse(JSON.stringify(this.data)))
+  },
   set store(value) {
     this.writes.push({ via: 'store', keys: Object.keys(value) })
     this.fail()

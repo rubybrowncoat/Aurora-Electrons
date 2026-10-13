@@ -428,7 +428,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'racePrefix']),
 
     appearance() {
       return activeAppearance()
@@ -458,7 +458,7 @@ export default {
     },
 
     rankingKey() {
-      return `game.${this.GameID}.race.${this.RaceID}.targetWeights`
+      return this.racePrefix ? `${this.racePrefix}.targetWeights` : null
     },
 
     activeFilterCount() {
@@ -679,7 +679,12 @@ export default {
     rankingKey: {
       immediate: true,
       handler() {
-        this.ranking = normaliseRanking(this.GameID && this.RaceID ? this.config.get(this.rankingKey) : null)
+        // While no campaign is settled the ranking on screen stays as it is; it is stored under a key again once one settles.
+        if (!this.rankingKey) {
+          return
+        }
+
+        this.ranking = normaliseRanking(this.config.get(this.rankingKey))
       },
     },
     RaceID(_newRaceID, oldRaceID) {
@@ -743,15 +748,21 @@ export default {
 
     setRanking(key, value) {
       this.ranking = normaliseRanking({ ...this.ranking, [key]: value === '' ? null : Number(value) })
-      this.config.set(this.rankingKey, this.ranking)
+      this.storeRanking(this.ranking)
     },
     setWeight(id, value) {
       this.ranking = normaliseRanking({ ...this.ranking, weights: { ...this.ranking.weights, [id]: value === '' ? null : Number(value) } })
-      this.config.set(this.rankingKey, this.ranking)
+      this.storeRanking(this.ranking)
     },
     resetRanking() {
       this.ranking = normaliseRanking(null)
-      this.config.set(this.rankingKey, null)
+      this.storeRanking(null)
+    },
+    // The ranking is kept with the campaign's settings, so it waits for the recorder to settle which campaign the save belongs to and is only shown, not kept, until it has.
+    storeRanking(value) {
+      if (this.rankingKey) {
+        this.config.set(this.rankingKey, value)
+      }
     },
 
     isSelected(body) {

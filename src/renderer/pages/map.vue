@@ -449,7 +449,7 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// The map as the player left it, per game and race: places with any unsaved moves, the view and the selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
+// The map as the player left it, per campaign and race: places with any unsaved moves, the view and the selection. Coming back to the page, by the back arrow, the trail or a link, picks it up again.
 const keptMaps = new Map()
 
 const samePlace = (a, b) => Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y)
@@ -716,8 +716,9 @@ export default {
       }
     },
 
+    // The key of the race's own values and of the kept map: the campaign the open save belongs to and the race. Null until the recorder has settled the save to a campaign (and again while the next copy of the save is read), so nothing is kept or restored then.
     settingsPrefix() {
-      return `game.${this.GameID}.race.${this.RaceID}`
+      return this.$store.getters.racePrefix
     },
 
     systemRows() {
@@ -1644,7 +1645,7 @@ export default {
     },
   },
   watch: {
-    // The map's settings are kept per game and race; another race starts a fresh map.
+    // The map's settings are kept per campaign and race; another race starts a fresh map.
     RaceID: {
       immediate: true,
       handler() {
@@ -1652,6 +1653,13 @@ export default {
         this.discoveryYear = null
         this.resetGraph()
       },
+    },
+
+    // A campaign that settles after the race is picked (a new save, or a campaign answered on the History page) moves the map to its key. The prefix going null while the same save is read again changes nothing, and the same prefix settling again is the map already shown.
+    settingsPrefix(prefix) {
+      if (prefix !== null && prefix !== this.mapKey) {
+        this.retargetKept()
+      }
     },
 
     ready(value) {
@@ -2462,7 +2470,7 @@ export default {
       }
 
       this.mapKey = this.settingsPrefix
-      this.kept = keptMaps.get(this.mapKey) || null
+      this.kept = this.mapKey ? keptMaps.get(this.mapKey) || null : null
       this.syncedStart = null
       this.fitPending = true
       // The view shows the whole map and the user hasn't moved it since, so a resize fits it again.
@@ -2471,6 +2479,30 @@ export default {
       this.selectedIds = this.kept ? [...this.kept.selectedIds] : []
       this.movedIds = []
       this.quality = null
+    },
+
+    // The map moves to another key of what the player left (a campaign settled after the race was picked, or another one): the race's own data is the same, so no read is run again and the graph is not cleared. What was kept under the new key (places, view, selection) is picked up and the graph is drawn again; with nothing kept under it after another campaign, the selection and the places moved belonged to that campaign and go.
+    retargetKept() {
+      const left = this.mapKey
+
+      this.keepMap()
+      this.mapKey = this.settingsPrefix
+      this.kept = keptMaps.get(this.mapKey) || null
+
+      if (this.kept) {
+        this.fitted = this.kept.fitted
+        this.before = this.kept.before
+        this.selectedIds = [...this.kept.selectedIds]
+      } else if (left) {
+        this.fitted = true
+        this.before = null
+        this.selectedIds = []
+      }
+
+      this.movedIds = []
+      this.syncedStart = null
+      this.fitPending = true
+      this.scheduleSync()
     },
 
     // Loads the bold face of a bundled family for the marker images; a system family has none, and a face that fails to load leaves the images with the family's name alone.
@@ -2484,7 +2516,7 @@ export default {
 
     // Remembers the map as it is, for `resetGraph` to pick up when the player comes back to it.
     keepMap() {
-      if (this.graph && this.syncedStart) {
+      if (this.mapKey && this.graph && this.syncedStart) {
         keptMaps.set(this.mapKey, {
           positions: this.graphPositions(),
           syncedStart: this.syncedStart,

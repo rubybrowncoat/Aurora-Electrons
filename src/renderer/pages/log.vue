@@ -148,6 +148,7 @@ export default {
   data() {
     return {
       lastSeen: null,
+      settledContext: null,
       expandedGroups: [],
       detail: null,
       eventIcons: {
@@ -390,10 +391,10 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'racePrefix']),
 
     contextKey() {
-      return this.GameID && this.RaceID ? `game.${this.GameID}.race.${this.RaceID}` : null
+      return this.racePrefix
     },
 
     ready() {
@@ -616,11 +617,14 @@ export default {
     contextKey: {
       immediate: true,
       handler(prefix) {
-        this.expandedGroups = []
-        this.detail = null
-        if (!prefix) {
+        // The same campaign settling again after a new copy of the save is read keeps the visit: the stored watermark was written by this visit and must not replace the one the page compares against.
+        if (!prefix || prefix === this.settledContext) {
           return
         }
+
+        this.settledContext = prefix
+        this.expandedGroups = []
+        this.detail = null
         this.lastSeen = this.config.get(`${prefix}.logLastSeen`, null)
       },
     },
@@ -690,6 +694,10 @@ export default {
     },
 
     markVisit() {
+      if (!this.contextKey) {
+        return
+      }
+
       // Keep the previous visit fixed on screen; only the next visit reads the new watermark. It is this save's latest event, not the highest ever seen, so an earlier save of the same game starts counting from where it stands.
       this.config.set(`${this.contextKey}.logLastSeen`, this.latestIncrement)
     },

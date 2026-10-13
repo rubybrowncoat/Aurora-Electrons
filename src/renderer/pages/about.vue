@@ -82,9 +82,9 @@
               <div class="path" :class="{ 'path--missing': !settingsPath }">{{ settingsPath || 'Not available in this mode' }}</div>
               <div class="font-weight-medium mt-3">Empire History</div>
               <div class="path" :class="{ 'path--missing': !historyPath }">{{ historyPath || 'Not available in this mode' }}</div>
-              <div class="caption text--secondary mt-1">One file per game, named <code>game-&lt;GameID&gt;.json</code>.</div>
+              <div class="caption text--secondary mt-1">One file per campaign branch, named <code>campaign-&lt;id&gt;-&lt;branch&gt;.json</code>, and <code>campaigns.json</code> for the registry that tells which campaign a save belongs to.</div>
               <template v-if="historyFile">
-                <div class="caption text--secondary mt-1">The open game's file:</div>
+                <div class="caption text--secondary mt-1">The registry file:</div>
                 <div class="path">{{ historyFile }}</div>
               </template>
             </div>
@@ -181,7 +181,7 @@ import { mapActions, mapGetters } from 'vuex'
 
 import ExternalLink from '../components/ExternalLink.vue'
 import { CREDITS } from '../utilities/credits'
-import { historyConfig } from '../utilities/history'
+import { registryStore } from '../utilities/history'
 import { FORUM_URL } from '../utilities/navigation'
 import { version } from '../../../package.json'
 
@@ -252,11 +252,11 @@ export default {
     dataFolder() {
       return this.settingsPath ? folderOf(this.settingsPath) : ''
     },
-    // The open game's history file, once a game is picked.
+    // The campaign registry's file, which sits in the history folder.
     historyFile() {
-      return this.GameID ? historyConfig(this.GameID).path || '' : ''
+      return registryStore().path || ''
     },
-    // The folder the history files live in: the open game's file locates it, else it sits beside the settings.
+    // The folder the history files live in: the registry file locates it, else it sits beside the settings.
     historyPath() {
       if (this.historyFile) {
         return folderOf(this.historyFile)

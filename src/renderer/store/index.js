@@ -1,5 +1,6 @@
 import Config from 'electron-store'
 
+import { raceKeyPrefix } from '../utilities/campaign'
 import { resetDatabase, retireDatabase } from '../utilities/database'
 import { recordsHistory } from '../utilities/history'
 import { cacheQueries, dropQueryCache } from '../utilities/query-cache'
@@ -46,6 +47,16 @@ export const getters = {
   },
   RaceID (state) {
     return state.RaceID
+  },
+  // The campaign the selected game's save belongs to (utilities/campaign.js), once the recorder has settled it on the copy of the save now open, else null (also while the next copy is being read, and when its pass failed). GameID is a counter that repeats between saves, so settings and history that belong to a campaign are kept under this, and nothing is read or written under a stale one.
+  campaignId (_state, getters) {
+    const settled = getters['history/campaign']
+
+    return settled ? settled.campaignId : null
+  },
+  // The settings key prefix of the selected race's own values, `campaign.<campaignId>.race.<RaceID>`, or null until a campaign and a race are picked.
+  racePrefix (state, getters) {
+    return getters.campaignId && state.RaceID ? raceKeyPrefix(getters.campaignId, state.RaceID) : null
   },
   // Whether the app keeps Empire History for the selected race (true until a race is picked).
   historyRecorded (state) {

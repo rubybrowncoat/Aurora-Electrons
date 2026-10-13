@@ -18,6 +18,7 @@ const STUBS = {
       constructor({ name }) { this.name = name }
       get store() { return files.get(this.name) || {} }
       set store(value) { if (globalThis.onHistoryWrite) globalThis.onHistoryWrite(this.name, value); files.set(this.name, JSON.parse(JSON.stringify(value))) }
+      update(change) { this.store = change(this.store) }
     }
   `,
   dayjs: 'const dayjs = () => ({}); dayjs.extend = () => {}; export default dayjs',
@@ -273,7 +274,10 @@ const defineCases = (modules) => {
     return { wait: new Promise((resolve) => (open = resolve)), open }
   }
 
-  // A save with one race of game 1 at game time `time`, answering the recorder's reads from memory. `held` delays the read transaction's end, `onQuery` sees every read's options.
+  // A save with one race of game 1 at game time `time`, answering the recorder's reads from memory: the games, the lowest-numbered systems and the increment ledger, a prefix of one chain that is longer the later the time. `held` delays the read transaction's end, `onQuery` sees every read's options.
+  const LEDGER_BASE = 64
+  const ledgerAt = (time) => Array.from({ length: LEDGER_BASE + Math.floor(time / 10) }, (_, index) => ({ IncrementID: index + 1, GameTime: index + 1 }))
+  const anchorRows = Array.from({ length: 10 }, (_, index) => ({ SystemID: 10 + index, SystemNumber: index + 1, Age: 1, AbundanceModifier: 1, Stars: 1, DustDensity: 1, SystemTypeID: 1 }))
   const saveAt = (time, { held = null, onQuery = () => {}, gameName = 'Campaign' } = {}) => {
     const state = { inTransaction: false }
 
@@ -301,6 +305,18 @@ const defineCases = (modules) => {
           return [[{ GameID: 1, RaceID: 7, NPR: 0, SpecialNPRID: 0 }]]
         }
 
+        if (sql.startsWith('select FCT_Game.GameID')) {
+          return [[{ GameID: 1, GameName: gameName, GameTime: time }]]
+        }
+
+        if (sql.startsWith('select FCT_System.SystemID')) {
+          return [anchorRows]
+        }
+
+        if (sql.startsWith('select FCT_Increments.IncrementID')) {
+          return [ledgerAt(time)]
+        }
+
         if (sql.startsWith('select FCT_Game.GameTime')) {
           return [[{ GameTime: time, GameName: gameName, RaceTitle: 'Race', WealthPoints: 0, AnnualWealth: 0 }]]
         }
@@ -323,7 +339,14 @@ const defineCases = (modules) => {
     }
   }
 
-  const stored = () => files().get('game-1')
+  // What a pass leaves behind for the one campaign it recorded: its first branch's history file, or the pre-campaign file while no campaign has been recorded.
+  const stored = () => {
+    const registry = files().get('campaigns')
+    const campaign = registry && Object.values(registry.campaigns || {}).find((entry) => !entry.mergedInto)
+
+    return campaign ? files().get(`campaign-${campaign.id}-b1`) : files().get('game-1')
+  }
+  const everything = () => JSON.stringify([...files()])
 
   invariant('history', 'a current pass records one snapshot of the race at the save time (control)', async () => {
     reset(fileOf(50))
@@ -337,12 +360,12 @@ const defineCases = (modules) => {
   invariant('history', 'a superseded pass writes nothing and leaves the stored history as it was', async () => {
     reset(fileOf(100, 200))
 
-    const before = JSON.stringify(stored())
+    const before = everything()
     const result = await history.recordHistory(saveAt(150), { isCurrent: () => false })
 
     assert.equal(result.superseded, true)
     assert.equal(result.recorded, 0)
-    assert.equal(JSON.stringify(stored()), before)
+    assert.equal(everything(), before)
   })
 
   invariant('history', 'an older save whose pass finishes after a newer save\'s cannot erase the newer snapshot', async () => {
@@ -398,7 +421,8 @@ const defineCases = (modules) => {
     globalThis.onHistoryWrite = () => writes.push(database.state.inTransaction)
     await history.recordHistory(database)
 
-    assert.deepEqual(writes, [false])
+    assert.ok(writes.length > 0, 'nothing was written')
+    assert.deepEqual(writes.filter((inside) => inside), [])
   })
 
   invariant('history', 'a save at an already recorded time replaces that snapshot instead of adding a second', () => {
@@ -419,13 +443,13 @@ const defineCases = (modules) => {
     const merged = history.mergeGame(fileOf(100, 200), { gameName: 'Campaign', t: 150, races: [{ RaceID: 7, raceName: 'Race', npr: false, snapshot: snapshotOf(150) }] })
 
     assert.ok(JSON.stringify(merged).includes('"t":200'), 'the snapshot at 200 is gone from the merged history')
-  }, { reason: 'mergeGame trims every snapshot at or after the incoming time (utilities/history.js `before`), so a rewind or a copied older save drops the later record', task: 'AE-033-02' })
+  })
 
   invariant('history', 'a save of another campaign under the same GameID does not erase the recorded campaign', () => {
     const merged = history.mergeGame(fileOf(100, 200), { gameName: 'Another campaign', t: 50, races: [{ RaceID: 7, raceName: 'Race', npr: false, snapshot: snapshotOf(50) }] })
 
     assert.ok(JSON.stringify(merged).includes('"t":200'), 'the snapshots of the first campaign are gone from the merged history')
-  }, { reason: 'the history file is keyed by GameID alone and a different GameName starts it over (mergeGame `sameGame`), so two campaigns that reuse an ID overwrite each other', task: 'AE-033-02' })
+  })
 
   invariant('history', 'thinning a long history keeps its first and latest snapshot and fits the limit', () => {
     const many = Array.from({ length: 11 }, (_, index) => snapshotOf(index))

@@ -1,12 +1,14 @@
-// Empire History: the app's own record of each race, one snapshot per game save it sees. Aurora keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is the only way to chart growth. Each game has its own electron-store file, `history/game-<GameID>.json` beside the settings, never the save. See docs/plans/aurcalcs/build-3.md § Empire History.
+// Empire History: the app's own record of each race, one snapshot per game save it sees. Aurora keeps no history beyond a year of wealth and a few weeks of the mineral ledger, so this is the only way to chart growth. The records belong to a campaign, not to a GameID or a path (utilities/campaign.js), and each branch of a campaign has its own electron-store file in `history/` beside the settings, never the save. See docs/plans/aurcalcs/build-3.md § Empire History.
 
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
+import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, settle } from './campaign'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 import { isKnownNumber } from './math'
 import { combine, ofRule, registerRule, sumResults, unavailable } from './provenance'
+import { ReadOnly, recordingOwner, requireRecording, withRegistry } from './recording-owner'
 
 const HISTORY_VERSIONS = ['2.7.x']
 
@@ -186,17 +188,83 @@ export const totalResult = (rule, results) => sumResults({ rule, results })
 export const MAX_SNAPSHOTS = 2000
 
 const HISTORY_FOLDER = 'history'
-const historyStores = {}
+const MIGRATION_FOLDER = 'migrations'
+const openStores = {}
 
-// A game's history file, created on first use. Its contents:
-// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } },
-//   intel: { [ViewRaceID]: { [AlienRaceID]: { name, snapshots: [...] } } } }
-export const historyConfig = (GameID) => {
-  if (!historyStores[GameID]) {
-    historyStores[GameID] = new Config({ cwd: HISTORY_FOLDER, name: `game-${GameID}` })
+// A store on one of the app's own files (the registry, a history file, the migration record): reads as electron-store's, and every write is refused unless this tab is the recording owner (utilities/recording-owner.js), so no page or utility can write what the owner alone may.
+const openStore = (cwd, name) => {
+  const key = `${cwd}/${name}`
+
+  if (!openStores[key]) {
+    const config = new Config({ cwd, name })
+
+    openStores[key] = {
+      get path () {
+        return config.path
+      },
+      get store () {
+        return config.store
+      },
+      set store (value) {
+        requireRecording()
+        config.store = value
+      },
+      get: (path, fallback) => config.get(path, fallback),
+      set: (path, value) => {
+        requireRecording()
+        config.set(path, value)
+      },
+      delete: (path) => {
+        requireRecording()
+        config.delete(path)
+      },
+    }
   }
 
-  return historyStores[GameID]
+  return openStores[key]
+}
+
+// The files of Empire History, all beside the settings and never the save. `campaigns` in the history folder is the registry (utilities/campaign.js): each campaign the app has recorded with its branches, attached saves and the unattached legacy history. Each branch of a campaign has its own file, `campaign-<campaignId>-<branchId>.json`, holding:
+// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } },
+//   intel: { [ViewRaceID]: { [AlienRaceID]: { name, snapshots: [...] } } } }
+// A history file written before campaigns, `game-<GameID>.json`, is kept as it was (the preserved original of the migration, see campaign.js) and read only by that migration. `migrations/campaigns-v1.json` holds the migration's record and copies of those originals.
+export const registryStore = () => openStore(HISTORY_FOLDER, 'campaigns')
+
+// The history of one branch of a campaign, a store with `.store`, `.get(path, default)` and `.path`.
+export const branchStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, branchFileName(campaignId, branchId))
+
+// The branch a page of one campaign shows and an answer attaches to: the one the player picked when the campaign has it, else the branch the open save settled to (which stays where the recorder put it).
+export const shownBranch = (branchIds, picked, settled) => (picked && branchIds.includes(picked) ? picked : settled)
+
+// Removes one race's history from one branch file, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
+export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegistry(() => {
+  const store = branchStore(campaignId, branchId)
+  const history = store.store
+
+  if (!history.races || !history.races[RaceID]) {
+    return false
+  }
+
+  delete history.races[RaceID]
+  store.store = history
+
+  return true
+})
+
+let appSettings = null
+
+// The stores the campaign rules work on, `settings` being the app's settings store (the store's `config` getter in the app); without one, a store on the settings file is opened.
+export const campaignStorage = (settings = null) => {
+  if (!settings && !appSettings) {
+    appSettings = new Config({})
+  }
+
+  return {
+    registry: registryStore(),
+    migration: openStore(MIGRATION_FOLDER, MIGRATION_NAME),
+    settings: settings || appSettings,
+    file: (name) => openStore(HISTORY_FOLDER, name),
+  }
 }
 
 // Player races and NPR empires are recorded. Aurora's special factions (Precursors, Invaders, Rakhas, Eldar, Ancients and the like, `SpecialNPRID` > 0) have no empire to chart.
@@ -229,41 +297,23 @@ export const recordedSpan = (snapshots, windowSeconds = 0) => {
   return { count: snapshots.length, first, last, seconds, covered: windowSeconds ? Math.min(seconds, windowSeconds) : seconds, inWindow: snapshots.filter((snapshot) => snapshot.t >= since).length }
 }
 
-// Every record in `records` ({ id: { ..., snapshots } }) without its snapshots at or after `t`;
-// records left empty are dropped.
-const before = (records, t) => {
-  const kept = {}
+// The snapshots with `snapshot` in time order: it takes the place of one at the same game time, and none at another time is touched, so a save older than what is recorded lands in the past of the record and the later snapshots stay.
+const withSnapshot = (snapshots, snapshot) => thinSnapshots([...snapshots.filter((existing) => existing.t !== snapshot.t), snapshot].sort((a, b) => a.t - b.t))
 
-  Object.entries(records || {}).forEach(([id, record]) => {
-    const snapshots = (record.snapshots || []).filter((snapshot) => snapshot.t < t)
-
-    if (snapshots.length) {
-      kept[id] = { ...record, snapshots }
-    }
-  })
-
-  return kept
-}
-
-// Add one save's snapshots to a game's history. `history` is the file's contents (or empty), and everything was taken at game time `t`:
+// Add one save's snapshots to a branch's history. `history` is the file's contents (or empty); `gameName` is the name the save gave the game, kept as the label of the file, and each snapshot carries the game time it was taken at:
 // - `races`: [{ RaceID, raceName, npr, snapshot }];
 // - `intel`: { [ViewRaceID]: [{ AlienRaceID, name, snapshot }] }, what each race knows of the others.
 // Rules:
-// - Another game under the same GameID (another name) starts over.
-// - Every record loses its snapshots at or after `t`: an older save reloaded means that future didn't happen, and a save at a recorded time replaces it.
+// - Which campaign and branch the file belongs to is decided before this (utilities/campaign.js), so a name or an id is never compared here: a different campaign has a different file.
+// - Nothing is removed. A save at a recorded time replaces that snapshot; a save older than the latest one is inserted in time order, an older save reloaded (a rewind) leaves the later snapshots in place, and a rewound past that is then played differently goes to a branch of its own.
 // - A race (or an alien race) missing from this save keeps its past.
-// - Intelligence changes slowly, so its snapshot is kept only when something besides the time changed.
-export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
-  const sameGame = history && history.gameName === gameName
-  const merged = sameGame ? before(history.races, t) : {}
-  const mergedIntel = {}
+// - Intelligence changes slowly, so its snapshot is kept only when something besides the time changed from the snapshot before it.
+export const mergeGame = (history, { gameName, races, intel = {} }) => {
+  const merged = Object.fromEntries(Object.entries(history && history.races ? history.races : {}).map(([RaceID, record]) => [RaceID, { ...record, snapshots: record.snapshots || [] }]))
+  const mergedIntel = Object.fromEntries(Object.entries(history && history.intel ? history.intel : {}).map(([ViewRaceID, aliens]) => [ViewRaceID, { ...aliens }]))
 
   races.forEach(({ RaceID, raceName, npr, snapshot }) => {
-    merged[RaceID] = { raceName, npr, snapshots: thinSnapshots([...(merged[RaceID] ? merged[RaceID].snapshots : []), snapshot]) }
-  })
-
-  Object.entries(sameGame && history.intel ? history.intel : {}).forEach(([ViewRaceID, aliens]) => {
-    mergedIntel[ViewRaceID] = before(aliens, t)
+    merged[RaceID] = { raceName, npr, snapshots: withSnapshot(merged[RaceID] ? merged[RaceID].snapshots : [], snapshot) }
   })
 
   Object.entries(intel).forEach(([ViewRaceID, aliens]) => {
@@ -271,16 +321,10 @@ export const mergeGame = (history, { gameName, t, races, intel = {} }) => {
 
     aliens.forEach(({ AlienRaceID, name, snapshot }) => {
       const snapshots = view[AlienRaceID] ? view[AlienRaceID].snapshots : []
-      const last = snapshots[snapshots.length - 1]
+      const last = snapshots.filter((existing) => existing.t < snapshot.t).pop()
 
-      view[AlienRaceID] = { name, snapshots: !last || intelChanged(last, snapshot) ? thinSnapshots([...snapshots, snapshot]) : snapshots }
+      view[AlienRaceID] = { name, snapshots: !last || intelChanged(last, snapshot) ? withSnapshot(snapshots, snapshot) : snapshots.filter((existing) => existing.t !== snapshot.t) }
     })
-  })
-
-  Object.keys(mergedIntel).forEach((ViewRaceID) => {
-    if (!Object.keys(mergedIntel[ViewRaceID]).length) {
-      delete mergedIntel[ViewRaceID]
-    }
   })
 
   return { gameName, races: merged, intel: mergedIntel }
@@ -340,66 +384,138 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
   }
 }
 
-// Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, taken, intel }] per game, `taken` being [{ RaceID, raceName, npr, gameName, snapshot }] and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries, and the history files are written after it ends.
-const readSave = (database) => database.transaction(async (transaction) => {
+// Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, observation, taken, intel }] per game of the save, `observation` being what identifies its campaign (utilities/campaign.js `observeGame`), `taken` [{ RaceID, raceName, npr, gameName, snapshot }] for each recorded race and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. `marks` is { [GameID]: [increment counts] }, the stored tips the ledger is compared at exactly. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries and one scan of the game's increments, and the history files are written after it ends.
+const readSave = (database, marks = {}) => database.transaction(async (transaction) => {
   const options = { transaction }
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
-  const games = {}
+  const [games] = await database.query(GAMES_SQL, options)
+  const recorded = {}
   const read = []
   const failed = []
 
   races.filter(recordsHistory).forEach((race) => {
-    games[race.GameID] = [...(games[race.GameID] || []), race]
+    recorded[race.GameID] = [...(recorded[race.GameID] || []), race]
   })
 
-  for (const [GameID, gameRaces] of Object.entries(games)) {
+  for (const game of games) {
+    const GameID = Number(game.GameID)
     const taken = []
     const intel = {}
 
     try {
-      for (const race of gameRaces) {
-        const result = await takeSnapshot(database, { GameID, RaceID: race.RaceID }, options)
+      const observation = await observeGame(database, game, { options, marks: marks[GameID] })
+
+      for (const race of recorded[game.GameID] || []) {
+        const result = await takeSnapshot(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
 
         if (result) {
           taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
-          intel[race.RaceID] = await takeIntel(database, { GameID, RaceID: race.RaceID }, options)
+          intel[race.RaceID] = await takeIntel(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
         }
       }
 
-      read.push({ GameID: Number(GameID), taken, intel })
+      read.push({ GameID, observation, taken, intel })
     } catch (error) {
-      failed.push({ GameID: Number(GameID), stage: 'read', error })
+      failed.push({ GameID, stage: 'read', error })
     }
   }
 
   return { read, failed }
 })
 
-// Snapshot every recorded race in the save, and what each knows of the other races, writing each game's history file once. A game that can't be read or written doesn't stop the others (electron-store throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are lost. `onSaved(GameID)` is called as soon as each game's file is written, so views refresh even if a later game fails. `isCurrent()` is asked right before each write: a pass that was superseded (a newer save was loaded while it read) stops there, because mergeGame trims every snapshot at or after its time, which for an older save would erase the newer pass's. Returns { recorded, failed, superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage: 'read' | 'write', error }], and whether the pass was abandoned.
-export const recordHistory = async (database, { onSaved = () => {}, isCurrent = () => true } = {}) => {
-  const { read, failed } = await readSave(database)
+const randomId = () => globalThis.crypto.randomUUID()
+
+const SETTLE_ATTEMPTS = 3
+
+const settleAgain = (storage, options) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return settle(storage, options)
+    } catch (error) {
+      if (!error.conflict || attempt >= SETTLE_ATTEMPTS) {
+        throw error
+      }
+    }
+  }
+}
+
+// Snapshot every recorded race in the save, and what each knows of the other races, writing each game's history file once, in the history of the campaign and branch the game was settled to (utilities/campaign.js `settle`: the same campaign across a rename, a move or a copy of the file, a branch for a replayed past, a new campaign for a game no recorded one claims). A game that can't be read or written doesn't stop the others (electron-store throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are lost. `onResolved(GameID, resolution)` is called once a game is settled and `onSaved(GameID)` as soon as its history file is written, so views refresh even if a later game fails. `isCurrent()` is the store's freshness generation guard, asked before every write of the migration, the registry and the history files: a pass that was superseded (a newer save was loaded while it read) stops there, whatever it had done so far being either complete or rolled back by the next pass. A window or tab that is not the recording owner of its database (utilities/recording-owner.js, `ownerGrace` the ms it waits for the lock) records nothing and reports stage 'readonly'; the pass runs under the registry lock shared by every database. `path` is the save's path, kept as an attachment of the campaign and never as its identity. Returns { recorded, failed, superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage: 'read' | 'write' | 'registry' | 'readonly', error }] (GameID null and stage 'registry' when the campaign registry is damaged and nothing was recorded), and whether the pass was abandoned.
+export const recordHistory = async (database, { onSaved = () => {}, onResolved = () => {}, isCurrent = () => true, storage = campaignStorage(), path = null, now = Date.now, newId = randomId, ownerGrace = undefined } = {}) => {
+  const guard = () => {
+    if (!isCurrent()) {
+      throw new Superseded()
+    }
+  }
+
+  // Before the registry is read: a window that takes the recording over reads what the previous owner left.
+  if (!(await recordingOwner(ownerGrace))) {
+    return { recorded: 0, failed: [{ GameID: null, stage: 'readonly', error: new ReadOnly() }], superseded: false }
+  }
+
+  const tipsOf = () => {
+    try {
+      return { marks: marksOf(storage) }
+    } catch (error) {
+      return { failure: { recorded: 0, failed: [{ GameID: null, stage: 'registry', error }], superseded: false } }
+    }
+  }
+
+  const first = tipsOf()
+
+  if (first.failure) {
+    return first.failure
+  }
+
+  // The save is read outside the registry lock, so a read that hangs cannot hold every window's recording up.
+  let { read, failed } = await readSave(database, first.marks)
   let recorded = 0
 
-  for (const { GameID, taken, intel } of read) {
+  // The step of this pass that reads and changes the registry is taken alone under the registry lock shared by every database. A window of another database may have recorded since the tips were read: the save is then read again, here, against the tips now stored (a save read against older tips is settled on a coarser comparison than the tips need).
+  return withRegistry(async () => {
     if (!isCurrent()) {
       return { recorded, failed, superseded: true }
     }
 
-    if (taken.length) {
-      try {
-        const store = historyConfig(GameID)
+    const current = tipsOf()
 
-        store.store = mergeGame(store.store, { gameName: taken[0].gameName, t: taken[0].snapshot.t, races: taken, intel })
-      } catch (error) {
-        failed.push({ GameID, stage: 'write', error })
+    if (current.failure) {
+      return current.failure
+    }
 
-        continue
+    if (JSON.stringify(current.marks) !== JSON.stringify(first.marks)) {
+      ;({ read, failed } = await readSave(database, current.marks))
+    }
+
+    for (const { GameID, observation, taken, intel } of read) {
+      if (!isCurrent()) {
+        return { recorded, failed, superseded: true }
       }
 
-      recorded += taken.length
-      onSaved(GameID)
-    }
-  }
+      try {
+        guard()
 
-  return { recorded, failed, superseded: false }
+        const resolution = settleAgain(storage, { opened: observation, path, now: now(), newId, guard })
+
+        onResolved(GameID, resolution)
+
+        if (taken.length) {
+          guard()
+
+          const store = storage.file(branchFileName(resolution.campaignId, resolution.branchId))
+
+          store.store = mergeGame(store.store, { gameName: observation.gameName, races: taken, intel })
+          recorded += taken.length
+          onSaved(GameID)
+        }
+      } catch (error) {
+        if (error.superseded) {
+          return { recorded, failed, superseded: true }
+        }
+
+        failed.push({ GameID, stage: error.readOnly ? 'readonly' : 'write', error })
+      }
+    }
+
+    return { recorded, failed, superseded: false }
+  })
 }

@@ -61,6 +61,20 @@ export default class Store {
     write(this.storageKey, value, { strict: true })
   }
 
+  // A read-change-write of the whole store: `change(store)` returns the next one, and `companion(next)` may return { store, key, value } for a value of another store that goes with it. The app's `update`; the page's one thread makes it atomic here.
+  update (change, companion) {
+    const next = change(this.store)
+    const also = companion ? companion(next) : null
+
+    this.store = next
+
+    if (also) {
+      also.store.set(also.key, also.value)
+    }
+
+    return next
+  }
+
   get (key, defaultValue) {
     const value = getPath(read(this.storageKey), key)
 

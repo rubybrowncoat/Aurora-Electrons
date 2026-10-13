@@ -1,8 +1,10 @@
 // Moving preferences between empires, or installations, through a file: the versioned bundle, the allowlist it is built from, and the checks, preview, commit and undo of an import. Everything here is a pure function over plain JSON (the settings store as `config.store` returns it); Settings does the file and settings I/O.
 //
-// A bundle is `{ format, version, exportedAt, source: { gameId, raceId, gameName, raceName }, categories }`. `categories` holds only the categories chosen, each as `{ app?: { <key>: value }, race?: { <key>: value } }`. An `app` key is stored as it is; a `race` key is stored under `game.<GameID>.race.<RaceID>.` of the empire it was exported from, and travels without that prefix, so an import joins it to the prefix of the empire it is imported into. The source ids and names are there to tell the person which empire the file came from; they never decide where a key goes.
+// A bundle is `{ format, version, exportedAt, source: { gameId, raceId, gameName, raceName }, categories }`. `categories` holds only the categories chosen, each as `{ app?: { <key>: value }, race?: { <key>: value } }`. An `app` key is stored as it is; a `race` key is stored under `campaign.<campaign id>.race.<RaceID>.` of the empire it was exported from (the campaign is the app's own record of a campaign, see `utilities/campaign.js`), and travels without that prefix, so an import joins it to the prefix of the empire it is imported into. The source ids and names are there to tell the person which empire the file came from; they never decide where a key goes, and the campaign id never leaves the installation.
 //
 // The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the colour preset, and the Display panel's two settings. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
+
+import { raceKeyPrefix } from './campaign'
 
 export const FORMAT = 'aurora-electrons-preferences'
 export const VERSION = 1
@@ -33,7 +35,11 @@ const EXCLUDED_KEYS = ['maintenanceExclusions']
 const DISPLAY_KEYS = ['spyNPR', 'selectedSeparator']
 
 const UNSAFE_SEGMENTS = ['__proto__', 'constructor', 'prototype']
-const SAFE_PATH = /^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/
+const SEGMENT = /^[A-Za-z0-9_]+$/
+// The segment after `campaign.` is a campaign id, which is a UUID: hyphens are part of it.
+const CAMPAIGN_SEGMENT = /^[A-Za-z0-9_-]+$/
+// The settings of a campaign's empire: `campaign.<campaign id>.race.<RaceID>`. A backup of a version before campaigns were recorded named them `game.<GameID>.race.<RaceID>`.
+const LEGACY_PATH = /^game\.(\d+)(\..+)?$/
 const ID = /^\d+$/
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
@@ -58,7 +64,7 @@ const canonical = (value) => {
 
 export const sameValue = (a, b) => canonical(a) === canonical(b)
 
-const safePath = (path) => typeof path === 'string' && SAFE_PATH.test(path) && !path.split('.').some((part) => UNSAFE_SEGMENTS.includes(part))
+const safePath = (path) => typeof path === 'string' && path.split('.').every((part, index, parts) => !UNSAFE_SEGMENTS.includes(part) && (index === 1 && parts[0] === 'campaign' ? CAMPAIGN_SEGMENT : SEGMENT).test(part))
 
 const getPath = (object, path) => path.split('.').reduce((node, part) => (isObject(node) && has(node, part) ? node[part] : undefined), object)
 
@@ -95,7 +101,7 @@ const pruneEmpty = (object, path) => {
   }
 }
 
-const racePrefix = (gameId, raceId) => `game.${gameId}.race.${raceId}`
+const racePrefix = (campaignId, raceId) => raceKeyPrefix(campaignId, raceId)
 
 // A value as one short line, for the preview.
 export const shorten = (value, length = 70) => {
@@ -148,20 +154,20 @@ const checkDeclared = (declarations) => (value) => {
 // The allowlist: a map of `<category>:<scope>:<key>` to `{ category, scope, key, check(value) }`, where `check` gives `{ ok: true, value }` (the value as it would be kept) or `{ ok: false, reason }`.
 //   declarations: `declaredViews()` of mixins/persisted-view.js, once every page and component module is loaded.
 //   appearance: `{ key, ids }`, the settings key of the colour preset and the ids of the presets this version has.
+//   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
 //   separators: the thousands separators the Display panel offers.
 export const buildSchema = ({ declarations, appearance, font, separators }) => {
-//   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
   const fields = new Map()
   const add = (category, scope, key, check) => fields.set(`${category}:${scope}:${key}`, { category, scope, key, check })
 
   add('appearance', 'app', appearance.key, (value) => (typeof value === 'string' && appearance.ids.includes(value) ? { ok: true, value } : { ok: false, reason: 'is not a preset this version has' }))
-  add('display', 'app', 'spyNPR', (value) => (typeof value === 'boolean' ? { ok: true, value } : { ok: false, reason: 'must be true or false' }))
-  add('display', 'app', 'selectedSeparator', (value) => (separators.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${separators.join(', ')}` }))
   add('appearance', 'app', font.key, (value) => {
     const read = font.read(value)
 
     return read.ok ? { ok: true, value: read.font } : { ok: false, reason: 'is not a typeface and text size this version offers' }
   })
+  add('display', 'app', 'spyNPR', (value) => (typeof value === 'boolean' ? { ok: true, value } : { ok: false, reason: 'must be true or false' }))
+  add('display', 'app', 'selectedSeparator', (value) => (separators.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${separators.join(', ')}` }))
 
   const byKey = new Map()
 
@@ -184,11 +190,11 @@ export const buildSchema = ({ declarations, appearance, font, separators }) => {
 const fieldsOf = (schema, category) => [...schema.values()].filter((field) => field.category === category)
 
 // The empire's stored value of a field, and the key it lives under.
-const storedKey = (field, { gameId, raceId }) => (field.scope === 'race' ? `${racePrefix(gameId, raceId)}.${field.key}` : field.key)
+const storedKey = (field, { campaignId, raceId }) => (field.scope === 'race' ? `${racePrefix(campaignId, raceId)}.${field.key}` : field.key)
 
-const knownIds = ({ gameId, raceId }) => ID.test(String(gameId)) && ID.test(String(raceId))
+const knownIds = ({ gameId, raceId, campaignId }) => ID.test(String(gameId)) && ID.test(String(raceId)) && typeof campaignId === 'string' && campaignId !== ''
 
-// The bundle for the chosen categories, from the stored settings of the empire `source` ({ gameId, raceId, gameName, raceName }). A stored value that its page would not restore is left out and listed in `skipped`. `keys` lists every key written (as stored, with the empire's prefix for the race ones). Without an empire (`source.raceId` null), the race keys are not exported.
+// The bundle for the chosen categories, from the stored settings of the empire `source` ({ gameId, raceId, campaignId, gameName, raceName }; the campaign is the one the save belongs to, and is the key of its settings, never written to the bundle). A stored value that its page would not restore is left out and listed in `skipped`. `keys` lists every key written (as stored, with the empire's prefix for the race ones). Without an empire (`source.raceId` null, or a save not yet settled to a campaign), the race keys are not exported.
 export const buildExport = (schema, store, source, categories, now = new Date()) => {
   const out = {}
   const keys = []
@@ -404,7 +410,7 @@ export const planImport = ({ store, entries, source, target, categories }) => {
       return
     }
 
-    const fullKey = scope === 'race' ? `${racePrefix(target.gameId, target.raceId)}.${key}` : key
+    const fullKey = scope === 'race' ? `${racePrefix(target.campaignId, target.raceId)}.${key}` : key
     const parents = fullKey.split('.').slice(0, -1)
     const blocking = parents.map((_, index) => parents.slice(0, index + 1).join('.')).find((path) => getPath(store, path) !== undefined && !isObject(getPath(store, path)))
     const old = getPath(store, fullKey)
@@ -463,6 +469,35 @@ export const commitImport = (store, plan, { target, source, now = new Date() }) 
 
 // Whether a stored backup is one this version wrote and every key in it is a path the import could have written.
 export const validBackup = (backup) => isObject(backup) && backup.format === BACKUP_FORMAT && backup.version === VERSION && Array.isArray(backup.entries) && Array.isArray(backup.created) && backup.entries.every((entry) => isObject(entry) && safePath(entry.key) && typeof entry.had === 'boolean') && backup.created.every(safePath)
+
+// The backup to offer for a stored one, `{ backup, reason }`: null with no reason when it is damaged or absent, null with the `reason` it is not offered when it names the settings of a game from before campaigns were recorded (`game.<GameID>.race.<RaceID>`: the app no longer reads or writes them, so putting values back there would change nothing it shows) and `campaignOf(GameID)` knows no campaign that holds that game's settings now, and otherwise the backup with each such path moved to that campaign (`campaign.<campaign id>.race.<RaceID>`), so an undo puts the values back where they are read from.
+export const adoptBackup = (backup, campaignOf) => {
+  if (!validBackup(backup)) {
+    return { backup: null, reason: null }
+  }
+
+  const games = [...new Set([...backup.entries.map(({ key }) => key), ...backup.created].map((path) => LEGACY_PATH.exec(path)).filter(Boolean).map((match) => match[1]))]
+
+  if (!games.length) {
+    return { backup, reason: null }
+  }
+
+  const campaigns = new Map(games.map((GameID) => [GameID, campaignOf(GameID)]))
+  const missing = games.find((GameID) => !campaigns.get(GameID))
+
+  if (missing !== undefined) {
+    return { backup: null, reason: `The last import was made before campaigns were recorded, to settings of game ${missing} that no campaign holds yet, so it cannot be undone here until that game's save is opened and its settings belong to a campaign.` }
+  }
+
+  const moved = (path) => {
+    const match = LEGACY_PATH.exec(path)
+
+    return match ? `campaign.${campaigns.get(match[1])}${match[2] || ''}` : path
+  }
+  const adopted = { ...backup, entries: backup.entries.map((entry) => ({ ...entry, key: moved(entry.key) })), created: backup.created.map(moved) }
+
+  return validBackup(adopted) ? { backup: adopted, reason: null } : { backup: null, reason: 'The last import was made before campaigns were recorded and cannot be moved to a campaign, so it cannot be undone here.' }
+}
 
 // The settings with the backup's keys put back as they were: `{ store, restored }`. A key the import created is deleted, and so is each group it created that is empty again. Throws on a backup that fails `validBackup`.
 export const undoImport = (store, backup) => {

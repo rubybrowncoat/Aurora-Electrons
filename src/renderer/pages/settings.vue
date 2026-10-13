@@ -198,6 +198,13 @@
                 </template>
               </div>
 
+              <div v-if="!backup && backupUnavailable" class="setting" data-transfer-undo-unavailable>
+                <div class="setting__text">
+                  <div class="body-2">Undo the last import</div>
+                  <div class="caption text--secondary">{{ backupUnavailable }}</div>
+                </div>
+              </div>
+
               <div v-if="backup" class="setting" data-transfer-undo>
                 <div class="setting__text">
                   <div class="body-2">Undo the last import</div>
@@ -240,43 +247,17 @@ import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../uti
 import { FONT_KEY, loadFont, previewFont, readFont } from '../utilities/appearance-font'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 import { declaredViews } from '../mixins/persisted-view'
-import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportName, parseBundle, planImport, sameValue, shorten, undoImport, validBackup } from '../utilities/preferences'
+import { legacyCampaignOf } from '../utilities/campaign'
+import { campaignStorage } from '../utilities/history'
+import { appViews as appViewsOf, empireViews, withoutViews as withoutViewsOf } from '../utilities/remembered-views'
+import { CATEGORIES, MAX_BYTES, adoptBackup, buildExport, buildSchema, commitImport, exportName, parseBundle, planImport, sameValue, shorten, undoImport } from '../utilities/preferences'
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
 // The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
 const APP_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
-// What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
-const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
-
-const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
-
-// The app-wide keys a reset clears: every top-level key but the empires' and the Display settings.
-const appViews = (store) => Object.keys(store).filter((key) => key !== 'game' && !APP_SETTINGS.includes(key))
-
-// The keys a reset clears for each empire with any stored: [{ GameID, RaceID, keys }], ids as stored (strings).
-const empireViews = (store) => Object.entries(isObject(store.game) ? store.game : {}).flatMap(([GameID, game]) => Object.entries(isObject(game) && isObject(game.race) ? game.race : {}).map(([RaceID, values]) => ({ GameID, RaceID, keys: isObject(values) ? Object.keys(values).filter((key) => !KEPT_EMPIRE_KEYS.includes(key)) : [] }))).filter(({ keys }) => keys.length)
-
-// The settings with the views cleared: one empire's (`only`, { GameID, RaceID }), or every empire's and the app-wide ones.
-const withoutViews = (store, only) => {
-  const next = JSON.parse(JSON.stringify(store))
-
-  if (!only) {
-    appViews(next).forEach((key) => delete next[key])
-  }
-
-  empireViews(next).filter(({ GameID, RaceID }) => !only || (GameID === String(only.GameID) && RaceID === String(only.RaceID))).forEach(({ GameID, RaceID, keys }) => {
-    const races = next.game[GameID].race
-
-    keys.forEach((key) => delete races[RaceID][key])
-
-    if (!Object.keys(races[RaceID]).length) {
-      delete races[RaceID]
-    }
-  })
-
-  return next
-}
+const appViews = (store) => appViewsOf(store, APP_SETTINGS)
+const withoutViews = (store, only) => withoutViewsOf(store, APP_SETTINGS, only)
 
 const values = (number) => (number === 1 ? 'value' : 'values')
 
@@ -326,13 +307,15 @@ export default {
       confirmed: false,
       busy: false,
       backup: null,
+      // Why a kept undo is not offered, or '' (see `adoptBackup`).
+      backupUnavailable: '',
       // The appearance file: what a file that failed said (`fileName`, `errors`, `omitted`), and whether the contrast findings of the draft are accepted.
       fileProblem: null,
       acknowledged: false,
     }
   },
   computed: {
-    ...mapGetters(['config', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'GameID', 'RaceID', 'campaignId']),
     ...mapState('empires', ['games']),
 
     separatorName() {
@@ -467,7 +450,7 @@ export default {
     },
 
     empireCount() {
-      const own = this.empires.find(({ GameID, RaceID }) => GameID === String(this.GameID) && RaceID === String(this.RaceID))
+      const own = this.campaignId ? this.empires.find(({ campaignId, RaceID }) => campaignId === this.campaignId && RaceID === String(this.RaceID)) : null
 
       return this.RaceID && own ? own.keys.length : 0
     },
@@ -502,7 +485,7 @@ export default {
     target() {
       const game = this.games.find((entry) => entry.GameID === this.GameID)
 
-      return { gameId: this.GameID, raceId: this.RaceID, gameName: game ? game.GameName : null, raceName: this.empireName || null }
+      return { gameId: this.GameID, raceId: this.RaceID, campaignId: this.campaignId, gameName: game ? game.GameName : null, raceName: this.empireName || null }
     },
 
     exportNote() {
@@ -566,6 +549,10 @@ export default {
     },
   },
   watch: {
+    // A game from before campaigns settles to a campaign after the page opened: an undo kept for it is offered then.
+    campaignId() {
+      this.loadBackup()
+    },
     config: {
       immediate: true,
       handler(config) {
@@ -580,9 +567,7 @@ export default {
     // The number of the latest appearance file read; a read whose number is no longer the latest, or that finishes after the page is gone, is dropped.
     this.appearanceRead = 0
 
-    const kept = this.backupStore.get('backup')
-
-    this.backup = validBackup(kept) ? kept : null
+    this.loadBackup()
   },
   beforeDestroy() {
     this.appearanceRead++
@@ -727,7 +712,8 @@ export default {
       const { scope } = this.pending
       const cleared = scope === 'empire' ? this.empireCount : this.totalCount
 
-      this.config.store = withoutViews(this.config.store, scope === 'empire' ? { GameID: this.GameID, RaceID: this.RaceID } : null)
+      // Over the settings as they are when written: a page of another window may have written one since this page read them.
+      this.config.update((store) => withoutViews(store, scope === 'empire' ? { campaignId: this.campaignId, RaceID: this.RaceID } : null))
       this.pending = null
       this.reinstantiateConfig()
       this.activateSnackbar({ text: `${this.count(cleared)} remembered ${values(cleared)} reset`, color: 'success' })
@@ -809,31 +795,53 @@ export default {
       this.confirmed = false
     },
 
-    // The settings file is the one thing that changes, in one write, and what it replaced goes to the undo file first. The preview is made again over the settings as they are now, and a difference from the one on screen stops the import.
+    // The undo kept in its file, as `adoptBackup` offers it: an import made before campaigns were recorded is moved to the campaign that holds that game's settings now, or not offered, with the reason.
+    loadBackup() {
+      const { backup, reason } = adoptBackup(this.backupStore.get('backup'), (GameID) => {
+        try {
+          return legacyCampaignOf(campaignStorage(this.config), Number(GameID))
+        } catch (error) {
+          return null
+        }
+      })
+
+      this.backup = backup
+      this.backupUnavailable = reason || ''
+    },
+
+    // The settings file changes in one write, and the undo of that write goes to the undo file in the same step (the store host writes both or neither, and the undo of a change that was kept, never one of an attempt that lost to another window). The preview is made again over the settings as they are when the write is made (another window may have written since), and a difference from the one on screen stops the import.
     runImport() {
       const { plan } = this
       const settings = { target: this.target, source: this.parsed.bundle.source }
-      const current = planImport({ store: this.config.store, entries: this.parsed.entries, source: settings.source, target: this.target, categories: this.importCategories })
-
-      if (!this.canImport || !sameValue(current.changes, plan.changes)) {
-        this.stored = this.config.store
-        this.activateSnackbar({ text: 'The settings changed since the preview, so nothing was imported. The preview is refreshed.', color: 'warning' })
-
-        return
-      }
-
-      const { store, backup } = commitImport(this.config.store, current, settings)
+      let committed = null
 
       try {
-        this.backupStore.set('backup', backup)
-        this.config.store = store
+        this.config.update((store) => {
+          const current = planImport({ store, entries: this.parsed.entries, source: settings.source, target: this.target, categories: this.importCategories })
+
+          if (!this.canImport || !sameValue(current.changes, plan.changes)) {
+            throw Object.assign(new Error('The settings changed since the preview'), { changed: true })
+          }
+
+          committed = commitImport(store, current, settings)
+
+          return committed.store
+        }, () => ({ store: this.backupStore, key: 'backup', value: committed.backup }))
       } catch (error) {
+        if (error.changed) {
+          this.stored = this.config.store
+          this.activateSnackbar({ text: 'The settings changed since the preview, so nothing was imported. The preview is refreshed.', color: 'warning' })
+
+          return
+        }
+
         console.error("Couldn't write the imported preferences", error)
-        this.backupStore.delete('backup')
         this.activateSnackbar({ text: "Couldn't write the settings, so nothing was imported", color: 'error' })
 
         return
       }
+
+      const { backup } = committed
 
       this.backup = backup
       this.afterWrite(backup.entries.map(({ key }) => key))
@@ -845,8 +853,11 @@ export default {
       let result
 
       try {
-        result = undoImport(this.config.store, this.backup)
-        this.config.store = result.store
+        this.config.update((store) => {
+          result = undoImport(store, this.backup)
+
+          return result.store
+        })
       } catch (error) {
         console.error("Couldn't undo the import", error)
         this.activateSnackbar({ text: "Couldn't undo the import", color: 'error' })

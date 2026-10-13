@@ -210,7 +210,7 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance, toneColor } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
-import { historyConfig } from '../utilities/history'
+import { branchStore } from '../utilities/history'
 import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, POPULATION_LEVELS, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, classTons, coloniesObserved, communicationLabel, contactStatus, contactTime, diplomaticPoints, gameYear, groundReveal, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
@@ -374,11 +374,13 @@ export default {
       // eslint-disable-next-line no-unused-expressions
       this.$store.state.history.revision
 
-      if (!this.GameID || !this.RaceID || !this.selectedId || !this.historyRecorded) {
+      const campaign = this.$store.getters['history/campaign']
+
+      if (!this.GameID || !this.RaceID || !this.selectedId || !this.historyRecorded || !campaign) {
         return []
       }
 
-      const record = historyConfig(this.GameID).get(`intel.${this.RaceID}.${this.selectedId}`, null)
+      const record = branchStore(campaign.campaignId, campaign.branchId).get(`intel.${this.RaceID}.${this.selectedId}`, null)
 
       return record && Array.isArray(record.snapshots) ? record.snapshots : []
     },

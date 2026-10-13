@@ -340,10 +340,12 @@ const run = async () => {
 
   problems = []
 
-  const { GameID, RaceID, settingsPath, revision } = await page.evaluate(() => {
-    const { state } = window.$app.$store
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters['history/campaign']), null, { timeout: 30000 }).catch(() => {})
 
-    return { GameID: state.GameID, RaceID: state.RaceID, settingsPath: state.config.path, revision: state.history.revision }
+  const { GameID, RaceID, settingsPath, revision, campaign } = await page.evaluate(() => {
+    const { state, getters } = window.$app.$store
+
+    return { GameID: state.GameID, RaceID: state.RaceID, settingsPath: state.config.path, revision: state.history.revision, campaign: getters['history/campaign'] }
   })
 
   check('storage path IPC', GameID !== null, GameID !== null ? `loaded ${save}` : 'no game loaded')
@@ -353,7 +355,7 @@ const run = async () => {
 
   check('flag IPC', found === `data:image/png;base64,${FLAG_PNG.toString('base64')}` && missing === null && escaped === null && escapedBackslash === null && notAName === null, `found ${String(found).slice(0, 24)}..., missing ${missing}, dotdot ${escaped}, backslash ${escapedBackslash}, null ${notAName}`)
 
-  const historyPath = path.join(userData, 'history', `game-${GameID}.json`)
+  const historyPath = campaign ? path.join(userData, 'history', `campaign-${campaign.campaignId}-${campaign.branchId}.json`) : path.join(userData, 'history', 'campaign-unsettled.json')
   const readHistory = () => (fs.existsSync(historyPath) ? JSON.parse(fs.readFileSync(historyPath, 'utf8')) : null)
   const snapshotCount = (history) => (history && history.races && history.races[RaceID] ? history.races[RaceID].snapshots.length : 0)
   const before = readHistory()
@@ -376,6 +378,10 @@ const run = async () => {
 
     check('save watcher reloads', true, `database reopened, history revision ${revision} -> ${await page.evaluate(() => window.$app.$store.state.history.revision)}`)
     check('same save, same history', snapshotCount(after) === snapshotCount(before), `${snapshotCount(before)} -> ${snapshotCount(after)} snapshots`)
+
+    const reopened = await page.evaluate(() => window.$app.$store.getters['history/campaign'])
+
+    check('same save, same campaign', Boolean(campaign) && Boolean(reopened) && reopened.campaignId === campaign.campaignId && reopened.branchId === campaign.branchId, `${campaign && campaign.campaignId} -> ${reopened && reopened.campaignId}`)
   } catch (error) {
     check('save watcher reloads', false, error.message.split('\n')[0])
   }

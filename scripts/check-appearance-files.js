@@ -51,6 +51,9 @@ const fakeConfig = (initial = {}) => {
     get store() {
       return this.data
     },
+    update(change) {
+      this.store = change(JSON.parse(JSON.stringify(this.data)))
+    },
     set store(value) {
       this.writes.push({ via: 'store', keys: Object.keys(value) })
 
@@ -682,8 +685,8 @@ const MUTATIONS = [
   ['a baseline exemption that covers every ink', 'appearance-contrast.js', 'appearance.inks[token] === baseline.inks[token] && COLOUR_FILLS', 'COLOUR_FILLS'],
   ['the fills of the baseline not compared', 'appearance-contrast.js', 'COLOUR_FILLS.every(([, path]) => String(at(appearance, path)).toLowerCase() === String(at(baseline, path)).toLowerCase())', 'true'],
   ['the snackbar text button measured with the snackbar message ink', 'appearance-contrast.js', 'snackbarButton: appearance.inks.onColor })', 'snackbarButton: appearance.inks.onSnackbar })'],
-  ['Apply writes the document and the choice apart', APPEARANCE, 'config.store = { ...config.store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }', 'config.set(CUSTOM_KEY, entry.parsed.document)\n    config.set(APPEARANCE_KEY, CUSTOM_ID)'],
-  ['the state changed before the write that can fail', APPEARANCE, '    config.store = { ...config.store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }\n    imported.custom = register(CUSTOM_ID, entry.parsed)', '    imported.custom = register(CUSTOM_ID, entry.parsed)\n    config.store = { ...config.store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }'],
+  ['Apply writes the document and the choice apart', APPEARANCE, 'config.update((store) => ({ ...store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }))', 'config.set(CUSTOM_KEY, entry.parsed.document)\n    config.set(APPEARANCE_KEY, CUSTOM_ID)'],
+  ['the state changed before the write that can fail', APPEARANCE, '    config.update((store) => ({ ...store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }))\n    imported.custom = register(CUSTOM_ID, entry.parsed)', '    imported.custom = register(CUSTOM_ID, entry.parsed)\n    config.update((store) => ({ ...store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }))'],
   ['a failed import dropping the draft', APPEARANCE, '  if (!parsed.ok) {\n    return parsed', '  if (!parsed.ok) {\n    imported.draft = null\n\n    return parsed'],
   ['a cancelled preview keeping the draft', APPEARANCE, '  imported.draft = null\n  state.id = state.applied', '  state.id = state.applied'],
   ['a stored file that fails not reported', APPEARANCE, 'imported.problem = parsed && !parsed.ok ? { errors: parsed.errors, omitted: parsed.omitted } : null', 'imported.problem = null'],
