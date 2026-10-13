@@ -19,10 +19,32 @@ const storagePath = () => {
 
 export const launchDatabase = storagePath
 
-// The open windows: webContents id -> { database, window }. Each window is bound to the database it was opened for; the handlers that read the save's folder answer for the asking window's database.
+const focusWindow = (window) => {
+  if (window.isMinimized()) {
+    window.restore()
+  }
+
+  window.focus()
+}
+
+// The open windows: webContents id -> { database, window }. Each window is bound to the database it was opened for, or has switched to since; the handlers that read the save's folder answer for the asking window's database.
 const windows = new Map()
 
 export const databaseOf = (webContentsId) => (windows.has(webContentsId) ? windows.get(webContentsId).database : launchDatabase())
+
+// What src/main/saves.js asks of the windows: the databases they have, a window's own, and switching, focusing and the parent of a dialog. A window's database changes only through `switchTo`, which the save service calls after it has checked the file and the one-window-per-database rule.
+export const windowRegistry = {
+  list: () => [...windows].map(([id, entry]) => ({ id, database: entry.database })),
+  databaseOf,
+  has: (id) => windows.has(id),
+  switchTo (id, database) {
+    windows.get(id).database = database
+  },
+  focus (id) {
+    focusWindow(windows.get(id).window)
+  },
+  parent: (id) => (windows.has(id) ? windows.get(id).window : null),
+}
 
 export const openWindow = (database = launchDatabase()) => {
   const handler = new BrowserWinHandler({
@@ -52,11 +74,5 @@ export const handleLaunch = (database) => {
     return
   }
 
-  const { window } = windows.get(route.id)
-
-  if (window.isMinimized()) {
-    window.restore()
-  }
-
-  window.focus()
+  focusWindow(windows.get(route.id).window)
 }

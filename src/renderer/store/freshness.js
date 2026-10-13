@@ -35,6 +35,13 @@ export const mutations = {
     state.generation += 1
     state.refresh = { generation: state.generation, at, outcome: 'reading', message: null }
   },
+  // The window shows another save: what was read, heard from the watcher and read for the pages belongs to the one it left. The generation is not reset, so a read of the old save can never match the new one.
+  switched (state) {
+    state.file = null
+    state.refresh = null
+    state.read = null
+    state.inputs = {}
+  },
   // The watcher spoke. This records the event only; the read time moves when a probe succeeds.
   watched (state, { kind, at, message = null }) {
     state.file = { kind, at, message }

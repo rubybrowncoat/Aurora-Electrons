@@ -19,7 +19,7 @@ export class ReadOnly extends Error {
 
 const hasLocks = () => typeof navigator !== 'undefined' && !!navigator.locks
 
-// Asks for the recording lock of `database`, once per database, when the window starts recording. `onOwner()` is called when it is granted, which for a window that had to wait is after the previous owner closed. Claiming another database releases the lock of the one held (a window that opens another save later). A browser that refuses the lock leaves the window the owner.
+// Asks for the recording lock of `database`, once per database, when the window starts recording. `onOwner()` is called when it is granted, which for a window that had to wait is after the previous owner closed. Claiming another database releases the lock of the one held (a window that switches to another save). A browser that refuses the lock leaves the window the owner.
 export const claimRecording = ({ database = '', onOwner = () => {} } = {}) => {
   if (claim && claim.database === database) {
     return
@@ -75,6 +75,17 @@ export const claimRecording = ({ database = '', onOwner = () => {} } = {}) => {
       own()
     }
   })
+}
+
+// Gives up the recording lock held or waited for, at once: a window that moves to another save no longer records the first, and another window of that database may take over. The next `claimRecording` asks for the new database's.
+export const releaseRecording = () => {
+  if (claim) {
+    claim.release()
+    claim = null
+  }
+
+  state = 'owner'
+  granted = null
 }
 
 export const ownsRecording = () => state === 'owner'

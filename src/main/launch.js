@@ -22,3 +22,17 @@ export const routeLaunch = (requested, open, platform = process.platform) => {
 
   return found ? { action: 'focus', id: found.id } : { action: 'open' }
 }
+
+// What a window that asks to switch to `requested` does: { action: 'unchanged' } when it already has that database, { action: 'focus', id } when another window has it (that window comes forward and the asking one keeps its own: one window per database), else { action: 'switch' }. `open` is [{ id, database }], one per window, the asking window `id` among them.
+export const routeSwitch = (requested, id, open, platform = process.platform) => {
+  const key = databaseKey(requested, platform)
+  const own = open.find((window) => window.id === id)
+
+  if (own && databaseKey(own.database, platform) === key) {
+    return { action: 'unchanged' }
+  }
+
+  const found = open.find((window) => window.id !== id && databaseKey(window.database, platform) === key)
+
+  return found ? { action: 'focus', id: found.id } : { action: 'switch' }
+}

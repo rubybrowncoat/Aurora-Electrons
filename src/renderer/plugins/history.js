@@ -26,15 +26,20 @@ export default ({ store, ownerGrace }) => {
 
     // Open views refresh after each game's file is written, so a game that fails later in the pass doesn't leave them stale.
     recordHistory(database, { storage: campaignStorage(store.getters.config), path: store.state.savePath, isCurrent, ownerGrace, onResolved: (GameID, resolution) => isCurrent() && store.commit('history/resolved', { GameID, resolution, generation }), onSaved: () => store.commit('history/recorded') }).then(({ failed, superseded }) => {
+      // A pass that a newer copy replaced reports nothing: what it failed on belonged to the copy the app has left.
+      if (superseded || !isCurrent()) {
+        pass.status = 'done'
+
+        return
+      }
+
       failed.forEach(({ GameID, stage, error }) => {
         console.error(stage === 'registry' ? 'Empire history: the campaign registry could not be used' : stage === 'readonly' ? 'Empire history: another tab records, so this tab writes nothing' : `Empire history: couldn't ${stage} game ${GameID}'s snapshots`, error)
       })
 
-      pass.status = !superseded && failed.some(({ stage }) => stage === 'readonly') ? 'refused' : 'done'
+      pass.status = failed.some(({ stage }) => stage === 'readonly') ? 'refused' : 'done'
 
-      if (!superseded) {
-        store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
-      }
+      store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
     }).catch((error) => {
       pass.status = 'done'
 

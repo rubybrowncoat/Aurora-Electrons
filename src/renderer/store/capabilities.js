@@ -1,4 +1,5 @@
 import { blockedBonuses, preflight } from '../utilities/capabilities'
+import { isRetired } from '../utilities/retired'
 
 // What the copy of the save now open supports (utilities/capabilities.js), checked once per copy. Every check belongs to the freshness generation it ran on (store/freshness.js): the copy the root store's `renew` opened, so a result is never shown for a copy that has since been replaced, and a retry runs on the copy now open. A check only selects from the save.
 
@@ -95,7 +96,11 @@ const run = ({ commit, rootState }, { force }) => {
 
     return result
   }, (error) => {
-    console.error('The capability preflight failed', error)
+    // A read that was refused because the copy it ran on has been replaced is not a failure of the check; only the failure of the check that is still current is reported.
+    if (!isRetired(error) && checks.get(database) === check && generation === rootState.freshness.generation && database === rootState.database) {
+      console.error('The capability preflight failed', error)
+    }
+
     settle('failed', { message: String((error && error.message) || error).split(/\r?\n/)[0] })
 
     return null

@@ -72,13 +72,15 @@
         </v-col>
 
         <v-col cols="12" md="6" class="d-flex flex-column py-0">
-          <v-card class="panel flex-grow-1" data-summary="Where the app keeps its settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="The save this window shows and where the app keeps its settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
             <div class="panel-head">
               <span>Data</span>
               <v-btn v-if="dataFolder" small outlined @click="openDataFolder"><v-icon small left>mdi-folder-open-outline</v-icon>Open folder</v-btn>
             </div>
             <div class="panel-body body-2">
-              <div class="font-weight-medium">Settings</div>
+              <div class="font-weight-medium">Save shown</div>
+              <div class="path" :class="{ 'path--missing': !savePath }" data-save-path>{{ savePath || 'No save yet' }}</div>
+              <div class="font-weight-medium mt-3">Settings</div>
               <div class="path" :class="{ 'path--missing': !settingsPath }">{{ settingsPath || 'Not available in this mode' }}</div>
               <div class="font-weight-medium mt-3">Empire History</div>
               <div class="path" :class="{ 'path--missing': !historyPath }">{{ historyPath || 'Not available in this mode' }}</div>
@@ -243,6 +245,7 @@ export default {
     ...mapGetters([
       'config',
       'GameID',
+      'savePath',
     ]),
 
     settingsPath() {

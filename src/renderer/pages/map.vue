@@ -275,6 +275,7 @@ import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
+import { savePositions } from '../utilities/map-positions'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
@@ -3026,11 +3027,8 @@ export default {
       this.saving = true
 
       try {
-        await this.database.transaction(async (transaction) => {
-          for (const id of ids) {
-            await this.database.query(`update FCT_RaceSysSurvey set Xcor = ${Math.round(positions[id].x)}, Ycor = ${Math.round(positions[id].y)} where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.SystemID = ${Number(id)}`, { transaction })
-          }
-        })
+        // The database is taken once: a reload or a switch while the map is open replaces `this.database`.
+        await savePositions(this.database, { GameID: this.GameID, RaceID: this.RaceID, ids, positions })
 
         this.saveDialog = false
         this.before = null

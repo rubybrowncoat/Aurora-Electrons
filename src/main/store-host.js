@@ -111,5 +111,6 @@ export const createStoreHost = (open) => {
     }
   }
 
-  return { handle }
+  // `store(options)` is the store of one file for the main process's own use (the recent saves): the same instance the windows' requests reach.
+  return { handle, store: storeOf }
 }

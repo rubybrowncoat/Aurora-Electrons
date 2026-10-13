@@ -35,20 +35,21 @@ export default {
     color () {
       return this.race ? hashColor(this.race.RaceTitle, activeAppearance()) : 'primary'
     },
+    // The flag is the one of a save's folder, and a name repeats between saves: the same name under another save is another flag.
     flag () {
-      return this.race ? this.race.FlagPic : null
+      return this.race && this.race.FlagPic ? `${this.$store.state.savePath}\0${this.race.FlagPic}` : null
     },
   },
   watch: {
     flag: {
       immediate: true,
-      async handler (name) {
+      async handler (key) {
         this.src = null
 
-        if (name) {
-          const src = await flagUrl(name)
+        if (key) {
+          const src = await flagUrl(this.race.FlagPic)
 
-          if (this.flag === name) {
+          if (this.flag === key) {
             this.src = src
           }
         }

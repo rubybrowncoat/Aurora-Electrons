@@ -1,30 +1,40 @@
 import Config from 'electron-store'
+import { markRaw } from 'vue'
 
 import { raceKeyPrefix } from '../utilities/campaign'
 import { resetDatabase, retireDatabase } from '../utilities/database'
+import { setFlagScope } from '../utilities/flags'
 import { recordsHistory } from '../utilities/history'
 import { cacheQueries, dropQueryCache } from '../utilities/query-cache'
+import { releaseRecording } from '../utilities/recording-owner'
 
 const configConfiguration = {}
+
+// No game or race picked: what the app starts with, and what a new save starts with.
+const selection = () => ({
+  GameID: null,
+  RaceID: null,
+  // The selected race's kind, for what the app records about it (Empire History).
+  RaceNPR: false,
+  RaceSpecialNPRID: 0,
+
+  StartYear: 0,
+  GameTime: 0,
+
+  CivilianShippingLinesActive: true,
+})
 
 export const state = () => {
   return {
     config: new Config(configConfiguration),
     database: null,
-    // Where the save is expected, and why it couldn't be opened (null while it can).
+    // The save this window shows, as the main process says (it alone decides it, and it changes only by `openSave`), and why it couldn't be opened (null while it can).
     savePath: null,
+    // The path `database` was last opened from: a watcher that finds the file it already opened from does not open it again.
+    databasePath: null,
     databaseError: null,
 
-    GameID: null,
-    RaceID: null,
-    // The selected race's kind, for what the app records about it (Empire History).
-    RaceNPR: false,
-    RaceSpecialNPRID: 0,
-
-    StartYear: 0,
-    GameTime: 0,
-
-    CivilianShippingLinesActive: true,
+    ...selection(),
   }
 }
 
@@ -87,6 +97,13 @@ export const mutations = {
   setSavePath (state, { savePath }) {
     state.savePath = savePath
   },
+  setDatabasePath (state, { databasePath }) {
+    state.databasePath = databasePath
+  },
+  // The window shows another save: no game or race of the one it left stays picked.
+  clearSelection (state) {
+    Object.assign(state, selection())
+  },
   setDatabaseError (state, { message }) {
     state.databaseError = message
   },
@@ -125,13 +142,15 @@ export const actions = {
 
     // Opening loads the sqlite3 binary, which a broken install or build can lack. Left to throw, the app would go on as if the save held no games.
     try {
-      database = cacheQueries(resetDatabase(storagePath))
+      // Kept out of Vue's reactivity: the reactive wrapper would add its bookkeeping to the connections the instance closes with.
+      database = markRaw(cacheQueries(resetDatabase(storagePath)))
     } catch (error) {
       console.error(`Couldn't open ${storagePath}`, error)
       message = error.message.split(/\r?\n/)[0]
     }
 
     commit('replaceDatabase', { database })
+    commit('setDatabasePath', { databasePath: storagePath })
     commit('setDatabaseError', { message })
     commit('freshness/opened', { at: Date.now() })
     dropQueryCache(previous)
@@ -139,6 +158,28 @@ export const actions = {
     dispatch('capabilities/preflight')
 
     return retireDatabase(previous)
+  },
+
+  // The window shows `path` (the main process has already checked it and made it this window's save): everything of the save it leaves is retired first, in the one step, so nothing of the old save is read under the new one's name. Its queries and connection are closed (`renew` retires the previous copy), the game and race picked, the empire list, the history it settled, what the pages read and how current it was, the history of pages visited, the flags of its folder and the recording lock all go; the file watcher follows `savePath` (utilities/save-watcher.js), and the page shown moves to the Empires page. The new save is then opened as a new copy, as a file change opens one. Resolves once the old connection is closed.
+  openSave ({ commit, dispatch }, { path }) {
+    commit('clearSelection')
+    commit('empires/reset')
+    commit('history/reset')
+    commit('peeks/reset', null)
+    commit('navigation/reset')
+    commit('freshness/switched')
+    setFlagScope(path)
+    commit('setSavePath', { savePath: path })
+
+    const retired = dispatch('renew', { storagePath: path })
+
+    releaseRecording()
+
+    if (this.$router && this.$router.currentRoute.path !== '/') {
+      this.$router.push('/', () => {}, () => {})
+    }
+
+    return retired
   },
 
   changeGame ({ commit }, { game, race = null }) {

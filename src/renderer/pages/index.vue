@@ -1,21 +1,25 @@
 <template>
-  <v-card class="game-picker" :style="neutralStyle" outlined>
-    <v-card-title>Pick an empire</v-card-title>
-    <template v-if="games.length">
-      <v-card-subtitle>Picking one opens {{ targetTitle }}.</v-card-subtitle>
-      <empire-list :games="games" class="pb-2 px-2" @pick="open" />
-    </template>
-    <v-alert v-else-if="databaseError" type="error" text class="mx-4">Couldn't open the save: {{ databaseError }}</v-alert>
-    <v-alert v-else-if="error" type="error" text class="mx-4">Couldn't read the save: {{ error }}. The game may be saving; the list reads it again when it changes.</v-alert>
-    <v-card-text v-else-if="!database">Waiting for the save{{ savePath ? ` at ${savePath}` : '' }}. It is read from there and loaded again whenever it changes.</v-card-text>
-    <v-card-text v-else-if="loaded">No games found in the save.</v-card-text>
-  </v-card>
+  <div class="empires-page">
+    <v-card class="game-picker" :style="neutralStyle" outlined>
+      <v-card-title>Pick an empire</v-card-title>
+      <template v-if="games.length">
+        <v-card-subtitle>Picking one opens {{ targetTitle }}.</v-card-subtitle>
+        <empire-list :games="games" class="pb-2 px-2" @pick="open" />
+      </template>
+      <v-alert v-else-if="databaseError" type="error" text class="mx-4">Couldn't open the save: {{ databaseError }}</v-alert>
+      <v-alert v-else-if="error" type="error" text class="mx-4">Couldn't read the save: {{ error }}. The game may be saving; the list reads it again when it changes.</v-alert>
+      <v-card-text v-else-if="!database">Waiting for the save{{ savePath ? ` at ${savePath}` : '' }}. It is read from there and loaded again whenever it changes.</v-card-text>
+      <v-card-text v-else-if="loaded">No games found in the save.</v-card-text>
+    </v-card>
+    <save-panel />
+  </div>
 </template>
 
 <script>
 import { mapGetters, mapState } from 'vuex'
 
 import EmpireList from '../components/navigation/EmpireList.vue'
+import SavePanel from '../components/navigation/SavePanel.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import { activeAppearance } from '../utilities/appearance'
 import { pageByRoute } from '../utilities/navigation'
@@ -26,6 +30,7 @@ const DEFAULT_PAGE = '/production'
 export default {
   components: {
     EmpireList,
+    SavePanel,
   },
   computed: {
     ...mapState('empires', [

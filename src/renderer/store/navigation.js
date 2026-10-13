@@ -136,6 +136,17 @@ const replace = (state, path) => {
 }
 
 export const mutations = {
+  // The window shows another save: the pages visited, their focus and the last ones used belonged to the one it left (ids in a link are that save's). The history starts at `path`.
+  reset (state, path = '/') {
+    state.entries = [{ path, seen: 0 }]
+    state.index = 0
+    state.clock = 0
+    state.pending = null
+    state.replacing = false
+    state.labels = {}
+    state.lastInSection = {}
+    state.lastRacePage = null
+  },
   // Called from the router's afterEach: a replace updates the current entry, a navigation the store asked for lands on its entry, any other is a new visit.
   settle (state, path) {
     if (state.replacing) {

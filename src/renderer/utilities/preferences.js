@@ -26,7 +26,7 @@ export const EXCLUDED = [
   { id: 'mutes', title: 'Warnings mutes and exclusions', reason: "Mutes, what each check listed at the last visit and the maintenance exclusions name one campaign's rows and ships; not supported." },
   { id: 'lastSeen', title: 'What was new at the last visit', reason: "The Game Log's last event seen belongs to one save; not supported." },
   { id: 'scenarios', title: 'Local scenarios', reason: 'The app stores none.' },
-  { id: 'savePaths', title: 'Save paths', reason: 'Not kept in the settings: the save is found beside the app; never part of a bundle.' },
+  { id: 'savePaths', title: 'Save paths', reason: 'Not kept in the settings: the app keeps the recent save paths itself, and they are never part of a bundle.' },
 ]
 
 const MAP_GROUP_KEYS = ['mapPinned', 'mapGroups']

@@ -10,6 +10,13 @@ export const state = () => {
 }
 
 export const mutations = {
+  // The window shows another save: the list of the one it left is dropped and a read still running for it is not taken.
+  reset (state) {
+    latest++
+    state.games = []
+    state.error = null
+    state.loaded = false
+  },
   read (state, games) {
     state.games = games
     state.error = null
@@ -21,7 +28,7 @@ export const mutations = {
   },
 }
 
-// Reads are numbered, so one overtaken by a newer read (the save replaced mid-read, the NPR setting flipped) is dropped.
+// Reads are numbered, so one overtaken by a newer read (the save replaced mid-read, the NPR setting flipped) is dropped, and so is one whose database is no longer the open one.
 let latest = 0
 
 export const actions = {
@@ -33,11 +40,11 @@ export const actions = {
     try {
       const games = database ? await loadEmpires(database, rootGetters.config.get('spyNPR', false)) : []
 
-      if (read === latest) {
+      if (read === latest && rootState.database === database) {
         commit('read', games)
       }
     } catch (error) {
-      if (read === latest) {
+      if (read === latest && rootState.database === database) {
         console.error("Couldn't read the empire list", error)
         commit('failed', error.message)
       }

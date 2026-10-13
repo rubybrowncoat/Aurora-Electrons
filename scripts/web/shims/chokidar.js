@@ -1,4 +1,4 @@
-// Web mode stand-in for `chokidar`: emits `add` once, then polls the dev server for the database's mtime and emits `change` when it moves.
+// Web mode stand-in for `chokidar`: emits `add` once, then polls the dev server for the database's mtime and emits `change` when it moves, until it is closed.
 
 import { databaseRequest } from './database-request'
 
@@ -8,7 +8,16 @@ export const watch = (path) => {
   const handlers = { add: [], change: [] }
   const emit = (event) => handlers[event].forEach((handler) => handler(path, {}))
 
+  let closed = false
+  let timer = null
+
   const watcher = {
+    close () {
+      closed = true
+      clearTimeout(timer)
+
+      return Promise.resolve()
+    },
     on (event, handler) {
       if (handlers[event]) {
         handlers[event].push(handler)
@@ -28,8 +37,8 @@ export const watch = (path) => {
 
   let lastModified = null
 
-  const poll = () => databaseRequest('/stat').then((response) => (response.ok ? response.json() : null)).then((stat) => {
-    if (!stat) {
+  const poll = () => databaseRequest(`/stat?path=${encodeURIComponent(path)}`).then((response) => (response.ok ? response.json() : null)).then((stat) => {
+    if (!stat || closed) {
       return
     }
 
@@ -40,7 +49,11 @@ export const watch = (path) => {
     }
 
     lastModified = stat.mtimeMs
-  }).catch(() => {}).finally(() => setTimeout(poll, POLL_INTERVAL))
+  }).catch(() => {}).finally(() => {
+    if (!closed) {
+      timer = setTimeout(poll, POLL_INTERVAL)
+    }
+  })
 
   poll()
 

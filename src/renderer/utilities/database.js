@@ -2,6 +2,7 @@ import { Model, Sequelize } from 'sequelize'
 // import sqlite3 from 'sqlite3'
 
 import { gameTime } from './aurora'
+import { DatabaseRetired, isRetired } from './retired'
 
 // A statement that outlives this has stopped being a read and become a stall: every page waits behind it.
 export const QUERY_TIMEOUT_MS = 60000
@@ -14,7 +15,10 @@ const OPEN_EXISTING = 0x2
 
 const guards = new WeakMap()
 
-// Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. Transaction queries have a connection of their own and pass straight through.
+// The statements that end a transaction. A transaction already begun on a retired database still gets them, so that it ends while the connection is open.
+const ENDS_TRANSACTION = /^\s*(commit|rollback)\b/i
+
+// Sequelize's SQLite dialect keeps one connection per instance, and SQLite runs that connection's statements one at a time, so a slow statement holds every later one, from every page, until it ends. Nothing in node-sqlite3 cancels a statement but `interrupt()`. This runs the instance's queries one at a time itself, so it knows which one is running: that one is interrupted and rejected once it passes QUERY_TIMEOUT_MS, and the queue moves on. A transaction's queries have a connection of their own and pass straight through while the database is current; once it is retired, a transaction's next statement is refused (`DatabaseRetired`) except the one that ends it, which runs while the connection is still open, and the retiring waits (bounded) for the open transactions to end before it closes anything.
 const guardQueries = (sequelize) => {
   const query = sequelize.query.bind(sequelize)
   const waiting = []
@@ -22,6 +26,14 @@ const guardQueries = (sequelize) => {
   let retired = false
   let active = null
   const opening = new Set()
+  const transactions = new Set()
+  // The managed transactions that have not ended, and those the retiring ended itself: their own commit or rollback is then answered as retired without touching the connection, which is closed or about to be. `ending` are those being rolled back by the retiring.
+  const open = new Set()
+  const cancelled = new Set()
+  const ending = new Set()
+  // The retiring interrupts the statement that is running, and that statement ends with SQLite's interrupt code (read from the structured error, never its message). Once the database is retired, only that code is taken as the retiring's doing: the one other interrupter, the timeout below, rejects first. Every other error, whenever it arrives, is the save's own and passes on unchanged.
+  const interrupted = (error) => [error && error.original, error && error.parent, error].some((source) => Boolean(source) && source.code === 'SQLITE_INTERRUPT')
+  const asRetired = (error) => (retired && !isRetired(error) && interrupted(error) ? new DatabaseRetired(error) : error)
   const { connectionManager } = sequelize
   const getConnection = connectionManager.getConnection.bind(connectionManager)
 
@@ -86,7 +98,7 @@ const guardQueries = (sequelize) => {
 
     running = true
     active = query(sql, options)
-    active.then(resolve, reject).then(finish)
+    active.then(resolve, (error) => reject(asRetired(error))).then(finish)
   }
 
   // Not enumerable: Vue would otherwise make the property reactive, and wrapping it again (the smoke test does) would count as the store state being mutated outside a mutation.
@@ -95,11 +107,17 @@ const guardQueries = (sequelize) => {
     writable: true,
     value: (sql, options) => {
       if (options && options.transaction) {
-        return query(sql, options)
+        const { transaction } = options
+
+        if (ending.has(transaction)) {
+          return query(sql, options)
+        }
+
+        return (retired && !ENDS_TRANSACTION.test(String(sql))) || cancelled.has(transaction) ? Promise.reject(new DatabaseRetired()) : query(sql, options).catch((error) => { throw asRetired(error) })
       }
 
       if (retired) {
-        return Promise.reject(new Error('The save was reloaded; this read belongs to the old copy'))
+        return Promise.reject(new DatabaseRetired())
       }
 
       return new Promise((resolve, reject) => {
@@ -109,17 +127,75 @@ const guardQueries = (sequelize) => {
     },
   })
 
-  // sqlite3 runs a close only after the open before it succeeds, and a statement on a connection that is still opening can't be interrupted. So retiring first lets the opens and the running statement settle (an open that fails drops its handle above), then closes; each wait is bounded by RETIRE_SETTLE_MS so retiring can't hang.
+  // A managed transaction (the callback form) is followed until it has ended, and none begins on a retired database.
+  const transaction = sequelize.transaction.bind(sequelize)
+
+  Object.defineProperty(sequelize, 'transaction', {
+    configurable: true,
+    writable: true,
+    value: (...args) => {
+      if (retired) {
+        return Promise.reject(new DatabaseRetired())
+      }
+
+      const managed = args.findIndex((argument) => typeof argument === 'function')
+
+      if (managed < 0) {
+        return transaction(...args)
+      }
+
+      let mine = null
+      const work = args[managed]
+      const run = transaction(...args.map((argument, index) => (index === managed ? (started) => {
+        mine = started
+        open.add(started)
+
+        const commit = started.commit.bind(started)
+        const rollback = started.rollback.bind(started)
+
+        started.commit = () => (cancelled.has(started) ? Promise.reject(new DatabaseRetired()) : commit())
+        started.rollback = () => (cancelled.has(started) && !ending.has(started) ? Promise.reject(new DatabaseRetired()) : rollback())
+        started.endForRetiring = rollback
+
+        return work(started)
+      } : argument)))
+      const ended = Promise.resolve(run).catch(() => {})
+
+      transactions.add(ended)
+      ended.then(() => {
+        transactions.delete(ended)
+        open.delete(mine)
+        cancelled.delete(mine)
+      })
+
+      return run
+    },
+  })
+
+  // sqlite3 runs a close only after the open before it succeeds, and a statement on a connection that is still opening can't be interrupted. So retiring first lets the opens and the running statement settle (an open that fails drops its handle above, a transaction's next statement is refused so its callback ends and it rolls back), then closes; each wait is bounded by RETIRE_SETTLE_MS so retiring can't hang.
   guards.set(sequelize, async () => {
     retired = true
-    waiting.splice(0).forEach(({ reject }) => reject(new Error('The save was reloaded; this read belongs to the old copy')))
+    waiting.splice(0).forEach(({ reject }) => reject(new DatabaseRetired()))
     interrupt(true)
 
     const bounded = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('timed out'), RETIRE_SETTLE_MS))])
-    const settling = [...opening, ...(running && active ? [active] : [])].map((promise) => promise.catch(() => {}))
+    const settling = [...opening, ...transactions, ...(running && active ? [active] : [])].map((promise) => promise.catch(() => {}))
 
     if (settling.length) {
       await bounded(Promise.all(settling))
+    }
+
+    // A transaction still suspended after the wait is ended here, through its own connection while that is open, and its later commit or rollback is answered as retired.
+    const stranded = [...open].filter((started) => !started.finished)
+
+    stranded.forEach((started) => cancelled.add(started))
+
+    if (stranded.length) {
+      await bounded(Promise.all(stranded.map((started) => {
+        ending.add(started)
+
+        return started.endForRetiring().catch(() => {}).finally(() => ending.delete(started))
+      })))
     }
 
     if (await bounded(sequelize.close()) === 'timed out') {

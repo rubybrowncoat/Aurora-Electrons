@@ -1,65 +1,38 @@
-
 import { ipcRenderer } from 'electron'
 
 import chokidar from 'chokidar'
 
+import { setFlagScope } from '../utilities/flags'
+import { createSaveWatcher } from '../utilities/save-watcher'
+
 export default ({ store }) => {
-  // console.log('app', app, remote, electron, BrowserWindow )
+  const watcher = createSaveWatcher({ chokidar, store })
 
-  // // const app = electron.app //|| remote.app
-  // const exePath = path.dirname(app.getPath('exe'))
-  // const isMac = exePath.includes('MacOS')
+  // The watcher follows the save the window shows, and nothing else moves it: a switch (store `openSave`) changes `savePath`, which retires the watcher of the save left and starts the one of the save entered.
+  store.watch((state) => state.savePath, (path) => {
+    if (path) {
+      watcher.start(path)
+    } else {
+      watcher.stop()
+    }
+  }, { sync: true })
 
-  // const headGame = process.env.NODE_ENV === 'development'
+  // Only the web build's database shim sends this: the dev server no longer has the copy the page opened (it was pushed out, or the server restarted). The save is opened again, as a file change opens it, so reads go to a live copy and the status line says why; a copy that is no longer the open one is ignored.
+  window.addEventListener('aurora:database-lost', (event) => {
+    if (store.state.database && event.detail.database === store.state.database && store.state.savePath) {
+      console.warn('The dev server lost the copy of the save; opening it again')
+      store.commit('freshness/watched', { kind: 'error', at: Date.now(), message: 'The connection to the save was lost; it was opened again' })
+      store.dispatch('renew', { storagePath: store.state.savePath })
+    }
+  })
 
-  // const storagePath = app.isPackaged
-  //   ? isMac
-  //     ? path.join(exePath, '../../../', 'AuroraDB.db')
-  //     : process.env.PORTABLE_EXECUTABLE_DIR
-  //       ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'AuroraDB.db')
-  //       : path.join(exePath, 'AuroraDB.db')
-  //   : headGame
-  //     ? path.join('../', 'AuroraDB.db')
-  //     : 'AuroraDB.db'
-
+  // The main process names the save the window starts on (the launch database); a switch that happened before this answer came back is the newer word.
   ipcRenderer.invoke('request-storage-path').then((storagePath) => {
     console.log('Returned storage path:', storagePath)
 
-    store.commit('setSavePath', { savePath: storagePath })
-
-    const watcher = chokidar.watch(storagePath, {
-      persistent: true,
-      awaitWriteFinish: true,
-    })
-
-    // Every notification is recorded as what it is (freshness store `file`), and none of them counts as a read: a notification reopens the save, and only the probe that follows (store `renew`) marks it read. `add` stays handled each time, since the file comes back as a new `add` after it was removed.
-    const reopen = (kind) => (path, stats) => {
-      console.log(`File ${path} ${kind}.`, stats)
-
-      store.commit('freshness/watched', { kind, at: Date.now() })
-      store.dispatch('renew', {
-        storagePath,
-      })
+    if (store.state.savePath === null) {
+      setFlagScope(storagePath)
+      store.commit('setSavePath', { savePath: storagePath })
     }
-
-    watcher.on('add', reopen('add'))
-    watcher.on('change', reopen('change'))
-
-    // The open copy may still answer, but nothing says the file it came from is the save any more, so the refresh counts as failed until the file is back and a probe has read it.
-    watcher.on('unlink', (path) => {
-      console.warn(`File ${path} removed.`)
-
-      store.commit('freshness/watched', { kind: 'unlink', at: Date.now() })
-      store.commit('freshness/refreshFailed', { at: Date.now(), message: 'The save file is missing' })
-    })
-
-    watcher.on('error', (error) => {
-      console.error('The save watcher failed', error)
-
-      const message = String((error && error.message) || error).split(/\r?\n/)[0]
-
-      store.commit('freshness/watched', { kind: 'error', at: Date.now(), message })
-      store.commit('freshness/refreshFailed', { at: Date.now(), message: `The save watcher failed: ${message}` })
-    })
   })
 }

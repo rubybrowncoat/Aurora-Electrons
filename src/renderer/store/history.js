@@ -46,6 +46,12 @@ export const getters = {
 }
 
 export const mutations = {
+  // The window shows another save: what was settled and what failed belonged to the one it left, and the files the pages read are read again.
+  reset (state) {
+    state.revision++
+    state.failures = []
+    state.campaigns = {}
+  },
   recorded (state) {
     state.revision++
   },
