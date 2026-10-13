@@ -75,10 +75,15 @@
                 </template>
                 <v-card class="pa-4">
                   <div class="subtitle-2">Tech levels designed with</div>
-                  <div class="caption text--secondary mb-2">Each line starts at the level the game designs with. A lower level shows what an engine built before the latest research would be.</div>
-                  <div v-for="line in techLines" :key="line.type" class="mt-3">
+                  <div class="caption text--secondary mb-2">Each line starts at the level the game designs with. A lower level shows what an engine built before the latest research would be. The next tech choice is a hypothetical level the race has not researched: every result built on it is marked hypothetical, and a level with a missing prerequisite says so.</div>
+                  <div v-if="scenarioNotice" class="caption warning--text mb-2" data-tech="notice">{{ scenarioNotice }}</div>
+                  <div v-for="line in techLines" :key="line.type" class="mt-3" :data-tech-line="line.type">
                     <v-select :value="line.selected" :items="line.items" item-text="text" item-value="value" :label="line.label" :disabled="!line.items.length" dense outlined hide-details @change="(id) => setTech(line.type, id)" />
-                    <div v-if="line.next" class="d-flex align-center caption text--disabled pt-1 pl-3">Next: {{ line.next.name }} · {{ count(line.next.cost) }} RP<page-link :to="linkTo.techTree({ tech: line.next.id })" :name="line.next.name" class="ml-1" /></div>
+                    <v-select v-if="line.candidates.length" :value="line.candidate" :items="line.candidates" item-text="text" item-value="value" :label="`${line.label}: next tech (hypothetical)`" clearable dense outlined hide-details class="mt-1" @change="(id) => chooseNextTech(line.type, id)" />
+                    <div v-if="line.hypothetical" class="caption warning--text pt-1 pl-3" data-tech="hypothetical-line">Hypothetical: the results use a level the race has not researched.</div>
+                    <div v-if="line.unresolved" class="caption warning--text pt-1 pl-3" data-tech="unresolved-line">{{ line.unresolvedText }}<v-btn x-small text class="ml-1" @click="forgetChoice(line.type)">Forget the choice</v-btn></div>
+                    <div v-if="line.next" class="d-flex align-center caption text--disabled pt-1 pl-3">Next: {{ line.nextText }}<page-link :to="linkTo.techTree({ tech: line.next.id })" :name="line.next.name" class="ml-1" /></div>
+                    <div v-else-if="line.candidates.length" class="caption text--disabled pt-1 pl-3">No further level is researchable now.</div>
                     <div v-else-if="!line.items.length" class="caption text--disabled pt-1 pl-3">Not researched</div>
                   </div>
                 </v-card>
@@ -110,12 +115,15 @@
           <div>{{ result.run.text }}</div>
           <div v-if="result.output.omitted > 0">The best {{ count(result.output.listed) }} are listed; {{ count(result.output.omitted) }} more meet the targets.</div>
         </div>
+        <v-alert v-if="hypotheticalNotice" type="warning" outlined dense class="mt-3" data-tech="hypothetical">{{ hypotheticalNotice }}</v-alert>
+        <v-alert v-for="item in unresolvedChoices" :key="item.type" type="warning" outlined dense class="mt-3" data-tech="unresolved">{{ item.text }}</v-alert>
+        <v-alert v-if="scenarioNotice" type="info" outlined dense class="mt-3" data-tech="scenario-notice">{{ scenarioNotice }}</v-alert>
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
         <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship the engines and fuel take, with the saved class beside them. A row opens to the engine as the game would build it and the tanks that hold its fuel. A mark beside speed, burn, range, endurance and BP says whether the figure is confirmed, estimated, assumed or unavailable, and the CSV keeps it." elevation="1">
           <div class="panel-head">
-            <span>Propulsion sets<v-chip v-if="result && result.run.incomplete && !searching" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip></span>
+            <span>Propulsion sets<v-chip v-if="result && result.run.incomplete && !searching" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip><v-chip v-if="propulsionAssumptions.length" x-small color="warning" outlined class="ml-2" data-tech="hypothetical-chip">Hypothetical tech</v-chip></span>
             <span class="d-flex align-center flex-wrap">
               <v-chip v-if="hullReady" small class="mr-2">Hull {{ count(hullHS, 2) }} HS · {{ count(hullHS * tonsPerHs) }} tons</v-chip>
               <v-chip v-if="existingEngine" small color="primary" outlined close @click:close="engineId = null">{{ existingEngine.name }}</v-chip>
@@ -420,6 +428,7 @@
               <div>Squadron limits of the automatic design: {{ jumpSquadron }}.</div>
               <div>The race's own techs, as reference: {{ jumpReference }}.</div>
               <div v-if="selectedClass && selectedClass.drives.length">The saved class already mounts {{ driveList }}; the figures above are for the hull without them.</div>
+              <div v-if="jumpAssumptions.length" class="warning--text" data-tech="jump-hypothetical">{{ jumpAssumptions.join('; ') }}. The figures above rest on it and are not the race's today.</div>
             </div>
           </template>
           <div class="panel-foot caption text--secondary">A drive for a ship of S HS is S over (efficiency × the larger of 1 and (S / 20) to the power 0.25) HS. Its cost is S over the efficiency, times the squadron size and radius cost multipliers, times 5; its crew is twice its size, rounded; its HTK is the square root of its size, cut to a whole number. A commercial drive is five times the size and moves five times the ships. The game's automatic design starts from the hull's size, rounded up (a fifth of it for a commercial drive), and grows the drive by 1 HS until it moves the hull with the drive aboard. It uses the race's highest efficiency tech and the default squadron size and radius techs, whatever else the race has researched, and it leaves the armour as it is.</div>
@@ -453,12 +462,13 @@ import { roundToDecimal } from '../utilities/math'
 import { PARETO_AXES, axesOf, describeEmpty, describeFront, normaliseChoice } from '../utilities/pareto'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
-import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, NO_RACE_TECH, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE, loadRaceTech } from '../utilities/race-tech'
+import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, PROPULSION_TECH_TYPES, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE } from '../utilities/race-tech'
 import { RESPONSIVENESS, TERMINATION, countText, createRunSlot, describeOutcome } from '../utilities/search-run'
 import { describeSweep } from '../utilities/sweep-domain'
+import { NO_TECH_CHOICES, candidateText, hypotheticalAssumptionsOf, hypotheticalOf, loadTechChoices, markAllHypothetical, markHypothetical, readScenario, registerTechScenarios, resolveChoices, saveChoice, scopeOf, selectionOf } from '../utilities/tech-scenarios'
 
 const INPUT_LABELS = {
-  tech: 'the race\'s engine and jump drive tech',
+  tech: 'the race\'s tech lines, researched levels and research graph',
   classes: 'the ship classes',
   classParts: 'the engines, tanks and jump drives of the classes',
   tanks: 'the fuel tanks',
@@ -566,16 +576,17 @@ const fuelFigures = ({ speedResult, power, burn, noFuel, rangeKm, hours, fractio
   }
 }
 
-// A designed set's figures: speed, burn and range follow rules checked against saved classes; the endurance rests on the cruise share; the BP is an estimate.
-const setProvenance = (set, fraction) => {
+// A designed set's figures: speed, burn and range follow rules checked against saved classes; the endurance rests on the cruise share; the BP is an estimate. `assumptions` are the hypothetical tech lines the set was designed with: every figure carries them and is at most assumed.
+const setProvenance = (set, fraction, assumptions = EMPTY_LIST) => {
   const speedResult = classSpeedResult({ power: set.power, sizeHS: set.totalHS, speed: set.speed, check: null })
-
-  return {
+  const figures = {
     speed: speedResult,
     ...fuelFigures({ speedResult, power: set.power, burn: set.burnFull, noFuel: set.litres > 0 ? null : SETS_NO_FUEL, rangeKm: set.rangeKm, hours: set.enduranceHours, fraction }),
     cost: ofRule({ rule: 'design.propulsionSetCost', value: set.cost, units: 'BP', inputs: { present: ['engine design', 'stock tank costs'] } }),
     tanks: set.tankPackage ? tankPackageResult({ feasible: true, sizeHS: set.tankHS, objective: 'lightest', status: set.tankPackage.status, reason: set.tankPackage.reason }) : null,
   }
+
+  return assumptions.length ? markAllHypothetical(figures, assumptions) : figures
 }
 
 // A saved class's BP: the sum of the stored costs of its engines and tanks, unavailable and naming the component when any stored cost is missing, never counted as 0.
@@ -601,13 +612,15 @@ const classProvenance = ({ shipClass, power, speed, check, burn, rangeKm, hours,
   }
 }
 
-// A burn or endurance level of the chosen row: the row's own result when it is unavailable, confirmed at full power, and assumed at any other share, which the player picked.
+// A burn or endurance level of the chosen row: the row's own result when it is unavailable, confirmed at full power, and assumed at any other share, which the player picked. The hypothetical tech the row's result rests on stays on every level, and keeps the level from being confirmed.
 const levelResult = (base, rule, value, units, fraction) => {
   if (!isAvailable(base)) {
     return base
   }
 
-  return fraction === 1 ? ofRule({ rule, value, units, inputs: base.inputs }) : envelope({ value, status: STATUS.ASSUMED, rule, units, inputs: base.inputs, assumptions: [cruiseAssumption(fraction)] })
+  const result = fraction === 1 ? ofRule({ rule, value, units, inputs: base.inputs }) : envelope({ value, status: STATUS.ASSUMED, rule, units, inputs: base.inputs, assumptions: [cruiseAssumption(fraction)] })
+
+  return markHypothetical(result, hypotheticalAssumptionsOf([base]))
 }
 
 // One engine as the game prints it on its design window, with how many the row mounts.
@@ -673,10 +686,15 @@ export default {
       statuses: STATUSES,
       tonsPerHs: TONS_PER_HS,
       linkTo,
+      // The hypothetical choices that could not be written to the scenario record (another tab holds the file, the campaign is not settled, the file cannot be written), by tech type: they hold for this page only.
+      heldChoices: {},
+      // Why the last choice was not kept in the record, and a count that makes the record be read again after a write.
+      scenarioMessage: '',
+      scenarioRevision: 0,
     }
   },
   computed: {
-    ...mapGetters(['database', 'GameID', 'RaceID']),
+    ...mapGetters(['database', 'GameID', 'RaceID', 'GameTime']),
 
     context() {
       return { GameID: this.GameID, RaceID: this.RaceID }
@@ -746,32 +764,98 @@ export default {
       return (kind !== 'either' ? 1 : 0) + (min !== 1 || max !== 100 ? 1 : 0) + (share !== 0.5 ? 1 : 0) + (exactLimits ? 1 : 0) + (this.existingEngine ? 1 : 0)
     },
 
-    // The level of each tech line the page designs with: the race's choice when it is still researched, else the game's pick.
-    techLevels() {
-      return Object.fromEntries(TECH_LINES.map(({ type }) => {
-        const line = this.tech.lines[type]
+    // The campaign and branch of the open save once settled, and the scope of its scenario records: null until both are known.
+    scope() {
+      return scopeOf({ campaign: this.$store.getters['history/campaign'], RaceID: this.RaceID, gameTime: this.GameTime })
+    },
 
-        return [type, line.levels.find((level) => level.id === this.techChoice[type]) || line.pick]
-      }))
+    // The scenario record of the race on the branch as the open save reads it (see readScenario).
+    scenario() {
+      return { ...readScenario(this.records ? this.records.repository : null, this.scope, this.tech), revision: this.scenarioRevision }
+    },
+
+    // The hypothetical choices as the lines resolve them: the record's, then the ones that could only be kept for this page. A choice cleared for this page only (null) hides the record's choice of its line.
+    scenarioSelection() {
+      const selection = { ...this.scenario.selection }
+
+      Object.entries(this.heldChoices).forEach(([type, choice]) => {
+        if (choice) {
+          selection[type] = { ...choice, source: 'scenario' }
+        } else {
+          delete selection[type]
+        }
+      })
+
+      return selection
+    },
+
+    // Each tech line's choice resolved against the open save: the level it designs with, whether that level is hypothetical, and a choice the save cannot honour as unresolved.
+    techResolution() {
+      return resolveChoices(this.tech, selectionOf(this.techChoice, this.scenarioSelection))
+    },
+
+    // The level of each tech line the page designs with: the race's choice when it is still researched, a hypothetical next tech the player picked, else the game's pick.
+    techLevels() {
+      return Object.fromEntries(TECH_LINES.map(({ type }) => [type, this.techResolution[type].level]))
     },
 
     techChoiceCount() {
       return TECH_LINES.filter(({ type }) => this.techLevels[type] && this.techLevels[type] !== this.tech.lines[type].pick).length
     },
 
+    // The hypothetical tech lines the sets are designed with, as assumptions of their results; none when an engine of the race's own fixes the design.
+    propulsionAssumptions() {
+      return this.existingEngine ? EMPTY_LIST : hypotheticalOf(this.techResolution, PROPULSION_TECH_TYPES).assumptions
+    },
+
+    // The hypothetical tech the jump drive figures rest on: a hypothetical jump efficiency, and a hypothetical propulsion set whose size is the hull they start from (a saved class's own row is not marked).
+    jumpAssumptions() {
+      const own = hypotheticalOf(this.techResolution, [JUMP_EFFICIENCY_TECH_TYPE]).assumptions
+      const row = this.selectedRow ? hypotheticalAssumptionsOf(Object.values(this.selectedRow.provenance)) : EMPTY_LIST
+
+      return unique([own, row])
+    },
+
+    hypotheticalNotice() {
+      const assumptions = unique([this.propulsionAssumptions, this.jumpAssumptions])
+
+      return assumptions.length ? `Hypothetical results: ${assumptions.join('; ')}. Each figure built on it is marked assumed.` : ''
+    },
+
+    // Why a record's choices are not all applied or kept: a write that failed, a file that cannot be read or made at another game time or by another version.
+    scenarioNotice() {
+      const parts = [this.scenarioMessage, this.records && this.records.error ? `The scenario records are not available (${this.records.error}), so the choice is kept for this page only.` : '', this.scenario.error ? `The scenario records cannot be read (${this.scenario.error.message}), so saved choices are not applied.` : '', ...this.scenario.notes.map((note) => note.reason)]
+
+      return parts.filter(Boolean).join(' ')
+    },
+
     techLines() {
       return TECH_LINES.map(({ type, label, figure }) => {
         const line = this.tech.lines[type]
-        const selected = this.techLevels[type]
+        const resolved = this.techResolution[type]
+        const text = (item) => `${figure ? `${figure(item)} · ` : ''}${item.name}`
+        const format = (value) => this.count(value)
+        const unresolved = resolved.unresolved
 
         return {
           type,
           label,
-          selected: selected ? selected.id : null,
+          selected: resolved.hypothetical || !resolved.level ? null : resolved.level.id,
+          candidate: resolved.hypothetical ? resolved.level.id : null,
+          hypothetical: resolved.hypothetical,
           next: line.next,
-          items: line.levels.map((level) => ({ value: level.id, text: `${figure ? `${figure(level)} · ` : ''}${level.name}${level === line.pick ? ' · the game\'s pick' : ''}` })),
+          nextText: line.next ? `${line.next.name} · ${candidateText(line.next, format)}` : '',
+          unresolved,
+          unresolvedText: unresolved ? `${label}: ${unresolved.name} is not used. ${unresolved.reason} The line uses ${line.pick ? `the game's pick, ${line.pick.name}` : 'no level, as none is researched'}.` : '',
+          items: line.levels.map((level) => ({ value: level.id, text: `${text(level)}${level === line.pick ? ' · the game\'s pick' : ''}` })),
+          candidates: line.candidates.map((item) => ({ value: item.id, text: `${text(item)} · ${candidateText(item, format)}` })),
         }
       })
+    },
+
+    // The choices a line could not use, in words.
+    unresolvedChoices() {
+      return this.techLines.filter((line) => line.unresolved).map((line) => ({ type: line.type, text: line.unresolvedText }))
     },
 
     // What the search designs with, or null without an engine and a fuel consumption tech.
@@ -1090,7 +1174,7 @@ export default {
       const cheapest = tile('Cheapest set', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`)
 
       if (result && result.cheapest) {
-        const cost = setProvenance(result.cheapest, this.fraction).cost
+        const cost = setProvenance(result.cheapest, this.fraction, this.propulsionAssumptions).cost
 
         Object.assign(cheapest, { icon: STATUS_MARKS[cost.status].icon, title: `${cheapest.value}. ${describeResult(cost)}`, note: `${cheapest.note} · cost ${cost.status}` })
       }
@@ -1099,7 +1183,7 @@ export default {
         tile('Fastest set within the share', result && result.fastest, (set) => `${this.count(set.speed)} km/s`),
         tile('Lightest set for the targets', result && result.lightest, (set) => `${this.count(set.propulsionHS, 2)} HS (${this.count(set.tons)} tons)`),
         cheapest,
-        { label: 'Engine and fuel tech', value: tech ? `${this.count(tech.engineTech, 2)} EP/HS` : '—', note: tech ? `Fuel ${tech.fuelTech} L per EP hour · thrust × ${tech.minThrust} to × ${tech.maxThrust}` : 'None researched' },
+        { label: 'Engine and fuel tech', value: tech ? `${this.count(tech.engineTech, 2)} EP/HS` : '—', note: tech ? `Fuel ${tech.fuelTech} L per EP hour · thrust × ${tech.minThrust} to × ${tech.maxThrust}${this.propulsionAssumptions.length ? ' · hypothetical level' : ''}` : 'None researched' },
       ]
     },
 
@@ -1130,7 +1214,7 @@ export default {
 
     tradeRows() {
       return this.tradeFrontier.map((set) => {
-        const provenance = setProvenance(set, this.fraction)
+        const provenance = setProvenance(set, this.fraction, this.propulsionAssumptions)
 
         return { key: `${set.engine.id || `${set.engine.sizeHS}-${set.engine.thrust}`}-${set.count}`, set, share: set.share, speed: valueOrNull(provenance.speed), rangeBn: valueOrNull(provenance.rangeBn), propulsionHS: set.propulsionHS, cost: valueOrNull(provenance.cost), name: this.setName(set), count: set.count, type: set.commercial ? 'Commercial' : 'Military', provenance }
       })
@@ -1267,11 +1351,15 @@ export default {
       this.searchSlot.invalidate(TERMINATION.SAVE_CHANGED)
       this.startSearch(this.searchInput)
       this.sweepDrafts = {}
+      this.heldChoices = {}
+      this.scenarioMessage = ''
     },
 
     database() {
       this.searchSlot.invalidate(TERMINATION.SAVE_CHANGED)
       this.startSearch(this.searchInput)
+      this.heldChoices = {}
+      this.scenarioMessage = ''
     },
 
     searchInput: {
@@ -1362,7 +1450,7 @@ export default {
       }
     },
 
-    // A level other than the game's pick is remembered; the pick itself is forgotten, so a later research moves it on.
+    // A researched level other than the game's pick is remembered; the pick itself is forgotten, so a later research moves it on. A line has one choice: a researched level replaces a hypothetical one.
     setTech(type, id) {
       const choice = { ...this.techChoice }
 
@@ -1373,6 +1461,67 @@ export default {
       }
 
       this.techChoice = choice
+
+      return this.dropScenarioChoice(type)
+    },
+
+    // A hypothetical next tech of the line (a candidate of the research graph), kept in the scenario record of the race on the branch; null clears it. When the record cannot be written the choice holds for this page only, and the notice says why.
+    async chooseNextTech(type, id) {
+      const techId = id === undefined ? null : id
+
+      if (techId === null && !this.scenario.selection[type] && !this.heldChoices[type]) {
+        return
+      }
+
+      if (techId !== null) {
+        const choice = { ...this.techChoice }
+
+        delete choice[type]
+        this.techChoice = choice
+      }
+
+      const outcome = await saveChoice(this.records ? this.records.repository : null, this.scope, this.tech, this.scenario, { typeId: type, techId })
+      const held = { ...this.heldChoices }
+
+      if (outcome.ok) {
+        delete held[type]
+        this.scenarioMessage = ''
+        this.scenarioRevision += 1
+      } else if (techId === null) {
+        held[type] = null
+        this.scenarioMessage = outcome.message
+      } else {
+        const candidate = this.tech.lines[type].candidates.find((item) => item.id === techId)
+
+        held[type] = { techId, name: candidate ? candidate.name : `tech ${techId}` }
+        this.scenarioMessage = outcome.message
+      }
+
+      this.heldChoices = held
+    },
+
+    // Removes the hypothetical choice of a line, from the record and from this page.
+    async dropScenarioChoice(type) {
+      if (this.heldChoices[type]) {
+        const held = { ...this.heldChoices }
+
+        delete held[type]
+        this.heldChoices = held
+      }
+
+      if (this.scenario.selection[type]) {
+        await this.chooseNextTech(type, null)
+      }
+    },
+
+    // Gives up a choice the save cannot honour, wherever it is kept.
+    forgetChoice(type) {
+      const choice = { ...this.techChoice }
+
+      delete choice[type]
+      this.techChoice = choice
+
+      return this.dropScenarioChoice(type)
     },
 
     // The engine as the game names a design: the tech's component name, two spaces and EP with the power, with Commercial in front for a commercial engine. The race's own engines keep their names.
@@ -1392,7 +1541,7 @@ export default {
 
     rowOfSet(set, rank) {
       const name = this.setName(set)
-      const provenance = setProvenance(set, this.fraction)
+      const provenance = setProvenance(set, this.fraction, this.propulsionAssumptions)
 
       return {
         key: `${set.engine.id || `${set.engine.sizeHS}-${set.engine.thrust}`}-${set.count}`,
@@ -1616,12 +1765,27 @@ export default {
     tech: {
       get: tracked('tech', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
-          return NO_RACE_TECH
+          return NO_TECH_CHOICES
         }
 
-        return await loadRaceTech(this.database, this.context)
+        return await loadTechChoices(this.database, this.context)
       }),
-      default: NO_RACE_TECH,
+      default: NO_TECH_CHOICES,
+    },
+    // The repository of scenario records, loaded when the page is: its module needs the app's settings store, so a page that is read without it still loads.
+    records: {
+      async get() {
+        try {
+          const records = await import('../utilities/scenario-records')
+
+          registerTechScenarios(records.registerAdapter)
+
+          return Object.freeze({ repository: records.openScenarioRecords(), error: null })
+        } catch (error) {
+          return Object.freeze({ repository: null, error: error.message })
+        }
+      },
+      default: null,
     },
     classes: {
       get: tracked('classes', async function () {
