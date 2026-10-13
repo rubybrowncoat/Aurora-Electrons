@@ -19,6 +19,7 @@
                   <v-btn small outlined :disabled="!previewing" data-preset-action="cancel" @click="cancelDraft">Cancel</v-btn>
                   <v-btn small text :disabled="activeId === defaultId" data-preset-action="reset" @click="resetDraft">Reset to {{ defaultName }}</v-btn>
                 </div>
+                <preset-reference v-if="shown.reference" :appearance="shown" />
               </div>
               <div class="setting">
                 <div class="setting__text">
@@ -199,6 +200,7 @@ import { mapActions, mapGetters, mapState } from 'vuex'
 import Config from 'electron-store'
 
 import PresetCard from '../components/settings/PresetCard.vue'
+import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
 import { APPEARANCE_KEY, DEFAULT_PRESET_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, isPreviewing, listAppearances, previewPreset, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
@@ -244,8 +246,8 @@ const withoutViews = (store, only) => {
 const values = (number) => (number === 1 ? 'value' : 'values')
 
 // Every page and component module declares its remembered fields as it is loaded, which is on its first visit, so the allowlist of what can be exported and imported is complete only once all of them are. They load together the first time a file is exported or chosen, and the declarations are kept.
-// PresetCard is left out: this page imports it already, and declares nothing.
-const declaringModules = import.meta.glob(['../pages/*.vue', '../components/**/*.vue', '!../components/settings/PresetCard.vue'])
+// The Settings components are left out: this page imports them already, and they declare nothing.
+const declaringModules = import.meta.glob(['../pages/*.vue', '../components/**/*.vue', '!../components/settings/*.vue'])
 let declarations = null
 
 const loadDeclarations = () => {
@@ -273,7 +275,7 @@ const download = (text, name) => {
 
 export default {
   name: 'SettingsPage',
-  components: { PresetCard },
+  components: { PresetCard, PresetReference },
   mixins: [countFormat],
   data() {
     return {
@@ -309,6 +311,11 @@ export default {
 
     presets() {
       return listAppearances()
+    },
+
+    // The preset in force (the previewed one while a preview is open), resolved: the explanation of its reference is shown for it.
+    shown() {
+      return activeAppearance()
     },
 
     // The preset in force (the previewed one while a preview is open) and the kept one.

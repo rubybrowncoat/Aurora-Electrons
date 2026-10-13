@@ -123,3 +123,85 @@
     }
   }
 }
+
+// Text on a filled button or avatar in the primary colour: Vuetify draws a button's white, which is 2:1 to 3.1:1 on the lighter focus colours of the dark presets (the same colour has to be 4.5:1 as text on their surfaces, so it cannot also be dark enough for white). The preset's `inks.onFill` replaces it, as on a chip (scripts/check-contrast.js measures it on `focus.primary`). A disabled button keeps Vuetify's own disabled colours.
+.v-application {
+  .v-btn:not(.v-btn--outlined):not(.v-btn--text):not(.v-btn--disabled).primary,
+  .v-avatar.primary {
+    color: var(--ae-on-fill);
+
+    .v-icon {
+      color: inherit;
+    }
+  }
+}
+
+// Vuetify's own text: each of its components draws its text in a colour of the theme (black at 87% or white; 60% and 70% for secondary text), which the inks of a preset that adapts a reference never reach. The rules below, at Vuetify's own specificity and after it, draw the text in `inks.text` and `inks.textMuted` instead: the baselines carry Vuetify's own values, so Light and Dark do not change (utilities/appearance.js). A theme the preset is not based on keeps Vuetify's colours (`--ae-text-light` and `--ae-text-dark` are per theme). A disabled component keeps Vuetify's disabled colours (each selector leaves its disabled state out, or Vuetify's `!important` wins); icons, tabs, placeholders and the text of a filled coloured button keep Vuetify's colours as well; a toolbar, snackbar or other sheet filled with a named colour is handled by the rules after these. scripts/check-contrast.js reads these rules from the compiled stylesheet.
+@each $theme in light, dark {
+  .v-application.theme--#{$theme},
+  .v-sheet:not(.v-snack__wrapper).theme--#{$theme},
+  .v-card.theme--#{$theme},
+  .v-list.theme--#{$theme},
+  .v-list-item:not(.v-list-item--active):not(.v-list-item--disabled).theme--#{$theme},
+  .v-input:not(.v-input--is-disabled).theme--#{$theme},
+  .v-input:not(.v-input--is-disabled).theme--#{$theme} input,
+  .v-input:not(.v-input--is-disabled).theme--#{$theme} textarea,
+  .v-select:not(.v-input--is-disabled).theme--#{$theme} .v-select__selections,
+  .v-chip.theme--#{$theme},
+  .v-data-table.theme--#{$theme},
+  .v-data-table.theme--#{$theme} .v-data-table-header th.sortable:hover,
+  .v-data-table.theme--#{$theme} .v-data-table-header th.sortable.active,
+  .v-expansion-panels.theme--#{$theme} .v-expansion-panel:not(.v-expansion-panel--disabled),
+  .v-footer.theme--#{$theme},
+  .v-pagination.theme--#{$theme} .v-pagination__item:not(.v-pagination__item--active),
+  .v-btn:not(.v-btn--has-bg):not(.v-btn--icon).theme--#{$theme} {
+    color: var(--ae-text-#{$theme});
+  }
+
+  .v-application.theme--#{$theme} .text--primary {
+    color: var(--ae-text-#{$theme}) !important;
+  }
+
+  .v-subheader.theme--#{$theme},
+  .v-list-item:not(.v-list-item--disabled).theme--#{$theme} .v-list-item__subtitle,
+  .v-list-item:not(.v-list-item--disabled).theme--#{$theme} .v-list-item__action-text,
+  .v-label:not(.v-label--is-disabled).theme--#{$theme},
+  .v-messages.theme--#{$theme},
+  .v-counter.theme--#{$theme},
+  .v-card.theme--#{$theme} > .v-card__text,
+  .v-card.theme--#{$theme} > .v-card__subtitle,
+  .v-data-table.theme--#{$theme} > .v-data-table__wrapper > table > thead > tr > th,
+  .v-file-input.theme--#{$theme} .v-file-input__text--placeholder {
+    color: var(--ae-text-muted-#{$theme});
+  }
+
+  .v-application.theme--#{$theme} .text--secondary {
+    color: var(--ae-text-muted-#{$theme}) !important;
+  }
+}
+
+// Text and icons on a dark-theme surface filled with one of Vuetify's named colours (the System view's toolbar, the snackbar): the ordinary text inks above are drawn for the surfaces of the preset, not for these fills, so the rules below, after them and more specific, draw `inks.onColor` on the title, the icons and the text buttons, and `inks.onSnackbar` on a snackbar's message. The baselines carry Vuetify's own white, so Light and Dark do not change (utilities/appearance.js); an adaptation's inks are 4.5:1 on the primary and the four severities (scripts/check-contrast.js measures each pairing from this compiled stylesheet). `secondary` and `accent` are not used as fills. A disabled button and a filled button keep their own colours.
+.v-application {
+  @each $name in primary, success, error, warning, info {
+    .v-sheet.theme--dark.#{$name}:not(.v-snack__wrapper) {
+      color: var(--ae-on-color);
+
+      .v-icon,
+      .v-btn:not(.v-btn--disabled):not(.v-btn--has-bg) {
+        color: inherit;
+      }
+    }
+
+    .v-snack__wrapper.v-sheet.theme--dark.#{$name} {
+      color: var(--ae-on-snackbar);
+
+      .v-icon {
+        color: inherit;
+      }
+
+      .v-btn:not(.v-btn--disabled):not(.v-btn--has-bg) {
+        color: var(--ae-on-color);
+      }
+    }
+  }
+}

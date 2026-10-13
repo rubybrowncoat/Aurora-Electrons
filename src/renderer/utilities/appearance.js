@@ -1,11 +1,11 @@
 import Vue from 'vue'
 
-// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed.
+// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic and Solaris are adaptations of a community reference (see `reference`), listed after them.
 //
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
 // - `surfaces`: `background` (the page and app bar), `chrome` (rail, footer), `card` (cards, tables, chart canvases), `border` (dividers and outlines), `track` and `trackSoft` (the empty part of a meter, the fill of a chip) and `rule` (a hairline under a table head).
-// - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks), `onTooltip` (text on the chart tooltip) and `onFill` (text on a chip filled with a severity, status, planner or focus colour: white where the fills are dark enough for it, the page's dark ink where they are light, because a tone that is also drawn as text on the dark surfaces cannot hold white).
+// - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks), `text` and `textMuted` (the colours Vuetify's own components draw their text in, styles/appearance.scss: the baselines keep Vuetify's own black or white, an adaptation uses its body and muted inks; the text Vuetify draws on the other theme keeps Vuetify's own), `onTooltip` (text on the chart tooltip), `onColor` and `onSnackbar` (the text and icons on a surface filled with one of Vuetify's named colours, a toolbar or a snackbar, and the snackbar's message: the baselines keep Vuetify's own white; an adaptation takes an ink that is 4.5:1 on the primary and the four severities, which scripts/check-contrast.js measures) and `onFill` (text on a chip filled with a severity, status, planner or focus colour: white where the fills are dark enough for it, the page's dark ink where they are light, because a tone that is also drawn as text on the dark surfaces cannot hold white).
 // - `focus`: `primary` (focus, selection, links, the Galaxy Map's selection), `hover` (the wash under the pointer) and Vuetify's other two named colours, `secondary` and `accent`.
 // - `rows`: table rows that mark something: `selected` (the picked row), `differs` (a compared row that differs), `differsMark` and `differsDot` (the stripe and the dot that go with it), `stripe` and `stripeSoft` (the two bands of the focused row's hatching). Each wash is faint enough that every text colour of the preset, severity tones included, stays 4.5:1 on it, and `focus.hover` is the wash a hovered table row takes (scripts/check-contrast.js measures both).
 // - `severity`: Warnings' three levels, `action` (needs action), `attention` and `info`, plus `success`; Vuetify's `error`, `warning`, `info` and `success`.
@@ -15,6 +15,7 @@ import Vue from 'vue'
 // - `sections`: `neutral` (the accent without a section: Settings, About, Empires).
 // - `space`: the system view's sky and what is drawn on it: `background`, `label` (names), `labelShadow`, `bodyOrbit`, `jumpUnexplored`, `jumpExplored`. The sky is dark in every preset, so the ink on it does not follow the mode.
 // - `washes`: alphas of a section's colour for an active item (`sectionSoft`), a hovered one (`sectionTint`), and of the available-status colour in the research tree (`statusSoft`).
+// - `reference` (optional, adaptations only): what the preset is an adaptation of and how far. `title` and `summary` (what it looks like), `source` (the inspected community theme: `name`, `author`, `repository`, `revision`, `revisionDate`, `license`, `inspected` (what was read and how it was used: values, not code), `copied` (what was copied: nothing), `note` (what the source does not say)), `roles` (each reference value: `role`, `value`, `maps` (where the preset uses it)) and `modifications` (what the Electrons adaptation changes or adds). Nothing in it claims that a version of the game ships the palette: a reference is a historical or community one, and the preset an adaptation of it. Settings shows it beside the preview and About's credits list the source. scripts/check-contrast.js keeps the selection colour of a preset with a reference apart from every warning severity.
 //
 // Physical colours (stars and the star orbit lines drawn in their colour, planet terrain) depict the world, not a meaning, and stay out of presets.
 //
@@ -26,7 +27,7 @@ const LIGHT = {
   version: 4,
   mode: 'light',
   surfaces: { background: '#ffffff', chrome: '#f6f7f9', card: '#ffffff', border: '#e0e3e8', track: 'rgba(0, 0, 0, .08)', trackSoft: 'rgba(0, 0, 0, .06)', rule: 'rgba(0, 0, 0, .12)' },
-  inks: { body: '#212121', muted: '#6a6a6a', onTooltip: '#ffffff', onFill: '#ffffff' },
+  inks: { body: '#212121', muted: '#6a6a6a', text: 'rgba(0, 0, 0, 0.87)', textMuted: 'rgba(0, 0, 0, 0.6)', onTooltip: '#ffffff', onFill: '#ffffff', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
   focus: { primary: '#1867c0', hover: 'rgba(24, 103, 192, .06)', secondary: '#b0bec5', accent: '#8c9eff' },
   rows: { selected: 'rgba(33, 150, 243, .08)', differs: 'rgba(33, 150, 243, .08)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .08)', stripeSoft: 'rgba(33, 150, 243, .04)' },
   severity: { action: '#b71c1c', attention: '#a75d00', info: '#0b72c5', success: '#367d39' },
@@ -42,13 +43,103 @@ const LIGHT = {
   washes: { sectionSoft: 0.14, sectionTint: 0.08, statusSoft: 0.18 },
 }
 
+// The community theme both adaptations take their reference values from, at the revision that was inspected. Its public source lists the colours it replaces (the legacy ones) and the four it draws instead (near-black, light grey, controls, planets). Its license is MIT; no code or artwork of it is bundled, so the license notice is shown in About as a courtesy and for provenance.
+const SOLARIS_SOURCE = {
+  name: 'Solaris theme',
+  author: 'Simas Toleikis',
+  repository: 'https://github.com/simast/SolarisTheme',
+  revision: '83aa53017754216367851620b4457284db654c15',
+  revisionDate: '2021-05-20',
+  license: 'MIT License',
+  inspected: "The colour numbers in the theme's public source: the legacy colours it replaces and the four it puts in their place. Read in October 2026, at the revision above, and typed into this preset as values.",
+  copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken, and the preset does not reproduce the theme.',
+  note: 'The source does not say which Aurora version the legacy colours come from; its last commit is dated 2021-05-20. Nothing here states what any release of the game uses today.',
+}
+
+const CLASSIC = {
+  id: 'classic',
+  name: 'Aurora Classic',
+  version: 1,
+  mode: 'dark',
+  reference: {
+    title: 'Legacy navy and pale yellow',
+    summary: 'Navy surfaces under pale-yellow text, the legacy colours the reference records as the ones it replaces, adapted so that selection, warnings and charts read as they do in the other presets.',
+    source: SOLARIS_SOURCE,
+    roles: [
+      { role: 'Window background', value: '#000040', maps: 'The page, and the system view sky' },
+      { role: 'Text', value: '#FFFFC0', maps: 'Body text, the system view labels and the chart tooltip text' },
+      { role: 'Enabled button', value: '#000078', maps: 'The rail and the footer' },
+      { role: 'Orbit and comet line', value: '#32CD32', maps: 'Orbit lines in the system view' },
+    ],
+    modifications: [
+      'Cards, tables and chart canvases take a navy between the page and the rail, with a lighter blue border, so a card is told from the page by more than its text.',
+      'Secondary text, the status tone, the links and the selection are Electrons additions, each held at 4.5:1 or more on every surface; the legacy reference has no such roles.',
+      'Selection is a sky blue, kept clear of the warning levels: Action is red, Attention orange and Info turquoise.',
+      'The categorical chart slots, the planner tones and the typeface are the Dark preset\'s; the legacy interface has no equivalent.',
+    ],
+  },
+  surfaces: { background: '#000040', chrome: '#000078', card: '#08085e', border: '#3a3aa0', track: 'rgba(255, 255, 192, .14)', trackSoft: 'rgba(255, 255, 192, .10)', rule: 'rgba(255, 255, 192, .16)' },
+  inks: { body: '#ffffc0', muted: '#c4c4a0', text: '#ffffc0', textMuted: '#c4c4a0', onTooltip: '#ffffc0', onFill: '#000040', onColor: '#000040', onSnackbar: '#000040' },
+  focus: { primary: '#7fa8ff', hover: 'rgba(127, 168, 255, .12)', secondary: '#2a2a8a', accent: '#FF4081' },
+  rows: { selected: 'rgba(127, 168, 255, .14)', differs: 'rgba(127, 168, 255, .14)', differsMark: '#7fa8ff', differsDot: 'rgba(127, 168, 255, .55)', stripe: 'rgba(127, 168, 255, .14)', stripeSoft: 'rgba(127, 168, 255, .06)' },
+  severity: { action: '#ff5c5c', attention: '#ffa040', info: '#40d0d0', success: '#90ee90' },
+  status: { inactive: '#a8a8c8' },
+  plan: { mining: '#ff8f00', terraformFree: '#c759da', terraformPartial: '#7482cf', terraformCheaper: '#6d8b9a', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#ea5527', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#f44336' },
+  charts: {
+    axis: '#3a3aa0',
+    tooltip: 'rgba(40, 40, 160, 0.97)',
+    categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
+  },
+  sections: { neutral: '#a0a8d8' },
+  space: { background: '#000040', label: '#ffffc0', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
+  washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
+}
+
+const SOLARIS = {
+  id: 'solaris',
+  name: 'Solaris inspired',
+  version: 1,
+  mode: 'dark',
+  reference: {
+    title: 'Near-black with muted blue controls',
+    summary: 'A near-black page with light-grey text and blue-grey raised surfaces, after the community Solaris theme, adapted with full semantic surfaces and state colours.',
+    source: SOLARIS_SOURCE,
+    roles: [
+      { role: 'Background', value: '#0C0C0C', maps: 'The page, the app bar and the system view sky' },
+      { role: 'Text', value: '#D2D2D2', maps: 'Body text, the system view labels and the chart tooltip text' },
+      { role: 'Controls', value: '#171A27', maps: 'Cards, tables, chart canvases, the rail and the footer' },
+      { role: 'Planet', value: '#808080', maps: 'Orbit lines in the system view' },
+    ],
+    modifications: [
+      'Secondary text and the status tone are lighter greys than the reference planet grey, which falls just under 4.5:1 on the controls colour; the grey itself stays the orbit line.',
+      'Selection is a muted periwinkle, kept clear of the warning levels: Action is red, Attention orange and Info cyan; the reference has no selection or state colours.',
+      'The categorical chart slots and the planner tones are the Dark preset\'s, and the typeface is the app\'s own, not Tahoma.',
+    ],
+  },
+  surfaces: { background: '#0c0c0c', chrome: '#171a27', card: '#171a27', border: '#2f3449', track: 'rgba(210, 210, 210, .12)', trackSoft: 'rgba(210, 210, 210, .10)', rule: 'rgba(210, 210, 210, .12)' },
+  inks: { body: '#d2d2d2', muted: '#a8a8a8', text: '#d2d2d2', textMuted: '#a8a8a8', onTooltip: '#d2d2d2', onFill: '#0c0c0c', onColor: '#0c0c0c', onSnackbar: '#0c0c0c' },
+  focus: { primary: '#a5b4ff', hover: 'rgba(165, 180, 255, .10)', secondary: '#2b3045', accent: '#FF4081' },
+  rows: { selected: 'rgba(165, 180, 255, .14)', differs: 'rgba(165, 180, 255, .14)', differsMark: '#a5b4ff', differsDot: 'rgba(165, 180, 255, .55)', stripe: 'rgba(165, 180, 255, .14)', stripeSoft: 'rgba(165, 180, 255, .06)' },
+  severity: { action: '#ff6b6b', attention: '#ffa94d', info: '#4dd0e1', success: '#81c784' },
+  status: { inactive: '#9a9a9a' },
+  plan: { mining: '#ff8f00', terraformFree: '#c759da', terraformPartial: '#7482cf', terraformCheaper: '#6d8b9a', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#ea5527', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#f44336' },
+  charts: {
+    axis: '#2f3449',
+    tooltip: 'rgba(43, 48, 69, 0.97)',
+    categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
+  },
+  sections: { neutral: '#9aa0b8' },
+  space: { background: '#0c0c0c', label: '#d2d2d2', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#808080', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
+  washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
+}
+
 const DARK = {
   id: 'dark',
   name: 'Dark',
   version: 4,
   mode: 'dark',
   surfaces: { background: '#121212', chrome: '#1e1e1e', card: '#1e1e1e', border: '#333333', track: 'rgba(255, 255, 255, .12)', trackSoft: 'rgba(255, 255, 255, .1)', rule: 'rgba(255, 255, 255, .12)' },
-  inks: { body: '#f5f5f5', muted: '#b0b0b0', onTooltip: '#ffffff', onFill: '#121212' },
+  inks: { body: '#f5f5f5', muted: '#b0b0b0', text: '#ffffff', textMuted: 'rgba(255, 255, 255, 0.7)', onTooltip: '#ffffff', onFill: '#121212', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
   focus: { primary: '#2196f3', hover: 'rgba(33, 150, 243, .10)', secondary: '#424242', accent: '#FF4081' },
   rows: { selected: 'rgba(33, 150, 243, .10)', differs: 'rgba(33, 150, 243, .10)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .10)', stripeSoft: 'rgba(33, 150, 243, .04)' },
   severity: { action: '#FF5252', attention: '#FB8C00', info: '#2196F3', success: '#4CAF50' },
@@ -65,7 +156,7 @@ const DARK = {
 }
 
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
@@ -117,6 +208,7 @@ export const resolveAppearance = (id) => {
       mode: preset.mode,
       surfaces: { ...preset.surfaces },
       inks: { ...preset.inks },
+      reference: preset.reference || null,
       focus: { ...preset.focus },
       rows: { ...preset.rows },
       severity: { ...preset.severity },
@@ -200,8 +292,11 @@ export const loadAppearance = (config) => {
 // The baseline preset of a mode.
 export const baselinePresetId = (mode) => BASELINE_BY_MODE[mode]
 
-// The CSS custom properties the app's styles read, for the root element (`:style` on `v-app`).
-export const appearanceStyle = ({ surfaces, inks, focus, rows, space, status }) => ({
+// Vuetify's own text colours of each theme: what a component of the theme the preset is not based on (a `dark` toolbar, chip or button on a light preset) keeps drawing.
+const VUETIFY_TEXT = { light: { text: 'rgba(0, 0, 0, 0.87)', muted: 'rgba(0, 0, 0, 0.6)' }, dark: { text: '#ffffff', muted: 'rgba(255, 255, 255, 0.7)' } }
+
+// The CSS custom properties the app's styles read, for the root element (`:style` on `v-app`). `--ae-text-light`, `--ae-text-dark` and their `-muted` pairs are the colours Vuetify's components of each theme draw their text in: the preset's `inks.text` and `inks.textMuted` on its own theme, Vuetify's on the other.
+export const appearanceStyle = ({ mode, surfaces, inks, focus, rows, space, status }) => ({
   '--ae-bg': surfaces.background,
   '--ae-chrome': surfaces.chrome,
   '--ae-card': surfaces.card,
@@ -212,6 +307,12 @@ export const appearanceStyle = ({ surfaces, inks, focus, rows, space, status }) 
   '--ae-ink': inks.body,
   '--ae-muted': inks.muted,
   '--ae-on-fill': inks.onFill,
+  '--ae-on-color': inks.onColor,
+  '--ae-on-snackbar': inks.onSnackbar,
+  '--ae-text-light': mode === 'light' ? inks.text : VUETIFY_TEXT.light.text,
+  '--ae-text-muted-light': mode === 'light' ? inks.textMuted : VUETIFY_TEXT.light.muted,
+  '--ae-text-dark': mode === 'dark' ? inks.text : VUETIFY_TEXT.dark.text,
+  '--ae-text-muted-dark': mode === 'dark' ? inks.textMuted : VUETIFY_TEXT.dark.muted,
   '--ae-primary': focus.primary,
   '--ae-hover': focus.hover,
   '--ae-row-selected': rows.selected,
