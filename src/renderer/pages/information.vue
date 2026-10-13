@@ -122,6 +122,7 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength: the strength of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology, plus the technology once more if the colony has a spaceport or cargo shuttle station; commander, governor and sector Logistics bonuses are not counted, so times err long. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, with no spaceport or cargo shuttle station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
@@ -164,7 +165,7 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapGetters, mapState } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
@@ -178,7 +179,9 @@ import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
+import { isAvailable } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
+import { amountText, describeTariffVersion, payoutRows } from '../utilities/civilian-tariff'
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -244,6 +247,7 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID', 'CivilianShippingLinesActive']),
+    ...mapState(['RaceNPR']),
 
     options() {
       return Object.fromEntries(OPTIONS.map((option) => [option.key, this[option.key]]))
@@ -428,6 +432,44 @@ export default {
 
     civilianRuns() {
       return this.runs.filter((run) => run.civilian)
+    },
+
+    // What a shipping line is paid over the run, at the rates of the save's game version: one unit of each category over the measured route in billion km, with the result the figures rest on, or why no figure is given. Null while shipping lines are off or no destination is picked.
+    payoutNote() {
+      const { destination, formulaVersion: version } = this
+
+      if (!destination || !this.CivilianShippingLinesActive) {
+        return null
+      }
+
+      const kms = this.civilianRuns.filter((run) => run.status !== 'noroute').map((run) => run.km)
+      const npr = this.RaceNPR
+      const unknown = payoutRows({ version, km: null, npr })
+
+      if (!unknown.some((row) => isAvailable(row.rate))) {
+        return { text: 'No payout is estimated: the save\'s game version has no published payout rates.', result: unknown[0].payout }
+      } else if (!kms.length) {
+        return { text: 'No payout is estimated: no shipping line ship has a route to the destination, so no distance is measured.', result: unknown[0].payout }
+      }
+
+      const shortest = Math.min(...kms)
+      const longest = Math.max(...kms)
+      const near = payoutRows({ version, km: shortest, npr })
+      const far = payoutRows({ version, km: longest, npr })
+      const parts = near.map((row, index) => {
+        const { category, rate } = row
+
+        if (!isAvailable(rate) || !isAvailable(row.payout)) {
+          return `${category.label}: not estimated, needs ${(isAvailable(rate) ? row.payout : rate).inputs.missing.join(' and ')}`
+        }
+
+        const low = this.amountText(row.payout.value)
+        const high = this.amountText(far[index].payout.value)
+
+        return `${category.label} ${this.amountText(rate.value)} a unit per billion km, ${low === high ? low : `${low} to ${high}`} a unit over the route`
+      })
+
+      return { text: `${describeTariffVersion(version)}${npr ? ', with a computer-run empire paid half' : ''}, over the measured route of ${shortest === longest ? this.distance(shortest) : `${this.distance(shortest)} to ${this.distance(longest)}`} one way: ${parts.join('; ')}. A payout goes to the shipping line, and no stored link ties it to a treasury use, so no cost to the race is claimed.`, result: near[0].payout }
     },
 
     // What keeps fleets from the destination, said once for the fleets it stops.
@@ -695,6 +737,10 @@ export default {
       const total = (field) => items.reduce((sum, item) => sum + item[field], 0)
 
       return `Supply ${this.amount(total('supply'))} · Demand ${this.amount(total('demand'))} · En route ${this.amount(total('out'))}`
+    },
+
+    amountText(value) {
+      return amountText(value, this.separator)
     },
 
     distance(km) {
