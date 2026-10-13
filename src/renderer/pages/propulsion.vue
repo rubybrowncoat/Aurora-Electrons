@@ -1154,8 +1154,10 @@ export default {
       }
     },
 
-    selectRow(row) {
+    // A click picks the set the panels below show and opens or closes its detail, as clicking a row with details does on the other pages.
+    selectRow(row, { expand, isExpanded }) {
       this.selectedKey = row.key
+      expand(!isExpanded)
     },
 
     rowClass(row) {
