@@ -271,7 +271,7 @@ export const surfaceRate = (row, owned = true) => {
   return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
-// The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save, or the naval admin chain `adminBonus` is unknown (null); unverified, the sample has no player orbital miners.
+// The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save, or the naval admin chain `adminBonus` is unknown (null). Compared with the saved ledger by scripts/check-orbital-mining.js: in the sampled saves it matches exactly at the last completed increment where the deposit's accessibility is not falling, while one later save has an unexplained discrepancy earlier in its window. On a deposit mined below half its original amount the ledger ran up to two 0.01 steps of accessibility above the estimate over those same increments, because the save holds the accessibility after the last mining step; that is an observation, not a bound on future error. A short crew, a damaged module and a ship with no commander or outside any naval admin command have no case in the saves; the modules counted are the class's, damage is not read.
 export const orbitalRate = (row, adminBonus = 1) => {
   const crew = crewFraction(row)
 

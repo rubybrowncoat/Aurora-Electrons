@@ -202,7 +202,7 @@
           </template>
         </v-data-table>
         <div class="panel-foot caption text--secondary">
-          Rates include governor, sector, commander and naval-admin bonuses. Orbital mining uses the workbook's formula and is an estimate. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years.
+          Rates include governor, sector, commander and naval-admin bonuses. Orbital mining is the workbook's formula with the crew share and is an estimate: in the sampled saves it matched the ledger at the last completed increment while a deposit's accessibility was flat (one save has an unexplained earlier discrepancy), and the ledger ran up to two 0.01 steps of accessibility above it for a deposit mined below half its original amount, so it may read low there. A short crew, a damaged module, a miner with no commander and one outside any naval admin command are unobserved. Timeline: solid until half mined, lighter while accessibility falls, across {{ horizon }} years.
         </div>
       </v-card>
     </v-container>
