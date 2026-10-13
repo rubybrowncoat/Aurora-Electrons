@@ -263,6 +263,53 @@
           <div class="panel-foot caption text--secondary">A set is listed when no other set takes a smaller share of the finished ship and also goes faster (or farther). Every set already meets the speed and range targets, so the range column mostly shows the rounding of whole tanks. The table lists the same sets for reading off exact figures, with the saved class first, and the mark beside each figure keeps its status: a saved class's figures are observed, a designed set's BP is an estimate.</div>
         </v-card>
 
+        <v-card class="panel" data-summary="The sets that meet the targets and that no other set beats on every axis picked from BP, propulsion tonnage, speed, range, endurance and payload, each axis taken as least or most as picked, so efficient alternatives can be weighed against one another without a score that hides the trade. Sets with the same figures stay side by side." data-pareto="panel" elevation="1">
+          <div class="panel-head">
+            <span>Efficient sets<v-chip v-if="efficientProvisional && !searching" x-small color="warning" outlined class="ml-2" data-pareto="provisional-chip">Provisional</v-chip></span>
+          </div>
+          <div class="panel-body">
+            <div class="d-flex flex-wrap">
+              <div v-for="axis in paretoChoices" :key="axis.key" class="mr-4 mb-2">
+                <div class="caption text--secondary">{{ axis.label }}</div>
+                <v-btn-toggle :value="axis.pick" mandatory dense :data-pareto-axis="axis.key" @change="setParetoAxis(axis.key, $event)">
+                  <v-btn value="off" small>Off</v-btn>
+                  <v-btn value="min" small>Least</v-btn>
+                  <v-btn value="max" small>Most</v-btn>
+                </v-btn-toggle>
+              </div>
+            </div>
+            <div v-if="!efficientAxes.length" class="caption text--secondary" data-pareto="few">Pick two or more axes to list the sets no other set beats on all of them.</div>
+            <div v-else-if="searching" class="caption text--secondary" data-pareto="searching">Searching…</div>
+            <div v-else-if="!efficient" class="caption text--secondary">No sets to compare yet.</div>
+            <template v-else>
+              <v-alert v-if="efficientProvisional" type="warning" outlined dense class="mt-2" data-pareto="provisional">{{ efficientNote }}</v-alert>
+              <div v-else class="caption text--secondary mt-2" data-pareto="note">{{ efficientNote }}</div>
+            </template>
+          </div>
+          <v-data-table v-if="efficientAxes.length && !searching && efficient" :headers="efficientHeaders" :items="efficientRows" item-key="key" show-expand :expanded.sync="paretoExpanded" :custom-sort="sortRows" :items-per-page="15" :footer-props="{ itemsPerPageOptions: setPageSizes }" :no-data-text="efficientEmpty" dense class="clickable-rows" data-pareto="table" @click:row="(row, { expand, isExpanded }) => expand(!isExpanded)">
+            <template #[`item.name`]="{ item }">{{ item.name }}</template>
+            <template #[`item.count`]="{ item }"><span class="text-no-wrap">{{ count(item.count) }}</span></template>
+            <template #[`item.cost`]="{ item }"><span class="text-no-wrap">{{ item.cost === null ? '—' : count(item.cost, 1) }}</span><provenance-mark :result="item.provenance.cost" /></template>
+            <template #[`item.tons`]="{ item }"><span class="text-no-wrap">{{ count(item.tons) }}</span></template>
+            <template #[`item.speed`]="{ item }"><span class="text-no-wrap">{{ item.speed === null ? '—' : count(item.speed) }}</span><provenance-mark :result="item.provenance.speed" /></template>
+            <template #[`item.rangeBn`]="{ item }"><span class="text-no-wrap">{{ item.rangeBn === null ? '—' : count(item.rangeBn, 2) }}</span><provenance-mark :result="item.provenance.rangeBn" /></template>
+            <template #[`item.enduranceDays`]="{ item }"><span class="text-no-wrap">{{ item.enduranceDays === null ? '—' : count(item.enduranceDays, 1) }}</span><provenance-mark :result="item.provenance.enduranceDays" /></template>
+            <template #[`item.payload`]="{ item }"><span class="text-no-wrap">{{ count(item.payload, 2) }}</span></template>
+            <template #[`item.alternativeCount`]="{ item }"><span class="text-no-wrap">{{ item.alternativeCount ? `+${count(item.alternativeCount)}` : '—' }}</span></template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="expand-cell" data-pareto="alike">
+                <div v-if="!item.alternativeCount" class="caption text--secondary">No other set meeting the targets has these figures on every axis picked.</div>
+                <template v-else>
+                  <div class="caption text--secondary mb-1">{{ count(item.alternativeCount) }} other {{ item.alternativeCount === 1 ? 'set has' : 'sets have' }} these figures on every axis picked:</div>
+                  <div v-for="line in item.alternatives" :key="line" class="caption">{{ line }}</div>
+                  <div v-if="item.alternativesMore > 0" class="caption text--secondary">and {{ count(item.alternativesMore) }} more<template v-if="item.alternativeIds.length">: {{ item.alternativeIds.join(', ') }}<template v-if="item.alternativesMore > item.alternativeIds.length"> and others</template></template></div>
+                </template>
+              </td>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">A set is listed when no other set that meets the targets is as good on every axis picked and better on one; no score is added up. Each axis is taken as least or most as picked. A set with a figure that is not known on a picked axis takes no part, and is counted above. The comparison covers every set the search evaluated that meets the targets, not only the sets the table above lists, and stays provisional while the search has stopped early or when more sets are efficient than the comparison holds. Sets with the same figures on every axis picked are kept under the first found; open a row to read them. The payload is the hull, the same for every set of one search, so it never tells two sets apart. Changing an axis runs the search again.</div>
+        </v-card>
+
         <v-row>
           <v-col cols="12" xl="6">
             <v-card class="panel" data-summary="The stock fuel tanks that hold the chosen set's fuel in the fewest HS, with their litres and cost, to fit the fuel a range or endurance needs." elevation="1">
@@ -403,6 +450,7 @@ import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TO
 import { engineFields, engineSweep, normaliseEngineOptions, propulsionRun } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
+import { PARETO_AXES, axesOf, describeEmpty, describeFront, normaliseChoice } from '../utilities/pareto'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
 import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, NO_RACE_TECH, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE, loadRaceTech } from '../utilities/race-tech'
@@ -448,6 +496,12 @@ const TECH_LINES = [
 const DEFAULTS = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const EMPTY_LIST = Object.freeze([])
+
+// How many more candidate ids of the sets alike a set a row names after the sets it describes.
+const ALTERNATIVE_IDS_SHOWN = 40
+
+// The column of the efficient sets table for each axis of the comparison: its heading and the field of the row it reads.
+const PARETO_COLUMNS = { cost: ['BP', 'cost'], tons: ['Propulsion tons', 'tons'], speed: ['Speed (km/s)', 'speed'], range: ['Range (bn km)', 'rangeBn'], endurance: ['Endurance (d)', 'enduranceDays'], payload: ['Payload (HS)', 'payload'] }
 
 // A new task as soon as the browser has had its turn, which still comes in a hidden window.
 const nextTask = () => new Promise((resolve) => {
@@ -592,6 +646,7 @@ export default {
       techChoice: { key: 'propulsionTech', default: {}, scope: 'race', valid: (value) => value && typeof value === 'object' && !Array.isArray(value) },
       setsTable: { ...tableView('propulsionSetsTable', { sortBy: ['rank'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: SET_PAGE_SIZES }), scope: 'race' },
       tradeView: { key: 'propulsionTradeView', default: 'chart', valid: oneOf(TRADE_VIEWS) },
+      paretoAxes: { key: 'propulsionParetoAxes', default: {}, normalise: normaliseChoice, valid: (value) => value !== null && typeof value === 'object' && !Array.isArray(value) },
       sweepUnit: { key: 'propulsionSweepUnit', default: 'hs', valid: oneOf(SWEEP_UNITS) },
     }),
   ],
@@ -610,6 +665,7 @@ export default {
       // The row whose fuel and jump drive the panels show, by its key; the rows open in the table.
       selectedKey: null,
       expanded: [],
+      paretoExpanded: [],
       tradeMetric: 'speed',
       kinds: KINDS,
       setPageSizes: SET_PAGE_SIZES,
@@ -854,6 +910,7 @@ export default {
         tech: this.designTech,
         tanks: this.tanks,
         engine: this.existingEngine,
+        axes: this.efficientAxes,
         engineTechName: this.techLevels[ENGINE_TECH_TYPE] ? this.techLevels[ENGINE_TECH_TYPE].componentName : '',
       }
     },
@@ -1139,6 +1196,63 @@ export default {
       }
     },
 
+    // The axes the sets are compared on: the ones picked when two or more are, else none (one axis compares nothing), and then the search keeps no comparison.
+    efficientAxes() {
+      const axes = axesOf(this.paretoAxes)
+
+      return axes.length >= 2 ? axes : EMPTY_LIST
+    },
+
+    // One control for each axis offered, with whether it is off, least or most.
+    paretoChoices() {
+      return Object.entries(PARETO_AXES).map(([key, axis]) => ({ key, label: axis.label, pick: this.paretoAxes[key] || 'off' }))
+    },
+
+    // The comparison of the latest result, null when its search kept none.
+    efficient() {
+      return this.result && this.result.efficient ? this.result.efficient : null
+    },
+
+    // Whether the comparison is provisional: a set not yet compared may beat these, or the comparison was cut at its limit.
+    efficientProvisional() {
+      return this.efficient !== null && this.efficient.status === 'provisional'
+    },
+
+    efficientNote() {
+      return this.efficient ? describeFront(this.efficient, (value) => this.count(value)) : ''
+    },
+
+    // What the table says when the comparison holds no set: nothing met the targets, the search stopped before it found one, or every set that met them lacks a figure that was picked.
+    efficientEmpty() {
+      return this.efficient ? describeEmpty(this.efficient, (value) => this.count(value)) : ''
+    },
+
+    // The columns follow the axes of the result shown, not the ones picked since, which a search that is running has not reached.
+    efficientHeaders() {
+      const axes = this.efficient ? this.efficient.axes : EMPTY_LIST
+
+      return [
+        { text: 'Engine', value: 'name' },
+        { text: 'Count', value: 'count', align: 'end' },
+        { text: 'Type', value: 'type' },
+        ...axes.map(({ key }) => ({ text: PARETO_COLUMNS[key][0], value: PARETO_COLUMNS[key][1], align: 'end' })),
+        { text: 'Same figures', value: 'alternativeCount', align: 'end' },
+        { text: '', value: 'data-table-expand', sortable: false },
+      ]
+    },
+
+    efficientRows() {
+      if (!this.efficient) {
+        return EMPTY_LIST
+      }
+
+      return this.efficient.members.map((member) => {
+        const named = member.alternatives.map(({ set }) => `${this.count(set.count)} × ${this.setName(set)}`)
+
+        return { ...this.rowOfSet(member.set, null), key: member.name, payload: member.set.hullHS, alternativeCount: member.alternativeCount, alternatives: named, alternativesMore: member.alternativeCount - named.length, alternativeIds: member.identities.slice(named.length, named.length + ALTERNATIVE_IDS_SHOWN) }
+      })
+    },
+
     // A link names the saved class and the race's own engine the page is on.
     linkQuery() {
       return this.ready ? linkTo.propulsion({ class: this.selectedClass ? this.selectedClass.id : null, engine: this.existingEngine ? this.existingEngine.id : null }).query : null
@@ -1312,6 +1426,19 @@ export default {
         totalHS: set.totalHS,
         provenance,
       }
+    },
+
+    // Turns an axis of the comparison off or sets its direction; the search runs again for the new axes.
+    setParetoAxis(key, pick) {
+      const next = { ...this.paretoAxes }
+
+      if (pick === 'off') {
+        delete next[key]
+      } else {
+        next[key] = pick
+      }
+
+      this.paretoAxes = next
     },
 
     // A click picks the set the panels below show and opens or closes its detail, as clicking a row with details does on the other pages.

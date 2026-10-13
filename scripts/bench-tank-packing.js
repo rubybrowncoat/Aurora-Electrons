@@ -1566,23 +1566,25 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// searchPropulsion's own source with its design-rules import taken from `globalThis.__benchRules`, its sweep-domain and search-run imports taken from the real modules (`globalThis.__benchSweep`, `globalThis.__benchRun`), its tank-packing import replaced by `globalThis.__benchTankPacking` (meetsRequest, PACKAGE_STATUS) and a `packerFor` whose packer is `globalThis.__benchPacker`, which warms nothing. Nothing else changes.
+// searchPropulsion's own source with its design-rules import taken from `globalThis.__benchRules`, its sweep-domain, search-run and pareto imports taken from the real modules (`globalThis.__benchSweep`, `globalThis.__benchRun`, `globalThis.__benchPareto`), its tank-packing import replaced by `globalThis.__benchTankPacking` (meetsRequest, PACKAGE_STATUS) and a `packerFor` whose packer is `globalThis.__benchPacker`, which warms nothing. Nothing else changes.
 const loadPatchedSearch = async (rules) => {
   const source = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', 'design-search.js'), 'utf8')
   const rulesPattern = /import \{([^}]*)\} from '\.\/design-rules'/
   const sweepPattern = /import \{([^}]*)\} from '\.\/sweep-domain'/
   const runPattern = /import \{([^}]*)\} from '\.\/search-run'/
+  const paretoPattern = /import \{([^}]*)\} from '\.\/pareto'/
   const packingPattern = /import \{([^}]*)\} from '\.\/tank-packing'/
   const rulesMatch = rulesPattern.exec(source)
   const sweepMatch = sweepPattern.exec(source)
   const runMatch = runPattern.exec(source)
+  const paretoMatch = paretoPattern.exec(source)
   const packingMatch = packingPattern.exec(source)
 
-  if (!rulesMatch || !sweepMatch || !runMatch || !packingMatch || !/\bpackerFor\b/.test(packingMatch[1])) {
+  if (!rulesMatch || !sweepMatch || !runMatch || !paretoMatch || !packingMatch || !/\bpackerFor\b/.test(packingMatch[1])) {
     throw new Error('design-search.js no longer imports packerFor from ./tank-packing in the shape the harness replaces')
   }
 
-  const patched = source.replace(rulesPattern, `const { ${rulesMatch[1].trim()} } = globalThis.__benchRules`).replace(sweepPattern, `const { ${sweepMatch[1].trim()} } = globalThis.__benchSweep`).replace(runPattern, `const { ${runMatch[1].trim()} } = globalThis.__benchRun`).replace(packingPattern, 'const { meetsRequest, PACKAGE_STATUS } = globalThis.__benchTankPacking\nconst packerFor = (tanks) => ({ pack: (litres) => globalThis.__benchPacker({ litres, tanks }), packing: function* (litres) { return globalThis.__benchPacker({ litres, tanks }) }, warm: function* () {} })')
+  const patched = source.replace(rulesPattern, `const { ${rulesMatch[1].trim()} } = globalThis.__benchRules`).replace(sweepPattern, `const { ${sweepMatch[1].trim()} } = globalThis.__benchSweep`).replace(runPattern, `const { ${runMatch[1].trim()} } = globalThis.__benchRun`).replace(paretoPattern, `const { ${paretoMatch[1].trim()} } = globalThis.__benchPareto`).replace(packingPattern, 'const { meetsRequest, PACKAGE_STATUS } = globalThis.__benchTankPacking\nconst packerFor = (tanks) => ({ pack: (litres) => globalThis.__benchPacker({ litres, tanks }), packing: function* (litres) { return globalThis.__benchPacker({ litres, tanks }) }, warm: function* () {} })')
 
   if (/from '\.\//.test(patched)) {
     throw new Error('design-search.js imports another utility the harness does not load')
@@ -1593,6 +1595,7 @@ const loadPatchedSearch = async (rules) => {
   globalThis.__benchRules = rules
   globalThis.__benchSweep = await realModule('sweep-domain')
   globalThis.__benchRun = await realModule('search-run')
+  globalThis.__benchPareto = await realModule('pareto')
   globalThis.__benchTankPacking = production
 
   return import(`data:text/javascript;base64,${Buffer.from(patched).toString('base64')}`)

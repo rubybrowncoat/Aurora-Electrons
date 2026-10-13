@@ -3,6 +3,7 @@
 // `searchPropulsion` is a generator that follows the protocol of search-run.js: it yields { progress, counts, snapshot } about every `slice` units of work so the page can run it in slices between frames, and returns the result with its counts, what its output left out and how it ended. `propulsionRun` is the search as a run (a descriptor, a budget, cancellation and invalidation), which is how the page runs it.
 
 import { classSpeed, engineDesign, fullPowerRangeKm, MAX_SPEED, thermalSignature, TONS_PER_HS } from './design-rules'
+import { createFront, FRONT_LIMIT } from './pareto'
 import { createRun, TERMINATION, UNPACED } from './search-run'
 import { combinationCount, describeSweep, readValue, SWEEP_KINDS, sweepDomain } from './sweep-domain'
 import { meetsRequest, PACKAGE_STATUS, packerFor } from './tank-packing'
@@ -22,9 +23,13 @@ const TANK_WORK = 6
 const TANK_COUNT_WORK = 0.01
 // What an engine design built, or skipped for its kind, counts for against a slice: the work of the candidates it holds is counted as they are evaluated, so a design that holds none (the speed or the share rules every count out) still moves a slice along.
 const DESIGN_WORK = 1
+// What each member of the efficient front that a set is compared with counts for against a slice: a front of its limit costs a candidate about as much as a package does.
+const FRONT_WORK = 0.01
 // How many looks at whether the step has run long enough pass between two reads of the clock: a candidate that is rejected at once costs far less than the read, and sixteen that pack tanks stay within a millisecond or two.
 export const CLOCK_EVERY = 16
 const EPSILON = 1e-9
+// What a set of an engine stored without a cost carries, so the other sets keep the shape they had.
+const UNKNOWN_COST = Object.freeze({ costKnown: false })
 const NO_TANKS = Object.freeze({ status: null, reason: null, complete: true, feasible: true, requestedLitres: 0, litres: 0, excessLitres: 0, count: 0, sizeHS: 0, cost: 0, crew: 0, picks: Object.freeze([]) })
 
 // The engine sizes the search tries: from 1 HS up to the largest the race may design, every 0.1 HS to 10, every 0.25 HS above that to 20, then every whole HS. Each stretch steps from the end of the one before, and the steps are multiples of the step from 0 HS.
@@ -223,11 +228,12 @@ function* gridDesigns({ sizes, thrusts, tech, kind }) {
 // - `engine`: one of the race's own engines (as design-data.js `loadRaceEngines` has them) to search only its count, or null to design engines.
 // - `include`: the endpoint policy of the grid ('grid' or 'limits', see `engineSweep`), `sweep` an `engineSweep` the caller already made (the page's preview), which must be for the same `tech`, counts and policy; a sweep that is not `ok` throws before anything runs.
 // - `keep`: how many ranked sets the result lists, `slice` the units of work between two yields, `maxCandidates` the most candidates it evaluates (null for no limit): at that many, with candidates left in its domain, it returns what it has with `termination: 'candidate-budget'`.
+// - `axes`: `[{ key, goal }]` (pareto.js) to keep the front of the sets that no set meeting the targets beats on those axes (none, the default, keeps none); the front is built from every set that meets the targets, whatever `keep` lists, and holds at most `frontLimit` sets.
 // - `pace`: `{ expired() }`, which says when the step's time is up (the run gives its own; the default never expires). The search yields there as well as at `slice`, between candidates and passes and inside the tank tables and package walks, and goes on where it stopped: the results are the same wherever it yields.
-// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `tankPackage` (`{ status, reason, requestedLitres, excessLitres }` of its fuel tanks: 'optimal' when they are proved the lightest package that holds the fuel, 'bound-exhausted' with the reason when a bound ran out and they only hold it, null for a set with no fuel), `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `crew`, `commercial` and `thermal`; `candidateId(set)` names it.
+// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `tankPackage` (`{ status, reason, requestedLitres, excessLitres }` of its fuel tanks: 'optimal' when they are proved the lightest package that holds the fuel, 'bound-exhausted' with the reason when a bound ran out and they only hold it, null for a set with no fuel), `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `costKnown: false` (only on a set of an engine the save stores without a cost, which `cost` then prices at nothing), `crew`, `commercial` and `thermal`; `candidateId(set)` names it.
 // The work of a step is counted in units: `DESIGN_WORK` for each engine design built (or skipped for its kind), 1 for each candidate evaluated, and `TANK_WORK` and `TANK_COUNT_WORK` for each tank package, so a step is bounded by `slice` plus the work of one candidate or one design whether the candidates are rejected at once or pack large packages, and the first yield comes before any candidate when tables are warmed. The pace bounds a step in time as well: the clock is read every `CLOCK_EVERY` looks, so units that cost more than they are counted for (a slow machine, a long table build or walk, which yield by themselves) still end the step at the pace's deadline.
-// Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), packages: { optimal, boundExhausted, infeasible } (the fuel packages of the candidates that met the speed: proved lightest, not proved, and none that holds the fuel, which drops the candidate), counts (as search-run.js has them: `pruned` the candidates of the domain left out because the speed or the share rules out every count beyond a bound, `prunedBy` the reasons: 'kind' of engine not wanted, 'speed', 'share', 'input'; `total`, `pruned`, `unexplored` and `prunedBy` are null when the domain passes a safe integer, where they cannot be exact), output: { limit, listed, omitted } (the ranked list's cut: `omitted` is the feasible candidates it does not list, which says nothing of how much was explored), termination }. A snapshot has the same shape with `termination` null, and does not count the candidate whose tank passes the step ended in.
-export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, kind = 'either', minCount = 1, maxCount = 100, share = 1, tech, tanks = [], engine = null, include = 'grid', sweep = null, keep = KEPT_SETS, slice = SLICE_CANDIDATES, maxCandidates = null, pace = UNPACED }) {
+// Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), efficient (the front of `axes` from pareto.js, with its status: provisional unless the whole domain was explored, null without `axes`), packages: { optimal, boundExhausted, infeasible } (the fuel packages of the candidates that met the speed: proved lightest, not proved, and none that holds the fuel, which drops the candidate), counts (as search-run.js has them: `pruned` the candidates of the domain left out because the speed or the share rules out every count beyond a bound, `prunedBy` the reasons: 'kind' of engine not wanted, 'speed', 'share', 'input'; `total`, `pruned`, `unexplored` and `prunedBy` are null when the domain passes a safe integer, where they cannot be exact), output: { limit, listed, omitted } (the ranked list's cut: `omitted` is the feasible candidates it does not list, which says nothing of how much was explored), termination }. A snapshot has the same shape with `termination` null, and does not count the candidate whose tank passes the step ended in.
+export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, kind = 'either', minCount = 1, maxCount = 100, share = 1, tech, tanks = [], engine = null, include = 'grid', sweep = null, keep = KEPT_SETS, slice = SLICE_CANDIDATES, maxCandidates = null, axes = [], frontLimit = FRONT_LIMIT, pace = UNPACED }) {
   const plan = sweep || engineSweep({ tech, engine, minCount, maxCount, include })
 
   if (!plan.ok) {
@@ -236,6 +242,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
   const sets = []
   const frontiers = { speed: [], rangeKm: [] }
+  const front = axes.length ? createFront(axes, { limit: frontLimit, name: candidateId }) : null
   const best = { fastest: null, cheapest: null }
   const floorKm = Math.max(0, Math.ceil(speed - EPSILON))
   const floorFraction = floorKm / 1000
@@ -254,8 +261,8 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
   const packages = { optimal: 0, boundExhausted: 0, infeasible: 0 }
 
-  // The results the search holds: the ranked list, both frontiers and the fastest and cheapest sets, each once.
-  const retained = () => new Set([...sets, ...frontiers.speed, ...frontiers.rangeKm, best.fastest, best.cheapest].filter(Boolean)).size
+  // The results the search holds: the ranked list, both frontiers, the efficient front and the fastest and cheapest sets, each once.
+  const retained = () => new Set([...sets, ...frontiers.speed, ...frontiers.rangeKm, ...(front ? front.sets() : []), best.fastest, best.cheapest].filter(Boolean)).size
 
   // `pending` is 1 for a step that ends inside the tank passes of a candidate: that candidate is not yet evaluated, and a snapshot of the step leaves it out.
   const countsNow = (pending) => {
@@ -268,7 +275,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
     return { total, evaluated: evaluated - pending, pruned: dropped, unexplored: total - (evaluated - pending) - dropped, feasible: matched, retained: retained(), prunedBy: { ...pruned } }
   }
 
-  const resultOf = (termination, pending) => ({ sets: sets.slice(), lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed.slice(), range: frontiers.rangeKm.slice() }, packages: { ...packages }, counts: countsNow(pending), output: { limit: keep, listed: sets.length, omitted: matched - sets.length }, termination })
+  const resultOf = (termination, pending) => ({ sets: sets.slice(), lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed.slice(), range: frontiers.rangeKm.slice() }, efficient: front ? front.result({ explored: termination === TERMINATION.EXHAUSTED, feasible: matched }) : null, packages: { ...packages }, counts: countsNow(pending), output: { limit: keep, listed: sets.length, omitted: matched - sets.length }, termination })
 
   const stepOf = (pending = 0) => ({ progress: done / designTotal, counts: countsNow(pending), snapshot: () => resultOf(null, pending) })
 
@@ -329,6 +336,9 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
     if (design === null) {
       pruned.kind += perDesign
     } else {
+      // An engine the save stores without a cost is priced at nothing by `cost` below (the ranking has always read it so); the set says it is not known, which the efficient front takes as no figure.
+      const costKnown = Number.isFinite(design.cost)
+
       // The engines this design needs to reach the speed on the bare hull, and the most that fit the share: the counts in between are tried.
       const room = design.power - floorFraction * design.sizeHS
       let first = plan.counts.first
@@ -463,7 +473,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
         const wantsSpeedFrontier = frontierWants(frontiers.speed, 'speed', propulsionShare, finalSpeed)
         const wantsRangeFrontier = frontierWants(frontiers.rangeKm, 'rangeKm', propulsionShare, rangeKm)
 
-        if (wantsRank || wantsFastest || wantsCheapest || wantsSpeedFrontier || wantsRangeFrontier) {
+        if (wantsRank || wantsFastest || wantsCheapest || wantsSpeedFrontier || wantsRangeFrontier || front) {
           const set = {
             engine: design,
             count,
@@ -484,9 +494,15 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
             rangeKm,
             enduranceHours: burnCruise > 0 ? pack.litres / burnCruise : 0,
             cost,
+            ...(costKnown ? null : UNKNOWN_COST),
             crew: pack.crew === null ? null : count * design.crew + pack.crew,
             commercial: design.commercial,
             thermal: thermalSignature({ enginePower: power, stealthRating: design.thermalRating, fraction, sizeHS: totalHS }),
+          }
+
+          if (front) {
+            front.offer(set)
+            work += front.scanned * FRONT_WORK
           }
 
           if (wantsRank) {
