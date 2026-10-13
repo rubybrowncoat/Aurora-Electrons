@@ -204,9 +204,9 @@ export default {
 .help__title {
   min-width: 0;
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 600;
-  line-height: 20px;
+  line-height: calc(20px * var(--ae-font-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -238,8 +238,8 @@ export default {
 
 .help__body {
   padding: 10px 14px 14px;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--ae-font-scale));
+  line-height: calc(17px * var(--ae-font-scale));
 }
 
 .help__lead,
@@ -250,7 +250,7 @@ export default {
 
 .help__heading {
   margin: 12px 0 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 600;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -277,7 +277,7 @@ export default {
 .help__units {
   margin-left: 8px;
   font-family: var(--ae-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   font-weight: 400;
   color: var(--ae-muted);
 }
@@ -299,7 +299,7 @@ export default {
   flex-wrap: wrap;
   gap: 0 10px;
   color: var(--ae-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
 }
 
 .help__status {

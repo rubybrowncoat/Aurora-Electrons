@@ -8,7 +8,8 @@
 import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip } from 'chart.js'
 
 import { activeAppearance } from '../../utilities/appearance'
-import { barPattern, chartTheme, seriesIdentity } from './theme'
+import { whenFontsReady } from '../../utilities/appearance-font'
+import { barPattern, chartFont, chartTheme, seriesIdentity } from './theme'
 
 Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip)
 
@@ -30,11 +31,11 @@ const guides = {
   id: 'guides',
   afterDatasetsDraw (chart, _args, pluginOptions) {
     const { ctx, chartArea, scales } = chart
-    const { color, textColor, crosshair, markers = [], levels = [] } = pluginOptions
+    const { color, textColor, crosshair, markers = [], levels = [], font, size } = pluginOptions
 
     ctx.save()
     ctx.lineWidth = 1
-    ctx.font = '12px Roboto, "Helvetica Neue", Arial, sans-serif'
+    ctx.font = font
 
     levels.forEach((level) => {
       const scale = scales[level.axis || 'y']
@@ -55,7 +56,7 @@ const guides = {
       if (level.label) {
         ctx.fillStyle = textColor
         ctx.textAlign = 'left'
-        ctx.fillText(level.label, chartArea.left + 6, y - 4 < chartArea.top + 12 ? y + 14 : y - 4)
+        ctx.fillText(level.label, chartArea.left + 6, y - 4 < chartArea.top + size ? y + size + 2 : y - 4)
       }
     })
 
@@ -78,7 +79,7 @@ const guides = {
 
         ctx.fillStyle = textColor
         ctx.textAlign = alignRight ? 'right' : 'left'
-        ctx.fillText(marker.label, alignRight ? x - 6 : x + 6, chartArea.top + 12)
+        ctx.fillText(marker.label, alignRight ? x - 6 : x + 6, chartArea.top + size)
       }
     })
 
@@ -177,6 +178,10 @@ export default {
     theme () {
       return chartTheme(this.appearance)
     },
+    // The typeface and text size of the chart text: Chart.js's own (ticks, axis titles, tooltip) and the guides drawn on the canvas. Chart.js reads a font from the option of each element, so every one of them names it.
+    typeface () {
+      return chartFont()
+    },
   },
   watch: {
     data () {
@@ -188,16 +193,20 @@ export default {
     appearance () {
       this.update()
     },
+    typeface () {
+      this.build()
+    },
+  },
+  created () {
+    this.chart = null
+    this.builds = 0
   },
   mounted () {
-    this.chart = new Chart(this.$refs.canvas, {
-      type: this.type,
-      data: this.plainData(),
-      options: this.resolvedOptions(),
-      plugins: [guides, series],
-    })
+    this.build()
   },
   beforeDestroy () {
+    this.builds++
+
     if (this.chart) {
       this.chart.destroy()
       this.chart = null
@@ -230,11 +239,13 @@ export default {
     resolvedOptions () {
       const { ink, inkMuted, border, surface, tooltip, tooltipInk } = this.theme
       const line = this.type === 'line'
+      const { family, size, font } = this.typeface
+      const text = { family, size: size(12) }
       const axis = {
         grid: { color: `${border}99`, drawTicks: false },
         border: { color: border },
-        ticks: { color: inkMuted, padding: 6 },
-        title: { color: inkMuted },
+        ticks: { color: inkMuted, padding: 6, font: text },
+        title: { color: inkMuted, font: text },
       }
 
       return merge({
@@ -242,7 +253,7 @@ export default {
         maintainAspectRatio: false,
         animation: false,
         color: ink,
-        font: { family: 'Roboto, "Helvetica Neue", Arial, sans-serif', size: 12 },
+        font: text,
         interaction: line ? { mode: 'index', intersect: false } : { mode: 'nearest', intersect: true },
         scales: { x: axis, y: axis },
         plugins: {
@@ -251,6 +262,9 @@ export default {
             backgroundColor: tooltip,
             titleColor: tooltipInk,
             bodyColor: tooltipInk,
+            titleFont: text,
+            bodyFont: text,
+            footerFont: text,
             padding: 8,
             cornerRadius: 4,
             boxWidth: 12,
@@ -258,10 +272,31 @@ export default {
             usePointStyle: false,
             callbacks: { labelColor },
           },
-          guides: { color: inkMuted, textColor: inkMuted, crosshair: line, markers: [], levels: [] },
+          guides: { color: inkMuted, textColor: inkMuted, crosshair: line, markers: [], levels: [], font: font(12), size: size(12) },
           series: { surface },
         },
       }, this.options)
+    },
+    // Chart.js keeps the widths it measured under the font string of each label, and a face that loads afterwards leaves the string as it was. So the chart is built once the faces are ready, and built again when the typeface or a face changes; the one on screen stays until its replacement is ready.
+    async build () {
+      const build = ++this.builds
+
+      await whenFontsReady()
+
+      if (build !== this.builds) {
+        return
+      }
+
+      if (this.chart) {
+        this.chart.destroy()
+      }
+
+      this.chart = new Chart(this.$refs.canvas, {
+        type: this.type,
+        data: this.plainData(),
+        options: this.resolvedOptions(),
+        plugins: [guides, series],
+      })
     },
     update () {
       if (!this.chart) {

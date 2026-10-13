@@ -118,7 +118,7 @@ export default {
   padding-inline: 8px;
   border: 1px solid var(--ae-border);
   border-radius: 11px;
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -147,7 +147,7 @@ export default {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 14px;
+  line-height: calc(14px * var(--ae-font-scale));
 }
 
 .trail__step--now {

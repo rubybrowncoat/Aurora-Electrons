@@ -3,14 +3,14 @@
     <v-navigation-drawer app permanent mini-variant mini-variant-width="80" class="rail">
       <div class="rail__empire" :class="{ 'rail__empire--active': onEmpiresPage, 'rail__empire--peek': flyoutId === EMPIRES_ID, 'rail__empire--invite': !RaceID && !onEmpiresPage }" :style="neutralStyle" role="link" tabindex="0" @click="goEmpires" @keydown.enter="goEmpires" @mouseenter="onEmpiresPage || peekSection(EMPIRES_ID)" @mouseleave="leaveRail">
         <empire-avatar :race="selectedRace" :size="40" />
-        <div class="rail__label">Empires</div>
+        <div class="rail__label" title="Empires">Empires</div>
       </div>
 
       <div v-for="section in railSections" :key="section.id" class="rail__item" :class="{ 'rail__item--active': RaceID && currentSection === section, 'rail__item--peek': flyoutId === section.id, 'rail__item--disabled': !RaceID }" :style="section.style" role="link" :tabindex="RaceID ? 0 : -1" @click="goSection(section)" @keydown.enter="goSection(section)" @mouseenter="RaceID && peekSection(section.id)" @mouseleave="leaveRail">
         <div class="rail__pill">
           <v-icon>{{ section.icon }}</v-icon>
         </div>
-        <div class="rail__label">{{ section.title }}</div>
+        <div class="rail__label" :title="section.title">{{ section.title }}</div>
       </div>
 
       <div class="rail__spacer" />
@@ -19,14 +19,14 @@
         <div class="rail__pill">
           <v-icon>mdi-wrench</v-icon>
         </div>
-        <div class="rail__label">Settings</div>
+        <div class="rail__label" title="Settings">Settings</div>
       </div>
 
       <div class="rail__item" :class="{ 'rail__item--active': page.route === '/about' }" :style="neutralStyle" role="link" tabindex="0" @click="go('/about')" @keydown.enter="go('/about')">
         <div class="rail__pill">
           <v-icon>mdi-information-outline</v-icon>
         </div>
-        <div class="rail__label">About</div>
+        <div class="rail__label" title="About">About</div>
       </div>
     </v-navigation-drawer>
 
@@ -448,10 +448,8 @@ export default {
   }
 }
 
-// The colour custom properties (--ae-bg, --ae-chrome, --ae-card, --ae-border, --ae-ink, --ae-muted, --ae-primary, --ae-hover) are set inline on the root from the appearance in force (utilities/appearance.js).
+// The monospace of keys and figures (--ae-mono) comes from the typeface choice on the root element (utilities/appearance-font.js). The colour custom properties (--ae-bg, --ae-chrome, --ae-card, --ae-border, --ae-ink, --ae-muted, --ae-primary, --ae-hover) are set inline on the root from the appearance in force (utilities/appearance.js).
 .v-application {
-  --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
-
   // Both theme classes, to outrank Vuetify's own kbd styling.
   &.theme--light kbd,
   &.theme--dark kbd {
@@ -462,7 +460,7 @@ export default {
     background: var(--ae-bg);
     color: var(--ae-muted);
     font-family: var(--ae-mono);
-    font-size: 11px;
+    font-size: calc(11px * var(--ae-font-scale));
   }
 }
 </style>
@@ -590,8 +588,14 @@ export default {
   transition: background .15s ease;
 }
 
+// The label box keeps the 16.5 px line it has at 100 % (1.5 times 11 px), so the rail still fits its nine sections, Settings and About in a 720 px window at any text size. The rail is 80 px wide at every size, so a name wider than its entry (a wide typeface at a large size) ends in an ellipsis, and its title carries the whole name.
 .rail__label {
-  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ae-font-scale));
+  line-height: 16.5px;
   font-weight: 500;
   letter-spacing: .02em;
 }
@@ -703,7 +707,7 @@ export default {
   border: 1px solid var(--ae-border);
   border-radius: 18px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   color: var(--ae-muted);
   white-space: nowrap;
   flex: none;
@@ -723,7 +727,7 @@ export default {
 }
 
 .breadcrumb__section {
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 500;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -738,7 +742,7 @@ export default {
 
 .breadcrumb__title {
   overflow: hidden;
-  font-size: 20px;
+  font-size: calc(20px * var(--ae-font-scale));
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--ae-ink);

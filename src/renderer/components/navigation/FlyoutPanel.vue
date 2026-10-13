@@ -76,7 +76,7 @@ export default {
 }
 
 .flyout-panel__title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -85,7 +85,7 @@ export default {
 
 .flyout-panel__meta {
   font-family: var(--ae-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 
@@ -96,7 +96,7 @@ export default {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 </style>

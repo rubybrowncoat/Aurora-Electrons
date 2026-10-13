@@ -69,7 +69,7 @@ export default {
 <style lang="scss" scoped>
 .empire-list__game {
   padding: 12px 10px 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   font-weight: 500;
   letter-spacing: .04em;
   color: var(--ae-muted);
@@ -112,13 +112,13 @@ export default {
 
 .empire-list__title {
   min-width: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 500;
 }
 
 .empire-list__details {
   grid-column: 2 / 4;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   line-height: 1.4;
   color: var(--ae-muted);
 }

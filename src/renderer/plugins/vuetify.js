@@ -2,6 +2,7 @@ import Vue from 'vue'
 import Vuetify from 'vuetify'
 import 'vuetify/dist/vuetify.min.css'
 import 'roboto-fontface/css/roboto/roboto-fontface.css'
+import 'roboto-fontface/css/roboto-condensed/roboto-condensed-fontface.css'
 import '../styles/appearance.scss'
 
 import { keyboardControls } from '../components/page/keyboard-controls'

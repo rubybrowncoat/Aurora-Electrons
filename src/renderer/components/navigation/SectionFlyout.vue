@@ -96,13 +96,13 @@ export default {
 }
 
 .section-flyout__name {
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 500;
 }
 
 .section-flyout__blurb {
   grid-column: 2 / 4;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   line-height: 1.4;
   color: var(--ae-muted);
 }
@@ -112,8 +112,8 @@ export default {
   min-height: 16px;
   padding-top: 4px;
   font-family: var(--ae-mono);
-  font-size: 11px;
-  line-height: 12px;
+  font-size: calc(11px * var(--ae-font-scale));
+  line-height: calc(12px * var(--ae-font-scale));
   color: var(--ae-ink);
   opacity: .8;
 }

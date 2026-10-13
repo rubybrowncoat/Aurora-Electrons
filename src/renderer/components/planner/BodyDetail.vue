@@ -347,8 +347,8 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
-    line-height: 22px;
+    font-size: calc(12px * var(--ae-font-scale));
+    line-height: calc(22px * var(--ae-font-scale));
   }
 
   .factor-label {
@@ -398,8 +398,8 @@ export default {
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    font-size: 13px;
-    line-height: 22px;
+    font-size: calc(13px * var(--ae-font-scale));
+    line-height: calc(22px * var(--ae-font-scale));
     font-variant-numeric: tabular-nums;
   }
 

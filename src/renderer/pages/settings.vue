@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and the colour preset. Use it to set the app up, to preview a preset on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the colour preset, the typeface and the text size. Use it to set the app up, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting setting--block">
@@ -49,8 +49,9 @@
                   </ul>
                 </v-alert>
 
-                <appearance-file v-if="detail" :entry="detail" :kept="detailKept" />
+                <appearance-file v-if="detail" :entry="detail" :kept="detailKept" @use-font="useFont" />
               </div>
+              <font-choice class="setting setting--block" :config="config" @changed="reinstantiateConfig" />
               <div class="setting">
                 <div class="setting__text">
                   <div class="body-2">Thousands separator</div>
@@ -73,7 +74,7 @@
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
 
@@ -230,11 +231,13 @@ import { mapActions, mapGetters, mapState } from 'vuex'
 import Config from 'electron-store'
 
 import AppearanceFile from '../components/settings/AppearanceFile.vue'
+import FontChoice from '../components/settings/FontChoice.vue'
 import PresetCard from '../components/settings/PresetCard.vue'
 import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
 import { APPEARANCE_KEY, CUSTOM_ID, CUSTOM_KEY, DEFAULT_PRESET_ID, DRAFT_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
 import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
+import { FONT_KEY, loadFont, previewFont, readFont } from '../utilities/appearance-font'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 import { declaredViews } from '../mixins/persisted-view'
 import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportName, parseBundle, planImport, sameValue, shorten, undoImport, validBackup } from '../utilities/preferences'
@@ -242,7 +245,7 @@ import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportNa
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
 // The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
-const APP_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
+const APP_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
 // What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
 const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
 
@@ -307,7 +310,7 @@ const download = (text, name) => {
 
 export default {
   name: 'SettingsPage',
-  components: { AppearanceFile, PresetCard, PresetReference },
+  components: { AppearanceFile, FontChoice, PresetCard, PresetReference },
   mixins: [countFormat],
   data() {
     return {
@@ -626,6 +629,11 @@ export default {
       cancelPreview()
     },
 
+    // The typeface an appearance file names, previewed through the same choice as the typeface list; Apply there keeps it.
+    useFont(id) {
+      previewFont({ family: id })
+    },
+
     // The label of a kind of failure of an appearance file.
     kindLabel(kind) {
       return KIND_LABELS[kind]
@@ -736,7 +744,7 @@ export default {
       this.busy = true
 
       try {
-        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: listAppearances().map(({ id }) => id) }, separators: SEPARATORS })
+        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: listAppearances().map(({ id }) => id) }, font: { key: FONT_KEY, read: readFont }, separators: SEPARATORS })
       } catch (error) {
         console.error("Couldn't load the pages' declared preferences", error)
         this.activateSnackbar({ text: "Couldn't load the list of preferences that can be exported", color: 'error' })
@@ -854,8 +862,12 @@ export default {
       this.activateSnackbar({ text: `${this.count(result.restored)} ${values(result.restored)} put back`, color: 'success' })
     },
 
-    // The colour preset in force follows the settings once they changed under it, and every reader takes a new settings instance.
+    // The colour preset and the typeface in force follow the settings once they changed under them, and every reader takes a new settings instance.
     afterWrite(keys) {
+      if (keys.includes(FONT_KEY)) {
+        loadFont(this.config)
+      }
+
       if (keys.includes(APPEARANCE_KEY)) {
         const id = this.config.get(APPEARANCE_KEY)
 

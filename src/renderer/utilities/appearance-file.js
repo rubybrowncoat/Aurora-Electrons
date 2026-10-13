@@ -1,4 +1,5 @@
 import { measureAppearance, over, parseColor, ratio } from './appearance-contrast'
+import { FALLBACK, FONT_FAMILIES, familyByName, familyOf } from './appearance-font'
 
 // The Electrons appearance file: the app's own data-only exchange format for the colours of an appearance (utilities/appearance.js). It is not an Aurora game file and no part of the game reads or writes it. One JSON object, no CSS, no URLs, no expressions, nothing that is run; `parseAppearanceFile` accepts only the members listed here and builds a new object from the values it has checked, so nothing of the text itself reaches a style or a script.
 //
@@ -6,7 +7,7 @@ import { measureAppearance, over, parseColor, ratio } from './appearance-contras
 // - `format` (always 'aurora-electrons-appearance'), `version` (always 1), `name` and `mode` ('light' or 'dark', the base theme of Vuetify's own components): required.
 // - `description` and `author`: optional text.
 // - `base`: optional id of a built-in preset whose values fill every role the file leaves out; the baseline preset of the mode when absent. A base takes the mode of the file.
-// - `font`: optional, `{ family }`. The only family the app draws in is Roboto (FONT_FAMILIES); another family is kept and reported, not drawn.
+// - `font`: optional, `{ family }`. The family is looked up among the typefaces the app offers (FONT_FAMILIES of utilities/appearance-font.js, by name); one that is not offered is kept and reported, not drawn. Reading a file never changes the typeface in force.
 // - `provenance`: optional, where the values came from (`app`, `exportedAt`, `origin` and the `reference` an adapted preset carries), written on export and shown on import.
 // - `roles`: optional, the colours, nested like a resolved appearance (ROLES lists every group and key). Each role is optional; one the file leaves out takes the base's value and is reported as a default.
 //
@@ -19,7 +20,6 @@ export const FILE_VERSION = 1
 export const MAX_BYTES = 64 * 1024
 export const MAX_ERRORS = 100
 export const LIMITS = { name: 60, description: 280, author: 80, family: 60, app: 60, exportedAt: 40, id: 40, title: 120, source: 200 }
-export const FONT_FAMILIES = ['Roboto']
 export const MODES = ['light', 'dark']
 export const LINK_LINES = ['underline']
 export const ORIGIN_KINDS = ['built-in', 'imported']
@@ -410,7 +410,8 @@ export const parseAppearanceFile = (text, { builtIn, baselines }) => {
     document.roles = keptRoles
   }
 
-  const family = font ? font.family : FONT_FAMILIES[0]
+  const family = font ? font.family : familyOf(FALLBACK).name
+  const offered = font ? familyByName(font.family) : null
 
   return {
     ok: true,
@@ -420,15 +421,15 @@ export const parseAppearanceFile = (text, { builtIn, baselines }) => {
     description: document.description || '',
     author: document.author || '',
     base: { id: baseId, explicit: Boolean(baseAppearance) },
-    font: { family, explicit: Boolean(font), supported: FONT_FAMILIES.includes(family) },
+    font: { family, explicit: Boolean(font), supported: !font || Boolean(offered), choice: offered ? offered.id : null },
     provenance: document.provenance || null,
     roles,
     defaults,
   }
 }
 
-// What an unsupported font family means for the app, as a sentence for the person applying the file, or null for a family the app draws in.
-export const fontNotice = (font) => (font.supported ? null : `The file names the font family "${font.family}". The app draws every text in ${FONT_FAMILIES.join(' or ')} and does not load fonts from a file, so the family is kept in the file and not drawn.`)
+// What an unsupported font family means for the app, as a sentence for the person applying the file, or null for a family the app offers.
+export const fontNotice = (font) => (font.supported ? null : `The file names the font family "${font.family}", which is not one of the typefaces offered (${FONT_FAMILIES.map((family) => family.name).join(', ')}). The app does not load fonts from a file, so the family is kept in the file and not drawn, and the typeface in force does not change.`)
 
 // The contrast of a resolved appearance, measured with the tables scripts/check-contrast.js uses (utilities/appearance-contrast.js): `findings` are the measurements under their minimum (`{ label, foreground, surface, ratio, minimum }`), `blocking` the page's ink and Vuetify's text ink on the page background when under 3:1, which no one can read, and `checked` how many were measured. What needs the compiled stylesheet, the colour-vision simulation or the map's menu is left to that script.
 export const BLOCKING_MINIMUM = 3
@@ -460,8 +461,8 @@ export const contrastReport = (appearance, { baseline = null } = {}) => {
 // The file name an exported appearance is saved under; it names the app's own format and no game.
 export const appearanceFileName = (name) => `aurora-electrons-appearance-${String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'custom'}.json`
 
-// The file of a resolved appearance, a built-in preset or an imported one (`appearance.file`): every role it has, its metadata and its provenance. `now` is the time of the export. Exporting a file that was imported gives the roles as they are in force, defaults included, and carries its base, description, author, font and reference; the origin and the time are the export's own. The result is a new object.
-export const buildAppearanceFile = (appearance, { now = Date.now() } = {}) => {
+// The file of a resolved appearance, a built-in preset or an imported one (`appearance.file`): every role it has, its metadata and its provenance. `now` is the time of the export and `typeface` the name of the typeface in force, which the file names unless the appearance was imported from a file that named one. Exporting a file that was imported gives the roles as they are in force, defaults included, and carries its base, description, author, font and reference; the origin and the time are the export's own. The result is a new object.
+export const buildAppearanceFile = (appearance, { now = Date.now(), typeface = familyOf(FALLBACK).name } = {}) => {
   const imported = appearance.file
   const roles = {}
 
@@ -486,7 +487,7 @@ export const buildAppearanceFile = (appearance, { now = Date.now() } = {}) => {
     ...(imported && imported.author ? { author: imported.author } : {}),
     mode: appearance.mode,
     base: imported ? imported.base.id : appearance.id,
-    font: { family: imported ? imported.font.family : FONT_FAMILIES[0] },
+    font: { family: imported && imported.font.explicit ? imported.font.family : typeface },
     provenance: {
       app: 'Aurora Electrons',
       exportedAt: new Date(now).toISOString(),

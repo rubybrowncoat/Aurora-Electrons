@@ -11,7 +11,7 @@
 
 <script>
 import { activeAppearance } from '../../utilities/appearance'
-import { chartTheme } from '../charts/theme'
+import { chartTheme, mapFont } from '../charts/theme'
 import { wheelZoom } from '../../utilities/map-minimap'
 import { placeUnplaced } from '../../utilities/map-placement'
 
@@ -24,7 +24,7 @@ const BUTTON_ZOOM = 1.5
 const DRAG_PIXELS = 4
 // Pixels round a marker that still count as pointing at it, so the smallest stay easy to click.
 const HIT_SLACK = 3
-const LABEL_FONT = "11px Roboto, 'Helvetica Neue', Arial, sans-serif"
+const LABEL_SIZE = 11
 const LABEL_CELL = 64
 
 // The known systems at their places on the game's galactic map (FCT_RaceSysSurvey.Xcor/Ycor), joined by their jump links; systems the game left at its centre get a place beside a linked system. The wheel zooms round the pointer (faster with Shift), dragging pans, and the buttons zoom or fit the map again. Sizes and strokes are in screen pixels whatever the zoom. The map draws on a canvas: as SVG, a few thousand systems made every zoom step restyle and lay out the whole drawing for a second or more. Nodes draw in the order given, so put the ones that matter last: the last one under the pointer is the one clicked, its `title` shows on hover, and its name wins where names would cover each other.
@@ -57,6 +57,11 @@ export default {
 
     theme() {
       return chartTheme(this.appearance)
+    },
+
+    // The typeface and text size of the names drawn on the map.
+    typeface() {
+      return mapFont()
     },
 
     placed() {
@@ -152,11 +157,12 @@ export default {
     this.frameQueued = false
     this.wheelFactor = 1
     this.wheelAt = null
-    // Label widths by name, measured once in LABEL_FONT.
+    // Label widths by name, measured once in the label font; they are measured again when the font changes.
     this.labelWidths = new Map()
+    this.labelTypeface = null
   },
   mounted() {
-    this.unwatchDrawing = this.$watch(() => [this.nodes, this.drawnLinks, this.routeLine, this.routeColor, this.selected, this.appearance.key], () => this.queueFrame())
+    this.unwatchDrawing = this.$watch(() => [this.nodes, this.drawnLinks, this.routeLine, this.routeColor, this.selected, this.appearance.key, this.typeface], () => this.queueFrame())
     // The first observation comes once the page is laid out, with the canvas's size.
     this.resizeObserver = new ResizeObserver(([entry]) => this.resize(entry.contentRect))
     this.resizeObserver.observe(this.$refs.canvas)
@@ -293,7 +299,7 @@ export default {
         }
       })
 
-      context.font = LABEL_FONT
+      context.font = this.labelFontOf()
       context.textAlign = 'center'
       context.lineWidth = 3
       context.strokeStyle = theme.surface
@@ -302,6 +308,16 @@ export default {
         context.strokeText(name, x, y)
         context.fillText(name, x, y)
       })
+    },
+
+    // The canvas font of the names. The measured widths belong to one typeface object: it is a new one at a change of typeface or text size and when a face has finished loading (the font string is the same then, the metrics are not), and either drops the widths.
+    labelFontOf() {
+      if (this.typeface !== this.labelTypeface) {
+        this.labelTypeface = this.typeface
+        this.labelWidths.clear()
+      }
+
+      return this.typeface.font(LABEL_SIZE)
     },
 
     // The names go over the systems, the ones of systems drawn last first, each only where it covers no name already placed: zoomed out on a crowded map, only some show, and zooming in brings in the rest. Names already placed are kept in cells of LABEL_CELL pixels, to check only the ones nearby.
@@ -328,7 +344,7 @@ export default {
         }
 
         const half = this.labelWidths.get(label.name) / 2 + 2
-        const box = { x1: label.x - half, y1: label.y - 11, x2: label.x + half, y2: label.y + 3 }
+        const box = { x1: label.x - half, y1: label.y - this.typeface.size(11), x2: label.x + half, y2: label.y + this.typeface.size(3) }
         const keys = cellsOf(box)
         const covers = keys.some((key) => (cells.get(key) || []).some((other) => box.x1 < other.x2 && other.x1 < box.x2 && box.y1 < other.y2 && other.y1 < box.y2))
 

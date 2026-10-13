@@ -1,5 +1,6 @@
 import Vue from 'vue'
 import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appearance-file'
+import { appliedFont, familyOf, loadFont } from './appearance-font'
 
 // The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
 //
@@ -361,8 +362,8 @@ export const importAppearanceFile = (text) => {
   return { ok: true, entry: imported.draft }
 }
 
-// The file of a preset or an imported appearance (an id of `custom` or `custom-draft`), as an object ready to be written as JSON, or null for an id that names none. `now` is the time of the export.
-export const exportAppearanceFile = (id, now = Date.now()) => (isKnown(id) ? buildAppearanceFile(resolveAppearance(id), { now }) : null)
+// The file of a preset or an imported appearance (an id of `custom` or `custom-draft`), as an object ready to be written as JSON, or null for an id that names none. `now` is the time of the export; the file names the typeface in force (utilities/appearance-font.js) unless it is an imported file that named one of its own.
+export const exportAppearanceFile = (id, now = Date.now()) => (isKnown(id) ? buildAppearanceFile(resolveAppearance(id), { now, typeface: familyOf(appliedFont().family).name }) : null)
 
 // Puts a preset in force without keeping it, so every page shows it (Vuetify's theme follows through the watcher in plugins/vuetify.js). An unknown id changes nothing. Writes nothing.
 export const previewPreset = (id) => {
@@ -442,8 +443,10 @@ export const unsupportedPresetId = (config) => {
   return id === undefined || isKnown(id) ? null : id
 }
 
-// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. The kept imported appearance is read back through the parser whenever there is one, so the card is there beside the presets; one that no longer passes (a file from a newer version, a damaged value) is not loaded, is left in the settings as it is and is reported by `importedAppearances().problem`. `config` is the settings store.
+// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. The kept imported appearance is read back through the parser whenever there is one, so the card is there beside the presets; one that no longer passes (a file from a newer version, a damaged value) is not loaded, is left in the settings as it is and is reported by `importedAppearances().problem`. The typeface and text size are read too (`loadFont`). `config` is the settings store.
 export const loadAppearance = (config) => {
+  loadFont(config)
+
   const stored = config.get(APPEARANCE_KEY)
   const legacy = config.get('darkMode')
   const document = config.get(CUSTOM_KEY)

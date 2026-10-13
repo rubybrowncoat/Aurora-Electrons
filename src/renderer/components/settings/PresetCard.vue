@@ -148,20 +148,20 @@ export default {
 }
 
 .preset__name {
-  font-size: 15px;
+  font-size: calc(15px * var(--ae-font-scale));
   font-weight: 500;
 }
 
 .preset__mode {
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 
 .preset__status {
   margin-left: auto;
   padding: 0 8px;
-  font-size: 11px;
-  line-height: 18px;
+  font-size: calc(11px * var(--ae-font-scale));
+  line-height: calc(18px * var(--ae-font-scale));
   color: var(--ae-primary);
   border: 1px solid var(--ae-primary);
   border-radius: 9px;
@@ -177,7 +177,7 @@ export default {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   line-height: 1.3;
   color: var(--ae-ink);
   background: var(--ae-bg);
@@ -202,7 +202,7 @@ export default {
   border-radius: 10px;
 
   .mdi {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     color: var(--sc);
   }
 }
@@ -256,7 +256,7 @@ export default {
   gap: 3px;
 
   .mdi {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
   }
 }
 

@@ -786,7 +786,7 @@ export default {
 
   .new-label {
     white-space: nowrap;
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
     border: 1px solid currentColor;
     border-radius: 4px;
     padding: 0 4px;

@@ -71,7 +71,7 @@ export default {
 .capability-state__list {
   margin: 8px 0 0;
   padding-inline-start: 20px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ae-font-scale));
   line-height: 1.6;
 }
 </style>

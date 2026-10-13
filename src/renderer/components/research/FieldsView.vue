@@ -501,7 +501,7 @@ export default {
     align-items: center;
     gap: 8px;
     margin-bottom: 6px;
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     font-weight: 500;
   }
 
@@ -511,13 +511,13 @@ export default {
   }
 
   .rail-now {
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
     font-weight: 400;
     color: var(--st-available);
   }
 
   .abbreviation {
-    font-size: 11px;
+    font-size: calc(11px * var(--ae-font-scale));
     font-weight: 700;
     letter-spacing: 0.04em;
     padding: 1px 5px;
@@ -552,7 +552,7 @@ export default {
   }
 
   .panel-title {
-    font-size: 15px;
+    font-size: calc(15px * var(--ae-font-scale));
     font-weight: 500;
   }
 
@@ -561,14 +561,14 @@ export default {
     margin-left: 6px;
     padding: 0 8px;
     border-radius: 10px;
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
     font-weight: 500;
     background: var(--sc-soft);
   }
 
   .empty {
     padding: 4px 0 8px;
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     opacity: 0.7;
   }
 
@@ -589,7 +589,7 @@ export default {
     grid-column: 1 / -1;
     padding: 2px 0 2px 28px;
     margin-top: -6px;
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
   }
 
   .project-name {
@@ -628,7 +628,7 @@ export default {
   }
 
   .need {
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
     white-space: nowrap;
   }
 

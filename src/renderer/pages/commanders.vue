@@ -1065,15 +1065,15 @@ export default {
     margin: 2px 4px 2px 0;
     padding: 0 6px;
     border-radius: 10px;
-    font-size: 12px;
-    line-height: 20px;
+    font-size: calc(12px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
     white-space: nowrap;
     background: var(--ae-track-soft);
   }
 
   .career-line {
-    font-size: 13px;
-    line-height: 20px;
+    font-size: calc(13px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
   }
 
   .career-date {

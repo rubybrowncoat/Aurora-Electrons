@@ -19,7 +19,7 @@ let instance = 0
 
 // The three modules in a copy of their own (`fresh` loads another from the same folder, for a start of the app after this one), so that each check starts with no draft, no kept file and the default preset applied. The stub of Vue differs by a comment, which gives appearance.js another source and so another module.
 const load = async (directory = utilitiesDirectory) => {
-  const loaded = await loadUtilities(['appearance', 'appearance-file', 'appearance-contrast'], { directory, stubs: { vue: `export default { observable: (value) => value }\n// instance ${instance++}` } })
+  const loaded = await loadUtilities(['appearance', 'appearance-file', 'appearance-contrast'], { directory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value }, delete: (target, key) => { delete target[key] } }\n// instance ${instance++}` } })
 
   return { appearance: loaded.appearance, file: loaded['appearance-file'], contrast: loaded['appearance-contrast'], fresh: () => load(directory) }
 }
@@ -158,7 +158,7 @@ const CHECKS = [
       const reference = original.reference ? { title: original.reference.title, source: Object.fromEntries(['name', 'author', 'repository', 'revision', 'revisionDate', 'license'].map((key) => [key, original.reference.source[key]])) } : undefined
       const problems = [
         same(rolesOf(ctx, read), rolesOf(ctx, original)),
-        same([read.name, read.mode, read.file.base, read.file.font, read.file.defaults.length], [original.name, original.mode, { id, explicit: true }, { family: 'Roboto', explicit: true, supported: true }, 0]),
+        same([read.name, read.mode, read.file.base, read.file.font, read.file.defaults.length], [original.name, original.mode, { id, explicit: true }, { family: 'Roboto', explicit: true, supported: true, choice: 'roboto' }, 0]),
         same(read.file.provenance.reference, reference),
         same(read.file.provenance.origin, { kind: 'built-in', id, name: original.name, version: original.version }),
         same(result.entry.report.findings.length, 0),
@@ -419,10 +419,16 @@ const CHECKS = [
 
     const font = parse(ctx, document({ font: { family: 'Comic Sans MS' } }))
     const roboto = parse(ctx, document({ font: { family: 'Roboto' } }))
+    const condensed = parse(ctx, document({ font: { family: 'roboto condensed' } }))
+    const verdana = parse(ctx, document({ font: { family: 'Verdana' } }))
     const none = parse(ctx, document())
 
-    if (!font.ok || font.font.supported || !/Comic Sans MS/.test(ctx.file.fontNotice(font.font) || '') || ctx.file.fontNotice(roboto.font) !== null || ctx.file.fontNotice(none.font) !== null || none.font.explicit) {
+    if (!font.ok || font.font.supported || font.font.choice !== null || !/Comic Sans MS/.test(ctx.file.fontNotice(font.font) || '') || ctx.file.fontNotice(roboto.font) !== null || ctx.file.fontNotice(none.font) !== null || none.font.explicit) {
       return 'the font notice'
+    }
+
+    if (!condensed.ok || condensed.font.choice !== 'roboto-condensed' || !verdana.ok || verdana.font.choice !== 'verdana' || ctx.file.fontNotice(condensed.font) !== null || ctx.file.fontNotice(verdana.font) !== null) {
+      return `a family named like one of the choices: ${short([condensed.font, verdana.font])}`
     }
 
     ctx.appearance.importAppearanceFile(JSON.stringify(document({ font: { family: 'Comic Sans MS' } })))
@@ -669,7 +675,8 @@ const MUTATIONS = [
   ['the contrast check finds nothing', FILE, 'const findings = labelled.filter((row) => !row.pass)', 'const findings = labelled.filter((row) => false)'],
   ['an unreadable body ink not blocking', FILE, 'return value < BLOCKING_MINIMUM ?', 'return false ?'],
   ['an unsupported font not explained', FILE, 'export const fontNotice = (font) => (font.supported ? null :', 'export const fontNotice = (font) => (true ? null :'],
-  ['the font family not kept on export', FILE, 'font: { family: imported ? imported.font.family : FONT_FAMILIES[0] },', 'font: { family: FONT_FAMILIES[0] },'],
+  ['the font family not kept on export', FILE, 'font: { family: imported && imported.font.explicit ? imported.font.family : typeface },', 'font: { family: typeface },'],
+  ['a font name not resolved through the choices', 'appearance-font.js', 'family.id === wanted || family.name.toLowerCase() === wanted', 'family.id === wanted'],
   ['the reference dropped on export', FILE, '...(reference ? { reference: JSON.parse(JSON.stringify(reference)) } : {}),', ''],
   ['the toolbar and snackbar inks not measured on the fills', FILE, '    ...measured.named,\n', ''],
   ['a baseline exemption that covers every ink', 'appearance-contrast.js', 'appearance.inks[token] === baseline.inks[token] && COLOUR_FILLS', 'COLOUR_FILLS'],

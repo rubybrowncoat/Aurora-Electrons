@@ -254,7 +254,7 @@ import cxtmenu from 'cytoscape-cxtmenu'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
 
-import { chartTheme, markerPoints, seriesIdentity } from '../components/charts/theme'
+import { chartTheme, mapFont, markerPoints, seriesIdentity } from '../components/charts/theme'
 import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -264,6 +264,8 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
 import { activeAppearance, MAP_MENU } from '../utilities/appearance'
+import { fontRoles, whenFontsReady } from '../utilities/appearance-font'
+import { glyphFace } from '../utilities/glyph-faces'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { loadJumpPoints } from '../utilities/jump-graph'
@@ -496,20 +498,32 @@ const ringPattern = (size, scale, { dash, gap, least }) => {
 }
 
 const markerImages = new Map()
+// The text size, family and face the images in `markerImages` were drawn for. Each image with a count carries the whole face, so the images of a typeface or size no longer in force are dropped when another is drawn.
+let markerKind = null
 
 // A clear pixel, for a marker with nothing over its fill. Cytoscape restyles a node without an image each time it draws it, which throws away the picture of the whole map it keeps for panning and zooming, so every frame would draw each system and link again.
 const CLEAR_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
 // What a marker carries over its fill: `spots` small dots round the rim (unexplored jump points, or bodies with ground survey potential), a lock on a pinned system, and `glyphs` round the outside (`{ key, path, offset, color, hollow }`, or a count as `text` at its own `angle`), which the image then has MARK_ROOM for on every side.
-const markerImage = (size, spots, color, pinned, glyphs, surface) => {
+// `type` is `{ family, scale, face }`: the CSS family list the glyphs' counts are written in (the `svg` role of utilities/appearance-font.js), the text size, which scales a glyph with its disc, ring and room, and the data URI of the bold face a bundled family brings (null for a system family, which the image finds by its name).
+const markerImage = (size, spots, color, pinned, glyphs, surface, type) => {
   if (!spots && !pinned && !glyphs.length) {
     return CLEAR_IMAGE
   }
 
-  const key = `${size}|${spots}|${color}|${pinned}|${glyphs.map((glyph) => glyph.key).join(',')}|${surface}`
+  const kind = `${type.scale}|${type.family}|${type.face ? 'face' : ''}`
+
+  if (kind !== markerKind) {
+    markerImages.clear()
+    markerKind = kind
+  }
+
+  const key = `${size}|${spots}|${color}|${pinned}|${glyphs.map((glyph) => glyph.key).join(',')}|${surface}|${glyphs.length ? `${type.scale}|${glyphs.some((glyph) => glyph.text) ? `${type.family}|${type.face ? 'face' : ''}` : ''}` : ''}`
 
   if (!markerImages.has(key)) {
-    const room = glyphs.length ? MARK_ROOM : 0
+    const unit = type.scale
+    const room = glyphs.length ? MARK_ROOM * unit : 0
+    const radius = GLYPH_RADIUS * unit
     const centre = size / 2 + room
     const width = size + 2 * room
     let content = ''
@@ -527,6 +541,7 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       content += `<g transform="translate(${centre - lock / 2}, ${centre - lock / 2}) scale(${lock / 24})"><path fill="black" stroke="black" stroke-width="3" d="${LOCK_PATH}" /><path fill="white" d="${LOCK_PATH}" /></g>`
     }
 
+    const stack = (type.face ? `ae-glyph, ${type.family}` : type.family).replace(/"/g, "'")
     let next = 0
 
     glyphs.forEach((glyph) => {
@@ -537,18 +552,18 @@ const markerImage = (size, spots, color, pinned, glyphs, surface) => {
       }
 
       const angle = (degrees * Math.PI) / 180
-      const x = centre + (size / 2 + GLYPH_RING) * Math.sin(angle)
-      const y = centre - (size / 2 + GLYPH_RING) * Math.cos(angle)
-      const icon = GLYPH_RADIUS - 2
+      const x = centre + (size / 2 + GLYPH_RING * unit) * Math.sin(angle)
+      const y = centre - (size / 2 + GLYPH_RING * unit) * Math.cos(angle)
+      const icon = radius - 2 * unit
       const scale = (2 * icon) / 24
       const [dx, dy] = glyph.offset || [0, 0]
       const ink = glyph.hollow ? glyph.color : surface
 
-      content += `<circle cx="${x}" cy="${y}" r="${GLYPH_RADIUS}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="1.5" />`
-      content += glyph.text ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Roboto, Arial, sans-serif" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1]}" fill="${ink}">${glyph.text}</text>` : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
+      content += `<circle cx="${x}" cy="${y}" r="${radius}" fill="${glyph.hollow ? surface : glyph.color}" stroke="${glyph.hollow ? glyph.color : surface}" stroke-width="${1.5 * unit}" />`
+      content += glyph.text ? `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="${stack}" font-weight="700" font-size="${[11, 9, 7][Math.min(glyph.text.length, 3) - 1] * unit}" fill="${ink}">${glyph.text}</text>` : `<path transform="translate(${x - icon + dx * scale}, ${y - icon + dy * scale}) scale(${scale})" fill="${ink}" d="${glyph.path}" />`
     })
 
-    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${content}</svg>`)}`)
+    markerImages.set(key, `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${width}" viewBox="0 0 ${width} ${width}">${type.face && glyphs.some((glyph) => glyph.text) ? `<style>@font-face{font-family:ae-glyph;font-weight:700;src:url(${type.face}) format('woff2')}</style>` : ''}${content}</svg>`)}`)
   }
 
   return markerImages.get(key)
@@ -622,6 +637,9 @@ export default {
       systemDialog: false,
       systemViewId: null,
 
+      // The bold face of the bundled family in force as a data URI, for the counts drawn in marker images: `{ family, uri }`, or null for a family the images find by its name.
+      glyphFace: null,
+
       layers: LAYERS,
       borderOptions: BORDER_OPTIONS,
       linkLengths: LINK_LENGTHS,
@@ -653,6 +671,15 @@ export default {
 
     theme() {
       return chartTheme(this.appearance)
+    },
+
+    // The typeface and text size in force (utilities/appearance-font.js): the labels of the graph, the names beside the borders and the counts in the glyphs follow them.
+    roles() {
+      return fontRoles()
+    },
+
+    typeface() {
+      return mapFont(this.roles)
     },
 
     colors() {
@@ -1700,6 +1727,33 @@ export default {
       }
     },
 
+    // The counts in the marker images are drawn in the bundled face of the family in force, which the image carries.
+    'roles.family'(family) {
+      this.glyphFace = null
+      this.glyphReady = this.loadGlyphFace(family)
+    },
+
+    glyphFace() {
+      this.restyle()
+    },
+
+    // A change of typeface or text size restyles the graph and measures the names again. Cytoscape keeps the size of a label under a key made of the font's name and size, which a face that loads afterwards leaves as it was, so the keys are dropped first.
+    typeface() {
+      if (this.graph) {
+        this.labelPlaces = null
+        this.graph.elements().forEach((element) => {
+          element._private.rscratch.prefixedLabelDimsKey = null
+        })
+        this.graph.style(this.stylesheet())
+        this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
+      }
+    },
+
     'appearance.key'() {
       if (this.graph) {
         this.graph.style(this.stylesheet())
@@ -1731,6 +1785,14 @@ export default {
     this.zoomStyleTimer = null
     this.settleTimer = null
     this.settling = false
+    // The graph measures the names of the systems when it is built, so it is built once the faces are ready.
+    this.facesReady = false
+    whenFontsReady().then(() => {
+      this.facesReady = true
+      this.scheduleSync()
+    })
+    // Settles when the face of the family in force has been looked up, which a capture of the map waits for.
+    this.glyphReady = this.loadGlyphFace(this.roles.family)
   },
   beforeDestroy() {
     this.keepMap()
@@ -1849,8 +1911,8 @@ export default {
             label: 'data(label)',
             'text-wrap': 'wrap',
             color: theme.ink,
-            'font-family': 'Roboto, sans-serif',
-            'font-size': 14,
+            'font-family': this.typeface.family,
+            'font-size': this.typeface.size(14),
             'text-valign': 'bottom',
             'text-margin-y': 5,
             'text-background-color': theme.surface,
@@ -2047,8 +2109,8 @@ export default {
       return {
         ...data,
         label,
-        imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM) / row.size : 1,
-        image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface),
+        imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM * this.roles.scale) / row.size : 1,
+        image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface, { family: this.roles.svg, scale: this.roles.scale, face: this.glyphFace && this.glyphFace.family === this.roles.family ? this.glyphFace.uri : null }),
         marked,
         dim: this.fades(row, marked),
       }
@@ -2279,6 +2341,7 @@ export default {
       if (!this.labelPlaces) {
         this.labelPlaces = placeLabels(this.$refs.borders.getContext('2d'), this.borderParts, {
           ...this.borderGeometry(),
+          type: this.typeface,
           systems: this.systemRows.map((row) => row.id),
           links: this.links.list,
           nameOf: (id) => this.labelOf(this.rowById[id]),
@@ -2318,7 +2381,7 @@ export default {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * pan.x, ratio * pan.y)
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom) ? this.borderLabels() : null })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom, this.typeface) ? this.borderLabels() : null, type: this.typeface })
     },
 
     // The overview: the borders, links and systems, without names. A system is a dot in the colour it shows most: the larger share of its pie, else its fill.
@@ -2410,6 +2473,15 @@ export default {
       this.quality = null
     },
 
+    // Loads the bold face of a bundled family for the marker images; a system family has none, and a face that fails to load leaves the images with the family's name alone.
+    async loadGlyphFace(family) {
+      const uri = await glyphFace(family)
+
+      if (uri && this.roles.family === family) {
+        this.glyphFace = { family, uri }
+      }
+    },
+
     // Remembers the map as it is, for `resetGraph` to pick up when the player comes back to it.
     keepMap() {
       if (this.graph && this.syncedStart) {
@@ -2450,6 +2522,10 @@ export default {
       }
 
       if (!this.graph) {
+        if (!this.facesReady) {
+          return
+        }
+
         this.createGraph()
       }
 
@@ -2537,6 +2613,28 @@ export default {
         })
         this.fadeLinks()
       })
+    },
+
+    // Settles when the marker images carry the face of the family in force and the graph has loaded every one of them, so a capture shows the counts as the screen does.
+    async markersReady() {
+      let ready
+
+      do {
+        ready = this.glyphReady
+        await ready
+      } while (ready !== this.glyphReady)
+
+      await this.$nextTick()
+
+      if (!this.graph) {
+        return
+      }
+
+      this.restyle()
+      const renderer = this.graph.renderer()
+      const images = new Set(this.graph.nodes().map((node) => node.data('image')).filter(Boolean))
+
+      await Promise.all([...images].map((url) => renderer.getCachedImage(url, null, () => undefined).decode().catch(() => undefined)))
     },
 
     // Sets only which systems and links are faint, from the marks each marker already has.
@@ -2916,6 +3014,10 @@ export default {
     // The whole map with its borders. Keep both canvases within a bounded size;
     // oversized canvases produce an empty data URL that Image.decode() rejects.
     async exportPng() {
+      // Names are measured and drawn in the typeface in force, and the counts in the markers in its bundled face, so both are ready first.
+      await whenFontsReady()
+      await this.markersReady()
+
       const graph = this.graph
       const requestedScale = 2 * (window.devicePixelRatio || 1)
       const geometry = this.borderGeometry()
@@ -2957,7 +3059,7 @@ export default {
 
         await image.decode()
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
-        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places })
+        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places, type: this.typeface })
         context.setTransform(1, 0, 0, 1, 0, 0)
         // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour (the appearance's page background, as the stage draws it), not transparency or the card surface.
         context.globalCompositeOperation = 'destination-over'
@@ -3092,8 +3194,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   .tool--find {
@@ -3386,7 +3488,7 @@ export default {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 4px 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
 
     dd {
       margin: 0;

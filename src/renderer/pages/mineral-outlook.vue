@@ -1185,8 +1185,8 @@ export default {
   }
 
   .figure-value {
-    font-size: 18px;
-    line-height: 26px;
+    font-size: calc(18px * var(--ae-font-scale));
+    line-height: calc(26px * var(--ae-font-scale));
     font-variant-numeric: tabular-nums;
   }
 
@@ -1199,7 +1199,7 @@ export default {
   }
 
   .chart-title {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     font-weight: 500;
     margin-bottom: 8px;
   }

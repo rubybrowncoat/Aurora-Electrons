@@ -288,7 +288,7 @@ export default {
 <style lang="scss" scoped>
 .path {
   font-family: var(--ae-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   word-break: break-all;
   color: var(--ae-muted);
 }
@@ -323,7 +323,7 @@ export default {
 .steps__number {
   justify-content: center;
   color: var(--ae-on-fill);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
 }
 
 // Every cell starts at the same line and keeps the same space below it; the selector matches Vuetify's own cell rule, which sets the padding, so it wins.
@@ -357,7 +357,7 @@ export default {
 
 .notice-text {
   font-family: var(--ae-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
   white-space: pre-wrap;
   color: var(--ae-ink);
 }
@@ -370,6 +370,6 @@ code {
   background: var(--ae-chrome);
   color: var(--ae-ink);
   font-family: var(--ae-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
 }
 </style>

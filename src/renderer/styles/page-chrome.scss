@@ -49,8 +49,8 @@
 .stat-value {
   display: flex;
   align-items: center;
-  font-size: 24px;
-  line-height: 32px;
+  font-size: calc(24px * var(--ae-font-scale));
+  line-height: calc(32px * var(--ae-font-scale));
   font-weight: 400;
   margin: 4px 0;
 
@@ -74,8 +74,8 @@
   }
 
   .stat-value {
-    font-size: 20px;
-    line-height: 28px;
+    font-size: calc(20px * var(--ae-font-scale));
+    line-height: calc(28px * var(--ae-font-scale));
     margin: 2px 0;
   }
 
@@ -100,8 +100,8 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px 24px;
-  font-size: 16px;
-  line-height: 28px;
+  font-size: calc(16px * var(--ae-font-scale));
+  line-height: calc(28px * var(--ae-font-scale));
 }
 
 .panel-body {
@@ -117,7 +117,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ae-font-scale));
 }
 
 .legend-item {

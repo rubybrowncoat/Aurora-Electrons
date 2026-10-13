@@ -23,7 +23,9 @@ import { color, hsl } from 'd3-color'
 import Quadtree from '@timohausmann/quadtree-js'
 import { Viewport } from 'pixi-viewport'
 import { mapGetters } from 'vuex'
+import { mapFont } from '~/components/charts/theme'
 import { activeAppearance } from '~/utilities/appearance'
+import { whenFontsReady } from '~/utilities/appearance-font'
 import { starName, systemBodyName, toNumber } from '~/utilities/aurora'
 import { approximatelyEquals, safeModulo360 } from '~/utilities/math'
 
@@ -245,10 +247,12 @@ const spaceColors = (space) => ({
   jumpExplored: hexInt(space.jumpExplored),
 })
 
-const textStyles = (label) => ({
+// The names drawn in the sky, in the typeface and at the text size in force (`type` is `mapFont()`).
+const textStyles = (label, type) => ({
   body: new PIXI.TextStyle({
     fill: label,
-    fontSize: 12,
+    fontFamily: type.family,
+    fontSize: type.size(12),
     // align: 'left',
 
     dropShadow: true,
@@ -258,7 +262,8 @@ const textStyles = (label) => ({
   }),
   star: new PIXI.TextStyle({
     fill: label,
-    fontSize: 16,
+    fontFamily: type.family,
+    fontSize: type.size(16),
     fontWeight: 'bold',
 
     dropShadow: true,
@@ -366,10 +371,15 @@ export default {
     appearance() {
       return activeAppearance()
     },
+
+    typeface() {
+      return mapFont()
+    },
   },
   watch: {
     elements: 'scheduleInitPixi',
     'appearance.key': 'scheduleInitPixi',
+    typeface: 'scheduleInitPixi',
   },
   mounted() {
     window.addEventListener('resize', this._onResize, { passive: true })
@@ -377,6 +387,7 @@ export default {
   beforeDestroy() {
     window.removeEventListener('resize', this._onResize)
 
+    this._initToken = (this._initToken || 0) + 1
     this._cleanup()
   },
   methods: {
@@ -1763,13 +1774,19 @@ export default {
       this._initRaf = requestAnimationFrame(() => {
         this._initRaf = null
 
-        if (!this.elements.system) return
-        if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
+        const token = (this._initToken = (this._initToken || 0) + 1)
 
-        this._cleanup()
+        // Text is measured when it is made, so the scene waits for the faces it draws in; a later request, or leaving the page, drops this one.
+        whenFontsReady().then(() => {
+          if (token !== this._initToken) return
+          if (!this.elements.system) return
+          if (!Array.isArray(this.elements.stars) || this.elements.stars.length === 0) return
 
-        this.userInteracted = false
-        this.initPixi()
+          this._cleanup()
+
+          this.userInteracted = false
+          this.initPixi()
+        })
       })
     },
 
@@ -1785,7 +1802,7 @@ export default {
       }
 
       this._space = spaceColors(this.appearance.space)
-      this._textStyles = textStyles(this._space.label)
+      this._textStyles = textStyles(this._space.label, this.typeface)
 
       console.log('SystemView initPixi', this.$props)
 

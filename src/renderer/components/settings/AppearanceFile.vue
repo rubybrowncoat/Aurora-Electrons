@@ -12,7 +12,7 @@
       <li data-appearance-base>{{ baseText }}</li>
       <li v-if="originText" data-appearance-origin>{{ originText }}</li>
       <li v-if="referenceText" data-appearance-reference>{{ referenceText }}</li>
-      <li data-appearance-font>{{ fontText }}</li>
+      <li data-appearance-font>{{ fontText }} <v-btn v-if="usable" x-small text color="primary" data-appearance-use-font @click="$emit('use-font', file.font.choice)">Preview {{ file.font.family }}</v-btn></li>
     </ul>
 
     <v-alert v-if="notice" type="warning" text dense class="mb-0" data-appearance-font-notice>{{ notice }}</v-alert>
@@ -56,6 +56,7 @@
 <script>
 import countFormat from '../../mixins/count-format'
 import { ROLE_PATHS, fontNotice } from '../../utilities/appearance-file'
+import { fontInForce } from '../../utilities/appearance-font'
 import { resolveAppearance } from '../../utilities/appearance'
 
 const SHOWN_GROUPS = 12
@@ -121,7 +122,20 @@ export default {
     },
 
     fontText() {
-      return `Font: ${this.file.font.family}${this.file.font.explicit ? '' : ' (the app\'s own, since the file names none)'}.`
+      const { family, explicit, supported } = this.file.font
+
+      if (!explicit) {
+        return 'Font: none named, so the typeface in force is kept.'
+      }
+
+      return supported ? `Font: ${family}, one of the typefaces offered under Typeface and text size. Applying the file does not change the typeface in force.` : `Font: ${family}.`
+    },
+
+    // A typeface the file names that is offered, and not the one in force already: the preview button.
+    usable() {
+      const { explicit, choice } = this.file.font
+
+      return explicit && choice !== null && choice !== fontInForce().family
     },
 
     notice() {

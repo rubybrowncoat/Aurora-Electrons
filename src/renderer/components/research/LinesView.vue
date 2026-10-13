@@ -116,7 +116,7 @@ export default {
   }
 
   .abbreviation {
-    font-size: 11px;
+    font-size: calc(11px * var(--ae-font-scale));
     font-weight: 700;
     letter-spacing: 0.04em;
     padding: 1px 5px;

@@ -89,7 +89,7 @@ import countFormat from '../../mixins/count-format'
 import { activeAppearance } from '../../utilities/appearance'
 import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
-import { chartTheme, withAlpha } from '../charts/theme'
+import { chartTheme, mapFont, withAlpha } from '../charts/theme'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
@@ -124,6 +124,11 @@ export default {
 
     colors() {
       return statusColors(this.appearance)
+    },
+
+    // The typeface and text size in force (utilities/appearance-font.js); the graph is drawn again when they change.
+    typeface() {
+      return mapFont()
     },
 
     tech() {
@@ -205,6 +210,7 @@ export default {
   watch: {
     chain: 'draw',
     'appearance.key': 'draw',
+    typeface: 'draw',
   },
   mounted() {
     this.draw()
@@ -286,8 +292,8 @@ export default {
                 'text-wrap': 'wrap',
                 'text-valign': 'center',
                 'text-halign': 'center',
-                'font-size': 11,
-                'font-family': 'Roboto, Helvetica Neue, Arial, sans-serif',
+                'font-size': this.typeface.size(11),
+                'font-family': this.typeface.family,
                 color: theme.ink,
               },
             },
@@ -330,8 +336,8 @@ export default {
   }
 
   .fact-value {
-    font-size: 22px;
-    line-height: 30px;
+    font-size: calc(22px * var(--ae-font-scale));
+    line-height: calc(30px * var(--ae-font-scale));
   }
 
   .status-chip {
@@ -399,7 +405,7 @@ export default {
   }
 
   .empty {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     opacity: 0.7;
   }
 

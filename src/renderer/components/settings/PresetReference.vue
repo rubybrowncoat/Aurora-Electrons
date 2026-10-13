@@ -86,7 +86,7 @@ export default {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ae-font-scale));
 }
 
 .reference__swatch {
@@ -99,7 +99,7 @@ export default {
 }
 
 .reference__list {
-  font-size: 13px;
+  font-size: calc(13px * var(--ae-font-scale));
 
   li + li {
     margin-top: 4px;

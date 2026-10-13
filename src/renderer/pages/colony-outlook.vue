@@ -819,7 +819,7 @@ function percent(fraction, decimals) {
   }
 
   .chart-title {
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     font-weight: 500;
     margin-bottom: 8px;
   }

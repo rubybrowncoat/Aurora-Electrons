@@ -804,7 +804,7 @@ export default {
     align-items: center;
     gap: 12px;
     padding: 4px 0;
-    font-size: 14px;
+    font-size: calc(14px * var(--ae-font-scale));
     font-variant-numeric: tabular-nums;
   }
 

@@ -20,7 +20,7 @@ export const CREDITS = [
     id: 'roboto',
     name: 'Roboto',
     kind: 'Font',
-    covers: 'The interface typeface: Roboto from thin to black, with italics, as woff2 and woff files.',
+    covers: 'The interface typefaces: Roboto from thin to black and Roboto Condensed in light, regular and bold, each with italics, as woff2 and woff files. Settings offers both; the other typefaces it lists are named, not shipped.',
     reuse: BUNDLED,
     author: 'Christian Robertson for Google; packaged by Christian Hoffmeister',
     source: { label: `roboto-fontface ${robotoVersion}`, href: 'https://github.com/choffmeister/roboto-fontface-bower' },

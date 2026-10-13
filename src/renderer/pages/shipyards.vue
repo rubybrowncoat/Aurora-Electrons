@@ -1076,7 +1076,7 @@ export default {
       background: var(--ae-card);
       text-align: center;
       font-weight: 500;
-      font-size: 12px;
+      font-size: calc(12px * var(--ae-font-scale));
     }
 
     thead th.corner {
@@ -1097,7 +1097,7 @@ export default {
       background: var(--ae-card);
       text-align: left;
       font-weight: 500;
-      font-size: 13px;
+      font-size: calc(13px * var(--ae-font-scale));
     }
 
     .class-name {
@@ -1116,7 +1116,7 @@ export default {
       max-width: 112px;
       padding: 0;
       text-align: center;
-      font-size: 12px;
+      font-size: calc(12px * var(--ae-font-scale));
       line-height: 1.3;
     }
 
@@ -1158,7 +1158,7 @@ export default {
     .cell-yards {
       display: block;
       color: var(--ae-muted);
-      font-size: 11px;
+      font-size: calc(11px * var(--ae-font-scale));
       white-space: nowrap;
     }
   }

@@ -210,3 +210,95 @@
     }
   }
 }
+
+// The typeface and text size (utilities/appearance-font.js) are set on the root element as `--ae-font`, `--ae-mono` and `--ae-font-scale`, with the root font size, so everything Vuetify sizes in rem follows the text size. These are the bundled defaults, in force until the settings are read. Vuetify sets its family on each typography class with !important, so each of them takes the choice here, after Vuetify's sheet.
+:root {
+  --ae-font: Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ae-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
+  --ae-font-scale: 1;
+}
+
+$ae-type-classes: display-4, display-3, display-2, display-1, headline, title, subtitle-2, subtitle-1, body-2, body-1, caption, overline;
+$ae-type-names: h1, h2, h3, h4, h5, h6, subtitle-1, subtitle-2, body-1, body-2, button, caption, overline;
+
+.v-application {
+  font-family: var(--ae-font);
+
+  @each $name in $ae-type-classes {
+    .#{$name} {
+      font-family: var(--ae-font) !important;
+    }
+  }
+
+  @each $name in $ae-type-names {
+    .text-#{$name},
+    .text-sm-#{$name},
+    .text-md-#{$name},
+    .text-lg-#{$name},
+    .text-xl-#{$name} {
+      font-family: var(--ae-font) !important;
+    }
+  }
+}
+
+// Vuetify sizes the text of some components in pixels, which the root font size does not move: a text field and its label, an alert, a chip, the messages and the counter under a field, a badge, breadcrumbs and a tooltip. Each takes the text size here, at 100 % exactly the size Vuetify gives it. Icons keep their size: they are drawn to fit a button, not read.
+$ae-vuetify-text: (
+  '.v-input': 16,
+  '.v-label': 16,
+  '.v-alert': 16,
+  '.v-input--radio-group legend.v-label': 14,
+  '.v-chip.v-size--x-small': 10,
+  '.v-chip.v-size--small': 12,
+  '.v-chip.v-size--default': 14,
+  '.v-chip.v-size--large': 16,
+  '.v-chip.v-size--x-large': 18,
+  '.v-messages': 12,
+  '.v-counter': 12,
+  '.v-badge__badge': 12,
+  '.v-breadcrumbs li': 14,
+  '.v-tooltip__content': 14,
+);
+
+$ae-vuetify-lines: (
+  '.v-chip': 20,
+  '.v-input .v-label': 20,
+  '.v-select__selections': 18,
+  '.v-text-field input': 20,
+  '.v-text-field__prefix': 20,
+  '.v-text-field__suffix': 20,
+  '.v-messages__message': 12,
+  '.v-counter': 12,
+  '.v-tooltip__content': 22,
+);
+
+$ae-vuetify-chip-heights: (
+  '.v-chip.v-size--x-small': 16,
+  '.v-chip.v-size--small': 24,
+  '.v-chip.v-size--default': 32,
+  '.v-chip.v-size--large': 54,
+  '.v-chip.v-size--x-large': 66,
+);
+
+.v-application {
+  @each $selector, $size in $ae-vuetify-text {
+    #{$selector} {
+      font-size: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+
+  @each $selector, $size in $ae-vuetify-lines {
+    #{$selector} {
+      line-height: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+
+  .v-text-field .v-label {
+    height: calc(20px * var(--ae-font-scale));
+  }
+
+  @each $selector, $size in $ae-vuetify-chip-heights {
+    #{$selector} {
+      height: calc(#{$size}px * var(--ae-font-scale));
+    }
+  }
+}

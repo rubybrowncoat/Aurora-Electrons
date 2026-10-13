@@ -181,8 +181,8 @@ export default {
     border-radius: 50%;
     border: 1px solid currentColor;
     text-align: center;
-    font-size: 12px;
-    line-height: 20px;
+    font-size: calc(12px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
     font-variant-numeric: tabular-nums;
   }
 

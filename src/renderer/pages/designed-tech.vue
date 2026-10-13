@@ -627,8 +627,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   .tool--category {

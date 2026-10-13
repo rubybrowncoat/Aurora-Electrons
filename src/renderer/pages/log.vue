@@ -825,7 +825,7 @@ export default {
     align-items: center;
     gap: 6px;
     min-width: 0;
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
   }
 
   // Vuetify gives every icon a focus wash (an ::after scaled to 130%) that only a link icon ever shows; the hide button has its own. On the icon at the row's end it reaches past the row, so the row's content overflows by two pixels.
@@ -844,13 +844,13 @@ export default {
     margin-left: auto;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
   }
 
   .repeat-count,
   .new-label {
     white-space: nowrap;
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
     border: 1px solid currentColor;
     border-radius: 4px;
     padding: 0 4px;
@@ -861,8 +861,8 @@ export default {
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     overflow: hidden;
-    font-size: 13px;
-    line-height: 19px;
+    font-size: calc(13px * var(--ae-font-scale));
+    line-height: calc(19px * var(--ae-font-scale));
     margin-top: 3px;
     color: inherit;
   }

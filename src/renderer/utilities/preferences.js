@@ -12,7 +12,7 @@ export const BACKUP_FORMAT = 'aurora-electrons-preferences-backup'
 export const MAX_BYTES = 1024 * 1024
 
 export const CATEGORIES = [
-  { id: 'appearance', title: 'Colour preset', note: 'The preset applied to every page. App-wide.' },
+  { id: 'appearance', title: 'Colour preset, typeface and text size', note: 'The preset, the typeface and the text size applied to every page. App-wide.' },
   { id: 'display', title: 'Number format and Computer-run empires', note: 'The thousands separator and whether Computer-run empires are listed. App-wide.' },
   { id: 'views', title: 'Remembered views', note: "Each page's options, filters, searches, views and each table's sort and rows per page: app-wide, or for the one empire where a value is about its own things." },
   { id: 'mapGroups', title: 'Galaxy Map pins and clusters', note: "The Galaxy Map's pinned systems and clusters of the empire. They name the systems of one campaign." },
@@ -149,13 +149,19 @@ const checkDeclared = (declarations) => (value) => {
 //   declarations: `declaredViews()` of mixins/persisted-view.js, once every page and component module is loaded.
 //   appearance: `{ key, ids }`, the settings key of the colour preset and the ids of the presets this version has.
 //   separators: the thousands separators the Display panel offers.
-export const buildSchema = ({ declarations, appearance, separators }) => {
+export const buildSchema = ({ declarations, appearance, font, separators }) => {
+//   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
   const fields = new Map()
   const add = (category, scope, key, check) => fields.set(`${category}:${scope}:${key}`, { category, scope, key, check })
 
   add('appearance', 'app', appearance.key, (value) => (typeof value === 'string' && appearance.ids.includes(value) ? { ok: true, value } : { ok: false, reason: 'is not a preset this version has' }))
   add('display', 'app', 'spyNPR', (value) => (typeof value === 'boolean' ? { ok: true, value } : { ok: false, reason: 'must be true or false' }))
   add('display', 'app', 'selectedSeparator', (value) => (separators.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${separators.join(', ')}` }))
+  add('appearance', 'app', font.key, (value) => {
+    const read = font.read(value)
+
+    return read.ok ? { ok: true, value: read.font } : { ok: false, reason: 'is not a typeface and text size this version offers' }
+  })
 
   const byKey = new Map()
 

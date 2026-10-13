@@ -1705,8 +1705,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   .tool--mineral {
@@ -1811,8 +1811,8 @@ export default {
   .mineral-strip__cell {
     flex: 0 0 22px;
     height: 20px;
-    line-height: 17px;
-    font-size: 10px;
+    line-height: calc(17px * var(--ae-font-scale));
+    font-size: calc(10px * var(--ae-font-scale));
     text-align: center;
     border-radius: 2px;
     border-bottom: 3px solid transparent;
@@ -1824,7 +1824,7 @@ export default {
 
   .mineral-strip__cell--out {
     border: 1px dashed rgba(127, 127, 127, 0.6);
-    line-height: 18px;
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   .chip-cell {

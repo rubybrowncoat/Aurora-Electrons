@@ -373,7 +373,7 @@ export default {
 
   .place-picker__row--header {
     cursor: default;
-    font-size: 12px;
+    font-size: calc(12px * var(--ae-font-scale));
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -382,7 +382,7 @@ export default {
 
   .place-picker__row--note {
     cursor: default;
-    font-size: 13px;
+    font-size: calc(13px * var(--ae-font-scale));
     opacity: 0.75;
   }
 

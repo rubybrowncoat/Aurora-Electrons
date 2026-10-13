@@ -355,9 +355,9 @@ export default {
 
 .section-nav__title {
   overflow: hidden;
-  font-size: 14px;
+  font-size: calc(14px * var(--ae-font-scale));
   font-weight: 600;
-  line-height: 20px;
+  line-height: calc(20px * var(--ae-font-scale));
   color: var(--ae-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -367,8 +367,8 @@ export default {
   display: -webkit-box;
   overflow: hidden;
   margin-top: 2px;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--ae-font-scale));
+  line-height: calc(17px * var(--ae-font-scale));
   color: var(--ae-ink);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -376,8 +376,8 @@ export default {
 
 .section-nav__summary {
   margin-top: 4px;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: calc(12px * var(--ae-font-scale));
+  line-height: calc(17px * var(--ae-font-scale));
   color: var(--ae-muted);
 }
 

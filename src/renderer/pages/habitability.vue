@@ -1008,8 +1008,8 @@ export default {
   }
 
   .tool__label {
-    height: 18px;
-    line-height: 18px;
+    height: calc(18px * var(--ae-font-scale));
+    line-height: calc(18px * var(--ae-font-scale));
   }
 
   // One row from 1280 px up: the species, goal and terraformers keep their size, the systems field takes what is left (so it grows on a wide window) and the buttons lose their labels below 1500 px. Narrower windows wrap.
@@ -1132,14 +1132,14 @@ export default {
   }
 
   .legend-rule {
-    font-size: 13px;
-    line-height: 20px;
+    font-size: calc(13px * var(--ae-font-scale));
+    line-height: calc(20px * var(--ae-font-scale));
   }
 
   .legend-count {
     text-align: right;
     font-variant-numeric: tabular-nums;
-    line-height: 24px;
+    line-height: calc(24px * var(--ae-font-scale));
   }
 }
 </style>

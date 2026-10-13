@@ -1,4 +1,5 @@
 import { activeAppearance, SERIES_ENCODINGS } from '../../utilities/appearance'
+import { fontRoles } from '../../utilities/appearance-font'
 
 // Chart colours, taken from the resolved appearance (utilities/appearance.js): its card surface, inks, axis colour, tooltip and nine categorical slots. The palette's validation notes are there, and so is what tells a slot apart without its colour (`SERIES_ENCODINGS`: marker, dash, bar pattern). This file holds the shapes those names stand for.
 
@@ -15,6 +16,13 @@ export const chartTheme = (appearance = activeAppearance()) => {
 
   return themes.get(charts)
 }
+
+// The typeface of the text a chart or a map draws, from the choice in force (utilities/appearance-font.js): `family` (a CSS family list), `size(px)` (a size in pixels at the chosen text size) and `font(px, weight)` (a canvas font string). `chartFont` takes the chart role and `mapFont` the map role. Read inside a computed property, they follow a change of typeface or text size and the load of a bundled face.
+const textFont = (family, roles) => ({ family, size: roles.size, font: (px, weight = 400) => `${weight} ${roles.size(px)}px ${family}` })
+
+export const chartFont = (roles = fontRoles()) => textFont(roles.chart, roles)
+
+export const mapFont = (roles = fontRoles()) => textFont(roles.map, roles)
 
 // The flow groups' fixed slots: the order the validator passed, so neighbouring stack segments (salvage | mining | construction | shipbuilding | …) stay distinct.
 const FLOW_SLOTS = { mining: 0, construction: 1, shipbuilding: 2, ordnance: 3, ground: 4, fuel: 5, maintenance: 6, salvage: 7 }

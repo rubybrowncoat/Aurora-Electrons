@@ -214,7 +214,7 @@ export default {
   min-width: 0;
   margin-inline-start: 12px;
   max-width: 70%;
-  font-size: 11px;
+  font-size: calc(11px * var(--ae-font-scale));
   line-height: 1;
   white-space: nowrap;
   color: var(--ae-muted);
