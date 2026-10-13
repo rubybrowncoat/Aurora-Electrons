@@ -121,13 +121,20 @@
               <div class="panel-head">
                 <span>{{ chart.title }}<provenance-mark v-for="rule in chart.rules" :key="rule" :rule="rule" /></span>
                 <span class="legend">
-                  <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" kind="line" />{{ series.label }}</span>
+                  <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" :dash="series.borderDash" kind="line" />{{ series.label }}</span>
                 </span>
               </div>
               <div class="panel-body">
+                <div v-if="chart.compare" class="mb-2 history-compare">
+                  <v-btn-toggle v-model="mineralScale" mandatory dense class="mr-2">
+                    <v-btn v-for="option in chart.compare.scales" :key="option.value" :value="option.value" small :title="option.title">{{ option.text }}</v-btn>
+                  </v-btn-toggle>
+                  <v-btn small text :disabled="chart.compare.resetDisabled" title="Show every retained snapshot: the span above goes back to All, for the whole page. The minerals picked and the scale stay." @click="resetMineralRange"><v-icon small left>mdi-backup-restore</v-icon>Reset range</v-btn>
+                  <v-btn small text :disabled="chart.compare.csvDisabled" title="Download the minerals picked, on the scale shown, as a CSV with units and baselines" @click="downloadMineralCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
+                </div>
                 <div v-if="chart.picker" class="mb-2">
                   <v-chip-group :value="chart.picker.model" multiple column @change="chart.picker.change">
-                    <v-chip v-for="option in chart.picker.options" :key="option.value" :value="option.value" small filter outlined>{{ option.text }}</v-chip>
+                    <v-chip v-for="option in chart.picker.options" :key="option.value" :value="option.value" :title="option.title" small filter outlined><series-key v-if="option.color" :color="option.color" :dash="option.dash" kind="line" />{{ option.text }}<span v-if="option.flag" class="caption text--secondary ml-1">{{ option.flag }}</span></v-chip>
                   </v-chip-group>
                 </div>
                 <chart-canvas type="line" :data="chart.data" :options="chart.options" :height="240" :label="chart.title" />
@@ -175,6 +182,7 @@ import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { MAX_SNAPSHOTS, branchStore, campaignStorage, changeResult, clearRaceHistory, installationResult, mineralResult, recordedSpan, shownBranch, snapshotResult, totalResult } from '../utilities/history'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
+import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '../utilities/mineral-compare'
 import { MINERALS } from '../utilities/minerals'
 import { describeResult, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { withRegistry } from '../utilities/recording-owner'
@@ -212,6 +220,9 @@ const whole = (value) => (isKnownNumber(value) ? `${roundToDecimal(value, 0)}` :
 
 const withUnit = (text, unit) => (text === UNKNOWN_TEXT ? text : `${text} ${unit}`)
 
+// A percent change on an axis: signed, 0 without a sign.
+const percentTick = (value) => (!isKnownNumber(value) ? UNKNOWN_TEXT : value === 0 ? '0 %' : `${value > 0 ? '+' : '−'}${compact(Math.abs(value))} %`)
+
 const fleetResult = (snapshot) => totalResult('history.fleetTonnage', [snapshotResult(snapshot, 'militaryTons'), snapshotResult(snapshot, 'commercialTons')])
 
 // What the Rivals chart can compare: `result` is a snapshot's figure as a result of `rule`.
@@ -245,7 +256,8 @@ export default {
     persistedView({
       view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
       historyTable: tableView('historyTable', { itemsPerPage: 25, itemsPerPageOptions: HISTORY_PAGE_SIZES }),
-      mineralIds: { key: 'historyMinerals', default: [1, 2, 11] },
+      mineralIds: { key: 'historyMinerals', default: [1, 2, 11], normalise: (stored) => (Array.isArray(stored) ? MINERALS.map((mineral) => mineral.id).filter((id) => stored.includes(id)) : undefined) },
+      mineralScale: { key: 'historyMineralScale', default: 'absolute', valid: oneOf(MINERAL_SCALES.map((option) => option.value)) },
       installationIds: { key: 'historyInstallations', default: null, scope: 'race' },
       rivalMetric: { key: 'historyRivalsMetric', default: 'population', valid: oneOf(RIVAL_METRIC_VALUES) },
       span: { key: 'historySpan', default: 0, valid: oneOf(SPAN_OPTIONS.map((option) => option.value)) },
@@ -530,6 +542,82 @@ export default {
       return notes
     },
 
+    // The mineral comparison: the minerals picked over the snapshots of the chosen span, with the baseline of each (the first snapshot of the span).
+    mineralComparison() {
+      return compareMinerals(this.snapshots, this.mineralIds)
+    },
+
+    // The mineral chart on the scale chosen. Each mineral is drawn in the colour of its ID, whichever others are picked. On the percent scale a mineral whose change from its baseline is undefined has no line, and says why.
+    mineralChart() {
+      const palette = this.theme.categorical
+      const percent = this.mineralScale === 'percent'
+      const scale = MINERAL_SCALES.find((option) => option.value === this.mineralScale)
+      const { series } = this.mineralComparison
+      const drawn = series.filter((entry) => !percent || entry.normalisation.defined)
+      const options = this.options({ y: percent ? percentTick : (value) => `${compact(value)} t` })
+      const signed = (value) => `${value >= 0 ? '+' : '−'}${this.count(Math.abs(value), 1)} %`
+
+      options.scales.y.title = { display: true, text: scale.axis }
+      options.plugins.tooltip.callbacks.label = (item) => {
+        const name = item.dataset.label
+        const stock = item.raw ? item.raw.stock : null
+
+        if (!isKnownNumber(item.parsed.y)) {
+          return `${name}: ${UNKNOWN_TEXT}`
+        }
+
+        return percent ? `${name}: ${signed(item.parsed.y)} (${this.count(stock, 0)} t)` : `${name}: ${this.count(item.parsed.y, item.parsed.y < 100 ? 1 : 0)} t`
+      }
+
+      if (percent) {
+        options.plugins.guides = { levels: [{ y: 0 }] }
+      }
+
+      const notes = [
+        ...(this.mineralIds.length ? [] : ['Pick a mineral above to draw its stockpile.']),
+        ...(percent && this.mineralIds.length ? ['Change is measured from each mineral\'s stock in the first snapshot of the span chosen above, so another span has another baseline.'] : []),
+        ...(percent ? series.filter((entry) => entry.baseline).map((entry) => (entry.normalisation.defined ? `${entry.name}: baseline ${this.count(entry.baseline.stock, 0)} t, at ${this.date(entry.baseline.t)}.` : `${entry.name}: change undefined, so no line is drawn, because ${entry.normalisation.reason} (${this.date(entry.baseline.t)}).`)) : []),
+      ]
+
+      return {
+        key: 'minerals',
+        title: 'Mineral stockpiles',
+        rules: ['history.stockpile', 'history.mineralChange'],
+        summary: 'Stockpiles of the selected minerals over time, in tonnes or as the percent change from the first snapshot of the span, to spot shortages and surpluses before they hold up production and to compare how fast the minerals move. Each mineral keeps its own colour.',
+        compare: { scales: MINERAL_SCALES, resetDisabled: this.span === 0, csvDisabled: !this.mineralIds.length || !this.snapshots.length },
+        picker: {
+          model: this.mineralIds,
+          options: MINERALS.map((mineral) => {
+            const style = mineralStyle(palette, mineral.id)
+            const entry = series.find((candidate) => candidate.id === mineral.id)
+            const undefinedChange = percent && !!entry && !entry.normalisation.defined
+
+            return { value: mineral.id, text: mineral.name, color: style.color, dash: style.dash, flag: undefinedChange ? 'undefined' : '', title: undefinedChange ? `Change from the baseline is undefined: ${entry.normalisation.reason}` : undefined }
+          }),
+          change: this.setMinerals,
+        },
+        extraNotes: notes,
+        data: {
+          datasets: drawn.map((entry) => {
+            const style = mineralStyle(palette, entry.id)
+
+            return {
+              label: entry.name,
+              data: entry.samples.map((sample, position) => ({ x: this.year(sample.t), y: percent ? entry.percent[position] : sample.stock, stock: sample.stock })),
+              borderColor: style.color,
+              backgroundColor: withAlpha(style.color, 0.1),
+              borderDash: style.dash,
+              borderWidth: 2,
+              pointRadius: this.snapshots.length > 40 ? 0 : 3,
+              pointHoverRadius: 4,
+              tension: 0,
+            }
+          }),
+        },
+        options,
+      }
+    },
+
     charts() {
       const palette = this.theme.categorical
       const line = (label, values, index, axis = 'y') => ({
@@ -578,15 +666,7 @@ export default {
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           options: this.options({ y: compact, y1: (value) => `${value}` }),
         },
-        {
-          key: 'minerals',
-          title: 'Mineral stockpiles',
-          rules: ['history.stockpile'],
-          summary: 'Stockpiles of the selected minerals, over time, to spot shortages or surpluses before they hold up production.',
-          picker: { model: this.mineralIds, options: MINERALS.map((mineral) => ({ value: mineral.id, text: mineral.name })), change: this.setMinerals },
-          data: { datasets: this.mineralIds.map((id, index) => line(MINERALS.find((mineral) => mineral.id === id).name, this.snapshots.map((snapshot) => valueOrNull(mineralResult(snapshot, id, MINERALS.find((mineral) => mineral.id === id).name))), index)) },
-          options: this.options({ y: (value) => `${compact(value)} t` }),
-        },
+        this.mineralChart,
         {
           key: 'installations',
           title: 'Installations',
@@ -722,8 +802,26 @@ export default {
         },
       }
     },
+    // The minerals picked, kept in the order of their IDs so that the order of picking changes nothing.
     setMinerals(ids) {
-      this.mineralIds = ids
+      this.mineralIds = MINERALS.map((mineral) => mineral.id).filter((id) => ids.includes(id))
+    },
+    // The span goes back to every retained snapshot; the minerals picked and the scale stay as they are.
+    resetMineralRange() {
+      this.span = 0
+    },
+    downloadMineralCsv() {
+      const csv = comparisonCsv({ comparison: this.mineralComparison, scale: this.mineralScale, palette: this.theme.categorical, date: (seconds) => this.date(seconds) })
+
+      this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-minerals-${this.mineralScale}.csv`)
+    },
+    saveCsv(csv, fileName) {
+      const link = document.createElement('a')
+
+      link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+      link.download = fileName
+      link.click()
+      URL.revokeObjectURL(link.href)
     },
     setInstallations(ids) {
       this.installationIds = ids
@@ -826,12 +924,8 @@ export default {
         return [snapshot.t, this.date(snapshot.t), ...results.map(valueOrNull), results.filter((result) => !isAvailable(result)).flatMap((result) => result.inputs.missing).join('; ')]
       })
       const csv = [header, ...rows].map((row) => row.map(quote).join(',')).join('\n')
-      const link = document.createElement('a')
 
-      link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-      link.download = `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`
-      link.click()
-      URL.revokeObjectURL(link.href)
+      this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`)
     },
   },
   asyncComputed: {
@@ -859,6 +953,13 @@ export default {
 
   .history-campaign__path .path {
     word-break: break-all;
+  }
+
+  .history-compare {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 4px;
   }
 }
 </style>
