@@ -20,6 +20,8 @@ const SAFE_TOTAL = 2 ** 52
 const MAX_TANKS = 2 ** 50
 const WARM_WORK = 120000
 const MAX_FRONTIER_ENTRIES = 200000
+const SCAN_CELLS = 1 << 16
+const UNPACED = Object.freeze({ expired: () => false })
 
 // Whether a package of `delivered` litres meets a request of `requested` litres: the one tolerance the packages and the searches that use them share.
 export const meetsRequest = (delivered, requested) => delivered >= requested * (1 - REQUEST_TOLERANCE)
@@ -75,7 +77,7 @@ const catalogueOf = (tanks) => {
   return catalogue
 }
 
-// The table solver over whole-number rows ({ units, hs, cost }) for one objective, built as far as the requests need it. `maxUnits` is the most cells it holds. `solve(need)` gives the counts per row of the best package that reaches `need` units and whether that is proved.
+// The table solver over whole-number rows ({ units, hs, cost }) for one objective, built as far as the requests need it. `maxUnits` is the most cells it holds. `solving(need, pace)` is a generator that gives the counts per row of the best package that reaches `need` units and whether that is proved, yielding where `pace.expired()` says the caller's time is up.
 const createTable = (entries, keys, maxUnits) => {
   const values = entries.map((entry) => keys.map((key) => (key === 'count' ? 1 : entry[key])))
   const widest = entries.reduce((most, entry) => Math.max(most, entry.units), 0)
@@ -101,6 +103,7 @@ const createTable = (entries, keys, maxUnits) => {
   }, -1)
 
   const firstCap = Math.max(2 * widest + entries[periodic].units, 1024)
+  const buildChunk = Math.ceil(WARM_WORK / entries.length)
 
   const grow = (needed) => {
     const next = Math.min(maxUnits + 1, Math.max(needed + 1, capacity * 2, 1024))
@@ -157,21 +160,43 @@ const createTable = (entries, keys, maxUnits) => {
     built = units
   }
 
-  const trace = (units, counts) => {
+  // Builds the cells up to `units`, a chunk at a time, looking at the pace between chunks and yielding once it has expired. The table is sized as one `ensure(units)` sizes it, so the memory held does not depend on where the work was cut.
+  function* building(units, pace) {
+    if (units > built && units + 1 > capacity) {
+      grow(units)
+    }
+
+    for (let cell = built; cell < units; cell = built) {
+      ensure(Math.min(units, cell + buildChunk))
+
+      if (built < units && pace.expired()) {
+        yield
+      }
+    }
+  }
+
+  // Walks the picks back from `units` into `counts`, looking at the pace every SCAN_CELLS tanks and yielding once it has expired: a package of a hundred thousand tanks is a long walk.
+  function* tracing(units, counts, pace) {
     let cell = units
+    let walked = 0
 
     while (cell > 0) {
       const chosen = pick[cell]
 
       counts[chosen]++
       cell = cell > entries[chosen].units ? cell - entries[chosen].units : 0
+
+      if (++walked % SCAN_CELLS === 0 && cell > 0 && pace.expired()) {
+        yield
+      }
     }
   }
 
-  // The periodic extension. Let s be the units of the repeated row, U those of the largest row and `cap` a table size with cap - U + 1 >= s + U. If f[c] = f[c - s] + value(row) for the U cells cap - U + 1 .. cap, it holds for every cell above: the recurrence for such a cell c reads f at c - units(row) for each row, all in cap - U + 1 .. c - 1 (and never the clamp at 0, because c - units(row) stays above U), where the equality already holds, so each read is the value s lower plus value(row), and the best of those is the recurrence for c - s plus value(row), that is f[c - s] + value(row). A request of `need` units past `cap` is then k = ceil((need - cap) / s) copies of the row and the table's answer for need - k * s.
-  const windowHolds = (cap) => {
+  // The periodic extension. Let s be the units of the repeated row, U those of the largest row and `cap` a table size with cap - U + 1 >= s + U. If f[c] = f[c - s] + value(row) for the U cells cap - U + 1 .. cap, it holds for every cell above: the recurrence for such a cell c reads f at c - units(row) for each row, all in cap - U + 1 .. c - 1 (and never the clamp at 0, because c - units(row) stays above U), where the equality already holds, so each read is the value s lower plus value(row), and the best of those is the recurrence for c - s plus value(row), that is f[c - s] + value(row). A request of `need` units past `cap` is then k = ceil((need - cap) / s) copies of the row and the table's answer for need - k * s. The check of the window yields every SCAN_CELLS cells.
+  function* windowHolds(cap) {
     const step = entries[periodic].units
     const [a, b, c] = values[periodic]
+    let scanned = 0
 
     if (cap - widest + 1 < step + widest) {
       return false
@@ -180,6 +205,10 @@ const createTable = (entries, keys, maxUnits) => {
     for (let cell = cap - widest + 1; cell <= cap; cell++) {
       if (first[cell] - first[cell - step] !== a || second[cell] - second[cell - step] !== b || third[cell] - third[cell - step] !== c) {
         return false
+      }
+
+      if (++scanned % SCAN_CELLS === 0) {
+        yield
       }
     }
 
@@ -205,7 +234,7 @@ const createTable = (entries, keys, maxUnits) => {
         yield
       }
 
-      if (windowHolds(cap)) {
+      if (yield * windowHolds(cap)) {
         proved = cap
       } else {
         yield
@@ -238,39 +267,24 @@ const createTable = (entries, keys, maxUnits) => {
     }
   }
 
-  const prove = () => {
-    if (proofCap !== null) {
-      return proofCap
-    }
-
-    const run = proving(Infinity)
-    let step
-
-    do {
-      step = run.next()
-    } while (!step.done)
-
-    return step.value
-  }
-
-  // The best package for `need` units: { counts, proved, reason }. Past the table without a periodic proof the answer is the repeated row plus the table's answer for the rest, feasible and not proved.
-  const solve = (need) => {
+  // The best package for `need` units: { counts, proved, reason }. Past the table without a periodic proof the answer is the repeated row plus the table's answer for the rest, feasible and not proved. The table the request needs, its proof and the walk back from it yield while the pace has expired (the proof, whenever a chunk of it is done), so a caller that must stay responsive can resume where it stopped.
+  function* solving(need, pace) {
     const counts = new Float64Array(entries.length)
 
-    if (need > firstCap && prove() > 0 && need > proofCap) {
+    if (need > firstCap && (yield * proving(buildChunk)) > 0 && need > proofCap) {
       const step = entries[periodic].units
       const repeats = Math.ceil((need - proofCap) / step)
 
-      ensure(need - repeats * step)
-      trace(need - repeats * step, counts)
+      yield * building(need - repeats * step, pace)
+      yield * tracing(need - repeats * step, counts, pace)
       counts[periodic] += repeats
 
       return { counts, proved: true, reason: null }
     }
 
     if (need <= maxUnits) {
-      ensure(need)
-      trace(need, counts)
+      yield * building(need, pace)
+      yield * tracing(need, counts, pace)
 
       return { counts, proved: true, reason: null }
     }
@@ -279,14 +293,14 @@ const createTable = (entries, keys, maxUnits) => {
     const repeats = Math.ceil((need - maxUnits) / step)
     const rest = Math.max(0, need - repeats * step)
 
-    ensure(rest)
-    trace(rest, counts)
+    yield * building(rest, pace)
+    yield * tracing(rest, counts, pace)
     counts[periodic] += repeats
 
     return { counts, proved: false, reason: 'table-cap' }
   }
 
-  return { solve, proving, warming, prove, bytes: () => first.byteLength + second.byteLength + third.byteLength + pick.byteLength, built: () => built }
+  return { solving, proving, warming, bytes: () => first.byteLength + second.byteLength + third.byteLength + pick.byteLength, built: () => built }
 }
 
 // A feasible package from raw figures for a catalogue that cannot be made whole: the densest tank (the least HS per litre) as many times as fits, and the one tank that covers the rest in the fewest HS, then BP. Never proved. Null when the count of tanks passes what a float counts exactly.
@@ -424,7 +438,8 @@ export const createTankPacker = (tanks, { maxUnits = MAX_TABLE_UNITS } = {}) => 
     return need
   }
 
-  const pack = (litres, objective = 'lightest') => {
+  // The package for a request as a generator, for a caller that must stay responsive: it yields wherever `pace.expired()` is true while the table is built and the package walked back from it, and returns the package, the same one `pack` gives. Resuming it carries on where it stopped; the table built so far is kept.
+  function* packing(litres, objective = 'lightest', pace = UNPACED) {
     objectiveKeys(objective)
 
     const early = settled(litres, objective)
@@ -445,9 +460,20 @@ export const createTankPacker = (tanks, { maxUnits = MAX_TABLE_UNITS } = {}) => 
       return noPackage(PACKAGE_STATUS.BOUND_EXHAUSTED, 'request-too-large', objective, litres)
     }
 
-    const answer = tableOf(objective).solve(need)
+    const answer = yield * tableOf(objective).solving(need, pace)
 
     return packageOf(catalogue, answer.counts, litres, objective, answer.proved ? PACKAGE_STATUS.OPTIMAL : PACKAGE_STATUS.BOUND_EXHAUSTED, answer.reason)
+  }
+
+  const pack = (litres, objective = 'lightest') => {
+    const steps = packing(litres, objective)
+    let step = steps.next()
+
+    while (!step.done) {
+      step = steps.next()
+    }
+
+    return step.value
   }
 
   // Builds the table of an objective as far as its periodic proof needs (and the whole bounded table when there is no proof), `catalogue.warmCells` cells at a time, yielding between chunks, so a caller that must stay responsive pays for it in small steps before the first request.
@@ -558,6 +584,7 @@ export const createTankPacker = (tanks, { maxUnits = MAX_TABLE_UNITS } = {}) => 
 
   return {
     pack,
+    packing,
     warm,
     nondominated,
     catalogue: Object.freeze({ rows: rows.length, excluded: Object.freeze(catalogue.excluded), exact, unitLitres: exact ? catalogue.unit / catalogue.litresScale : null, maxUnits, warmCells: rows.length ? Math.ceil(WARM_WORK / rows.length) : 0 }),

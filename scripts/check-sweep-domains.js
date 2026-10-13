@@ -520,7 +520,7 @@ const synthetic = ({ domain, search, rules }) => {
     const limits = drain(search.searchPropulsion({ ...input, include: 'limits' }))
     const thrustsOf = (result) => [...new Set(result.sets.map((set) => set.engine.thrust))].sort()
 
-    return made.include === 'grid' && made.sizes.last === 12.25 && made.thrusts.last === 1.3 && same(thrustsOf(grid), [1.3]) === true && same(thrustsOf(limits), [1.3, 1.33]) === true && limits.evaluated > grid.evaluated ? true : short([made.sizes.last, made.thrusts.last, thrustsOf(grid), thrustsOf(limits), grid.evaluated, limits.evaluated])
+    return made.include === 'grid' && made.sizes.last === 12.25 && made.thrusts.last === 1.3 && same(thrustsOf(grid), [1.3]) === true && same(thrustsOf(limits), [1.3, 1.33]) === true && limits.counts.evaluated > grid.counts.evaluated ? true : short([made.sizes.last, made.thrusts.last, thrustsOf(grid), thrustsOf(limits), grid.counts.evaluated, limits.counts.evaluated])
   })
 
   add('the preview and the search read one sweep: a search given the sweep and one that builds it give the same result', () => {
@@ -625,7 +625,8 @@ const MUTATIONS = [
   ['the finest declared step tested instead of the step of each stretch that has values', 'sweep-domain.js', 'if (part.count > 1 && collapses(part.first, lastOf(part), part.step)) {', 'if (collapses(part.first, lastOf(part), Math.min(...pieces.map((piece) => piece.step)))) {', ({ domain }) => !domain.sweepDomain({ kind: 'fuel', min: '8796093022208', max: '8796093022212', bands: [{ step: '0.001', to: '1' }, { step: '1' }] }).ok],
   ['the middle band of the engine sizes ends early', 'design-search.js', '{ step: 0.25, to: 20 }', '{ step: 0.25, to: 19 }'],
   ['the engine thrust grid anchored at the minimum instead of 0', 'design-search.js', "step: THRUST_STEP, anchor: 'zero'", "step: THRUST_STEP, anchor: 'min'"],
-  ['the search not stopped by a sweep that cannot run', 'design-search.js', 'if (!plan.ok) {', 'if (false) {'],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the search not stopped by a sweep that cannot run', 'design-search.js', "throw new Error(`The sweep cannot run. ${plan.problems.join(' ')}`)", 'void 0'],
   ['the engine count minimum not enforced', 'design-search.js', "const counts = sweepDomain({ kind: 'count', min: minCount, max: maxCount, step: 1, limits: { min: 1 } })", "const counts = sweepDomain({ kind: 'count', min: minCount, max: maxCount, step: 1 })"],
 ]
 
@@ -685,7 +686,8 @@ const openSave = (file) => new Promise((resolve, reject) => {
   })
 })
 
-const digest = (result) => crypto.createHash('sha256').update(JSON.stringify(result)).digest('hex').slice(0, 16)
+// The digests recorded before the search kept counts hash this projection: the sets and best sets, then the evaluated and matched figures that `counts.evaluated` and `counts.feasible` now hold, in the order the search returned them then.
+const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts }) => crypto.createHash('sha256').update(JSON.stringify({ sets, lightest, fastest, cheapest, pareto, packages, evaluated: counts.evaluated, matched: counts.feasible })).digest('hex').slice(0, 16)
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
@@ -792,10 +794,10 @@ const run = async () => {
     const old = drain(mods.search.searchPropulsion({ ...input, sweep: oldSweep }))
     const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
 
-    check(`${label}: the default search on the domain grid gives the result of the search on the old grid (${current.evaluated} candidates, ${current.matched} matched, ${current.sets.length} kept)`, digest(current) === digest(old) && current.evaluated === old.evaluated ? true : `${digest(current)} vs ${digest(old)}`, digest(current))
+    check(`${label}: the default search on the domain grid gives the result of the search on the old grid (${current.counts.evaluated} candidates, ${current.counts.feasible} matched, ${current.sets.length} kept)`, digest(current) === digest(old) && current.counts.evaluated === old.counts.evaluated ? true : `${digest(current)} vs ${digest(old)}`, digest(current))
 
     if (anchor) {
-      check(`${label}: the default search still gives the result taken before the domains existed`, current.evaluated === anchor.evaluated && current.matched === anchor.matched && digest(current) === anchor.digest ? true : `${current.evaluated}/${current.matched}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+      check(`${label}: the default search still gives the result taken before the domains existed`, current.counts.evaluated === anchor.evaluated && current.counts.feasible === anchor.matched && digest(current) === anchor.digest ? true : `${current.counts.evaluated}/${current.counts.feasible}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
     } else {
       console.log('SKIP  no digest of the unchanged search is recorded for this save')
     }

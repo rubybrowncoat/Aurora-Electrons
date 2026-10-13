@@ -536,12 +536,12 @@ const searchChecks = async (utilities, saves) => {
 
     while (!step.done) {
       if (firstEvaluated === null) {
-        firstEvaluated = step.value.evaluated
+        firstEvaluated = step.value.counts.evaluated
         firstBuilt = packer.built()
       }
 
-      maxStepCandidates = Math.max(maxStepCandidates, step.value.evaluated - evaluated)
-      evaluated = step.value.evaluated
+      maxStepCandidates = Math.max(maxStepCandidates, step.value.counts.evaluated - evaluated)
+      evaluated = step.value.counts.evaluated
       yields++
       step = iterator.next()
     }
@@ -559,7 +559,7 @@ const searchChecks = async (utilities, saves) => {
     const { result } = timed
     const stale = search({ ...input, tanks: [...save.tanks], goal: { mode: 'endurance', value: 120 }, fraction: 0.5 })
 
-    check(`${save.label}: the search ranks sets, every set's tanks hold its fuel, and each says whether they are proved`, result.sets.length > 0 && result.sets.every((set) => set.tankPackage && set.tankPackage.status === 'optimal' && set.litres >= set.tankPackage.requestedLitres * (1 - 1e-9) && set.tanks.length > 0 && set.tanks.every((tank) => save.tanks.some((row) => row.id === tank.id))) && result.packages.boundExhausted === 0, `${result.sets.length} sets of ${result.matched} matched, packages ${JSON.stringify(result.packages)}`)
+    check(`${save.label}: the search ranks sets, every set's tanks hold its fuel, and each says whether they are proved`, result.sets.length > 0 && result.sets.every((set) => set.tankPackage && set.tankPackage.status === 'optimal' && set.litres >= set.tankPackage.requestedLitres * (1 - 1e-9) && set.tanks.length > 0 && set.tanks.every((tank) => save.tanks.some((row) => row.id === tank.id))) && result.packages.boundExhausted === 0, `${result.sets.length} sets of ${result.counts.feasible} matched, packages ${JSON.stringify(result.packages)}`)
 
     const lightestTanks = result.sets.every((set) => {
       const again = packTanks({ litres: set.tankPackage.requestedLitres, tanks: save.tanks })
@@ -579,7 +579,7 @@ const searchChecks = async (utilities, saves) => {
 
   const none = search({ hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks: [], maxCount: 40, share: 0.6 })
 
-  check('a fuel target with no tanks to pack is infeasible for every candidate: no sets, no repeated packing passes', none.result.sets.length === 0 && none.result.packages.infeasible > 0 && none.result.matched === 0, `${JSON.stringify(none.result.packages)}, ${none.result.evaluated} candidates`)
+  check('a fuel target with no tanks to pack is infeasible for every candidate: no sets, no repeated packing passes', none.result.sets.length === 0 && none.result.packages.infeasible > 0 && none.result.counts.feasible === 0, `${JSON.stringify(none.result.packages)}, ${none.result.counts.evaluated} candidates`)
 
   const noFuel = search({ hullHS: 60, speed: 2500, tech, tanks: saves[0].tanks, maxCount: 40, share: 0.6 })
 
@@ -640,7 +640,7 @@ const searchChecks = async (utilities, saves) => {
   const sparseInput = (tanks) => ({ hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks, maxCount: 40, share: 0.6, slice: SEARCH_SLICE })
   const sparseSearchTanks = sparseTanks()
   const sparseRun = search(sparseInput(sparseSearchTanks))
-  const summary = (run) => JSON.stringify({ evaluated: run.result.evaluated, matched: run.result.matched, packages: run.result.packages, sets: run.result.sets.map((set) => [set.engine.sizeHS, set.engine.thrust, set.count, set.tankHS, set.litres, set.cost, set.tanks.map((tank) => `${tank.id}x${tank.count}`)]) })
+  const summary = (run) => JSON.stringify({ evaluated: run.result.counts.evaluated, matched: run.result.counts.feasible, packages: run.result.packages, sets: run.result.sets.map((set) => [set.engine.sizeHS, set.engine.thrust, set.count, set.tankHS, set.litres, set.cost, set.tanks.map((tank) => `${tank.id}x${tank.count}`)]) })
   const sparseBuiltAtEnd = packerFor(sparseSearchTanks).built()
 
   check('the search of a sparse catalogue yields before it evaluates anything (the first step warms, building at most catalogue.warmCells cells), and no step evaluates more candidates than its slice', sparseRun.firstEvaluated === 0 && sparseRun.firstBuilt <= warmCells && sparseRun.maxStepCandidates <= SEARCH_SLICE && sparseBuiltAtEnd === maxUnits, `first step: ${sparseRun.firstBuilt} cells built, ${sparseRun.firstEvaluated} candidates; at most ${sparseRun.maxStepCandidates} of ${SEARCH_SLICE} candidates in a step over ${sparseRun.yields} yields`)

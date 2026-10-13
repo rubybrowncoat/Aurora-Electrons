@@ -92,21 +92,30 @@
           <div v-for="note in sweepPreview.notes" :key="note">{{ note }}</div>
         </div>
 
-        <v-progress-linear v-if="searching" :value="progress * 100" height="3" class="mt-2" aria-label="Searching propulsion sets" />
+        <div v-if="searching" class="d-flex align-center mt-2">
+          <v-progress-linear :value="progress * 100" height="3" class="flex-grow-1" aria-label="Searching propulsion sets" />
+          <v-btn v-if="running" x-small text class="ml-2" aria-label="Stop the search and keep the best sets so far" data-search="stop" @click="cancelSearch">Stop</v-btn>
+        </div>
         <v-alert v-if="sweepErrorText" type="error" outlined dense class="mt-3" data-sweep="errors">The search does not run: {{ sweepErrorText }}</v-alert>
         <v-alert v-else-if="searchError" type="error" outlined dense class="mt-3">The search failed: {{ searchError }}</v-alert>
         <v-alert v-else-if="!engineTechMissing && !hullReady" type="info" outlined dense class="mt-3">Enter a hull size, or pick a saved class, to search propulsion sets.</v-alert>
         <v-alert v-else-if="engineTechMissing" type="warning" outlined dense class="mt-3">The race has no engine or fuel consumption tech to design engines with. A saved class and the race's own engines can still be shown.</v-alert>
         <v-alert v-else-if="!speedReady" type="info" outlined dense class="mt-3">Enter a speed between 1 and {{ count(maxSpeed) }} km/s.</v-alert>
-        <v-alert v-else-if="result && !result.sets.length && result.packages && result.packages.infeasible && !searching" type="warning" outlined dense class="mt-3">No tank package can hold the fuel of the targets: the race holds no fuel tank with known litres, size and cost, or a target asks for more fuel than the planner can size. Lower the range or endurance target, or research a fuel tank.</v-alert>
-        <v-alert v-else-if="result && !result.sets.length && !searching" type="warning" outlined dense class="mt-3">No engine set reaches {{ count(speed) }} km/s{{ goalText }} within {{ Math.round(engineOptions.share * 100) }}% of the ship. Raise the share or the most engines, lower the targets, allow both kinds of engine, or pick a higher tech level.</v-alert>
-        <v-alert v-else-if="result && result.sets.length && result.packages && result.packages.boundExhausted && !searching" type="info" outlined dense class="mt-3">{{ result.packages.boundExhausted }} of the {{ result.matched }} sets that meet the targets carry fuel tanks that hold the litres but are not proved the lightest. The mark beside the tanks of a set says so.</v-alert>
+        <v-alert v-else-if="emptyNotice === 'no-package'" type="warning" outlined dense class="mt-3">No tank package can hold the fuel of the targets: the race holds no fuel tank with known litres, size and cost, or a target asks for more fuel than the planner can size. Lower the range or endurance target, or research a fuel tank.</v-alert>
+        <v-alert v-else-if="emptyNotice === 'unreachable'" type="warning" outlined dense class="mt-3">No engine set reaches {{ count(speed) }} km/s{{ goalText }} within {{ Math.round(engineOptions.share * 100) }}% of the ship. Raise the share or the most engines, lower the targets, allow both kinds of engine, or pick a higher tech level.</v-alert>
+        <v-alert v-else-if="emptyNotice === 'so-far'" type="info" outlined dense class="mt-3" data-search="none-so-far">No matching set found so far. The search stopped before it explored the whole domain, so a set that meets the targets may still exist.</v-alert>
+        <v-alert v-else-if="result && result.sets.length && result.packages && result.packages.boundExhausted && !searching" type="info" outlined dense class="mt-3">{{ result.packages.boundExhausted }} of the {{ result.counts.feasible }} sets that meet the targets carry fuel tanks that hold the litres but are not proved the lightest. The mark beside the tanks of a set says so.</v-alert>
+        <v-alert v-if="result && result.run.incomplete && !searching" type="warning" outlined dense class="mt-3" data-search="incomplete">Incomplete search. {{ result.run.text }}</v-alert>
+        <div v-else-if="result && !searching" class="caption text--secondary mt-2" data-search="outcome">
+          <div>{{ result.run.text }}</div>
+          <div v-if="result.output.omitted > 0">The best {{ count(result.output.listed) }} are listed; {{ count(result.output.omitted) }} more meet the targets.</div>
+        </div>
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
         <v-card class="panel" data-summary="The engine sets that give the hull its speed and range, ranked by how little of the ship the engines and fuel take, with the saved class beside them. A row opens to the engine as the game would build it and the tanks that hold its fuel. A mark beside speed, burn, range, endurance and BP says whether the figure is confirmed, estimated, assumed or unavailable, and the CSV keeps it." elevation="1">
           <div class="panel-head">
-            <span>Propulsion sets</span>
+            <span>Propulsion sets<v-chip v-if="result && result.run.incomplete && !searching" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip></span>
             <span class="d-flex align-center flex-wrap">
               <v-chip v-if="hullReady" small class="mr-2">Hull {{ count(hullHS, 2) }} HS · {{ count(hullHS * tonsPerHs) }} tons</v-chip>
               <v-chip v-if="existingEngine" small color="primary" outlined close @click:close="engineId = null">{{ existingEngine.name }}</v-chip>
@@ -391,12 +400,13 @@ import { activeAppearance } from '../utilities/appearance'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClasses } from '../utilities/design-data'
 import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, tankPackageResult, thermalSignature } from '../utilities/design-rules'
-import { engineFields, engineSweep, normaliseEngineOptions, searchPropulsion } from '../utilities/design-search'
+import { engineFields, engineSweep, normaliseEngineOptions, propulsionRun } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
 import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, NO_RACE_TECH, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE, loadRaceTech } from '../utilities/race-tech'
+import { RESPONSIVENESS, TERMINATION, countText, createRunSlot, describeOutcome } from '../utilities/search-run'
 import { describeSweep } from '../utilities/sweep-domain'
 
 const INPUT_LABELS = {
@@ -407,8 +417,7 @@ const INPUT_LABELS = {
   raceEngines: 'the race\'s engines',
 }
 
-// The search runs in slices this long, handing the browser a turn between them to draw, and starts this long after the last change to an input.
-const SLICE_MS = 12
+// The search runs in slices of RESPONSIVENESS.sliceMs, handing the browser a turn between them to draw, and starts this long after the last change to an input.
 const SEARCH_DELAY_MS = 250
 
 const KINDS = [
@@ -594,6 +603,7 @@ export default {
       result: null,
       searching: false,
       progress: 0,
+      running: false,
       searchError: '',
       // What the count and share fields hold as typed while a value is not accepted, by field ('min', 'max', 'share'); the stored value stays as it was until every field is right.
       sweepDrafts: {},
@@ -993,10 +1003,31 @@ export default {
       })
     },
 
+    // What an empty result says. Only a search that explored its whole domain can say that nothing reaches the targets; one that stopped early has found nothing so far.
+    emptyNotice() {
+      const result = this.result
+
+      if (!result || result.sets.length || this.searching) {
+        return null
+      }
+
+      if (result.run.incomplete) {
+        return 'so-far'
+      }
+
+      return result.packages && result.packages.infeasible ? 'no-package' : 'unreachable'
+    },
+
+    // The note of a tile with no set.
+    noSetNote() {
+      return this.searching ? 'Searching…' : this.result && this.result.run.incomplete ? 'No set found so far' : 'No set meets the targets'
+    },
+
     tiles() {
       const result = this.result
-      const none = { value: '—', note: this.searching ? 'Searching…' : 'No set meets the targets' }
-      const describe = (set) => `${this.count(set.count)} × ${this.setName(set)}`
+      const none = { value: '—', note: this.noSetNote }
+      const partial = result && result.run.incomplete ? ' · best so far' : ''
+      const describe = (set) => `${this.count(set.count)} × ${this.setName(set)}${partial}`
       const tile = (label, set, figure) => ({ label, ...(set ? { value: figure(set), note: describe(set) } : none) })
       const tech = this.designTech
       const cheapest = tile('Cheapest set', result && result.cheapest, (set) => `${this.count(set.cost, 1)} BP`)
@@ -1118,15 +1149,22 @@ export default {
     },
   },
   watch: {
+    context() {
+      this.searchSlot.invalidate(TERMINATION.SAVE_CHANGED)
+      this.startSearch(this.searchInput)
+      this.sweepDrafts = {}
+    },
+
+    database() {
+      this.searchSlot.invalidate(TERMINATION.SAVE_CHANGED)
+      this.startSearch(this.searchInput)
+    },
+
     searchInput: {
       immediate: true,
       handler(input) {
         this.startSearch(input)
       },
-    },
-
-    context() {
-      this.sweepDrafts = {}
     },
 
     targetOrphaned(orphaned) {
@@ -1141,9 +1179,13 @@ export default {
       }
     },
   },
+  beforeCreate() {
+    // Not reactive: the run slot holds live generators, and the immediate `searchInput` watcher needs it before `data` is read.
+    this.searchSlot = createRunSlot()
+  },
   beforeDestroy() {
     clearTimeout(this.searchTimer)
-    this.run = null
+    this.searchSlot.invalidate(TERMINATION.CLOSED)
   },
   methods: {
     // The class the query names becomes the hull; the race's own engine is searched alone. A key the query leaves out means no engine, and the hull as it is.
@@ -1352,7 +1394,8 @@ export default {
 
     // The saved class and every set listed, with the status beside each figure and the rules, versions, assumptions and missing inputs of the row, so a copy keeps what the table showed. An unavailable figure is left empty, never 0.
     downloadCsv() {
-      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs']
+      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs', 'Search']
+      const search = !this.result ? '' : `${this.result.run.incomplete ? `incomplete (${this.result.run.termination})` : 'complete'}: ${countText(this.result.counts)}`
       const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
 
       const lines = this.rows.map((row) => {
@@ -1360,7 +1403,7 @@ export default {
         const fields = basis.map(exportFields)
         const results = row.provenance.tanks ? [...basis, row.provenance.tanks] : basis
 
-        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; ')]
+        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; '), row.pinned ? '' : search]
       })
 
       const csv = [header, ...lines].map((line) => line.map(quote).join(',')).join('\n')
@@ -1372,63 +1415,74 @@ export default {
       URL.revokeObjectURL(link.href)
     },
 
-    // Stops the search running and, for an input that can be searched, starts it after a short wait. An input that changes meanwhile takes over.
+    // Ends the search running and, for an input that can be searched, starts it after a short wait. An input that changes meanwhile takes over.
     startSearch(input) {
       clearTimeout(this.searchTimer)
-
-      const run = {}
-
-      this.run = run
+      this.searchSlot.invalidate(TERMINATION.INPUT_CHANGED)
+      this.running = false
       this.searchError = ''
 
       if (!input) {
         this.result = null
+        this.searchSlot.clear()
         this.searching = false
 
         return
       }
 
       this.searching = true
-      this.searchTimer = setTimeout(() => this.runSearch(input, run), SEARCH_DELAY_MS)
+      this.searchTimer = setTimeout(() => this.runSearch(input), SEARCH_DELAY_MS)
     },
 
-    // Runs `searchPropulsion` a slice at a time, then keeps its result with the input it was for.
-    async runSearch(input, run) {
-      const iterator = searchPropulsion(input)
-      let step
+    // Stops the search running where it is; the best sets so far stay, labelled incomplete.
+    cancelSearch() {
+      this.searchSlot.cancel()
+    },
 
-      this.progress = 0
-
+    // Runs the search of `input` a slice at a time, then keeps its outcome with the input it was for. A run that is replaced, or whose save changed, is dropped without a word.
+    async runSearch(input) {
       try {
-        do {
-          const end = performance.now() + SLICE_MS
+        const run = this.searchSlot.start(propulsionRun(input))
 
-          do {
-            step = iterator.next()
-          } while (!step.done && performance.now() < end)
+        this.progress = 0
+        this.running = true
 
-          if (!step.done) {
-            this.progress = step.value.progress
+        while (run.running) {
+          run.advance(RESPONSIVENESS.sliceMs)
+          this.progress = run.progress
+
+          if (run.running) {
             await nextTask()
           }
 
-          if (this.run !== run) {
+          if (!this.searchSlot.isCurrent(run)) {
             return
           }
-        } while (!step.done)
-      } catch (error) {
-        if (this.run === run) {
-          this.run = null
-          this.searching = false
-          this.searchError = error.message
         }
 
-        return
-      }
+        const outcome = this.searchSlot.publish(run)
 
-      this.run = null
-      this.searching = false
-      this.result = Object.freeze({ ...step.value, input })
+        if (!outcome) {
+          return
+        }
+
+        this.running = false
+        this.searching = false
+
+        if (outcome.error) {
+          this.searchError = outcome.error
+
+          return
+        }
+
+        const text = describeOutcome(outcome, (value) => this.count(value))
+
+        this.result = outcome.result ? Object.freeze({ ...outcome.result, input, run: Object.freeze({ status: outcome.status, incomplete: outcome.incomplete, termination: outcome.termination, elapsedMs: outcome.elapsedMs, text }) }) : null
+      } catch (error) {
+        this.running = false
+        this.searching = false
+        this.searchError = error.message
+      }
     },
   },
   asyncComputed: {

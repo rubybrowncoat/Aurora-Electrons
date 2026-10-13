@@ -1,9 +1,10 @@
 // The propulsion search: for a hull without its engines and fuel, a speed and a range or an endurance, every engine the race's tech can design (a size, a thrust modifier) at every count that fits, with the fuel tanks that give the range, ranked by how little of the ship the propulsion takes. Sizes are in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, range in km, endurance in hours, cost in BP, as in design-rules.js.
 //
-// `searchPropulsion` is a generator: it yields { progress, evaluated, matched } about every `slice` candidates so the page can run it in slices between frames, and returns the result.
+// `searchPropulsion` is a generator that follows the protocol of search-run.js: it yields { progress, counts, snapshot } about every `slice` units of work so the page can run it in slices between frames, and returns the result with its counts, what its output left out and how it ended. `propulsionRun` is the search as a run (a descriptor, a budget, cancellation and invalidation), which is how the page runs it.
 
 import { classSpeed, engineDesign, fullPowerRangeKm, MAX_SPEED, thermalSignature, TONS_PER_HS } from './design-rules'
-import { combinationCount, readValue, sweepDomain } from './sweep-domain'
+import { createRun, TERMINATION, UNPACED } from './search-run'
+import { combinationCount, describeSweep, readValue, SWEEP_KINDS, sweepDomain } from './sweep-domain'
 import { meetsRequest, PACKAGE_STATUS, packerFor } from './tank-packing'
 
 export const THRUST_STEP = 0.05
@@ -11,11 +12,18 @@ export const MIN_ENGINE_SIZE_HS = 1
 export const KEPT_SETS = 50
 export const SLICE_CANDIDATES = 2000
 
+// What a run of the search may spend: the most candidates it evaluates (the search stops itself there) and the most milliseconds it runs for (the run stops it). Past either the run ends truncated, and says how much of its domain was explored. The default engine search is a small part of the first: it evaluates about 170,000 candidates on the repository's modded save, in under a second.
+export const SEARCH_BUDGET = Object.freeze({ candidates: 5000000, ms: 30000 })
+
 // The most times a set's tanks are sized again, each time for the speed the ship has with the tanks of the time before. The tanks only grow, so a few passes settle; one that doesn't is dropped.
 const MAX_TANK_PASSES = 24
 // What a candidate that packs tanks counts for against a slice, next to one that doesn't: a lookup in the packer's table costs a few candidates' work, and walking a package back from the table costs a little for each tank in it, which a catalogue of one small tank and large ones makes long.
 const TANK_WORK = 6
 const TANK_COUNT_WORK = 0.01
+// What an engine design built, or skipped for its kind, counts for against a slice: the work of the candidates it holds is counted as they are evaluated, so a design that holds none (the speed or the share rules every count out) still moves a slice along.
+const DESIGN_WORK = 1
+// How many looks at whether the step has run long enough pass between two reads of the clock: a candidate that is rejected at once costs far less than the read, and sixteen that pack tanks stay within a millisecond or two.
+export const CLOCK_EVERY = 16
 const EPSILON = 1e-9
 const NO_TANKS = Object.freeze({ status: null, reason: null, complete: true, feasible: true, requestedLitres: 0, litres: 0, excessLitres: 0, count: 0, sizeHS: 0, cost: 0, crew: 0, picks: Object.freeze([]) })
 
@@ -83,6 +91,29 @@ export const normaliseEngineOptions = (stored) => {
   }
 
   return { kind: stored.kind, min: stored.min, max: stored.max, share: Math.max(0.01, stored.share), exactLimits: stored.exactLimits === true }
+}
+
+// The deterministic name of a candidate, from the engine and the count alone: 'grid:<size in thousandths of HS>:<thrust in thousandths>:<count>' for a designed engine, 'engine:<id>:<count>' for one of the race's own. A set (or a candidate before it is a set) has one name in every run, whatever else was searched.
+export const candidateId = ({ engine, count }) => (engine.id === undefined ? `grid:${Math.round(engine.sizeHS * SWEEP_KINDS.sizeHS.scale)}:${Math.round(engine.thrust * SWEEP_KINDS.thrust.scale)}:${count}` : `engine:${engine.id}:${count}`)
+
+// What a run of the engine search explores, from the sweep it was given: `total` the candidates of the grid and the counts (before the search drops those that cannot reach the speed or fit the share; null past a safe integer), `order` how they are visited, `axes` each swept value as the preview states it, and `signature`, which is the same for the same domain (the sweep, the kind of engine wanted, the policy at its limits and the race's own engine, if one).
+export const engineDomain = (plan, { kind = 'either', engine = null } = {}) => {
+  const axis = (domain, unit) => (domain ? { unit, count: domain.count, first: domain.first, last: domain.last, ranges: describeSweep(domain).ranges } : null)
+
+  if (!plan.ok) {
+    return Object.freeze({ kind: 'engine-grid', total: null, order: [], axes: {}, signature: `invalid:${plan.problems.join('|')}`, idFormat: null })
+  }
+
+  const signature = [engine ? `engine:${engine.id}` : `grid:${kind}`, plan.include, plan.sizes ? plan.sizes.signature : '-', plan.thrusts ? plan.thrusts.signature : '-', plan.counts.signature].join('|')
+
+  return Object.freeze({
+    kind: engine ? 'engine-counts' : 'engine-grid',
+    total: plan.combinations,
+    order: engine ? ['count'] : ['size', 'thrust', 'count'],
+    axes: Object.freeze({ sizes: axis(plan.sizes, 'HS'), thrusts: axis(plan.thrusts, ''), counts: axis(plan.counts, '') }),
+    signature,
+    idFormat: engine ? 'engine:<id>:<count>' : 'grid:<thousandths of HS>:<thousandths of thrust>:<count>',
+  })
 }
 
 // Whether set `a` ranks ahead of `b`: the less HS the propulsion takes, then the less it costs, then the faster it is.
@@ -191,8 +222,12 @@ function* gridDesigns({ sizes, thrusts, tech, kind }) {
 // - `tech`: `{ engineTech, fuelTech, thermalTech, thermalCost, minThrust, maxThrust, maxSize }`, the levels the race designs with; `tanks`: the stock tanks as `packTanks` takes them (`packerFor(tanks)` keeps the tables built for them, so a later search of the same list starts with them).
 // - `engine`: one of the race's own engines (as design-data.js `loadRaceEngines` has them) to search only its count, or null to design engines.
 // - `include`: the endpoint policy of the grid ('grid' or 'limits', see `engineSweep`), `sweep` an `engineSweep` the caller already made (the page's preview), which must be for the same `tech`, counts and policy; a sweep that is not `ok` throws before anything runs.
-// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `tankPackage` (`{ status, reason, requestedLitres, excessLitres }` of its fuel tanks: 'optimal' when they are proved the lightest package that holds the fuel, 'bound-exhausted' with the reason when a bound ran out and they only hold it, null for a set with no fuel), `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `crew`, `commercial` and `thermal`. Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), packages: { optimal, boundExhausted, infeasible } (the fuel packages of the candidates that met the speed: proved lightest, not proved, and none that holds the fuel, which drops the candidate), evaluated, matched }.
-export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, kind = 'either', minCount = 1, maxCount = 100, share = 1, tech, tanks = [], engine = null, include = 'grid', sweep = null, keep = KEPT_SETS, slice = SLICE_CANDIDATES }) {
+// - `keep`: how many ranked sets the result lists, `slice` the units of work between two yields, `maxCandidates` the most candidates it evaluates (null for no limit): at that many, with candidates left in its domain, it returns what it has with `termination: 'candidate-budget'`.
+// - `pace`: `{ expired() }`, which says when the step's time is up (the run gives its own; the default never expires). The search yields there as well as at `slice`, between candidates and passes and inside the tank tables and package walks, and goes on where it stopped: the results are the same wherever it yields.
+// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `tankPackage` (`{ status, reason, requestedLitres, excessLitres }` of its fuel tanks: 'optimal' when they are proved the lightest package that holds the fuel, 'bound-exhausted' with the reason when a bound ran out and they only hold it, null for a set with no fuel), `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `crew`, `commercial` and `thermal`; `candidateId(set)` names it.
+// The work of a step is counted in units: `DESIGN_WORK` for each engine design built (or skipped for its kind), 1 for each candidate evaluated, and `TANK_WORK` and `TANK_COUNT_WORK` for each tank package, so a step is bounded by `slice` plus the work of one candidate or one design whether the candidates are rejected at once or pack large packages, and the first yield comes before any candidate when tables are warmed. The pace bounds a step in time as well: the clock is read every `CLOCK_EVERY` looks, so units that cost more than they are counted for (a slow machine, a long table build or walk, which yield by themselves) still end the step at the pace's deadline.
+// Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), packages: { optimal, boundExhausted, infeasible } (the fuel packages of the candidates that met the speed: proved lightest, not proved, and none that holds the fuel, which drops the candidate), counts (as search-run.js has them: `pruned` the candidates of the domain left out because the speed or the share rules out every count beyond a bound, `prunedBy` the reasons: 'kind' of engine not wanted, 'speed', 'share', 'input'; `total`, `pruned`, `unexplored` and `prunedBy` are null when the domain passes a safe integer, where they cannot be exact), output: { limit, listed, omitted } (the ranked list's cut: `omitted` is the feasible candidates it does not list, which says nothing of how much was explored), termination }. A snapshot has the same shape with `termination` null, and does not count the candidate whose tank passes the step ended in.
+export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, kind = 'either', minCount = 1, maxCount = 100, share = 1, tech, tanks = [], engine = null, include = 'grid', sweep = null, keep = KEPT_SETS, slice = SLICE_CANDIDATES, maxCandidates = null, pace = UNPACED }) {
   const plan = sweep || engineSweep({ tech, engine, minCount, maxCount, include })
 
   if (!plan.ok) {
@@ -206,8 +241,12 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
   const floorFraction = floorKm / 1000
   const sizes = engine ? [] : plan.sizes.toArray()
   const thrusts = engine ? [] : plan.thrusts.toArray()
-  const total = engine ? 1 : sizes.length * thrusts.length
+  const designTotal = engine ? 1 : sizes.length * thrusts.length
+  const perDesign = plan.counts.count
+  const total = designTotal * perDesign
+  const exact = Number.isSafeInteger(total)
   const designs = engine ? [engine] : gridDesigns({ sizes, thrusts, tech, kind })
+  const pruned = { kind: 0, speed: 0, share: 0, input: 0 }
   let evaluated = 0
   let matched = 0
   let work = 0
@@ -215,10 +254,61 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
   const packages = { optimal: 0, boundExhausted: 0, infeasible: 0 }
 
-  const finish = () => ({ sets, lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed, range: frontiers.rangeKm }, packages, evaluated, matched })
+  // The results the search holds: the ranked list, both frontiers and the fastest and cheapest sets, each once.
+  const retained = () => new Set([...sets, ...frontiers.speed, ...frontiers.rangeKm, best.fastest, best.cheapest].filter(Boolean)).size
+
+  // `pending` is 1 for a step that ends inside the tank passes of a candidate: that candidate is not yet evaluated, and a snapshot of the step leaves it out.
+  const countsNow = (pending) => {
+    const dropped = pruned.kind + pruned.speed + pruned.share + pruned.input
+
+    if (!exact) {
+      return { total: null, evaluated: evaluated - pending, pruned: null, unexplored: null, feasible: matched, retained: retained(), prunedBy: null }
+    }
+
+    return { total, evaluated: evaluated - pending, pruned: dropped, unexplored: total - (evaluated - pending) - dropped, feasible: matched, retained: retained(), prunedBy: { ...pruned } }
+  }
+
+  const resultOf = (termination, pending) => ({ sets: sets.slice(), lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed.slice(), range: frontiers.rangeKm.slice() }, packages: { ...packages }, counts: countsNow(pending), output: { limit: keep, listed: sets.length, omitted: matched - sets.length }, termination })
+
+  const stepOf = (pending = 0) => ({ progress: done / designTotal, counts: countsNow(pending), snapshot: () => resultOf(null, pending) })
+
+  // Whether the step has run long enough: its work reaches the slice, or the pace says its time is up (looked at every CLOCK_EVERY times).
+  let looks = 0
+
+  const due = () => {
+    if (work >= slice) {
+      return true
+    }
+
+    if (++looks < CLOCK_EVERY) {
+      return false
+    }
+
+    looks = 0
+
+    return pace.expired()
+  }
+
+  // The package for a request. The table it needs and the walk back from it yield while the pace is up, and the step then ends with the candidate it is for not yet evaluated.
+  const packNow = function* (litres) {
+    const packing = packer.packing(litres, 'lightest', pace)
+    let step = packing.next()
+
+    while (!step.done) {
+      work = 0
+
+      yield stepOf(1)
+
+      step = packing.next()
+    }
+
+    return step.value
+  }
 
   if (floorKm > MAX_SPEED || !(hullHS >= 0)) {
-    return finish()
+    pruned[floorKm > MAX_SPEED ? 'speed' : 'input'] = total
+
+    return resultOf(TERMINATION.EXHAUSTED, 0)
   }
 
   const packer = packerFor(tanks)
@@ -228,15 +318,16 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
     const warming = packer.warm()
 
     while (!warming.next().done) {
-      yield { progress: 0, evaluated, matched }
+      yield stepOf()
     }
   }
 
   for (const design of designs) {
     done++
+    work += DESIGN_WORK
 
     if (design === null) {
-      work++
+      pruned.kind += perDesign
     } else {
       // The engines this design needs to reach the speed on the bare hull, and the most that fit the share: the counts in between are tried.
       const room = design.power - floorFraction * design.sizeHS
@@ -247,15 +338,25 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
         first = room > 0 ? Math.max(first, Math.floor(floorFraction * hullHS / room)) : last + 1
       }
 
+      // The counts below the first can't reach the speed; those the loop does not reach above the last are ruled out by the share.
+      const below = Math.min(perDesign, Math.max(0, first - plan.counts.first))
+      const entered = evaluated
+
+      pruned.speed += below
+
       if (share < 1) {
         last = Math.min(last, Math.floor(share * hullHS / (design.sizeHS * (1 - share))) + 1)
       }
 
       for (let count = first; count <= last; count++) {
-        if (work >= slice) {
+        if (maxCandidates !== null && evaluated >= maxCandidates) {
+          return resultOf(TERMINATION.CANDIDATE_BUDGET, 0)
+        }
+
+        if (due()) {
           work = 0
 
-          yield { progress: done / total, evaluated, matched }
+          yield stepOf()
         }
 
         work++
@@ -282,7 +383,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
         if (goal && goal.value > 0 && goal.mode === 'endurance') {
           work += TANK_WORK
-          pack = packer.pack(goal.value * burnCruise)
+          pack = yield * packNow(goal.value * burnCruise)
           work += pack.count * TANK_COUNT_WORK
 
           if (!pack.feasible) {
@@ -301,14 +402,14 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
           let settled = false
 
           for (let pass = 0; pass < MAX_TANK_PASSES && Number.isFinite(litres); pass++) {
-            if (work >= slice) {
+            if (due()) {
               work = 0
 
-              yield { progress: done / total, evaluated, matched }
+              yield stepOf(1)
             }
 
             work += TANK_WORK
-            pack = packer.pack(litres)
+            pack = yield * packNow(litres)
             work += pack.count * TANK_COUNT_WORK
 
             if (!pack.feasible) {
@@ -409,14 +510,23 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
           }
         }
       }
+
+      pruned.share += perDesign - below - (evaluated - entered)
     }
 
-    if (work >= slice) {
+    if (due()) {
       work = 0
 
-      yield { progress: done / total, evaluated, matched }
+      yield stepOf()
     }
   }
 
-  return finish()
+  return resultOf(TERMINATION.EXHAUSTED, 0)
+}
+
+// The engine search as a run: its descriptor names the input and the domain, `budget` is { candidates, ms } (SEARCH_BUDGET by default; null for either is no limit), and `now` the clock. The sweep is made once and read by the descriptor and the search alike, and one that cannot run fails the run on its first step with the problems in words.
+export const propulsionRun = (input, { budget = SEARCH_BUDGET, now } = {}) => {
+  const plan = input.sweep || engineSweep({ tech: input.tech, engine: input.engine || null, minCount: input.minCount === undefined ? 1 : input.minCount, maxCount: input.maxCount === undefined ? 100 : input.maxCount, include: input.include || 'grid' })
+
+  return createRun({ kind: 'engine-search', input, domain: engineDomain(plan, { kind: input.kind || 'either', engine: input.engine || null }), budget, now, search: (pace) => searchPropulsion({ ...input, sweep: plan, maxCandidates: budget.candidates, pace }) })
 }

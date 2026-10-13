@@ -11,7 +11,7 @@
 
   Statuses every algorithm returns: `optimal` (proved best under its objective over the whole domain), `heuristic` (a feasible package with no proof), `bound-exhausted` (a bound ran out first: the incumbent, if any, is feasible and unproven, and no package found is not infeasible), `infeasible` (the whole domain was searched or the catalogue is empty: no package exists), `inapplicable` (a fast path whose proof conditions the catalogue does not meet; it never returns a package).
 
-  The search part drives the real `searchPropulsion` source with two changes: its design-rules and tank-packing imports are replaced (the harness refuses to run if the tank-packing import is not found), the packer being the one under test; a run with the production packer must reproduce the unmodified search exactly. The removed greedy `packTanks` (embedded as `legacyPackTanks`) is the baseline named `current`; the production solver (tank-packing.js) is `production`. After it, `runSparseResponsiveness` times the unmodified `searchPropulsion` and the production warm generator over a sparse catalogue, a fixed number of cold runs reporting every maximum and the percentiles. No wall-clock time is asserted anywhere in this file (scripts/check-tank-packing.js asserts the bounded work per step instead).
+  The search part drives the real `searchPropulsion` source with two changes: its design-rules and tank-packing imports are replaced (the harness refuses to run if the tank-packing import is not found), the packer being the one under test; a run with the production packer must reproduce the unmodified search exactly. The removed greedy `packTanks` (embedded as `legacyPackTanks`) is the baseline named `current`; the production solver (tank-packing.js) is `production`. After it, `runSparseResponsiveness` times the unmodified `searchPropulsion` and the production warm generator over a sparse catalogue, a fixed number of cold runs reporting every maximum and the percentiles, and `runRunnerResponsiveness` drives the search as a run (`propulsionRun`, search-run.js) the way the page does on rejection-heavy and packing-heavy cases, reporting each `advance()` and the cancel latency beside the declared responsiveness budget. No wall-clock time is asserted anywhere in this file (scripts/check-tank-packing.js and scripts/check-search-runner.js assert the bounded work per step instead).
 */
 const fs = require('fs')
 const path = require('path')
@@ -1566,28 +1566,33 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// searchPropulsion's own source with its design-rules import taken from `globalThis.__benchRules`, its sweep-domain import taken from the real module (`globalThis.__benchSweep`), its tank-packing import replaced by `globalThis.__benchTankPacking` (meetsRequest, PACKAGE_STATUS) and a `packerFor` whose packer is `globalThis.__benchPacker`, which warms nothing. Nothing else changes.
+// searchPropulsion's own source with its design-rules import taken from `globalThis.__benchRules`, its sweep-domain and search-run imports taken from the real modules (`globalThis.__benchSweep`, `globalThis.__benchRun`), its tank-packing import replaced by `globalThis.__benchTankPacking` (meetsRequest, PACKAGE_STATUS) and a `packerFor` whose packer is `globalThis.__benchPacker`, which warms nothing. Nothing else changes.
 const loadPatchedSearch = async (rules) => {
   const source = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', 'design-search.js'), 'utf8')
   const rulesPattern = /import \{([^}]*)\} from '\.\/design-rules'/
   const sweepPattern = /import \{([^}]*)\} from '\.\/sweep-domain'/
+  const runPattern = /import \{([^}]*)\} from '\.\/search-run'/
   const packingPattern = /import \{([^}]*)\} from '\.\/tank-packing'/
   const rulesMatch = rulesPattern.exec(source)
   const sweepMatch = sweepPattern.exec(source)
+  const runMatch = runPattern.exec(source)
   const packingMatch = packingPattern.exec(source)
 
-  if (!rulesMatch || !sweepMatch || !packingMatch || !/\bpackerFor\b/.test(packingMatch[1])) {
+  if (!rulesMatch || !sweepMatch || !runMatch || !packingMatch || !/\bpackerFor\b/.test(packingMatch[1])) {
     throw new Error('design-search.js no longer imports packerFor from ./tank-packing in the shape the harness replaces')
   }
 
-  const patched = source.replace(rulesPattern, `const { ${rulesMatch[1].trim()} } = globalThis.__benchRules`).replace(sweepPattern, `const { ${sweepMatch[1].trim()} } = globalThis.__benchSweep`).replace(packingPattern, 'const { meetsRequest, PACKAGE_STATUS } = globalThis.__benchTankPacking\nconst packerFor = (tanks) => ({ pack: (litres) => globalThis.__benchPacker({ litres, tanks }), warm: function* () {} })')
+  const patched = source.replace(rulesPattern, `const { ${rulesMatch[1].trim()} } = globalThis.__benchRules`).replace(sweepPattern, `const { ${sweepMatch[1].trim()} } = globalThis.__benchSweep`).replace(runPattern, `const { ${runMatch[1].trim()} } = globalThis.__benchRun`).replace(packingPattern, 'const { meetsRequest, PACKAGE_STATUS } = globalThis.__benchTankPacking\nconst packerFor = (tanks) => ({ pack: (litres) => globalThis.__benchPacker({ litres, tanks }), packing: function* (litres) { return globalThis.__benchPacker({ litres, tanks }) }, warm: function* () {} })')
 
   if (/from '\.\//.test(patched)) {
     throw new Error('design-search.js imports another utility the harness does not load')
   }
 
+  const realModule = (name) => import(`data:text/javascript;base64,${Buffer.from(fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${name}.js`), 'utf8')).toString('base64')}`)
+
   globalThis.__benchRules = rules
-  globalThis.__benchSweep = await import(`data:text/javascript;base64,${Buffer.from(fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', 'sweep-domain.js'), 'utf8')).toString('base64')}`)
+  globalThis.__benchSweep = await realModule('sweep-domain')
+  globalThis.__benchRun = await realModule('search-run')
   globalThis.__benchTankPacking = production
 
   return import(`data:text/javascript;base64,${Buffer.from(patched).toString('base64')}`)
@@ -1761,7 +1766,7 @@ const runPaged = async ({ search, input, packer, budgetMs, cancelAtMs = null }) 
 
     if (!step.done) {
       progress = step.value.progress
-      evaluated = step.value.evaluated
+      evaluated = step.value.counts.evaluated
       await nextTask()
     }
 
@@ -1785,7 +1790,7 @@ const runPaged = async ({ search, input, packer, budgetMs, cancelAtMs = null }) 
 
   slices.sort((a, b) => a - b)
 
-  return { outcome, wall, result, evaluated: result ? result.evaluated : evaluated, progress: result ? 1 : progress, slices, longestStep, probeGap, peak, peakBuffers, latency, base }
+  return { outcome, wall, result, evaluated: result ? result.counts.evaluated : evaluated, progress: result ? 1 : progress, slices, longestStep, probeGap, peak, peakBuffers, latency, base }
 }
 
 const packersOf = (catalogue, packTanks) => {
@@ -1888,14 +1893,14 @@ const runSearchBench = async (utilities, catalogues) => {
 
       return step.value
     }
-    const summary = (result) => JSON.stringify({ evaluated: result.evaluated, matched: result.matched, sets: result.sets.map((set) => [setKey(set), set.propulsionHS, set.cost, set.litres, set.tanks.map((pick) => `${pick.id}x${pick.count}`)]), lightest: result.lightest && setKey(result.lightest), fastest: result.fastest && setKey(result.fastest), cheapest: result.cheapest && setKey(result.cheapest) })
+    const summary = (result) => JSON.stringify({ evaluated: result.counts.evaluated, matched: result.counts.feasible, sets: result.sets.map((set) => [setKey(set), set.propulsionHS, set.cost, set.litres, set.tanks.map((pick) => `${pick.id}x${pick.count}`)]), lightest: result.lightest && setKey(result.lightest), fastest: result.fastest && setKey(result.fastest), cheapest: result.cheapest && setKey(result.cheapest) })
 
     globalThis.__benchPacker = (request) => production.packerFor(request.tanks).pack(request.litres)
 
     const unmodified = drain(real.searchPropulsion(input))
     const patched = drain(search.searchPropulsion(input))
 
-    check('the patched search with the production packer gives the unmodified search\'s result (reduced grid)', summary(unmodified) === summary(patched), `${unmodified.evaluated} evaluated, ${unmodified.matched} matched, ${unmodified.sets.length} sets kept`)
+    check('the patched search with the production packer gives the unmodified search\'s result (reduced grid)', summary(unmodified) === summary(patched), `${unmodified.counts.evaluated} evaluated, ${unmodified.counts.feasible} matched, ${unmodified.sets.length} sets kept`)
   }
 
   for (const catalogue of catalogues) {
@@ -1922,7 +1927,7 @@ const runSearchBench = async (utilities, catalogues) => {
       const sorted = Float64Array.from(requests).sort()
       const distinct = sorted.reduce((count, value, index) => count + (index === 0 || value !== sorted[index - 1] ? 1 : 0), 0)
 
-      console.log(`  requests: ${referenceAudit.tally.calls} pack calls over ${referenceResult.result.evaluated} evaluated candidates (${(referenceAudit.tally.calls / referenceResult.result.evaluated).toFixed(2)} per candidate), ${distinct} distinct whole-litre requests (${fmt(100 * distinct / Math.max(1, sorted.length))}% distinct); litres min ${sorted[0]}, median ${sorted[Math.floor(sorted.length / 2)]}, p99 ${sorted[Math.floor(sorted.length * 0.99)]}, max ${sorted[sorted.length - 1]}; matched ${referenceResult.result.matched}`)
+      console.log(`  requests: ${referenceAudit.tally.calls} pack calls over ${referenceResult.result.counts.evaluated} evaluated candidates (${(referenceAudit.tally.calls / referenceResult.result.counts.evaluated).toFixed(2)} per candidate), ${distinct} distinct whole-litre requests (${fmt(100 * distinct / Math.max(1, sorted.length))}% distinct); litres min ${sorted[0]}, median ${sorted[Math.floor(sorted.length / 2)]}, p99 ${sorted[Math.floor(sorted.length * 0.99)]}, max ${sorted[sorted.length - 1]}; matched ${referenceResult.result.counts.feasible}`)
 
       for (const spec of packersOf(catalogue, packTanks)) {
         if (spec.name === 'shortcut+bnb-1e4' && !classify(catalogue.quantized.rows).applicable) {
@@ -2048,8 +2053,125 @@ const runSparseResponsiveness = (utilities) => {
   check('every cold run of the sparse search finds sets, and the same number each time', sets.every((count) => count > 0 && count === sets[0]), `${sets.join(' / ')} sets`)
 }
 
+// The search as a run (`propulsionRun`, the production packer) driven the way the page drives it: `advance(RESPONSIVENESS.sliceMs)` between event-loop turns, on the cases where a step is longest in work and shortest in progress: designs and candidates that are rejected at once, and candidates that pack tanks. Each run has the run's own time budget (--budget-ms); a second run of each is cancelled 0.3 s after it starts, honoured after the turn that follows the slice as the page honours a click on Stop (a change of input is honoured the same way, so it waits as long as the longest event-loop block). Every figure is a diagnostic of this machine at this moment; the declared budget (RESPONSIVENESS.budgetMs) is printed beside them and nothing is asserted.
+const CANCEL_AT_MS = 300
+
+// What the machine itself takes from a thread: a busy loop that allocates nothing, reading the clock, for `ms`. The longest gap between two reads is time the loop did not run (another process, the scheduler), so it is the floor under every maximum printed beside it.
+const hostJitter = (ms) => {
+  const end = performance.now() + ms
+  let last = performance.now()
+  let longest = 0
+  let over5 = 0
+  let over50 = 0
+
+  while (last < end) {
+    const now = performance.now()
+    const gap = now - last
+
+    longest = Math.max(longest, gap)
+    over5 += gap > 5 ? 1 : 0
+    over50 += gap > 50 ? 1 : 0
+    last = now
+  }
+
+  return `host reference, a busy loop that allocates nothing for ${fmt(ms / 1000, 0)} s: longest gap ${fmt(longest, 2)} ms, ${over5} gaps over 5 ms, ${over50} over 50 ms (time the machine took from the thread, a floor under the maxima)`
+}
+
+const driveRun = async (made, cancelAtMs) => {
+  const advances = []
+  const start = performance.now()
+  let probeLast = start
+  let probeGap = 0
+  let probing = true
+  let cancelRequested = null
+  let latency = null
+
+  const tick = () => {
+    const now = performance.now()
+
+    probeGap = Math.max(probeGap, now - probeLast)
+    probeLast = now
+
+    if (probing) {
+      setTimeout(tick, 1)
+    }
+  }
+
+  setTimeout(tick, 1)
+
+  if (cancelAtMs !== null) {
+    setTimeout(() => {
+      cancelRequested = performance.now()
+    }, cancelAtMs)
+  }
+
+  while (made.running) {
+    const begin = performance.now()
+
+    made.advance(SLICE_MS)
+    advances.push(performance.now() - begin)
+
+    if (made.running) {
+      await nextTask()
+    }
+
+    if (cancelRequested !== null && made.running) {
+      made.cancel()
+      latency = performance.now() - cancelRequested
+    }
+  }
+
+  probing = false
+  advances.sort((a, b) => a - b)
+
+  return { outcome: made.outcome(), wall: performance.now() - start, advances, probeGap, latency }
+}
+
+const runRunnerResponsiveness = async (utilities, catalogues) => {
+  const { propulsionRun } = utilities['design-search']
+  const { RESPONSIVENESS } = utilities['search-run']
+
+  heading(`Search runner: advance() times against the declared responsiveness budget of ${RESPONSIVENESS.budgetMs} ms (slices of ${RESPONSIVENESS.sliceMs} ms; diagnostic, nothing asserted; each run stops at --budget-ms ${options.budgetMs})`)
+  console.log(`  ${hostJitter(2000)}`)
+
+  const sparse = { name: 'sparse', tech: { engineTech: 10, fuelTech: 0.7, thermalTech: 1, thermalCost: 1, minThrust: 0.5, maxThrust: 1.5, maxSize: 12 }, tanks: sparseTanks() }
+  const scenarios = []
+
+  for (const catalogue of catalogues) {
+    if (!catalogue.quantized.rows) {
+      continue
+    }
+
+    const tech = options.quick ? { ...catalogue.tech, maxSize: 12, maxThrust: Math.min(catalogue.tech.maxThrust, 1.5) } : catalogue.tech
+    const base = { kind: 'either', minCount: 1, maxCount: 100, share: 1, tech, tanks: catalogue.quantized.tanks }
+
+    scenarios.push([`${catalogue.name}: rejection-heavy, 269,999 km/s (rules out every count of the designs that cannot reach it)`, { ...base, hullHS: 100, speed: 269999, goal: { mode: 'range', value: 1e9 } }])
+    scenarios.push([`${catalogue.name}: rejection-heavy, a 1% propulsion share (rules out every design above 1 HS)`, { ...base, hullHS: 100, speed: 2000, share: 0.01, goal: { mode: 'range', value: 1e9 } }])
+    scenarios.push([`${catalogue.name}: rejection-heavy, a range no tank package holds`, { ...base, hullHS: 100, speed: 2000, goal: { mode: 'range', value: 1e15 } }])
+    scenarios.push([`${catalogue.name}: packing-heavy, ${SCENARIOS[catalogue.name][0].label}`, { ...base, ...SCENARIOS[catalogue.name][0].input }])
+  }
+
+  scenarios.push(['sparse catalogue: packing-heavy, a table built whole before the first candidate (range 2e9 km, 60 HS hull)', { hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech: sparse.tech, tanks: sparse.tanks, maxCount: 40, share: 0.6 }])
+
+  for (const [label, input] of scenarios) {
+    const timed = await driveRun(propulsionRun({ ...input, tanks: input.tanks === sparse.tanks ? sparseTanks() : input.tanks }, { budget: { candidates: null, ms: options.budgetMs } }), null)
+    const stopped = await driveRun(propulsionRun({ ...input, tanks: input.tanks === sparse.tanks ? sparseTanks() : input.tanks }, { budget: { candidates: null, ms: options.budgetMs } }), CANCEL_AT_MS)
+    const { counts } = timed.outcome
+    const over = timed.advances.filter((time) => time > RESPONSIVENESS.budgetMs).length
+
+    console.log(`  ${label}`)
+    console.log(`    run: ${timed.outcome.status} (${timed.outcome.termination}), ${fmt(timed.wall / 1000, 2)} s, ${counts.evaluated} of ${counts.total} candidates evaluated, ${counts.pruned} dropped, ${counts.feasible} meet the targets`)
+    console.log(`    advance(): ${timed.advances.length} calls, p50 ${fmt(percentile(timed.advances, 0.5), 2)} p99 ${fmt(percentile(timed.advances, 0.99), 2)} max ${fmt(timed.advances[timed.advances.length - 1], 2)} ms, ${over} over the ${RESPONSIVENESS.budgetMs} ms budget; longest event-loop block ${fmt(timed.probeGap)} ms`)
+    console.log(`    cancel requested ${CANCEL_AT_MS} ms after the start: ${stopped.latency === null ? `the run ended first (${stopped.outcome.status})` : `honoured after ${fmt(stopped.latency)} ms, ${stopped.outcome.status}, ${stopped.outcome.counts.evaluated} candidates evaluated, incomplete ${stopped.outcome.incomplete}`}; longest event-loop block ${fmt(stopped.probeGap)} ms, longest advance ${fmt(stopped.advances[stopped.advances.length - 1], 2)} ms`)
+  }
+
+  console.log(`  ${hostJitter(2000)}`)
+
+  check('the harness slice is the slice the runner declares', SLICE_MS === RESPONSIVENESS.sliceMs, `${SLICE_MS} ms`)
+}
+
 const main = async () => {
-  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'race-tech', 'tank-packing'])
+  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'race-tech', 'tank-packing', 'search-run'])
   const packTanks = legacyPackTanks
 
   production = { ...utilities['tank-packing'], packTanks: utilities['design-rules'].packTanks }
@@ -2072,6 +2194,7 @@ const main = async () => {
   if (!options.skipSearch) {
     await runSearchBench(utilities, catalogues)
     runSparseResponsiveness(utilities)
+    await runRunnerResponsiveness(utilities, catalogues)
   }
 
   console.log(`\n${checks - failures}/${checks} checks passed`)
