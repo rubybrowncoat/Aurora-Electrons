@@ -36,7 +36,7 @@
             <div class="tool__buttons">
               <v-menu offset-y left :close-on-content-click="false" max-width="440">
                 <template #activator="{ on, attrs }">
-                  <v-btn outlined aria-label="Engine options" v-bind="attrs" v-on="on"><v-icon small left>mdi-engine-outline</v-icon><span class="tool__btn-label">Engines</span><span v-if="engineOptionCount">&nbsp;({{ engineOptionCount }})</span></v-btn>
+                  <v-btn outlined :color="sweepHasErrors ? 'error' : undefined" aria-label="Engine options" v-bind="attrs" v-on="on"><v-icon small left>mdi-engine-outline</v-icon><span class="tool__btn-label">Engines</span><span v-if="engineOptionCount">&nbsp;({{ engineOptionCount }})</span></v-btn>
                 </template>
                 <v-card class="pa-4">
                   <div class="subtitle-2">Engines</div>
@@ -44,13 +44,29 @@
                     <v-btn v-for="option in kinds" :key="option.value" :value="option.value" small>{{ option.text }}</v-btn>
                   </v-btn-toggle>
                   <v-row dense class="mt-2">
-                    <v-col cols="4"><v-text-field :value="engineOptions.min" type="number" min="1" label="Fewest" aria-label="Fewest engines" dense outlined hide-details @input="(value) => setEngineNumber('min', value)" /></v-col>
-                    <v-col cols="4"><v-text-field :value="engineOptions.max" type="number" min="1" label="Most" aria-label="Most engines" dense outlined hide-details @input="(value) => setEngineNumber('max', value)" /></v-col>
-                    <v-col cols="4"><v-text-field :value="Math.round(engineOptions.share * 100)" type="number" min="1" max="100" suffix="%" label="Share" aria-label="Most of the ship the engines and fuel may take, in percent" dense outlined hide-details @input="(value) => setEngineNumber('share', value / 100)" /></v-col>
+                    <v-col cols="4"><v-text-field :value="engineFieldText('min')" type="number" min="1" label="Fewest" aria-label="Fewest engines" :error-messages="sweepFields.errors.min" dense outlined hide-details="auto" @input="(value) => setEngineNumber('min', value)" /></v-col>
+                    <v-col cols="4"><v-text-field :value="engineFieldText('max')" type="number" min="1" label="Most" aria-label="Most engines" :error-messages="sweepFields.errors.max" dense outlined hide-details="auto" @input="(value) => setEngineNumber('max', value)" /></v-col>
+                    <v-col cols="4"><v-text-field :value="engineFieldText('share')" type="number" min="1" max="100" suffix="%" label="Share" aria-label="Most of the ship the engines and fuel may take, in percent" :error-messages="sweepFields.errors.share" dense outlined hide-details="auto" @input="(value) => setEngineNumber('share', value)" /></v-col>
                   </v-row>
                   <div class="caption text--secondary mt-1">The share is the most of the finished ship the engines and their fuel tanks may take.</div>
                   <v-autocomplete :value="engineId" :items="engineItems" item-text="text" item-value="value" label="Engine" placeholder="Design new engines" prepend-inner-icon="mdi-engine-outline" clearable dense outlined hide-details class="mt-3" @change="(value) => (engineId = value || null)" />
                   <div class="caption text--secondary mt-1">An engine of the race's own fixes the size, thrust and fuel of the set, and only its count is searched.</div>
+                  <div v-if="sweepPreview" class="sweep-detail mt-3" data-sweep="detail">
+                    <div class="d-flex align-center justify-space-between">
+                      <div class="subtitle-2">Sweep</div>
+                      <v-btn-toggle v-model="sweepUnit" mandatory dense>
+                        <v-btn value="hs" small aria-label="Show engine sizes in HS">HS</v-btn>
+                        <v-btn value="tons" small aria-label="Show engine sizes in tons">Tons</v-btn>
+                      </v-btn-toggle>
+                    </div>
+                    <template v-if="sweepPreview.ok">
+                      <div v-for="line in sweepPreview.lines" :key="line.key" class="caption mt-1"><span class="font-weight-medium">{{ line.label }}</span> {{ line.detail }}</div>
+                      <div class="caption mt-1"><span class="font-weight-medium">Combinations</span> up to {{ count(sweepPreview.combinations) }}, before the counts that cannot reach the speed or fit the share are dropped.</div>
+                    </template>
+                    <div v-for="problem in sweepPreview.problems" :key="problem" class="caption error--text mt-1">{{ problem }}</div>
+                    <v-checkbox :input-value="!!engineOptions.exactLimits" label="Try a researched limit between two steps" :disabled="!!existingEngine" dense hide-details class="mt-1" @change="(value) => setEngineOption('exactLimits', !!value)" />
+                    <div class="caption text--secondary">Sizes step by 0.1 HS to 10 HS, by 0.25 HS to 20 HS and by 1 HS above; thrust steps by 0.05. A researched least or greatest limit that falls between two steps is left out. With this on it is tried once, as the first or last value.</div>
+                  </div>
                 </v-card>
               </v-menu>
               <v-menu offset-y left :close-on-content-click="false" max-width="560" max-height="640">
@@ -71,8 +87,14 @@
           </div>
         </div>
 
+        <div v-if="sweepPreview && sweepPreview.ok" class="sweep-summary caption text--secondary mt-2" data-sweep="summary">
+          <div>{{ sweepSummaryText }}</div>
+          <div v-for="note in sweepPreview.notes" :key="note">{{ note }}</div>
+        </div>
+
         <v-progress-linear v-if="searching" :value="progress * 100" height="3" class="mt-2" aria-label="Searching propulsion sets" />
-        <v-alert v-if="searchError" type="error" outlined dense class="mt-3">The search failed: {{ searchError }}</v-alert>
+        <v-alert v-if="sweepErrorText" type="error" outlined dense class="mt-3" data-sweep="errors">The search does not run: {{ sweepErrorText }}</v-alert>
+        <v-alert v-else-if="searchError" type="error" outlined dense class="mt-3">The search failed: {{ searchError }}</v-alert>
         <v-alert v-else-if="!engineTechMissing && !hullReady" type="info" outlined dense class="mt-3">Enter a hull size, or pick a saved class, to search propulsion sets.</v-alert>
         <v-alert v-else-if="engineTechMissing" type="warning" outlined dense class="mt-3">The race has no engine or fuel consumption tech to design engines with. A saved class and the race's own engines can still be shown.</v-alert>
         <v-alert v-else-if="!speedReady" type="info" outlined dense class="mt-3">Enter a speed between 1 and {{ count(maxSpeed) }} km/s.</v-alert>
@@ -192,7 +214,7 @@
             <div v-for="line in basisRows" :key="line.label" class="provenance-basis__line"><provenance-mark :result="line.result" label /><span class="font-weight-medium">{{ line.label }}</span> {{ basisText(line.result) }}</div>
           </div>
           <div class="panel-foot caption text--secondary">
-            Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; its speed is confirmed when the save stores the same speed. A figure with nothing to work from, such as the range of a class without engines, shows a dash and is unavailable, never 0.
+            Engine power is the engine tech's power per HS times the size times the thrust modifier. Fuel per engine power hour is the fuel tech times the thrust modifier to the power of 2.5 times the square root of 10 over the size, so a larger or slower engine burns less. An engine of 25 HS or more at thrust 0.5 or less is commercial; any other is military. Cost is half the power, times the thermal reduction's cost multiplier when it cuts the signature, times the thrust when that is under 1, and never under 5 BP. Speed is the total power over the ship's size in HS, times 1,000, cut to a whole number and capped at 270,000 km/s; the fuel tanks are part of that size. The engines are tried from 1 HS up to the largest size researched, at every 0.05 of thrust between the least and the most researched, at every count that fits the share. Sizes step by 0.1 HS to 10 HS, by 0.25 HS to 20 HS and by 1 HS above, from the end of the stretch before, and every step is a whole number of thousandths, so no step drifts and each value is tried once. A researched limit that falls between two steps is not tried unless the Engines menu says so; then it is tried once, as the first or last value. The sweep line shows the values and the combinations before the counts that cannot reach the speed or fit the share are dropped, and a field that is wrong stops the search. Sets rank by the least HS the engines and tanks take, then the least cost. The saved class is worked out from the engines it mounts; its speed is confirmed when the save stores the same speed. A figure with nothing to work from, such as the range of a class without engines, shows a dash and is unavailable, never 0.
           </div>
         </v-card>
 
@@ -369,12 +391,13 @@ import { activeAppearance } from '../utilities/appearance'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClasses } from '../utilities/design-data'
 import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, tankPackageResult, thermalSignature } from '../utilities/design-rules'
-import { searchPropulsion } from '../utilities/design-search'
+import { engineFields, engineSweep, normaliseEngineOptions, searchPropulsion } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
 import { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, JUMP_EFFICIENCY_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, NO_RACE_TECH, SQUADRON_RADIUS_TECH_TYPE, SQUADRON_SIZE_TECH_TYPE, THERMAL_TECH_TYPE, loadRaceTech } from '../utilities/race-tech'
+import { describeSweep } from '../utilities/sweep-domain'
 
 const INPUT_LABELS = {
   tech: 'the race\'s engine and jump drive tech',
@@ -397,6 +420,7 @@ const KIND_VALUES = KINDS.map((option) => option.value)
 const SET_PAGE_SIZES = [15, 30, -1]
 const TRADE_VIEWS = ['chart', 'table']
 const RANGE_MODES = ['range', 'endurance']
+const SWEEP_UNITS = ['hs', 'tons']
 
 // The tech lines the menu offers, with how a level reads. The line's levels are the ones the race has researched.
 const TECH_LINES = [
@@ -555,10 +579,11 @@ export default {
       range: { key: 'propulsionRange', default: { range: 5, endurance: 30 }, scope: 'race', valid: (value) => value && value.range >= 0 && value.endurance >= 0 },
       rangeMode: { key: 'propulsionRangeMode', default: 'range', scope: 'race', valid: oneOf(RANGE_MODES) },
       fraction: { key: 'propulsionFraction', default: 0.5, scope: 'race', valid: (value) => value > 0 && value <= 1 },
-      engineOptions: { key: 'propulsionEngines', default: { kind: 'either', min: 1, max: 100, share: 0.5 }, scope: 'race', valid: (value) => value && KIND_VALUES.includes(value.kind) && value.min >= 1 && value.max >= value.min && value.share > 0 && value.share <= 1 },
+      engineOptions: { key: 'propulsionEngines', default: { kind: 'either', min: 1, max: 100, share: 0.5, exactLimits: false }, scope: 'race', normalise: normaliseEngineOptions, valid: (value) => value && KIND_VALUES.includes(value.kind) && Number.isInteger(value.min) && Number.isInteger(value.max) && value.min >= 1 && value.max >= value.min && value.share >= 0.01 && value.share <= 1 && typeof value.exactLimits === 'boolean' },
       techChoice: { key: 'propulsionTech', default: {}, scope: 'race', valid: (value) => value && typeof value === 'object' && !Array.isArray(value) },
       setsTable: { ...tableView('propulsionSetsTable', { sortBy: ['rank'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: SET_PAGE_SIZES }), scope: 'race' },
       tradeView: { key: 'propulsionTradeView', default: 'chart', valid: oneOf(TRADE_VIEWS) },
+      sweepUnit: { key: 'propulsionSweepUnit', default: 'hs', valid: oneOf(SWEEP_UNITS) },
     }),
   ],
   data() {
@@ -570,6 +595,8 @@ export default {
       searching: false,
       progress: 0,
       searchError: '',
+      // What the count and share fields hold as typed while a value is not accepted, by field ('min', 'max', 'share'); the stored value stays as it was until every field is right.
+      sweepDrafts: {},
       // The row whose fuel and jump drive the panels show, by its key; the rows open in the table.
       selectedKey: null,
       expanded: [],
@@ -648,9 +675,9 @@ export default {
     },
 
     engineOptionCount() {
-      const { kind, min, max, share } = this.engineOptions
+      const { kind, min, max, share, exactLimits } = this.engineOptions
 
-      return (kind !== 'either' ? 1 : 0) + (min !== 1 || max !== 100 ? 1 : 0) + (share !== 0.5 ? 1 : 0) + (this.existingEngine ? 1 : 0)
+      return (kind !== 'either' ? 1 : 0) + (min !== 1 || max !== 100 ? 1 : 0) + (share !== 0.5 ? 1 : 0) + (exactLimits ? 1 : 0) + (this.existingEngine ? 1 : 0)
     },
 
     // The level of each tech line the page designs with: the race's choice when it is still researched, else the game's pick.
@@ -707,11 +734,80 @@ export default {
       return !this.designTech && !this.existingEngine
     },
 
-    // The least and most engines of a set, and the share of the ship they may take, as entered but made sane.
+    // The least and most engines of a set, the share of the ship they may take and the endpoint policy of the grid, as stored (the fields accept only valid values).
     engineLimits() {
-      const min = Math.max(1, Math.floor(finiteNumber(this.engineOptions.min)) || 1)
+      const { kind, min, max, share, exactLimits } = this.engineOptions
 
-      return { kind: this.engineOptions.kind, min, max: Math.max(min, Math.floor(finiteNumber(this.engineOptions.max)) || min), share: Math.min(1, Math.max(0.01, finiteNumber(this.engineOptions.share) || 1)) }
+      return { kind, min, max, share, include: exactLimits ? 'limits' : 'grid' }
+    },
+
+    // The count and share fields as they stand, with a message for each that is wrong.
+    sweepFields() {
+      const draft = this.sweepDrafts
+
+      return engineFields({ min: 'min' in draft ? draft.min : this.engineOptions.min, max: 'max' in draft ? draft.max : this.engineOptions.max, share: 'share' in draft ? draft.share : roundToDecimal(this.engineOptions.share * 100, 2) })
+    },
+
+    // The values the search sweeps, or null when nothing is searched. The preview and the search read this one object.
+    sweep() {
+      if (!this.ready || (!this.existingEngine && !this.designTech)) {
+        return null
+      }
+
+      return engineSweep({ tech: this.designTech, engine: this.existingEngine, minCount: this.engineLimits.min, maxCount: this.engineLimits.max, include: this.engineLimits.include })
+    },
+
+    // The sweep in words and figures: a line for each domain with its endpoints and count, the notes on bounds between steps, and the combinations.
+    sweepPreview() {
+      const sweep = this.sweep
+
+      if (!sweep) {
+        return null
+      }
+
+      if (!sweep.ok) {
+        return { ok: false, problems: sweep.problems, lines: [], notes: [], combinations: null }
+      }
+
+      const format = (value) => this.count(value, 3)
+      const lines = []
+
+      const add = (key, label, noun, domain, unit, wrap) => {
+        const described = describeSweep(domain, { unit, format })
+
+        lines.push({ key, label, detail: described.text, notes: described.notes, count: described.count, summary: `${this.count(described.count)} ${noun} (${wrap(format(described.first))} to ${wrap(format(described.last))}${described.unit ? ` ${described.unit}` : ''})` })
+      }
+
+      if (sweep.sizes) {
+        add('sizes', 'Engine sizes', 'engine sizes', sweep.sizes, this.sweepUnit === 'tons' ? 'tons' : undefined, (text) => text)
+        add('thrusts', 'Engine thrust', 'thrust modifiers', sweep.thrusts, undefined, (text) => `× ${text}`)
+      }
+
+      add('counts', 'Engine counts', 'engine counts', sweep.counts, undefined, (text) => text)
+
+      return { ok: true, problems: [], lines, notes: lines.flatMap((line) => line.notes), combinations: sweep.combinations }
+    },
+
+    sweepSummaryText() {
+      const preview = this.sweepPreview
+
+      return preview && preview.ok ? `Sweep: ${preview.lines.map((line) => line.summary).join(' × ')}${preview.lines.length > 1 ? ` = up to ${this.count(preview.combinations)} combinations` : ''}` : ''
+    },
+
+    // What stops the search: a message for each count or share field that is wrong, and the reasons the engine grid cannot be built.
+    sweepErrorText() {
+      const labels = { min: 'Fewest engines', max: 'Most engines', share: 'Share' }
+      const messages = Object.entries(this.sweepFields.errors).map(([key, message]) => `${labels[key]}: ${message}`)
+
+      if (this.sweep && !this.sweep.ok) {
+        messages.push(...this.sweep.problems)
+      }
+
+      return messages.join(' ')
+    },
+
+    sweepHasErrors() {
+      return this.sweepErrorText !== ''
     },
 
     goal() {
@@ -730,7 +826,7 @@ export default {
 
     // Everything the search depends on, or null while it can't run.
     searchInput() {
-      if (!this.ready || !this.hullReady || !this.speedReady || (!this.existingEngine && !this.designTech)) {
+      if (!this.ready || !this.hullReady || !this.speedReady || (!this.existingEngine && !this.designTech) || this.sweepHasErrors) {
         return null
       }
 
@@ -743,6 +839,8 @@ export default {
         minCount: this.engineLimits.min,
         maxCount: this.engineLimits.max,
         share: this.engineLimits.share,
+        include: this.engineLimits.include,
+        sweep: this.sweep,
         tech: this.designTech,
         tanks: this.tanks,
         engine: this.existingEngine,
@@ -1027,6 +1125,10 @@ export default {
       },
     },
 
+    context() {
+      this.sweepDrafts = {}
+    },
+
     targetOrphaned(orphaned) {
       if (orphaned) {
         this.target = { kind: 'tonnage', value: 5000 }
@@ -1083,13 +1185,24 @@ export default {
       this.engineOptions = { ...this.engineOptions, [key]: value }
     },
 
-    // A count or share the field holds as typed; one that isn't sane keeps the stored value.
-    setEngineNumber(key, value) {
-      const number = finiteNumber(value)
-      const options = { ...this.engineOptions, [key]: number }
+    // The text a count or share field shows: what was typed while it is not accepted, else the stored value (the share in percent).
+    engineFieldText(key) {
+      if (key in this.sweepDrafts) {
+        return this.sweepDrafts[key]
+      }
 
-      if (key === 'share' ? number > 0 && number <= 1 : number >= 1 && Number.isInteger(number) && (key === 'max' ? number >= options.min : number <= options.max)) {
-        this.engineOptions = options
+      return key === 'share' ? roundToDecimal(this.engineOptions.share * 100, 2) : this.engineOptions[key]
+    },
+
+    // A count or share field as typed. Every field is read together: when all are right they are stored and the drafts dropped; otherwise the stored values stay, each wrong field shows its message and the search does not run.
+    setEngineNumber(key, value) {
+      this.sweepDrafts = { ...this.sweepDrafts, [key]: value }
+
+      const fields = this.sweepFields
+
+      if (fields.ok) {
+        this.engineOptions = { ...this.engineOptions, min: fields.min, max: fields.max, share: fields.share }
+        this.sweepDrafts = {}
       }
     },
 
