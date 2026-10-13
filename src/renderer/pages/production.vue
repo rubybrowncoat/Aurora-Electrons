@@ -90,9 +90,10 @@
                 <div v-if="item.shortage && item.status.id !== 'short'" class="caption">
                   <router-link v-if="item.shortage.mineralId" :to="mineralLink(item.shortage)">Short of {{ item.shortage.name }}</router-link>
                   <span v-else>Short of {{ item.shortage.name }}</span>
-                  <span class="text--secondary">: the stock covers {{ units(item.shortage.covered) }} of {{ units(item.amount) }}</span><provenance-mark :result="item.covers" />
+                  <span class="text--secondary">: the stock covers {{ coverText(item.shortage) }} of {{ units(item.amount) }}</span><provenance-mark :result="item.covers" />
                 </div>
                 <div v-else-if="item.stockUnknown" class="caption text--secondary">Stock not known<provenance-mark :result="item.covers" /></div>
+                <div v-for="text in item.cautions" :key="text" class="caption text--secondary">{{ text }}</div>
               </div>
             </template>
             <template #[`item.rate`]="{ item }">
@@ -107,13 +108,38 @@
                 <span v-else-if="item.days === 0">Done<provenance-mark :result="item.finishResult" /></span>
                 <template v-else>
                   <div>{{ item.approx ? '~' : '' }}{{ duration(item.days) }}<provenance-mark :result="item.finishResult" /></div>
+                  <div v-if="item.range" class="caption text--secondary">{{ rangeText(item.range) }}</div>
                   <div class="caption text--secondary">{{ dateIn(item.days) }}</div>
                 </template>
               </div>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            An industrial project builds at its share of the colony's construction, ordnance or fighter capacity, and only as far as the colony's own stock of each mineral goes; each project is checked against the whole stock, so projects at one colony that need the same mineral run short sooner. A queued project starts when a project of the same kind at that colony finishes, in queue order, if the share left is enough for it. Paused jobs keep their share and build nothing. Times assume the minerals arrive; ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with or never starts, or because an input is not known; its mark says which.
+            An industrial project builds cycle by cycle at its share of the colony's construction, ordnance or fighter capacity, taking minerals and fuel from one stock shared by every project at that colony, so a project builds only as far as what is left goes. A project the stock cannot finish has no date until arrivals are entered. Where the order the game serves the colony's projects in would change the outcome, the date is the earliest of the orders tried, with the latest beside it. A queued project starts in the cycle after a project of the same kind at that colony finishes, in queue order, if the share left is enough for it. Paused jobs keep their share and build nothing. A colony with an input not known, or a production type the forecast does not cover, keeps the older check of each project against the whole stock. ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with, never starts or never finishes, or because an input is not known; its mark says which.
+          </div>
+        </v-card>
+
+        <v-card class="panel" data-summary="Stock assumed to reach a colony on a given day, entered by hand to see which of its projects it releases; none is read from the save and none is shipped automatically." elevation="1">
+          <div class="panel-head">
+            <span>Assumed arrivals</span>
+            <v-btn small text :disabled="!arrivals.length" @click="arrivals = []">Remove all</v-btn>
+          </div>
+          <div class="arrival-form">
+            <v-select v-model="arrivalForm.populationId" :items="arrivalColonies" item-text="colonyName" item-value="PopulationID" label="Colony" dense outlined hide-details style="max-width: 240px" />
+            <v-select v-model="arrivalForm.resource" :items="arrivalResources" label="Stock" dense outlined hide-details style="max-width: 160px" />
+            <v-text-field v-model="arrivalForm.day" label="Days from now" type="number" min="0" dense outlined hide-details style="max-width: 140px" />
+            <v-text-field v-model="arrivalForm.quantity" :label="arrivalForm.resource === 'fuel' ? 'Litres' : 'Tonnes'" type="number" min="0" dense outlined hide-details style="max-width: 140px" />
+            <v-text-field v-model="arrivalForm.source" label="Source" placeholder="Freighter or colony" dense outlined hide-details style="max-width: 200px" />
+            <v-btn small color="primary" :disabled="!arrivalValid" @click="addArrival">Add arrival</v-btn>
+          </div>
+          <p v-if="arrivalHint" class="caption error--text mb-2">{{ arrivalHint }}</p>
+          <v-data-table v-if="arrivalRows.length" :headers="arrivalHeaders" :items="arrivalRows" item-key="id" dense hide-default-footer :items-per-page="-1">
+            <template #[`item.actions`]="{ item }">
+              <v-btn icon small aria-label="Remove arrival" @click="removeArrival(item.id)"><v-icon small>mdi-close</v-icon></v-btn>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            An arrival adds its quantity to the colony's stock from the first cycle that ends on or after its day. These are assumptions, never observed stock: removing them restores the colony's own stock, and nothing is kept when the race changes.
           </div>
         </v-card>
 
@@ -134,7 +160,7 @@
                 <div v-else class="caption text--secondary">None of the jobs shown finishes in the next {{ timeline.option.label }}.</div>
               </div>
               <div class="panel-foot caption text--secondary">
-                The jobs in the table, per {{ timeline.option.unit }} they finish in. Paused jobs and jobs that never start are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts jobs the colony's stock can't finish, at the time they would finish if the minerals arrive.<span v-if="timeline.skipped.unknown"> {{ timeline.skipped.unknown }} {{ timeline.skipped.unknown === 1 ? 'job has' : 'jobs have' }} no finish time known and {{ timeline.skipped.unknown === 1 ? 'is' : 'are' }} not counted<provenance-mark :result="timeline.result" />.</span><span v-else><provenance-mark :result="timeline.result" /></span>
+                The jobs in the table, per {{ timeline.option.unit }} they finish in. Paused jobs, jobs that never start and jobs the colony's stock cannot finish are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts only jobs at a colony the cycle forecast cannot cover, at the time they would finish if the minerals arrive.<span v-if="timeline.skipped.unknown"> {{ timeline.skipped.unknown }} {{ timeline.skipped.unknown === 1 ? 'job has' : 'jobs have' }} no finish time known and {{ timeline.skipped.unknown === 1 ? 'is' : 'are' }} not counted<provenance-mark :result="timeline.result" />.</span><span v-else><provenance-mark :result="timeline.result" /></span>
               </div>
             </v-card>
           </v-col>
@@ -201,13 +227,15 @@ import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
 import { crewFractionSql } from '../utilities/crew'
+import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS, navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryForecastRun, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
+import { RESPONSIVENESS, RUN_STATUS, TERMINATION, createRun, createRunSlot } from '../utilities/search-run'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -246,6 +274,7 @@ const STATUS = {
   paused: { order: 3, icon: 'mdi-pause-circle-outline', color: 'warning' },
   stalled: { order: 4, icon: 'mdi-cancel', color: 'error' },
   unknown: { order: 5, icon: 'mdi-help-circle-outline', color: undefined },
+  forecasting: { order: 6, icon: 'mdi-progress-clock', color: undefined },
 }
 
 // The completions chart's spans: a year by month, five years by quarter, twenty by year.
@@ -257,6 +286,18 @@ const HORIZONS = [
 
 const JOB_PAGE_SIZES = [15, 30, -1]
 const CAPACITY_PAGE_SIZES = [10, 25, -1]
+
+const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
+const ARRIVAL_RESOURCES = [...MINERALS.map((mineral) => mineral.name), 'fuel']
+
+const ARRIVAL_HEADERS = [
+  { text: 'Colony', value: 'colonyName' },
+  { text: 'Stock', value: 'resourceText' },
+  { text: 'Days from now', value: 'day', align: 'end' },
+  { text: 'Amount', value: 'quantityText', align: 'end', sortable: false },
+  { text: 'Source', value: 'source' },
+  { text: '', value: 'actions', align: 'end', sortable: false },
+]
 
 const PRODUCTION_TYPES = {
   0: 'Construction',
@@ -300,6 +341,14 @@ const IDLE_MINIMUM = 0.5
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
+// A new task as soon as the browser has had its turn, which still comes in a hidden window.
+const nextTask = () => new Promise((resolve) => {
+  const channel = new MessageChannel()
+
+  channel.port1.onmessage = () => resolve()
+  channel.port2.postMessage(null)
+})
+
 export default {
   name: 'ProductionPage',
   components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
@@ -322,6 +371,12 @@ export default {
   data() {
     return {
       focusId: null,
+      arrivals: [],
+      arrivalCount: 0,
+      arrivalForm: { populationId: null, resource: 'Duranium', day: null, quantity: null, source: '' },
+      forecastState: Object.freeze({ key: null, colonies: null, error: null }),
+      arrivalResources: ARRIVAL_RESOURCES,
+      arrivalHeaders: ARRIVAL_HEADERS,
       linkTo,
       horizons: HORIZONS,
       jobPageSizes: JOB_PAGE_SIZES,
@@ -354,6 +409,56 @@ export default {
 
     activeOptionCount() {
       return [!this.showQueued, !this.showPaused].filter(Boolean).length
+    },
+
+    // The colonies with an industrial project, the ones an arrival can be entered for.
+    arrivalColonies() {
+      return [...new Set(this.industry.map((project) => project.PopulationID))].map((id) => ({ PopulationID: id, colonyName: this.colony(id, '').colonyName })).sort((a, b) => a.colonyName.localeCompare(b.colonyName))
+    },
+
+    arrivalRows() {
+      return this.arrivals.map((arrival) => ({ ...arrival, colonyName: this.colony(arrival.PopulationID, '').colonyName, resourceText: arrival.resource === 'fuel' ? 'Fuel' : arrival.resource, quantityText: `${this.count(arrival.quantity, 0)} ${arrival.resource === 'fuel' ? 'litres' : 't'}` }))
+    },
+
+    arrivalValid() {
+      const { populationId, resource, day, quantity } = this.arrivalForm
+
+      return populationId !== null && ARRIVAL_RESOURCES.includes(resource) && day !== null && day !== '' && Number.isFinite(Number(day)) && Number(day) >= 0 && Number.isFinite(Number(quantity)) && Number(quantity) > 0 && fitsDouble(Number(quantity))
+    },
+
+    // Why a quantity typed cannot be added: more than the game's decimal type holds, which no forecast can carry.
+    arrivalHint() {
+      const { quantity } = this.arrivalForm
+
+      return quantity !== null && quantity !== '' && Number.isFinite(Number(quantity)) && Number(quantity) > 0 && !fitsDouble(Number(quantity)) ? 'That quantity is more than the game\'s decimal type holds (about 7.9 × 10^28); enter a smaller quantity' : ''
+    },
+
+    // Each colony's industrial projects made ready for the cycle forecast: { [PopulationID]: { gaps } or the colony ready to run }. Nothing is run here.
+    industryPlans() {
+      const colonies = {}
+
+      this.industry.forEach((project) => (colonies[project.PopulationID] = colonies[project.PopulationID] || []).push(project))
+
+      return Object.fromEntries(Object.entries(colonies).map(([populationId, projects]) => {
+        const capacities = Object.fromEntries(CAPACITY_KINDS.map((kind) => [kind, this.populationCapacityResult(Number(populationId), kind)]))
+
+        return [populationId, prepareForecast({ projects, capacities, modifiers: this.populationProductionModifiers[populationId], arrivals: this.arrivals.filter((arrival) => arrival.PopulationID === Number(populationId)), npr: this.RaceNPR })]
+      }))
+    },
+
+    // What the run is given: the plain input of the engine for each colony that has one.
+    forecastRunInput() {
+      return { colonies: Object.entries(this.industryPlans).filter(([, prepared]) => !prepared.gaps).map(([populationId, prepared]) => ({ populationId: Number(populationId), input: prepared.input })) }
+    },
+
+    // The input as text: a forecast is the one of this key, and a different key is a different forecast.
+    forecastKey() {
+      return JSON.stringify(this.forecastRunInput)
+    },
+
+    // The forecast the page shows: the outcome of the run kept, only while it is the forecast of what the page holds now.
+    forecastCurrent() {
+      return this.forecastState.key === this.forecastKey ? this.forecastState : null
     },
 
     facilitiesByColony() {
@@ -424,27 +529,50 @@ export default {
         ;(groups[key] = groups[key] || []).push(project)
       })
 
+      // A colony the save gives every input of has its cycles run forward on one stock its projects share, in the run the page keeps (`startForecast`); until that run has ended the colony is forecasting. A colony the save lacks an input of, or whose quantity the decimal type cannot hold, or whose run failed, keeps the schedule of each capacity on its own, each project against the whole stock.
+      const forecasts = {}
+      const gaps = {}
+      const pending = new Set()
+      const run = this.forecastCurrent
+
+      Object.entries(this.industryPlans).forEach(([populationId, prepared]) => {
+        const outcome = prepared.gaps ? prepared : run ? (run.error ? { gaps: [`the forecast of the colony failed (${run.error})`] } : (run.colonies && run.colonies[populationId])) : null
+
+        if (!outcome) {
+          pending.add(Number(populationId))
+        }
+
+        forecasts[populationId] = outcome && !outcome.gaps ? Object.fromEntries(outcome.figures.map((figure) => [figure.forecast.ID, figure])) : null
+        gaps[populationId] = outcome && outcome.gaps ? outcome.gaps : null
+      })
+
       return Object.values(groups).flatMap((group) => {
         const { PopulationID, ProductionType } = group[0]
         const category = categoryOf(ProductionType)
         const capacity = category === 'unknown' ? unknownKindCapacity() : this.populationCapacityResult(PopulationID, category)
-        const figures = industryFigures(group, capacity, undecided[PopulationID])
+        const forecasting = pending.has(PopulationID)
+        const figures = forecasts[PopulationID] ? null : industryFigures(group, capacity, undecided[PopulationID])
         const anyBuilding = isAvailable(capacity) && capacity.value > 0 && group.some((project) => !project.Queue && !project.Paused)
         const pausedAhead = group.some((project) => !project.Queue && project.Paused)
 
         return group.map((project, index) => {
-          const { rate, finish, start } = figures[index]
+          const planned = forecasts[PopulationID] ? forecasts[PopulationID][project.ID] : null
+          const { rate, start } = planned || figures[index]
           // A spied NPR builds from its capital's stock.
-          const { shortage, covers, unknown } = this.RaceNPR ? { shortage: null, covers: null, unknown: [] } : shortageOf(project)
+          const { shortage, covers, unknown } = planned ? { shortage: planned.shortage, covers: planned.covers, unknown: [] } : (this.RaceNPR || forecasting) ? { shortage: null, covers: null, unknown: [] } : shortageOf(project)
+          let { finish } = planned || figures[index]
           const paused = flagOf(project.Paused)
           const queued = Number.isFinite(project.Queue) && project.Queue > 0
           let status
 
-          if (queued) {
+          if (forecasting && (queued || paused !== true)) {
+            status = { id: 'forecasting', label: 'Forecasting', note: 'The colony\'s production cycles are being run forward; the date follows' }
+            finish = { result: unavailable({ rule: 'production.industryFinish', missing: ['the colony\'s production cycle forecast, which is still running'] }), idle: false }
+          } else if (queued) {
             status = {
               id: 'queued',
               label: `Queued #${project.Queue}`,
-              note: start !== null ? `Starts in ${this.duration(start)}${paused ? ', paused' : ''}` : finish.idle ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}` : `Start not known: missing ${finish.result.inputs.missing.join(', ')}`,
+              note: start !== null ? `Starts in ${this.duration(start)}${planned && planned.startRange ? this.startRangeText(planned.startRange) : ''}${paused ? ', paused' : ''}` : planned && planned.forecast.outcome === 'unresolved' ? 'Start not known: the project ahead of it cannot finish exactly (a part of a unit finer than a build is left), so whether it frees its share is not known' : finish.idle ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}` : `Start not known: missing ${finish.result.inputs.missing.join(', ')}`,
             }
           } else if (paused === true) {
             status = { id: 'paused', label: 'Paused' }
@@ -455,10 +583,16 @@ export default {
           } else if (!(rate.value > 0)) {
             status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${category} capacity` }
           } else if (shortage) {
+            const supplied = planned ? null : valueOrNull(finish.result)
+
             status = {
               id: 'short',
               label: `Short of ${shortage.name}`,
-              note: `The stock covers ${this.units(shortage.covered)} of ${this.units(project.Amount)}${Number.isFinite(project.ProdPerUnit) ? `, about ${this.duration((shortage.covered * project.ProdPerUnit / rate.value) * 365)}` : ''}`,
+              note: planned ? this.plannedShortNote(project, planned) : `The stock covers ${this.units(shortage.covered)} of ${this.units(project.Amount)}${Number.isFinite(project.ProdPerUnit) ? `, about ${this.duration((shortage.covered * project.ProdPerUnit / rate.value) * 365)}` : ''}${supplied !== null ? `, and with all the stock it needs it would finish in ${this.duration(supplied)}` : ''}`,
+            }
+
+            if (!planned) {
+              finish = { result: unavailable({ rule: 'production.industryFinish', missing: [`${shortage.name} in the colony's stock (what it holds cannot finish the project)`], present: rate.inputs.present }), idle: true }
             }
           } else {
             status = { id: 'running', label: 'Running' }
@@ -479,6 +613,9 @@ export default {
             shortage,
             covers,
             stockUnknown: unknown.length > 0 && !shortage,
+            approx: Boolean(planned && (planned.range || planned.startRange)),
+            range: planned ? planned.range : null,
+            cautions: planned ? this.forecastCautions(project, planned) : forecasting ? [] : this.fallbackCautions(PopulationID, gaps[PopulationID]),
             status,
           })
         })
@@ -696,8 +833,9 @@ export default {
       const queued = this.jobs.length - active.length
       const short = this.jobs.filter((job) => job.shortage)
       const notKnown = this.jobs.filter((job) => job.status.id === 'unknown').length
+      const forecasting = this.jobs.filter((job) => job.status.id === 'forecasting').length
       const shortLabel = short.some((job) => !job.shortage.mineralId) ? 'short of minerals or fuel' : 'short of minerals'
-      const jobNotes = [paused && `${paused} paused`, queued && `${queued} queued`, short.length && `${short.length} ${shortLabel}`, notKnown && `${notKnown} not known`].filter(Boolean)
+      const jobNotes = [paused && `${paused} paused`, queued && `${queued} queued`, short.length && `${short.length} ${shortLabel}`, notKnown && `${notKnown} not known`, forecasting && `${forecasting} being forecast`].filter(Boolean)
 
       const rows = this.colonyCapacity
       const coloniesWith = (key) => rows.filter((row) => row[`${key}Free`] >= IDLE_MINIMUM).length
@@ -796,7 +934,21 @@ export default {
     // Which colony the tables show is not kept, so another race starts with all of them.
     RaceID() {
       this.focusId = null
+      this.arrivals = []
     },
+
+    // The forecast of the colonies is run again whenever anything it is made from changes (a project, a stock, a capacity, an arrival, the save).
+    forecastKey: {
+      immediate: true,
+      handler() {
+        this.startForecast()
+      },
+    },
+  },
+  beforeDestroy() {
+    if (this.forecastSlot) {
+      this.forecastSlot.invalidate(TERMINATION.CLOSED)
+    }
   },
   methods: {
     applyLink(query) {
@@ -820,6 +972,8 @@ export default {
         shortage: null,
         covers: null,
         stockUnknown: false,
+        cautions: [],
+        range: null,
         amount: null,
         ...fields,
         ...colony,
@@ -855,6 +1009,140 @@ export default {
       }
 
       return project.CommanderField !== field ? 'Scientist outside the field' : ''
+    },
+
+    // What a project the colony's stock cannot finish builds before it stops, and what it would take to finish it.
+    plannedShortNote(project, planned) {
+      const { shortage, supplied } = planned
+
+      return `The stock covers ${this.coverText(shortage)} of ${this.units(project.Amount)}${supplied !== null ? `, and with all the stock it needs it would finish in ${this.duration(supplied)}` : ''}`
+    },
+
+    // The units a stock covers, as a range where the order the game takes the colony's projects in moves them.
+    coverText(shortage) {
+      return shortage.coveredMost !== undefined && shortage.coveredMost > shortage.covered ? `${this.units(shortage.covered)} to ${this.units(shortage.coveredMost)}` : this.units(shortage.covered)
+    },
+
+    // The line under a project of a colony the cycle forecast cannot run: what the save leaves out, and that arrivals entered are not counted.
+    fallbackCautions(populationId, gaps) {
+      const arrivals = this.arrivals.some((arrival) => arrival.PopulationID === populationId)
+
+      return gaps && gaps.length ? [`Forecast by the older per-project check because ${gaps.join('; ')}${arrivals ? '; arrivals entered by hand are not counted for this colony' : ''}`] : []
+    },
+
+    // The caveats of a forecast date, one line each under the status: the order of the colony's projects, a stock that holds a project up, a build too small to date.
+    forecastCautions(project, planned) {
+      const { maybeShort, held, range, startRange, sampled, fineRemainder, sensitive } = planned
+      const cautions = []
+
+      if (maybeShort) {
+        cautions.push(`May be short of ${maybeShort.name}: in some orders of the colony's projects the stock covers ${this.coverText(maybeShort)} of ${this.units(project.Amount)}`)
+      }
+
+      if (held) {
+        cautions.push(`The stock of ${held.name} runs short from ${this.duration(held.day)}; the date counts the arrivals entered`)
+      }
+
+      if ((range || startRange) && !sampled) {
+        cautions.push('The order the game takes the colony\'s projects in is not saved, so the date is the earliest of the orders tried')
+      }
+
+      if (sampled) {
+        cautions.push(`Too many projects compete for the stock to try every order (${sampled} tried): the date is the earliest of those, not a bound`)
+      }
+
+      if (fineRemainder) {
+        cautions.push('A fuel or installation limit left the project a part of a unit finer than a build of 4 decimals, so no build can finish it exactly and whether the game ever does is not known')
+      }
+
+      if (sensitive) {
+        cautions.push(`Each cycle builds ${sensitive.units.toFixed(5)} of a unit, rounded to 4 decimals (up to ${this.count(sensitive.error * 100, 0)}% of it), so the date is not reliable`)
+      }
+
+      return cautions
+    },
+
+    // How far another order of the colony's projects moves a date: a range of the orders tried, or a latest of those where they were only sampled.
+    rangeText(range) {
+      if (range.sampled) {
+        return range.latest === null ? 'Not finished in some of the orders tried; others may differ' : `Latest of the orders tried: ${this.duration(range.latest)}; other orders may differ`
+      }
+
+      return range.latest === null ? 'Some orders never finish it' : `Up to ${this.duration(range.latest)} in another order`
+    },
+
+    // The start of a queued project that another order moves, as a suffix of "Starts in X".
+    startRangeText(range) {
+      if (range.sampled) {
+        return range.latest === null ? ' (not started in some of the orders tried; others may differ)' : ` (latest of the orders tried: ${this.duration(range.latest)}; other orders may differ)`
+      }
+
+      return range.latest === null ? ', or never in another order' : `, up to ${this.duration(range.latest)} in another order`
+    },
+
+    // The slot that keeps the one forecast run whose result the page shows; made on first use, not reactive (it holds live generators).
+    forecastRunSlot() {
+      if (!this.forecastSlot) {
+        this.forecastSlot = createRunSlot()
+      }
+
+      return this.forecastSlot
+    },
+
+    // The search of one run: the colonies' forecasts one after the other.
+    forecastSearch(colonies, pace) {
+      return industryForecastRun(colonies, pace)
+    },
+
+    // Ends the forecast running, if any, and starts the forecast of the colonies as they are now; resolves when that run has ended and its outcome was kept or dropped. A run whose input changed meanwhile is ended and its outcome is never kept.
+    startForecast() {
+      const slot = this.forecastRunSlot()
+      const colonies = Object.entries(this.industryPlans).filter(([, prepared]) => !prepared.gaps).map(([populationId, prepared]) => ({ populationId, prepared }))
+
+      slot.invalidate(TERMINATION.INPUT_CHANGED)
+
+      return this.driveForecast(slot.start(createRun({ kind: 'production-forecast', input: this.forecastRunInput, domain: { signature: 'colony-cycle-forecast', total: colonies.length }, search: (pace) => this.forecastSearch(colonies, pace) })), this.forecastKey)
+    },
+
+    // Runs a forecast a slice at a time with a turn for the browser between slices, then keeps its outcome with the key of the input it was for.
+    async driveForecast(run, key) {
+      const slot = this.forecastRunSlot()
+
+      try {
+        while (run.running) {
+          run.advance(RESPONSIVENESS.sliceMs)
+
+          if (run.running) {
+            await nextTask()
+          }
+
+          if (!slot.isCurrent(run)) {
+            return
+          }
+        }
+
+        const outcome = slot.publish(run)
+
+        if (outcome) {
+          this.forecastState = Object.freeze({ key, colonies: outcome.result && outcome.status === RUN_STATUS.COMPLETE ? outcome.result.forecasts : null, error: outcome.error || (outcome.status === RUN_STATUS.COMPLETE ? null : 'the forecast was stopped before it finished') })
+        }
+      } catch (error) {
+        if (slot.isCurrent(run)) {
+          this.forecastState = Object.freeze({ key, colonies: null, error: error.message })
+        }
+      }
+    },
+
+    addArrival() {
+      const { populationId, resource, day, quantity, source } = this.arrivalForm
+
+      this.arrivals = [...this.arrivals, { id: this.arrivalCount + 1, PopulationID: populationId, resource, day: Number(day), quantity: Number(quantity), source: (source || '').trim() }]
+      this.arrivalCount += 1
+      this.arrivalForm = { ...this.arrivalForm, quantity: null, source: '' }
+    },
+
+    removeArrival(id) {
+      this.arrivals = this.arrivals.filter((arrival) => arrival.id !== id)
     },
 
     mineralLink(shortage) {
@@ -930,7 +1218,7 @@ export default {
         const needs = MINERALS.map((mineral) => `FCT_IndustrialProjects.${mineral.name}`).join(', ')
         const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name} as Stock${mineral.name}`).join(', ')
 
-        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`)
 
         return rows
       }),
@@ -1065,6 +1353,14 @@ export default {
   .search-field {
     min-width: 200px;
     max-width: 260px;
+  }
+
+  .arrival-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
   }
 
   .panel {

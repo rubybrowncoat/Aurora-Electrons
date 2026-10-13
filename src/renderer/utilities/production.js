@@ -1,5 +1,7 @@
 // The calculations behind the Production page: what each colony can build, research and train, what is idle, and when each job finishes. Every figure is a provenance result (utilities/provenance.js): a missing input gives an unavailable result naming it, never 0, and a job that is not making progress gives an unavailable finish that says so. The colony's production modifiers and its construction, ordnance and fighter capacity come from the production-modifiers mixin (rule `production.populationCapacity`).
 
+import { admitQueued, forecastColonySteps, FUEL, HORIZON_DAYS } from './industry-cycle'
+import { TERMINATION, UNPACED } from './search-run'
 import { MINERALS, projectShortages } from './minerals'
 import { combine, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
@@ -131,7 +133,7 @@ registerRule({
 
 ;[
   { key: 'research', note: 'The remaining research points over the project\'s rate, in days. A queued tech starts when the one ahead finishes, with the same labs.' },
-  { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days; a queued project starts when a project ahead of it at the colony finishes and leaves enough share. Minerals are not simulated.' },
+  { key: 'industry', note: 'The project\'s remaining build points (units left times the points a unit takes) over its rate, in days, for a colony the save gives every input of: the colony\'s production cycles run forward one by one, each project building its share of the capacity, rounded to 4 decimals a cycle and cut to what the colony\'s one stock of each mineral and the fuel covers after the projects ahead of it in the cycle, so the day is the end of the cycle the project finishes in. A queued project starts when a project of its kind finishes and leaves enough share, and builds from the next cycle. Where two projects want the same stock and the order the game takes them in is not saved, the date is the earliest over the orders tried, with its range; a project the stock cannot finish has no date. For a colony missing an input it is the points over the rate with the minerals not simulated, a queued project starting the moment the one ahead finishes.' },
   { key: 'ship', note: 'The task\'s remaining build points over the yard\'s rate, in days. Minerals are not simulated.' },
   { key: 'shipyardUpgrade', note: 'The activity\'s remaining build points over the yard\'s rate, in days, shared among the slipways of a retool.' },
   { key: 'training', note: 'The task\'s remaining build points over its rate, in days.' },
@@ -154,6 +156,16 @@ registerRule({
   verification: 'confirmed',
   structure: ['FCT_IndustrialProjects.Amount, FuelRequired and the mineral columns', 'FCT_Population mineral stockpiles and FuelStockpile'],
   note: 'The units of a project the colony\'s own stock covers (stock over the project\'s need a unit, for each mineral and the fuel) against the units left. Stock arriving later is not counted.',
+})
+
+registerRule({
+  id: 'production.stockCover',
+  versions: PRODUCTION_VERSIONS,
+  units: 'units',
+  verification: 'estimated',
+  structure: ['FCT_IndustrialProjects.Amount, PartialCompletion, FuelRequired and the mineral columns', 'FCT_Population mineral stockpiles and FuelStockpile', 'production.industryFinish'],
+  note: 'The units of a project the colony\'s stock lets it build before a mineral or the fuel runs out, the stock being shared with the colony\'s other projects and no arrival entered brings more. Where the order the game takes the projects in is not saved the figure is the fewest the orders tried give, and the most is shown beside it.',
+  assumptions: ['The order the game takes a colony\'s projects in each cycle is not saved'],
 })
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
@@ -417,19 +429,13 @@ export const industrySchedule = (projects, capacity) => {
     running.sort((a, b) => a.finish - b.finish)
 
     const done = running.shift()
-    let full = false
 
     used -= done.project.Percentage
-    queue = queue.filter((project) => {
-      if (full || 100 - used + 1e-9 < project.Percentage) {
-        return true
-      }
 
-      begin(project, done.finish)
-      full = 100 - used <= 0
+    const { started, waiting } = admitQueued(queue, used)
 
-      return false
-    })
+    started.forEach((project) => begin(project, done.finish))
+    queue = waiting
   }
 
   queue.forEach((project) => {
@@ -439,6 +445,13 @@ export const industrySchedule = (projects, capacity) => {
   return schedule
 }
 
+// A project's rate in BP a year: the colony's capacity for its kind (a result) times the project's share. Unavailable while the capacity or the share is not known.
+const projectRate = (capacity, project) => {
+  const rule = 'production.industryRate'
+
+  return !isNumber(project.Percentage) ? unavailable({ rule, missing: [...capacity.inputs.missing, 'the project\'s share of the capacity'], present: capacity.inputs.present }) : combine({ rule, parts: { capacity }, compute: (values) => (values.capacity * project.Percentage) / 100, inputs: { present: ['the project\'s share of the capacity'] } })
+}
+
 const SCHEDULE_FIELDS = { Queue: 'a project\'s queue place', Paused: 'whether a project is paused', Percentage: 'a project\'s share of the capacity', Amount: 'a project\'s units left', ProdPerUnit: 'a project\'s build points per unit' }
 
 // The most unknown-category projects of a colony whose every resolution is tried; with more, every queued start of the colony is left unknown.
@@ -446,7 +459,6 @@ const MAX_TRIED_UNDECIDED = 4
 
 // The industrial projects of one colony and category with their rate and finish, in the order given: [{ rate, finish, start }], `rate` a 'production.industryRate' result, `finish` a { result, idle } of 'production.industryFinish' and `start` the days until a queued project starts (null when it never does or is not known). `capacity`: the colony's 'production.populationCapacity' result for the category. A project that runs now needs only its own figures and the capacity; a queued one needs those of every project of the group, since the ones ahead of it set when it starts. `undecided`: the colony's projects of unknown category (from `undecidedStarts`). Each of them is in this group or in another capacity, so the schedule is run for every combination of those two outcomes (the real scheduler, which skips a project that does not fit and admits a later one) and a start or finish is kept only when it is the same in all of them; otherwise it is unavailable and names the projects whose resolution changes it. With more than `MAX_TRIED_UNDECIDED` such projects, or one without its own figures, every queued project of the group is unavailable and names them all. A project that runs now is the same in every combination.
 export const industryFigures = (group, capacity, undecided = []) => {
-  const rule = 'production.industryRate'
   const finishRule = 'production.industryFinish'
   const gaps = (project) => Object.keys(SCHEDULE_FIELDS).filter((key) => !isNumber(project[key])).map((key) => SCHEDULE_FIELDS[key])
   const groupGaps = [...new Set(group.flatMap(gaps))]
@@ -479,7 +491,7 @@ export const industryFigures = (group, capacity, undecided = []) => {
   const dated = (rate, days) => ({ result: combine({ rule: finishRule, parts: { rate }, compute: () => days, inputs: { present: ['the units left and the points a unit takes'] } }), idle: false })
 
   return group.map((project) => {
-    const rate = !isNumber(project.Percentage) ? unavailable({ rule, missing: [...capacity.inputs.missing, 'the project\'s share of the capacity'], present: capacity.inputs.present }) : combine({ rule, parts: { capacity }, compute: (values) => (values.capacity * project.Percentage) / 100, inputs: { present: ['the project\'s share of the capacity'] } })
+    const rate = projectRate(capacity, project)
 
     const held = swayed[project.ID] || []
 
@@ -503,6 +515,223 @@ export const industryFigures = (group, capacity, undecided = []) => {
 
     return { rate, finish: days === null ? idle(finishRule, stalled(project), rate.inputs.present) : dated(rate, days), start: 0 }
   })
+}
+
+const FORECAST_STALLS = {
+  queue: 'a start (nothing ahead of it frees the share it needs)',
+  paused: 'a job that is making progress (it is paused)',
+  rounding: 'a build above 0 in a cycle (what its share of the capacity buys in a cycle rounds to 0 at 4 decimals)',
+  capacity: 'a rate above 0 (no capacity or share to work with)',
+  cost: 'a build point cost above 0 a unit',
+  remainder: 'a whole build (what is left of the project, or what it overshot, is a part of a unit finer than a build of 4 decimals, left by a fuel or installation limit, so no build can finish it exactly and what the game does with it is not known)',
+  unresolved: 'a start (the project ahead of it cannot finish exactly, so whether the game ever frees its share is not known)',
+}
+
+// The resource of a cut or a stall as { mineralId, name }: a mineral, the fuel (no mineral id) or the source installations of a conversion (none either).
+const resourceOf = (resource) => {
+  const mineral = MINERALS.find((candidate) => candidate.name === resource)
+
+  return mineral ? { mineralId: mineral.id, name: mineral.name } : { mineralId: null, name: resource === FUEL ? 'fuel' : 'source installations' }
+}
+
+// What the save leaves out of one colony's industrial projects that the cycle forecast needs, as a list of texts; empty when the forecast can run.
+const forecastGaps = (projects, capacities, modifiers, npr) => {
+  const gaps = new Set()
+  const add = (text) => gaps.add(text)
+
+  if (npr) {
+    add('the stock of the capital, which a spied empire\'s colony builds from')
+  }
+
+  modifierGaps(modifiers, ['MinConstructionPeriod']).forEach(add)
+
+  if (isNumber(modifiers && modifiers.MinConstructionPeriod) && !(modifiers.MinConstructionPeriod > 0)) {
+    add('a construction period above 0')
+  }
+
+  projects.forEach((project) => {
+    const category = categoryOf(project.ProductionType)
+
+    if (category === 'unknown') {
+      add('the production type of a project')
+    } else if (!isAvailable(capacities[category])) {
+      ;(capacities[category] ? capacities[category].inputs.missing : ['the colony\'s capacity']).forEach(add)
+    }
+
+    Object.keys(SCHEDULE_FIELDS).filter((key) => !isNumber(project[key])).forEach((key) => add(SCHEDULE_FIELDS[key]))
+
+    if (!isNumber(project.PartialCompletion)) {
+      add('the part of a unit a project has built')
+    }
+
+    MINERALS.forEach((mineral) => {
+      if (!isNumber(project[mineral.name])) {
+        add(`the ${mineral.name} a project needs`)
+      } else if (project[mineral.name] > 0 && !isNumber(project[`Stock${mineral.name}`])) {
+        add(`the colony's stock of ${mineral.name}`)
+      }
+    })
+
+    if (!isNumber(project.FuelRequired)) {
+      add('the fuel a project needs')
+    } else if (project.FuelRequired > 0 && !isNumber(project.StockFuel)) {
+      add('the colony\'s fuel stock')
+    }
+
+    if (isNumber(project.ConversionFrom) && !isNumber(project.ConversionSource)) {
+      add('the installations a conversion project draws on')
+    }
+  })
+
+  return [...gaps]
+}
+
+// What one colony's industrial projects need for the production cycle engine (`utilities/industry-cycle.js`) to forecast them together on the stock they share, with the same figures `industryFigures` gives. `projects`: the page's rows, each with the stock of its colony as `Stock<Mineral>` and `StockFuel`, `PartialCompletion` and, for a conversion, `ConversionFrom` (the installation type it consumes) and `ConversionSource` (how many the colony holds); `capacities`: { construction, ordnance, fighter } 'production.populationCapacity' results; `modifiers`: the colony's production modifiers row (its construction period is the length of a cycle); `arrivals`: the hypothetical arrivals of this colony, [{ resource (a mineral's name or 'fuel'), day, quantity, source }], none in any save; `npr`: a spied empire, whose projects build from its capital's stock. Returns { gaps } when the save lacks an input, otherwise the colony ready to run: { projects, capacities, cycleDays, entered, input } where `input` is the plain, serialisable argument of the engine.
+export const prepareForecast = ({ projects, capacities, modifiers, arrivals = [], npr = false }) => {
+  const gaps = forecastGaps(projects, capacities, modifiers, npr)
+
+  if (gaps.length) {
+    return { gaps }
+  }
+
+  const cycleDays = modifiers.MinConstructionPeriod / SECONDS_PER_DAY
+  const stock = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, isNumber(projects[0][`Stock${mineral.name}`]) ? projects[0][`Stock${mineral.name}`] : 0]))
+
+  stock[FUEL] = isNumber(projects[0].StockFuel) ? projects[0].StockFuel : 0
+
+  const sourceKey = (project) => `installation-${project.ConversionFrom}`
+
+  projects.filter((project) => isNumber(project.ConversionFrom)).forEach((project) => (stock[sourceKey(project)] = project.ConversionSource))
+
+  const resources = new Set([...MINERALS.map((mineral) => mineral.name), FUEL])
+  const entered = arrivals.filter((arrival) => resources.has(arrival.resource) && isNumber(arrival.day) && arrival.day >= 0 && isNumber(arrival.quantity) && arrival.quantity > 0)
+
+  return {
+    projects,
+    capacities,
+    cycleDays,
+    entered,
+    input: {
+      projects: projects.map((project) => ({
+        ID: project.ID,
+        Percentage: project.Percentage,
+        Amount: project.Amount,
+        PartialCompletion: project.PartialCompletion,
+        ProdPerUnit: project.ProdPerUnit,
+        Queue: project.Queue,
+        Paused: flagOf(project.Paused),
+        category: categoryOf(project.ProductionType),
+        needs: { ...Object.fromEntries(MINERALS.map((mineral) => [mineral.name, project[mineral.name]])), [FUEL]: project.FuelRequired },
+        source: isNumber(project.ConversionFrom) ? sourceKey(project) : null,
+      })),
+      capacities: Object.fromEntries(['construction', 'ordnance', 'fighter'].map((category) => [category, isAvailable(capacities[category]) ? capacities[category].value : 0])),
+      stock,
+      arrivals: entered,
+      cycleDays,
+    },
+  }
+}
+
+// The figures the page shows for each project of a prepared colony, from the engine's forecast of it, a generator that yields between one project and the next wherever the `pace` says the time is up.
+function* forecastFigures({ projects, capacities, cycleDays, entered }, engine, pace) {
+  const figures = []
+
+  for (const [index, project] of projects.entries()) {
+    if (index > 0 && pace.expired()) {
+      yield
+    }
+
+    const figure = engine.projects[project.ID]
+    const rate = projectRate(capacities[categoryOf(project.ProductionType)], project)
+    const sampled = !engine.orders.exhaustive
+    const range = figure.earliest !== null && (sampled || figure.dependent || figure.stallOrders === 'some') ? { earliest: figure.earliest, latest: figure.latest, sampled } : null
+    const sensitive = figure.sensitive ? { units: figure.unitsPerCycle, error: figure.roundingError } : null
+    const stalled = figure.outcome === 'stalls' && figure.stall.resource !== null
+    const shortage = stalled && figure.stallOrders === 'all' ? { ...resourceOf(figure.stall.resource), covered: figure.builtRange[0], coveredMost: figure.builtRange[1], day: figure.cut ? figure.cut.day : null } : null
+    const maybeShort = stalled && figure.stallOrders === 'some' ? { ...resourceOf(figure.stall.resource), covered: figure.builtRange[0], coveredMost: figure.builtRange[1], day: figure.cut ? figure.cut.day : null } : null
+    const held = figure.cut && figure.finish !== null ? { ...resourceOf(figure.cut.resource), day: figure.cut.day } : null
+
+    const assumptions = [
+      `A production cycle is taken as the game's construction period (${cycleDays.toFixed(2)} days); cycles played over a longer increment end later`,
+      ...(entered.length ? [`${entered.length === 1 ? 'An arrival' : `${entered.length} arrivals`} of stock entered by hand ${entered.length === 1 ? 'is' : 'are'} counted; nothing else arrives`] : ['No minerals arrive: the colony\'s stock is all there is']),
+      ...(range ? [engine.orders.exhaustive ? `The order the game takes the colony's projects in each cycle is not saved: ${engine.orders.tried} orders tried (every order), the project finishes ${range.latest === null ? 'in some of them and never in others' : 'between the earliest and the latest of them'}` : `The order the game takes the colony's projects in each cycle is not saved and too many projects compete for the stock to try every order: ${engine.orders.tried} orders were sampled, so the date is the earliest of those, not a bound, and another order may finish this project earlier or later`] : []),
+      ...(sensitive ? [`A cycle builds only ${sensitive.units.toFixed(5)} of a unit and the game rounds a build to 4 decimals, up to ${(sensitive.error * 100).toFixed(0)}% of it, so a small error in the capacity or the cycle length moves this date by a large share of itself`] : []),
+      'The game\'s arithmetic is reproduced exactly (decimals of 28 digits, the build rounded to 4 decimals with a tie to the even digit, the figures of the save read to 15 digits); the one thing it takes from the app is the colony\'s capacity, worked out from its installations and modifiers rather than read from the game, so a build within the precision of that figure of a midpoint of the rounding could round the other way',
+    ]
+
+    const present = ['the units left and the points a unit takes', 'the colony\'s stock of each mineral and the fuel, shared by its projects', 'the share of the capacity each project holds']
+    const days = figure.earliest
+
+    const finish = days !== null ? { result: combine({ rule: 'production.industryFinish', parts: { rate }, compute: () => days, inputs: { present }, assumptions }), idle: false } : idle('production.industryFinish', figure.outcome === 'beyond' ? `a finish within ${Math.round(HORIZON_DAYS / DAYS_PER_YEAR)} years` : stalled ? (figure.stall.reason === 'source' ? 'source installations to convert (the colony holds none left)' : `${resourceOf(figure.stall.resource).name} in the colony's stock (what it holds is used up and no arrival is entered)`) : FORECAST_STALLS[figure.stall.reason], rate.inputs.present)
+
+    const covers = shortage || maybeShort ? ofRule({ rule: 'production.stockCover', value: (shortage || maybeShort).covered, inputs: { present: ['the units left', 'the colony\'s stock, shared by its projects', 'the project\'s need a unit'] } }) : null
+    const queued = project.Queue > 0
+    const startRange = queued && figure.startEarliest !== null && (sampled || figure.startDepends) ? { earliest: figure.startEarliest, latest: figure.startLatest, sampled } : null
+
+    figures.push({ rate, finish, start: queued ? figure.startEarliest : 0, startRange, shortage, maybeShort, held, covers, range, sampled: sampled ? engine.orders.tried : null, fineRemainder: figure.fineRemainder, sensitive, supplied: figure.finish === null && figure.suppliedFinish !== null && stalled ? figure.suppliedFinish : null, forecast: figure })
+  }
+
+  return { figures, orders: engine.orders, events: engine.events, cycleDays }
+}
+
+// A quantity beyond the game's decimal type is the colony's own gap: its forecast is not made, and says why.
+const overflowGap = (error) => `a quantity of the colony is beyond what the game's decimal type holds (${error.message})`
+
+// The forecast of a prepared colony as a generator for the sliced run: it yields wherever the `pace` says the time is up and returns what `industryForecast` returns, `{ gaps }` for a colony the save leaves a gap in or whose quantity the decimal type cannot hold.
+export function* industryForecastSteps(prepared, pace) {
+  if (prepared.gaps) {
+    return prepared
+  }
+
+  let engine
+
+  try {
+    engine = yield * forecastColonySteps(prepared.input, pace)
+  } catch (error) {
+    if (!(error instanceof RangeError)) {
+      throw error
+    }
+
+    return { gaps: [overflowGap(error)] }
+  }
+
+  return yield * forecastFigures(prepared, engine, pace)
+}
+
+// The same forecast run to its end at once.
+export const industryForecast = (colony) => {
+  const steps = industryForecastSteps(prepareForecast(colony), UNPACED)
+  let step = steps.next()
+
+  while (!step.done) {
+    step = steps.next()
+  }
+
+  return step.value
+}
+
+// The counts of a run over `total` colonies, in the shape of the search runner's.
+const runCounts = (total, done) => ({ total, evaluated: done, pruned: 0, unexplored: total - done, feasible: done, retained: done, prunedBy: {} })
+
+// The forecasts of several colonies as the search of one run (`utilities/search-run.js`): each colony in turn, yielding wherever the `pace` says the time is up (the engine looks at it at the start of every cycle or stretch of cycles), and returning { counts, termination, forecasts: { [populationId]: what `industryForecast` returns } }. `colonies`: [{ populationId, prepared }], each `prepared` from `prepareForecast` without gaps.
+export function* industryForecastRun(colonies, pace) {
+  const forecasts = {}
+
+  const state = (done) => ({ progress: colonies.length ? done / colonies.length : 1, counts: runCounts(colonies.length, done), snapshot: () => ({ counts: runCounts(colonies.length, done), forecasts: { ...forecasts } }) })
+
+  for (const [index, colony] of colonies.entries()) {
+    const steps = industryForecastSteps(colony.prepared, pace)
+    let step = steps.next()
+
+    while (!step.done) {
+      yield state(index)
+      step = steps.next()
+    }
+
+    forecasts[colony.populationId] = step.value
+  }
+
+  return { counts: runCounts(colonies.length, colonies.length), termination: TERMINATION.EXHAUSTED, forecasts }
 }
 
 // What an industrial project's stock can't cover, as { shortage, covers, unknown }: `shortage` the first mineral or fuel the colony's stock cannot cover (`projectShortages`: { mineralId, name, covered }) or null, `covers` its 'production.shortage' result (the units the stock covers), or an unavailable one when no shortage is found while some stock or need is not in the save, `unknown` the names of what is not in the save. A mineral the project has no recorded need of is unknown, not free.
