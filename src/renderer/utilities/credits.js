@@ -6,11 +6,13 @@ import apacheLicense from 'roboto-fontface/LICENSE?raw'
 import { version as robotoVersion } from 'roboto-fontface/package.json'
 import { resolveAppearance } from './appearance'
 import solarisLicense from './notices/solaris-theme-license.txt?raw'
+import t2dLicense from './notices/t2d-theme-license.txt?raw'
 
 const APACHE = { title: 'Apache License 2.0', text: apacheLicense }
 
-// The community theme the Aurora Classic and Solaris inspired presets take their reference colours from; the provenance is the presets' own metadata, so the two cannot differ.
+// The community themes the colour presets take their reference colours from (the Aurora Classic and Solaris inspired presets from the first, the T2D inspired preset from the second); the provenance is each preset's own metadata, so an entry and its preset cannot differ.
 const { source: SOLARIS } = resolveAppearance('solaris').reference
+const { source: T2D } = resolveAppearance('t2d').reference
 const BUNDLED = { kind: 'Bundled files', detail: 'The files ship inside the app.' }
 
 export const CREDITS = [
@@ -49,5 +51,17 @@ export const CREDITS = [
     license: { label: SOLARIS.license, href: `${SOLARIS.repository}/blob/${SOLARIS.revision}/LICENSE` },
     modifications: 'The two presets adapt the reference colours with surfaces, text, selection and state colours of their own; Settings lists each preset\'s changes.',
     notices: [{ title: 'MIT License (Solaris theme)', text: solarisLicense }],
+  },
+  {
+    id: 't2d-theme',
+    name: T2D.name,
+    kind: 'Colour reference',
+    covers: 'Its black window, white text and grey map lines, the reference of the T2D inspired preset. Its custom icon set and its font choice are not used.',
+    reuse: { kind: 'Visual inspiration', detail: T2D.copied },
+    author: T2D.author,
+    source: { label: `T2DTheme ${T2D.revision.slice(0, 7)}, ${T2D.revisionDate}`, href: `${T2D.repository}/tree/${T2D.revision}` },
+    license: { label: T2D.license, href: `${T2D.repository}/blob/${T2D.revision}/LICENSE` },
+    modifications: 'The preset adapts the reference colours with outlines, states, chart greys and a link underline of its own; Settings lists its changes.',
+    notices: [{ title: 'MIT License (T2D theme)', text: t2dLicense }],
   },
 ]

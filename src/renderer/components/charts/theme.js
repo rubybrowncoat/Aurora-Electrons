@@ -88,6 +88,39 @@ export const seriesIdentity = (appearance, color) => {
   return { slot, color: appearance.charts.categorical[slot], marker, markerPath: MARKER_PATHS[marker], dash, pattern, primitives: PATTERNS[pattern] }
 }
 
+// A straight-edged marker's corners as the flat "x y x y …" string of a cytoscape polygon, scaled so the widest corner reaches 1 on its axis; null for the circle, which a node draws as an ellipse. Walks the path's M, L, H, V and Z commands.
+export const markerPoints = (marker) => {
+  const path = MARKER_PATHS[marker]
+
+  if (!path || path.includes('a')) {
+    return null
+  }
+
+  const corners = []
+  let x = 0
+  let y = 0
+
+  for (const [, command, values] of path.matchAll(/([MLHVZ])([^MLHVZ]*)/g)) {
+    const numbers = values.split(/[ ,]+/).filter(Boolean).map(Number)
+
+    if (command === 'H') {
+      x = numbers[0]
+    } else if (command === 'V') {
+      y = numbers[0]
+    } else if (command !== 'Z') {
+      [x, y] = numbers
+    }
+
+    if (command !== 'Z') {
+      corners.push([x, y])
+    }
+  }
+
+  const reach = Math.max(...corners.flat().map(Math.abs))
+
+  return corners.map(([cornerX, cornerY]) => `${+(cornerX / reach).toFixed(3)} ${+(cornerY / reach).toFixed(3)}`).join(' ')
+}
+
 // The slot's texture as a CSS `background-image` (an SVG tile, PATTERN_SIZE square, the texture alone over transparency), for swatches and previews that are not drawn on a canvas; null for the solid slot.
 export const patternImage = (identity, surface) => {
   if (!identity.primitives.length) {

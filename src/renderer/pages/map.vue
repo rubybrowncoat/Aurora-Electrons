@@ -99,8 +99,8 @@
                   </span>
                   <provenance-mark :result="discoveryEra" />
                 </template>
-                <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
-                <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
+                <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color, clipPath: item.clip, borderRadius: item.clip && '0' }" /></span>
+                <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color, clipPath: item.clip, borderRadius: item.clip && '0' }" />
                 {{ item.label }}<provenance-mark v-if="item.rule || item.result" :rule="item.rule || ''" :result="item.result || null" />
               </span>
             </span>
@@ -254,7 +254,7 @@ import cxtmenu from 'cytoscape-cxtmenu'
 import fcose from 'cytoscape-fcose'
 import cola from 'cytoscape-cola'
 
-import { chartTheme } from '../components/charts/theme'
+import { chartTheme, markerPoints, seriesIdentity } from '../components/charts/theme'
 import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -263,7 +263,7 @@ import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
-import { activeAppearance } from '../utilities/appearance'
+import { activeAppearance, MAP_MENU } from '../utilities/appearance'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
 import { loadJumpPoints } from '../utilities/jump-graph'
@@ -1395,7 +1395,7 @@ export default {
       // Borders round the groups the layer colours by: those entries show the border's swatch too.
       const merged = this.borders === this.layer && (this.layer === 'sectors' || this.layer === 'control' || this.layer === 'groups')
       const shaped = new Set(this.borderLegend.map((entry) => entry.owner))
-      const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, label })
+      const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, clip: this.clipOf(owner.color), tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, clip: this.clipOf(owner.color), label })
       const systemsWhere = (test) => this.systemRows.filter(test).length
       const systemsText = (systems) => `${systems} ${systems === 1 ? 'system' : 'systems'}`
       // A system whose state the layer can't tell is drawn hollow with a dashed ring.
@@ -1829,6 +1829,8 @@ export default {
             width: 'data(size)',
             height: 'data(size)',
             'background-color': 'data(fill)',
+            shape: (node) => node.data('shape'),
+            'shape-polygon-points': (node) => node.data('polygon'),
             'border-color': 'data(border)',
             'border-width': 'data(borderWidth)',
             'border-style': 'data(borderStyle)',
@@ -1944,10 +1946,26 @@ export default {
       ]
     },
 
+    // What a categorical colour is drawn as besides its fill, a node's `shape` and `polygon` (the slot's marker, as in the charts; a circle for any other colour).
+    shapeOf(color) {
+      const identity = color ? seriesIdentity(this.appearance, color) : null
+      const polygon = identity ? markerPoints(identity.marker) : null
+
+      return polygon ? { shape: 'polygon', polygon } : { shape: 'ellipse', polygon: '-1 -1 1 -1 1 1 -1 1' }
+    },
+
+    // The same marker as a CSS `clip-path` for a legend dot; undefined for a circle.
+    clipOf(color) {
+      const { shape, polygon } = this.shapeOf(color)
+      const percent = (value) => `${+(((Number(value) + 1) / 2) * 100).toFixed(1)}%`
+
+      return shape === 'polygon' ? `polygon(${polygon.match(/\S+ \S+/g).map((pair) => pair.split(' ').map(percent).join(' ')).join(', ')})` : undefined
+    },
+
     // A system's fill, border, pie and overlay for the layer shown. A system whose state the layer can't tell is hollow, with a dashed ring.
     markerData(row) {
       const { colors } = this
-      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null }
+      let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null, ...this.shapeOf(null) }
       const unknown = { fill: colors.surface, borderStyle: 'dashed', pieDone: 0, pieLeft: 0 }
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
@@ -1981,11 +1999,11 @@ export default {
           ...(share === null ? unknown : {}),
         }
       } else if (this.layer === 'sectors') {
-        marker.fill = (this.sectorById[row.SectorID] || {}).color || colors.none
+        marker = { ...marker, ...this.shapeOf((this.sectorById[row.SectorID] || {}).color), fill: (this.sectorById[row.SectorID] || {}).color || colors.none }
       } else if (this.layer === 'control') {
-        marker.fill = row.ControlRaceID === this.RaceID ? colors.primary : (this.controllerById[row.ControlRaceID] || {}).color || colors.none
+        marker = row.ControlRaceID === this.RaceID ? { ...marker, fill: colors.primary } : { ...marker, ...this.shapeOf((this.controllerById[row.ControlRaceID] || {}).color), fill: (this.controllerById[row.ControlRaceID] || {}).color || colors.none }
       } else if (this.layer === 'groups') {
-        marker.fill = (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none
+        marker = { ...marker, ...this.shapeOf((this.groupOwners[this.groupOf[row.id]] || {}).color), fill: (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none }
       } else if (this.layer === 'discovery') {
         const shade = discoveryShade(row.DiscoveredTime, this.discoveryRange)
 
@@ -2331,7 +2349,7 @@ export default {
       })
     },
 
-    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or unpin, and the System View for a single system.
+    // The right-click menu: Minerals and the Colonization Planner for the selection, pin or unpin, and the System View for a single system. Its icons take the ink the preset sets for a surface filled with a named colour (`inks.onColor`), as the wedge is the primary colour and the active one a categorical slot; the menu's own white is under 3:1 on a light primary.
     createMenu() {
       if (this.menu) {
         this.menu.destroy()
@@ -2342,8 +2360,9 @@ export default {
       this.menu = this.graph.cxtmenu({
         menuRadius: 100,
         selector: 'node',
-        fillColor: rgba(this.theme.primary, 0.88),
-        activeFillColor: rgba(this.theme.categorical[2], 0.9),
+        fillColor: rgba(this.theme.primary, MAP_MENU.fillAlpha),
+        activeFillColor: rgba(this.theme.categorical[MAP_MENU.activeSlot], MAP_MENU.activeAlpha),
+        itemColor: this.appearance.inks.onColor,
         indicatorSize: 36,
         maxSpotlightRadius: 100,
         commands: (node) => {
@@ -3176,8 +3195,8 @@ export default {
     margin-right: 6px;
 
     .dot {
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
       margin: 0;
     }
   }

@@ -1,12 +1,12 @@
 import Vue from 'vue'
 
-// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic and Solaris are adaptations of a community reference (see `reference`), listed after them.
+// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
 //
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
 // - `surfaces`: `background` (the page and app bar), `chrome` (rail, footer), `card` (cards, tables, chart canvases), `border` (dividers and outlines), `track` and `trackSoft` (the empty part of a meter, the fill of a chip) and `rule` (a hairline under a table head).
 // - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks), `text` and `textMuted` (the colours Vuetify's own components draw their text in, styles/appearance.scss: the baselines keep Vuetify's own black or white, an adaptation uses its body and muted inks; the text Vuetify draws on the other theme keeps Vuetify's own), `onTooltip` (text on the chart tooltip), `onColor` and `onSnackbar` (the text and icons on a surface filled with one of Vuetify's named colours, a toolbar or a snackbar, and the snackbar's message: the baselines keep Vuetify's own white; an adaptation takes an ink that is 4.5:1 on the primary and the four severities, which scripts/check-contrast.js measures) and `onFill` (text on a chip filled with a severity, status, planner or focus colour: white where the fills are dark enough for it, the page's dark ink where they are light, because a tone that is also drawn as text on the dark surfaces cannot hold white).
-// - `focus`: `primary` (focus, selection, links, the Galaxy Map's selection), `hover` (the wash under the pointer) and Vuetify's other two named colours, `secondary` and `accent`.
+// - `focus`: `primary` (focus, selection, links, the Galaxy Map's selection), `hover` (the wash under the pointer) and Vuetify's other two named colours, `secondary` and `accent`; and, optionally, `linkLine`, the `text-decoration-line` a link takes (`underline`) in a preset whose focus colour is too close to its text ink to tell a link by colour (styles/appearance.scss; the key is emitted as `--ae-link-line` only when the preset has it, so the other presets' links do not change).
 // - `rows`: table rows that mark something: `selected` (the picked row), `differs` (a compared row that differs), `differsMark` and `differsDot` (the stripe and the dot that go with it), `stripe` and `stripeSoft` (the two bands of the focused row's hatching). Each wash is faint enough that every text colour of the preset, severity tones included, stays 4.5:1 on it, and `focus.hover` is the wash a hovered table row takes (scripts/check-contrast.js measures both).
 // - `severity`: Warnings' three levels, `action` (needs action), `attention` and `info`, plus `success`; Vuetify's `error`, `warning`, `info` and `success`.
 // - `contacts`, `survey`, `habitability`, `accessibility`, `status` (each optional): the meaning of a colour, not its place in the palette. `contacts`: how the race regards an alien contact (hostile, unknown, neutral, friendly, allied, civilian). `survey`: surveyed, remaining, ground (a ground survey location), unexplored (an unexplored jump point), and the geological, gravitational and both kinds of survey. `habitability`: `band`, the hue the colony-cost bands shade from. `accessibility`: a mineral deposit's good, fair and poor band. `status`: `shortfall` and `inactive` (a standing that is neither good nor bad). Each defaults to its slot in ROLE_SLOTS of the categorical list; a colour here replaces it.
@@ -54,6 +54,19 @@ const SOLARIS_SOURCE = {
   inspected: "The colour numbers in the theme's public source: the legacy colours it replaces and the four it puts in their place. Read in October 2026, at the revision above, and typed into this preset as values.",
   copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken, and the preset does not reproduce the theme.',
   note: 'The source does not say which Aurora version the legacy colours come from; its last commit is dated 2021-05-20. Nothing here states what any release of the game uses today.',
+}
+
+// The community theme the T2D inspired preset takes its colours from, at the revision that was inspected. It draws a black window and white text with white outlines; its license is MIT. Its custom icon set is a source asset with its own author and its font is chosen by the player at run time: neither is bundled, and the preset keeps the app's typeface and icons.
+const T2D_SOURCE = {
+  name: 'T2D theme',
+  author: 'Aurora-Modders',
+  repository: 'https://github.com/Aurora-Modders/T2DTheme',
+  revision: 'ebee1f9feafcac13904740562d96a05b8336e9e7',
+  revisionDate: '2021-05-12',
+  license: 'MIT License',
+  inspected: "The colour numbers in the theme's public source (the legacy navy and pale yellow it replaces, the black and white it puts in their place, the grey it draws map lines in) and the look of its published screenshot (black controls with white outlines). Read in October 2026, at the revision above, and typed into this preset as values.",
+  copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken. The theme\'s custom icon set, made by another author, and its font choice are references only: the preset uses the app\'s own icons and typeface.',
+  note: 'The theme lists corner cases that "don\'t quite look good yet" and its published screenshot keeps the default light window chrome on some dialogs, green text on black in a field and overlapping map labels; none of these is reproduced. The source does not say which Aurora version it was drawn for; its last commit is dated 2021-05-12. Nothing here states what any release of the game uses today.',
 }
 
 const CLASSIC = {
@@ -133,6 +146,48 @@ const SOLARIS = {
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
 
+const T2D = {
+  id: 't2d',
+  name: 'T2D inspired',
+  version: 1,
+  mode: 'dark',
+  reference: {
+    title: 'Black and white with outlines',
+    summary: 'A pure black page with white text, structure drawn in outlines and weight instead of tints, after the community T2D theme. Chart categories are told apart by marker, dash and pattern on unique greys; the warning levels keep a restrained pastel on top of their icons and labels.',
+    source: T2D_SOURCE,
+    roles: [
+      { role: 'Window background', value: '#000000', maps: 'The page, the app bar, cards, tables, chart canvases, the rail, the footer and the system view sky' },
+      { role: 'Text', value: '#FFFFFF', maps: 'Body text, the system view labels, the selection and link colour; the tooltip is white with black text' },
+      { role: 'Map lines', value: '#808080', maps: 'Orbit lines in the system view' },
+      { role: 'Controls', value: 'Black with a white outline', maps: 'The outline colour of cards, tables and the rail, drawn in light grey' },
+    ],
+    modifications: [
+      'The reference has no state colours: the warning levels, success and the planner\'s cost bands are light pastels (Action a salmon, Attention an amber, Info an aqua, Success a mint) that are each 4.5:1 as text on black and take black text as a fill, and every one of them is also carried by an icon and a label.',
+      'Selection, links and the focus ring are white. A link is underlined, and a selected row keeps its 3px bar and a wash that a pressed button, a hovered row and the focused row\'s hatching share, so none of them depends on a hue; the selection stays 20 or more CIEDE2000 from the warning pastels.',
+      'The nine chart categories are unique greys alternating between lighter and darker, none under 6:1 on black so that a section accent (an active tab, a rail icon) is never dimmer than an inactive one, neighbours at least 12 CIEDE2000 apart; the marker, dash and bar pattern of each slot (SERIES_ENCODINGS) tell them apart where two greys come close.',
+      'The system view\'s jump points differ in lightness (an unexplored one is white, an explored one grey) and keep the square outline of a gate, besides their labels; the reference has no equivalent.',
+      'The typeface is the app\'s own and stays an independent preference; the reference\'s font dialog is not reproduced.',
+    ],
+  },
+  surfaces: { background: '#000000', chrome: '#000000', card: '#000000', border: '#8a8a8a', track: 'rgba(255, 255, 255, .22)', trackSoft: 'rgba(255, 255, 255, .16)', rule: 'rgba(255, 255, 255, .4)' },
+  inks: { body: '#ffffff', muted: '#b3b3b3', text: '#ffffff', textMuted: '#b3b3b3', onTooltip: '#000000', onFill: '#000000', onColor: '#000000', onSnackbar: '#000000' },
+  focus: { primary: '#ffffff', hover: 'rgba(255, 255, 255, .10)', secondary: '#4d4d4d', accent: '#bdbdbd', linkLine: 'underline' },
+  rows: { selected: 'rgba(255, 255, 255, .18)', differs: 'rgba(255, 255, 255, .18)', differsMark: '#ffffff', differsDot: 'rgba(255, 255, 255, .6)', stripe: 'rgba(255, 255, 255, .18)', stripeSoft: 'rgba(255, 255, 255, .07)' },
+  severity: { action: '#ff8a80', attention: '#ffcc80', info: '#80deea', success: '#a5d6a7' },
+  contacts: { hostile: '#ff8a80', friendly: '#a5d6a7', allied: '#f9f9f9' },
+  accessibility: { good: '#dedede', fair: '#aaaaaa', poor: '#919191' },
+  status: { shortfall: '#ff8a80', inactive: '#9a9a9a' },
+  plan: { mining: '#d6d6d6', terraformFree: '#f0f0f0', terraformPartial: '#b4b4b4', terraformCheaper: '#8f8f8f', cheap: '#a5d6a7', moderate: '#80deea', costly: '#ffcc80', severe: '#ff9e94', insufficient: '#ff8a80', rich: '#eaeaea', cmc: '#a2a2a2', unsurveyed: '#7a7a7a', selected: '#ffffff' },
+  charts: {
+    axis: '#8a8a8a',
+    tooltip: 'rgba(255, 255, 255, 0.97)',
+    categorical: ['#c4c4c4', '#919191', '#d1d1d1', '#9d9d9d', '#dedede', '#aaaaaa', '#ececec', '#b7b7b7', '#f9f9f9'],
+  },
+  sections: { neutral: '#b3b3b3' },
+  space: { background: '#000000', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#808080', jumpUnexplored: '#ffffff', jumpExplored: '#a0a0a0' },
+  washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
+}
+
 const DARK = {
   id: 'dark',
   name: 'Dark',
@@ -156,7 +211,7 @@ const DARK = {
 }
 
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
@@ -168,6 +223,9 @@ export const APPEARANCE_KEY = 'appearance'
 
 // Categorical slots of the colours that carry a meaning, by role; `muted` is the preset's muted ink.
 export const CONTACT_SLOTS = { hostile: 7, unknown: 7, neutral: 3, friendly: 2, allied: 0, civilian: 'muted' }
+
+// The Galaxy Map's right-click menu: its wedges are the primary colour at `fillAlpha` over the page background, the wedge under the pointer a categorical slot at `activeAlpha` over that wedge, and its icons `inks.onColor`, which scripts/check-contrast.js measures against both (3:1).
+export const MAP_MENU = { fillAlpha: 0.88, activeSlot: 2, activeAlpha: 0.9 }
 
 // What tells a categorical slot apart without its colour, one entry per slot: the `marker` a line or scatter series carries (the shapes are in components/charts/theme.js), the `dash` of its line (line widths; empty is solid) and the `pattern` a bar or stack segment is hatched with. Each of the three is unique to a slot, so a series is identifiable by any one of them, and a legend shows all that apply. They belong to the slot, not to the preset, because a preset only recolours the slots. scripts/check-contrast.js checks that the nine are unique.
 export const SERIES_ENCODINGS = [
@@ -324,6 +382,7 @@ export const appearanceStyle = ({ mode, surfaces, inks, focus, rows, space, stat
   '--ae-space-ink': space.label,
   '--ae-space-shadow': space.labelShadow,
   '--ae-shortfall': status.shortfall,
+  ...(focus.linkLine ? { '--ae-link-line': focus.linkLine } : {}),
 })
 
 // The colours Vuetify's theme takes for the appearance's mode: its named colours, `error`, `warning`, `info` and `success` being the severities.

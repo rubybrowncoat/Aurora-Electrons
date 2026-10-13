@@ -56,6 +56,11 @@
   }
 }
 
+// A link in running text (an anchor with no Vuetify class: the router links, the external links, the research views' tech links, the map's text actions) is underlined in a preset whose focus colour is too close to its text ink to tell a link by colour (utilities/appearance.js: `focus.linkLine` is emitted as `--ae-link-line` only for such a preset, and the selector matches the root's inline style only then, so the other presets draw their links as before). scripts/check-contrast.js requires the rule whenever the focus colour is under 20 CIEDE2000 from the text.
+.v-application[style*='--ae-link-line'] a:not([class^='v-']):not([class*=' v-']) {
+  text-decoration-line: var(--ae-link-line);
+}
+
 // A pressed button of a toggle group (a chosen mode, view or range) carries a 3px bar along its bottom edge in the focus colour and a wash of the selected-row token, besides Vuetify's grey wash, which is under 1.5:1 against its neighbours and so cannot tell the state on its own. Vuetify's own wash of the pressed button (white at 18% to 32% on the dark theme) would pull the bar under 3:1 against the button, so the wash is the preset's own, at one strength whether the button is pressed, hovered or focused (scripts/check-contrast.js measures the bar on it). The focused button's own grey wash is dropped, so the wash means pressed and the ring means focus.
 .v-application .v-btn-toggle {
   > .v-btn {

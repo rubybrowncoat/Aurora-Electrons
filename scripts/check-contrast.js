@@ -12,12 +12,15 @@
   - Vuetify's text inks (4.5:1): `inks.text` and `inks.textMuted`, which styles/appearance.scss draws every Vuetify component's text in, on the surfaces and under the row washes; the script compiles that stylesheet, reads the colour each rule declares and fails when a selector is missing or declares another colour (a disabled state, which Vuetify draws fainter, is left out by the selector itself), when the baselines' text inks differ from Vuetify's own (Light and Dark must not change) or when a theme's `--ae-text-*` variable is not the colour the rule is meant to draw;
   - text on a filled primary button and avatar (4.5:1), from the colour the stylesheet declares for them (Vuetify's white when it declares none);
   - for a preset that adapts a reference, text and icons on the surfaces Vuetify's named colours fill (the System view's toolbar, the snackbar), against each of the primary and the four severity colours: the toolbar's title (4.5:1), its icon, text button and icon button (icons 3:1), the snackbar's message and its text button (4.5:1), each from the colour the compiled stylesheet finally declares for it (the ordinary text ink where a rule is missing); the baselines keep Vuetify's own white and are not measured here;
+  - hue independence: in every preset one colour per categorical slot (a series is told which slot it is by its colour, so two slots of one colour would share a marker, dash and pattern); in a preset that adapts a reference and whose card or rail has the page's colour, the outline of that surface against the page (3:1), its only edge (Light's card is white on white with a decorative hairline and is not measured); in a preset whose focus colour is under 20 CIEDE2000 from its text ink, a link cue that is not a colour: `--ae-link-line` is `underline` and the stylesheet's link rule draws it;
+  - the icons of the Galaxy Map's right-click menu (3:1) on its wedge and on the wedge under the pointer, in every preset: the gate cuts `createMenu` out of pages/map.vue, runs it with a stub for `graph.cxtmenu` and a stand-in `this` carrying the preset, and measures the options it hands the library (`itemColor`, `fillColor`, `activeFillColor`; the library's white where `itemColor` is absent) over the page background, so a commented-out or stale option cannot pass; `MAP_MENU` in appearance.js sets the alphas and the slot;
   A categorical slot under 3:1 passes only when the slot's encoding (marker, dash and bar pattern, `SERIES_ENCODINGS` in appearance.js) tells it from every other slot without colour. Exceptions (decorative hairlines, track fills, gridlines, washes as colours, disabled controls) are listed with their reason, so the evidence names what the gate does not measure.
 
   A failed measurement, or a preset whose encodings do not tell its nine slots apart, sets exit code 1.
 */
 const fs = require('fs')
 const { join } = require('path')
+const vm = require('vm')
 const sass = require('sass')
 const { loadUtilities } = require('./lib/utilities')
 
@@ -214,6 +217,47 @@ const WASHED_ROWS = [
 ]
 const STYLESHEET = join(__dirname, '..', 'src', 'renderer', 'styles', 'appearance.scss')
 const readSource = () => fs.readFileSync(STYLESHEET, 'utf8')
+
+// The Galaxy Map page, whose `createMenu` the gate runs for the options it hands the menu library (icon ink, wedge colours): the method's source is cut out of the page and executed with a stub for `graph.cxtmenu` and a stand-in `this` that carries the preset, so a comment, a string or an explicit white cannot pass for the live option. The library draws icons white where `itemColor` is not given.
+const MAP_PAGE = join(__dirname, '..', 'src', 'renderer', 'pages', 'map.vue')
+const readMapSource = () => fs.readFileSync(MAP_PAGE, 'utf8')
+const MENU_LIBRARY_INK = '#ffffff'
+const MENU_INK_NAMES = { white: '#ffffff', black: '#000000' }
+const MENU_APPEARANCE_IMPORT = /^import \{[^}]*\bMAP_MENU\b[^}]*\} from '\.\.\/utilities\/appearance'$/m
+
+const menuOptions = (mapSource, appearance, MAP_MENU) => {
+  if (!MENU_APPEARANCE_IMPORT.test(mapSource)) {
+    throw new Error('pages/map.vue does not import MAP_MENU from utilities/appearance')
+  }
+
+  const lines = mapSource.split('\n')
+  const start = lines.findIndex((line) => /^ {4}createMenu\(\) \{$/.test(line))
+  const end = lines.findIndex((line, index) => index > start && line === '    },')
+  const rgba = lines.find((line) => /^const rgba = /.test(line))
+
+  if (start < 0 || end < 0 || !rgba) {
+    throw new Error('pages/map.vue has no createMenu method or no rgba helper the gate can read')
+  }
+
+  let options = null
+  const page = {
+    menu: null,
+    graph: { cxtmenu: (given) => { options = given; return { destroy: () => {} } } },
+    theme: { primary: appearance.focus.primary, categorical: appearance.charts.categorical },
+    appearance,
+  }
+
+  const { createMenu } = vm.compileFunction(`${rgba}\nreturn ({\n${lines.slice(start, end + 1).join('\n')}\n})`, ['MAP_MENU'])(MAP_MENU)
+
+  createMenu.call(page)
+
+  if (!options) {
+    throw new Error('createMenu in pages/map.vue did not hand options to graph.cxtmenu')
+  }
+
+  return options
+}
+
 const compileStylesheet = (source) => sass.compileString(source).css
 
 // The rules of a compiled stylesheet that set `color`: the selectors of each (whitespace normalised), the last colour it declares and whether that one is `!important`.
@@ -226,6 +270,10 @@ const parseRules = (css) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(
 // The last rule that lists the selector exactly as written, or null: the colour the stylesheet finally draws for it.
 const declaredColor = (rules, selector) => rules.filter((rule) => rule.selectors.includes(selector)).pop() || null
 
+// The selector of the stylesheet's link rule as the compiled stylesheet writes it, and the `text-decoration-line` the stylesheet finally declares for a selector, or null.
+const LINK_SELECTOR = '.v-application[style*="--ae-link-line"] a:not([class^=v-]):not([class*=" v-"])'
+const declaredLine = (css, selector) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors, body]) => selectors.split(',').some((candidate) => candidate.replace(/\s+/g, ' ').trim() === selector) && /text-decoration-line\s*:/.test(body)).map(([, , body]) => /text-decoration-line\s*:\s*([^;]+)/.exec(body)[1].trim()).pop() || null
+
 // A `var(--name)` colour as the root element sets it for the appearance (`appearanceStyle`); any other value as it stands.
 const resolveVariable = (value, style) => {
   const variable = /^var\((--[\w-]+)\)$/.exec(value)
@@ -235,7 +283,7 @@ const resolveVariable = (value, style) => {
 
 const replaceOnce = (source, pattern, replacement) => {
   if (!pattern.test(source)) {
-    throw new Error(`The self-test mutation does not apply: ${pattern} is not in appearance.scss`)
+    throw new Error(`The self-test mutation does not apply: ${pattern} is not in the source it mutates`)
   }
 
   return source.replace(pattern, replacement)
@@ -330,13 +378,15 @@ const EXCEPTIONS = [
   ['Stars, planet terrain, orbit lines in the stars\' colour', 'Physical colours that depict the world, not a meaning; named in the legend by their label.'],
   ['Dark and Light, text and icons on the surfaces Vuetify\'s named colours fill (toolbar, snackbar)', 'The baselines keep Vuetify\'s own white, as before presets: on the primary and severity colours of Dark it is 2.4:1 to 3.2:1 (Light 5.0:1 to 6.6:1). Not measured and not changed, so that Light and Dark render as they did; only a preset with a `reference` is measured.'],
   ['A snackbar with no colour (Vuetify draws it at 87% white on a dark grey; the app always sets one), icons, tabs, placeholders, the text of a filled button in another colour than the primary (Vuetify colours)', 'appearance.scss leaves them on Vuetify\'s own colours: an icon is white on the dark theme and 54% black on the light one, an inactive tab 60% of the base ink, a placeholder 38 to 50%; the preset\'s text inks are not drawn in them, so the text rows above do not measure them.'],
+  ['Hue independence of series, warning levels and selection', 'Measured: each categorical slot has its own colour, marker, dash and pattern, a preset with an edgeless card has an outline of 3:1, and a preset whose links are not told from its text by colour underlines them. Not measured, because the gate renders no page: that the renderers draw the markers, dashes and patterns (components/charts), that a warning level carries an icon and a label (utilities/warnings), a selected row a 3px bar and a rule, a pressed button a 3px bar, and that the system view\'s jump points differ in lightness and a gate gets a square outline.'],
 ]
 
-const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appearanceStyle }, options = {}) => {
+const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appearanceStyle, MAP_MENU }, options = {}) => {
   const results = []
   const appearances = options.preset ? [resolveAppearance(options.preset)] : listAppearances()
   const stylesheet = options.stylesheet === undefined ? compileStylesheet(readSource()) : options.stylesheet
   const rules = parseRules(stylesheet)
+  const mapSource = options.mapSource === undefined ? readMapSource() : options.mapSource
 
   appearances.forEach((appearance) => {
     const card = parseColor(appearance.surfaces.card)
@@ -346,7 +396,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       return color.a < 1 ? over(color, card) : color
     }
 
-    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: [], graphics: [], rows: [], categorical: [], cvd: [], selection: [], disabled: [], inkRules: [], inkTokens: [], colourSurfaces: [], encodings: null }
+    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: [], graphics: [], rows: [], categorical: [], cvd: [], selection: [], disabled: [], inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
     const distinct = (surfaces) => surfaces.filter((surface, index) => surfaces.findIndex((other) => hex(resolve(other)) === hex(resolve(surface))) === index)
 
     TEXT_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
@@ -403,6 +453,41 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
 
     report.graphics.push({ label: 'Pressed toggle button bar, focused, hovered or not (the selected-row wash over the button)', foreground: appearance.focus.primary, surface: hex(pressed), surfacePath: 'buttons.pressed', ratio: barRatio, minimum: GRAPHIC, pass: barRatio >= GRAPHIC })
 
+    const menuLabel = 'Map right-click menu icon'
+    const menuFailure = (error) => report.menu.push({ label: 'Map right-click menu options', message: error.message, ratio: 0, minimum: GRAPHIC, pass: false })
+    let menu = null
+
+    try {
+      menu = menuOptions(mapSource, appearance, MAP_MENU)
+    } catch (error) {
+      menuFailure(error)
+    }
+
+    if (menu) {
+      const ink = menu.itemColor === undefined ? MENU_LIBRARY_INK : menu.itemColor
+
+      try {
+        const wedge = over(parseColor(menu.fillColor), parseColor(appearance.surfaces.background))
+        const activeWedge = over(parseColor(menu.activeFillColor), wedge)
+
+        ;[[`${menuLabel} on its wedge (the primary colour over the page)`, wedge], [`${menuLabel} on the wedge under the pointer (a categorical slot over the wedge)`, activeWedge]].forEach(([label, surface]) => {
+          const value = ratio(over(parseColor(MENU_INK_NAMES[ink] || ink), surface), surface)
+
+          report.menu.push({ label, foreground: String(ink), surface: hex(surface), ratio: value, minimum: GRAPHIC, pass: value >= GRAPHIC })
+        })
+      } catch (error) {
+        menuFailure(error)
+      }
+    }
+
+    const edgeless = appearance.reference ? ['surfaces.card', 'surfaces.chrome'].filter((path) => hex(resolve(path)) === hex(resolve('surfaces.background'))) : []
+
+    if (edgeless.length) {
+      const outline = ratio(resolve('surfaces.border'), resolve('surfaces.background'))
+
+      report.graphics.push({ label: `Outline of a card or rail with the page's colour, its only edge (${edgeless.map((path) => path.split('.')[1]).join(', ')})`, foreground: appearance.surfaces.border, surface: appearance.surfaces.background, surfacePath: 'surfaces.background', ratio: outline, minimum: GRAPHIC, pass: outline >= GRAPHIC })
+    }
+
     const encodings = SERIES_ENCODINGS
     const unique = (key) => new Set(encodings.map((encoding) => JSON.stringify(encoding[key]))).size === encodings.length
     report.fills = FILL_TONES.map((path) => {
@@ -429,6 +514,11 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
 
     const style = appearanceStyle(appearance)
     const THEMES = ['light', 'dark']
+
+    const linkDelta = Math.min(deltaE(resolve('focus.primary'), resolve('inks.body')), deltaE(resolve('focus.primary'), resolve('inks.text')))
+    const linkLine = declaredLine(stylesheet, LINK_SELECTOR)
+
+    report.links = { delta: linkDelta, variable: style['--ae-link-line'] || null, rule: linkLine, pass: linkDelta >= SELECTION_DELTA || (style['--ae-link-line'] === 'underline' && linkLine === 'var(--ae-link-line)') }
 
     report.inkRules = INK_RULES.flatMap(([template, kind, important]) => THEMES.map((theme) => {
       const selector = template.replace('{theme}', theme)
@@ -496,7 +586,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       })
     }
 
-    report.encodings = { slots: encodings.length, markers: unique('marker'), dashes: unique('dash'), patterns: unique('pattern') }
+    report.encodings = { slots: encodings.length, markers: unique('marker'), dashes: unique('dash'), patterns: unique('pattern'), colours: new Set(appearance.charts.categorical.map((color) => color.toLowerCase())).size === appearance.charts.categorical.length }
     appearance.charts.categorical.forEach((color, slot) => {
       distinct(SURFACES).forEach((surface) => {
         const background = resolve(surface)
@@ -544,8 +634,11 @@ const failures = (reports) => reports.flatMap((report) => [
   ...report.fills.filter((row) => !row.pass).map((row) => `${report.id}: text ${row.foreground} on the ${row.label} fill ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.inkRules.filter((row) => !row.pass).map((row) => `${report.id}: ${row.selector} draws ${row.declared || 'Vuetify\'s own colour'}, not ${row.expected}`),
   ...report.colourSurfaces.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
+  ...report.menu.filter((row) => !row.pass).map((row) => `${report.id}: ${row.message || `${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`}`),
   ...report.inkTokens.filter((row) => !row.pass).map((row) => `${report.id}: ${row.message}`),
   ...(report.encodings.markers && report.encodings.dashes && report.encodings.patterns && report.encodings.slots === report.slotCount ? [] : [`${report.id}: the series encodings do not give each of the ${report.slotCount} slots its own marker, dash and pattern`]),
+  ...report.encodings.colours ? [] : [`${report.id}: two categorical slots are the same colour, so a series cannot be told which slot it is, and they would share a marker, a dash and a pattern`],
+  ...report.links.pass ? [] : [`${report.id}: links are ${report.links.delta.toFixed(1)} CIEDE2000 from the text ink, under ${SELECTION_DELTA}, and have no other cue: --ae-link-line is ${report.links.variable || 'not set'} and the stylesheet's link rule draws ${report.links.rule || 'nothing'}`],
   ...report.cvd.filter((row) => row.vision !== 'normal vision' && row.neighbour.delta < CVD_NEIGHBOUR_DELTA).map((row) => `${report.id}: ${row.vision}: neighbouring slots ${row.neighbour.pair.join(' and ')} differ by only ${row.neighbour.delta.toFixed(1)}`),
 ])
 
@@ -570,12 +663,17 @@ const format = (reports, verbose) => {
       report.colourSurfaces.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surface}`))
     }
 
+    lines.push('Icons of the Galaxy Map\'s right-click menu on its wedges, minimum 3:1')
+    report.menu.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.message || `${row.foreground} on ${row.surface}`}`))
+
     lines.push(`Vuetify's text inks in appearance.scss (compiled): ${report.inkRules.filter((row) => row.pass).length} of ${report.inkRules.length} selectors draw the preset's text inks, ${report.inkTokens.filter((row) => row.pass).length} of ${report.inkTokens.length} variables and baselines hold`)
 
     if (report.selection.length) {
       lines.push(`Selection colour against the warning severities, CIEDE2000 minimum ${SELECTION_DELTA}`)
       report.selection.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(1).padStart(5)}  ${row.label}: ${row.foreground} against ${row.surface}`))
     }
+
+    lines.push(`Links: the focus colour is ${report.links.delta.toFixed(1)} CIEDE2000 from the text ink (minimum ${SELECTION_DELTA} to tell a link by colour); --ae-link-line ${report.links.variable || 'not set'}, the stylesheet's link rule draws ${report.links.rule || 'nothing'}: ${report.links.pass ? 'ok' : 'FAIL'}`)
 
     lines.push(`Disabled text (Vuetify's own ink), legibility floor ${DISABLED_TEXT}:1`)
     report.disabled.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
@@ -598,7 +696,7 @@ const format = (reports, verbose) => {
   return lines.join('\n')
 }
 
-// Mutations the gate must catch, so that it can't pass by measuring nothing: a slot the colour of the card (its markers and patterns don't make it visible), a chip whose text is the colour of its fill, a row wash as dark as Vuetify's own dark-theme hover, a compared row whose hover the stylesheet leaves unsettled (so the two washes layer), a pressed-button wash that takes the bar under 3:1, a selection colour that is a warning's, an orbit line the colour of the sky, surfaces that take Vuetify's disabled text under its floor and, on the stylesheet, a fill rule or a text rule that keeps its selector and draws another colour, one that loses its selector or its disabled exclusion, and baselines whose text inks differ from Vuetify's. The fifth item, when there is one, mutates the source of appearance.scss (it is compiled afterwards; a pattern that does not apply is an error).
+// Mutations the gate must catch, so that it can't pass by measuring nothing: a slot the colour of the card (its markers and patterns don't make it visible), a chip whose text is the colour of its fill, a row wash as dark as Vuetify's own dark-theme hover, a compared row whose hover the stylesheet leaves unsettled (so the two washes layer), a pressed-button wash that takes the bar under 3:1, a selection colour that is a warning's, an orbit line the colour of the sky, surfaces that take Vuetify's disabled text under its floor, an edgeless card with a faint outline, two slots of one colour, a pastel too dark for black text, a link that is the colour of its text with no underline and, on the stylesheet, a fill rule or a text rule that keeps its selector and draws another colour, one that loses its selector or its disabled exclusion, a link rule that loses its selector or draws no line, and baselines whose text inks differ from Vuetify's. The fifth item, when there is one, mutates the source of appearance.scss (it is compiled afterwards; a pattern that does not apply is an error).
 const MUTATIONS = [
   ['a categorical slot the colour of the card', 'light', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 5 ? appearance.surfaces.card : color)) } }), /slot 5 .* under 3:1/],
   ['a chip whose text is its fill', 'dark', (appearance) => ({ ...appearance, plan: { ...appearance.plan, rich: appearance.inks.onFill } }), /plan\.rich fill .* under 4\.5:1/],
@@ -622,12 +720,27 @@ const MUTATIONS = [
   ['an on-colour ink that is white on a dark preset', 'solaris', (appearance) => ({ ...appearance, inks: { ...appearance.inks, onColor: '#ffffff' } }), /toolbar title on the primary fill #ffffff .* under 4\.5:1/],
   ['a dark baseline whose snackbar message is not Vuetify\'s', 'dark', (appearance) => ({ ...appearance, inks: { ...appearance.inks, onSnackbar: '#ffffff' } }), /inks\.onSnackbar #ffffff is not Vuetify's rgba\(255, 255, 255, 0\.87\)/],
   ['a text ink the colour of the card', 'classic', (appearance) => ({ ...appearance, inks: { ...appearance.inks, text: appearance.surfaces.card } }), /Vuetify text \(.*\) .* under 4\.5:1/],
+  ['a card with the page\'s colour and a faint outline', 't2d', (appearance) => ({ ...appearance, surfaces: { ...appearance.surfaces, border: '#1a1a1a' } }), /Outline of a card or rail with the page's colour, .* under 3:1/],
+  ['two categorical slots of one grey', 't2d', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 3 ? appearance.charts.categorical[1] : color)) } }), /two categorical slots are the same colour/],
+  ['a severity pastel too dark for black text', 't2d', (appearance) => ({ ...appearance, severity: { ...appearance.severity, action: '#c62828' } }), /severity\.action fill .* under 4\.5:1/],
+  ['a white focus colour with no link underline', 't2d', (appearance) => ({ ...appearance, focus: { ...appearance.focus, linkLine: undefined } }), /links are .* CIEDE2000 from the text ink, under 20, and have no other cue: --ae-link-line is not set/],
+  ['a link colour that is the text ink with no underline', 'solaris', (appearance) => ({ ...appearance, focus: { ...appearance.focus, primary: appearance.inks.body } }), /links are 0\.0 CIEDE2000 from the text ink/],
+  ['a link rule that loses its selector', 't2d', (appearance) => appearance, /the stylesheet's link rule draws nothing/, (source) => replaceOnce(source, /\.v-application\[style\*='--ae-link-line'\] a:not/, ".v-application[style*='--ae-link-line-off'] a:not")],
+  ['a link rule that draws no line', 't2d', (appearance) => appearance, /the stylesheet's link rule draws none/, (source) => replaceOnce(source, /text-decoration-line: var\(--ae-link-line\)/, 'text-decoration-line: none')],
+  ['a menu icon ink that is white on a light primary', 'solaris', (appearance) => ({ ...appearance, inks: { ...appearance.inks, onColor: '#ffffff' } }), /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/],
+  ['a menu whose icons keep the library\'s white', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /\s*itemColor: this\.appearance\.inks\.onColor,/, '')],
+  ['a menu whose pointer wedge is the icon colour', 't2d', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 2 ? appearance.inks.onColor : color)) } }), /Map right-click menu icon on the wedge under the pointer .* under 3:1/],
+  ['a menu icon ink that is only a line comment', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /^( +)(itemColor: this\.appearance\.inks\.onColor,)$/m, '$1// $2')],
+  ['a menu icon ink that is only a block comment', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /^( +)(itemColor: this\.appearance\.inks\.onColor,)$/m, '$1/* $2 */')],
+  ['a menu icon ink that is an explicit white beside a stale comment', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /^( +)(itemColor: this\.appearance\.inks\.onColor,)$/m, "$1itemColor: '#ffffff', // $2")],
+  ['a map page that stops importing the menu constants', 't2d', (appearance) => appearance, /pages\/map\.vue does not import MAP_MENU/, null, (source) => replaceOnce(source, /import \{ activeAppearance, MAP_MENU \} from/, 'import { activeAppearance } from')],
 ]
 
-const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected, mutateSource]) => {
+const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected, mutateSource, mutateMap]) => {
   const mutated = mutate(utilities.resolveAppearance(id))
   const stylesheet = compileStylesheet(mutateSource ? mutateSource(readSource()) : readSource())
-  const found = failures(analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }, { stylesheet }))
+  const mapSource = mutateMap ? mutateMap(readMapSource()) : readMapSource()
+  const found = failures(analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }, { stylesheet, mapSource }))
 
   return { label, caught: found.some((problem) => expected.test(problem)) }
 })

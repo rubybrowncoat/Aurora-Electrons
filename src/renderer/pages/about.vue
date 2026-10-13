@@ -104,7 +104,7 @@
         </v-col>
 
         <v-col cols="12" class="py-0">
-          <v-card class="panel" data-summary="The fonts and icons the app ships and the community theme two colour presets are adapted from, who made them and the terms they come under. Open a notice to read the license text bundled with the app." elevation="1" data-credits>
+          <v-card class="panel" data-summary="The fonts and icons the app ships and the community themes the colour presets are adapted from, who made them and the terms they come under. Open a notice to read the license text bundled with the app." elevation="1" data-credits>
             <div class="panel-head"><span>Credits</span></div>
             <v-simple-table class="credits-table">
               <thead>
@@ -134,7 +134,7 @@
                 </tr>
               </tbody>
             </v-simple-table>
-            <div class="panel-foot caption text--secondary">Each notice is the license text as it comes with the asset's package, or with the community theme the presets are adapted from, bundled into the app. Bundled files ship in the app; visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages; they are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
+            <div class="panel-foot caption text--secondary">Each notice is the license text as it comes with the asset's package, or with the community themes the presets are adapted from, bundled into the app. Bundled files ship in the app; visual inspiration copies no code, image or font, and its notice is shown for provenance. Code libraries carry their licenses in their own packages; they are listed under Built with. Material not listed here, such as the game's flags and portraits, is read from the Aurora install and not shipped.</div>
           </v-card>
         </v-col>
 
@@ -340,6 +340,7 @@ export default {
   border: 0;
   background: none;
   color: var(--ae-primary);
+  text-decoration-line: var(--ae-link-line, none);
   font: inherit;
   text-align: left;
   cursor: pointer;
