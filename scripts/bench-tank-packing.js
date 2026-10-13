@@ -11,7 +11,7 @@
 
   Statuses every algorithm returns: `optimal` (proved best under its objective over the whole domain), `heuristic` (a feasible package with no proof), `bound-exhausted` (a bound ran out first: the incumbent, if any, is feasible and unproven, and no package found is not infeasible), `infeasible` (the whole domain was searched or the catalogue is empty: no package exists), `inapplicable` (a fast path whose proof conditions the catalogue does not meet; it never returns a package).
 
-  The search part drives the real `searchPropulsion` source with one change: its `packTanks` import is replaced by the packer under test (the harness refuses to run if that import line is not found), and a run with the real `packTanks` must reproduce the unmodified search exactly.
+  The search part drives the real `searchPropulsion` source with two changes: its design-rules and tank-packing imports are replaced (the harness refuses to run if the tank-packing import is not found), the packer being the one under test; a run with the production packer must reproduce the unmodified search exactly. The removed greedy `packTanks` (embedded as `legacyPackTanks`) is the baseline named `current`; the production solver (tank-packing.js) is `production`. After it, `runSparseResponsiveness` times the unmodified `searchPropulsion` and the production warm generator over a sparse catalogue, a fixed number of cold runs reporting every maximum and the percentiles. No wall-clock time is asserted anywhere in this file (scripts/check-tank-packing.js asserts the bounded work per step instead).
 */
 const fs = require('fs')
 const path = require('path')
@@ -33,6 +33,43 @@ const INAPPLICABLE = 'inapplicable'
 
 const LIGHTEST = ['hs', 'cost', 'count']
 const CHEAPEST = ['cost', 'hs', 'count']
+
+// The packTanks the planner had before AE-130-01, kept only as the baseline the research compares against: from the largest tank down, each size takes as many as fit and hands the rest to the smaller sizes, or takes one more and holds the lot; the lighter of the two wins. It is wrong when a smaller tank is denser in a way the sizes in between hide (two 6 L/3 HS tanks beat one 10 L/10 HS tank for 10 L).
+const legacyPackTanks = ({ litres, tanks }) => {
+  const totals = (picks) => ({ picks, sizeHS: picks.reduce((sum, pick) => sum + pick.sizeHS * pick.count, 0), litres: picks.reduce((sum, pick) => sum + pick.litres * pick.count, 0), cost: picks.reduce((sum, pick) => sum + pick.cost * pick.count, 0) })
+  const largestFirst = tanks.filter((tank) => tank.litres > 0 && tank.sizeHS > 0).sort((a, b) => b.litres - a.litres)
+
+  const pack = (index, remaining) => {
+    if (remaining <= 1e-9 || index >= largestFirst.length) {
+      return totals([])
+    }
+
+    const tank = largestFirst[index]
+    const whole = Math.floor(remaining / tank.litres + 1e-9)
+    const left = remaining - whole * tank.litres
+
+    if (left <= 1e-9) {
+      return totals([{ ...tank, count: whole }])
+    }
+
+    const covered = totals([{ ...tank, count: whole + 1 }])
+
+    if (index === largestFirst.length - 1) {
+      return covered
+    }
+
+    const rest = pack(index + 1, left)
+    const split = totals(whole > 0 ? [{ ...tank, count: whole }, ...rest.picks] : rest.picks)
+    const lighter = split.sizeHS < covered.sizeHS - 1e-9 || (Math.abs(split.sizeHS - covered.sizeHS) <= 1e-9 && split.cost <= covered.cost)
+
+    return lighter ? split : covered
+  }
+
+  return pack(0, litres)
+}
+
+// The solver under test: the utilities of tank-packing.js with design-rules.js's packTanks, loaded by `main`.
+let production = null
 
 let failures = 0
 let checks = 0
@@ -307,7 +344,7 @@ const greedy = (rows, request, order, objective = LIGHTEST) => {
 const greedyLargest = (rows, request, objective) => greedy(rows, request, byLitres, objective)
 const greedyDensity = (rows, request, objective) => greedy(rows, request, byDensity, objective)
 
-// The packTanks the planner has now, called on float tanks; `tanks` are the quantized catalogue's usable tanks, in the order of its rows.
+// A packTanks called on float tanks; `tanks` are the quantized catalogue's usable tanks, in the order of its rows. The removed greedy has no status and counts as heuristic; the production packer's own status is kept.
 const currentSolver = (packTanks, quantized) => (request) => {
   const { rows, tanks } = quantized
   const early = degenerate(rows, request)
@@ -323,7 +360,7 @@ const currentSolver = (packTanks, quantized) => (request) => {
     counts[tanks.findIndex((tank) => tank.id === pick.id)] += pick.count
   }
 
-  return { status: HEURISTIC, counts, nodes: 0 }
+  return { status: packed.status === 'optimal' ? OPTIMAL : packed.status ? EXHAUSTED : HEURISTIC, counts, nodes: 0 }
 }
 
 // Dynamic programming over capacity in units of `quantum` litres. State: f[c] = the best package (objective vector, additive) whose litres reach c units, for c = 0..need; f[c] = best over rows of f[max(0, c - units(row))] + row. The objective keys are additive and compared lexicographically, so the recursion is exact (the optimal package minus one tank is optimal for what remains). `quantum` defaults to the gcd of the litres, where every row is a whole number of units and the table is exact. A coarser quantum floors each row's units (and rounds the request up) so a package still reaches the request, but optimality is lost: heuristic. The table is one per catalogue and objective and grows as requests need it, so a search shares it across candidates.
@@ -847,6 +884,7 @@ const solversFor = (quantized, objective, packTanks, { nodeBound = 5e6 } = {}) =
 
   if (objective === LIGHTEST) {
     solvers.current = currentSolver(packTanks, quantized)
+    solvers.production = currentSolver(production.packTanks, quantized)
     solvers.shortcut = stockShortcut(rows)
   }
 
@@ -997,7 +1035,7 @@ const runOracleChecks = (packTanks) => {
 
   const losing = outcomes.filter((o) => o.current.hs === 10).length
 
-  check('the current packTanks returns 10 HS for that request in every BP combination (the recorded counterexample)', losing === outcomes.length, `${losing}/${outcomes.length} return 10 HS`)
+  check('the removed greedy packTanks returns 10 HS for that request in every BP combination (the recorded counterexample)', losing === outcomes.length, `${losing}/${outcomes.length} return 10 HS`)
 
   const ties = [
     { name: 'HS tie goes to the lower BP', triples: [[4, 2, 5], [2, 1, 3]], request: 4, objective: LIGHTEST, counts: [1, 0] },
@@ -1167,6 +1205,7 @@ const runLargeRequests = (catalogues, packTanks) => {
 
       if (objective === LIGHTEST) {
         solvers.current = currentSolver(packTanks, catalogue.quantized)
+        solvers.production = currentSolver(production.packTanks, catalogue.quantized)
         solvers.shortcut = stockShortcut(rows)
       }
 
@@ -1221,7 +1260,7 @@ const runStatusDemos = (packTanks, catalogues) => {
   const demos = [
     ['empty catalogue, 10 L', () => solveBnb(empty, 10), INFEASIBLE, true],
     ['empty catalogue, 10 L (table)', () => createDp(empty).solve(10), INFEASIBLE, true],
-    ['empty catalogue, 10 L (current packTanks)', () => (packTanks({ litres: 10, tanks: [] }).picks.length === 0 ? { status: INFEASIBLE, counts: null } : { status: HEURISTIC, counts: [] }), INFEASIBLE, true],
+    ['empty catalogue, 10 L (removed greedy packTanks)', () => (packTanks({ litres: 10, tanks: [] }).picks.length === 0 ? { status: INFEASIBLE, counts: null } : { status: HEURISTIC, counts: [] }), INFEASIBLE, true],
     ['zero request, any catalogue', () => solveBnb(rows, 0), OPTIMAL, false],
     ['one 10 L tank, 100 L, at most 5 tanks, search finished', () => solveBnb(rows, 100, { maxTanks: 5, nodeBound: 1e6 }), INFEASIBLE, true],
     ['one 10 L tank, 100 L, at most 5 tanks, 2 nodes allowed (the count bound proves it at the root)', () => solveBnb(rows, 100, { maxTanks: 5, nodeBound: 2 }), INFEASIBLE, true],
@@ -1300,8 +1339,8 @@ const runFailureAnatomy = (catalogues, packTanks) => {
       }
     }
 
-    heading(`${catalogue.name}: every whole request 1..${top} L, packTanks against the exact table (lightest)`)
-    console.log(`  packTanks differs from the optimum on ${worse} requests (${hsWorse} of them on HS, the rest on BP or count); by decade of request: ${Object.entries(decades).map(([decade, bucket]) => `10^${decade}: ${bucket.worse}/${bucket.n}`).join(', ')}`)
+    heading(`${catalogue.name}: every whole request 1..${top} L, the removed greedy packTanks against the exact table (lightest)`)
+    console.log(`  the removed greedy packTanks differs from the optimum on ${worse} requests (${hsWorse} of them on HS, the rest on BP or count); by decade of request: ${Object.entries(decades).map(([decade, bucket]) => `10^${decade}: ${bucket.worse}/${bucket.n}`).join(', ')}`)
 
     for (const item of first) {
       console.log(`  R = ${item.request} L: packTanks ${item.got.hs / hsScale} HS ${item.got.cost} cost units (${describePackage(rows, item.gotCounts, catalogue.quantized)}) against optimum ${item.best.hs / hsScale} HS ${item.best.cost} cost units (${describePackage(rows, item.bestCounts, catalogue.quantized)})`)
@@ -1309,7 +1348,7 @@ const runFailureAnatomy = (catalogues, packTanks) => {
 
     if (applicable) {
       check(`${catalogue.name}: the shortcut equals the exact table on every whole request 1..${top} L`, shortcutDiffers === 0, `${shortcutDiffers} differences`)
-      check(`${catalogue.name}: packTanks equals the optimum on every whole request 1..${top} L (its behaviour on a canonical catalogue)`, worse === 0, `${worse} differences`)
+      check(`${catalogue.name}: the removed greedy packTanks equals the optimum on every whole request 1..${top} L (its behaviour on a canonical catalogue)`, worse === 0, `${worse} differences`)
     }
   }
 }
@@ -1527,26 +1566,40 @@ const nextTask = () => new Promise((resolve) => {
   channel.port2.postMessage(null)
 })
 
-// searchPropulsion's own source with its packTanks import replaced by `globalThis.__benchPacker`. Nothing else changes.
+// searchPropulsion's own source with its design-rules import taken from `globalThis.__benchRules`, its tank-packing import replaced by `globalThis.__benchTankPacking` (meetsRequest, PACKAGE_STATUS) and a `packerFor` whose packer is `globalThis.__benchPacker`, which warms nothing. Nothing else changes.
 const loadPatchedSearch = async (rules) => {
   const source = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', 'design-search.js'), 'utf8')
-  const pattern = /import \{([^}]*)\} from '\.\/design-rules'/
-  const match = pattern.exec(source)
+  const rulesPattern = /import \{([^}]*)\} from '\.\/design-rules'/
+  const packingPattern = /import \{([^}]*)\} from '\.\/tank-packing'/
+  const rulesMatch = rulesPattern.exec(source)
+  const packingMatch = packingPattern.exec(source)
 
-  if (!match || !/\bpackTanks\b/.test(match[1])) {
-    throw new Error('design-search.js no longer imports packTanks from ./design-rules in the shape the harness replaces')
+  if (!rulesMatch || !packingMatch || !/\bpackerFor\b/.test(packingMatch[1])) {
+    throw new Error('design-search.js no longer imports packerFor from ./tank-packing in the shape the harness replaces')
   }
 
-  const names = match[1].split(',').map((name) => name.trim()).filter((name) => name && name !== 'packTanks')
-  const patched = source.replace(pattern, `const { ${names.join(', ')} } = globalThis.__benchRules\nconst packTanks = (request) => globalThis.__benchPacker(request)`)
+  const patched = source.replace(rulesPattern, `const { ${rulesMatch[1].trim()} } = globalThis.__benchRules`).replace(packingPattern, 'const { meetsRequest, PACKAGE_STATUS } = globalThis.__benchTankPacking\nconst packerFor = (tanks) => ({ pack: (litres) => globalThis.__benchPacker({ litres, tanks }), warm: function* () {} })')
 
   if (/from '\.\//.test(patched)) {
     throw new Error('design-search.js imports another utility the harness does not load')
   }
 
   globalThis.__benchRules = rules
+  globalThis.__benchTankPacking = production
 
   return import(`data:text/javascript;base64,${Buffer.from(patched).toString('base64')}`)
+}
+
+// A package in the shape the search reads (status, feasibility, excess, count, crew) from a packer that only returns picks, sizeHS, litres and cost: the removed greedy and the research packers. Such a package holds the litres or is nothing, and is never proved.
+const adaptPack = (pack, request) => {
+  if (pack.feasible !== undefined) {
+    return pack
+  }
+
+  const feasible = pack.picks.length > 0 || !(request.litres > 0)
+  const crew = pack.picks.every((pick) => Number.isFinite(pick.crew)) ? pack.picks.reduce((sum, pick) => sum + pick.crew * pick.count, 0) : null
+
+  return { ...pack, feasible, status: feasible ? EXHAUSTED : INFEASIBLE, reason: null, objective: 'lightest', complete: false, requestedLitres: request.litres, excessLitres: Math.max(0, pack.litres - request.litres), count: pack.picks.reduce((sum, pick) => sum + pick.count, 0), crew }
 }
 
 const SEARCH_EPSILON = 1e-9
@@ -1647,7 +1700,7 @@ const setKey = (set) => `${set.engine.sizeHS}/${set.engine.thrust}/${set.count}`
 
 // One search run the way the page runs it: slices of SLICE_MS between event-loop turns, memory sampled each slice, a 1 ms timer probing how long the loop was blocked, and optionally a cancel request due `cancelAtMs` after the start, honoured as the page honours it (checked after the turn that follows a slice).
 const runPaged = async ({ search, input, packer, budgetMs, cancelAtMs = null }) => {
-  globalThis.__benchPacker = packer
+  globalThis.__benchPacker = (request) => adaptPack(packer(request), request)
 
   gc()
 
@@ -1812,13 +1865,13 @@ const MIB = 1048576
 
 const runSearchBench = async (utilities, catalogues) => {
   const rules = utilities['design-rules']
-  const { packTanks } = rules
+  const packTanks = legacyPackTanks
   const search = await loadPatchedSearch(rules)
   const real = utilities['design-search']
 
   heading('Search harness')
 
-  // The patched search with the real packTanks reproduces the unmodified search on a reduced grid.
+  // The patched search with the production packer reproduces the unmodified search on a reduced grid.
   const first = catalogues.find((catalogue) => catalogue.quantized.rows)
 
   if (first) {
@@ -1834,12 +1887,12 @@ const runSearchBench = async (utilities, catalogues) => {
     }
     const summary = (result) => JSON.stringify({ evaluated: result.evaluated, matched: result.matched, sets: result.sets.map((set) => [setKey(set), set.propulsionHS, set.cost, set.litres, set.tanks.map((pick) => `${pick.id}x${pick.count}`)]), lightest: result.lightest && setKey(result.lightest), fastest: result.fastest && setKey(result.fastest), cheapest: result.cheapest && setKey(result.cheapest) })
 
-    globalThis.__benchPacker = (request) => packTanks(request)
+    globalThis.__benchPacker = (request) => production.packerFor(request.tanks).pack(request.litres)
 
     const unmodified = drain(real.searchPropulsion(input))
     const patched = drain(search.searchPropulsion(input))
 
-    check('the patched search with the real packTanks gives the unmodified search\'s result (reduced grid)', summary(unmodified) === summary(patched), `${unmodified.evaluated} evaluated, ${unmodified.matched} matched, ${unmodified.sets.length} sets kept`)
+    check('the patched search with the production packer gives the unmodified search\'s result (reduced grid)', summary(unmodified) === summary(patched), `${unmodified.evaluated} evaluated, ${unmodified.matched} matched, ${unmodified.sets.length} sets kept`)
   }
 
   for (const catalogue of catalogues) {
@@ -1930,9 +1983,73 @@ const runSearchBench = async (utilities, catalogues) => {
   }
 }
 
+// The step times of the production packer's warm generator and of the real searchPropulsion over a sparse catalogue (one 1 L tank and fifteen of about 600,000 L, so no repeating pattern is proved below the table cap and the table is built whole). A fixed number of cold runs, each on a new tanks array so no packer is shared; every step of every run is kept, nothing is retried and nothing is asserted: the figures are a diagnostic of this machine at this moment. The deterministic properties (a bounded number of cells and of candidates per step) are asserted by scripts/check-tank-packing.js.
+const SPARSE_RUNS = 5
+
+const sparseTanks = () => [[1, 1, 1], ...Array.from({ length: 15 }, (_unused, index) => [600001 + 2 * index, 500000 + index, 500000 + index])].map(([litres, hs, cost], index) => ({ id: index + 1, name: `${litres} L`, sizeHS: hs / 1000, litres, cost: cost / 100, crew: 1 }))
+
+const stepTimes = (generator) => {
+  const times = []
+  let done = false
+  let last = null
+
+  while (!done) {
+    const start = performance.now()
+    const step = generator.next()
+
+    times.push(performance.now() - start)
+    done = step.done
+    last = step.value
+  }
+
+  return { times, last }
+}
+
+const spread = (times) => {
+  const sorted = [...times].sort((a, b) => a - b)
+
+  return { n: sorted.length, p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), p99: percentile(sorted, 0.99), max: sorted[sorted.length - 1] }
+}
+
+const printSpread = (label, runs) => {
+  const line = (stats) => `${stats.n} steps, p50 ${fmt(stats.p50, 2)} p95 ${fmt(stats.p95, 2)} p99 ${fmt(stats.p99, 2)} max ${fmt(stats.max, 2)} ms`
+
+  console.log(`  ${label}`)
+  runs.forEach((times, index) => console.log(`    run ${index + 1}: ${line(spread(times))}`))
+  console.log(`    all ${runs.length} runs: ${line(spread(runs.flat()))}; maxima per run ${runs.map((times) => fmt(Math.max(...times), 1)).join(' / ')} ms`)
+}
+
+const runSparseResponsiveness = (utilities) => {
+  heading(`Sparse catalogue: step times over ${SPARSE_RUNS} cold runs (diagnostic, nothing asserted; the machine's other work shows in the maxima)`)
+
+  const { packerFor } = utilities['tank-packing']
+  const { searchPropulsion } = utilities['design-search']
+  const tech = { engineTech: 10, fuelTech: 0.7, thermalTech: 1, thermalCost: 1, minThrust: 0.5, maxThrust: 1.5, maxSize: 12 }
+  const warmRuns = []
+  const searchRuns = []
+  const sets = []
+
+  for (let run = 0; run < SPARSE_RUNS; run++) {
+    const tanks = sparseTanks()
+    const warm = stepTimes(packerFor(tanks).warm())
+    const searchTanks = sparseTanks()
+    const search = stepTimes(searchPropulsion({ hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks: searchTanks, maxCount: 40, share: 0.6 }))
+
+    warmRuns.push(warm.times)
+    searchRuns.push(search.times)
+    sets.push(search.last.sets.length)
+  }
+
+  printSpread('the warm generator (one packer per run, built before any request)', warmRuns)
+  printSpread('the search steps (a cold packer per run; its first step warms the table)', searchRuns)
+  check('every cold run of the sparse search finds sets, and the same number each time', sets.every((count) => count > 0 && count === sets[0]), `${sets.join(' / ')} sets`)
+}
+
 const main = async () => {
-  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'race-tech'])
-  const { packTanks } = utilities['design-rules']
+  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'race-tech', 'tank-packing'])
+  const packTanks = legacyPackTanks
+
+  production = { ...utilities['tank-packing'], packTanks: utilities['design-rules'].packTanks }
 
   heading('Catalogues (every tank the race has researched, as loadFuelTanks reads it)')
 
@@ -1951,6 +2068,7 @@ const main = async () => {
 
   if (!options.skipSearch) {
     await runSearchBench(utilities, catalogues)
+    runSparseResponsiveness(utilities)
   }
 
   console.log(`\n${checks - failures}/${checks} checks passed`)

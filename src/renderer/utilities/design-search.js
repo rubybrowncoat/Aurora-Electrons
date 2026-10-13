@@ -2,7 +2,8 @@
 //
 // `searchPropulsion` is a generator: it yields { progress, evaluated, matched } about every `slice` candidates so the page can run it in slices between frames, and returns the result.
 
-import { classSpeed, engineDesign, fullPowerRangeKm, MAX_SPEED, packTanks, thermalSignature, TONS_PER_HS } from './design-rules'
+import { classSpeed, engineDesign, fullPowerRangeKm, MAX_SPEED, thermalSignature, TONS_PER_HS } from './design-rules'
+import { meetsRequest, PACKAGE_STATUS, packerFor } from './tank-packing'
 
 export const THRUST_STEP = 0.05
 export const MIN_ENGINE_SIZE_HS = 1
@@ -11,10 +12,11 @@ export const SLICE_CANDIDATES = 2000
 
 // The most times a set's tanks are sized again, each time for the speed the ship has with the tanks of the time before. The tanks only grow, so a few passes settle; one that doesn't is dropped.
 const MAX_TANK_PASSES = 24
-// What a candidate that packs tanks counts for against a slice, next to one that doesn't.
+// What a candidate that packs tanks counts for against a slice, next to one that doesn't: a lookup in the packer's table costs a few candidates' work, and walking a package back from the table costs a little for each tank in it, which a catalogue of one small tank and large ones makes long.
 const TANK_WORK = 6
+const TANK_COUNT_WORK = 0.01
 const EPSILON = 1e-9
-const NO_TANKS = Object.freeze({ picks: [], sizeHS: 0, litres: 0, cost: 0 })
+const NO_TANKS = Object.freeze({ status: null, reason: null, complete: true, feasible: true, requestedLitres: 0, litres: 0, excessLitres: 0, count: 0, sizeHS: 0, cost: 0, crew: 0, picks: Object.freeze([]) })
 
 // The engine sizes the search tries, from 1 HS up to the largest the race may design: every 0.1 HS to 10, every 0.25 HS to 20, then every whole HS.
 export const engineSizes = (maxSizeHS) => {
@@ -149,9 +151,9 @@ function* gridDesigns({ sizes, thrusts, tech, kind }) {
 // - `hullHS`: the hull without engines or fuel tanks, `speed` the least speed in km/s, `fraction` the share of the engines' power the ship cruises at.
 // - `goal`: `{ mode: 'range', value }` (km at full power) or `{ mode: 'endurance', value }` (hours at `fraction` of the power), or null for none, which fits no tanks.
 // - `kind`: 'military', 'commercial' or 'either'; `minCount` and `maxCount` the engines a set may have; `share` the most of the finished ship the engines and tanks may take.
-// - `tech`: `{ engineTech, fuelTech, thermalTech, thermalCost, minThrust, maxThrust, maxSize }`, the levels the race designs with; `tanks`: the stock tanks as `packTanks` takes them.
+// - `tech`: `{ engineTech, fuelTech, thermalTech, thermalCost, minThrust, maxThrust, maxSize }`, the levels the race designs with; `tanks`: the stock tanks as `packTanks` takes them (`packerFor(tanks)` keeps the tables built for them, so a later search of the same list starts with them).
 // - `engine`: one of the race's own engines (as design-data.js `loadRaceEngines` has them) to search only its count, or null to design engines.
-// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `crew`, `commercial` and `thermal`. Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), evaluated, matched }.
+// A set has `engine`, `count`, `power`, `engineHS`, `tankHS`, `propulsionHS`, `tons`, `totalHS`, `share`, `speed`, `litres`, `tanks`, `tankPackage` (`{ status, reason, requestedLitres, excessLitres }` of its fuel tanks: 'optimal' when they are proved the lightest package that holds the fuel, 'bound-exhausted' with the reason when a bound ran out and they only hold it, null for a set with no fuel), `burnFull`, `burnCruise`, `rangeKm`, `enduranceHours`, `cost`, `crew`, `commercial` and `thermal`. Returns { sets (the best `keep`, ranked), lightest, fastest, cheapest, pareto: { speed, range } (the sets that no other beats on share of the ship and on speed, or on range), packages: { optimal, boundExhausted, infeasible } (the fuel packages of the candidates that met the speed: proved lightest, not proved, and none that holds the fuel, which drops the candidate), evaluated, matched }.
 export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, kind = 'either', minCount = 1, maxCount = 100, share = 1, tech, tanks = [], engine = null, keep = KEPT_SETS, slice = SLICE_CANDIDATES }) {
   const sets = []
   const frontiers = { speed: [], rangeKm: [] }
@@ -167,10 +169,23 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
   let work = 0
   let done = 0
 
-  const finish = () => ({ sets, lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed, range: frontiers.rangeKm }, evaluated, matched })
+  const packages = { optimal: 0, boundExhausted: 0, infeasible: 0 }
+
+  const finish = () => ({ sets, lightest: sets[0] || null, fastest: best.fastest, cheapest: best.cheapest, pareto: { speed: frontiers.speed, range: frontiers.rangeKm }, packages, evaluated, matched })
 
   if (floorKm > MAX_SPEED || !(hullHS >= 0) || maxCount < Math.max(1, minCount)) {
     return finish()
+  }
+
+  const packer = packerFor(tanks)
+
+  // The tables a package needs are built before the search starts, a chunk at a time, so no step of it waits for a whole table.
+  if (goal && goal.value > 0) {
+    const warming = packer.warm()
+
+    while (!warming.next().done) {
+      yield { progress: 0, evaluated, matched }
+    }
   }
 
   for (const design of designs) {
@@ -193,6 +208,12 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
       }
 
       for (let count = first; count <= last; count++) {
+        if (work >= slice) {
+          work = 0
+
+          yield { progress: done / total, evaluated, matched }
+        }
+
         work++
         evaluated++
 
@@ -217,10 +238,18 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
         if (goal && goal.value > 0 && goal.mode === 'endurance') {
           work += TANK_WORK
-          pack = packTanks({ litres: goal.value * burnCruise, tanks })
+          pack = packer.pack(goal.value * burnCruise)
+          work += pack.count * TANK_COUNT_WORK
+
+          if (!pack.feasible) {
+            packages.infeasible++
+
+            continue
+          }
+
           finalSpeed = classSpeed({ enginePower: power, sizeHS: bareHS + pack.sizeHS })
 
-          if (finalSpeed < floorKm || pack.litres < goal.value * burnCruise * (1 - EPSILON)) {
+          if (finalSpeed < floorKm || !meetsRequest(pack.litres, goal.value * burnCruise)) {
             continue
           }
         } else if (goal && goal.value > 0 && goal.mode === 'range') {
@@ -228,8 +257,22 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
           let settled = false
 
           for (let pass = 0; pass < MAX_TANK_PASSES && Number.isFinite(litres); pass++) {
+            if (work >= slice) {
+              work = 0
+
+              yield { progress: done / total, evaluated, matched }
+            }
+
             work += TANK_WORK
-            pack = packTanks({ litres, tanks })
+            pack = packer.pack(litres)
+            work += pack.count * TANK_COUNT_WORK
+
+            if (!pack.feasible) {
+              packages.infeasible++
+
+              break
+            }
+
             finalSpeed = classSpeed({ enginePower: power, sizeHS: bareHS + pack.sizeHS })
 
             if (!(finalSpeed >= floorKm && finalSpeed > 0)) {
@@ -238,7 +281,7 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
 
             const needed = goal.value * burnFull / (finalSpeed * 3600)
 
-            if (pack.litres >= needed * (1 - EPSILON)) {
+            if (meetsRequest(pack.litres, needed)) {
               settled = true
               break
             }
@@ -260,6 +303,12 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
         }
 
         matched++
+
+        if (pack.status === PACKAGE_STATUS.OPTIMAL) {
+          packages.optimal++
+        } else if (pack.status === PACKAGE_STATUS.BOUND_EXHAUSTED) {
+          packages.boundExhausted++
+        }
 
         const cost = count * design.cost + pack.cost
         const rangeKm = burnFull > 0 ? fullPowerRangeKm({ fuel: pack.litres, enginePower: power, fuelPerEph: design.fuelPerEph, speed: finalSpeed }) : 0
@@ -284,12 +333,13 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
             speed: finalSpeed,
             litres: pack.litres,
             tanks: pack.picks,
+            tankPackage: pack.status ? { status: pack.status, reason: pack.reason, requestedLitres: pack.requestedLitres, excessLitres: pack.excessLitres } : null,
             burnFull,
             burnCruise,
             rangeKm,
             enduranceHours: burnCruise > 0 ? pack.litres / burnCruise : 0,
             cost,
-            crew: count * design.crew + pack.picks.reduce((crew, pick) => crew + (pick.crew || 0) * pick.count, 0),
+            crew: pack.crew === null ? null : count * design.crew + pack.crew,
             commercial: design.commercial,
             thermal: thermalSignature({ enginePower: power, stealthRating: design.thermalRating, fraction, sizeHS: totalHS }),
           }
@@ -313,12 +363,6 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
           if (wantsRangeFrontier) {
             frontierAdd(frontiers.rangeKm, 'rangeKm', set)
           }
-        }
-
-        if (work >= slice) {
-          work = 0
-
-          yield { progress: done / total, evaluated, matched }
         }
       }
     }

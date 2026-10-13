@@ -1,6 +1,9 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
-import { combine, ofRule, registerRule, unavailable } from './provenance'
+import { combine, envelope, ofRule, registerRule, STATUS, unavailable } from './provenance'
+import { PACKAGE_STATUS, REQUEST_TOLERANCE, packerFor } from './tank-packing'
+
+export { PACKAGE_STATUS, REQUEST_TOLERANCE, createTankPacker, meetsRequest, packerFor } from './tank-packing'
 
 export const TONS_PER_HS = 50
 export const THRUST_EXPONENT = 2.5
@@ -84,44 +87,34 @@ export const thermalSignature = ({ enginePower, stealthRating, fraction = 1, siz
   return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)
 }
 
-const tankTotals = (picks) => ({
-  picks,
-  sizeHS: picks.reduce((sum, pick) => sum + pick.sizeHS * pick.count, 0),
-  litres: picks.reduce((sum, pick) => sum + pick.litres * pick.count, 0),
-  cost: picks.reduce((sum, pick) => sum + pick.cost * pick.count, 0),
-})
+// The package of fuel tanks that holds `litres` from `tanks` ({ id, name, sizeHS, litres, cost, crew }) in the fewest HS, then the fewest BP, then the fewest tanks (`objective: 'lightest'`, the default), or in the fewest BP first (`'cheapest'`). The game has no packing rule; the objective is the planner's own, and the package is its exact optimum, worked out by the table solver of tank-packing.js, which also names the request tolerance. Returns { status ('optimal', 'bound-exhausted' or 'infeasible'), reason, complete (the answer is proved), feasible (the picks hold the litres), objective, requestedLitres, litres (delivered), excessLitres, count, sizeHS, cost, crew (null when a tank's crew is unknown), picks: [{ ...tank, count }] }, largest tank first. A caller that packs many requests from one list gets the packer once with `packerFor(tanks)`, which keeps its tables.
+export const packTanks = ({ litres, tanks, objective = 'lightest' }) => packerFor(tanks).pack(litres, objective)
 
-// The fuel tanks that hold `litres` in the fewest HS, then the fewest BP, from `tanks` ({ id, name, sizeHS, litres, cost }). Going from the largest tank down, each size either takes as many as fit and hands the rest to the smaller sizes, or takes one more and holds the lot; the lighter of the two wins. The game has no packing rule; this is the planner's own, as A4xCalc's was. Returns { picks: [{ ...tank, count }], sizeHS, litres, cost }, largest tank first.
-export const packTanks = ({ litres, tanks }) => {
-  const largestFirst = tanks.filter((tank) => tank.litres > 0 && tank.sizeHS > 0).sort((a, b) => b.litres - a.litres)
+const PACKAGE_REASONS = {
+  'table-cap': 'the request is larger than the largest table the planner builds and no repeating pattern was proved',
+  'catalogue-not-whole': 'the tank figures cannot be made whole numbers',
+  'request-too-large': 'the request is too large to size exactly',
+}
 
-  const pack = (index, remaining) => {
-    if (remaining <= 1e-9 || index >= largestFirst.length) {
-      return tankTotals([])
-    }
+const PACKAGE_MISSING = {
+  'no-usable-tank': 'a fuel tank with known litres, size and cost',
+  'invalid-request': 'a valid litres request',
+  'request-not-finite': 'a finite litres request',
+}
 
-    const tank = largestFirst[index]
-    const whole = floorExact(remaining / tank.litres)
-    const left = remaining - whole * tank.litres
-
-    if (left <= 1e-9) {
-      return tankTotals([{ ...tank, count: whole }])
-    }
-
-    const covered = tankTotals([{ ...tank, count: whole + 1 }])
-
-    if (index === largestFirst.length - 1) {
-      return covered
-    }
-
-    const rest = pack(index + 1, left)
-    const split = tankTotals(whole > 0 ? [{ ...tank, count: whole }, ...rest.picks] : rest.picks)
-    const lighter = split.sizeHS < covered.sizeHS - 1e-9 || (Math.abs(split.sizeHS - covered.sizeHS) <= 1e-9 && split.cost <= covered.cost)
-
-    return lighter ? split : covered
+// A package's HS as a result of design.packTanks: the planner's own policy ('assumed') when the package is proved the best, 'estimated' when a bound ran out and it is only a package that holds the litres, unavailable when no package is known.
+export const tankPackageResult = (pack) => {
+  if (!pack.feasible) {
+    return unavailable({ rule: 'design.packTanks', units: 'HS', missing: [PACKAGE_MISSING[pack.reason] || `a package: ${PACKAGE_REASONS[pack.reason] || 'none was found'}`] })
   }
 
-  return pack(0, litres)
+  const inputs = { present: ['tank sizes', 'tank litres', 'tank costs'] }
+
+  if (pack.status === PACKAGE_STATUS.OPTIMAL) {
+    return ofRule({ rule: 'design.packTanks', value: pack.sizeHS, units: 'HS', inputs })
+  }
+
+  return envelope({ value: pack.sizeHS, status: STATUS.ESTIMATED, rule: 'design.packTanks', units: 'HS', inputs, assumptions: [`The package holds the litres but is not proved the ${pack.objective}: ${PACKAGE_REASONS[pack.reason] || pack.reason}`] })
 }
 
 // A jump drive as the game designs it for ships up to `shipSizeHS`, from the jump drive efficiency tech (`efficiency`) and the cost multipliers of the squadron size and radius techs. A commercial drive is five times the size and moves five times the ships. Returns { sizeHS, capacityHS, cost, crew, htk, commercial, modifiedEfficiency }.
@@ -468,8 +461,8 @@ registerRule({
   units: 'HS, L, BP',
   verification: 'assumed',
   structure: ['FCT_ShipDesignComponents.Size, ComponentValue, Cost of the race\'s stock fuel tanks'],
-  note: 'The game has no packing rule: this is the planner\'s own policy (fewest HS, then fewest BP). The litres each tank holds and its cost are stored figures.',
-  assumptions: ['Tanks are chosen by the planner\'s own packing, which the game does not do'],
+  note: 'The game has no packing rule: the objective is the planner\'s own (fewest HS, then fewest BP, then fewest tanks; the cheapest package takes the fewest BP first). Under it the package is exact, not a heuristic: a table over whole-number litres, HS and BP, with a repeating pattern checked on the table for the requests past its size, equal to the exhaustive enumeration of every package on the stock tanks, on the modded save\'s tanks and on synthetic catalogues (scripts/check-tank-packing.js), and every package holds the litres it was asked for, from the catalogue\'s own rows. The litres each tank holds and its cost are stored figures. A result says whether it is proved: a package a bound cut short is estimated, and a request no tank can hold is unavailable.',
+  assumptions: ['The package is chosen by the planner\'s own objective, which the game does not apply', `A request is met when the litres held reach it within ${REQUEST_TOLERANCE} of it`],
 })
 
 registerRule({
@@ -524,8 +517,8 @@ registerRule({
   units: 'BP',
   verification: 'estimated',
   structure: ['FCT_ShipDesignComponents.Cost of the stock tanks', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the engine, fuel and thermal techs'],
-  note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (design.engineDesign), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own packing (design.packTanks) and the figure leaves out the rest of the class.',
-  assumptions: ['Engines are priced by the design rule, not by a stored component', 'Tanks are chosen by the planner\'s own packing', 'Only the engines and fuel tanks are counted, not the rest of the class'],
+  note: 'The engine cost rule reproduces every stored engine\'s cost, bar one modded row (design.engineDesign), but the engines of a set are not yet designed in the game, the tank mix is the planner\'s own lightest package (design.packTanks) and the figure leaves out the rest of the class.',
+  assumptions: ['Engines are priced by the design rule, not by a stored component', 'Tanks are the planner\'s own lightest package, which the game does not apply', 'Only the engines and fuel tanks are counted, not the rest of the class'],
 })
 
 registerRule({

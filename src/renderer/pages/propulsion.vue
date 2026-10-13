@@ -76,7 +76,9 @@
         <v-alert v-else-if="!engineTechMissing && !hullReady" type="info" outlined dense class="mt-3">Enter a hull size, or pick a saved class, to search propulsion sets.</v-alert>
         <v-alert v-else-if="engineTechMissing" type="warning" outlined dense class="mt-3">The race has no engine or fuel consumption tech to design engines with. A saved class and the race's own engines can still be shown.</v-alert>
         <v-alert v-else-if="!speedReady" type="info" outlined dense class="mt-3">Enter a speed between 1 and {{ count(maxSpeed) }} km/s.</v-alert>
+        <v-alert v-else-if="result && !result.sets.length && result.packages && result.packages.infeasible && !searching" type="warning" outlined dense class="mt-3">No tank package can hold the fuel of the targets: the race holds no fuel tank with known litres, size and cost, or a target asks for more fuel than the planner can size. Lower the range or endurance target, or research a fuel tank.</v-alert>
         <v-alert v-else-if="result && !result.sets.length && !searching" type="warning" outlined dense class="mt-3">No engine set reaches {{ count(speed) }} km/s{{ goalText }} within {{ Math.round(engineOptions.share * 100) }}% of the ship. Raise the share or the most engines, lower the targets, allow both kinds of engine, or pick a higher tech level.</v-alert>
+        <v-alert v-else-if="result && result.sets.length && result.packages && result.packages.boundExhausted && !searching" type="info" outlined dense class="mt-3">{{ result.packages.boundExhausted }} of the {{ result.matched }} sets that meet the targets carry fuel tanks that hold the litres but are not proved the lightest. The mark beside the tanks of a set says so.</v-alert>
 
         <stat-tiles :tiles="tiles" class="mt-1" :class="{ 'is-searching': searching }" />
 
@@ -266,7 +268,8 @@
                   </tr>
                 </tbody>
               </v-simple-table>
-              <div class="panel-foot caption text--secondary">Tanks are picked from the stock tanks the race holds: from the largest down, each size takes as many as fit and leaves the rest to the smaller ones, or takes one more and holds it all, whichever takes fewer HS, then fewer BP. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
+              <div v-if="selectedRow && selectedRow.tankPackage" class="panel-body pt-3 caption text--secondary"><provenance-mark :result="selectedRow.provenance.tanks" label /><span class="ml-2">{{ tankPackageText(selectedRow) }}</span></div>
+              <div class="panel-foot caption text--secondary">Tanks are picked from the stock tanks the race holds: the package with the fewest HS that holds the litres the set needs, then the fewest BP, then the fewest tanks. Two tanks of a smaller size can beat one of a larger size, so the choice is never greedy by size. A package is met within a relative 1e-9 of the litres; the spare litres are what the whole tanks add. When the table behind the search runs out on a very large request the package is marked not proved. The game has no packing rule; this is the planner's own. A range target is met at the speed the finished ship reaches with the tanks aboard.</div>
             </v-card>
           </v-col>
           <v-col cols="12" xl="6">
@@ -365,7 +368,7 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClasses } from '../utilities/design-data'
-import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, thermalSignature } from '../utilities/design-rules'
+import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, tankPackageResult, thermalSignature } from '../utilities/design-rules'
 import { searchPropulsion } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
@@ -484,6 +487,7 @@ const setProvenance = (set, fraction) => {
     speed: speedResult,
     ...fuelFigures({ speedResult, power: set.power, burn: set.burnFull, noFuel: set.litres > 0 ? null : SETS_NO_FUEL, rangeKm: set.rangeKm, hours: set.enduranceHours, fraction }),
     cost: ofRule({ rule: 'design.propulsionSetCost', value: set.cost, units: 'BP', inputs: { present: ['engine design', 'stock tank costs'] } }),
+    tanks: set.tankPackage ? tankPackageResult({ feasible: true, sizeHS: set.tankHS, objective: 'lightest', status: set.tankPackage.status, reason: set.tankPackage.reason }) : null,
   }
 }
 
@@ -830,7 +834,7 @@ export default {
     basisRows() {
       const row = this.selectedRow
 
-      return row ? BASIS_COLUMNS.map(([label, key]) => ({ label, result: row.provenance[key] })) : EMPTY_LIST
+      return row ? [...BASIS_COLUMNS.map(([label, key]) => ({ label, result: row.provenance[key] })), ...(row.provenance.tanks ? [{ label: 'Fuel tanks (HS)', result: row.provenance.tanks }] : [])] : EMPTY_LIST
     },
 
     // The finished hull's size without the jump drives the saved class mounts, as the game's automatic design starts from.
@@ -1146,6 +1150,7 @@ export default {
         thermal: set.thermal,
         cards: [engineCard(set.engine, name, set.count)],
         tanks: set.tanks,
+        tankPackage: set.tankPackage,
         tankHS: set.tankHS,
         tankCost: set.tanks.reduce((total, tank) => total + tank.cost * tank.count, 0),
         litres: set.litres,
@@ -1205,6 +1210,18 @@ export default {
       return STATUS_MARKS[status].meaning
     },
 
+    // What the tanks of a designed row are: proved the lightest package for the litres the set asks for, or only a package that holds them, with the reason the proof stopped.
+    tankPackageCell(row) {
+      return !row.tankPackage ? '' : row.tankPackage.status === 'optimal' ? 'proved lightest' : `not proved: ${row.tankPackage.reason}`
+    },
+
+    tankPackageText(row) {
+      const { status, requestedLitres, excessLitres } = row.tankPackage
+      const litres = `${this.count(requestedLitres)} L`
+
+      return status === 'optimal' ? `The lightest package that holds the ${litres} this set needs, proved against every other combination of the tanks; ${this.count(excessLitres)} L of it is spare. The mark reads assumed because the game has no packing rule.` : `A package that holds the ${litres} this set needs, but not proved the lightest, so the mark reads estimated. The basis above names why.`
+    },
+
     // A result's rule, versions, assumptions and missing inputs on one line.
     basisText(result) {
       const parts = [`${result.rule.id}, game ${result.rule.versions.join(', ')}`]
@@ -1222,14 +1239,15 @@ export default {
 
     // The saved class and every set listed, with the status beside each figure and the rules, versions, assumptions and missing inputs of the row, so a copy keeps what the table showed. An unavailable figure is left empty, never 0.
     downloadCsv() {
-      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs']
+      const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs']
       const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
 
       const lines = this.rows.map((row) => {
-        const results = BASIS_COLUMNS.map(([, key]) => row.provenance[key])
-        const fields = results.map(exportFields)
+        const basis = BASIS_COLUMNS.map(([, key]) => row.provenance[key])
+        const fields = basis.map(exportFields)
+        const results = row.provenance.tanks ? [...basis, row.provenance.tanks] : basis
 
-        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; ')]
+        return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; ')]
       })
 
       const csv = [header, ...lines].map((line) => line.map(quote).join(',')).join('\n')
