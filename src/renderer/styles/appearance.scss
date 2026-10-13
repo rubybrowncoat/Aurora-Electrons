@@ -15,24 +15,96 @@
   }
 }
 
-// Keyboard focus: a 2px ring in the appearance's focus colour on the controls Vuetify leaves with a faint grey overlay, so the focused control is told from its neighbours by an edge and not by a wash. scripts/check-contrast.js measures the focus colour at 3:1 or more on every surface of every preset.
+// Keyboard focus: a 2px ring in the appearance's focus colour on the controls Vuetify leaves with a faint grey overlay (or, for a clickable chip, with none), so the focused control is told from its neighbours by an edge and not by a wash. scripts/check-contrast.js measures the focus colour at 3:1 or more on every surface of every preset.
 .v-application {
   a:focus-visible,
   .v-btn:focus-visible,
   .v-chip--link:focus-visible,
+  .v-chip--clickable:focus-visible,
   .v-tab:focus-visible,
   .v-list-item--link:focus-visible,
   .v-slide-group__prev:focus-visible,
   .v-slide-group__next:focus-visible,
   .v-pagination__item:focus-visible,
-  .v-pagination__navigation:focus-visible {
+  .v-pagination__navigation:focus-visible,
+  .v-expansion-panel-header:focus-visible,
+  .v-icon--link:focus-visible {
     outline: 2px solid var(--ae-primary);
     outline-offset: 2px;
   }
 
   .v-list-item--link:focus-visible,
-  .v-tab:focus-visible {
+  .v-tab:focus-visible,
+  .v-expansion-panel-header:focus-visible {
     outline-offset: -2px;
+  }
+
+  // A button-icon such as the row expander keeps Vuetify's round faint overlay, so the ring follows it.
+  .v-icon--link:focus-visible {
+    border-radius: 50%;
+  }
+
+  // A table row a page makes focusable (Enter selects it), and a sortable column head (components/page/keyboard-controls.js makes it focusable; Vuetify's own rule takes its outline away). The head shows its sort arrow while it holds focus, as it does under the pointer.
+  .v-data-table tbody tr[tabindex]:focus-visible,
+  .v-data-table-header th.sortable:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: -2px;
+  }
+
+  .v-data-table-header th.sortable:focus-visible .v-data-table-header__icon {
+    opacity: 1;
+  }
+}
+
+// A pressed button of a toggle group (a chosen mode, view or range) carries a 3px bar along its bottom edge in the focus colour and a wash of the selected-row token, besides Vuetify's grey wash, which is under 1.5:1 against its neighbours and so cannot tell the state on its own. Vuetify's own wash of the pressed button (white at 18% to 32% on the dark theme) would pull the bar under 3:1 against the button, so the wash is the preset's own, at one strength whether the button is pressed, hovered or focused (scripts/check-contrast.js measures the bar on it). The focused button's own grey wash is dropped, so the wash means pressed and the ring means focus.
+.v-application .v-btn-toggle {
+  > .v-btn {
+    &:not(.v-btn--active):focus::before {
+      opacity: 0;
+    }
+
+    &.v-btn--active::before,
+    &.v-btn--active:hover::before,
+    &.v-btn--active:focus::before {
+      background-color: var(--ae-row-selected);
+      opacity: 1;
+    }
+
+    &.v-btn--active::after {
+      display: block;
+      content: '';
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background: var(--ae-primary);
+      pointer-events: none;
+    }
+  }
+}
+
+// A table row under the pointer, and a row ticked in a table with checkboxes (`v-data-table__selected`). Vuetify washes the first grey (#eeeeee, and #616161 on the dark theme, where that takes secondary text to 4.0:1 and a red or amber figure to 1.9:1 and 2.6:1) and the second #f5f5f5, and #505050 on the dark theme, which takes a red figure to 2.8:1. The appearance's own faint washes of the focus colour keep the text they sit under at 4.5:1 (scripts/check-contrast.js measures them). A row that carries a wash of its own keeps it under the pointer instead of taking a second one over it, because two washes layered would pull the severity figures in it under 4.5:1: a picked row takes the selection wash again, and a compared row that differs (`compare-differs`, washed on its cells) and the focused row of Mineral Outlook (`is-focus-row`, hatched) take none. scripts/check-contrast.js reads this block and measures the layered wash of any washed row whose hover it does not settle (`.<class>:hover`).
+.v-application .v-data-table > .v-data-table__wrapper > table > tbody > tr {
+  &:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background-color: var(--ae-hover);
+  }
+
+  &.v-data-table__selected,
+  &.v-data-table__selected:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper),
+  &.is-selected-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper),
+  &.selected-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background-color: var(--ae-row-selected);
+  }
+
+  &.compare-differs:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background: transparent;
+  }
+
+  // The focused row of Mineral Outlook is hatched in the two bands of its tokens, at rest and under the pointer: Vuetify's hover sets the whole `background` shorthand, which would take the hatching away, so the rule is here at hover's specificity.
+  &.is-focus-row,
+  &.is-focus-row:hover:not(.v-data-table__expanded__content):not(.v-data-table__empty-wrapper) {
+    background: repeating-linear-gradient(-45deg, var(--ae-row-stripe) 0, var(--ae-row-stripe) 12px, var(--ae-row-stripe-soft) 12px, var(--ae-row-stripe-soft) 24px);
   }
 }
 

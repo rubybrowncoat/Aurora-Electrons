@@ -7,7 +7,7 @@ import Vue from 'vue'
 // - `surfaces`: `background` (the page and app bar), `chrome` (rail, footer), `card` (cards, tables, chart canvases), `border` (dividers and outlines), `track` and `trackSoft` (the empty part of a meter, the fill of a chip) and `rule` (a hairline under a table head).
 // - `inks`: `body` (text), `muted` (secondary text, rail icons, axis ticks), `onTooltip` (text on the chart tooltip) and `onFill` (text on a chip filled with a severity, status, planner or focus colour: white where the fills are dark enough for it, the page's dark ink where they are light, because a tone that is also drawn as text on the dark surfaces cannot hold white).
 // - `focus`: `primary` (focus, selection, links, the Galaxy Map's selection), `hover` (the wash under the pointer) and Vuetify's other two named colours, `secondary` and `accent`.
-// - `rows`: table rows that mark something: `selected` (the picked row), `differs` (a compared row that differs), `differsMark` and `differsDot` (the stripe and the dot that go with it), `stripe` and `stripeSoft` (the two bands of the focused row's hatching).
+// - `rows`: table rows that mark something: `selected` (the picked row), `differs` (a compared row that differs), `differsMark` and `differsDot` (the stripe and the dot that go with it), `stripe` and `stripeSoft` (the two bands of the focused row's hatching). Each wash is faint enough that every text colour of the preset, severity tones included, stays 4.5:1 on it, and `focus.hover` is the wash a hovered table row takes (scripts/check-contrast.js measures both).
 // - `severity`: Warnings' three levels, `action` (needs action), `attention` and `info`, plus `success`; Vuetify's `error`, `warning`, `info` and `success`.
 // - `contacts`, `survey`, `habitability`, `accessibility`, `status` (each optional): the meaning of a colour, not its place in the palette. `contacts`: how the race regards an alien contact (hostile, unknown, neutral, friendly, allied, civilian). `survey`: surveyed, remaining, ground (a ground survey location), unexplored (an unexplored jump point), and the geological, gravitational and both kinds of survey. `habitability`: `band`, the hue the colony-cost bands shade from. `accessibility`: a mineral deposit's good, fair and poor band. `status`: `shortfall` and `inactive` (a standing that is neither good nor bad). Each defaults to its slot in ROLE_SLOTS of the categorical list; a colour here replaces it.
 // - `plan`: the Colonization Planner's hues that are not a severity (mining, terraformFree, terraformPartial, terraformCheaper, cheap, moderate, costly, severe, insufficient, rich, cmc, unsurveyed, selected), each given in full. `toneColor` turns a tone, a severity name or a key of `plan` or `status`, into its colour.
@@ -23,12 +23,12 @@ import Vue from 'vue'
 const LIGHT = {
   id: 'light',
   name: 'Light',
-  version: 3,
+  version: 4,
   mode: 'light',
   surfaces: { background: '#ffffff', chrome: '#f6f7f9', card: '#ffffff', border: '#e0e3e8', track: 'rgba(0, 0, 0, .08)', trackSoft: 'rgba(0, 0, 0, .06)', rule: 'rgba(0, 0, 0, .12)' },
   inks: { body: '#212121', muted: '#6a6a6a', onTooltip: '#ffffff', onFill: '#ffffff' },
-  focus: { primary: '#1867c0', hover: 'rgba(24, 103, 192, .07)', secondary: '#b0bec5', accent: '#8c9eff' },
-  rows: { selected: 'rgba(33, 150, 243, .08)', differs: 'rgba(33, 150, 243, .1)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .12)', stripeSoft: 'rgba(33, 150, 243, .04)' },
+  focus: { primary: '#1867c0', hover: 'rgba(24, 103, 192, .06)', secondary: '#b0bec5', accent: '#8c9eff' },
+  rows: { selected: 'rgba(33, 150, 243, .08)', differs: 'rgba(33, 150, 243, .08)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .08)', stripeSoft: 'rgba(33, 150, 243, .04)' },
   severity: { action: '#b71c1c', attention: '#a75d00', info: '#0b72c5', success: '#367d39' },
   status: { inactive: '#707070' },
   plan: { mining: '#b85c00', terraformFree: '#9c27b0', terraformPartial: '#3f51b5', terraformCheaper: '#5d7986', cheap: '#008276', moderate: '#037ab5', costly: '#8a5300', severe: '#d34215', insufficient: '#dc3500', rich: '#b85c00', cmc: '#00695c', unsurveyed: '#a86500', selected: '#f44336' },
@@ -45,12 +45,12 @@ const LIGHT = {
 const DARK = {
   id: 'dark',
   name: 'Dark',
-  version: 3,
+  version: 4,
   mode: 'dark',
   surfaces: { background: '#121212', chrome: '#1e1e1e', card: '#1e1e1e', border: '#333333', track: 'rgba(255, 255, 255, .12)', trackSoft: 'rgba(255, 255, 255, .1)', rule: 'rgba(255, 255, 255, .12)' },
   inks: { body: '#f5f5f5', muted: '#b0b0b0', onTooltip: '#ffffff', onFill: '#121212' },
   focus: { primary: '#2196f3', hover: 'rgba(33, 150, 243, .10)', secondary: '#424242', accent: '#FF4081' },
-  rows: { selected: 'rgba(33, 150, 243, .16)', differs: 'rgba(33, 150, 243, .2)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .22)', stripeSoft: 'rgba(33, 150, 243, .1)' },
+  rows: { selected: 'rgba(33, 150, 243, .10)', differs: 'rgba(33, 150, 243, .10)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .10)', stripeSoft: 'rgba(33, 150, 243, .04)' },
   severity: { action: '#FF5252', attention: '#FB8C00', info: '#2196F3', success: '#4CAF50' },
   status: { inactive: '#9e9e9e' },
   plan: { mining: '#ff8f00', terraformFree: '#c759da', terraformPartial: '#7482cf', terraformCheaper: '#6d8b9a', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#ea5527', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#f44336' },

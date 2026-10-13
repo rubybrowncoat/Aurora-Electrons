@@ -1255,9 +1255,5 @@ export default {
     width: 2px;
     height: 14px;
   }
-
-  tr.is-focus-row {
-    background-image: repeating-linear-gradient(-45deg, var(--ae-row-stripe) 0, var(--ae-row-stripe) 12px, var(--ae-row-stripe-soft) 12px, var(--ae-row-stripe-soft) 24px);
-  }
 }
 </style>

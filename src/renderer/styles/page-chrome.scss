@@ -5,7 +5,7 @@
   height: 100%;
 }
 
-// A tile that filters its page (StatTiles' `selectable`), drawn in its icon's colour (`--stat-tile-accent`): a faint wash of it under the pointer over the card's own background and, pressed, a border in it with a slightly stronger wash. Vuetify's grey focus overlay gives way to that border for the keyboard.
+// A tile that filters its page (StatTiles' `selectable`), drawn in its icon's colour (`--stat-tile-accent`): a faint wash of it under the pointer over the card's own background and, pressed, a 2px border in it inside the tile with a slightly stronger wash and a check in the corner, so the state does not rest on a colour. The keyboard's focus is a different thing: a 2px ring in the focus colour outside the tile (`--ae-primary`), so a focused tile and a pressed one are not told apart by the same border. Vuetify's grey focus overlay gives way to that ring.
 .stat-tile--selectable {
   --stat-tile-wash: transparent;
 
@@ -20,16 +20,29 @@
   }
 
   &:focus-visible {
-    outline: 2px solid var(--stat-tile-accent);
-    outline-offset: -2px;
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
   }
 }
 
 .stat-tile--selectable.stat-tile--active {
   --stat-tile-wash: color-mix(in srgb, var(--stat-tile-accent) 7%, transparent);
 
-  outline: 2px solid var(--stat-tile-accent);
-  outline-offset: -2px;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--stat-tile-accent);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+}
+
+.stat-tile .stat-tile__pressed.v-icon {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--stat-tile-accent);
 }
 
 // A row, so an icon before the value is centred on it instead of sitting low on the text's baseline.
@@ -127,8 +140,21 @@
   border: 2px solid;
 }
 
-// A selected table row: a bar on its left edge in the focus colour besides the pages' faint wash, the way a compared row that differs carries its mark (`--ae-row-differs-mark`), so the selection does not rest on a tint. The focus colour clears 3:1 on every surface of every preset (scripts/check-contrast.js).
+// A selected table row (a page's `is-selected-row` or `selected-row`, or a row ticked in a table with checkboxes): a bar on its left edge in the focus colour besides the faint wash, the way a compared row that differs carries its mark (`--ae-row-differs-mark`), so the selection does not rest on a tint. A 1px rule in the same colour runs along the top and bottom of every cell, and the last cell has a bar of its own, so a wide row scrolled sideways keeps an edge the eye can follow when its first cell is out of view. The focus colour clears 3:1 on every surface of every preset (scripts/check-contrast.js).
+tr.is-selected-row > td,
+tr.selected-row > td,
+tr.v-data-table__selected > td {
+  box-shadow: inset 0 1px 0 var(--ae-primary), inset 0 -1px 0 var(--ae-primary);
+}
+
 tr.is-selected-row > td:first-child,
-tr.selected-row > td:first-child {
-  box-shadow: inset 3px 0 0 var(--ae-primary);
+tr.selected-row > td:first-child,
+tr.v-data-table__selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--ae-primary), inset 0 1px 0 var(--ae-primary), inset 0 -1px 0 var(--ae-primary);
+}
+
+tr.is-selected-row > td:last-child:not(:first-child),
+tr.selected-row > td:last-child:not(:first-child),
+tr.v-data-table__selected > td:last-child:not(:first-child) {
+  box-shadow: inset -3px 0 0 var(--ae-primary), inset 0 1px 0 var(--ae-primary), inset 0 -1px 0 var(--ae-primary);
 }

@@ -2,6 +2,7 @@
   <v-row :dense="dense || compact" :class="{ 'stat-tiles--compact': compact }">
     <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
       <v-card class="stat-tile" :class="{ 'stat-tile--selectable': tile.selectable, 'stat-tile--active': tile.selectable && tile.active }" :style="tile.selectable ? { '--stat-tile-accent': accentOf(tile) } : null" :ripple="false" elevation="1" v-bind="tile.selectable ? { role: 'button', tabindex: 0, 'aria-pressed': String(Boolean(tile.active)), title: tile.selectTitle } : {}" v-on="tile.selectable ? selectListeners(tile) : {}">
+        <v-icon v-if="tile.selectable && tile.active" small class="stat-tile__pressed" aria-hidden="true">mdi-check-circle</v-icon>
         <div class="caption text--secondary">{{ tile.label }}</div>
         <div class="stat-value" :title="tile.title || tile.value"><v-icon v-if="tile.icon" :color="tile.iconColor" class="mr-1">{{ tile.icon }}</v-icon><span class="stat-value__text">{{ tile.value }}</span></div>
         <div class="stat-note caption text--secondary" :title="compact ? tile.note : null">{{ tile.note }}</div>
@@ -13,7 +14,7 @@
 <script>
 import { activeAppearance, vuetifyColors } from '../../utilities/appearance'
 
-// The row of stat tiles that opens a page, four to a row from 1264 px. Each tile is { label, value, note }, with an optional icon (and iconColor, a theme colour name or a CSS colour) before the value and a title, the value's tooltip, which is the value itself unless given. A tile with `selectable` is a toggle button in its icon's colour: a click, Enter or Space emits `select` with the tile, `active` shows it pressed, and `selectTitle` is its tooltip. The styles are in styles/page-chrome.scss.
+// The row of stat tiles that opens a page, four to a row from 1264 px. Each tile is { label, value, note }, with an optional icon (and iconColor, a theme colour name or a CSS colour) before the value and a title, the value's tooltip, which is the value itself unless given. A tile with `selectable` is a toggle button in its icon's colour: a click, Enter or Space emits `select` with the tile, `active` shows it pressed (a border, a wash and a check), and `selectTitle` is its tooltip. The styles are in styles/page-chrome.scss.
 export default {
   name: 'StatTiles',
   props: {

@@ -4,9 +4,11 @@ import 'vuetify/dist/vuetify.min.css'
 import 'roboto-fontface/css/roboto/roboto-fontface.css'
 import '../styles/appearance.scss'
 
+import { keyboardControls } from '../components/page/keyboard-controls'
 import { activeAppearance, baselinePresetId, resolveAppearance, vuetifyColors } from '../utilities/appearance'
 
 Vue.use(Vuetify)
+Vue.mixin(keyboardControls)
 
 const vuetify = new Vuetify({
   theme: {

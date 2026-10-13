@@ -5,12 +5,15 @@
 
   For every preset it measures WCAG 2.x contrast ratios of the resolved tokens against the surfaces they are drawn on:
   - text (4.5:1): the inks on the page, card and chrome surfaces, the tooltip ink on the tooltip, axis ticks, links and the sky's labels;
-  - essential graphics and state cues (3:1): the focus colour, the severities, the contact relationships, the status colours, the selection mark and each categorical slot, against the card and page surfaces.
-  A categorical slot under 3:1 passes only when the slot's encoding (marker, dash and bar pattern, `SERIES_ENCODINGS` in appearance.js) tells it from every other slot without colour. Exceptions (decorative hairlines, track fills, gridlines, washes, disabled controls) are listed with their reason, so the evidence names what the gate does not measure.
-  It then simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009, severity 1.0, in linear RGB) and reports the smallest CIEDE2000 difference between any two categorical slots and between neighbouring slots, on the card surface's chart; the encodings carry what a small difference loses.
+  - essential graphics and state cues (3:1): the focus colour, the severities, the contact relationships, the status colours, the selection mark and each categorical slot, against the card and page surfaces;
+  - text on a table row's washes (4.5:1): the inks and severity tones on the card under the hover wash, the selected row's wash and the wash of a compared row that differs, and under the two layered whenever styles/appearance.scss leaves a washed row's hover unsettled, so a row state never takes the text or a severity figure below its own contrast;
+  - the pressed-button bar of a toggle group (3:1) on the button as drawn: the selected-row wash over Vuetify's pressed fill, which the wash keeps the same focused, hovered or not.
+  A categorical slot under 3:1 passes only when the slot's encoding (marker, dash and bar pattern, `SERIES_ENCODINGS` in appearance.js) tells it from every other slot without colour. Exceptions (decorative hairlines, track fills, gridlines, washes as colours, disabled controls) are listed with their reason, so the evidence names what the gate does not measure.
 
   A failed measurement, or a preset whose encodings do not tell its nine slots apart, sets exit code 1.
 */
+const fs = require('fs')
+const { join } = require('path')
 const { loadUtilities } = require('./lib/utilities')
 
 const TEXT = 4.5
@@ -181,13 +184,47 @@ const GRAPHIC_CHECKS = [
   ...[...PLAN_TONES, 'selected'].map((tone) => [`Planner tone ${tone}`, `plan.${tone}`, SURFACES]),
 ]
 
+// The washes a table row takes over the card (styles/appearance.scss: the hover wash; a row that carries a wash of its own keeps it, or none, under the pointer; the picked and compared rows' washes are the pages'), and the text drawn in a row: the inks, the links and the tones a figure is coloured with.
+const ROW_STATES = [
+  ['hovered row', ['focus.hover']],
+  ['selected row', ['rows.selected']],
+  ['compared row that differs', ['rows.differs']],
+  ['focused row, dark band of the hatching', ['rows.stripe']],
+  ['focused row, light band of the hatching', ['rows.stripeSoft']],
+]
+
+// The rows that carry a wash of their own (the classes their pages or Vuetify give them) and the wash. appearance.scss settles each one's hover with a `.<class>:hover` rule; for a class it does not settle, the hover wash layers over the row's own, and that composition is measured too.
+const WASHED_ROWS = [
+  ['picked row', ['v-data-table__selected', 'is-selected-row', 'selected-row'], 'rows.selected'],
+  ['compared row that differs', ['compare-differs'], 'rows.differs'],
+  ['focused row, dark band of the hatching', ['is-focus-row'], 'rows.stripe'],
+  ['focused row, light band of the hatching', ['is-focus-row'], 'rows.stripeSoft'],
+]
+const STYLESHEET = join(__dirname, '..', 'src', 'renderer', 'styles', 'appearance.scss')
+const readStylesheet = () => fs.readFileSync(STYLESHEET, 'utf8').replace(/^\s*\/\/.*$/gm, '')
+
+// Vuetify's fill of a pressed button of a toggle group, which the selected-row wash is drawn over (the bar is drawn on top).
+const PRESSED_BUTTON = { light: '#f5f5f5', dark: '#272727' }
+
+const ROW_TEXT = [
+  ['body text', 'inks.body'],
+  ['secondary text', 'inks.muted'],
+  ['link', 'focus.primary'],
+  ['needs-action figure', 'severity.action'],
+  ['attention figure', 'severity.attention'],
+  ['info figure', 'severity.info'],
+  ['success figure', 'severity.success'],
+  ['inactive standing', 'status.inactive'],
+  ['Vuetify secondary text (.text--secondary)', ({ mode }) => (mode === 'dark' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)')],
+]
+
 // Measured nowhere, and why.
 const EXCEPTIONS = [
   ['surfaces.border', 'Hairlines between regions repeat a boundary the layout already gives; decorative.'],
   ['surfaces.rule', 'The hairline under a table head; decorative.'],
   ['surfaces.track and surfaces.trackSoft', 'The empty part of a meter and a chip fill: the filled part and the figure beside it carry the value; decorative.'],
   ['charts.axis (axis line, gridlines at 60%)', 'Tick labels (measured at 4.5:1) and the tooltip carry every value; gridlines and the axis line are decorative guides.'],
-  ['rows.selected, rows.differs, rows.stripe, rows.stripeSoft, focus.hover', 'Washes under content: the compared row also carries a mark (3:1, measured) and a dot, the selected row a bar on its left edge in the focus colour (3:1, measured); the hover wash is feedback on top of a focus ring.'],
+  ['rows.selected, rows.differs, rows.stripe, rows.stripeSoft, focus.hover as colours', 'Washes under content, so their own contrast is not the point; what is measured is the text on them ("Text on table row washes"). The compared row also carries a mark (3:1, measured) and a dot, the selected row a bar on its left edge, a rule along its cells and a bar on its last cell in the focus colour (3:1, measured).'],
   ['washes.*', 'Alphas of a section colour behind an active item; the item also carries the section icon, label and weight.'],
   ['Disabled controls (Vuetify disabled opacity)', 'Exempt under WCAG 1.4.3 and 1.4.11: inactive components.'],
   ['Stars, planet terrain, orbit lines in the stars\' colour', 'Physical colours that depict the world, not a meaning; named in the legend by their label.'],
@@ -205,7 +242,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS }, optio
       return color.a < 1 ? over(color, card) : color
     }
 
-    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: [], graphics: [], categorical: [], cvd: [], encodings: null }
+    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: [], graphics: [], rows: [], categorical: [], cvd: [], encodings: null }
     const distinct = (surfaces) => surfaces.filter((surface, index) => surfaces.findIndex((other) => hex(resolve(other)) === hex(resolve(surface))) === index)
 
     TEXT_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
@@ -223,6 +260,30 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS }, optio
 
       report.graphics.push({ label, foreground: at(appearance, path), surface: at(appearance, surface), surfacePath: surface, ratio: value, minimum: GRAPHIC, pass: value >= GRAPHIC })
     }))
+
+    const stylesheet = options.stylesheet === undefined ? readStylesheet() : options.stylesheet
+    const layered = WASHED_ROWS.flatMap(([state, classes, wash]) => {
+      const unsettled = classes.filter((name) => !stylesheet.includes(`.${name}:hover`))
+
+      return unsettled.length ? [[`hovered ${state}, washes layered (${unsettled.join(', ')})`, ['focus.hover', wash]]] : []
+    })
+
+    ROW_STATES.concat(layered).forEach(([state, washes]) => {
+      const background = washes.reduce((below, path) => over(parseColor(at(appearance, path)), below), card)
+
+      ROW_TEXT.forEach(([label, path]) => {
+        const ink = typeof path === 'function' ? path(appearance) : at(appearance, path)
+        const value = ratio(over(parseColor(ink), background), background)
+
+        report.rows.push({ label: `${label} on a ${state}`, foreground: ink, surface: hex(background), ratio: value, minimum: TEXT, pass: value >= TEXT })
+      })
+    })
+
+    const pressed = over(parseColor(appearance.rows.selected), parseColor(PRESSED_BUTTON[appearance.mode]))
+    const bar = parseColor(appearance.focus.primary)
+    const barRatio = ratio(bar, pressed)
+
+    report.graphics.push({ label: 'Pressed toggle button bar, focused, hovered or not (the selected-row wash over the button)', foreground: appearance.focus.primary, surface: hex(pressed), surfacePath: 'buttons.pressed', ratio: barRatio, minimum: GRAPHIC, pass: barRatio >= GRAPHIC })
 
     const encodings = SERIES_ENCODINGS
     const unique = (key) => new Set(encodings.map((encoding) => JSON.stringify(encoding[key]))).size === encodings.length
@@ -273,6 +334,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS }, optio
 const failures = (reports) => reports.flatMap((report) => [
   ...report.text.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.graphics.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
+  ...report.rows.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.categorical.filter((row) => !row.pass).map((row) => `${report.id}: slot ${row.slot} ${row.color} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (a marker or pattern does not stand in for the colour)`),
   ...report.fills.filter((row) => !row.pass).map((row) => `${report.id}: text ${row.foreground} on the ${row.label} fill ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...(report.encodings.markers && report.encodings.dashes && report.encodings.patterns && report.encodings.slots === report.slotCount ? [] : [`${report.id}: the series encodings do not give each of the ${report.slotCount} slots its own marker, dash and pattern`]),
@@ -289,6 +351,8 @@ const format = (reports, verbose) => {
     report.text.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
     lines.push('Essential graphics and state cues, minimum 3:1')
     report.graphics.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
+    lines.push('Text on table row washes (the card under the wash), minimum 4.5:1')
+    report.rows.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surface}`))
     lines.push('Categorical slots against the card and the page, minimum 3:1 (the encodings come on top of the colour, they do not replace it)')
     report.categorical.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  slot ${row.slot}: ${row.color} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
     lines.push(`Text on filled chips and controls, ink ${report.fills[0].foreground}, minimum 4.5:1`)
@@ -312,16 +376,19 @@ const format = (reports, verbose) => {
   return lines.join('\n')
 }
 
-// Mutations the gate must catch, so that it can't pass by measuring nothing: a slot the colour of the card (its markers and patterns don't make it visible), and a chip whose text is the colour of its fill.
+// Mutations the gate must catch, so that it can't pass by measuring nothing: a slot the colour of the card (its markers and patterns don't make it visible), a chip whose text is the colour of its fill, a row wash as dark as Vuetify's own dark-theme hover, a compared row whose hover the stylesheet leaves unsettled (so the two washes layer) and a pressed-button wash that takes the bar under 3:1. The fifth item, when there is one, mutates the stylesheet.
 const MUTATIONS = [
   ['a categorical slot the colour of the card', 'light', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 5 ? appearance.surfaces.card : color)) } }), /slot 5 .* under 3:1/],
   ['a chip whose text is its fill', 'dark', (appearance) => ({ ...appearance, plan: { ...appearance.plan, rich: appearance.inks.onFill } }), /plan\.rich fill .* under 4\.5:1/],
   ['a chip with white text on a light fill', 'light', (appearance) => ({ ...appearance, plan: { ...appearance.plan, costly: '#ffb74d' } }), /plan\.costly fill .* under 4\.5:1/],
+  ['a hover wash as dark as Vuetify\'s own on the dark theme', 'dark', (appearance) => ({ ...appearance, focus: { ...appearance.focus, hover: '#616161' } }), /needs-action figure .* hovered row .* under 4\.5:1/],
+  ['a compared row whose hover the stylesheet leaves unsettled', 'dark', (appearance) => appearance, /needs-action figure on a hovered compared row that differs, washes layered .* under 4\.5:1/, (stylesheet) => stylesheet.replace(/\.compare-differs:hover/g, '.compare-differs-off:hover')],
+  ['a pressed-button wash as bright as the bar', 'dark', (appearance) => ({ ...appearance, rows: { ...appearance.rows, selected: 'rgba(255, 255, 255, .5)' } }), /Pressed toggle button bar.* under 3:1/],
 ]
 
-const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected]) => {
+const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected, mutateStylesheet]) => {
   const mutated = mutate(utilities.resolveAppearance(id))
-  const found = failures(analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }))
+  const found = failures(analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }, mutateStylesheet ? { stylesheet: mutateStylesheet(readStylesheet()) } : {}))
 
   return { label, caught: found.some((problem) => expected.test(problem)) }
 })
