@@ -167,6 +167,8 @@
             <div class="mt-1">The arrows without a colour mark the highest and the lowest value of a figure with no better side, such as a sensor's resolution, a beam's power and capacitor draw, or the missile size a launcher takes. A raw total trades against size and cost, so the per hull space and per build point rows rank designs of different sizes on what each space or point buys. Classes and ships are what the race has today. The picks are kept for each category and race, and a design that is no longer known drops out of them.</div>
           </div>
         </v-card>
+
+        <missile-hit-scenarios v-if="isMissileCategory" :missiles="rows" :version="formulaVersion" />
       </template>
     </v-container>
   </div>
@@ -176,12 +178,14 @@
 import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
+import MissileHitScenarios from '../components/missiles/MissileHitScenarios.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
+import { loadFormulaVersion } from '../utilities/capabilities'
 import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, USAGE_COLUMNS, augmentComponent, augmentMissile, augmentSpecies, categoryNote, cellOf as designCell, classUsageByComponent, columnRule, columnsFor, compareMarks, designTiles, isUnused, obsoleteResult, sortRows, tagsOf, withUsage } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
@@ -193,6 +197,7 @@ const INPUT_LABELS = {
   missiles: 'the missile designs',
   species: 'the species',
   classUsage: 'the classes that mount them',
+  formulaVersion: 'the save\'s schema',
 }
 
 const PAGE_SIZES = [15, 30, -1]
@@ -223,7 +228,7 @@ const RULE_NOTE = 'Lists the designs the race knows: researched ones and the bas
 
 export default {
   name: 'DesignedTechPage',
-  components: { LoadState, ProvenanceMark, StatTiles },
+  components: { LoadState, MissileHitScenarios, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     loadState(INPUT_LABELS),
@@ -259,12 +264,13 @@ export default {
       return [...this.components, ...this.missiles, ...this.species]
     },
 
+    // The categories the race has a design in, and always the missile one: its hit chance panel takes a missile typed in, so it is useful with no saved design.
     categoryOptions() {
       const counts = new Map()
 
       this.allItems.forEach((item) => counts.set(item.CategoryID, (counts.get(item.CategoryID) || 0) + 1))
 
-      return this.categories.filter((category) => counts.has(category.CategoryID)).map((category) => ({ CategoryID: category.CategoryID, Name: category.Name, count: counts.get(category.CategoryID) }))
+      return this.categories.filter((category) => counts.has(category.CategoryID) || category.CategoryID === MISSILE_CATEGORY_ID).map((category) => ({ CategoryID: category.CategoryID, Name: category.Name, count: counts.get(category.CategoryID) || 0 }))
     },
 
     activeCategoryId() {
@@ -292,6 +298,10 @@ export default {
 
     mountable() {
       return this.activeCategoryId !== MISSILE_CATEGORY_ID && this.activeCategoryId !== SPECIES_CATEGORY_ID
+    },
+
+    isMissileCategory() {
+      return this.activeCategoryId === MISSILE_CATEGORY_ID
     },
 
     categoryNoteText() {
@@ -587,6 +597,17 @@ export default {
         return Object.freeze(items)
       }),
       default: [],
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape. The missile hit chance rules are read for that version.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
   },
 }
