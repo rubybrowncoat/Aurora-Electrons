@@ -242,7 +242,7 @@ const modulesSql = async (common) => {
 }
 
 const runSave = async (utilities, save, label) => {
-  const { common, index, mining, transport } = utilities
+  const { common, index, mining, capabilities } = utilities
   const database = await openSave(save.file)
 
   if (!database) {
@@ -252,7 +252,7 @@ const runSave = async (utilities, save, label) => {
 
   try {
     const ctx = { database, GameID: save.game, RaceID: save.race, RaceNPR: false, separator: ',', options: {}, count: common.counter(',') }
-    const version = await transport.loadFormulaVersion(database).catch(() => null)
+    const version = await capabilities.loadFormulaVersion(database).catch(() => null)
     const model = await common.readMiningSites(ctx)
     const [[{ Fleets }]] = await database.query(`select count(distinct FCT_Fleet.FleetID) as Fleets from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.GameID = ${save.game} and FCT_Fleet.RaceID = ${save.race} and FCT_Fleet.OrbitBodyID > 0 and FCT_Ship.MothershipID = 0 and FCT_ShipClass.MiningModules > 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID and FCT_MoveOrders.GameID = FCT_Fleet.GameID)`)
     const [mineRows] = await database.query(`select FCT_Population.PopulationID from FCT_Population where FCT_Population.GameID = ${save.game} and FCT_Population.RaceID = ${save.race} and exists (select 1 from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and FCT_PopulationInstallations.Amount > 0 and DIM_PlanetaryInstallation.MiningProductionValue > 0)`)
@@ -324,8 +324,8 @@ const runSave = async (utilities, save, label) => {
 
 const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['mining-sites', 'provenance', 'transport', 'warnings/common', 'warnings/index'], { stubs: STUBS })
-  const named = { mining: utilities['mining-sites'], provenance: utilities.provenance, transport: utilities.transport, common: utilities['warnings/common'], index: utilities['warnings/index'] }
+  const utilities = await loadUtilities(['mining-sites', 'provenance', 'capabilities', 'warnings/common', 'warnings/index'], { stubs: STUBS })
+  const named = { mining: utilities['mining-sites'], provenance: utilities.provenance, capabilities: utilities.capabilities, common: utilities['warnings/common'], index: utilities['warnings/index'] }
 
   rulesRegistered(named.provenance)
   worked(named.mining)

@@ -251,12 +251,12 @@ import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
+import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
-import { loadFormulaVersion } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -401,22 +401,23 @@ export default {
       const ships = shipStock.value
       const refineries = this.refineryTotals.litres
       const harvesters = this.harvesterYear.litres
+      const harvestersKnown = this.harvesterYear.knownLitres
       const lifetime = this.burnRows.reduce((sum, row) => sum + row.lifetime, 0)
       const moving = this.burnRows.reduce((sum, row) => sum + row.moving, 0)
 
-      return { colonies, tankers, ships, stock: valueOrNull(stockResult), stockResult, stockUnknown: colonyStock.unknown + tankerStock.unknown + shipStock.unknown, refineries, refineriesUnknown: this.refineryTotals.unknown, harvesters, harvestersUnknown: this.harvesterYear.unknown, production: (refineries ?? 0) + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
+      return { colonies, tankers, ships, stock: valueOrNull(stockResult), stockResult, stockUnknown: colonyStock.unknown + tankerStock.unknown + shipStock.unknown, refineries, refineriesUnknown: this.refineryTotals.unknown, harvesters, harvestersKnown, harvestersUnknown: this.harvesterYear.unknown, harvestersGaps: this.harvesterYear.gaps, production: refineries === null || harvesters === null ? null : refineries + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
     },
 
     fuelBalance() {
       const totals = this.fuelTotals
-      const largest = Math.max(totals.production, totals.high) || 1
+      const largest = Math.max((totals.refineries ?? 0) + totals.harvestersKnown, totals.high) || 1
       const line = (label, value, color) => ({ label, value, color, width: value ? (value / largest) * 100 : 0 })
 
       return [
         {
           label: 'Made',
           total: this.litres(totals.production),
-          lines: [line(`Refineries${totals.refineriesUnknown ? ` (${totals.refineriesUnknown} unknown)` : ''}`, totals.refineries, 'success'), ...(this.harvesterRows.length ? [line(`Harvesters, fit in tanks${totals.harvestersUnknown ? ` (${totals.harvestersUnknown} unknown)` : ''}`, totals.harvesters, 'success')] : [])],
+          lines: [line(`Refineries${totals.refineriesUnknown ? ` (${totals.refineriesUnknown} unknown)` : ''}`, totals.refineries, 'success'), ...(this.harvesterRows.length ? [line(`Harvesters, fit in tanks${totals.harvestersUnknown ? ` (${totals.harvestersUnknown} unknown, those known only)` : ''}`, totals.harvestersKnown, 'success')] : [])],
         },
         {
           label: 'Burned (estimate)',
@@ -524,7 +525,7 @@ export default {
     tiles() {
       const fuel = this.fuelTotals
       const msp = this.mspTotals
-      const fuelNet = fuel.refineries === null ? null : fuel.production - fuel.high
+      const fuelNet = fuel.production === null ? null : fuel.production - fuel.high
       const mspNet = msp.production === null || msp.upkeepUnknown ? null : msp.production - msp.upkeep
       const mspStock = valueOrNull(msp.stockResult)
       const fuelDown = fuelNet !== null && fuelNet < 0
@@ -540,9 +541,9 @@ export default {
         {
           label: 'Fuel per year',
           value: this.signedLitres(fuelNet),
-          note: `Made ${this.litres(fuel.production)}${fuel.refineriesUnknown ? ` (${fuel.refineriesUnknown} ${fuel.refineriesUnknown === 1 ? 'colony' : 'colonies'} not counted)` : ''}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters unknown)` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelDown && fuel.stock > 0 && !fuel.stockUnknown ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
-          title: `Refineries: ${describeResult(this.refineryTotals.result)}${this.harvesterRows.length ? ` Harvesters, fit in tanks: ${fuel.harvestersUnknown ? `${fuel.harvestersUnknown} of ${this.harvesterRows.length} have no figure and are not counted, so the harvested share is a lower bound.` : 'every harvester has a figure.'}` : ''}`,
-          icon: fuelDown ? 'mdi-trending-down' : 'mdi-trending-up',
+          note: `Made ${this.litres(fuel.production)}${fuel.refineriesUnknown ? ` (${fuel.refineriesUnknown} ${fuel.refineriesUnknown === 1 ? 'colony' : 'colonies'} not counted)` : ''}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters have no figure, so the total and the balance are not given: ${fuel.harvestersGaps.join('; ')}; the known output of the rest is ${this.litres(fuel.refineries === null ? null : fuel.refineries + fuel.harvestersKnown)})` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelDown && fuel.stock > 0 && !fuel.stockUnknown ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
+          title: `Refineries: ${describeResult(this.refineryTotals.result)}${this.harvesterRows.length ? ` Harvesters, fit in tanks: ${fuel.harvestersUnknown ? `${fuel.harvestersUnknown} of ${this.harvesterRows.length} have no figure, so the fuel made and the balance are not given.` : 'every harvester has a figure.'}` : ''}`,
+          icon: fuelNet === null ? null : fuelDown ? 'mdi-trending-down' : 'mdi-trending-up',
           iconColor: fuelDown ? 'error' : 'success',
         },
         {
@@ -558,7 +559,7 @@ export default {
           value: this.signed(mspNet),
           note: `Made ${this.count(msp.production)}${msp.uncounted ? ` (${msp.uncounted} ${msp.uncounted === 1 ? 'colony' : 'colonies'} not counted)` : ''}${msp.potential > msp.production ? ` (${this.count(msp.potential)} with all on and supplied)` : ''}, used ${msp.upkeepUnknown ? `${this.count(msp.upkeep)} at the ${this.locations.length - msp.upkeepUnknown} locations that have a figure (${msp.upkeepUnknown} unknown)` : this.count(msp.upkeep)}${msp.short ? `; ${msp.short} running low` : ''}`,
           title: `${describeResult(msp.productionResult)}${msp.upkeepUnknown ? ` The upkeep of ${msp.upkeepUnknown} locations is not known, so the net is not given.` : ''}`,
-          icon: mspDown ? 'mdi-trending-down' : 'mdi-trending-up',
+          icon: mspNet === null ? null : mspDown ? 'mdi-trending-down' : 'mdi-trending-up',
           iconColor: mspDown ? 'error' : 'success',
         },
       ]
@@ -718,15 +719,17 @@ export default {
     // The race's harvesters: the undamaged modules and tank capacity (class components less the first damage row of each component), the gas giant or super-Jovian at the fleet's coordinates (the first body within 1 unit on both axes), and its deposit only where the race has surveyed the body. A class whose component rows are missing gives unknown modules or capacity (null).
     harvesters: {
       get: tracked('harvesters', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.Harvesters end as Harvesters, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.ClassHarvesters end as ClassHarvesters, case when VIR_Parts.TankRows > 0 then VIR_Parts.FuelCapacity when FCT_ShipClass.FuelCapacity > 0 then null else 0 end as FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join (select VIR_Ship.ShipID, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then 1 else 0 end) as HarvesterRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent else 0 end) as ClassHarvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0) else 0 end) as Harvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then 1 else 0 end) as TankRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then (FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue else 0 end) as FuelCapacity from FCT_Ship as VIR_Ship inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = VIR_Ship.ShipClassID and FCT_ClassComponent.GameID = VIR_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID in (3, 32) left join (select FCT_DamagedComponent.ShipID, FCT_DamagedComponent.ComponentID, FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.rowid in (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.GameID = ${this.GameID} group by VIR_First.ShipID, VIR_First.ComponentID)) as VIR_Damage on VIR_Damage.ShipID = VIR_Ship.ShipID and VIR_Damage.ComponentID = FCT_ClassComponent.ComponentID where VIR_Ship.GameID = ${this.GameID} and VIR_Ship.RaceID = ${this.RaceID} and VIR_Ship.ShippingLineID = 0 and VIR_Ship.ShipClassID in (select VIR_Harvester.ClassID from FCT_ClassComponent as VIR_Harvester inner join FCT_ShipDesignComponents as VIR_Type on VIR_Type.SDComponentID = VIR_Harvester.ComponentID and VIR_Type.ComponentTypeID = 32 where VIR_Harvester.GameID = ${this.GameID}) group by VIR_Ship.ShipID) as VIR_Parts on VIR_Parts.ShipID = FCT_Ship.ShipID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = (select VIR_Body.SystemBodyID from FCT_SystemBody as VIR_Body where VIR_Body.GameID = FCT_Ship.GameID and VIR_Body.BodyTypeID in (4, 5) and abs(VIR_Body.Xcor - FCT_Fleet.Xcor) < 1 and abs(VIR_Body.Ycor - FCT_Fleet.Ycor) < 1 order by VIR_Body.SystemBodyID limit 1) left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Harvesters > 0 or VIR_Parts.HarvesterRows > 0) order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => items)
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_Fleet.SystemID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.Fuel, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.Harvesters end as Harvesters, case when VIR_Parts.HarvesterRows > 0 then VIR_Parts.ClassHarvesters end as ClassHarvesters, case when VIR_Parts.TankRows > 0 then VIR_Parts.FuelCapacity when FCT_ShipClass.FuelCapacity > 0 then null else 0 end as FuelCapacity, FCT_Race.FuelProduction, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyTypeID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, case when FCT_SystemBodySurveys.SystemBodyID is null then 0 else 1 end as Surveyed, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Amount, 0) end as SoriumAmount, case when FCT_SystemBodySurveys.SystemBodyID is null then null else coalesce(FCT_MineralDeposit.Accessibility, 0) end as SoriumAccessibility, coalesce(VIR_Commander.BonusValue, 1) as MiningBonus from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID left join (select VIR_Ship.ShipID, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then 1 else 0 end) as HarvesterRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent else 0 end) as ClassHarvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 32 then FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0) else 0 end) as Harvesters, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then 1 else 0 end) as TankRows, sum(case when FCT_ShipDesignComponents.ComponentTypeID = 3 then (FCT_ClassComponent.NumComponent - coalesce(VIR_Damage.Number, 0)) * FCT_ShipDesignComponents.ComponentValue else 0 end) as FuelCapacity from FCT_Ship as VIR_Ship inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = VIR_Ship.ShipClassID and FCT_ClassComponent.GameID = VIR_Ship.GameID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID in (3, 32) left join (select FCT_DamagedComponent.ShipID, FCT_DamagedComponent.ComponentID, FCT_DamagedComponent.Number from FCT_DamagedComponent where FCT_DamagedComponent.rowid in (select min(VIR_First.rowid) from FCT_DamagedComponent as VIR_First where VIR_First.GameID = ${this.GameID} group by VIR_First.ShipID, VIR_First.ComponentID)) as VIR_Damage on VIR_Damage.ShipID = VIR_Ship.ShipID and VIR_Damage.ComponentID = FCT_ClassComponent.ComponentID where VIR_Ship.GameID = ${this.GameID} and VIR_Ship.RaceID = ${this.RaceID} and VIR_Ship.ShippingLineID = 0 and VIR_Ship.ShipClassID in (select VIR_Harvester.ClassID from FCT_ClassComponent as VIR_Harvester inner join FCT_ShipDesignComponents as VIR_Type on VIR_Type.SDComponentID = VIR_Harvester.ComponentID and VIR_Type.ComponentTypeID = 32 where VIR_Harvester.GameID = ${this.GameID}) group by VIR_Ship.ShipID) as VIR_Parts on VIR_Parts.ShipID = FCT_Ship.ShipID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = (select VIR_Body.SystemBodyID from FCT_SystemBody as VIR_Body where VIR_Body.GameID = FCT_Ship.GameID and VIR_Body.BodyTypeID in (4, 5) and abs(VIR_Body.Xcor - FCT_Fleet.Xcor) < 1 and abs(VIR_Body.Ycor - FCT_Fleet.Ycor) < 1 order by VIR_Body.SystemBodyID limit 1) left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Ship.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Ship.RaceID and FCT_SystemBodySurveys.GameID = FCT_Ship.GameID left join FCT_MineralDeposit on FCT_MineralDeposit.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_MineralDeposit.MaterialID = 8 and FCT_MineralDeposit.GameID = FCT_Ship.GameID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 6 where FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 1) as VIR_Commander on VIR_Commander.CommandID = FCT_Ship.ShipID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Harvesters > 0 or VIR_Parts.HarvesterRows > 0) order by FCT_Fleet.FleetName, FCT_Ship.ShipName`).then(([items]) => gateHarvesterRows(items, blocked))
       }),
       default: [],
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {
@@ -765,7 +768,9 @@ export default {
           return {}
         }
 
-        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 6, share: 'Industrial' })
+        const { ranks, blocked } = await this.capabilityGates('/logistics')
+
+        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 6, share: 'Industrial', ranks, blocked })
       }),
       default: {},
     },

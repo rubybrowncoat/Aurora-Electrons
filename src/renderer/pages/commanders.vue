@@ -277,7 +277,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
-import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, shipSuggestions } from '../utilities/commanders'
+import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
@@ -347,6 +347,18 @@ export default {
       return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
     },
 
+    // The column groups the save has, { rank, age }, from the capability check of this page (store/capabilities.js); null until it has answered, and the queries then wait for it (`partsFor`).
+    rosterGroups() {
+      const report = this.$store.getters['capabilities/report']('/commanders')
+
+      return report ? report.groups : null
+    },
+
+    // The bonus IDs whose row in the save does not read as the planners expect: the figures resting on their meaning are left unavailable.
+    blockedBonuses() {
+      return this.$store.getters['capabilities/blockedBonuses']
+    },
+
     bonusTypeById() {
       return Object.fromEntries(this.bonusTypes.map((bonus) => [bonus.BonusID, bonus]))
     },
@@ -359,7 +371,7 @@ export default {
     people() {
       return this.commanders.map((commander) => ({
         ...commander,
-        bonuses: parseBonuses(commander.Bonuses),
+        bonuses: parseBonuses(commander.Bonuses, this.blockedBonuses),
         traitIds: (commander.Traits || '').split(',').filter(Boolean).map(Number),
       }))
     },
@@ -401,7 +413,7 @@ export default {
     },
 
     shipAssessment() {
-      return shipSuggestions(this.ships, this.byType[0], this.bonusNames)
+      return shipSuggestions(this.ships, this.byType[0], this.bonusNames, this.blockedBonuses)
     },
 
     shipRows() {
@@ -409,7 +421,7 @@ export default {
     },
 
     researchAssessment() {
-      return researchSuggestions(this.projects, this.byType[3])
+      return researchSuggestions(this.projects, this.byType[3], this.blockedBonuses)
     },
 
     researchRows() {
@@ -522,7 +534,7 @@ export default {
           killsResult: kills,
           medalTotal: valueOrNull(medals),
           medalsResult: medals,
-          bonusList: this.topBonuses(parseBonuses(person.Bonuses)),
+          bonusList: this.topBonuses(parseBonuses(person.Bonuses, this.blockedBonuses)),
         }
       })
     },
@@ -781,6 +793,16 @@ export default {
     },
   },
   methods: {
+    // The SQL parts for the columns the save has (`rosterParts`). With no answer from the capability check yet, this waits for it, so the first read already leaves out what the save lacks; a check that failed reads like a save that has everything.
+    async partsFor(groups) {
+      if (!groups) {
+        await this.$store.dispatch('capabilities/preflight')
+      }
+
+      const report = this.$store.getters['capabilities/report']('/commanders')
+
+      return rosterParts(groups || (report ? report.groups : null), { GameID: this.GameID, RaceID: this.RaceID })
+    },
     applyLink(query) {
       this.focusCommanderId = queryId(query.commander)
       this.focusColonyId = this.focusCommanderId ? null : queryId(query.colony)
@@ -825,7 +847,7 @@ export default {
         id: bonus.id,
         abbrev: (bonusTypeById[bonus.id] || {}).BonusAbbrev || `#${bonus.id}`,
         description: (bonusTypeById[bonus.id] || {}).Description || `Bonus ${bonus.id}`,
-        text: formatBonus(bonus.id, bonus.value),
+        text: formatBonus(bonus.id, bonus.value, this.blockedBonuses),
       }))
     },
     recordText(seconds) {
@@ -837,7 +859,7 @@ export default {
       return isAvailable(result) ? null : result
     },
     bonusText(bonusId, value) {
-      return value === null || value === undefined ? 'none' : `${(this.bonusTypeById[bonusId] || {}).Description || 'Bonus'} ${formatBonus(bonusId, value)}`
+      return this.blockedBonuses.has(bonusId) ? `${(this.bonusTypeById[bonusId] || {}).Description || 'Bonus'} ${UNKNOWN_TEXT}` : value === null || value === undefined ? 'none' : `${(this.bonusTypeById[bonusId] || {}).Description || 'Bonus'} ${formatBonus(bonusId, value, this.blockedBonuses)}`
     },
     rating(admin) {
       const value = admin.bonuses[COLONY_ADMINISTRATION]
@@ -852,7 +874,7 @@ export default {
     },
     keyLabel(colony, key) {
       // A missing bonus row ranks as no effect (1 for a multiplier, 0 for a rating); show it as "none" rather than +0%.
-      return [colony.BonusOne, colony.BonusTwo, colony.BonusThree].map((id, index) => (id > 0 ? `${(this.bonusTypeById[id] || {}).BonusAbbrev || id} ${key[index] === neutralBonus(id) ? 'none' : formatBonus(id, key[index])}` : null)).filter(Boolean).join(', ')
+      return [colony.BonusOne, colony.BonusTwo, colony.BonusThree].map((id, index) => (id > 0 ? `${(this.bonusTypeById[id] || {}).BonusAbbrev || id} ${key[index] === neutralBonus(id) ? 'none' : formatBonus(id, key[index], this.blockedBonuses)}` : null)).filter(Boolean).join(', ')
     },
     // A column of null-last values: an unavailable figure sorts after every value, in either direction, never as 0.
     sortRows(items, sortBy, sortDesc) {
@@ -894,7 +916,9 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, VIR_Levels.Lowest - FCT_Ranks.Priority + 1 as RankLevel, FCT_Species.GraduationAge, FCT_Commander.CareerStart, FCT_Game.GameTime, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID left join (select FCT_Ranks.RankType, max(FCT_Ranks.Priority) as Lowest from FCT_Ranks where FCT_Ranks.GameID = ${this.GameID} and FCT_Ranks.RaceID = ${this.RaceID} group by FCT_Ranks.RankType) as VIR_Levels on VIR_Levels.RankType = FCT_Ranks.RankType left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || coalesce(FCT_CommanderBonuses.BonusValue, ''), ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and ${SERVING_COMMANDER} order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => Object.freeze(items))
+        const parts = await this.partsFor(this.rosterGroups)
+
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.CommandType, FCT_Commander.CommandID, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.HealthRisk, FCT_Commander.StoryCharacter, ${parts.rankColumns}, ${parts.rankLevel}, ${parts.ageColumn}, FCT_Commander.CareerStart, FCT_Game.GameTime, case when FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) then VIR_Ship.ShipName when FCT_Commander.CommandType in (3, 17) then VIR_Population.PopName when FCT_Commander.CommandType = 4 then FCT_SectorCommand.SectorName when FCT_Commander.CommandType = 5 then FCT_GroundUnitFormation.Name when FCT_Commander.CommandType = 12 then FCT_NavalAdminCommand.AdminCommandName when FCT_Commander.CommandType = 7 then FCT_TechSystem.Name end as AssignmentName, VIR_Bonuses.Bonuses, VIR_Traits.Traits from FCT_Commander inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID ${parts.ageJoin} ${parts.rankJoin} ${parts.levelJoin} left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3 left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType in (1, 8, 9, 10, 11, 15) left join FCT_Population as VIR_Population on VIR_Population.PopulationID = FCT_Commander.CommandID and FCT_Commander.CommandType in (3, 17) left join FCT_SectorCommand on FCT_SectorCommand.SectorCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 4 left join FCT_GroundUnitFormation on FCT_GroundUnitFormation.FormationID = FCT_Commander.CommandID and FCT_Commander.CommandType = 5 left join FCT_NavalAdminCommand on FCT_NavalAdminCommand.NavalAdminCommandID = FCT_Commander.CommandID and FCT_Commander.CommandType = 12 left join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_Commander.CommandID and FCT_Commander.CommandType = 7 left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_CommanderBonuses.CommanderID, group_concat(FCT_CommanderBonuses.BonusID || ':' || coalesce(FCT_CommanderBonuses.BonusValue, ''), ',') as Bonuses from FCT_CommanderBonuses inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderBonuses.CommanderID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderBonuses.CommanderID) as VIR_Bonuses on VIR_Bonuses.CommanderID = FCT_Commander.CommanderID left join (select FCT_CommanderTraits.CmdrID as CommanderID, group_concat(FCT_CommanderTraits.TraitID, ',') as Traits from FCT_CommanderTraits inner join FCT_Commander as VIR_Owner on VIR_Owner.CommanderID = FCT_CommanderTraits.CmdrID where VIR_Owner.GameID = ${this.GameID} and VIR_Owner.RaceID = ${this.RaceID} group by FCT_CommanderTraits.CmdrID) as VIR_Traits on VIR_Traits.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and ${SERVING_COMMANDER} order by FCT_Commander.CommanderType, FCT_Commander.Seniority`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -936,7 +960,9 @@ export default {
           return []
         }
 
-        return await this.database.query(`with VIR_ShipCommanders as materialized (select CommanderID, CommandID, CommandType, RaceID from FCT_Commander where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Deceased = 0 and CommandType in (1, 10) order by rowid) select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_ShipClass.ClassName, FCT_ShipClass.RankRequired, FCT_ShipClass.Terraformers, FCT_ShipClass.MiningModules, FCT_ShipClass.Harvesters, FCT_ShipClass.GeoSurvey, FCT_ShipClass.GravSurvey, (select count(*) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.Name = 'Science Department') as SciencePosts, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as CaptainID, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 10 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as ScienceOfficerID from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Terraformers > 0 or FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.Harvesters > 0 or FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0 or FCT_ShipClass.Terraformers is null or FCT_ShipClass.MiningModules is null or FCT_ShipClass.Harvesters is null or FCT_ShipClass.GeoSurvey is null or FCT_ShipClass.GravSurvey is null) order by FCT_ShipClass.ClassName, FCT_Ship.ShipName`).then(([items]) => Object.freeze(items))
+        const parts = await this.partsFor(this.rosterGroups)
+
+        return await this.database.query(`with VIR_ShipCommanders as materialized (select CommanderID, CommandID, CommandType, RaceID from FCT_Commander where GameID = ${this.GameID} and RaceID = ${this.RaceID} and Deceased = 0 and CommandType in (1, 10) order by rowid) select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_ShipClass.ClassName, ${parts.classRank}, FCT_ShipClass.Terraformers, FCT_ShipClass.MiningModules, FCT_ShipClass.Harvesters, FCT_ShipClass.GeoSurvey, FCT_ShipClass.GravSurvey, (select count(*) from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.Name = 'Science Department') as SciencePosts, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 1 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as CaptainID, (select FCT_Commander.CommanderID from VIR_ShipCommanders as FCT_Commander where FCT_Commander.CommandID = FCT_Ship.ShipID and FCT_Commander.CommandType = 10 and FCT_Commander.RaceID = FCT_Ship.RaceID limit 1) as ScienceOfficerID from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Ship.RaceID and FCT_RaceSysSurvey.GameID = FCT_Ship.GameID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and (FCT_ShipClass.Terraformers > 0 or FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.Harvesters > 0 or FCT_ShipClass.GeoSurvey > 0 or FCT_ShipClass.GravSurvey > 0 or FCT_ShipClass.Terraformers is null or FCT_ShipClass.MiningModules is null or FCT_ShipClass.Harvesters is null or FCT_ShipClass.GeoSurvey is null or FCT_ShipClass.GravSurvey is null) order by FCT_ShipClass.ClassName, FCT_Ship.ShipName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -957,11 +983,13 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.StoryCharacter, FCT_Commander.Notes, FCT_Commander.KillTonnageMilitary, FCT_Commander.KillTonnageCommercial, FCT_Commander.CareerStart, FCT_Commander.RetireStatus, FCT_Commander.Prisoner, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, FCT_Species.GraduationAge, FCT_Game.GameTime, coalesce(VIR_HoldShip.RaceID, VIR_HoldColony.RaceID) as CaptorID, FCT_AlienRace.AlienRaceName as CaptorName, VIR_Bonuses.Bonuses, VIR_Medals.Medals, VIR_Medals.MedalCount
+        const parts = await this.partsFor(this.rosterGroups)
+
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_Commander.ResSpecID, DIM_ResearchField.FieldName, FCT_Commander.StoryCharacter, FCT_Commander.Notes, FCT_Commander.KillTonnageMilitary, FCT_Commander.KillTonnageCommercial, FCT_Commander.CareerStart, FCT_Commander.RetireStatus, FCT_Commander.Prisoner, ${parts.rankColumns}, ${parts.ageColumn}, FCT_Game.GameTime, coalesce(VIR_HoldShip.RaceID, VIR_HoldColony.RaceID) as CaptorID, FCT_AlienRace.AlienRaceName as CaptorName, VIR_Bonuses.Bonuses, VIR_Medals.Medals, VIR_Medals.MedalCount
           from FCT_Commander
           inner join FCT_Game on FCT_Game.GameID = FCT_Commander.GameID
-          left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID
-          left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID
+          ${parts.ageJoin}
+          ${parts.rankJoin}
           left join DIM_ResearchField on DIM_ResearchField.ResearchFieldID = FCT_Commander.ResSpecID and FCT_Commander.CommanderType = 3
           left join FCT_Ship as VIR_HoldShip on VIR_HoldShip.ShipID = FCT_Commander.TransportShipID and VIR_HoldShip.RaceID <> FCT_Commander.RaceID
           left join FCT_Population as VIR_HoldColony on VIR_HoldColony.PopulationID = FCT_Commander.PopLocationID and VIR_HoldColony.RaceID <> FCT_Commander.RaceID
@@ -997,12 +1025,14 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_AlienRace.AlienRaceName, FCT_Ranks.RankName, FCT_Ranks.RankAbbrev, FCT_Commander.Processed, VIR_Ship.ShipName, VIR_Colony.PopName
+        const parts = await this.partsFor(this.rosterGroups)
+
+        return await this.database.query(`select FCT_Commander.CommanderID, FCT_Commander.Name, FCT_Commander.CommanderType, FCT_AlienRace.AlienRaceName, ${parts.rankColumns}, FCT_Commander.Processed, VIR_Ship.ShipName, VIR_Colony.PopName
           from FCT_Commander
           left join FCT_Ship as VIR_Ship on VIR_Ship.ShipID = FCT_Commander.TransportShipID and VIR_Ship.RaceID = ${this.RaceID}
           left join FCT_Population as VIR_Colony on VIR_Colony.PopulationID = FCT_Commander.PopLocationID and VIR_Colony.RaceID = ${this.RaceID}
           left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Commander.GameID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.AlienRaceID = FCT_Commander.RaceID
-          left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID
+          ${parts.rankJoin}
           where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID <> ${this.RaceID} and FCT_Commander.Prisoner = 1 and (VIR_Ship.ShipID is not null or VIR_Colony.PopulationID is not null)`).then(([items]) => Object.freeze(items))
       }),
       default: [],

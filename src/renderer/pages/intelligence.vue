@@ -215,7 +215,7 @@ import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, G
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { describeResult, getRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
-import { loadFormulaVersion } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   races: 'the known races',
@@ -761,7 +761,7 @@ export default {
     },
   },
   asyncComputed: {
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

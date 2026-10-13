@@ -229,7 +229,7 @@ import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
 import { depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
-import { orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
+import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { describeResult, describeRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
 
@@ -1118,21 +1118,25 @@ export default {
     },
     surfaceMining: {
       get: tracked('surfaceMining', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
+        return await this.database.query(surfaceMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(gateMiningRows(items, blocked)))
       }),
       default: [],
     },
     orbitalMining: {
       get: tracked('orbitalMining', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
+        return await this.database.query(orbitalMiningQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(gateMiningRows(items, blocked)))
       }),
       default: [],
     },
@@ -1143,7 +1147,9 @@ export default {
           return {}
         }
 
-        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 6, share: 'Industrial' })
+        const { ranks, blocked } = await this.capabilityGates('/mineral-outlook')
+
+        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 6, share: 'Industrial', ranks, blocked })
       }),
       default: {},
     },

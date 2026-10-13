@@ -437,6 +437,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import capabilityGates from '../mixins/capability-gates'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -453,7 +454,7 @@ import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MASS_DRIVER_TONS, MINERALS, bestSiteResult, betterSite, bodyPotentialResult, compact, depositPotential, depositPotentialResult, depositReadable, massDriverRateResult, miningDistanceResult, pastHalf, perMineResult, qualifiesForCmc, withinOrbitalReach } from '../utilities/minerals'
 import { describeResult, isAvailable, ruleSupports, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
-import { loadFormulaVersion } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   race: "the race's mining tech",
@@ -514,6 +515,7 @@ export default {
   name: 'MineralsPage',
   components: { LoadState, PageLink, ProvenanceMark, StatTiles, SystemMap },
   mixins: [
+    capabilityGates,
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
@@ -1663,16 +1665,18 @@ export default {
     // The race's civilian mining complex colonies and their output, for the policy panel.
     policy: {
       get: tracked('policy', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return NO_CMC_POLICY
         }
 
-        return await loadCmcPolicy(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+        return await loadCmcPolicy(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked })
       }),
       default: NO_CMC_POLICY,
     },
 
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape. The civilian mining rates hold for that version only.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape. The civilian mining rates hold for that version only.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

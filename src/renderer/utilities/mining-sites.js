@@ -280,7 +280,7 @@ const fleetSites = (rows, { supported, count }) => {
   })
 }
 
-// The sites of a race's mining from the rows `readMiningSites` (warnings/common.js) loads. `RaceID` the race; `version` the save's formula version (transport.js `loadFormulaVersion`), without which the rules read from the 2.7 game are not applied and their prerequisites are unknown; `count` formats a figure in a text.
+// The sites of a race's mining from the rows `readMiningSites` (warnings/common.js) loads. `RaceID` the race; `version` the save's formula version (capabilities.js `loadFormulaVersion`), without which the rules read from the 2.7 game are not applied and their prerequisites are unknown; `count` formats a figure in a text.
 export const assessMiningSites = ({ colonies, fleets }, { RaceID, version = null, count = (value) => countText(value) } = {}) => {
   const supported = { surface: ruleSupports('miningSites.surface', version) === true, orbital: ruleSupports('miningSites.orbital', version) === true, delivery: ruleSupports('miningSites.delivery', version) === true }
   const fleetList = fleetSites(fleets, { supported, count })

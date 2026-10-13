@@ -161,6 +161,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import capabilityGates from '../mixins/capability-gates'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -169,12 +170,12 @@ import { systemBodyName } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
-import { navalAdminChainBonus } from '../utilities/minerals'
+import { navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { sumResults, valueOrNull } from '../utilities/provenance'
+import { sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surveyShipSql } from '../utilities/survey'
 import { surveyDays } from '../utilities/survey-eta'
-import { loadFormulaVersion } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   game: 'the game settings',
@@ -197,6 +198,7 @@ export default {
   name: 'SurveyProgressPage',
   components: { LoadState, PageLink, ProvenanceMark, StatTiles, SystemMap },
   mixins: [
+    capabilityGates,
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
@@ -221,6 +223,11 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
+
+    // The survey rates rest on the Survey bonus (2) of the officers and of the naval admin chain; they are not given while the save's lookup row for it is not confirmed.
+    surveyBlocked() {
+      return this.blockedBonuses.has(2)
+    },
 
     appearance() {
       return activeAppearance()
@@ -263,9 +270,9 @@ export default {
 
       return Object.values(fleets).map((fleet) => {
         const ships = fleet.ships.slice().sort((a, b) => a.ShipID - b.ShipID)
-        const admin = navalAdminChainBonus(navalAdmins, fleet.SystemID, fleet.NavalAdminCommandID)
-        const geo = fleetSurveyRate(ships, 'geo', { speed, admin, version })
-        const grav = fleetSurveyRate(ships, 'grav', { speed, admin, version })
+        const { bonus: admin, unknown: adminGap } = navalAdminChain(navalAdmins, fleet.SystemID, fleet.NavalAdminCommandID)
+        const geo = this.surveyBlocked ? this.withheldRate('survey.geoRate') : fleetSurveyRate(ships, 'geo', { speed, admin, adminGap, version })
+        const grav = this.surveyBlocked ? this.withheldRate('survey.gravRate') : fleetSurveyRate(ships, 'grav', { speed, admin, adminGap, version })
 
         return {
           ...fleet,
@@ -456,6 +463,10 @@ export default {
     },
   },
   methods: {
+    withheldRate(rule) {
+      return unavailable({ rule, missing: ['commander bonus 2, Survey (the save\'s lookup row is not confirmed)'] })
+    },
+
     applyLink(query) {
       this.selectedSystemId = queryId(query.system)
       this.revealPending = this.selectedSystemId !== null
@@ -634,11 +645,13 @@ export default {
           return {}
         }
 
-        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 2, share: 'Survey' })
+        const { ranks, blocked } = await this.capabilityGates('/survey-progress')
+
+        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 2, share: 'Survey', ranks, blocked })
       }),
       default: {},
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

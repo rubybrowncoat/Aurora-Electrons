@@ -128,7 +128,7 @@ const KINDS = {
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
 
 // The points a day of a fleet's `kind` ('geo' or 'grav') sensors, as a provenance result of 'survey.geoRate' or 'survey.gravRate' (utilities/provenance.js). `ships`: the fleet's rows from `loadSurveyShips`, embarked ones included. `options`: `speed`, the game's survey speed in percent (FCT_Game.SurveySpeed), `admin`, the naval admin Survey bonus in range (1 for none) and `version`, the formula version of the save (`loadFormulaVersion`, null when it is not a 2.7-shaped save). A result is confirmed only when its rule is, the save is 2.7-shaped, and none of its inputs is one the rule has not been checked on; otherwise it is an estimate, with what makes it one in its assumptions. A missing input gives an unavailable result, never 0.
-export const fleetSurveyRate = (ships, kind, { speed, admin = 1, version = null }) => {
+export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null, version = null }) => {
   const { value, designed, rule, unit } = KINDS[kind]
   const missing = []
 
@@ -140,6 +140,10 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, version = null 
 
   if (sensors.some((ship) => crewFraction(ship) === null || !Number.isFinite(ship.CrewMorale))) {
     missing.push('a ship\'s crew or morale')
+  }
+
+  if (adminGap || !Number.isFinite(admin)) {
+    missing.push(adminGap || 'the naval admin command chain\'s Survey bonus')
   }
 
   if (missing.length) {

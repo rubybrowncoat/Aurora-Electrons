@@ -74,6 +74,12 @@ const INPUT_LABELS = {
   race: 'the race',
 }
 const SECONDS_PER_YEAR = 31536000
+
+// The commander bonuses of the scientists' rows: Research (3) and Research Administration (27). One the save's lookup row does not confirm (`blockedBonuses`) is left unknown in every row, never read as no bonus.
+const RESEARCH_BONUS = 3
+const RESEARCH_ADMINISTRATION = 27
+
+const gated = (rows, blocked) => (blocked.size ? rows.map((row) => ({ ...row, ResearchBonus: blocked.has(RESEARCH_BONUS) ? null : row.ResearchBonus, MaxLabs: blocked.has(RESEARCH_ADMINISTRATION) ? null : row.MaxLabs })) : rows)
 // The views a visit leaves behind; the path view opens on a tech and is never the remembered one.
 const STORED_VIEWS = ['fields', 'lines']
 
@@ -104,6 +110,7 @@ export default {
   },
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID']),
+    ...mapGetters('capabilities', ['blockedBonuses']),
 
     rootStyle() {
       const appearance = activeAppearance()
@@ -369,6 +376,8 @@ export default {
     // Each running project with its colony, scientist and the labs' output; RP a year follows from them.
     projects: {
       get: tracked('projects', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
@@ -387,7 +396,7 @@ export default {
           left join FCT_CommanderBonuses as JOI_Admin on JOI_Admin.CommanderID = FCT_Commander.CommanderID and JOI_Admin.BonusID = 27
           where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
 
-        return rows
+        return gated(rows, blocked)
       }),
       default: [],
     },
@@ -443,6 +452,8 @@ export default {
     // The race's scientists with no project: who could start something.
     scientists: {
       get: tracked('scientists', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
@@ -452,7 +463,7 @@ export default {
           left join FCT_CommanderBonuses as JOI_Admin on JOI_Admin.CommanderID = FCT_Commander.CommanderID and JOI_Admin.BonusID = 27
           where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType = 3 and FCT_Commander.CommandType = 0 and ${SERVING_COMMANDER}`)
 
-        return Object.freeze(rows)
+        return Object.freeze(gated(rows, blocked))
       }),
       default: [],
     },

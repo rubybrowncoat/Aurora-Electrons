@@ -126,8 +126,8 @@ import { jumpLinks, loadJumpPoints } from '../utilities/jump-graph'
 import { bestStabilisation, stabilisationDays, stabilisationMultiplier, timeLeft } from '../utilities/lagrange'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
-import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
-import { loadFormulaVersion } from '../utilities/transport'
+import { describeResult, describeRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { gateGaps, loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -138,7 +138,7 @@ const INPUT_LABELS = {
   orders: 'stabilisation orders',
   formulaVersion: 'the save\'s schema',
 }
-// DIM_ComponentType 'Jump Point Stabilisation', DIM_MoveAction 'Stabilise Lagrange Point', the Production bonus.
+// DIM_ComponentType 'Jump Point Stabilisation', DIM_MoveAction 'Stabilise Lagrange Point', the Production bonus. The capability check confirms that the save's component type 29 and bonus 5 are those (`unverified`).
 const STABILISATION_COMPONENT = 29
 const STABILISE_ACTION = 217
 const PRODUCTION_BONUS = 5
@@ -237,9 +237,27 @@ export default {
       })
     },
 
+    // What the save's lookup rows leave unconfirmed of the two IDs this page reads (component type 29, Jump Point Stabilisation, and the Production bonus, 5), from the capability check (store/capabilities.js): [] when both read as expected, one text while the check has not answered for the copy now open.
+    unverified() {
+      return gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] })
+    },
+
+    // The columns of the stabilisation ships' read the save lacks (the report's optional 'ships' input): the map and the saved points do not need them, so only the ships go without.
+    missingShipFields() {
+      const report = this.$store.getters['capabilities/report']('/lagrange')
+      const entry = report && report.degraded.find((degraded) => degraded.key === 'ships')
+
+      return entry ? entry.fields : []
+    },
+
+    // Why the stabilisation ships and every figure built on them are left out: the unconfirmed lookup rows and the missing columns of the ships' read.
+    withheld() {
+      return [...this.unverified, ...this.missingShipFields.map((field) => `the save lacks ${field}`)]
+    },
+
     // The quickest usable ship (`ship`, a ship row) and the multiplier the times use (`result`, unavailable when no ship can time a stabilisation).
     best() {
-      return bestStabilisation(this.shipRows)
+      return this.withheld.length ? { ship: null, result: unavailable({ rule: 'lagrange.stabilisationMultiplier', missing: this.withheld }) } : bestStabilisation(this.shipRows)
     },
 
     bestShip() {
@@ -363,9 +381,9 @@ export default {
         },
         {
           label: 'Stabilisation ships',
-          value: usable.length ? `${usable.length} ${usable.length === 1 ? 'ship' : 'ships'}` : 'None',
+          value: this.withheld.length ? '—' : usable.length ? `${usable.length} ${usable.length === 1 ? 'ship' : 'ships'}` : 'None',
           title: describeResult(this.best.result),
-          note: this.bestShip ? `Quickest: ${this.bestShip.ShipName}, × ${this.fixed(this.bestShip.multiplier, 2)} time${unknownCrews ? `; ${unknownCrews} with crew unknown` : ''}` : this.shipRows.length ? `${this.shipRows.length} with a module, none usable: needs ${needs}` : 'Needs a ship with a jump point stabilisation module',
+          note: this.withheld.length ? `Not given: ${this.withheld.join('; ')}` : this.bestShip ? `Quickest: ${this.bestShip.ShipName}, × ${this.fixed(this.bestShip.multiplier, 2)} time${unknownCrews ? `; ${unknownCrews} with crew unknown` : ''}` : this.shipRows.length ? `${this.shipRows.length} with a module, none usable: needs ${needs}` : 'Needs a ship with a jump point stabilisation module',
         },
       ]
     },
@@ -507,7 +525,7 @@ export default {
     // Ships with a jump point stabilisation module, their captain's (CommandType 1) Production bonus, and whether a module is damaged.
     ships: {
       get: tracked('ships', async function () {
-        if (!this.database || !this.GameID || !this.RaceID) {
+        if (!this.database || !this.GameID || !this.RaceID || this.withheld.length) {
           return []
         }
 
@@ -526,7 +544,7 @@ export default {
       }),
       default: [],
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

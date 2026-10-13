@@ -2,7 +2,7 @@
 
 import { TONS_PER_HS } from './design-rules'
 import { STATUS, combine, envelope, getRule, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
-import { loadFormulaVersion } from './transport'
+import { loadFormulaVersion } from './capabilities'
 
 const COMPONENT_ENGINE = 1
 const COMPONENT_FUEL_TANK = 3

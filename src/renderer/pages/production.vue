@@ -204,10 +204,10 @@ import { crewFractionSql } from '../utilities/crew'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
-import { MINERALS, navalAdminChainBonus } from '../utilities/minerals'
+import { MINERALS, navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
-import { describeResult, describeRule, isAvailable, valueOrNull } from '../utilities/provenance'
+import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -222,6 +222,10 @@ const INPUT_LABELS = {
 }
 
 const SECONDS_PER_DAY = 86400
+
+// The commander bonus IDs of the research and terraforming rates: a figure that rests on one is not given when the save's lookup row for it is not confirmed (`blockedBonuses`).
+const RESEARCH_BONUS = 3
+const TERRAFORMING_BONUS = 9
 
 // Kinds of work, each with a fixed slot of the chart palette; short of minerals has the last.
 const TYPES = [
@@ -563,7 +567,9 @@ export default {
 
         // Orbital terraformers get their admin command chain's Terraforming bonus at the Industrial share.
         if (terraform.ParentCommandID) {
-          colony.orbital.push({ terraformers, adminBonus: navalAdminChainBonus(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID) })
+          const chain = navalAdminChain(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID)
+
+          colony.orbital.push({ terraformers, adminBonus: chain.bonus, adminGap: chain.unknown })
         } else {
           colony.planetary = { terraformers: colony.planetary === null ? terraformers : colony.planetary.terraformers === null || terraformers === null ? null : colony.planetary.terraformers + terraformers }
         }
@@ -571,7 +577,7 @@ export default {
         return map
       }, {})).map((terraform) => {
         const modifiers = this.populationProductionModifiers[terraform.PopulationID]
-        const rate = terraformRate(modifiers, { planetary: terraform.planetary, orbital: terraform.orbital, radius: terraform.Radius })
+        const rate = this.blockedBonuses.has(TERRAFORMING_BONUS) && terraform.orbital.length ? unavailable({ rule: 'production.terraformRate', missing: ['commander bonus 9, Terraforming (the save\'s lookup row is not confirmed)'] }) : terraformRate(modifiers, { planetary: terraform.planetary, orbital: terraform.orbital, radius: terraform.Radius })
         const finish = terraformFinish(modifiers, terraform, rate)
         const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
         const adding = flagOf(terraform.TerraformStatus)
@@ -899,15 +905,18 @@ export default {
     },
     researches: {
       get: tracked('researches', async function () {
+        const blocked = this.blockedBonuses
+
         if (!this.database || !this.GameID || !this.RaceID) {
           return { projects: [], queues: [] }
         }
 
         const [queues] = await this.database.query(`select FCT_ResearchQueue.CurrentProjectID, FCT_ResearchQueue.ResearchOrder, FCT_ResearchQueue.TechSystemID, FCT_TechSystem.Name, FCT_TechSystem.DevelopCost, DIM_TechType.FieldID as ProjectField from FCT_ResearchQueue inner join FCT_ResearchProject on FCT_ResearchProject.ProjectID = FCT_ResearchQueue.CurrentProjectID and FCT_ResearchProject.RaceID = ${this.RaceID} left join FCT_TechSystem on FCT_ResearchQueue.TechSystemID = FCT_TechSystem.TechSystemID left join DIM_TechType on DIM_TechType.TechTypeID = FCT_TechSystem.TechTypeID where FCT_ResearchQueue.GameID = ${this.GameID}`)
 
-        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
+        const [projects] = await this.database.query(`select FCT_ResearchProject.ProjectID as ID, FCT_Population.PopName, FCT_Population.PopulationID, FCT_ResearchProject.TechID as TechSystemID, FCT_TechSystem.Name, FCT_ResearchProject.Facilities, FCT_ResearchProject.ResearchPointsRequired as RemainingProduction, FCT_ResearchProject.Pause as Paused, COALESCE(VIR_ResearchBonus.CommanderBonus, 1) as CommanderBonus, VIR_ResearchBonus.CommanderField, VIR_ResearchBonus.CommandID as ScientistCommandID, FCT_ResearchProject.ResSpecID as ProjectField, FCT_AncientConstruct.ResearchField as AnomalyField, FCT_AncientConstruct.ResearchBonus as AnomalyBonus, COALESCE(case when VIR_ResearchBonus.CommanderField = FCT_ResearchProject.ResSpecID then VIR_ResearchBonus.CommanderBonus * 4 - 3 else VIR_ResearchBonus.CommanderBonus end, 1) as ActualCommanderResearchBonus, COALESCE(case when FCT_AncientConstruct.ResearchField = FCT_ResearchProject.ResSpecID then FCT_AncientConstruct.ResearchBonus else 1 end, 1) as ActualAnomalyBonus from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID left join FCT_TechSystem on FCT_ResearchProject.TechID = FCT_TechSystem.TechSystemID left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue as CommanderBonus, FCT_Commander.ResSpecID as CommanderField from FCT_Commander left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 3 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommanderType in (3,4) and FCT_Commander.CommandType = 7 and FCT_Commander.CommandID <> 0) as VIR_ResearchBonus on VIR_ResearchBonus.CommandID = FCT_ResearchProject.ProjectID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_AncientConstruct on FCT_SystemBody.SystemBodyID = FCT_AncientConstruct.SystemBodyID where FCT_ResearchProject.GameID = ${this.GameID} and FCT_ResearchProject.RaceID = ${this.RaceID}`)
 
-        return { projects, queues }
+        // A project with a scientist has the figure of the Research bonus the save's lookup row does not confirm left unknown, never read as no bonus.
+        return { projects: blocked.has(RESEARCH_BONUS) ? projects.map((project) => (project.ScientistCommandID === null ? project : { ...project, CommanderBonus: null, ActualCommanderResearchBonus: null })) : projects, queues }
       }),
       default: { projects: [], queues: [] },
     },
@@ -970,7 +979,9 @@ export default {
           return {}
         }
 
-        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 9, share: 'Industrial' })
+        const { ranks, blocked } = await this.capabilityGates('/production')
+
+        return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 9, share: 'Industrial', ranks, blocked })
       }),
       default: {},
     },

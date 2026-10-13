@@ -1,6 +1,6 @@
 // How the Mineral Outlook page's figures are built as provenance results (utilities/provenance.js): what the race holds, what its mines take, a mineral's production, use, net and runway, a deposit's forecast, the stockpile projection and the industry queue's demand. The plain numbers stay in minerals.js (`surfaceRate`, `orbitalMinerRate`, `depositForecast`, `stockProjection`, `annualQueueDemand`); each builder here checks that the inputs it reads are there, calls them, and returns a result that names its rule, its missing inputs and its assumptions. A figure with a missing input is unavailable (a dash on screen), never 0.
 
-import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalMinerRate, stockProjection, surfaceRate } from './minerals'
+import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalChainGap, orbitalMinerRate, stockProjection, surfaceRate } from './minerals'
 import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
 
 const VERSIONS = ['2.7.x']
@@ -133,7 +133,9 @@ const LABELS = {
   OriginalAcc: 'original accessibility',
 }
 
-const labelled = (fields, row) => fields.filter((field) => !finite(row[field])).map((field) => LABELS[field] || field)
+const BONUS_FIELDS = ['GovernorBonus', 'SectorBonus', 'CommanderBonus']
+
+const labelled = (fields, row) => fields.filter((field) => !finite(row[field])).map((field) => `${LABELS[field] || field}${row.BonusWithheld && BONUS_FIELDS.includes(field) ? ` (${row.BonusWithheld})` : ''}`)
 
 const SURFACE_FIELDS = ['ManualMineCount', 'AutomatedMineCount', 'CivilianMineCount', 'MineProduction', 'Accessibility', 'GovernorBonus', 'SectorBonus', 'Efficiency', 'StabilityModifier', 'RadiationModifier', 'PoliticalModifier']
 
@@ -168,7 +170,8 @@ const ORBITAL_FIELDS = ['MiningModules', 'MineProduction', 'CommanderBonus', 'Ac
 
 // What an orbital miner takes a year from the deposit its row names, as a result of 'mineral.orbitalRate' (`orbitalMinerRate`, with the naval admins' chain bonus). A column the row lacks makes it unavailable.
 export const orbitalRateResult = (row, navalAdmins) => {
-  const missing = [...labelled(ORBITAL_FIELDS, row), ...(row.ClassCrew > 0 ? labelled(['CurrentCrew'], row) : [])]
+  const chain = orbitalChainGap(row, navalAdmins)
+  const missing = [...labelled(ORBITAL_FIELDS, row), ...(row.ClassCrew > 0 ? labelled(['CurrentCrew'], row) : []), ...(chain ? [chain] : [])]
 
   return missing.length ? unavailable({ rule: 'mineral.orbitalRate', missing }) : ofRule({ rule: 'mineral.orbitalRate', value: orbitalMinerRate(row, navalAdmins), inputs: { present: ['the ship\'s mining modules and crew'] } })
 }

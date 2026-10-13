@@ -274,7 +274,7 @@ import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAt
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
-import { loadFormulaVersion } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
 
 cytoscape.use(cxtmenu)
 cytoscape.use(cola)
@@ -3028,7 +3028,7 @@ export default {
       }),
       default: {},
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape. The colony costs are checked for that version only.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape. The colony costs are checked for that version only.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

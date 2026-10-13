@@ -31,6 +31,9 @@ export const POSTS = {
 // Bonuses stored as ratings, not multipliers.
 const RATINGS = new Set([25, 27])
 
+// The bonus IDs the save's lookup rows do not confirm (`blockedBonuses` of utilities/capabilities.js, from the capability check): none unless a caller passes some. A figure that rests on the meaning of one of them is not given.
+const NONE = new Set()
+
 export const COLONY_ADMINISTRATION = 25
 export const RESEARCH_ADMINISTRATION = 27
 export const RESEARCH = 3
@@ -58,6 +61,22 @@ export const RETIRE_STATUSES = {
 
 // SQL condition for the commanders still serving. The game saves a retired or dead commander only when the player keeps them (`RetainRetired`) or they are a prisoner; `RetireStatus` is 0 while they serve, and a captured one keeps 0 with `Prisoner` set.
 export const SERVING_COMMANDER = 'FCT_Commander.RetireStatus = 0 and FCT_Commander.Prisoner = 0'
+
+// The SQL the roster's queries take for the columns the save has: `groups` is { rank, age } from the capability check of /commanders (utilities/capabilities.js `SOFT`), null while it has not answered, which reads as a save that has everything. A group the save lacks is selected as nulls (never 0, so the figures built on it are unavailable) and its joins are left out: `rankColumns`, `rankLevel` and `classRank` for the ranks, `ageColumn` for the species' graduation age.
+export const rosterParts = (groups, { GameID, RaceID }) => {
+  const ranked = !groups || groups.rank !== false
+  const aged = !groups || groups.age !== false
+
+  return {
+    rankColumns: ranked ? 'FCT_Ranks.RankName, FCT_Ranks.RankAbbrev' : 'null as RankName, null as RankAbbrev',
+    rankLevel: ranked ? 'VIR_Levels.Lowest - FCT_Ranks.Priority + 1 as RankLevel' : 'null as RankLevel',
+    classRank: ranked ? 'FCT_ShipClass.RankRequired' : 'null as RankRequired',
+    ageColumn: aged ? 'FCT_Species.GraduationAge' : 'null as GraduationAge',
+    ageJoin: aged ? 'left join FCT_Species on FCT_Species.SpeciesID = FCT_Commander.SpeciesID' : '',
+    rankJoin: ranked ? 'left join FCT_Ranks on FCT_Ranks.RankID = FCT_Commander.RankID' : '',
+    levelJoin: ranked ? `left join (select FCT_Ranks.RankType, max(FCT_Ranks.Priority) as Lowest from FCT_Ranks where FCT_Ranks.GameID = ${GameID} and FCT_Ranks.RaceID = ${RaceID} group by FCT_Ranks.RankType) as VIR_Levels on VIR_Levels.RankType = FCT_Ranks.RankType` : '',
+  }
+}
 
 // 'prisoner', 'dead' or 'retired' for an FCT_Commander row. A prisoner who is discharged or executed in captivity keeps the flag, so the status decides first.
 export const formerKind = ({ RetireStatus, Prisoner }) => (RETIRE_STATUSES[RetireStatus] || {}).kind || (Prisoner ? 'prisoner' : 'retired')
@@ -231,14 +250,14 @@ registerRule({
   note: 'The calendar date of a career record: the game\'s start year plus the stored time in seconds. A record with no stored time, or a save with no start year, has no date.',
 })
 
-// "6:1.15,25:6" -> { 6: 1.15, 25: 6 }. An entry with no value ("9:") is a stored bonus with no value: null.
-export const parseBonuses = (text) => Object.fromEntries((text || '').split(',').filter(Boolean).map((pair) => {
+// "6:1.15,25:6" -> { 6: 1.15, 25: 6 }. An entry with no value ("9:") is a stored bonus with no value: null. So is the entry of a bonus in `blocked`, whose stored value the save's lookup row does not let the page read as that bonus, so that every figure built on the value is unknown.
+export const parseBonuses = (text, blocked = NONE) => Object.fromEntries((text || '').split(',').filter(Boolean).map((pair) => {
   const [id, value] = pair.split(':')
 
-  return [Number(id), value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)]
+  return [Number(id), blocked.has(Number(id)) || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)]
 }))
 
-export const formatBonus = (bonusId, value) => (!isKnownNumber(value) ? UNKNOWN_TEXT : RATINGS.has(bonusId) ? `${Math.round(value)}` : `${value >= 1 ? '+' : '−'}${Math.round(Math.abs(value - 1) * 100)}%`)
+export const formatBonus = (bonusId, value, blocked = NONE) => (!isKnownNumber(value) || blocked.has(bonusId) ? UNKNOWN_TEXT : RATINGS.has(bonusId) ? `${Math.round(value)}` : `${value >= 1 ? '+' : '−'}${Math.round(Math.abs(value - 1) * 100)}%`)
 
 // The commander's career tag for a roster: the abbreviation of the rank, the field of a scientist, 'Administrator' for an administrator and a dash for an officer whose rank is not stored.
 export const rankLabel = (person) => person.RankAbbrev || (person.CommanderType === 3 ? person.FieldName || 'Scientist' : person.CommanderType === 2 ? 'Administrator' : UNKNOWN_TEXT)
@@ -479,12 +498,12 @@ export const captainlessShips = (ships) => {
   return { value, unknown, result: countOf({ rule: CAPTAINLESS, value, unknown, missing: `the class modules of ${unknown} ships without a captain`, units: 'ships' }) }
 }
 
-// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain. A class whose module counts or required rank are not stored has no post.
-export const specialistPost = (ship) => {
+// The officer post and bonus that matter on a specialist ship, as a result of 'commanders.specialistPost' with the value { post, bonusId, label, level, share }. Terraformers and miners use their captain's full bonus. Survey ships use their science officer's full Survey bonus when the class has a Science Department, else half their captain's. Secondary officers rank one below the captain. A class whose module counts or required rank are not stored has no post. `blocked` are the bonus IDs the save's lookup rows do not confirm: a post that rests on one is unavailable, naming it.
+export const specialistPost = (ship, blocked = NONE) => {
   const where = ship.ClassName || `class of ship ${ship.ShipID}`
   const lacking = (columns) => columns.filter((column) => !isKnownNumber(ship[column])).map((column) => `${column} of ${where}`)
   const post = (value) => {
-    const missing = lacking(['RankRequired'])
+    const missing = [...lacking(['RankRequired']), ...(blocked.has(value.bonusId) ? [`the save's row for bonus ${value.bonusId}, ${value.label}`] : [])]
 
     return missing.length ? unavailable({ rule: POST, missing }) : ofRule({ rule: POST, value: { ...value, level: value.post === 'science' ? Math.max(1, ship.RankRequired - 1) : ship.RankRequired }, inputs: { present: ['class modules', 'RankRequired'] } })
   }
@@ -510,8 +529,8 @@ export const specialistPost = (ship) => {
   return post({ post: 'captain', bonusId: SURVEY, label: 'Survey (half for a captain)', share: 0.5 })
 }
 
-// Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`. Returns { rows, unrated }: `rows` are the posts to improve or vacant, each with a result of 'commanders.shipBonus' that names a candidate left out for a missing bonus or rank (`unknownCandidates` counts them), and `unrated` the ships that cannot be rated, each { ship, result } with the result unavailable. A vacant post stays a row whether or not an officer is better. A post holder not among the officers, or whose bonus has no value, cannot be rated.
-export const shipSuggestions = (ships, officers, names = {}) => {
+// Specialist ships where an unassigned naval officer of the post's rank has a better bonus than the officer in it (or the post is empty). `officers`: naval officers with `bonuses` and `RankLevel`. Returns { rows, unrated }: `rows` are the posts to improve or vacant, each with a result of 'commanders.shipBonus' that names a candidate left out for a missing bonus or rank (`unknownCandidates` counts them), and `unrated` the ships that cannot be rated, each { ship, result } with the result unavailable. A vacant post stays a row whether or not an officer is better. A post holder not among the officers, or whose bonus has no value, cannot be rated. `blocked` as for `specialistPost`.
+export const shipSuggestions = (ships, officers, names = {}, blocked = NONE) => {
   const idle = idleOf(officers)
   const byId = Object.fromEntries(officers.map((officer) => [officer.CommanderID, officer]))
   const ranking = new Map()
@@ -530,7 +549,7 @@ export const shipSuggestions = (ships, officers, names = {}) => {
   }
 
   ships.forEach((ship) => {
-    const postResult = specialistPost(ship)
+    const postResult = specialistPost(ship, blocked)
 
     if (!isAvailable(postResult)) {
       unrated.push({ ship, result: postResult })
@@ -602,8 +621,14 @@ export const researchMultiplier = (scientist, inField) => {
   return missing.length ? unavailable({ rule: MULTIPLIER, missing }) : ofRule({ rule: MULTIPLIER, value: inField ? 4 * bonus - 3 : bonus, inputs: { present: ['Research bonus', 'research field'] } })
 }
 
-// Research projects where an unassigned scientist of the project's field, able to run its labs (Research Administration >= labs), would research faster than the scientist on it. Returns { rows, unrated }: `rows` carry the multipliers as results, `candidateLabs` and a result of 'commanders.researchSuggestion', and `unrated` the projects that cannot be rated, each { project, result } with the result unavailable. A project with no scientist researches at ×1. A project whose labs or field, a holder who is not among the scientists, or a scientist whose Research bonus, Research Administration or field is not stored cannot be rated unless no unassigned scientist could be its candidate.
-export const researchSuggestions = (projects, scientists) => {
+// Research projects where an unassigned scientist of the project's field, able to run its labs (Research Administration >= labs), would research faster than the scientist on it. Returns { rows, unrated }: `rows` carry the multipliers as results, `candidateLabs` and a result of 'commanders.researchSuggestion', and `unrated` the projects that cannot be rated, each { project, result } with the result unavailable. A project with no scientist researches at ×1. A project whose labs or field, a holder who is not among the scientists, or a scientist whose Research bonus, Research Administration or field is not stored cannot be rated unless no unassigned scientist could be its candidate. With a `blocked` Research or Research Administration bonus no project can be rated.
+export const researchSuggestions = (projects, scientists, blocked = NONE) => {
+  const unconfirmed = [RESEARCH, RESEARCH_ADMINISTRATION].filter((bonusId) => blocked.has(bonusId))
+
+  if (unconfirmed.length) {
+    return { rows: [], unrated: projects.map((project) => ({ project, result: unavailable({ rule: PROJECT, missing: unconfirmed.map((bonusId) => `the save's row for bonus ${bonusId}`) }) })) }
+  }
+
   const idle = idleOf(scientists)
   const byId = Object.fromEntries(scientists.map((scientist) => [scientist.CommanderID, scientist]))
   const rows = []

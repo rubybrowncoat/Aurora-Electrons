@@ -685,8 +685,14 @@ export const terraformRate = (modifiers, { planetary = null, orbital = [], radiu
     missing.push('the colony\'s terraforming installations')
   }
 
-  if (orbital.some((group) => !isNumber(group.terraformers) || !isNumber(group.adminBonus))) {
+  if (orbital.some((group) => !isNumber(group.terraformers) || (!isNumber(group.adminBonus) && !group.adminGap))) {
     missing.push('a terraformer ship\'s crew or its class crew')
+  }
+
+  for (const group of orbital) {
+    if (group.adminGap) {
+      missing.push(group.adminGap)
+    }
   }
 
   if (!isNumber(radius) || !(radius > 0)) {

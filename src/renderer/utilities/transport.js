@@ -140,17 +140,6 @@ registerRule({
   note: 'The shortest route over the jump points the race has explored, jumps first; the search was checked against the game\'s own routes (docs `fleet`).',
 })
 
-// FCT_Game.AllowCMC came with 2.7, and a save carries no version label, so the shape of the schema is the only evidence of the game version there is. A 2.7-shaped save is taken as 2.7.x, the formula version these rules are stated for; any other shape gives null, and the landing rule is then not settled (`landingThreshold`).
-export const STATED_FORMULA_VERSION = '2.7.x'
-
-const FORMULA_SHAPE_SQL = "select count(*) as Shaped from pragma_table_info('FCT_Game') where name = 'AllowCMC'"
-
-export const loadFormulaVersion = async (database) => {
-  const [[row]] = await database.query(FORMULA_SHAPE_SQL)
-
-  return row && row.Shaped > 0 ? STATED_FORMULA_VERSION : null
-}
-
 export const UNVERIFIED_VERSION = 'the 2.7.x landing and shuttle rules, though the save\'s game version is not verified'
 
 // The formula version in words for a note.

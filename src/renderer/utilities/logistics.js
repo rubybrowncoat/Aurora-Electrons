@@ -2,7 +2,8 @@
 
 import { crewFraction } from './crew'
 import { roundToDecimal } from './math'
-import { navalAdminChainBonus } from './minerals'
+import { navalAdminChain } from './minerals'
+import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
 import { combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { totalOf } from './production'
 
@@ -221,12 +222,21 @@ export const maintenanceLocations = ({ colonies, fleets, modifierOf, maintenance
 // Fuel a class burns per ship and year at full power: engine power x litres per EP-hour.
 export const fullPowerBurn = (shipClass) => shipClass.EnginePower * shipClass.FuelEfficiency * HOURS_PER_YEAR
 
+// The rows of the page's harvesters query with the commander's Mining bonus left unknown (and `BonusWithheld` set to why) when `blocked` holds the Mining bonus, so no fuel rate rests on a bonus the save does not name as the planners expect.
+export const gateHarvesterRows = (rows, blocked) => (blocked.has(MINING_BONUS) ? rows.map((row) => ({ ...row, MiningBonus: null, BonusWithheld: MINING_WITHHELD })) : rows)
+
 // The naval admin Mining multiplier a harvester earns: its fleet's command up the chain, and for a fleet with no command the race's root command. `admins`: as `loadNavalAdmins` gives them; `ship`: { SystemID, NavalAdminCommandID }.
-export const harvesterAdminBonus = (admins, ship) => {
+const harvesterChain = (admins, ship) => {
   const root = Object.values(admins).find((admin) => !admin.ParentCommandID)
 
-  return navalAdminChainBonus(admins, ship.SystemID, ship.NavalAdminCommandID || (root ? root.NavalAdminCommandID : 0))
+  return navalAdminChain(admins, ship.SystemID, ship.NavalAdminCommandID || (root ? root.NavalAdminCommandID : 0))
 }
+
+// The multiplier, null while the chain is not known (`harvesterAdminGap` says why).
+export const harvesterAdminBonus = (admins, ship) => harvesterChain(admins, ship).bonus
+
+// Why the naval admin chain of a harvester is not known (a rank or a lookup row the save does not settle), as text, null when it is.
+export const harvesterAdminGap = (admins, ship) => harvesterChain(admins, ship).unknown
 
 // Reasons a harvester gives no fuel now, in the order the game tests them: no undamaged module, no room in the undamaged tanks (any room at all is filled), not at a gas giant or super-Jovian (found by the fleet's coordinates), no Sorium in the deposit. Null when it harvests.
 // Three reasons mean an input is not known, and then the output is unknown rather than 0: modules or tanks the class rows do not give, and a body the race has not surveyed (the game harvests there; the deposit is not visible).
@@ -271,17 +281,21 @@ const UNVERIFIED_SAVE = 'The save is not 2.7-shaped and has no version label, so
 
 const assumptionsFor = (rule, version) => (ruleSupports(rule, version) === true ? [] : [UNVERIFIED_SAVE])
 
+// What the commander's Mining bonus and the naval admin chain lack: the commander's bonus left unknown while the save's lookup row for it is not confirmed (`BonusWithheld`), and the chain's reason (`adminGap`).
+const bonusGaps = (ship, adminGap) => [...(Number.isFinite(ship.MiningBonus) ? [] : [ship.BonusWithheld ? `the commander's Mining bonus (${ship.BonusWithheld})` : 'the commander\'s Mining bonus']), ...(adminGap ? [adminGap] : [])]
+
 // The inputs of the unconstrained rate the save does not give.
-const rateMissing = (ship) => [
+const rateMissing = (ship, gaps = []) => [
   ...(Number.isFinite(ship.Harvesters) ? [] : ['the undamaged harvester modules']),
   ...(crewFraction(ship) === null ? ['the ship\'s crew'] : []),
   ...(!ship.SystemBodyID ? ['a gas giant or super-Jovian under the fleet'] : !ship.Surveyed ? ['the Sorium deposit (the body is not surveyed)'] : []),
+  ...gaps,
 ]
 
 // A harvester's unconstrained fuel per year, as a provenance result of 'logistics.harvesterOutput': undamaged modules x the racial rate x the commander's and naval admin Mining bonuses x the deposit's accessibility x the crew share. Unavailable (not 0) while the modules or the deposit are not known. Ignores the tanks: it is the rate at which the harvester works, not fuel that fits.
-const harvesterRate = (ship, admin, version) => {
+const harvesterRate = (ship, admin, version, gaps) => {
   const rule = 'logistics.harvesterOutput'
-  const missing = rateMissing(ship)
+  const missing = rateMissing(ship, gaps)
 
   if (missing.length) {
     return unavailable({ rule, missing, present: ['the racial rate', 'the commander and naval admin bonuses', 'the crew'] })
@@ -292,18 +306,20 @@ const harvesterRate = (ship, admin, version) => {
   return envelope({ value, status: statusFor(rule, version), rule, inputs: { present: ['the undamaged modules', 'the racial rate', 'the commander and naval admin bonuses', 'the crew', 'the deposit'] }, assumptions: assumptionsFor(rule, version) })
 }
 
-// One harvester's standing: why it works or not, its undamaged modules, tank room, unconstrained rate (a result and its value, null when unknown) and the years the rate takes to fill the room and the deposit's litres. `ship` is a row of the page's harvesters query; `admin` the naval admin multiplier (`harvesterAdminBonus`); `version` the formula version.
-export const harvesterBasis = (ship, { admin = 1, version = null } = {}) => {
+// One harvester's standing: why it works or not, its undamaged modules, tank room, unconstrained rate (a result and its value, null when unknown) and the years the rate takes to fill the room and the deposit's litres. `ship` is a row of the page's harvesters query; `admin` the naval admin multiplier (`harvesterAdminBonus`) and `adminGap` why it is not known (`harvesterAdminGap`); `version` the formula version.
+export const harvesterBasis = (ship, { admin = 1, adminGap = null, version = null } = {}) => {
   const idle = harvesterIdleReason(ship)
   const crew = crewFraction(ship)
+  const gaps = bonusGaps(ship, adminGap)
   const room = Number.isFinite(ship.FuelCapacity) ? Math.max(0, ship.FuelCapacity - ship.Fuel) : null
-  const rate = harvesterRate(ship, admin, version)
+  const rate = harvesterRate(ship, admin, version, gaps)
   const perYear = rate.value
   const depositLitres = ship.Surveyed && Number.isFinite(ship.SoriumAmount) ? ship.SoriumAmount * LITRES_PER_TON : null
 
   return {
     idle,
-    unknown: harvesterReasonIsUnknown(idle) || (idle === null && crew === null),
+    unknown: harvesterReasonIsUnknown(idle) || (idle === null && (crew === null || gaps.length > 0)),
+    gaps,
     crew,
     modules: ship.Harvesters,
     classModules: ship.ClassHarvesters,
@@ -325,6 +341,7 @@ export const harvesterObtainable = (basis, horizon, version = null) => {
       ...(Number.isFinite(basis.modules) ? [] : ['the undamaged harvester modules']),
       ...(Number.isFinite(basis.capacity) ? [] : ['the undamaged tank capacity']),
       ...(basis.crew === null ? ['the ship\'s crew'] : []),
+      ...basis.gaps,
       ...(basis.idle === 'Not surveyed' ? ['the Sorium deposit (the body is not surveyed)'] : []),
     ]
 
@@ -345,10 +362,10 @@ export const harvesterObtainable = (basis, horizon, version = null) => {
   return { result: envelope({ value: litres, status, rule, inputs, assumptions }), litres, limit }
 }
 
-// A race's harvesters over `horizon` years, one row per ship: the row of the query with `basis` fields, `obtainable` (a result), `obtainableLitres`, `limit`, `depositYears` (how long the body's deposit lasts at the rate of the ships that can fill their tanks now, null when any ship there is unknown) and `ships` and `overDeposit` for bodies shared by several. Ships over one body take from one deposit: the report's `litres` holds each body's total to the deposit. `unknown` counts ships whose output is unknown. `admins`: as `loadNavalAdmins` gives them.
+// A race's harvesters over `horizon` years, one row per ship: the row of the query with `basis` fields, `obtainable` (a result), `obtainableLitres`, `limit`, `depositYears` (how long the body's deposit lasts at the rate of the ships that can fill their tanks now, null when any ship there is unknown) and `ships` and `overDeposit` for bodies shared by several. Ships over one body take from one deposit: the report's `knownLitres` holds each body's total to the deposit, of the ships whose output is known only. `unknown` counts ships whose output is unknown and `gaps` names what they lack (a lookup row, a rank, a crew); `litres` is the total of every ship and is null while any ship's output is unknown, never the lower bound of the known ones. `admins`: as `loadNavalAdmins` gives them.
 export const harvesterReport = (ships, { admins, horizon, version = null }) => {
   const entries = ships.map((ship) => {
-    const basis = harvesterBasis(ship, { admin: harvesterAdminBonus(admins, ship), version })
+    const basis = harvesterBasis(ship, { admin: harvesterAdminBonus(admins, ship), adminGap: harvesterAdminGap(admins, ship), version })
 
     return { ship, basis, taken: harvesterObtainable(basis, horizon, version) }
   })
@@ -375,14 +392,19 @@ export const harvesterReport = (ships, { admins, horizon, version = null }) => {
     body.years = !body.unknown && body.depositLitres !== null && body.perYear > 0 ? body.depositLitres / body.perYear : null
   })
 
+  const unknown = entries.filter(({ taken }) => taken.litres === null)
+  const known = Object.values(bodies).reduce((sum, body) => sum + body.litres, 0)
+
   return {
     rows: entries.map(({ ship, basis, taken }) => {
       const body = bodies[ship.SystemBodyID] || null
 
       return { ...ship, ...basis, obtainable: taken.result, obtainableLitres: taken.litres, limit: taken.limit, depositYears: body ? body.years : null, ships: body ? body.ships : 0, overDeposit: body !== null && body.depositLitres !== null && body.demand > body.depositLitres }
     }),
-    litres: Object.values(bodies).reduce((sum, body) => sum + body.litres, 0),
-    unknown: entries.filter(({ taken }) => taken.litres === null).length,
+    litres: unknown.length ? null : known,
+    knownLitres: known,
+    unknown: unknown.length,
+    gaps: [...new Set(unknown.flatMap(({ taken }) => taken.result.inputs.missing))],
   }
 }
 

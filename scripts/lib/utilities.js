@@ -14,10 +14,10 @@ const dataUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).t
 
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const moduleUrl = (name, urls, stubs) => {
+const moduleUrl = (name, urls, stubs, base) => {
   if (!urls.has(name)) {
-    const source = fs.readFileSync(path.join(directory, `${name}.js`), 'utf8')
-    const relative = source.replace(/from '(\.\.?\/[\w\-/]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), urls, stubs)}'`)
+    const source = fs.readFileSync(path.join(base, `${name}.js`), 'utf8')
+    const relative = source.replace(/from '(\.\.?\/[\w\-/]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), urls, stubs, base)}'`)
     const stubbed = Object.entries(stubs).reduce((text, [specifier, stub]) => text.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), `from '${dataUrl(stub)}'`), relative)
 
     urls.set(name, dataUrl(stubbed))
@@ -26,13 +26,13 @@ const moduleUrl = (name, urls, stubs) => {
   return urls.get(name)
 }
 
-// The named utilities, keyed by file name: loadUtilities(['logistics', 'provenance']) gives { logistics, provenance }. `options.stubs` is { [package specifier]: module source } for the packages those utilities import.
-const loadUtilities = async (names, { stubs = {} } = {}) => {
+// The named utilities, keyed by file name: loadUtilities(['logistics', 'provenance']) gives { logistics, provenance }. `options.directory` loads from another copy of the utilities folder (a check that mutates one); `options.stubs` is { [package specifier]: module source } for the packages those utilities import.
+const loadUtilities = async (names, { stubs = {}, directory: base = directory } = {}) => {
   const urls = new Map()
   const modules = {}
 
   for (const name of names) {
-    modules[name] = await import(moduleUrl(name, urls, stubs))
+    modules[name] = await import(moduleUrl(name, urls, stubs, base))
   }
 
   return modules

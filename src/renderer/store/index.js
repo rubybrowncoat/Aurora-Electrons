@@ -106,7 +106,7 @@ export const actions = {
     })
   },
 
-  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go. The new copy counts as read only once the freshness probe has read it.
+  // The save changed on disk: open it again. The copy it replaces stops answering, so the work still queued or running on it can't hold the app up, and what was read from it is let go. The new copy counts as read only once the freshness probe has read it, and as supported only once the capability preflight has checked it.
   renew ({ commit, dispatch, state }, { storagePath }) {
     const previous = state.database
     let database = null
@@ -125,6 +125,7 @@ export const actions = {
     commit('freshness/opened', { at: Date.now() })
     dropQueryCache(previous)
     dispatch('freshness/probe')
+    dispatch('capabilities/preflight')
 
     return retireDatabase(previous)
   },

@@ -302,6 +302,7 @@ import { sectionStyle } from '../components/navigation/section-style'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import capabilityGates from '../mixins/capability-gates'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -393,6 +394,7 @@ const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}
 export default {
   components: { BodyDetail, LoadState, ProvenanceMark, SystemSelect },
   mixins: [
+    capabilityGates,
     deepLink,
     loadState(INPUT_LABELS),
     persistedView({
@@ -981,7 +983,9 @@ export default {
           return NO_OUTLOOK
         }
 
-        return kept(this, 'outlook', [this.GameID, this.RaceID], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+        const { ranks, blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'outlook', [this.GameID, this.RaceID, ranks, [...blocked].sort().join()], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID, ranks, blocked }).then(Object.freeze))
       }),
       default: NO_OUTLOOK,
     },

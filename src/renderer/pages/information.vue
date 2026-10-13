@@ -178,7 +178,8 @@ import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
-import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, loadFormulaVersion, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
+import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -782,7 +783,7 @@ export default {
       }),
       default: [],
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

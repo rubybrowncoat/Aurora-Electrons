@@ -1,7 +1,7 @@
 // The civilian mining complex policy audit of the Mineral Breakdown: per colony of the race whose complexes produce, whether the race buys or taxes their output, where a bought output goes by mass driver, which of the transfer's prerequisites are missing or not known, and what the other choice would change. The purchase and tax rates are game constants the save does not store, held to the version they were reproduced for. Evidence: docs/plans/backlog/evidence/AE-076-01.md.
 
 import { massDriverRateResult, surfaceRate } from './minerals'
-import { surfaceMiningQuery } from './mining-data'
+import { gateMiningRows, surfaceMiningQuery } from './mining-data'
 import { combine, isAvailable, ofRule, registerRule, ruleSupports, unavailable } from './provenance'
 
 const POLICY_VERSIONS = ['2.7.x']
@@ -119,14 +119,14 @@ const DRIVER_COLUMNS = 'sum(case when DIM_PlanetaryInstallation.MassDriverValue 
 // One row per colony of the race with civilian mining complexes: the stored choice, what decides whether the complexes produce, the colony's drivers and its destination with that colony's race, system and drivers.
 const policyQuery = ({ GameID, RaceID }) => `select FCT_Population.PopulationID, FCT_Population.SystemID, FCT_Population.PurchaseCivilianMinerals, FCT_Population.MassDriverDest, FCT_Race.NPR, FCT_Race.MineProduction, FCT_SystemBody.RadiationLevel, VIR_Civilian.Complexes, VIR_Civilian.CivilianCapacity, VIR_Civilian.Gaps as CivilianGaps, coalesce(VIR_Drivers.Drivers, 0) as Drivers, coalesce(VIR_Drivers.Gaps, 0) as DriverGaps, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount > 0) as Deposits, (select count(*) from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount is null) as DepositGaps, VIR_Destination.PopulationID as DestinationID, VIR_Destination.PopName as DestinationName, VIR_Destination.RaceID as DestinationRaceID, VIR_Destination.SystemID as DestinationSystemID, coalesce(VIR_DestinationDrivers.Drivers, 0) as DestinationDrivers, coalesce(VIR_DestinationDrivers.Gaps, 0) as DestinationDriverGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID inner join (${installations(GameID, ' and DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0', 'sum(FCT_PopulationInstallations.Amount) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue) as CivilianCapacity, sum(case when FCT_PopulationInstallations.Amount is null then 1 else 0 end) as Gaps')}) as VIR_Civilian on VIR_Civilian.PopID = FCT_Population.PopulationID left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_Drivers on VIR_Drivers.PopID = FCT_Population.PopulationID left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_Population.MassDriverDest and VIR_Destination.GameID = FCT_Population.GameID and FCT_Population.MassDriverDest > 0 left join (${installations(GameID, '', DRIVER_COLUMNS)}) as VIR_DestinationDrivers on VIR_DestinationDrivers.PopID = VIR_Destination.PopulationID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (VIR_Civilian.Complexes > 0 or VIR_Civilian.Gaps > 0)`
 
-// The race's complex colonies (`colonies`, by policyQuery) and the deposit rows of its colonies with civilian capacity (`surface`, mining-data.js `surfaceMiningQuery`), for `cmcPolicyRows`.
-export const loadCmcPolicy = async (database, { GameID, RaceID }) => {
+// The race's complex colonies (`colonies`, by policyQuery) and the deposit rows of its colonies with civilian capacity (`surface`, mining-data.js `surfaceMiningQuery`, with the Mining bonus left unknown for the `blocked` bonus IDs), for `cmcPolicyRows`.
+export const loadCmcPolicy = async (database, { GameID, RaceID, blocked = new Set() }) => {
   const [[colonies], [surface]] = await Promise.all([
     database.query(policyQuery({ GameID, RaceID })),
     database.query(surfaceMiningQuery({ GameID, RaceID })),
   ])
 
-  return Object.freeze({ colonies: Object.freeze(colonies), surface: Object.freeze(surface.filter((row) => row.CivilianMineCount > 0)) })
+  return Object.freeze({ colonies: Object.freeze(colonies), surface: Object.freeze(gateMiningRows(surface, blocked).filter((row) => row.CivilianMineCount > 0)) })
 }
 
 export const NO_CMC_POLICY = Object.freeze({ colonies: Object.freeze([]), surface: Object.freeze([]) })
@@ -173,7 +173,7 @@ const outputResult = (deposits) => {
   }
 
   const live = deposits.filter((row) => !(Number.isFinite(row.Amount) && row.Amount <= 0))
-  const missing = [...new Set(live.flatMap((row) => Object.keys(OUTPUT_COLUMNS).filter((column) => !Number.isFinite(row[column])).map((column) => OUTPUT_COLUMNS[column])))]
+  const missing = [...new Set(live.flatMap((row) => Object.keys(OUTPUT_COLUMNS).filter((column) => !Number.isFinite(row[column])).map((column) => (row.BonusWithheld && (column === 'GovernorBonus' || column === 'SectorBonus') ? row.BonusWithheld : OUTPUT_COLUMNS[column]))))]
 
   if (missing.length) {
     return unavailable({ rule: 'cmcPolicy.output', missing })
@@ -290,7 +290,7 @@ const stateOf = ({ choice, producing, target, source, receiver, throughput, ackn
 
 const verdictOf = (result) => (isAvailable(result) ? result.value : null)
 
-// The policy rows: one per complex colony whose complexes produce (or might: production not known), none for one whose complexes produce nothing, which `idle` counts. `RaceID` is the race the colonies belong to; `version` the save's formula version (transport.js `loadFormulaVersion`), which decides whether the rates hold; `acknowledged` the PopulationIDs whose taxation is acknowledged as intended.
+// The policy rows: one per complex colony whose complexes produce (or might: production not known), none for one whose complexes produce nothing, which `idle` counts. `RaceID` is the race the colonies belong to; `version` the save's formula version (capabilities.js `loadFormulaVersion`), which decides whether the rates hold; `acknowledged` the PopulationIDs whose taxation is acknowledged as intended.
 export const cmcPolicyRows = ({ colonies, surface }, { RaceID, version, acknowledged = [] }) => {
   const depositsBy = {}
   const acknowledgedIds = new Set(acknowledged)

@@ -83,7 +83,11 @@
 
       <!-- Provides the application the proper gutter -->
       <v-container fluid>
-        <router-view :key="$route.path" />
+        <capability-state v-if="capabilityReport && capabilityReport.status === 'unsupported'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
+        <template v-else>
+          <capability-state v-if="capabilityReport && capabilityReport.status === 'degraded'" :report="capabilityReport" :title="page.title" :checking="capabilityChecking" @retry="recheckCapabilities" />
+          <router-view :key="$route.path" />
+        </template>
         <section-nav :style="pageStyle" />
       </v-container>
     </v-main>
@@ -110,6 +114,7 @@ import PageTrail from '../components/navigation/PageTrail.vue'
 import SaveStatus from '../components/navigation/SaveStatus.vue'
 import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
+import CapabilityState from '../components/page/CapabilityState.vue'
 import SectionNav from '../components/page/SectionNav.vue'
 import { activeAppearance, appearanceStyle, applyMode, loadAppearance } from '../utilities/appearance'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
@@ -123,6 +128,7 @@ const FLYOUT_CLOSE_DELAY = 220
 
 export default {
   components: {
+    CapabilityState,
     EmpireAvatar,
     EmpireList,
     FlyoutPanel,
@@ -163,6 +169,11 @@ export default {
       peekLines: 'lines',
     }),
 
+    ...mapGetters('capabilities', {
+      capabilityStatus: 'status',
+      reportOf: 'report',
+    }),
+
     ...mapGetters([
       'config',
       'database',
@@ -186,6 +197,13 @@ export default {
     },
     page () {
       return pageByRoute[this.$route.path]
+    },
+    // What the capability check found of the open page (store/capabilities.js): null until it has answered, or if it failed, so the page then reads as before.
+    capabilityReport () {
+      return this.reportOf(this.$route.path)
+    },
+    capabilityChecking () {
+      return this.capabilityStatus === 'checking'
     },
     currentSection () {
       return this.railSections.find(({ id }) => id === this.page.section)
@@ -314,6 +332,9 @@ export default {
     }),
     ...mapActions('empires', {
       loadEmpires: 'load',
+    }),
+    ...mapActions('capabilities', {
+      recheckCapabilities: 'retry',
     }),
 
     loadFlyoutPeeks () {

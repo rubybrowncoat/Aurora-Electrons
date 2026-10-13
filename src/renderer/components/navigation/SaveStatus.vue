@@ -3,6 +3,7 @@
     <v-icon x-small :color="tone === 'bad' ? 'error' : null" class="save-status__icon">{{ icon }}</v-icon>
     <span class="save-status__text">{{ text }}</span>
     <v-btn v-if="status === 'failed'" x-small text color="error" class="save-status__retry" @click="reopen">Reopen save</v-btn>
+    <v-btn v-if="capabilityStatus === 'failed'" x-small text color="error" class="save-status__retry" data-capability-retry @click="recheck">Check again</v-btn>
   </div>
 </template>
 
@@ -30,7 +31,7 @@ const ageLabel = (ms) => {
   return `${Math.floor(seconds / 86400)} d`
 }
 
-// What the shell says about how current its picture of the save is (store/freshness.js): when the last successful read happened by the wall clock, the game date that read returned for the selected game, and whether the latest refresh is still running or has failed (the read shown is then stale). A page whose inputs failed adds which ones, with the age of their last good read.
+// What the shell says about how current its picture of the save is (store/freshness.js): when the last successful read happened by the wall clock, the game date that read returned for the selected game, and whether the latest refresh is still running or has failed (the read shown is then stale). A page whose inputs failed adds which ones, with the age of their last good read. The capability check of the copy (store/capabilities.js) adds a note only where the open page or the shell is not fully supported, and always a line to the hover text: the structure checked, apart from the formula version the schema stands for.
 export default {
   name: 'SaveStatus',
   data () {
@@ -50,6 +51,15 @@ export default {
       'status',
       'gameClock',
     ]),
+    ...mapState('capabilities', {
+      capabilityGeneration: 'generation',
+      capabilityMessage: 'message',
+    }),
+    ...mapGetters('capabilities', {
+      capabilities: 'result',
+      capabilityStatus: 'status',
+      reportOf: 'report',
+    }),
     ...mapGetters([
       'savePath',
     ]),
@@ -64,8 +74,30 @@ export default {
 
       return Object.values(page).filter(({ failedAt }) => failedAt !== null)
     },
+    // The open page's capability report, or null while the check has not answered.
+    pageReport () {
+      return this.reportOf(this.$route.path)
+    },
+    // What the check found short for the open page or the shell: '' when both are fully supported.
+    capabilityText () {
+      const parts = []
+
+      if (this.capabilityStatus === 'failed') {
+        parts.push('the save could not be checked for what it holds')
+      }
+
+      if (this.pageReport && this.pageReport.status !== 'supported') {
+        parts.push(`this page is ${this.pageReport.status} by the save's structure`)
+      }
+
+      if (this.capabilities && this.capabilities.shell.status !== 'supported') {
+        parts.push('some of what the shell reads is not in the save')
+      }
+
+      return parts.join(', ')
+    },
     tone () {
-      if (this.status === 'failed' || this.failedInputs.length) {
+      if (this.status === 'failed' || this.failedInputs.length || (this.pageReport && this.pageReport.status === 'unsupported') || this.capabilityStatus === 'failed') {
         return 'bad'
       }
 
@@ -113,7 +145,7 @@ export default {
       return `page inputs failed: ${parts.join('; ')}`
     },
     text () {
-      return [this.readText, this.refreshText, this.inputsText].filter(Boolean).join(' · ')
+      return [this.readText, this.refreshText, this.inputsText, this.capabilityText].filter(Boolean).join(' · ')
     },
     // The full account, for the hover text: each fact with its own clock.
     detail () {
@@ -131,7 +163,25 @@ export default {
         lines.push(`Last file notification: ${this.file.kind}${this.file.message ? ` (${this.file.message})` : ''} at ${new Date(this.file.at).toLocaleString()}. A notification alone is not a read.`)
       }
 
+      lines.push(this.capabilityDetail)
+
       return lines.join('\n')
+    },
+    // The capability check of the copy now open, on its own line: its database copy number, the reports it found fully supported, and the formula version, which the schema only suggests.
+    capabilityDetail () {
+      if (this.capabilityStatus === 'failed') {
+        return `Capability check of database copy ${this.capabilityGeneration} failed (${this.capabilityMessage}); ${this.capabilities ? 'the result of an earlier check of this copy stands' : 'the figures that rest on a lookup row are left out until it succeeds'}.`
+      } else if (!this.capabilities) {
+        return 'Capability check of the save: not finished, so the figures that rest on a lookup row are left out until it is.'
+      }
+
+      const reports = Object.values(this.capabilities.reports)
+      const count = (status) => reports.filter((report) => report.status === status).length
+      const formula = this.capabilities.formula.status === 'unavailable' ? `not stated (${this.capabilities.formula.inputs.missing.join(', ')} absent)` : `${this.capabilities.formula.value}, assumed from the schema, not a verified version`
+      const gates = [...Object.values(this.capabilities.gates.bonuses), ...Object.values(this.capabilities.gates.components)]
+      const unmatched = gates.filter((gate) => gate.status === 'unavailable').length
+
+      return `Capability check of database copy ${this.capabilityGeneration}: ${count('supported')} of ${reports.length} reports supported, ${count('degraded')} degraded, ${count('unsupported')} unsupported; ${unmatched} of ${gates.length} lookup rows not as expected. Formula version: ${formula}.`
     },
   },
   created () {
@@ -144,6 +194,10 @@ export default {
   },
   methods: {
     // Opens the save again, as a file notification does: the refresh then ends in a probe that succeeds or fails.
+    // Runs the capability check again on the copy now open.
+    recheck () {
+      this.$store.dispatch('capabilities/retry')
+    },
     reopen () {
       this.$store.dispatch('renew', { storagePath: this.savePath })
     },

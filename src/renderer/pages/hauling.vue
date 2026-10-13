@@ -217,7 +217,8 @@ import { loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
-import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, loadFormulaVersion, shuttleServiceJoin, tripResult } from '../utilities/transport'
+import { loadFormulaVersion } from '../utilities/capabilities'
+import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
   classes: 'the freighter classes',
@@ -692,7 +693,7 @@ export default {
       }),
       default: null,
     },
-    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape.
     formulaVersion: {
       get: tracked('formulaVersion', async function () {
         if (!this.database) {

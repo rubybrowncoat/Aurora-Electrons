@@ -2,7 +2,7 @@ import { CREW_MODULE_TYPES, crewEffects, crewFraction, crewFractionSql } from '.
 import { linkTo, place } from '../deep-links'
 import { roundHalfEven } from '../design-rules'
 import { isKnownNumber, roundToDecimal } from '../math'
-import { loadFormulaVersion } from '../transport'
+import { loadFormulaVersion } from '../capabilities'
 import { allOf, amount, anyOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, rowsOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems, so they can be repaired or refit before they matter.' }

@@ -271,24 +271,27 @@ export const surfaceRate = (row, owned = true) => {
   return (manned + whole(row.AutomatedMineCount) + civilian) * row.MineProduction * row.Accessibility * row.GovernorBonus * row.SectorBonus * Math.max(0, row.RadiationModifier)
 }
 
-// The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save; unverified, the sample has no player orbital miners.
+// The workbook's orbital formula, plus the crew rule: the modules run at the crew share of utilities/crew.js. Null while the ship's crew or its class crew is not in the save, or the naval admin chain `adminBonus` is unknown (null); unverified, the sample has no player orbital miners.
 export const orbitalRate = (row, adminBonus = 1) => {
   const crew = crewFraction(row)
 
-  return crew === null ? null : row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crew * row.Accessibility
+  return crew === null || adminBonus === null || !Number.isFinite(row.CommanderBonus) ? null : row.MiningModules * row.MineProduction * row.CommanderBonus * adminBonus * crew * row.Accessibility
 }
 
-// t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit.
+// Whether an orbital miner's rate rests on a naval admin chain the save does not settle: the reason as text, null when the chain is known or the body is too wide for the race to mine from orbit.
+export const orbitalChainGap = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? navalAdminChain(navalAdmins, row.SystemID, row.NavalAdminCommandID).unknown : null)
+
+// t/yr one orbital miner takes, with its naval admin chain; nothing over a body wider than the race can mine from orbit; null while the chain is unknown.
 export const orbitalMinerRate = (row, navalAdmins) => (row.Diameter <= row.MaximumOrbitalMiningDiameter ? orbitalRate(row, navalAdminChainBonus(navalAdmins, row.SystemID, row.NavalAdminCommandID)) : 0)
 
-// Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver transfer, which isn't income.
+// Mining the game's mineral ledger leaves out, t/yr by MaterialID: everything mined at a colony that buys its civilian complexes' output and ships it by mass driver (`MassDriverExport`, mining-data.js). The game records nothing for that colony, neither its own mines nor the complexes, and the shipment arrives as a mass-driver transfer, which isn't income. A mineral whose total includes a rate that is not known (a Mining bonus the save's lookup does not confirm, a naval admin chain the save does not settle) is null, never the smaller sum.
 export const unloggedMining = ({ surface, orbital, navalAdmins }) => {
   const totals = {}
   const add = (row, rate) => {
-    totals[row.MaterialID] = (totals[row.MaterialID] || 0) + rate
+    totals[row.MaterialID] = totals[row.MaterialID] === null || rate === null || !Number.isFinite(rate) ? null : (totals[row.MaterialID] || 0) + rate
   }
 
-  surface.filter((row) => row.MassDriverExport).forEach((row) => add(row, surfaceRate(row)))
+  surface.filter((row) => row.MassDriverExport).forEach((row) => add(row, Number.isFinite(row.GovernorBonus) && Number.isFinite(row.SectorBonus) ? surfaceRate(row) : null))
   orbital.filter((row) => row.MassDriverExport).forEach((row) => add(row, orbitalMinerRate(row, navalAdmins)))
 
   return totals
@@ -453,13 +456,13 @@ const ledgerCoverage = (ledger, gameTime, windowDays) => {
   })
 }
 
-// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }, where a stock or transit that is null or absent is unknown, never 0. Without a ledger (a save before Aurora 2.6) nothing is known of the flows and every mineral counts as holding (`known` is false).
+// Each mineral's runway as the Mineral Outlook page reads it from the ledger: the year's income (mining and salvage, plus the mining the ledger leaves out) against its spending, the stock and cargo in transit over the net loss, and the scarcity that sets. `ledger`: rows of { MaterialID, MineralDataType, Amount, FirstTime, LastTime, ProductionTicks, FirstTick, LastTick } over the last `windowDays`; `stock`, `transit` (tonnes) and `unlogged` (t/yr, from `unloggedMining`): { [MaterialID]: value }, where a stock or transit that is null or absent is unknown, never 0, and an unlogged rate that is null leaves that mineral's flow unknown. Without a ledger (a save before Aurora 2.6) nothing is known of the flows and every mineral counts as holding (`known` is false).
 // A mineral's `runway` is the years its stock lasts over a net loss; Infinity when it has no net loss (it holds or grows, whatever the stock); null when it is not known: a loss over a stock or transit that is unknown, or a ledger row of the mineral with no amount (then `net` is null too). `scarcityResult` is the provenance result of the tier, `scarcity` its value (null while unknown), and `stock` is null while the stock or the cargo in transit is unknown.
 export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, stock, transit, unlogged = {} }) => {
   const coverageDays = ledgerCoverage(ledger, gameTime, windowDays)
   const perYear = coverageDays ? DAYS_PER_YEAR / coverageDays : 0
   const held = (id) => (Number.isFinite(stock[id]) && Number.isFinite(transit[id]) ? stock[id] + transit[id] : null)
-  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: held(mineral.id), produced: coverageDays ? unlogged[mineral.id] || 0 : 0, used: 0, flowKnown: true }]))
+  const outlook = Object.fromEntries(MINERALS.map((mineral) => [mineral.id, { name: mineral.name, stock: held(mineral.id), produced: coverageDays ? unlogged[mineral.id] || 0 : 0, used: 0, flowKnown: !(coverageDays && unlogged[mineral.id] === null) }]))
 
   ledger.forEach((row) => {
     const group = !TRANSFER_TYPES.has(row.MineralDataType) && flowGroupOf(row.MineralDataType)
@@ -697,14 +700,20 @@ export const navalAdminRequiredRanks = (admins, captainRanks) => {
 }
 
 // Naval admin bonuses chain up the command tree: the ship must be within its own command's range, and each command's HQ within its parent's range for the parent to apply too. A command without a commander of the required rank breaks the chain (docs/DATABASE.md § Commander bonus rules). Each one passes on its commander's bonus scaled by the command type's share.
-// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Systems: Set } }
-export const navalAdminChainBonus = (admins, systemId, commandId) => {
+// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Unknown, Systems: Set } }. A command in range whose rank or bonus the save does not settle (`Unknown`, the reason as text, with `Eligible` null) makes the chain unknown: `{ bonus: null, unknown: reason }`, never a multiplier of 1.
+export const navalAdminChain = (admins, systemId, commandId) => {
   let bonus = 1
   let location = systemId
   const visited = new Set()
   let current = admins[commandId]
 
-  while (current && !visited.has(current.NavalAdminCommandID) && current.Eligible && current.Systems.has(location)) {
+  while (current && !visited.has(current.NavalAdminCommandID) && current.Systems.has(location)) {
+    if (current.Unknown) {
+      return { bonus: null, unknown: current.Unknown }
+    } else if (!current.Eligible) {
+      break
+    }
+
     visited.add(current.NavalAdminCommandID)
 
     if (current.BonusValue) {
@@ -715,8 +724,11 @@ export const navalAdminChainBonus = (admins, systemId, commandId) => {
     current = admins[current.ParentCommandID]
   }
 
-  return bonus
+  return { bonus, unknown: null }
 }
+
+// The chain's multiplier, null while the chain is unknown (`navalAdminChain`).
+export const navalAdminChainBonus = (admins, systemId, commandId) => navalAdminChain(admins, systemId, commandId).bonus
 
 // Tons at a readable precision: 47.3 Mt, 307 kt. Teratonnes only come from deposits set in the game's editor.
 export const compact = (value) => {

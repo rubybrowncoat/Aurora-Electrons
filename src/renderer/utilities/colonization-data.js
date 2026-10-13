@@ -5,7 +5,7 @@ import { cmcStarInReach } from './colonization'
 import { climateBaseTemp } from './habitability'
 import { loadJumpPoints } from './jump-graph'
 import { MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, mineralOutlook, unloggedMining } from './minerals'
-import { orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
+import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from './mining-data'
 import { loadNavalAdmins } from './naval-admins'
 import { ofRule, registerRule, unavailable } from './provenance'
 
@@ -174,17 +174,18 @@ group by FCT_RaceMineralData.MineralID, FCT_RaceMineralData.MineralDataType`)
 }
 
 // How short each mineral is for the race: the Mineral Outlook page's runway (stock, cargo and mass-driver packets over the year's net loss, from the game's mineral ledger and the mining it leaves out), read once for the Planner with the page's own reads. A sum with a row that has no value (a colony's stock, a cargo line, a packet column, a ledger amount) is null, not the smaller sum of the others: `mineralOutlook` reads null as unknown.
+// `ids.blocked` (the commander bonus IDs whose lookup row the save does not confirm) and `ids.ranks` (whether the naval admin commanders' ranks are in the save) leave the mining that rests on them unknown.
 export const loadMineralOutlook = async (database, ids) => {
-  const { GameID, RaceID } = ids
+  const { GameID, RaceID, ranks = true, blocked = new Set() } = ids
   const [[game], [stock], cargo, [packets], ledger, surface, orbital, navalAdmins] = await Promise.all([
     rows(database, `select GameTime from FCT_Game where GameID = ${GameID}`),
     rows(database, `select ${sumOf('FCT_Population')} from FCT_Population where GameID = ${GameID} and RaceID = ${RaceID}`),
     rows(database, `select FCT_ShipCargo.CargoID as MaterialID, ${completeSum('FCT_ShipCargo.Amount')} as Amount from FCT_ShipCargo inner join FCT_Ship on FCT_Ship.ShipID = FCT_ShipCargo.ShipID where FCT_ShipCargo.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_ShipCargo.CargoTypeID = 3 group by FCT_ShipCargo.CargoID`),
     rows(database, `select ${sumOf('FCT_MassDriverPackets')} from FCT_MassDriverPackets where GameID = ${GameID} and RaceID = ${RaceID}`),
     loadLedger(database, ids),
-    rows(database, surfaceMiningQuery(ids)),
-    rows(database, orbitalMiningQuery(ids)),
-    loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial' }),
+    rows(database, surfaceMiningQuery(ids)).then((items) => gateMiningRows(items, blocked)),
+    rows(database, orbitalMiningQuery(ids)).then((items) => gateMiningRows(items, blocked)),
+    loadNavalAdmins(database, { GameID, RaceID, bonusId: 6, share: 'Industrial', ranks, blocked }),
   ])
   const carried = (mineral) => {
     const aboard = cargo.find((row) => row.MaterialID === mineral.id)

@@ -2,7 +2,7 @@ import { populationName, systemBodyName } from '../aurora'
 import { UNKNOWN_TEXT, countText, isKnownNumber } from '../math'
 import { HAUL_ORDER_ACTIONS, ORBITAL_MINING_MODULE, assessMiningSites, missingNeeds, unknownNeeds } from '../mining-sites'
 import { registerRule, unavailable } from '../provenance'
-import { loadFormulaVersion } from '../transport'
+import { loadFormulaVersion } from '../capabilities'
 
 // Shared by the check modules of the Warnings page. A check is
 //

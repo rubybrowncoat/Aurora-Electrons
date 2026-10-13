@@ -277,7 +277,7 @@ const resolveIds = async (database, save) => {
 }
 
 const runSave = async (utilities, save, label) => {
-  const { refits, provenance, transport } = utilities
+  const { refits, provenance, capabilities } = utilities
   const database = await openSave(save.file)
 
   if (!database) {
@@ -294,7 +294,7 @@ const runSave = async (utilities, save, label) => {
     }
 
     const scope = { GameID: ids.game, RaceID: ids.race }
-    const version = await transport.loadFormulaVersion(database).catch(() => null)
+    const version = await capabilities.loadFormulaVersion(database).catch(() => null)
     const operations = await raceOperations(database, ids.race)
     const { classes, components } = await refits.loadRefitClasses(database, scope)
     const classesById = Object.fromEntries(classes.map((shipClass) => [shipClass.id, shipClass]))
@@ -429,7 +429,7 @@ const runSave = async (utilities, save, label) => {
 
 const main = async () => {
   const saves = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['refits', 'provenance', 'transport'])
+  const utilities = await loadUtilities(['refits', 'provenance', 'capabilities'])
 
   worked(utilities.refits, utilities.provenance)
   await loaderChecks(utilities.refits)
