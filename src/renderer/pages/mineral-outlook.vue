@@ -474,9 +474,9 @@ export default {
       })
     },
 
-    // `annualQueueDemand`'s { demand, unknown }: a colony whose production capacity is not known leaves the demand of the minerals its queue uses unknown.
+    // `annualQueueDemand`'s { demand, unknown, incomplete }: a colony whose production capacity is not known leaves the demand of the minerals its queue uses unknown.
     queueDemand() {
-      return annualQueueDemand(this.industrialProjects, (populationId, productionType) => valueOrNull(this.populationCapacityResult(populationId, productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')))
+      return annualQueueDemand(this.industrialProjects, (populationId, facility) => valueOrNull(this.populationCapacityResult(populationId, facility)))
     },
 
     // One row per mineral: plain figures (null when unknown, `runway` the years of a falling stock and null otherwise, `runwaySort` also Infinity for one that holds or grows) beside the provenance results in `results`.

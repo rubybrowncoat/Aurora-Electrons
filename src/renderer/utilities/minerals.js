@@ -483,13 +483,14 @@ export const mineralOutlook = ({ ledger, gameTime, windowDays = DAYS_PER_YEAR, s
   return { known: coverageDays > 0, minerals: outlook }
 }
 
-const facilityOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
-
 // Minerals the industrial queue will consume over the next year: each project's cost scaled to one year of work at its share of the colony's capacity; queued entries count only while the year has capacity left (as "mineral use.sql" does), and only for the capacity earlier entries leave.
-// `capacityOf(PopulationID, ProductionType)`: BP/yr at 100%, or null when the colony's capacity is not known. Returns `{ demand, unknown, incomplete }`: `demand` is t by mineral name, over the projects whose inputs are known; `unknown` lists by mineral name the colonies (PopulationID) whose queued projects use that mineral but have no known capacity; `incomplete` lists by mineral name the project inputs a queued project lacks: the mineral's own cost (also at a colony with unknown capacity), or at a colony with known capacity its place in the queue, units left, build points per unit or share, which set how much of the year each project gets. The demand of a mineral with either is not known. A real capacity of 0 means no work gets done and demands nothing, whatever the queue lacks.
+// `capacityOf(PopulationID, facility)`: BP/yr at 100% of the colony's 'construction', 'ordnance' or 'fighter' capacity, or null when it is not known. Returns `{ demand, unknown, incomplete }`: `demand` is t by mineral name, over the projects whose inputs are known; `unknown` lists by mineral name the colonies (PopulationID) whose queued projects use that mineral but have no known capacity; `incomplete` lists by mineral name the project inputs a queued project lacks: the mineral's own cost (also at a colony with unknown capacity), a production type, or at a colony with known capacity its place in the queue, units left, build points per unit or share, which set how much of the year each project gets. The demand of a mineral with either is not known. A real capacity of 0 means no work gets done and demands nothing, whatever the queue lacks.
 const SCHEDULE_INPUTS = [['Queue', 'place in the queue'], ['Amount', 'units left'], ['ProdPerUnit', 'build points per unit'], ['Percentage', 'share of the colony\'s capacity']]
 
 const recorded = (value) => typeof value === 'number' && Number.isFinite(value)
+
+// The capacity a project draws on: ordnance and fighters have their own and everything else uses construction; null for a production type the save lacks, which is never taken as construction.
+const facilityOf = (productionType) => (!recorded(productionType) ? null : productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
 
 export const annualQueueDemand = (projects, capacityOf) => {
   const demand = Object.fromEntries(MINERALS.map((mineral) => [mineral.name, 0]))
@@ -508,8 +509,21 @@ export const annualQueueDemand = (projects, capacityOf) => {
     ;(groups[key] = groups[key] || []).push(project)
   })
 
+  // The colonies with a project whose production type is not in the save: which capacity it draws on is not known, so neither is the share of the year any project of the colony gets.
+  const undecided = new Set(projects.filter((project) => facilityOf(project.ProductionType) === null).map((project) => project.PopulationID))
+
   Object.values(groups).forEach((group) => {
-    const capacity = capacityOf(group[0].PopulationID, group[0].ProductionType)
+    if (undecided.has(group[0].PopulationID)) {
+      MINERALS.forEach((mineral) => {
+        if (group.some((project) => !recorded(project[mineral.name]) || project[mineral.name] > 0)) {
+          lack(mineral, 'a queued project\'s production type')
+        }
+      })
+
+      return
+    }
+
+    const capacity = capacityOf(group[0].PopulationID, facilityOf(group[0].ProductionType))
 
     if (capacity === null || capacity === undefined || Number.isNaN(capacity)) {
       MINERALS.forEach((mineral) => {

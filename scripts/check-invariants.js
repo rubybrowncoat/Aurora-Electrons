@@ -602,6 +602,22 @@ const defineCases = (modules) => {
     })
   })
 
+  invariant('queue demand', 'a project with no production type is never taken as construction: its demand and that of the colony\'s other projects are unknown, naming the type', () => {
+    const projects = [queued({ ProductionType: null }), queued({ Queue: 2 })]
+    const result = mineralOutlook.queueDemandResult(minerals.annualQueueDemand(projects, () => 1000), 'Duranium')
+
+    assert.equal(result.status, 'unavailable')
+    assert.ok(result.inputs.missing.some((name) => name.includes('production type')), `missing: ${result.inputs.missing}`)
+  })
+
+  invariant('queue demand', 'a project with no production type at another colony leaves this colony\'s demand known (control)', () => {
+    const projects = [queued({ ProductionType: null, PopulationID: 2, Duranium: 0 }), queued()]
+    const queue = minerals.annualQueueDemand(projects, () => 1000)
+
+    assert.equal(queue.demand.Duranium, 50)
+    assert.equal(mineralOutlook.queueDemandResult(queue, 'Duranium').status, 'estimated')
+  })
+
   // ---- Page group C (provenance, unknown is not zero). Each page's cases go under its own marker; add the utility a case loads to the list in `main`. ----
   // ---- Shared formatting and history ----
   const mathUtilities = modules.math
