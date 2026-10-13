@@ -160,6 +160,7 @@
             </template>
             <template #[`item.amount`]="{ item }">
               <div v-if="focus" class="text-no-wrap" :title="`${count(item.amount)} t`">{{ compact(item.amount) }}</div>
+              <div v-else-if="item.body.bare" class="py-2 text--secondary">No mineral deposit recorded</div>
               <div v-else class="py-2">
                 <div class="mineral-strip">
                   <span v-for="cell in item.cells" :key="cell.id" class="mineral-strip__cell" :class="{ 'mineral-strip__cell--empty': !cell.deposit, 'mineral-strip__cell--out': cell.deposit && !cell.passes }" :style="cell.deposit && cell.passes ? { background: withAlpha(bandColors[cell.band], 0.3), borderBottomColor: bandColors[cell.band] } : {}" :title="cell.title">{{ cell.short }}</span>
@@ -711,6 +712,15 @@ export default {
         }
       })
 
+      // A body picked by a link stays listed when the save records no deposit on it, so its colonies and miners remain reachable.
+      this.selectedBodies.forEach((body) => {
+        if (!bodies[body.SystemBodyID]) {
+          const [colony] = colonies[body.SystemBodyID] || []
+
+          bodies[body.SystemBodyID] = { ...body, SystemID: colony ? colony.SystemID : null, Xcor: colony ? colony.Xcor : null, Ycor: colony ? colony.Ycor : null, deposits: {}, bare: true }
+        }
+      })
+
       return Object.values(bodies).map((row) => {
         const own = colonies[row.SystemBodyID] || []
         const alien = aliens[row.SystemBodyID] || []
@@ -744,7 +754,7 @@ export default {
           worked: mining > 0,
           tapped: mining > 0 || alien.length > 0,
           miningUnknown: mining === 0 && own.some((colony) => colony.InstallationGaps > 0),
-          untapped: mining === 0 && alien.length === 0 && !own.some((colony) => colony.InstallationGaps > 0),
+          untapped: !row.bare && mining === 0 && alien.length === 0 && !own.some((colony) => colony.InstallationGaps > 0),
           distance: valueOrNull(distanceResult),
           distanceResult,
         }
@@ -752,7 +762,7 @@ export default {
     },
 
     bodiesPassingOrbital() {
-      return this.bodies.filter((body) => this.orbital === 'all' || (this.orbital === 'eligible') === body.orbitalEligible)
+      return this.bodies.filter((body) => body.bare || this.orbital === 'all' || (this.orbital === 'eligible') === body.orbitalEligible)
     },
 
     scopedBodies() {
@@ -915,12 +925,12 @@ export default {
       return this.scopedBodies.map((body) => {
         const passing = body.depositList.filter((deposit) => this.passesDeposit(deposit))
 
-        if (!passing.length && !body.unreadable) {
+        if (!passing.length && !body.unreadable && !body.bare) {
           return null
         }
 
-        const potentialResult = bodyPotentialResult(passing, body.unreadable)
-        const perMine = body.unreadable ? unavailable({ rule: 'minerals.perMine', missing: [`Amount or Accessibility of ${this.counted(body.unreadable, 'deposit', 'deposits')}`] }) : perMineResult(raceRules.MineProduction, passing)
+        const potentialResult = body.bare ? unavailable({ rule: 'minerals.bodyPotential', missing: ['A recorded deposit'] }) : bodyPotentialResult(passing, body.unreadable)
+        const perMine = body.bare ? unavailable({ rule: 'minerals.perMine', missing: ['A recorded deposit'] }) : body.unreadable ? unavailable({ rule: 'minerals.perMine', missing: [`Amount or Accessibility of ${this.counted(body.unreadable, 'deposit', 'deposits')}`] }) : perMineResult(raceRules.MineProduction, passing)
         const potential = valueOrNull(potentialResult)
 
         return {
@@ -1043,7 +1053,7 @@ export default {
         const total = (rule, key) => sumResults({ rule, results: picked.map((mineral) => mineral.results[key]) })
         const results = { stock: total('minerals.colonyStock', 'stock'), reserve: total('minerals.colonyStock', 'reserve'), free: total('minerals.colonyStock', 'free'), needs: total('minerals.queueNeeds', 'needs'), inbound: total('minerals.inFlight', 'inbound') }
 
-        if (Object.values(results).every((result) => isAvailable(result) && result.value === 0)) {
+        if (Object.values(results).every((result) => isAvailable(result) && result.value === 0) && !this.selectedBodyIds.has(colony.SystemBodyID)) {
           return null
         }
 

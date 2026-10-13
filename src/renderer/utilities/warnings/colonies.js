@@ -1,6 +1,7 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
-import { amount, anyOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, rowsOf, unknownCell, verdictRows } from './common'
+import { deliveryVerdict } from '../mining-sites'
+import { amount, anyOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, readMiningSites, rowsOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so what holds them back can be fixed.' }
 
@@ -65,12 +66,6 @@ const LOW_EFFICIENCY = '(FCT_Population.Efficiency < 1 and FCT_Population.Popula
 const SELF_SUSTAINING = '(FCT_Population.Efficiency = 1 and FCT_Population.Population > 10 and FCT_Population.Capital = 0 and FCT_Population.ColonistDestination = 0)'
 
 const STOCKPILING = '(FCT_Population.PurchaseCivilianMinerals = 1 and FCT_Population.MassDriverDest = 0)'
-
-// Whether the colony has mines and drivers, as 1, or null while an installation's amount or type is missing, and whether a body has a deposit: SQLite's three-valued logic, in the query and the verdict.
-const MINES = '(case when VIR_Installations.Mines > 0 then 1 when VIR_Installations.MineGaps > 0 then null else 0 end)'
-const DRIVERS = '(case when VIR_Installations.Drivers > 0 then 1 when VIR_Installations.DriverGaps > 0 then null else 0 end)'
-const DEPOSITS = '(case when exists (select 1 from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount > 0) then 1 when exists (select 1 from FCT_MineralDeposit where FCT_MineralDeposit.SystemBodyID = FCT_Population.SystemBodyID and FCT_MineralDeposit.GameID = FCT_Population.GameID and FCT_MineralDeposit.Amount is null) then null else 0 end)'
-const ORPHAN = `(${MINES} and ${DRIVERS} and FCT_Population.MassDriverDest = 0 and ${DEPOSITS})`
 
 export const checks = checksOf([
   {
@@ -162,33 +157,37 @@ export const checks = checksOf([
     group: group.key,
     severity: 'attention',
     title: (count) => amount(count, 'colony with wasted mining capacity', 'colonies with wasted mining capacity'),
-    rule: 'A colony has mines but no mineral deposit on its body, so they produce nothing.',
+    rule: 'A colony has mines that can\'t work: its body holds no mineral deposit, radiation stops mine output, the race has no mine production, or its manned mines have no workforce. Each missing prerequisite is named; a body the race has not surveyed is listed apart, as its deposits are not known.',
     evidence: {
-      verification: 'confirmed',
-      structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue', 'FCT_MineralDeposit.MaterialID'],
-      note: 'A presence check on stored rows: an installation with a mining value on a body with no deposit row. A colony with an installation whose mining value is not stored is listed apart, as not evaluated; a total with an amount or value not stored shows a dash.',
+      verification: 'estimated',
+      structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys', 'FCT_Population.Efficiency, Population', 'FCT_SystemBody.RadiationLevel', 'FCT_Race.MineProduction'],
+      note: 'The deposits and the survey are stored rows, so a surveyed body with no deposit left (empty or exhausted: the save does not tell them apart) is a confirmed fact, while a body the race has not surveyed is unknown, not empty. That manned mines need a workforce (the colony\'s stored efficiency above 0) and that radiation of 10000 or more stops all output are read from the game\'s rules for 2.7 and apply to 2.7-shaped saves only, so on any other save they are unknown; a race mine production of 0 stops the mines whatever the version. A colony with an installation amount or type, a deposit amount, the efficiency, the radiation or the survey not stored is listed apart, as not evaluated; a mining total with an amount not stored shows a dash.',
+      assumptions: ['A colony whose stored efficiency is 0 has no workforce for its manned mines.'],
     },
     columns: [
       { key: 'colony', text: 'Colony' },
       { key: 'installations', text: 'Mines' },
+      { key: 'reason', text: 'Missing' },
       { key: 'output', text: 'Mining value', align: 'end' },
     ],
     async read(ctx) {
-      const { GameID, RaceID } = ctx
+      const { colonies } = await readMiningSites(ctx)
 
-      const items = await rowsOf(ctx, `
-          select DIM_PlanetaryInstallation.Name, DIM_PlanetaryInstallation.MiningProductionValue, (DIM_PlanetaryInstallation.MiningProductionValue > 0) as Verdict, FCT_PopulationInstallations.Amount, FCT_Population.PopulationID, FCT_Population.PopName, ${COLONY_COLUMNS} from FCT_Population
+      const sites = colonies.filter((site) => site.surface).map((site) => ({ ...site, Verdict: site.idle })).sort((alpha, beta) => (alpha.capacity === null) - (beta.capacity === null) || beta.capacity - alpha.capacity)
 
-          ${COLONY_JOINS}
-
-          join FCT_PopulationInstallations on FCT_Population.PopulationID = FCT_PopulationInstallations.PopID
-          left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID
-          left join FCT_MineralDeposit ON FCT_Population.SystemBodyID = FCT_MineralDeposit.SystemBodyID
-
-          where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and (DIM_PlanetaryInstallation.MiningProductionValue > 0) is not 0 and FCT_MineralDeposit.MaterialID is null
-        `)
-
-      return installationRows(ctx, items, 'MiningProductionValue', (colony) => linkTo.colonyOutlook(colony.PopulationID), () => [])
+      return verdictRows(ctx, sites, {
+        missing: (site) => needInputs(site),
+        build: (site) => ({
+          id: `colony:${site.id}`,
+          cells: {
+            colony: colonyText(site.row),
+            installations: site.row.MineNames || unknownCell(ctx, ['the amount of an installation of the colony']),
+            reason: needsCell(ctx, site),
+            output: figure(ctx, site.capacity, 'the amount or the type of an installation of the colony', (known) => ctx.count(known, 1)),
+          },
+          link: linkTo.minerals({ bodies: [site.row] }),
+        }),
+      })
     },
   },
   {
@@ -228,43 +227,37 @@ export const checks = checksOf([
     key: 'mass-driver-orphans',
     group: group.key,
     severity: 'attention',
-    title: (count) => amount(count, 'mining colony', 'mining colonies') + ' without a mass driver destination',
-    rule: 'A colony mines, has mass drivers and shares its system with other colonies but sends nothing anywhere, so minerals pile up where they\'re dug; colonies that receive packets themselves are left out.',
+    title: (count) => amount(count, 'mining colony', 'mining colonies') + ' with no mineral export set up',
+    rule: 'A colony, or orbital miners at it, mine but the save holds no way to deliver the minerals: no mass driver pointing at a colony of the race in the same system that has drivers too, no such colony pointing its drivers at it and no fleet order loading minerals at it. Colonies that receive packets, the capital and colonies with factories use their minerals where they lie and are left out; so are mines that don\'t produce, which the mining checks above list. A freighter can still collect minerals without a stored order, so this lists the setup the save shows, not minerals that never leave.',
     evidence: {
-      verification: 'confirmed',
-      structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue', 'FCT_Population.MassDriverDest', 'FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys'],
-      note: 'A presence check on stored rows: mines and mass drivers on a surveyed body with a deposit, no destination, and another colony of the race in the system. A colony with an installation amount or type, the destination or a deposit amount not stored is listed apart, as not evaluated.',
+      verification: 'estimated',
+      structure: ['FCT_Population.MassDriverDest, Capital, SystemID', 'FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MassDriverValue, MiningProductionValue, ConstructionValue', 'FCT_MoveOrders.MoveActionID, PopulationID', 'FCT_Fleet.OrbitBodyID, AssignedPopulationID', 'FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys'],
+      note: 'A site that mines (a deposit on a surveyed body and mines or orbital miners that work) is delivery-blocked, never non-producing, when the save shows none of the exports: drivers with a valid destination whose colony has drivers too, an order loading minerals at the colony, a colony with drivers pointing its drivers at it, the capital or factories. That a loading order is carrying minerals, that a freighter collects minerals with no stored order and the use of minerals at a colony with factories are not checked: the check reads the current stored setup, not the mineral ledger. Civilian complexes are left to the stockpiling check. A colony whose destination, installation amounts, survey, deposit amounts or game version are not known is listed apart, as not evaluated.',
+      assumptions: ['A colony that receives packets, the capital and a colony with factories use their minerals on the spot.', 'An order to load minerals at the colony is an export; it shows a haul is set up, not that it runs.', 'A colony with no stored export may still be served by a freighter without a stored order.'],
     },
     columns: [
       { key: 'colony', text: 'Colony' },
-      { key: 'mines', text: 'Mines', align: 'end' },
-      { key: 'drivers', text: 'Drivers', align: 'end' },
+      { key: 'mining', text: 'Mining' },
+      { key: 'missing', text: 'Missing' },
       { key: 'others', text: 'Colonies here', align: 'end' },
     ],
     async read(ctx) {
-      const { GameID, RaceID } = ctx
+      const { colonies } = await readMiningSites(ctx)
 
-      const populations = await rowsOf(ctx, `select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.MassDriverDest, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, VIR_Installations.Mines, VIR_Installations.MineGaps, VIR_Installations.Drivers, VIR_Installations.DriverGaps, ${DEPOSITS} as Deposits, ${ORPHAN} as Verdict, (select count(*) from FCT_Population as VIR_Other where VIR_Other.SystemID = FCT_Population.SystemID and VIR_Other.RaceID = FCT_Population.RaceID and VIR_Other.GameID = FCT_Population.GameID and VIR_Other.PopulationID <> FCT_Population.PopulationID) as OtherColonies from FCT_Population inner join (select FCT_PopulationInstallations.PopID, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID in (7, 12, 48) then FCT_PopulationInstallations.Amount else 0 end) as Mines, sum(case when FCT_PopulationInstallations.PlanetaryInstallationID in (7, 12, 48) and FCT_PopulationInstallations.Amount is null then 1 else 0 end) as MineGaps, sum(case when DIM_PlanetaryInstallation.MassDriverValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Drivers, sum(case when DIM_PlanetaryInstallation.PlanetaryInstallationID is null or DIM_PlanetaryInstallation.MassDriverValue is null or (DIM_PlanetaryInstallation.MassDriverValue > 0 and FCT_PopulationInstallations.Amount is null) then 1 else 0 end) as DriverGaps from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID and (VIR_Installations.Mines > 0 or VIR_Installations.MineGaps > 0) and (VIR_Installations.Drivers > 0 or VIR_Installations.DriverGaps > 0) inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Population.RaceID and FCT_SystemBodySurveys.GameID = FCT_Population.GameID left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and ${ORPHAN} is not 0 and exists (select 1 from FCT_Population as VIR_Other where VIR_Other.SystemID = FCT_Population.SystemID and VIR_Other.RaceID = FCT_Population.RaceID and VIR_Other.GameID = FCT_Population.GameID and VIR_Other.PopulationID <> FCT_Population.PopulationID) and not exists (select 1 from FCT_Population as VIR_Sender where VIR_Sender.MassDriverDest = FCT_Population.PopulationID and VIR_Sender.GameID = FCT_Population.GameID) order by FCT_Population.PopName`)
+      const sites = colonies.map((site) => ({ ...site, Verdict: deliveryVerdict(site) }))
 
-      const MINES_NAME = 'the amount of the colony\'s mines'
-      const DRIVERS_NAME = 'the amount or the type of an installation of the colony'
-
-      return verdictRows(ctx, populations, {
-        missing: (population) => [
-          ...(population.Mines > 0 || !(population.MineGaps > 0) ? [] : [MINES_NAME]),
-          ...(population.Drivers > 0 || !(population.DriverGaps > 0) ? [] : [DRIVERS_NAME]),
-          ...lacking(population, { MassDriverDest: 'the colony\'s mass driver destination' }),
-          ...(population.Deposits === null ? ['the amount of a mineral deposit on the body'] : []),
-        ],
-        build: (population) => ({
-          id: `colony:${population.PopulationID}`,
+      return verdictRows(ctx, sites, {
+        missing: (site) => needInputs(site, { delivery: true }),
+        build: (site) => ({
+          id: `colony:${site.id}`,
           cells: {
-            colony: colonyText(population),
-            mines: figure(ctx, population.MineGaps > 0 ? null : population.Mines, MINES_NAME),
-            drivers: figure(ctx, population.DriverGaps > 0 ? null : population.Drivers, DRIVERS_NAME),
-            others: ctx.count(population.OtherColonies),
+            colony: colonyText(site.row),
+            mining: [site.row.MineNames, site.orbital.length ? amount(site.orbital.length, 'orbital mining fleet') : null].filter(Boolean).join(' · ') || unknownCell(ctx, ['the amount of an installation of the colony']),
+            missing: needsCell(ctx, site, { delivery: true }),
+            others: ctx.count(site.row.OtherColonies),
           },
-          link: linkTo.colonyOutlook(population.PopulationID),
+          ...(deliveryVerdict(site) === 1 ? { caption: 'The save shows no export set up here, so minerals leave only if a freighter collects them without a stored order' } : {}),
+          link: linkTo.minerals({ bodies: [site.row] }),
         }),
       })
     },

@@ -223,7 +223,8 @@ const switchResult = (choice, complexes, output, production, version) => {
   })
 }
 
-const targetOf = (row, RaceID) => {
+// Where a colony's mass driver points, as one of the TARGET_STATES keys, or null when the destination or what decides it is not stored. `row` carries the colony's MassDriverDest, PopulationID and SystemID and the destination's DestinationID, DestinationRaceID and DestinationSystemID.
+export const targetOf = (row, RaceID) => {
   const destination = row.MassDriverDest
 
   if (!Number.isInteger(destination)) {

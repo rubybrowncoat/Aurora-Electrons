@@ -1,5 +1,5 @@
 import { linkTo, place } from '../deep-links'
-import { amount, bodyText, checksOf, lacking, rowsOf, systemText, unknownCell, verdictRows } from './common'
+import { amount, bodyText, checksOf, figure, lacking, needInputs, needsCell, readMiningSites, rowsOf, systemText, verdictRows } from './common'
 
 export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so they can be given something to do.' }
 
@@ -19,16 +19,6 @@ const idleFleetLocation = (fleet) => {
 
 const idleFleetOrders = (fleet) => [fleet.StandingOrders ? 'Standing orders' : null, fleet.ConditionalOrders ? 'Conditional orders' : null].filter(Boolean).join(', ') || '—'
 
-const strandedMinerReason = (fleet, count) => {
-  if (fleet.Reason === 'not surveyed') {
-    return 'Body not surveyed'
-  } else if (fleet.Reason === 'no deposits') {
-    return 'No minerals here'
-  }
-
-  return `${count(fleet.Diameter)} km across, more than the ${count(fleet.MaximumDiameter)} km orbital mining can handle`
-}
-
 const cargoLabel = (ship, count) => [
   ship.Colonists ? `${count(ship.Colonists)} colonists` : null,
   ship.Installations ? `${count(ship.Installations, 2)} installations` : null,
@@ -46,13 +36,6 @@ const FLEET_INPUTS = { ShippingLine: 'whether the fleet is a shipping line', Civ
 
 // A cargo hold entry that holds something, as 1, or null while an amount is not stored and none is known to hold something.
 const LOADED = '(case when sum(case when FCT_ShipCargo.Amount > 0 then 1 else 0 end) > 0 then 1 when sum(case when FCT_ShipCargo.Amount is null then 1 else 0 end) > 0 then null else 0 end)'
-
-const MINING_FLEET = '(case when sum(case when FCT_ShipClass.MiningModules > 0 then 1 else 0 end) > 0 then 1 else null end)'
-
-// Whether the deposits of a body say it holds minerals: 0 with one, null with none known and one whose amount is not stored, else 1 for no deposit.
-const NO_DEPOSITS = '(case when VIR_Deposits.Deposits > 0 then 0 when VIR_Deposits.Gaps > 0 then null else 1 end)'
-const TOO_LARGE = '(FCT_SystemBody.Radius * 2 > FCT_Race.MaximumOrbitalMiningDiameter)'
-const STRANDED = `((FCT_SystemBodySurveys.SystemBodyID is null) or ${NO_DEPOSITS} or ${TOO_LARGE})`
 
 const ORPHANED = '((FCT_Fleet.AssignedPopulationID <> 0) and FCT_Population.PopulationID is null)'
 
@@ -156,35 +139,31 @@ export const checks = checksOf([
     key: 'stranded-miners',
     group: group.key,
     severity: 'needs-action',
-    title: (count) => `${amount(count, 'orbital mining fleet')} at bodies they can't mine`,
-    rule: 'A fleet with mining modules and no orders orbits an unsurveyed body, a body without minerals, or one wider than the orbital mining limit.',
+    title: (count) => `${amount(count, 'orbital mining fleet')} that can't mine where they are`,
+    rule: 'A fleet with mining modules and no orders orbits a body where it can\'t mine: no colony of the race there to take the output, a body wider than the orbital mining limit, no mineral deposit, no mine production, no working module or no crew. Each missing prerequisite is named; a body the race has not surveyed is listed apart, as its deposits are not known.',
     evidence: {
       verification: 'estimated',
-      structure: ['FCT_ShipClass.MiningModules', 'FCT_SystemBodySurveys', 'FCT_MineralDeposit.Amount', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter'],
-      note: 'The surveyed state and the deposits are stored rows, but the width limit is the race\'s stored orbital mining diameter compared with the body\'s diameter, a reading of the limit that is not checked against the game. A fleet with a deposit amount, a diameter, the limit or a class\'s mining modules not stored is listed apart, as not evaluated.',
-      assumptions: ['Orbital mining works on a body up to the race\'s stored maximum diameter, the body\'s diameter being twice its radius.'],
+      structure: ['FCT_Fleet.OrbitBodyID, AssignedPopulationID, MothershipID', 'FCT_Population.SystemBodyID', 'FCT_ShipClass.Crew', 'FCT_Ship.CurrentCrew', 'FCT_ClassComponent.NumComponent', 'FCT_DamagedComponent.Number', 'FCT_SystemBodySurveys', 'FCT_MineralDeposit.Amount', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction'],
+      note: 'The surveyed state, the deposits, the body\'s diameter against the race\'s orbital mining limit, the working modules and the crew aboard are stored facts; a surveyed body with no deposit left (empty or exhausted: the save does not tell them apart) is confirmed, while a body the race has not surveyed is unknown, not empty. That the output goes to the race\'s colony on the body, or to the colony the fleet is assigned to, is read from the game\'s rules for 2.7 and applies to 2.7-shaped saves only. A fleet with a deposit amount, a diameter, the limit, a class\'s modules or the crew not stored is listed apart, as not evaluated.',
+      assumptions: ['Orbital mining works on a body up to the race\'s stored maximum diameter, the body\'s diameter being twice its radius.', 'A fleet not assigned to a colony, or assigned to one that is gone, is assigned to the colony on its body.', 'A fleet crewed in part still mines; only a fleet with no crew aboard is listed.'],
     },
     columns: [
       { key: 'fleet', text: 'Fleet' },
-      { key: 'reason', text: 'Why' },
+      { key: 'reason', text: 'Missing' },
       { key: 'modules', text: 'Modules', align: 'end' },
     ],
     async read(ctx) {
-      const { GameID, RaceID } = ctx
+      const { fleets } = await readMiningSites(ctx)
 
-      const fleets = await rowsOf(ctx, `select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.Radius, FCT_SystemBody.Radius * 2 as Diameter, FCT_Race.MaximumOrbitalMiningDiameter as MaximumDiameter, VIR_Deposits.Deposits, VIR_Deposits.Gaps, sum(FCT_ShipClass.MiningModules) as MiningModules, sum(case when FCT_ShipClass.MiningModules > 0 then 1 else 0 end) as ModuleClasses, sum(case when FCT_ShipClass.MiningModules is null then 1 else 0 end) as ModuleGaps, (${STRANDED} and ${MINING_FLEET}) as Verdict, case when FCT_SystemBodySurveys.SystemBodyID is null then 'not surveyed' when ${NO_DEPOSITS} = 1 then 'no deposits' when ${TOO_LARGE} = 1 then 'too large' else 'unknown' end as Reason from FCT_Fleet inner join FCT_Race on FCT_Race.RaceID = FCT_Fleet.RaceID and FCT_Race.GameID = FCT_Fleet.GameID inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID and (FCT_ShipClass.MiningModules > 0 or FCT_ShipClass.MiningModules is null) inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Fleet.OrbitBodyID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Fleet.RaceID left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = FCT_Fleet.RaceID and FCT_SystemBodySurveys.GameID = FCT_Fleet.GameID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID left join (select FCT_MineralDeposit.SystemBodyID, sum(case when FCT_MineralDeposit.Amount > 0 then 1 else 0 end) as Deposits, sum(case when FCT_MineralDeposit.Amount is null then 1 else 0 end) as Gaps from FCT_MineralDeposit where FCT_MineralDeposit.GameID = ${GameID} and (FCT_MineralDeposit.Amount > 0 or FCT_MineralDeposit.Amount is null) group by FCT_MineralDeposit.SystemBodyID) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.SystemBodyID is not null where FCT_Fleet.GameID = ${GameID} and FCT_Fleet.RaceID = ${RaceID} and FCT_Fleet.OrbitBodyID > 0 and FCT_Ship.MothershipID = 0 and ${STRANDED} is not 0 and not exists (select 1 from FCT_MoveOrders where FCT_MoveOrders.FleetID = FCT_Fleet.FleetID) group by FCT_Fleet.FleetID having ${MINING_FLEET} is not 0 order by FCT_Fleet.FleetName`)
+      const sites = fleets.map((site) => ({ ...site, Verdict: site.producing === null ? null : 1 - site.producing }))
 
-      return verdictRows(ctx, fleets, {
-        missing: (fleet) => [
-          ...lacking(fleet, { Radius: 'the diameter of the body', MaximumDiameter: 'the race\'s orbital mining diameter limit' }),
-          ...(fleet.Deposits > 0 || !(fleet.Gaps > 0) ? [] : ['the amount of a mineral deposit on the body']),
-          ...(fleet.ModuleClasses > 0 || !(fleet.ModuleGaps > 0) ? [] : ['the mining modules of a ship class']),
-        ],
-        build: (fleet) => ({
-          id: `fleet:${fleet.FleetID}`,
-          cells: { fleet: fleet.FleetName, reason: fleet.Reason === 'unknown' ? unknownCell(ctx, ['a stored input the reason rests on']) : strandedMinerReason(fleet, ctx.count), modules: ctx.count(fleet.MiningModules) },
-          caption: bodyText(fleet),
-          link: linkTo.routes({ from: place.fleet(fleet.FleetID) }),
+      return verdictRows(ctx, sites, {
+        missing: (site) => needInputs(site),
+        build: (site) => ({
+          id: `fleet:${site.id}`,
+          cells: { fleet: site.row.FleetName, reason: needsCell(ctx, site), modules: figure(ctx, site.modules, 'the mining modules of a ship class') },
+          caption: bodyText(site.row),
+          link: linkTo.routes({ from: place.fleet(site.id) }),
         }),
       })
     },
