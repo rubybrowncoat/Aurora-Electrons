@@ -37,7 +37,7 @@
       <template #foot><kbd>Esc</kbd> close</template>
     </flyout-panel>
 
-    <v-app-bar app flat height="64" extension-height="44" :extended="showTabs" class="app-bar">
+    <v-app-bar app flat clipped-right height="64" extension-height="44" :extended="showTabs" class="app-bar">
       <history-buttons />
 
       <div class="breadcrumb ml-3" :style="pageStyle">
@@ -668,7 +668,9 @@ export default {
 }
 
 // Same side padding as the page's container, and no block padding: Vuetify's 6 px leaves less height than the tagline's line box, which then hangs below the centre while the trail stays centred.
+// The footer is inset for the rail, and the help drawer (a right application drawer between the bar and the footer; the bar clears it with `clipped-right`) must not narrow it either.
 .app-footer.v-footer {
+  right: 0 !important;
   padding-block: 0;
   padding-inline: 12px;
   background: var(--ae-chrome) !important;
