@@ -1,8 +1,8 @@
 <template>
   <div>
     <v-container fluid class="about-page">
-      <v-row>
-        <v-col cols="12" md="6" class="d-flex flex-column">
+      <v-row class="my-0">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
           <v-card class="panel flex-grow-1" data-summary="What this app is, its version and who made it. Use it to check which release is running." elevation="1">
             <div class="panel-head">
               <span class="d-flex align-center">
@@ -38,7 +38,7 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
           <v-card class="panel flex-grow-1" data-summary="Places to report bugs, follow updates and discuss the app. Use them to get help or share feedback." elevation="1">
             <div class="panel-head"><span>Links</span></div>
             <v-list dense>
@@ -71,7 +71,7 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
           <v-card class="panel flex-grow-1" data-summary="Where the app keeps its settings and Empire History files on disk. Use it to find them or back them up." elevation="1">
             <div class="panel-head">
               <span>Data</span>
@@ -92,7 +92,7 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12" md="6" class="d-flex flex-column">
+        <v-col cols="12" md="6" class="d-flex flex-column py-0">
           <v-card class="panel flex-grow-1" data-summary="The libraries and tools this app is built on. Use the links to read about any of them." elevation="1">
             <div class="panel-head"><span>Built with</span></div>
             <div class="panel-body">
@@ -103,7 +103,7 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12">
+        <v-col cols="12" class="py-0">
           <v-card class="panel" data-summary="The fonts and icons the app ships, who made them and the terms they come under. Open a notice to read the license text bundled with the app." elevation="1" data-credits>
             <div class="panel-head"><span>Credits</span></div>
             <v-simple-table class="credits-table">
@@ -119,16 +119,16 @@
               </thead>
               <tbody>
                 <tr v-for="credit in credits" :key="credit.id" :data-credit="credit.id">
-                  <td class="py-2">
+                  <td>
                     <div class="font-weight-medium">{{ credit.name }}</div>
                     <div class="caption text--secondary">{{ credit.kind }} · {{ credit.covers }}</div>
                   </td>
                   <td>{{ credit.author }}</td>
-                  <td><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
+                  <td class="text-no-wrap"><external-link :href="credit.source.href">{{ credit.source.label }}</external-link></td>
                   <td><external-link :href="credit.license.href">{{ credit.license.label }}</external-link></td>
-                  <td class="caption">{{ credit.modifications }}</td>
+                  <td>{{ credit.modifications }}</td>
                   <td class="text-no-wrap">
-                    <v-btn v-for="item in credit.notices" :key="item.title" x-small text color="primary" class="d-block" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</v-btn>
+                    <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
                   </td>
                 </tr>
               </tbody>
@@ -137,7 +137,7 @@
           </v-card>
         </v-col>
 
-        <v-col cols="12">
+        <v-col cols="12" class="py-0">
           <v-card class="panel" data-summary="How to help improve the app with pull requests and issues. Follow the steps to get a change in." elevation="1">
             <div class="panel-head"><span>Contribute</span></div>
             <div class="panel-body body-2 pb-0">Pull requests and issues are welcome. The short version:</div>
@@ -310,19 +310,47 @@ export default {
   }
 }
 
+// A list's icons and step numbers line up with the panel's title and text, which sit 24px in (styles/page-chrome.scss).
+.panel .v-list-item {
+  padding: 0 24px;
+}
+
 .steps__text {
   white-space: normal;
 }
 
 .steps__number {
   justify-content: center;
-  color: #fff;
+  color: var(--ae-on-fill);
   font-size: 12px;
 }
 
-.credits-table td {
+// Every cell starts at the same line and keeps the same space below it; the selector matches Vuetify's own cell rule, which sets the padding, so it wins.
+.credits-table.v-data-table > .v-data-table__wrapper > table > tbody > tr > td {
+  padding-top: 10px;
+  padding-bottom: 10px;
   vertical-align: top;
-  padding-top: 8px;
+}
+
+// A notice opens in a dialog; it reads as a link, like the source and license beside it.
+.credit-notice {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ae-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ae-primary);
+    outline-offset: 2px;
+  }
 }
 
 .notice-text {
