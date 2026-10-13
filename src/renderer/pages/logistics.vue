@@ -58,9 +58,9 @@
           <v-card class="panel" data-summary="The fuel stockpile, refineries and Sorium stock at each colony. Use it to see where fuel is made and where Sorium is about to run out." elevation="1">
             <div class="panel-head">
               <span>Colony fuel and refineries<provenance-mark rule="logistics.refineryOutput" label /></span>
-              <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining</v-chip>
+              <v-chip small>{{ refineryRows.filter((row) => row.output > 0).length }} refining<template v-if="refineryTotals.unknown"> · {{ refineryTotals.unknown }} not known</template></v-chip>
             </div>
-            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :sort-by.sync="refineriesTable.sortBy" :sort-desc.sync="refineriesTable.sortDesc" :items-per-page.sync="refineriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
+            <v-data-table :headers="refineryHeaders" :items="refineryRows" item-key="PopulationID" :custom-sort="sortNullLast" :sort-by.sync="refineriesTable.sortBy" :sort-desc.sync="refineriesTable.sortDesc" :items-per-page.sync="refineriesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.PopName }}<page-link :to="colonyLink(item.PopulationID)" :name="item.PopName" class="ml-1" /></div>
@@ -75,14 +75,15 @@
               </template>
               <template #[`item.Refineries`]="{ item }">{{ item.Refineries ? count(item.Refineries) : '—' }}</template>
               <template #[`item.output`]="{ item }">
-                <span v-if="item.output > 0" class="text-no-wrap">{{ litres(item.output) }}</span>
+                <span v-if="item.output === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.outputResult" /></span>
+                <span v-else-if="item.output > 0" class="text-no-wrap">{{ litres(item.output) }}<provenance-mark :result="item.outputResult" /></span>
                 <span v-else-if="item.idleReason" class="text-no-wrap" :class="item.idleReason === 'Turned off' ? 'text--secondary' : 'warning--text'">{{ item.idleReason }}</span>
                 <span v-else class="text--secondary">—</span>
               </template>
               <template #[`item.Sorium`]="{ item }">{{ item.Sorium >= 1 ? tons(item.Sorium) : '—' }}</template>
               <template #[`item.soriumSort`]="{ item }">
-                <span v-if="item.soriumYears !== null" class="text-no-wrap" :class="{ 'warning--text': item.soriumYears < 5 }">{{ years(item.soriumYears) }}</span>
-                <span v-else class="text--secondary">—</span>
+                <span v-if="item.soriumYears !== null" class="text-no-wrap" :class="{ 'warning--text': item.soriumYears < 5 }">{{ years(item.soriumYears) }}<provenance-mark :result="item.soriumResult" /></span>
+                <span v-else class="text--secondary">—<provenance-mark v-if="item.output === null" :result="item.soriumResult" /></span>
               </template>
               <template #[`item.services`]="{ item }">
                 <v-chip v-if="item.CanRefuel" x-small class="mr-1" title="Has a spaceport or refuelling station">Refuel</v-chip>
@@ -155,7 +156,7 @@
               <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
               <v-switch v-model="showIdleLocations" label="Show colonies without ships" dense hide-details class="mt-0" />
             </div>
-            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
+            <v-data-table :headers="locationHeaders" :items="visibleLocations" item-key="key" :custom-sort="sortNullLast" :sort-by.sync="locationsTable.sortBy" :sort-desc.sync="locationsTable.sortDesc" :items-per-page.sync="locationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.name }}<page-link v-if="item.PopulationID" :to="colonyLink(item.PopulationID)" :name="item.name" class="ml-1" /></div>
@@ -165,21 +166,24 @@
               <template #[`item.stock`]="{ item }">
                 <span class="text-no-wrap">
                   <v-icon v-if="item.belowWarning" small color="warning" :title="`Below the warning level of ${count(item.warningLevel)}`">mdi-alert</v-icon>
-                  {{ count(item.stock) }}
+                  {{ count(item.stock) }}<provenance-mark v-if="item.stockUnknown" :result="item.stockResult" />
                 </span>
-                <div v-if="item.supply" class="caption text--secondary text-no-wrap">+{{ count(item.supply) }} on supply ships</div>
+                <div v-if="item.supply || item.supplyUnknown" class="caption text--secondary text-no-wrap">{{ item.supply === null ? 'Supply ships not known' : `+${count(item.supply)} on supply ships` }}<provenance-mark v-if="item.supplyUnknown" :result="item.supplyResult" /></div>
               </template>
               <template #[`item.production`]="{ item }">
-                <template v-if="item.production > 0">
-                  <span class="text-no-wrap">{{ count(item.production) }}</span>
+                <span v-if="item.production === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.productionResult" /></span>
+                <template v-else-if="item.production > 0">
+                  <span class="text-no-wrap">{{ count(item.production) }}<provenance-mark :result="item.productionResult" /></span>
                   <div v-if="item.blocked > 0" class="caption error--text text-no-wrap" :title="`The ${item.missing.join(', ')} in stock won't last a year at full production, and there are no mines on a deposit of it`">Short of {{ item.missing.join(', ') }} (−{{ count(item.blocked) }})</div>
                 </template>
                 <span v-else-if="item.blocked > 0" class="text-no-wrap error--text" :title="`Facilities are on but the colony has none of the ${item.missing.join(', ')} the MSP needs, and no mines on a deposit of it`">No {{ item.missing.join(', ') }} ({{ count(item.blocked) }})</span>
                 <span v-else-if="item.potential > 0" class="text-no-wrap" :class="item.net < 0 ? 'error--text' : 'text--secondary'">Off ({{ count(item.potential) }})</span>
                 <span v-else class="text--secondary">—</span>
+                <div v-if="item.uncounted && item.production !== null" class="caption text--secondary text-no-wrap">{{ item.uncounted }} {{ item.uncounted === 1 ? 'colony' : 'colonies' }} not counted</div>
               </template>
               <template #[`item.loadSort`]="{ item }">
-                <div v-if="item.tons > 0 || item.capacity > 0" class="load-cell" :title="`${tons(item.tons)} maintained, capacity ${tons(item.capacity)}`">
+                <span v-if="item.tons === null || item.capacity === null" class="caption text-no-wrap" :title="`${tons(item.tons)} maintained, capacity ${tons(item.capacity)}`">{{ tons(item.tons) }} / {{ tons(item.capacity) }}<provenance-mark :result="item.tons === null ? item.tonsResult : item.capacityResult" /></span>
+                <div v-else-if="item.tons > 0 || item.capacity > 0" class="load-cell" :title="`${tons(item.tons)} maintained, capacity ${tons(item.capacity)}`">
                   <div class="meter">
                     <div class="meter-fill" :class="{ warning: item.tons > item.capacity }" :style="{ width: `${item.capacity > 0 ? Math.min(100, (item.tons / item.capacity) * 100) : 100}%` }" />
                   </div>
@@ -188,15 +192,19 @@
                 <span v-else class="text--secondary">—</span>
               </template>
               <template #[`item.upkeep`]="{ item }">
-                <span v-if="item.tons > 0 && item.capacity <= 0" class="error--text text-no-wrap" title="No maintenance facilities or modules here: the ships' maintenance clocks are running">Not maintained</span>
-                <span v-else-if="item.upkeep > 0" class="text-no-wrap">{{ count(item.upkeep) }}<span v-if="item.rate < 1" class="caption warning--text"> at {{ percent(item.rate) }}</span></span>
+                <span v-if="item.unmaintained" class="error--text text-no-wrap" title="No maintenance facilities or modules here: the ships' maintenance clocks are running">Not maintained</span>
+                <span v-else-if="item.upkeep === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.upkeepResult" /></span>
+                <span v-else-if="item.upkeep > 0" class="text-no-wrap">{{ count(item.upkeep) }}<span v-if="item.rate !== null && item.rate < 1" class="caption warning--text"> at {{ percent(item.rate) }}</span></span>
                 <span v-else class="text--secondary">—</span>
               </template>
               <template #[`item.net`]="{ item }">
-                <span class="text-no-wrap" :class="{ 'error--text': item.net < 0 }">{{ signed(item.net) }}</span>
+                <span v-if="item.net === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.netResult" /></span>
+                <span v-else class="text-no-wrap" :class="{ 'error--text': item.net < 0 }">{{ signed(item.net) }}<provenance-mark :result="item.netResult" /></span>
               </template>
               <template #[`item.runwaySort`]="{ item }">
-                <span v-if="item.runway !== null" class="text-no-wrap" :class="{ 'error--text': item.runway < 1, 'warning--text': item.runway >= 1 && item.runway < 5 }">{{ years(item.runway) }}</span>
+                <span v-if="item.net === null" class="text--secondary">—<provenance-mark :result="item.netResult" /></span>
+                <span v-else-if="item.runway !== null" class="text-no-wrap" :class="{ 'error--text': item.runway < 1, 'warning--text': item.runway >= 1 && item.runway < 5 }">{{ years(item.runway) }}<provenance-mark :result="item.netResult" /></span>
+                <span v-else-if="item.runwayResult" class="text--secondary">—<provenance-mark :result="item.runwayResult" /></span>
                 <span v-else-if="item.upkeep > 0" class="text--secondary">Covered</span>
                 <span v-else class="text--secondary">—</span>
               </template>
@@ -209,13 +217,13 @@
           <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships carrying maintenance supplies, with how much each holds. Use it to see how much spare stock could be sent to a colony in need." elevation="1">
             <div class="panel-head">
               <span>Supply ships</span>
-              <v-chip small>{{ count(supplyFleets.reduce((sum, fleet) => sum + fleet.SupplyMSP, 0)) }} MSP above their minimums</v-chip>
+              <v-chip small>{{ count(supplyTotal.value) }} MSP above their minimums<template v-if="supplyTotal.unknown"> · {{ supplyTotal.unknown }} not known<provenance-mark :result="supplyTotal.result" /></template></v-chip>
             </div>
-            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" :sort-by.sync="supplyTable.sortBy" :sort-desc.sync="supplyTable.sortDesc" disable-pagination hide-default-footer dense>
+            <v-data-table :headers="supplyHeaders" :items="supplyFleets" item-key="FleetID" :custom-sort="sortNullLast" :sort-by.sync="supplyTable.sortBy" :sort-desc.sync="supplyTable.sortDesc" disable-pagination hide-default-footer dense>
               <template #[`item.FleetName`]="{ item }">
                 <span>{{ item.FleetName }}</span><page-link :to="fleetRoutesLink(item.FleetID)" :name="item.FleetName" class="ml-1" />
               </template>
-              <template #[`item.SupplyMSP`]="{ item }">{{ count(item.SupplyMSP) }}</template>
+              <template #[`item.SupplyMSP`]="{ item }">{{ count(item.SupplyMSP) }}<provenance-mark v-if="item.SupplyMSP === null" rule="logistics.maintenanceStock" /></template>
             </v-data-table>
           </v-card>
         </template>
@@ -234,6 +242,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -242,9 +251,11 @@ import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { LITRES_PER_TON, MSP_MINERALS, compact, fullPowerBurn, harvesterReport, maintenanceLocations, refineryOutput } from '../utilities/logistics'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
+import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { sortNullLast, totalOf } from '../utilities/production'
+import { describeResult, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -276,6 +287,7 @@ export default {
   name: 'LogisticsPage',
   components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
+    countFormat,
     deepLink,
     loadState(INPUT_LABELS),
     productionModifiers,
@@ -293,16 +305,11 @@ export default {
     return {
       pageSizes: PAGE_SIZES,
       horizonOptions: HARVESTER_HORIZONS,
+      sortNullLast,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
-
-    separator() {
-      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
-
-      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
-    },
+    ...mapGetters(['database', 'GameID', 'RaceID']),
 
     appearance() {
       return activeAppearance()
@@ -328,21 +335,31 @@ export default {
 
     refineryRows() {
       return this.colonies.filter((colony) => colony.FuelStockpile >= 1 || colony.Refineries >= 1).map((colony) => {
-        const potential = refineryOutput(colony, this.modifierOf(colony.PopulationID))
-        const output = colony.Sorium >= 1 ? potential : 0
-        const soriumYears = output > 0 ? colony.Sorium / (output / LITRES_PER_TON) : null
+        const outputResult = refineryYield(colony, this.modifierOf(colony.PopulationID))
+        const output = valueOrNull(outputResult)
+        const soriumResult = soriumLasts(colony, outputResult)
+        const soriumYears = valueOrNull(soriumResult)
 
         return {
           ...colony,
           name: colony.PopName,
           place: this.place(colony),
           output,
-          idleReason: colony.Refineries < 1 || output > 0 ? null : !colony.FuelProdStatus ? 'Turned off' : colony.Sorium < 1 ? 'No Sorium' : 'No workers',
+          outputResult,
+          idleReason: colony.Refineries < 1 || output === null || output > 0 ? null : !colony.FuelProdStatus ? 'Turned off' : colony.Sorium < 1 ? 'No Sorium' : 'No workers',
           soriumYears,
-          soriumSort: soriumYears ?? Infinity,
+          soriumResult,
+          soriumSort: soriumYears,
           belowWarning: colony.WarningFuel > 0 && colony.FuelStockpile < colony.WarningFuel,
         }
       })
+    },
+
+    // The refineries' output summed over the colonies that have a figure, with how many do not.
+    refineryTotals() {
+      const { result, unknown } = totalOf('logistics.refineryOutput', this.refineryRows.map((row) => row.outputResult), 'colonies')
+
+      return { result, unknown, litres: valueOrNull(result) }
     },
 
     harvesterRows() {
@@ -375,27 +392,31 @@ export default {
     },
 
     fuelTotals() {
-      const colonies = this.colonies.reduce((sum, colony) => sum + colony.FuelStockpile, 0)
-      const tankers = this.shipFuel.filter((row) => row.FuelTanker).reduce((sum, row) => sum + row.Fuel, 0)
-      const ships = this.shipFuel.filter((row) => !row.FuelTanker).reduce((sum, row) => sum + row.Fuel, 0)
-      const refineries = this.refineryRows.reduce((sum, row) => sum + row.output, 0)
+      const colonyStock = columnTotal('logistics.fuelStock', this.colonies, 'FuelStockpile', 'the colony\'s fuel stockpile', 'colonies')
+      const tankerStock = columnTotal('logistics.fuelStock', this.shipFuel.filter((row) => row.FuelTanker), 'Fuel', 'the fuel aboard', 'tankers', [], 'FuelUnknown')
+      const shipStock = columnTotal('logistics.fuelStock', this.shipFuel.filter((row) => !row.FuelTanker), 'Fuel', 'the fuel aboard', 'ships', [], 'FuelUnknown')
+      const stockResult = totalOf('logistics.fuelStock', [colonyStock.result, tankerStock.result, shipStock.result], 'stocks').result
+      const colonies = colonyStock.value
+      const tankers = tankerStock.value
+      const ships = shipStock.value
+      const refineries = this.refineryTotals.litres
       const harvesters = this.harvesterYear.litres
       const lifetime = this.burnRows.reduce((sum, row) => sum + row.lifetime, 0)
       const moving = this.burnRows.reduce((sum, row) => sum + row.moving, 0)
 
-      return { colonies, tankers, ships, stock: colonies + tankers + ships, refineries, harvesters, harvestersUnknown: this.harvesterYear.unknown, production: refineries + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
+      return { colonies, tankers, ships, stock: valueOrNull(stockResult), stockResult, stockUnknown: colonyStock.unknown + tankerStock.unknown + shipStock.unknown, refineries, refineriesUnknown: this.refineryTotals.unknown, harvesters, harvestersUnknown: this.harvesterYear.unknown, production: (refineries ?? 0) + harvesters, low: Math.min(lifetime, moving), high: Math.max(lifetime, moving), lifetime, moving }
     },
 
     fuelBalance() {
       const totals = this.fuelTotals
       const largest = Math.max(totals.production, totals.high) || 1
-      const line = (label, value, color) => ({ label, value, color, width: (value / largest) * 100 })
+      const line = (label, value, color) => ({ label, value, color, width: value ? (value / largest) * 100 : 0 })
 
       return [
         {
           label: 'Made',
           total: this.litres(totals.production),
-          lines: [line('Refineries', totals.refineries, 'success'), ...(this.harvesterRows.length ? [line(`Harvesters, fit in tanks${totals.harvestersUnknown ? ` (${totals.harvestersUnknown} unknown)` : ''}`, totals.harvesters, 'success')] : [])],
+          lines: [line(`Refineries${totals.refineriesUnknown ? ` (${totals.refineriesUnknown} unknown)` : ''}`, totals.refineries, 'success'), ...(this.harvesterRows.length ? [line(`Harvesters, fit in tanks${totals.harvestersUnknown ? ` (${totals.harvestersUnknown} unknown)` : ''}`, totals.harvesters, 'success')] : [])],
         },
         {
           label: 'Burned (estimate)',
@@ -446,41 +467,56 @@ export default {
       return maintenanceLocations({ colonies: this.colonies, fleets: this.fleets, modifierOf: this.modifierOf, maintenanceCapacity, economicModifier }).map((location) => {
         const main = location.colonies.slice().sort((a, b) => b.Population - a.Population || b.MaintenanceStockpile - a.MaintenanceStockpile)[0]
         const fleets = location.fleets.filter((fleet) => fleet.MaintainedShips > 0 || fleet.MaintenanceModules > 0 || fleet.SupplyMSP > 0)
+        const unmaintained = location.tons > 0 && location.capacity !== null && location.capacity <= 0
 
         return {
           ...location,
           PopulationID: main ? main.PopulationID : null,
           name: main ? main.PopName : fleets.length ? fleets.map((fleet) => fleet.FleetName).slice(0, 2).join(', ') : location.fleets[0].FleetName,
           place: main ? this.place(main) : `${location.fleets[0].SystemName || 'Unknown system'}, deep space`,
-          belowWarning: location.warningLevel > 0 && location.stock < location.warningLevel,
-          loadSort: location.capacity > 0 ? location.tons / location.capacity : location.tons > 0 ? Infinity : 0,
-          // Ships with no maintenance at all first, then the stock that runs out soonest.
-          runwaySort: location.tons > 0 && location.capacity <= 0 ? -1 : location.runway ?? Infinity,
+          unmaintained,
+          belowWarning: location.warningLevel > 0 && location.stock !== null && location.stock < location.warningLevel,
+          // The load unknown (null) sorts last: a tonnage or a capacity the save does not give is no load of 0.
+          loadSort: location.tons === null || (location.capacity === null && location.tons > 0) ? null : location.capacity > 0 ? location.tons / location.capacity : location.tons > 0 ? Infinity : 0,
+          // Ships with no maintenance at all first, then the stock that runs out soonest, then the locations whose runway is unknown.
+          runwaySort: unmaintained ? -1 : location.net === null || (location.runway === null && location.net < 0) ? null : location.runway ?? Infinity,
         }
-      }).filter((location) => location.tons > 0 || location.stock >= 1 || location.potential > 0 || location.supply > 0)
+      }).filter((location) => location.tons > 0 || location.tons === null || location.stock >= 1 || location.stockUnknown > 0 || location.potential > 0 || location.potential === null || location.supply > 0 || location.supplyUnknown > 0)
     },
 
     visibleLocations() {
-      return this.showIdleLocations ? this.locations : this.locations.filter((location) => location.tons > 0 || location.supply > 0)
+      return this.showIdleLocations ? this.locations : this.locations.filter((location) => location.tons > 0 || location.tons === null || location.supply > 0 || location.supplyUnknown > 0)
     },
 
+    // The supply ships' fleets, a fleet with a ship the save does not describe with no figure (null).
     supplyFleets() {
-      return this.fleets.filter((fleet) => fleet.SupplyMSP >= 1).map((fleet) => ({ ...fleet, place: fleet.SystemName || 'Unknown system' })).sort((a, b) => b.SupplyMSP - a.SupplyMSP)
+      return this.fleets.filter((fleet) => fleet.SupplyMSP >= 1 || fleet.SupplyUnknown > 0).map((fleet) => ({ ...fleet, SupplyMSP: fleet.SupplyUnknown > 0 ? null : fleet.SupplyMSP, place: fleet.SystemName || 'Unknown system' })).sort((a, b) => (b.SupplyMSP ?? -1) - (a.SupplyMSP ?? -1))
+    },
+
+    supplyTotal() {
+      return columnTotal('logistics.maintenanceStock', this.supplyFleets, 'SupplyMSP', 'the spare MSP of the supply ships', 'fleets')
     },
 
     mspTotals() {
-      const sum = (key) => this.locations.reduce((total, location) => total + location[key], 0)
-      const unmaintained = this.locations.filter((location) => location.tons > 0 && location.capacity <= 0)
+      const sum = (key) => this.locations.reduce((total, location) => total + (location[key] ?? 0), 0)
+      const unmaintained = this.locations.filter((location) => location.unmaintained)
+      const made = totalOf('logistics.mspOutput', this.locations.map((location) => location.productionResult), 'locations')
+      const stock = totalOf('logistics.maintenanceStock', this.locations.flatMap((location) => [location.stockResult, location.supplyResult]), 'locations')
 
       return {
         stock: sum('stock'),
         supply: sum('supply'),
-        production: sum('production'),
+        stockResult: stock.result,
+        stockUnknown: sum('stockUnknown') + sum('supplyUnknown'),
+        production: valueOrNull(made.result),
+        productionResult: made.result,
+        uncounted: sum('uncounted'),
         potential: sum('potential'),
         upkeep: sum('upkeep'),
-        overloaded: this.locations.filter((location) => location.rate < 1 && location.capacity > 0).length,
+        upkeepUnknown: this.locations.filter((location) => location.upkeep === null).length,
+        overloaded: this.locations.filter((location) => location.rate !== null && location.rate < 1 && location.capacity > 0).length,
         short: this.locations.filter((location) => location.runway !== null && location.runway < 5).length,
-        unmaintainedShips: unmaintained.reduce((total, location) => total + location.ships, 0),
+        unmaintainedShips: unmaintained.reduce((total, location) => total + (location.ships ?? 0), 0),
         unmaintainedTons: unmaintained.reduce((total, location) => total + location.tons, 0),
       }
     },
@@ -488,36 +524,42 @@ export default {
     tiles() {
       const fuel = this.fuelTotals
       const msp = this.mspTotals
-      const fuelNet = fuel.production - fuel.high
-      const mspNet = msp.production - msp.upkeep
-      const mspStock = msp.stock + msp.supply
+      const fuelNet = fuel.refineries === null ? null : fuel.production - fuel.high
+      const mspNet = msp.production === null || msp.upkeepUnknown ? null : msp.production - msp.upkeep
+      const mspStock = valueOrNull(msp.stockResult)
+      const fuelDown = fuelNet !== null && fuelNet < 0
+      const mspDown = mspNet !== null && mspNet < 0
 
       return [
         {
           label: 'Fuel stock',
-          value: this.litres(fuel.stock),
-          note: `Colonies ${this.litres(fuel.colonies)}, tankers ${this.litres(fuel.tankers)}, other ships ${this.litres(fuel.ships)}`,
+          value: this.litres(valueOrNull(fuel.stockResult)),
+          note: `Colonies ${this.litres(fuel.colonies)}, tankers ${this.litres(fuel.tankers)}, other ships ${this.litres(fuel.ships)}${fuel.stockUnknown ? `; ${fuel.stockUnknown} stocks not counted` : ''}`,
+          title: describeResult(fuel.stockResult),
         },
         {
           label: 'Fuel per year',
           value: this.signedLitres(fuelNet),
-          note: `Made ${this.litres(fuel.production)}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters unknown)` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelNet < 0 && fuel.stock > 0 ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
-          icon: fuelNet < 0 ? 'mdi-trending-down' : 'mdi-trending-up',
-          iconColor: fuelNet < 0 ? 'error' : 'success',
+          note: `Made ${this.litres(fuel.production)}${fuel.refineriesUnknown ? ` (${fuel.refineriesUnknown} ${fuel.refineriesUnknown === 1 ? 'colony' : 'colonies'} not counted)` : ''}${fuel.harvestersUnknown ? ` (${fuel.harvestersUnknown} harvesters unknown)` : ''}, burned about ${this.litres(fuel.low)}–${this.litres(fuel.high)}${fuelDown && fuel.stock > 0 && !fuel.stockUnknown ? `: stock lasts ${this.years(fuel.stock / -fuelNet)}` : ''}`,
+          title: `Refineries: ${describeResult(this.refineryTotals.result)}${this.harvesterRows.length ? ` Harvesters, fit in tanks: ${fuel.harvestersUnknown ? `${fuel.harvestersUnknown} of ${this.harvesterRows.length} have no figure and are not counted, so the harvested share is a lower bound.` : 'every harvester has a figure.'}` : ''}`,
+          icon: fuelDown ? 'mdi-trending-down' : 'mdi-trending-up',
+          iconColor: fuelDown ? 'error' : 'success',
         },
         {
           label: 'Maintenance supplies',
-          value: `${this.count(mspStock)} MSP`,
-          note: msp.unmaintainedShips ? `${this.count(msp.unmaintainedShips)} ships (${this.tons(msp.unmaintainedTons)}) are away from any maintenance` : `${this.count(msp.supply)} on supply ships; every ship is at a maintenance location`,
+          value: mspStock === null ? UNKNOWN_TEXT : `${this.count(mspStock)} MSP`,
+          note: `${msp.unmaintainedShips ? `${this.count(msp.unmaintainedShips)} ships (${this.tons(msp.unmaintainedTons)}) are away from any maintenance` : `${this.count(msp.supply)} on supply ships; every ship is at a maintenance location`}${msp.stockUnknown ? `; ${msp.stockUnknown} stocks not counted` : ''}`,
+          title: describeResult(msp.stockResult),
           icon: msp.unmaintainedShips ? 'mdi-alert' : null,
           iconColor: 'warning',
         },
         {
           label: 'Supplies per year',
           value: this.signed(mspNet),
-          note: `Made ${this.count(msp.production)}${msp.potential > msp.production ? ` (${this.count(msp.potential)} with all on and supplied)` : ''}, used ${this.count(msp.upkeep)}${msp.short ? `; ${msp.short} running low` : ''}`,
-          icon: mspNet < 0 ? 'mdi-trending-down' : 'mdi-trending-up',
-          iconColor: mspNet < 0 ? 'error' : 'success',
+          note: `Made ${this.count(msp.production)}${msp.uncounted ? ` (${msp.uncounted} ${msp.uncounted === 1 ? 'colony' : 'colonies'} not counted)` : ''}${msp.potential > msp.production ? ` (${this.count(msp.potential)} with all on and supplied)` : ''}, used ${msp.upkeepUnknown ? `${this.count(msp.upkeep)} at the ${this.locations.length - msp.upkeepUnknown} locations that have a figure (${msp.upkeepUnknown} unknown)` : this.count(msp.upkeep)}${msp.short ? `; ${msp.short} running low` : ''}`,
+          title: `${describeResult(msp.productionResult)}${msp.upkeepUnknown ? ` The upkeep of ${msp.upkeepUnknown} locations is not known, so the net is not given.` : ''}`,
+          icon: mspDown ? 'mdi-trending-down' : 'mdi-trending-up',
+          iconColor: mspDown ? 'error' : 'success',
         },
       ]
     },
@@ -598,36 +640,36 @@ export default {
       return linkTo.routes({ from: placeKey.fleet(fleetId) })
     },
 
+    // The colony's overall production modifier, null while the save does not give it.
     modifierOf(populationId) {
       const modifiers = this.populationProductionModifiers[populationId]
 
-      return modifiers ? modifiers.OverallProductionModifier : 0
+      return modifiers && isKnownNumber(modifiers.OverallProductionModifier) ? modifiers.OverallProductionModifier : null
     },
 
     place(colony) {
       return stripHtml(populationName(colony)).replace(` — ${colony.PopName}`, '')
     },
 
-    count(value) {
-      return separatedNumber(roundToDecimal(value || 0, 0), this.separator)
-    },
     signed(value) {
-      return `${value < 0 ? '−' : '+'}${this.count(Math.abs(value))}`
+      return isKnownNumber(value) ? `${value < 0 ? '−' : '+'}${this.count(Math.abs(value))}` : UNKNOWN_TEXT
     },
     tons(value) {
-      return `${compact(value || 0)} t`
+      return isKnownNumber(value) ? `${compact(value)} t` : UNKNOWN_TEXT
     },
     litres(value) {
-      return `${compact(value || 0)} L`
+      return isKnownNumber(value) ? `${compact(value)} L` : UNKNOWN_TEXT
     },
     signedLitres(value) {
-      return `${value < 0 ? '−' : '+'}${this.litres(Math.abs(value))}`
+      return isKnownNumber(value) ? `${value < 0 ? '−' : '+'}${this.litres(Math.abs(value))}` : UNKNOWN_TEXT
     },
     percent(fraction) {
-      return `${roundToDecimal((fraction || 0) * 100, 0)}%`
+      return isKnownNumber(fraction) ? `${roundToDecimal(fraction * 100, 0)}%` : UNKNOWN_TEXT
     },
     years(value) {
-      if (value > 10000) {
+      if (!isKnownNumber(value)) {
+        return UNKNOWN_TEXT
+      } else if (value > 10000) {
         return '> 10,000 y'
       } else if (value < 1) {
         return `${Math.max(1, Math.round(value * 12))} mo`
@@ -669,7 +711,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then 1 else 0 end) as MaintainedShips, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then FCT_ShipClass.Size * 50 else 0 end) as MaintainedTons, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then case when FCT_Ship.MaintenanceState = 2 then FCT_ShipClass.Cost else FCT_ShipClass.Cost / 4.0 end else 0 end) as AnnualMSP, sum(case when FCT_Ship.MothershipID = 0 and FCT_ShipClass.MaintModules > 0 then FCT_ShipClass.MaintModules * case when FCT_ShipClass.Crew > 0 then min(1.0, max(0, FCT_Ship.CurrentCrew) * 1.0 / FCT_ShipClass.Crew) else 1 end else 0 end) as MaintenanceModules, sum(case when FCT_ShipClass.SupplyShip = 1 and FCT_Ship.CurrentMaintSupplies > FCT_ShipClass.MinimumSupplies then FCT_Ship.CurrentMaintSupplies - FCT_ShipClass.MinimumSupplies else 0 end) as SupplyMSP, sum(case when FCT_ShipClass.SupplyShip = 1 then 1 else 0 end) as SupplyShips from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join (select FCT_Ship.ShipID, FCT_ShipClass.CommercialHangar from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}) as VIR_Mothership on VIR_Mothership.ShipID = FCT_Ship.MothershipID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_Fleet.FleetID`).then(([items]) => items)
+        return await this.database.query(`select FCT_Fleet.FleetID, FCT_Fleet.FleetName, FCT_Fleet.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_Fleet.OrbitBodyID, FCT_Fleet.Xcor, FCT_Fleet.Ycor, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then 1 else 0 end) as MaintainedShips, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then FCT_ShipClass.Size * 50 else 0 end) as MaintainedTons, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 then case when FCT_Ship.MaintenanceState = 2 then FCT_ShipClass.Cost else FCT_ShipClass.Cost / 4.0 end else 0 end) as AnnualMSP, sum(case when FCT_Ship.MothershipID = 0 and FCT_ShipClass.MaintModules > 0 then FCT_ShipClass.MaintModules * case when FCT_ShipClass.Crew > 0 then min(1.0, max(0, FCT_Ship.CurrentCrew) * 1.0 / FCT_ShipClass.Crew) else 1 end else 0 end) as MaintenanceModules, sum(case when FCT_ShipClass.SupplyShip = 1 and FCT_Ship.CurrentMaintSupplies > FCT_ShipClass.MinimumSupplies then FCT_Ship.CurrentMaintSupplies - FCT_ShipClass.MinimumSupplies else 0 end) as SupplyMSP, sum(case when FCT_ShipClass.SupplyShip = 1 then 1 else 0 end) as SupplyShips, sum(case when FCT_ShipClass.Commercial is null then 1 else 0 end) as MaintainedUnknown, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 and FCT_ShipClass.Size is null then 1 else 0 end) as TonsUnknown, sum(case when FCT_ShipClass.Commercial = 0 and coalesce(VIR_Mothership.CommercialHangar, 1) = 1 and (FCT_ShipClass.Cost is null or FCT_Ship.MaintenanceState is null) then 1 else 0 end) as AnnualUnknown, sum(case when FCT_Ship.MothershipID = 0 and (FCT_ShipClass.MaintModules is null or (FCT_ShipClass.MaintModules > 0 and (FCT_ShipClass.Crew is null or (FCT_ShipClass.Crew > 0 and FCT_Ship.CurrentCrew is null)))) then 1 else 0 end) as ModulesUnknown, sum(case when FCT_ShipClass.SupplyShip is null or (FCT_ShipClass.SupplyShip = 1 and (FCT_Ship.CurrentMaintSupplies is null or FCT_ShipClass.MinimumSupplies is null)) then 1 else 0 end) as SupplyUnknown from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID left join (select FCT_Ship.ShipID, FCT_ShipClass.CommercialHangar from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}) as VIR_Mothership on VIR_Mothership.ShipID = FCT_Ship.MothershipID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Fleet.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Fleet.RaceID and FCT_RaceSysSurvey.GameID = FCT_Fleet.GameID where FCT_Fleet.GameID = ${this.GameID} and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 group by FCT_Fleet.FleetID`).then(([items]) => items)
       }),
       default: [],
     },
@@ -712,7 +754,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_ShipClass.FuelTanker, count(*) as Ships, sum(FCT_Ship.Fuel) as Fuel from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.FuelCapacity > 0 group by FCT_ShipClass.FuelTanker`).then(([items]) => items)
+        return await this.database.query(`select FCT_ShipClass.FuelTanker, count(*) as Ships, sum(FCT_Ship.Fuel) as Fuel, sum(case when FCT_Ship.Fuel is null then 1 else 0 end) as FuelUnknown from FCT_Ship inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_Ship.ShippingLineID = 0 and FCT_ShipClass.FuelCapacity > 0 group by FCT_ShipClass.FuelTanker`).then(([items]) => items)
       }),
       default: [],
     },

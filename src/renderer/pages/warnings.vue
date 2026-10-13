@@ -35,20 +35,21 @@
         <v-col v-for="(stack, stackIndex) in columns" :key="stackIndex" cols="12" xl="6" class="panel-column">
           <v-card v-for="panel in stack" :key="panel.group.key" class="panel" :data-summary="panel.group.summary" elevation="1">
             <div class="panel-head">
-              <div class="subtitle-2">{{ panel.group.title }} <span class="caption text--secondary">{{ count(panel.total) }} {{ panel.total === 1 ? 'warning' : 'warnings' }} in {{ count(panel.sections.length) }} {{ panel.sections.length === 1 ? 'check' : 'checks' }}</span></div>
+              <div class="subtitle-2">{{ panel.group.title }} <span class="caption text--secondary">{{ panelCaption(panel) }}<provenance-mark rule="warnings.summary" /></span></div>
             </div>
 
             <section v-for="section in panel.sections" :key="section.check.key" class="check" :class="{ 'check--muted': section.checkMuted }">
               <div class="check-head">
                 <v-icon small :color="section.severity.color" :title="section.severity.label" :aria-label="section.severity.label">{{ section.severity.icon }}</v-icon>
-                <span class="check-title">{{ section.check.title(section.rows.length, options) }}</span>
+                <span class="check-title">{{ sectionTitle(section) }}</span><provenance-mark :rule="section.check.provenance" />
                 <span v-if="section.newCount" class="new-label">{{ count(section.newCount) }} new</span>
                 <v-spacer />
                 <v-btn v-if="checkFilter !== section.check.key" icon x-small :style="{ color: 'inherit' }" :aria-label="`Show only ${checkLabel(section.check)}`" :title="`Show only ${checkLabel(section.check)}`" @click="checkFilter = section.check.key"><v-icon small>mdi-filter-outline</v-icon></v-btn>
                 <v-btn icon x-small :style="{ color: 'inherit' }" :aria-label="`${section.checkMuted ? 'Unmute' : 'Mute'} ${checkLabel(section.check)}`" :title="`${section.checkMuted ? 'Unmute' : 'Mute'} ${checkLabel(section.check)}`" @click="toggleCheckMuted(section.check.key)"><v-icon small>{{ section.checkMuted ? 'mdi-bell-outline' : 'mdi-bell-off-outline' }}</v-icon></v-btn>
               </div>
 
-              <v-simple-table dense>
+              <div v-if="section.failure" class="check-failure caption error--text">Could not be read: {{ section.failure }}. The check reads the save again when it changes.</div>
+              <v-simple-table v-else dense>
                 <template #default>
                   <thead>
                     <tr>
@@ -57,28 +58,38 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="row in visibleRows(section)" :key="row.id" :class="{ 'row-muted': section.mutedIds.has(row.id) }">
-                      <td v-for="(column, index) in section.check.columns" :key="column.key" :class="{ 'text-end': column.align === 'end' }">
-                        <template v-if="index === 0">
-                          <div class="row-name">
-                            <span :class="cellTone(row, column)">{{ cellText(row, column) }}</span>
-                            <span v-if="isNew(section.check.key, row.id)" class="new-label">New</span>
-                          </div>
-                          <div v-if="row.caption" class="caption text--secondary">{{ row.caption }}</div>
-                        </template>
-                        <span v-else :class="cellTone(row, column)">{{ cellText(row, column) }}</span>
-                      </td>
-                      <td class="row-actions">
-                        <page-link v-if="row.link" :to="row.link" :name="cellText(row, section.check.columns[0])" />
-                        <v-btn icon x-small :style="{ color: 'inherit' }" :aria-label="`${section.mutedIds.has(row.id) ? 'Unmute' : 'Mute'} ${cellText(row, section.check.columns[0])}`" :title="section.mutedIds.has(row.id) ? 'Unmute this warning' : 'Mute this warning'" @click="toggleRowMuted(section.check.key, row.id)"><v-icon small>{{ section.mutedIds.has(row.id) ? 'mdi-eye-outline' : 'mdi-eye-off-outline' }}</v-icon></v-btn>
-                      </td>
-                    </tr>
+                    <template v-for="row in listing(section)">
+                      <tr v-if="row.separator" :key="row.id" class="row-separator">
+                        <td :colspan="section.check.columns.length + 1" class="caption text--secondary">{{ count(row.count) }} not evaluated: a stored value the condition needs is missing<provenance-mark :rule="section.check.provenance" /></td>
+                      </tr>
+                      <tr v-else :key="row.id" :class="{ 'row-muted': !row.unevaluated && section.mutedIds.has(row.id) }">
+                        <td v-for="(column, index) in section.check.columns" :key="column.key" :class="{ 'text-end': column.align === 'end' }">
+                          <template v-if="index === 0">
+                            <div class="row-name">
+                              <span :class="cellTone(row, column)">{{ cellText(row, column) }}</span>
+                              <provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
+                              <provenance-mark v-if="row.unevaluated" :result="row.unevaluated" />
+                              <span v-if="!row.unevaluated && isNew(section.check.key, row.id)" class="new-label">New</span>
+                            </div>
+                            <div v-if="row.caption" class="caption text--secondary">{{ row.caption }}</div>
+                            <div v-if="row.unevaluated" class="caption text--secondary">{{ missingText(row) }}</div>
+                          </template>
+                          <template v-else>
+                            <span :class="cellTone(row, column)">{{ cellText(row, column) }}</span><provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
+                          </template>
+                        </td>
+                        <td class="row-actions">
+                          <page-link v-if="row.link" :to="row.link" :name="cellText(row, section.check.columns[0])" />
+                          <v-btn v-if="!row.unevaluated" icon x-small :style="{ color: 'inherit' }" :aria-label="`${section.mutedIds.has(row.id) ? 'Unmute' : 'Mute'} ${cellText(row, section.check.columns[0])}`" :title="section.mutedIds.has(row.id) ? 'Unmute this warning' : 'Mute this warning'" @click="toggleRowMuted(section.check.key, row.id)"><v-icon small>{{ section.mutedIds.has(row.id) ? 'mdi-eye-outline' : 'mdi-eye-off-outline' }}</v-icon></v-btn>
+                        </td>
+                      </tr>
+                    </template>
                   </tbody>
                 </template>
               </v-simple-table>
 
-              <div v-if="section.rows.length > previewRows" class="check-more">
-                <v-btn small text @click="toggleExpanded(section.check.key)">{{ expanded[section.check.key] ? 'Show fewer' : `Show all ${count(section.rows.length)}` }}</v-btn>
+              <div v-if="!section.failure && listedCount(section) > previewRows" class="check-more">
+                <v-btn small text @click="toggleExpanded(section.check.key)">{{ expanded[section.check.key] ? 'Show fewer' : `Show all ${count(listedCount(section))}` }}</v-btn>
               </div>
               <div class="check-foot caption text--secondary">{{ section.check.rule }}</div>
             </section>
@@ -87,12 +98,12 @@
       </v-row>
 
       <v-card v-else class="panel pa-6 text-center" elevation="1">
-        <template v-if="!anyRows">
+        <template v-if="!anyFindings">
           <v-icon large color="success">mdi-check-circle-outline</v-icon>
           <div class="title mt-2">All clear</div>
           <div class="text--secondary">None of the {{ count(checkCount) }} checks found anything for this race.</div>
         </template>
-        <template v-else-if="focusedCheck && !focusedRows.length">
+        <template v-else-if="focusedCheck && !focusedHasFindings">
           <v-icon large color="success">mdi-check-circle-outline</v-icon>
           <div class="title mt-2">Nothing to report</div>
           <div class="text--secondary">The check for {{ checkLabel(focusedCheck) }} found nothing for this race.</div>
@@ -118,13 +129,15 @@ import { mapGetters, mapState } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
 import { linkTo } from '../utilities/deep-links'
-import { tracked } from '../utilities/load-tracking'
+import { joinLabels, tracked } from '../utilities/load-tracking'
+import { describeRule } from '../utilities/provenance'
 import { CHECKS, GROUPS, IDLE_FLEETS_KEY, SEVERITIES, checkByKey, checkLabel, normalizeRows } from '../utilities/warnings'
 
 // Rows a check shows before "Show all".
@@ -150,7 +163,7 @@ const checkReads = Object.fromEntries(CHECKS.map((check) => [readName(check), {
 }]))
 
 export default {
-  components: { LoadState, PageLink, StatTiles },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -196,8 +209,9 @@ export default {
       return this.GameID && this.RaceID ? `game.${this.GameID}.race.${this.RaceID}` : null
     },
 
+    // Every read has settled: a read that failed still counts, as its check shows the failure in place of rows (a stale or empty read is never a clean zero).
     ready() {
-      return !!this.database && !!this.contextKey && this.inputsLoaded
+      return !!this.database && !!this.contextKey && Object.keys(INPUT_LABELS).every((key) => this.loadErrors[key] !== undefined)
     },
 
     severityOptions() {
@@ -264,22 +278,35 @@ export default {
       return Object.fromEntries(Object.entries(this.lastLook || {}).map(([key, ids]) => [key, new Set(ids)]))
     },
 
-    // Every check with the rows its read returned.
+    // Every check with the rows its read returned, apart from the rows that could not be evaluated, and the message of a read that failed.
     checkStates() {
-      return CHECKS.map((check) => ({ check, rows: this[readName(check)] }))
+      return CHECKS.map((check) => {
+        const failure = this.loadErrors[readName(check)] || null
+        const read = failure ? [] : this[readName(check)]
+
+        return { check, failure, rows: read.filter((row) => !row.unevaluated), unevaluated: read.filter((row) => row.unevaluated) }
+      })
     },
 
-    anyRows() {
-      return this.checkStates.some(({ rows }) => rows.length)
+    anyFindings() {
+      return this.checkStates.some(({ rows, unevaluated, failure }) => rows.length || unevaluated.length || failure)
     },
 
-    // What the tiles count: rows not muted, in checks not muted, by severity.
+    // What the tiles count: rows not muted, in checks not muted, by severity; the rows that could not be evaluated and the checks that could not be read are counted apart.
     summary() {
-      const severities = Object.fromEntries(SEVERITIES.map((severity) => [severity.key, { rows: 0, checks: 0 }]))
+      const severities = Object.fromEntries(SEVERITIES.map((severity) => [severity.key, { rows: 0, checks: 0, unevaluated: 0, unevaluatedChecks: 0, failed: 0 }]))
       let mutedRows = 0
       let mutedChecks = 0
 
-      this.checkStates.forEach(({ check, rows }) => {
+      this.checkStates.forEach(({ check, rows, unevaluated, failure }) => {
+        const tally = severities[check.severity]
+
+        if (failure) {
+          tally.failed += 1
+
+          return
+        }
+
         if (this.mutedCheckSet.has(check.key)) {
           mutedChecks += 1
           mutedRows += rows.length
@@ -293,27 +320,52 @@ export default {
         mutedRows += rows.length - open
 
         if (open) {
-          severities[check.severity].rows += open
-          severities[check.severity].checks += 1
+          tally.rows += open
+          tally.checks += 1
+        }
+
+        if (unevaluated.length) {
+          tally.unevaluated += unevaluated.length
+          tally.unevaluatedChecks += 1
         }
       })
 
-      return { severities, mutedRows, mutedChecks }
+      const total = (name) => Object.values(severities).reduce((sum, tally) => sum + tally[name], 0)
+
+      return { severities, mutedRows, mutedChecks, unevaluatedRows: total('unevaluated'), unevaluatedChecks: total('unevaluatedChecks'), failedChecks: total('failed') }
+    },
+
+    // The tiles' tooltip: the summary's rule, and how many rows could not be evaluated and checks could not be read.
+    summaryTitle() {
+      const { unevaluatedRows, unevaluatedChecks, failedChecks } = this.summary
+      const parts = [describeRule('warnings.summary')]
+
+      if (unevaluatedRows) {
+        parts.push(`${this.count(unevaluatedRows)} ${unevaluatedRows === 1 ? 'row' : 'rows'} in ${this.count(unevaluatedChecks)} ${unevaluatedChecks === 1 ? 'check' : 'checks'} could not be evaluated`)
+      }
+
+      if (failedChecks) {
+        parts.push(`${this.count(failedChecks)} ${failedChecks === 1 ? 'check' : 'checks'} could not be read`)
+      }
+
+      return parts.join('. ')
     },
 
     // The three severity tiles filter the checks to their severity, and a second click shows them all again; a tile is pressed while its severity is the filter and no single check is focused.
     tiles() {
       const tile = (severity, empty) => {
-        const { rows, checks } = this.summary.severities[severity.key]
+        const { rows, checks, unevaluated, failed } = this.summary.severities[severity.key]
         const active = this.checkFilter === null && this.filters.severity === severity.key
+        const note = [rows ? `${this.count(checks)} ${checks === 1 ? 'check' : 'checks'}` : (unevaluated || failed ? '' : empty), unevaluated ? `${this.count(unevaluated)} not evaluated` : '', failed ? `${this.count(failed)} not read` : ''].filter(Boolean).join(', ')
 
         return {
           key: severity.key,
           label: severity.label,
           value: this.count(rows),
+          title: this.summaryTitle,
           icon: severity.icon,
           iconColor: severity.color,
-          note: rows ? `${this.count(checks)} ${checks === 1 ? 'check' : 'checks'}` : empty,
+          note,
           selectable: true,
           active,
           selectTitle: active ? 'Show every severity' : `Show only ${severity.label}`,
@@ -329,26 +381,31 @@ export default {
         {
           label: 'Muted',
           value: this.count(mutedRows),
+          title: this.summaryTitle,
           icon: 'mdi-bell-off-outline',
           note: mutedChecks ? `Includes ${this.count(mutedChecks)} muted ${mutedChecks === 1 ? 'check' : 'checks'}` : 'Warnings muted',
         },
       ]
     },
 
-    // Each check with the rows the filters leave. A check focused by link or button ignores the severity, group and search filters; muted rows and checks stay out unless shown.
+    // Each check with the rows the filters leave. A check focused by link or button ignores the severity, group and search filters; muted rows and checks stay out unless shown. A check that could not be read stays in as long as the check is in scope.
     sections() {
       const search = (this.filters.search || '').trim().toLowerCase()
       const focused = this.checkFilter !== null
 
-      return this.checkStates.map(({ check, rows }) => {
+      return this.checkStates.map(({ check, rows, unevaluated, failure }) => {
         const checkMuted = this.mutedCheckSet.has(check.key)
         const mutedIds = this.mutedSets[check.key] || NO_IDS
         const inScope = focused ? check.key === this.checkFilter : (!this.filters.severity || check.severity === this.filters.severity) && (!this.filters.group || check.group === this.filters.group)
-        const shown = inScope && (this.showMuted || !checkMuted) ? rows.filter((row) => (focused || !search || row.text.includes(search)) && (this.showMuted || !mutedIds.has(row.id))) : []
+        const visible = inScope && (this.showMuted || !checkMuted)
+        const matches = (row) => focused || !search || row.text.includes(search)
+        const shown = visible ? rows.filter((row) => matches(row) && (this.showMuted || !mutedIds.has(row.id))) : []
 
         return {
           check,
           rows: shown,
+          unevaluated: visible ? unevaluated.filter(matches) : [],
+          failure: visible ? failure : null,
           checkMuted,
           mutedIds,
           severity: SEVERITY_BY_KEY[check.severity],
@@ -359,9 +416,16 @@ export default {
 
     panels() {
       return GROUPS.map((group) => {
-        const sections = this.sections.filter((section) => section.check.group === group.key && section.rows.length)
+        const sections = this.sections.filter((section) => section.check.group === group.key && (section.rows.length || section.unevaluated.length || section.failure))
 
-        return { group, sections, total: sections.reduce((sum, section) => sum + section.rows.length, 0) }
+        return {
+          group,
+          sections,
+          total: sections.reduce((sum, section) => sum + section.rows.length, 0),
+          warned: sections.filter((section) => section.rows.length).length,
+          unevaluated: sections.reduce((sum, section) => sum + section.unevaluated.length, 0),
+          failed: sections.filter((section) => section.failure).length,
+        }
       }).filter((panel) => panel.sections.length)
     },
 
@@ -377,16 +441,16 @@ export default {
         const column = columns[0].height <= columns[1].height ? columns[0] : columns[1]
 
         column.panels.push(panel)
-        column.height += 1 + panel.sections.reduce((sum, section) => sum + 4 + this.visibleRows(section).length, 0)
+        column.height += 1 + panel.sections.reduce((sum, section) => sum + 4 + this.listing(section).length, 0)
       })
 
       return columns.map(({ panels }) => panels)
     },
 
-    focusedRows() {
+    focusedHasFindings() {
       const state = this.focusedCheck && this.checkStates.find(({ check }) => check === this.focusedCheck)
 
-      return state ? state.rows : []
+      return !!state && !!(state.rows.length || state.unevaluated.length || state.failure)
     },
   },
   watch: {
@@ -447,7 +511,7 @@ export default {
         context.GameTime = this.GameTime
       }
 
-      return check.read(context).then(normalizeRows)
+      return check.read(context).then((rows) => normalizeRows(rows, check))
     },
 
     loadVisitState(prefix) {
@@ -531,8 +595,30 @@ export default {
       this.$set(this.expanded, key, !this.expanded[key])
     },
 
-    visibleRows(section) {
-      return this.expanded[section.check.key] ? section.rows : section.rows.slice(0, PREVIEW_ROWS)
+    // The rows a section lists, up to the preview unless expanded, with the rows that could not be evaluated after them under a separator.
+    listing(section) {
+      const limit = this.expanded[section.check.key] ? Infinity : PREVIEW_ROWS
+      const rows = section.rows.slice(0, limit)
+      const unevaluated = section.unevaluated.slice(0, Math.max(limit - rows.length, 0))
+
+      return unevaluated.length ? [...rows, { separator: true, id: `separator:${section.check.key}`, count: section.unevaluated.length }, ...unevaluated] : rows
+    },
+
+    listedCount(section) {
+      return section.rows.length + section.unevaluated.length
+    },
+
+    sectionTitle(section) {
+      return section.failure ? `The ${checkLabel(section.check)} check` : section.check.title(section.rows.length, this.options)
+    },
+
+    panelCaption(panel) {
+      return [`${this.count(panel.total)} ${panel.total === 1 ? 'warning' : 'warnings'} in ${this.count(panel.warned)} ${panel.warned === 1 ? 'check' : 'checks'}`, panel.unevaluated ? `${this.count(panel.unevaluated)} not evaluated` : '', panel.failed ? `${this.count(panel.failed)} not read` : ''].filter(Boolean).join(', ')
+    },
+
+    // What an unevaluated row lacks.
+    missingText(row) {
+      return `Missing ${joinLabels(row.unevaluated.inputs.missing)}`
     },
 
     // A row is new when it wasn't listed at the previous visit; the first visit has nothing to compare with.
@@ -548,7 +634,15 @@ export default {
 
       const look = {}
 
-      this.checkStates.forEach(({ check, rows }) => {
+      this.checkStates.forEach(({ check, rows, failure }) => {
+        if (failure) {
+          if (this.lastLook && this.lastLook[check.key]) {
+            look[check.key] = this.lastLook[check.key]
+          }
+
+          return
+        }
+
         if (rows.length) {
           look[check.key] = rows.map((row) => row.id)
         }
@@ -568,6 +662,13 @@ export default {
       const cell = row.cells[column.key]
 
       return cell !== null && typeof cell === 'object' && cell.tone ? `${cell.tone}--text` : ''
+    },
+
+    // The unavailable result behind a cell's dash, if any.
+    cellResult(row, column) {
+      const cell = row.cells[column.key]
+
+      return cell !== null && typeof cell === 'object' && cell.result ? cell.result : null
     },
   },
   asyncComputed: {
@@ -658,6 +759,10 @@ export default {
   }
 
   .check-foot {
+    padding: 4px 16px 12px;
+  }
+
+  .check-failure {
     padding: 4px 16px 12px;
   }
 

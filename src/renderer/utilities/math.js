@@ -18,8 +18,20 @@ export const ceilToDecimal = (number, decimals = 0) => {
   return Math.ceil(number * Math.pow(10, decimals)) / Math.pow(10, decimals)
 }
 
+// What a figure that is not known reads as: a dash, never 0.
+export const UNKNOWN_TEXT = '—'
+
+// Whether a value is a number the save gave: not null, not undefined, not NaN, not infinite. A numeric string counts, as a stored column may hold one.
+export const isKnownNumber = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
+
+// The number with the thousands separator, or a dash when it is not known (null, undefined, NaN or infinite), never 0.
 export const separatedNumber = (number, separator = '\'') => {
-  return number.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, separator)
+  return isKnownNumber(number) ? number.toString().replace(/\B(?<!\.\d*)(?=(\d{3})+(?!\d))/g, separator) : UNKNOWN_TEXT
+}
+
+// A count or amount rounded to `decimals` and written with the separator; a dash when it is not known, so a missing figure never reads as 0. A real 0 reads '0'.
+export const countText = (value, decimals = 0, separator = '\'') => {
+  return isKnownNumber(value) ? separatedNumber(roundToDecimal(Number(value), decimals), separator) : UNKNOWN_TEXT
 }
 
 // The character behind the "Thousands Separator" setting's name (`selectedSeparator`, default 'Tick').

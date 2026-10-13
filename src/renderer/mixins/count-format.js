@@ -1,6 +1,6 @@
 import { mapGetters } from 'vuex'
 
-import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
+import { countText, roundToDecimal, thousandsSeparator } from '../utilities/math'
 
 // Numbers as the "Thousands Separator" setting writes them, for components that don't read the setting themselves, and spans of days in the unit that reads best.
 export default {
@@ -12,8 +12,9 @@ export default {
     },
   },
   methods: {
+    // A dash for a value that is not known (null, undefined, NaN), never 0.
     count(value, decimals = 0) {
-      return separatedNumber(roundToDecimal(value || 0, decimals), this.separator)
+      return countText(value, decimals, this.separator)
     },
     // `3 h`, `12.5 d`, `4.1 mo` (30.4-day months), `2.3 y`.
     duration(days) {

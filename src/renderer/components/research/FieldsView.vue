@@ -24,7 +24,7 @@
           <span>{{ matches.length }} {{ matches.length === 1 ? 'technology matches' : 'technologies match' }} "{{ search }}"</span>
           <span v-if="matches.length > MATCH_LIMIT" class="caption text--secondary">Showing the first {{ MATCH_LIMIT }}</span>
         </div>
-        <v-data-table :headers="matchHeaders" :items="matches.slice(0, MATCH_LIMIT)" item-key="id" dense :sort-by.sync="matchesTable.sortBy" :sort-desc.sync="matchesTable.sortDesc" :items-per-page.sync="matchesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: MATCH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+        <v-data-table :headers="matchHeaders" :items="matches.slice(0, MATCH_LIMIT)" item-key="id" dense :custom-sort="sortMatches" :sort-by.sync="matchesTable.sortBy" :sort-desc.sync="matchesTable.sortDesc" :items-per-page.sync="matchesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: MATCH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
           <template #[`item.status`]="{ item }">
             <span class="status-chip"><v-icon x-small :color="statusColor(item.status)">{{ icons[item.status] }}</v-icon> {{ labels[item.status] }}</span>
           </template>
@@ -33,8 +33,9 @@
             <div class="caption text--secondary">{{ item.line }}</div>
           </template>
           <template #[`item.remaining`]="{ item }">
-            <span v-if="item.status !== 'done'" class="text-no-wrap">{{ count(item.remaining) }} RP</span>
-            <span v-else class="text--secondary">—</span>
+            <span v-if="item.status === 'done'" class="text--secondary">—</span>
+            <span v-else-if="item.remaining === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.remainingResult" /></span>
+            <span v-else class="text-no-wrap">{{ count(item.remaining) }} RP</span>
           </template>
         </v-data-table>
       </v-card>
@@ -57,18 +58,18 @@
                   <div class="project-name">
                     <v-icon small :color="statusColor('active')" class="mr-2">{{ project.running ? 'mdi-flask' : 'mdi-pause-circle-outline' }}</v-icon>
                     <a class="tech-link" @click="$emit('select-tech', project.TechID)">{{ project.Name }}</a>
-                    <span v-if="!project.running" class="caption warning--text ml-2">{{ pausedLabel(project) }}</span>
+                    <span v-if="!project.running" class="caption warning--text ml-2">{{ pausedLabel(project) }}<provenance-mark v-if="pausedResult(project)" :result="pausedResult(project)" /></span>
                   </div>
                   <div class="caption text--secondary">
-                    {{ project.PopName }}<page-link :to="colonyLink(project.PopulationID)" :name="project.PopName" class="ml-1" /> · {{ scientistLabel(project) }}<page-link v-if="project.CommanderID" :to="commanderLink(project.CommanderID)" :name="project.ScientistName" class="ml-1" /> · {{ project.Facilities }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year
+                    {{ project.PopName }}<page-link :to="colonyLink(project.PopulationID)" :name="project.PopName" class="ml-1" /> · {{ scientistLabel(project) }}<page-link v-if="project.CommanderID" :to="commanderLink(project.CommanderID)" :name="project.ScientistName" class="ml-1" /> · {{ count(project.Facilities) }}<span v-if="project.MaxLabs"> of {{ count(project.MaxLabs) }}</span> labs · {{ count(project.rate) }} RP a year<provenance-mark v-if="project.CommanderID" :result="project.rateResult" />
                   </div>
                 </div>
                 <div class="project-progress">
-                  <span class="meter"><span class="meter-fill meter-active" :style="{ width: `${share(project.DevelopCost - project.ResearchPointsRequired, project.DevelopCost)}%` }" /></span>
-                  <span class="caption text-no-wrap">{{ count(project.ResearchPointsRequired) }} of {{ count(project.DevelopCost) }} RP left</span>
+                  <span class="meter"><span class="meter-fill meter-active" :style="{ width: `${progress(project)}%` }" /></span>
+                  <span class="caption text-no-wrap">{{ count(project.ResearchPointsRequired) }} of {{ count(project.DevelopCost) }} RP left<provenance-mark v-if="leftResult(project)" :result="leftResult(project)" /></span>
                 </div>
                 <div class="project-eta">
-                  <div class="text-no-wrap">{{ landing(project.years) }}</div>
+                  <div class="text-no-wrap">{{ project.landing.text }}<provenance-mark v-if="project.landing.result" :result="project.landing.result" /></div>
                   <div v-if="project.years !== null" class="caption text--secondary text-no-wrap">in {{ duration(project.years) }}</div>
                 </div>
                 <div v-for="entry in project.queue" :key="`${entry.CurrentProjectID}-${entry.ResearchOrder}`" class="queued">
@@ -76,9 +77,9 @@
                     <v-icon small :color="statusColor('queued')" class="mr-2">mdi-subdirectory-arrow-right</v-icon>
                     <a class="tech-link" @click="$emit('select-tech', entry.TechID)">{{ entry.Name }}</a>
                   </div>
-                  <div class="project-progress caption text--secondary">{{ count(entry.remaining) }} RP, queued {{ entry.ResearchOrder }}</div>
+                  <div class="project-progress caption text--secondary">{{ count(entry.remaining) }} RP<provenance-mark v-if="entry.remaining === null" :result="entry.yearsResult" />, queued {{ entry.ResearchOrder }}</div>
                   <div class="project-eta caption">
-                    <span class="text-no-wrap">{{ landing(entry.years) }}</span>
+                    <span class="text-no-wrap">{{ entry.landing.text }}<provenance-mark v-if="entry.landing.result" :result="entry.landing.result" /></span>
                   </div>
                 </div>
               </div>
@@ -92,14 +93,15 @@
             <v-expansion-panel-content>
               <div v-if="scientistNote" class="caption text--secondary mb-2">{{ scientistNote }}</div>
               <div v-if="!group.available.length" class="empty">Nothing to start here: every project is running, queued or waits on a prerequisite.</div>
-              <v-data-table v-else :headers="availableHeaders" :items="availableRows" item-key="id" dense :sort-by.sync="availableTable.sortBy" :sort-desc.sync="availableTable.sortDesc" :items-per-page.sync="availableTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="availableHeaders" :items="availableRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="availableTable.sortBy" :sort-desc.sync="availableTable.sortDesc" :items-per-page.sync="availableTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.name`]="{ item }">
                   <div class="font-weight-medium">{{ item.name }}</div>
                   <div class="caption text--secondary">{{ item.line }}<span v-if="item.automatic"> · free with its prerequisite</span></div>
                 </template>
                 <template #[`item.remaining`]="{ item }">
-                  <span class="text-no-wrap">{{ count(item.remaining) }} RP</span>
-                  <div v-if="item.banked" class="caption text--secondary text-no-wrap">{{ count(item.banked) }} banked of {{ count(item.cost) }}</div>
+                  <span v-if="item.remaining === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.remainingResult" /></span>
+                  <span v-else class="text-no-wrap">{{ count(item.remaining) }} RP</span>
+                  <div v-if="item.banked > 0" class="caption text--secondary text-no-wrap">{{ count(item.banked) }} banked of {{ count(item.cost) }}</div>
                 </template>
                 <template #[`item.unlocks`]="{ item }">
                   <span v-if="item.unlocks">{{ item.unlocks }}</span>
@@ -115,7 +117,7 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div v-if="!group.locked.length" class="empty">Nothing here waits on a prerequisite.</div>
-              <v-data-table v-else :headers="lockedHeaders" :items="lockedRows" item-key="id" dense :sort-by.sync="lockedTable.sortBy" :sort-desc.sync="lockedTable.sortDesc" :items-per-page.sync="lockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="lockedHeaders" :items="lockedRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="lockedTable.sortBy" :sort-desc.sync="lockedTable.sortDesc" :items-per-page.sync="lockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.name`]="{ item }">
                   <div class="font-weight-medium">{{ item.name }}</div>
                   <div class="caption text--secondary">{{ item.line }}</div>
@@ -126,7 +128,8 @@
                   </div>
                 </template>
                 <template #[`item.pathRp`]="{ item }">
-                  <span class="text-no-wrap">{{ count(item.pathRp) }} RP</span>
+                  <span v-if="item.pathRp === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.pathRpResult" /></span>
+                  <span v-else class="text-no-wrap">{{ count(item.pathRp) }} RP<provenance-mark :result="item.pathRpResult" /></span>
                   <div class="caption text--secondary text-no-wrap">{{ item.steps }} {{ item.steps === 1 ? 'step' : 'steps' }}</div>
                 </template>
               </v-data-table>
@@ -139,9 +142,10 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div v-if="!group.done.length" class="empty">Nothing researched in this field yet.</div>
-              <v-data-table v-else :headers="doneHeaders" :items="doneRows" item-key="id" dense :sort-by.sync="doneTable.sortBy" :sort-desc.sync="doneTable.sortDesc" :items-per-page.sync="doneTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: DONE_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table v-else :headers="doneHeaders" :items="doneRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="doneTable.sortBy" :sort-desc.sync="doneTable.sortDesc" :items-per-page.sync="doneTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: DONE_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.cost`]="{ item }">
-                  <span class="text-no-wrap">{{ count(item.cost) }} RP</span>
+                  <span v-if="item.cost === null" class="text--secondary text-no-wrap">—<provenance-mark status="unavailable" /></span>
+                  <span v-else class="text-no-wrap">{{ count(item.cost) }} RP</span>
                 </template>
               </v-data-table>
             </v-expansion-panel-content>
@@ -153,9 +157,10 @@
             </v-expansion-panel-header>
             <v-expansion-panel-content>
               <div class="caption text--secondary mb-2">Techs this empire has no way to research: found only in ruins, owned by another empire, or behind a technology the game doesn't provide.</div>
-              <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :sort-by.sync="blockedTable.sortBy" :sort-desc.sync="blockedTable.sortDesc" :items-per-page.sync="blockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
+              <v-data-table :headers="blockedHeaders" :items="blockedRows" item-key="id" dense :custom-sort="sortNullLast" :sort-by.sync="blockedTable.sortBy" :sort-desc.sync="blockedTable.sortDesc" :items-per-page.sync="blockedTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: TECH_PAGE_SIZES }" class="clickable" @click:row="(item) => $emit('select-tech', item.id)">
                 <template #[`item.cost`]="{ item }">
-                  <span class="text-no-wrap">{{ count(item.cost) }} RP</span>
+                  <span v-if="item.cost === null" class="text--secondary text-no-wrap">—<provenance-mark status="unavailable" /></span>
+                  <span v-else class="text-no-wrap">{{ count(item.cost) }} RP</span>
                 </template>
               </v-data-table>
             </v-expansion-panel-content>
@@ -170,10 +175,14 @@
 import countFormat from '../../mixins/count-format'
 import persistedView, { tableView } from '../../mixins/persisted-view'
 import { activeAppearance } from '../../utilities/appearance'
-import { gameTime } from '../../utilities/aurora'
+import { gameTime, toBoolean } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
-import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
+import { sortNullLast } from '../../utilities/production'
+import { isAvailable, unavailable } from '../../utilities/provenance'
+import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, projectIdle, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
 import PageLink from '../page/PageLink.vue'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
 
@@ -187,7 +196,7 @@ const STATUS_ORDER = [ACTIVE, QUEUED, AVAILABLE, LOCKED, DONE, BLOCKED]
 
 export default {
   name: 'FieldsView',
-  components: { PageLink },
+  components: { PageLink, ProvenanceMark },
   mixins: [
     countFormat,
     persistedView({
@@ -212,6 +221,7 @@ export default {
       icons: STATUS_ICONS,
       labels: STATUS_LABELS,
       open: [0, 1],
+      sortNullLast,
     }
   },
   computed: {
@@ -234,7 +244,7 @@ export default {
     },
 
     projects() {
-      return this.research.schedule.filter((project) => project.FieldID === this.fieldId).sort((a, b) => (a.years === null) - (b.years === null) || a.years - b.years)
+      return this.research.schedule.filter((project) => project.FieldID === this.fieldId).sort((a, b) => (a.years === null) - (b.years === null) || a.years - b.years).map((project) => ({ ...project, landing: this.landingOf(project, project), queue: project.queue.map((entry) => ({ ...entry, landing: this.landingOf(entry, project) })) }))
     },
 
     scientistNote() {
@@ -244,7 +254,17 @@ export default {
         return 'No free scientist specialises in this field; any free scientist can run a project at their plain Research bonus.'
       }
 
-      return `${this.count(free.count)} free ${free.count === 1 ? 'scientist specialises' : 'scientists specialise'} in this field. The best, ${free.best.Name}, adds ${this.count((free.best.ResearchBonus - 1) * 100)}% (${this.count((4 * free.best.ResearchBonus - 3 - 1) * 100)}% on a project here) and can run ${this.count(free.best.MaxLabs)} labs.`
+      const { best } = free
+      const lead = `${this.count(free.count)} free ${free.count === 1 ? 'scientist specialises' : 'scientists specialise'} in this field.`
+
+      if (!isKnownNumber(best.ResearchBonus)) {
+        return `${lead} ${free.count === 1 ? 'It has no' : 'None has a'} Research bonus on record, so the best cannot be told.`
+      }
+
+      const labs = isKnownNumber(best.MaxLabs) ? `can run ${this.count(best.MaxLabs)} labs` : 'has no lab limit on record'
+      const gap = free.unknown ? ` ${this.count(free.unknown)} ${free.unknown === 1 ? 'scientist has' : 'scientists have'} no Research bonus on record and ${free.unknown === 1 ? 'is' : 'are'} not ranked.` : ''
+
+      return `${lead} The best, ${best.Name}, adds ${this.count((best.ResearchBonus - 1) * 100)}% (${this.count((4 * best.ResearchBonus - 3 - 1) * 100)}% on a project here) and ${labs}.${gap}`
     },
 
     availableRows() {
@@ -284,7 +304,9 @@ export default {
 
       this.research.graph.techs.forEach((tech) => {
         if (this.research.shown.has(tech.fieldId) && (tech.name.toLowerCase().includes(needle) || tech.typeName.toLowerCase().includes(needle))) {
-          rows.push({ ...this.row(tech), status: this.research.info.get(tech.id).status, field: this.fieldAbbreviation(tech.fieldId) })
+          const status = this.research.info.get(tech.id).status
+
+          rows.push({ ...this.row(tech), status, statusRank: STATUS_ORDER.indexOf(status), field: this.fieldAbbreviation(tech.fieldId) })
         }
       })
 
@@ -344,6 +366,22 @@ export default {
     share(part, whole) {
       return whole > 0 ? Math.min(100, (part / whole) * 100) : 0
     },
+    // The share of a project paid; none while its RP left or its cost is not known.
+    progress(project) {
+      return isKnownNumber(project.ResearchPointsRequired) && isKnownNumber(project.DevelopCost) ? this.share(project.DevelopCost - project.ResearchPointsRequired, project.DevelopCost) : 0
+    },
+
+    // What a project's RP left lacks, as an unavailable result; null when it is known.
+    leftResult(project) {
+      const missing = [...(isKnownNumber(project.ResearchPointsRequired) ? [] : [`RP left on ${project.Name}`]), ...(isKnownNumber(project.DevelopCost) ? [] : [`development cost of ${project.Name}`])]
+
+      return missing.length ? unavailable({ rule: 'research.remaining', missing }) : null
+    },
+
+    // Search results sort by what is happening first (`statusRank`), and a figure the save lacks last.
+    sortMatches(items, sortBy, sortDesc) {
+      return sortNullLast(items, sortBy.map((key) => (key === 'status' ? 'statusRank' : key)), sortDesc)
+    },
 
     fieldAbbreviation(fieldId) {
       return (this.research.fields.find((field) => field.ResearchFieldID === fieldId) || {}).Abbreviation || ''
@@ -359,7 +397,9 @@ export default {
         line: tech.typeName,
         cost: tech.cost,
         remaining: entry.remaining,
-        banked: state.paused.get(tech.id) || 0,
+        remainingResult: remainingResult(entry),
+        pathRpResult: pathRpResult(entry),
+        banked: state.paused.has(tech.id) ? state.paused.get(tech.id) : 0,
         unlocks: entry.unlocks,
         automatic: tech.automatic,
       }
@@ -380,21 +420,45 @@ export default {
 
       const specialised = project.ScientistField === project.FieldID
 
+      if (!isKnownNumber(project.ResearchBonus)) {
+        return `${project.ScientistName} (bonus not known)`
+      }
+
       return `${project.ScientistName} (${specialised ? `${this.count((4 * project.ResearchBonus - 3 - 1) * 100)}% in field` : `${this.count((project.ResearchBonus - 1) * 100)}%, off field`})`
     },
 
     pausedLabel(project) {
-      return project.Pause ? 'Paused' : project.CommanderID ? 'No labs' : 'No scientist'
-    },
-
-    landing(years) {
-      if (years === null) {
-        return 'Not progressing'
+      if (project.Pause === null || project.Pause === undefined) {
+        return 'Pause not stored'
+      } else if (toBoolean(project.Pause)) {
+        return 'Paused'
+      } else if (!project.CommanderID) {
+        return 'No scientist'
       }
 
+      return isAvailable(project.rateResult) ? 'No labs' : 'Rate not known'
+    },
+
+    // What a stopped project's label rests on when the save does not give it: the pause flag, or the rate of a project with a scientist.
+    pausedResult(project) {
+      if (project.Pause === null || project.Pause === undefined) {
+        return project.yearsResult
+      }
+
+      return !toBoolean(project.Pause) && project.CommanderID && !isAvailable(project.rateResult) ? project.rateResult : null
+    },
+
+    // The landing date of a project or of an entry queued behind it, as { text, result }: a project that makes no progress for a reason the save states never lands, one whose pause flag, rate or RP left is not stored has no date (result names what is missing), and so has any when the game clock is not stored.
+    landingOf(entry, project) {
       const { StartYear, GameTime } = this.research.game
 
-      return gameTime(StartYear, GameTime + years * SECONDS_PER_YEAR).format('YYYY-MM-DD')
+      if (isKnownNumber(entry.years)) {
+        const clock = [...(isKnownNumber(StartYear) ? [] : ['the game start year']), ...(isKnownNumber(GameTime) ? [] : ['the game time'])]
+
+        return clock.length ? { text: UNKNOWN_TEXT, result: unavailable({ rule: 'research.landing', missing: clock }) } : { text: gameTime(StartYear, GameTime + entry.years * SECONDS_PER_YEAR).format('YYYY-MM-DD'), result: null }
+      }
+
+      return projectIdle(project) ? { text: 'Not progressing', result: null } : { text: UNKNOWN_TEXT, result: entry.yearsResult }
     },
 
     duration: durationLabel,

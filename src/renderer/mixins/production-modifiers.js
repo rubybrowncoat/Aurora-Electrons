@@ -1,5 +1,5 @@
 import { tracked } from '../utilities/load-tracking'
-import { registerRule, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { registerRule, ofRule, unavailable } from '../utilities/provenance'
 
 registerRule({
   id: 'production.populationCapacity',
@@ -26,7 +26,7 @@ const CAPACITY = {
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // Per-population production modifiers and the capacity helpers built on them, shared by the Production, Mineral Outlook, Colony Outlook and Logistics pages. The host component provides `database`, `GameID` and `RaceID` (mapGetters), and can list `populationProductionModifiers` among its tracked reads (`loadErrors`).
-// `populationCapacityResult(populationId, kind)` ('construction', 'ordnance' or 'fighter') is a provenance result of 'production.populationCapacity': unavailable, naming what is missing, for a colony without a modifier row or with a null column. The three `population...Capacity` methods return its value, or 0 for a colony with none, for the callers that sum a figure they present as an estimate; one that must tell none from unknown reads the result.
+// `populationCapacityResult(populationId, kind)` ('construction', 'ordnance' or 'fighter') is a provenance result of 'production.populationCapacity': unavailable, naming what is missing, for a colony without a modifier row or with a null column. A caller that sums or shows the figure reads the result, never a 0 for a colony without one.
 export default {
   methods: {
     populationCapacityResult (populationId, kind) {
@@ -41,20 +41,6 @@ export default {
       const present = terms.filter((term) => isNumber(modifiers[term]))
 
       return missing.length ? unavailable({ rule: 'production.populationCapacity', missing, present }) : ofRule({ rule: 'production.populationCapacity', value: CAPACITY[kind](modifiers), inputs: { present } })
-    },
-    populationConstructionCapacity (populationId) {
-      return this.populationCapacityOrZero(populationId, 'construction')
-    },
-    populationOrdnanceCapacity (populationId) {
-      return this.populationCapacityOrZero(populationId, 'ordnance')
-    },
-    populationFighterCapacity (populationId) {
-      return this.populationCapacityOrZero(populationId, 'fighter')
-    },
-    populationCapacityOrZero (populationId, kind) {
-      const value = valueOrNull(this.populationCapacityResult(populationId, kind))
-
-      return value === null ? 0 : value
     },
   },
   asyncComputed: {

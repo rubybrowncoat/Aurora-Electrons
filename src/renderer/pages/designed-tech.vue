@@ -46,24 +46,27 @@
         <v-card class="panel" data-summary="Every known component design in the chosen category, with its figures. Filter and sort it to pick a design, and tick two or more to compare." elevation="1">
           <div class="panel-head">
             <span>{{ categoryName }}</span>
-            <span class="text--secondary body-2">{{ count(rows.length) }} of {{ count(categoryRows.length) }} shown</span>
+            <span class="text--secondary body-2">{{ count(rows.length) }} of {{ count(categoryRows.length) }} shown<provenance-mark rule="designedTech.count" /></span>
           </div>
           <div v-if="selected.length" class="selection-bar">
             <span class="body-2">{{ selected.length }} picked<span v-if="selected.length < 2" class="text--secondary"> · pick one or two more to compare them</span></span>
             <v-btn small text @click="clearSelection">Clear</v-btn>
           </div>
-          <v-data-table v-model="selected" class="components-table" :class="{ 'is-expandable': mountable }" :headers="headers" :items="rows" item-key="SDComponentID" show-select :show-expand="mountable" single-expand :expanded.sync="expanded" :sort-by.sync="componentsTable.sortBy" :sort-desc.sync="componentsTable.sortDesc" :items-per-page.sync="componentsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No design matches the category, filters and search." @click:row="onRowClick">
+          <v-data-table v-model="selected" class="components-table" :class="{ 'is-expandable': mountable }" :headers="headers" :items="rows" item-key="SDComponentID" show-select :show-expand="mountable" single-expand :expanded.sync="expanded" :custom-sort="sortRows" :sort-by.sync="componentsTable.sortBy" :sort-desc.sync="componentsTable.sortDesc" :items-per-page.sync="componentsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No design matches the category, filters and search." @click:row="onRowClick">
             <template #[`header.data-table-select`]><span /></template>
             <template #[`item.data-table-select`]="{ item, isSelected, select }">
               <v-simple-checkbox :value="isSelected" :disabled="!isSelected && selected.length >= maxCompare" :ripple="false" :aria-label="`Compare ${item.Name}`" @input="select" />
             </template>
-            <template v-for="column in hintedColumns" #[`header.${column.value}`]="{ header }">
-              <v-tooltip :key="column.value" top max-width="320">
-                <template #activator="{ on }">
-                  <span v-on="on">{{ header.text }}<v-icon x-small class="ml-1">mdi-information-outline</v-icon></span>
-                </template>
-                <span>{{ column.hint }}</span>
-              </v-tooltip>
+            <template v-for="column in markedColumns" #[`header.${column.value}`]="{ header }">
+              <span :key="column.value">
+                <v-tooltip v-if="column.hint" top max-width="320">
+                  <template #activator="{ on }">
+                    <span v-on="on">{{ header.text }}<v-icon x-small class="ml-1">mdi-information-outline</v-icon></span>
+                  </template>
+                  <span>{{ column.hint }}</span>
+                </v-tooltip>
+                <template v-else>{{ header.text }}</template><provenance-mark v-if="ruleOf(column)" :rule="ruleOf(column)" />
+              </span>
             </template>
             <template #[`item.Name`]="{ item }">
               <div class="py-2 d-flex align-center">
@@ -75,11 +78,11 @@
               </div>
             </template>
             <template v-for="column in cellColumns" #[`item.${column.value}`]="{ item }">
-              <div :key="column.value" class="py-2" :class="{ 'text-right': column.numeric }" :title="cellOf(column, item).title">
-                <div v-if="cellOf(column, item).none" class="text--disabled">—</div>
+              <div v-for="(cell, at) in [cellOf(column, item)]" :key="at" class="py-2" :class="{ 'text-right': column.numeric }" :title="cell.title">
+                <div v-if="cell.none" class="text--disabled">—<provenance-mark v-if="cell.unknown" :result="cell.result" /></div>
                 <template v-else>
-                  <div class="text-no-wrap">{{ cellOf(column, item).text }}</div>
-                  <div v-if="cellOf(column, item).note" class="caption text--secondary text-no-wrap">{{ cellOf(column, item).note }}</div>
+                  <div class="text-no-wrap">{{ cell.text }}</div>
+                  <div v-if="cell.note" class="caption text--secondary text-no-wrap">{{ cell.note }}</div>
                 </template>
               </div>
             </template>
@@ -89,7 +92,7 @@
                   <thead>
                     <tr>
                       <th>Class</th>
-                      <th class="text-right">Mounted per ship</th>
+                      <th class="text-right">Mounted per ship<provenance-mark rule="designedTech.usage" /></th>
                       <th class="text-right">Ships in service</th>
                     </tr>
                   </thead>
@@ -98,18 +101,20 @@
                       <td>
                         <span class="font-weight-medium">{{ shipClass.name }}</span>
                         <span v-if="shipClass.obsolete" class="warning--text caption"> · Obsolete class</span>
+                        <span v-else-if="shipClass.obsolete === null" class="text--secondary caption"> · Obsolete flag not stored</span>
                       </td>
                       <td class="text-right text-no-wrap">{{ count(shipClass.perShip, 2) }}</td>
-                      <td class="text-right text-no-wrap">{{ shipClass.ships ? count(shipClass.ships) : '—' }}</td>
+                      <td class="text-right text-no-wrap">{{ count(shipClass.ships) }}</td>
                     </tr>
                   </tbody>
                 </v-simple-table>
-                <div v-else class="body-2 text--secondary">No class of this race mounts it.</div>
+                <div v-else-if="item.classCount === 0" class="body-2 text--secondary">No class of this race mounts it.</div>
+                <div v-else class="body-2 text--secondary">Usage unknown: {{ item.usageGaps.join(', ') }}.<provenance-mark :result="cellOf(usageColumn, item).result" /></div>
               </td>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            <div>{{ ruleNote }}</div>
+            <div>{{ ruleNote }}<provenance-mark rule="designedTech.stored" /></div>
             <div v-if="categoryNoteText" class="mt-1">{{ categoryNoteText }}</div>
           </div>
         </v-card>
@@ -142,11 +147,14 @@
             </thead>
             <tbody>
               <tr v-for="attribute in compareAttributes" :key="attribute.key" :class="attribute.differs ? 'compare-differs' : 'compare-same'">
-                <td class="text-no-wrap" :title="attribute.title">{{ attribute.label }}</td>
+                <td :title="attribute.title">
+                  <span class="text-no-wrap">{{ attribute.label }}</span><provenance-mark v-if="attribute.rule" :rule="attribute.rule" /><provenance-mark v-if="attribute.ranking" :result="attribute.ranking" />
+                  <div v-if="attribute.rankingNote" class="caption text--secondary">{{ attribute.rankingNote }}</div>
+                </td>
                 <td v-for="(cell, index) in attribute.cells" :key="index" class="text-right">
                   <div class="text-no-wrap" :title="cell.markTitle">
                     <v-icon v-if="cell.mark" x-small class="mr-1" :class="verdictClass(cell.verdict)">{{ cell.mark === 'high' ? 'mdi-arrow-up' : 'mdi-arrow-down' }}</v-icon>
-                    <span :class="{ 'text--disabled': cell.none }">{{ cell.text }}</span>
+                    <span :class="{ 'text--disabled': cell.none }">{{ cell.text }}</span><provenance-mark v-if="cell.unknown" :result="cell.result" />
                     <span v-if="cell.verdict" class="caption ml-1" :class="verdictClass(cell.verdict)">{{ cell.verdict }}</span>
                   </div>
                   <div v-if="cell.note && !cell.none" class="caption text--secondary text-no-wrap">{{ cell.note }}</div>
@@ -168,14 +176,16 @@
 import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
-import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, augmentComponent, augmentMissile, augmentSpecies, categoryNote, columnsFor, isMountable, tagsOf } from '../utilities/designed-tech'
+import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, USAGE_COLUMNS, augmentComponent, augmentMissile, augmentSpecies, categoryNote, cellOf as designCell, classUsageByComponent, columnRule, columnsFor, compareMarks, designTiles, isUnused, obsoleteResult, sortRows, tagsOf, withUsage } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
+import { describeResult, isAvailable } from '../utilities/provenance'
 
 const INPUT_LABELS = {
   categories: 'the research categories',
@@ -207,18 +217,13 @@ const normaliseCompare = (stored) => {
   return Object.keys(picks).length ? picks : undefined
 }
 
-const USAGE_COLUMNS = [
-  { text: 'Classes', value: 'classCount', numeric: true, format: (item, f) => f.count(item.classCount), hint: 'Classes of the race that mount it, obsolete classes included.' },
-  { text: 'Ships', value: 'shipCount', numeric: true, format: (item, f) => f.count(item.shipCount), hint: 'Ships of those classes still in service.' },
-]
-
 const MINERAL_COLUMNS = MINERALS.map((mineral) => `FCT_ShipDesignComponents.${mineral.name}`).join(', ')
 
 const RULE_NOTE = 'Lists the designs the race knows: researched ones and the base components it starts with. Used on counts the classes of the race that mount a component, obsolete classes included, and the ships of those classes still in service. A component marked obsolete is only kept out of the design pickers; classes that mount it keep it. Commercial is any component that is not a military system (a jump drive: one built as a commercial drive), Civilian one made for a shipping line, and Baseline one from the base data every game starts with. One hull space is 50 tons.'
 
 export default {
   name: 'DesignedTechPage',
-  components: { LoadState, StatTiles },
+  components: { LoadState, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     loadState(INPUT_LABELS),
@@ -239,6 +244,8 @@ export default {
       expanded: [],
       pageSizes: PAGE_SIZES,
       maxCompare: MAX_COMPARE,
+      sortRows,
+      usageColumn: USAGE_COLUMNS[0],
     }
   },
   computed: {
@@ -297,37 +304,14 @@ export default {
 
     // Per component: the classes of this race that mount it, each with how many it mounts per ship and the ships in service.
     usageById() {
-      const byComponent = new Map()
-
-      this.classUsage.forEach((row) => {
-        let classes = byComponent.get(row.ComponentID)
-
-        if (!classes) {
-          classes = new Map()
-          byComponent.set(row.ComponentID, classes)
-        }
-
-        const existing = classes.get(row.ClassID)
-
-        if (existing) {
-          existing.perShip += row.NumComponent
-        } else {
-          classes.set(row.ClassID, { id: row.ClassID, name: row.ClassName, perShip: row.NumComponent, ships: row.Ships, obsolete: !!row.Obsolete })
-        }
-      })
-
-      return byComponent
+      return classUsageByComponent(this.classUsage)
     },
 
     // Every design of the category with its usage, before the filters.
     categoryRows() {
       return this.allItems
         .filter((item) => item.CategoryID === this.activeCategoryId)
-        .map((item) => {
-          const classes = isMountable(item) && this.usageById.has(item.SDComponentID) ? [...this.usageById.get(item.SDComponentID).values()].sort((a, b) => b.ships - a.ships || a.name.localeCompare(b.name)) : []
-
-          return { ...item, classes, classCount: classes.length, shipCount: classes.reduce((total, shipClass) => total + shipClass.ships, 0) }
-        })
+        .map((item) => withUsage(item, this.usageById))
         .sort((a, b) => a.Name.localeCompare(b.Name))
     },
 
@@ -337,7 +321,7 @@ export default {
       return this.categoryRows.filter((row) => {
         if ((this.hideObsolete && row.Obsolete) || (this.hideCommercial && row.Commercial) || (this.hideCivilian && row.Civilian)) {
           return false
-        } else if (this.unusedOnly && this.mountable && row.classCount > 0) {
+        } else if (this.unusedOnly && this.mountable && !isUnused(row)) {
           return false
         }
 
@@ -350,29 +334,9 @@ export default {
     },
 
     tiles() {
-      const rows = this.categoryRows
-      const used = rows.filter((row) => row.classCount > 0)
-      const unused = rows.filter((row) => row.classCount === 0)
-      const obsolete = rows.filter((row) => row.Obsolete)
-      const shipClasses = new Set(used.flatMap((row) => row.classes.map((shipClass) => shipClass.id)))
-      const ships = new Map(used.flatMap((row) => row.classes.map((shipClass) => [shipClass.id, shipClass.ships])))
-      const shipTotal = [...ships.values()].reduce((total, number) => total + number, 0)
+      const tile = ({ label, result, results = [result], note }) => ({ label, value: isAvailable(result) ? this.count(result.value) : '—', note, title: results.map(describeResult).join('. '), result })
 
-      if (!this.mountable) {
-        return [
-          { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with the filters` },
-          { label: 'In use', value: '—', note: 'Not mounted on a class' },
-          { label: 'Unused', value: '—', note: 'Not mounted on a class' },
-          { label: 'Obsolete', value: this.count(obsolete.length), note: 'Filters ignored · marked obsolete by the race' },
-        ]
-      }
-
-      return [
-        { label: 'Designs', value: this.count(rows.length), note: `All in the category; ${this.count(this.rows.length)} listed with the filters` },
-        { label: 'In use', value: this.count(used.length), note: `Filters ignored · on ${this.count(shipClasses.size)} classes, ${this.count(shipTotal)} ships` },
-        { label: 'Unused', value: this.count(unused.length), note: `Filters ignored · ${this.count(unused.filter((row) => !row.Obsolete).length)} not obsolete` },
-        { label: 'Obsolete', value: this.count(obsolete.length), note: `Filters ignored · ${this.count(obsolete.filter((row) => row.classCount > 0).length)} still on a class` },
-      ]
+      return designTiles({ rows: this.categoryRows, shown: this.rows.length, mountable: this.mountable, f: this.fmt }).map(tile)
     },
 
     // The columns the category shows, name first; the usage ones follow for a component a class can mount.
@@ -395,8 +359,8 @@ export default {
       return [...this.usageColumns, ...columnsFor(this.activeCategoryId).slice(1)]
     },
 
-    hintedColumns() {
-      return this.cellColumns.filter((column) => column.hint)
+    markedColumns() {
+      return this.cellColumns.filter((column) => column.hint || this.ruleOf(column))
     },
 
     headers() {
@@ -421,27 +385,42 @@ export default {
       const attributes = this.compareColumns.map((column) => {
         const cells = rows.map((row) => this.cellOf(column, row))
         const differs = new Set(cells.map((cell) => `${cell.text}|${cell.note}`)).size > 1
-        const marks = this.markCells(column, rows, differs)
+        const ranked = compareMarks(column, rows, cells, differs)
 
         return {
           key: column.value,
           label: column.text,
+          rule: this.ruleOf(column),
           title: [column.hint, this.sideOf(column)].filter(Boolean).join(' '),
           differs,
-          cells: cells.map((cell, index) => ({ ...cell, ...marks[index] })),
+          ranking: ranked.verdict,
+          rankingNote: ranked.note,
+          cells: cells.map((cell, index) => ({ ...cell, ...ranked.marks[index] })),
         }
       })
 
       const textRow = (key, label, text) => {
         const texts = rows.map(text)
 
-        return { key, label, title: '', differs: new Set(texts).size > 1, cells: texts.map((value) => ({ text: value, note: '', none: false, mark: null, verdict: null, markTitle: '' })) }
+        return { key, label, rule: '', title: '', differs: new Set(texts).size > 1, ranking: null, rankingNote: '', cells: texts.map((value) => ({ text: value, note: '', none: false, unknown: false, result: null, mark: null, verdict: null, markTitle: '' })) }
+      }
+
+      // The race's obsolete flag of a design: a design without one stored reads a dash and its mark.
+      const statusRow = {
+        key: 'status',
+        label: 'Status',
+        rule: '',
+        title: '',
+        differs: new Set(rows.map((row) => (row.ObsoleteKnown ? row.Obsolete : null))).size > 1,
+        ranking: null,
+        rankingNote: '',
+        cells: rows.map((row) => ({ text: row.ObsoleteKnown ? (row.Obsolete ? 'Obsolete' : 'Current') : '—', note: '', none: !row.ObsoleteKnown, unknown: !row.ObsoleteKnown, result: row.ObsoleteKnown ? null : obsoleteResult(row), mark: null, verdict: null, markTitle: '' })),
       }
 
       // A missile or a species has no marks, so only a ship component's compare shows them, its role always among them.
       const marks = this.mountable ? [textRow('marks', 'Marked as', (row) => tagsOf(row, { role: true }).join(', '))] : []
 
-      return [...attributes, textRow('status', 'Status', (row) => (row.Obsolete ? 'Obsolete' : 'Current')), ...marks]
+      return [...attributes, statusRow, ...marks]
     },
 
     // Whether the table is sorted on a column it doesn't show: another category's, or a per hull space one turned off.
@@ -471,10 +450,7 @@ export default {
   },
   methods: {
     cellOf(column, item) {
-      const value = item[column.value]
-      const none = column.none ? column.none(item) : value == null || Number.isNaN(value) || (column.numeric && value === 0)
-
-      return none ? { text: '—', note: '', title: '', none: true } : { text: column.format(item, this.fmt), note: column.note ? column.note(item, this.fmt) : '', title: column.title ? column.title(item, this.fmt) : '', none: false }
+      return designCell(column, item, this.fmt)
     },
 
     iconOf(item) {
@@ -528,49 +504,12 @@ export default {
       this.compareByCategory = stored
     },
 
-    // Which cell of a compared row takes a mark: the highest and the lowest value of a row that differs. A column that says which side is better turns them into best and worst, as long as the designs are of one component type; any other row only shows the extremes.
-    markCells(column, rows, differs) {
-      const none = rows.map(() => ({ mark: null, verdict: null, markTitle: '' }))
-
-      if (!differs || !column.numeric) {
-        return none
-      }
-
-      const values = rows.map((row) => {
-        const value = row[column.value] == null ? NaN : Number(row[column.value])
-
-        return Number.isFinite(value) && !(column.skipZero && value === 0) ? value : null
-      })
-
-      const present = values.filter((value) => value !== null)
-      const high = Math.max(...present)
-      const low = Math.min(...present)
-
-      if (present.length < 2 || high === low) {
-        return none
-      }
-
-      const directed = Boolean(column.better) && rows.every((row) => row.ComponentTypeID === rows[0].ComponentTypeID)
-
-      return values.map((value) => {
-        if (value === null || (value !== high && value !== low)) {
-          return { mark: null, verdict: null, markTitle: '' }
-        }
-
-        const mark = value === high ? 'high' : 'low'
-
-        if (!directed) {
-          return { mark, verdict: null, markTitle: mark === 'high' ? 'Highest value' : 'Lowest value' }
-        }
-
-        const verdict = mark === column.better ? 'best' : 'worst'
-
-        return { mark, verdict, markTitle: `${verdict === 'best' ? 'Best' : 'Worst'}: the ${mark === 'high' ? 'highest' : 'lowest'} value, ${column.better === HIGH ? 'higher' : 'lower'} is better` }
-      })
-    },
-
     sideOf(column) {
       return column.better === HIGH ? 'Higher is better' : column.better === LOW ? 'Lower is better' : 'No better side'
+    },
+
+    ruleOf(column) {
+      return columnRule(column) || ''
     },
 
     verdictClass(verdict) {

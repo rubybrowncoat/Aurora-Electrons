@@ -1,6 +1,6 @@
 // Colony maths for the Colony Outlook page: body capacity, population growth, infrastructure and the worker split. Sources and checks: docs/plans/aurcalcs/build-2.md § Colony Outlook. The numeric helpers (`bodyCapacity`, `growthRate`, `projectBody`, `workerSplit`) take validated inputs and run in the projection loop; the `...Result` helpers check the inputs, name what a colony lacks and return a provenance result (utilities/provenance.js), so a figure the save cannot support is unavailable rather than 0.
 
-import { roundToDecimal } from './math'
+import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
 import { combine, isAvailable, registerRule, satisfies, unavailable } from './provenance'
 
 const EARTH_SURFACE_AREA = 511187128
@@ -364,9 +364,13 @@ export const outlookColonies = (colonies, inbound, years) => {
   })
 }
 
-// Millions of people, at a readable precision.
+// Millions of people, at a readable precision; a dash when the figure is not known (null, undefined or not finite), never '0'. A real 0 reads '0'.
 export const people = (millions) => {
-  const value = Math.abs(millions || 0)
+  if (!isKnownNumber(millions)) {
+    return UNKNOWN_TEXT
+  }
+
+  const value = Math.abs(millions)
 
   if (value === 0) {
     return '0'

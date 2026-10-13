@@ -24,7 +24,7 @@
         <div class="line-next caption">
           <template v-if="line.next">
             <a class="tech-link font-weight-medium" @click="$emit('select-tech', line.next.id)">{{ line.next.name }}</a>
-            <div class="text--secondary">{{ nextNote(line.next) }}</div>
+            <div class="text--secondary">{{ nextNote(line.next) }}<provenance-mark v-if="nextResult(line.next)" :result="nextResult(line.next)" /></div>
           </template>
           <span v-else class="text--secondary">Every level researched</span>
         </div>
@@ -36,10 +36,13 @@
 
 <script>
 import countFormat from '../../mixins/count-format'
-import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import { isKnownNumber } from '../../utilities/math'
+import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, pathRpResult, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 export default {
   name: 'LinesView',
+  components: { ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
@@ -61,24 +64,40 @@ export default {
     },
   },
   methods: {
+    // RP as the page prints it, or a plain statement that the save does not give it.
+    rp(value) {
+      return isKnownNumber(value) ? `${this.count(value)} RP` : 'RP not known'
+    },
+
     pipTitle(tech) {
       const entry = this.research.info.get(tech.id)
 
-      return `${tech.name}: ${STATUS_LABELS[entry.status].toLowerCase()}, ${this.count(tech.cost)} RP`
+      return `${tech.name}: ${STATUS_LABELS[entry.status].toLowerCase()}, ${isKnownNumber(tech.cost) ? this.rp(tech.cost) : 'cost not known'}`
     },
 
     nextNote(tech) {
       const entry = this.research.info.get(tech.id)
 
       if (entry.status === ACTIVE) {
-        return `Running, ${this.count(entry.remaining)} RP left`
+        return isKnownNumber(entry.remaining) ? `Running, ${this.rp(entry.remaining)} left` : 'Running, RP left not known'
       } else if (entry.status === QUEUED) {
-        return `Queued, ${this.count(entry.remaining)} RP`
+        return `Queued, ${this.rp(entry.remaining)}`
       } else if (entry.status === LOCKED) {
-        return `${this.count(entry.pathRp)} RP in all, ${entry.missing.length + 1} steps`
+        return `${isKnownNumber(entry.pathRp) ? `${this.rp(entry.pathRp)} in all` : 'RP in all not known'}, ${entry.missing.length + 1} steps`
       }
 
-      return `${this.count(entry.remaining)} RP, available now`
+      return `${this.rp(entry.remaining)}, available now`
+    },
+
+    // The result behind the figure of the next note: the path RP of a locked level (an estimate while known), the RP left of an available one when that is not known.
+    nextResult(tech) {
+      const entry = this.research.info.get(tech.id)
+
+      if (entry.status === LOCKED) {
+        return pathRpResult(entry)
+      }
+
+      return isKnownNumber(entry.remaining) ? null : remainingResult(entry)
     },
   },
 }

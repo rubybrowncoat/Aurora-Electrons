@@ -1,7 +1,7 @@
 /*
   Loads the renderer's utilities into a Node check script.
 
-  The utilities are ES modules in a package without "type": "module", which Node would reparse with a warning. Each loads from its own source as a data URL, its relative imports of other utilities replaced by the data URLs of those modules, so every utility loads once and they all share one rule registry (utilities/provenance.js). Only `from './name'` imports are rewritten: a utility that imports a page or a Vite alias cannot load this way.
+  The utilities are ES modules in a package without "type": "module", which Node would reparse with a warning. Each loads from its own source as a data URL, its relative imports of other utilities replaced by the data URLs of those modules, so every utility loads once and they all share one rule registry (utilities/provenance.js). Only `from './name'` and `from '../name'` imports are rewritten, resolved from the importing file's folder, so a module in a subfolder is named by its path ('warnings/common'): a utility that imports a page or a Vite alias cannot load this way.
 
   A utility that imports a package loads only when the caller stubs that package: `stubs` maps a package specifier to the source of an ES module that stands in for it, and each `from '<specifier>'` becomes a data URL of that source. The stub replaces the package for every utility loaded in the call, so it holds only what the check needs of it.
 */
@@ -17,7 +17,7 @@ const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const moduleUrl = (name, urls, stubs) => {
   if (!urls.has(name)) {
     const source = fs.readFileSync(path.join(directory, `${name}.js`), 'utf8')
-    const relative = source.replace(/from '\.\/([\w-]+)'/g, (_match, dependency) => `from '${moduleUrl(dependency, urls, stubs)}'`)
+    const relative = source.replace(/from '(\.\.?\/[\w\-/]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), urls, stubs)}'`)
     const stubbed = Object.entries(stubs).reduce((text, [specifier, stub]) => text.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), `from '${dataUrl(stub)}'`), relative)
 
     urls.set(name, dataUrl(stubbed))

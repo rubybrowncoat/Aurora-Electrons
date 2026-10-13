@@ -94,7 +94,7 @@ export const peeks = {
   '/finances': async ({ database, GameID, RaceID, separator }) => {
     const { WealthPoints } = await row(database, `select FCT_Race.WealthPoints from FCT_Race where FCT_Race.GameID = ${GameID} and FCT_Race.RaceID = ${RaceID}`)
 
-    return `Treasury ${separatedNumber(roundToDecimal(WealthPoints || 0, 0), separator)}`
+    return WealthPoints === null || WealthPoints === undefined ? 'Treasury unavailable' : `Treasury ${separatedNumber(roundToDecimal(WealthPoints, 0), separator)}`
   },
 
   '/colony-outlook': async ({ database, GameID, RaceID, separator }) => {

@@ -27,7 +27,7 @@
         <v-row dense>
           <v-col v-for="fact in facts" :key="fact.label" cols="6" sm="3">
             <div class="caption text--secondary">{{ fact.label }}</div>
-            <div class="fact-value">{{ fact.value }}</div>
+            <div class="fact-value">{{ fact.value }}<provenance-mark v-if="fact.result" :result="fact.result" /><provenance-mark v-else-if="fact.status" :status="fact.status" /></div>
             <div v-if="fact.note" class="caption text--secondary">{{ fact.note }}</div>
           </v-col>
         </v-row>
@@ -57,7 +57,7 @@
               <li v-for="step in order" :key="step.id" class="step">
                 <v-icon small :color="colors[step.status]">{{ icons[step.status] }}</v-icon>
                 <a class="tech-link" @click="$emit('select-tech', step.id)">{{ step.name }}</a>
-                <span class="caption text--secondary ml-auto text-no-wrap">{{ count(step.remaining) }} RP</span>
+                <span class="caption text--secondary ml-auto text-no-wrap"><template v-if="step.remaining === null">—<provenance-mark :result="step.result" /></template><template v-else>{{ count(step.remaining) }} RP</template></span>
               </li>
             </ol>
           </div>
@@ -87,8 +87,10 @@ import cytoscape from 'cytoscape'
 
 import countFormat from '../../mixins/count-format'
 import { activeAppearance } from '../../utilities/appearance'
-import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, prerequisiteChain, QUEUED, STATUS_LABELS } from '../../utilities/research'
+import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
+import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
 import { chartTheme, withAlpha } from '../charts/theme'
+import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
 
@@ -101,6 +103,7 @@ const truncate = (text, length) => (text.length > length ? `${text.slice(0, leng
 
 export default {
   name: 'PathView',
+  components: { ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
@@ -150,27 +153,27 @@ export default {
 
     facts() {
       const { entry, tech } = this
-      const banked = this.research.state.paused.get(tech.id) || 0
+      const { paused } = this.research.state
+      const banked = paused.has(tech.id) ? paused.get(tech.id) : 0
+      const costKnown = isKnownNumber(tech.cost)
+      const cost = { label: 'Cost', value: costKnown ? `${this.count(tech.cost)} RP` : UNKNOWN_TEXT, ...(costKnown ? {} : { status: 'unavailable' }) }
 
       if (entry.status === DONE) {
-        return [
-          { label: 'Cost', value: `${this.count(tech.cost)} RP` },
-          { label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology not yet researched' : 'technologies not yet researched' },
-        ]
+        return [cost, { label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology not yet researched' : 'technologies not yet researched' }]
       } else if (entry.status === BLOCKED) {
-        return [{ label: 'Cost', value: `${this.count(tech.cost)} RP` }]
+        return [cost]
       }
 
-      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: `${this.count(entry.remaining)} RP`, note: banked ? `${this.count(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
+      const facts = [{ label: entry.status === ACTIVE ? 'RP left on this project' : 'RP to research it', value: isKnownNumber(entry.remaining) ? `${this.count(entry.remaining)} RP` : UNKNOWN_TEXT, result: remainingResult(entry), note: banked > 0 ? `${this.count(banked)} banked of ${this.count(tech.cost)}` : entry.status === ACTIVE ? `of ${this.count(tech.cost)}` : '' }]
 
       if (entry.missing.length) {
-        facts.push({ label: 'RP to get there', value: `${this.count(entry.pathRp)} RP`, note: `${entry.missing.length + 1} steps, prerequisites included` })
+        facts.push({ label: 'RP to get there', value: isKnownNumber(entry.pathRp) ? `${this.count(entry.pathRp)} RP` : UNKNOWN_TEXT, result: pathRpResult(entry), note: `${entry.missing.length + 1} steps, prerequisites included` })
       }
 
       const rate = this.research.totalRate
 
       if (rate > 0) {
-        facts.push({ label: 'With every lab on it', value: durationLabel(entry.pathRp / rate), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
+        facts.push({ label: 'With every lab on it', value: isKnownNumber(entry.pathRp) ? durationLabel(entry.pathRp / rate) : UNKNOWN_TEXT, result: pathRpResult(entry), note: `at ${this.count(rate)} RP a year, if one scientist could run them all` })
       }
 
       facts.push({ label: 'Opens', value: `${entry.unlocks}`, note: entry.unlocks === 1 ? 'technology' : 'technologies' })
@@ -181,7 +184,7 @@ export default {
     order() {
       const { info, graph } = this.research
 
-      return [...this.entry.missing, this.tech.id].map((id) => ({ id, name: graph.techs.get(id).name, status: info.get(id).status, remaining: info.get(id).remaining }))
+      return [...this.entry.missing, this.tech.id].map((id) => ({ id, name: graph.techs.get(id).name, status: info.get(id).status, remaining: info.get(id).remaining, result: remainingResult(info.get(id)) }))
     },
 
     opens() {
@@ -253,7 +256,7 @@ export default {
             const status = info.get(node.id).status
 
             return {
-              data: { id: String(node.id), status, target: node.id === this.tech.id, label: status === DONE ? truncate(tech.name, 30) : `${truncate(tech.name, 30)}\n${this.count(info.get(node.id).remaining)} RP` },
+              data: { id: String(node.id), status, target: node.id === this.tech.id, label: status === DONE ? truncate(tech.name, 30) : `${truncate(tech.name, 30)}\n${isKnownNumber(info.get(node.id).remaining) ? `${this.count(info.get(node.id).remaining)} RP` : 'RP not known'}` },
               position: { x: node.layer * COLUMN_WIDTH, y: node.row * ROW_HEIGHT },
             }
           }),

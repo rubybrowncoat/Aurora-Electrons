@@ -9,8 +9,8 @@
     <v-container v-else fluid class="history-page">
       <v-row dense align="center" class="mb-1">
         <v-col class="caption text--secondary">
-          <template v-if="recording">{{ recording.headline }}</template>
-          The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.
+          <template v-if="recording">{{ recording.headline }}<provenance-mark rule="history.recordedSpan" /></template>
+          The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.<provenance-mark :result="timeAxis" />
           <div v-if="recording && recording.note" class="history-recording-note">{{ recording.note }}</div>
         </v-col>
         <v-col cols="auto">
@@ -46,7 +46,7 @@
 
         <v-card v-if="view === 'charts' && rivals" class="panel" data-summary="Every race recorded in this game on one chosen measure over time, to see who is ahead of the race and who is catching up." elevation="1">
           <div class="panel-head">
-            <span>Rivals <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
+            <span>Rivals<provenance-mark :rule="rivals.rule" /> <span class="caption text--secondary ml-2">Spy mode: every race recorded in this game</span></span>
             <span class="legend">
               <span v-for="series in rivals.data.datasets" :key="series.label" class="legend-item" :class="{ 'font-weight-bold': series.borderWidth === 3 }"><series-key :color="series.borderColor" :dash="series.borderDash" kind="line" />{{ series.label }}</span>
             </span>
@@ -63,7 +63,7 @@
           <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="6">
             <v-card class="panel" :data-summary="chart.summary" elevation="1">
               <div class="panel-head">
-                <span>{{ chart.title }}</span>
+                <span>{{ chart.title }}<provenance-mark v-for="rule in chart.rules" :key="rule" :rule="rule" /></span>
                 <span class="legend">
                   <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" kind="line" />{{ series.label }}</span>
                 </span>
@@ -75,13 +75,17 @@
                   </v-chip-group>
                 </div>
                 <chart-canvas type="line" :data="chart.data" :options="chart.options" :height="240" :label="chart.title" />
+                <div v-for="note in chart.notes" :key="note" class="caption text--secondary mt-1">{{ note }}</div>
               </div>
             </v-card>
           </v-col>
         </v-row>
 
         <v-card v-else class="panel" elevation="1">
-          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :sort-by.sync="historyTable.sortBy" :sort-desc.sync="historyTable.sortDesc" :items-per-page.sync="historyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: historyPageSizes }" dense />
+          <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :custom-sort="sortRows" :sort-by.sync="historyTable.sortBy" :sort-desc.sync="historyTable.sortDesc" :items-per-page.sync="historyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: historyPageSizes }" dense>
+            <template v-for="column in tableHeaders" #[`header.${column.value}`]="{ header }">{{ header.text }}<provenance-mark v-if="column.rule" :key="column.value" :rule="column.rule" /></template>
+            <template v-for="column in measureColumns" #[`item.${column.value}`]="{ item }">{{ count(item[column.value], column.decimals) }}<provenance-mark v-if="item.results[column.value].status === 'unavailable'" :key="column.value" :result="item.results[column.value]" /></template>
+          </v-data-table>
         </v-card>
       </template>
 
@@ -106,13 +110,15 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
-import { MAX_SNAPSHOTS, historyConfig, recordedSpan } from '../utilities/history'
-import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { MAX_SNAPSHOTS, changeResult, historyConfig, installationResult, mineralResult, recordedSpan, snapshotResult, totalResult } from '../utilities/history'
+import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
+import { describeResult, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
@@ -121,7 +127,12 @@ const HISTORY_PAGE_SIZES = [25, 100, -1]
 // Installation types charted when the player hasn't picked any: the largest by count.
 const DEFAULT_INSTALLATIONS = 5
 
+// An unknown figure reads as a dash, never 0.
 const compact = (value) => {
+  if (!isKnownNumber(value)) {
+    return UNKNOWN_TEXT
+  }
+
   const size = Math.abs(value)
 
   if (size >= 1e9) {
@@ -136,24 +147,41 @@ const compact = (value) => {
 }
 
 // Millions of people, in billions from 1,000 M (three decimals, so slow growth still shows).
-const people = (millions) => (Math.abs(millions) >= 1000 ? `${roundToDecimal(millions / 1000, 3)} bn` : `${roundToDecimal(millions, 1)} M`)
+const people = (millions) => (!isKnownNumber(millions) ? UNKNOWN_TEXT : Math.abs(millions) >= 1000 ? `${roundToDecimal(millions / 1000, 3)} bn` : `${roundToDecimal(millions, 1)} M`)
 
-// What the Rivals chart can compare.
+const whole = (value) => (isKnownNumber(value) ? `${roundToDecimal(value, 0)}` : UNKNOWN_TEXT)
+
+const withUnit = (text, unit) => (text === UNKNOWN_TEXT ? text : `${text} ${unit}`)
+
+const fleetResult = (snapshot) => totalResult('history.fleetTonnage', [snapshotResult(snapshot, 'militaryTons'), snapshotResult(snapshot, 'commercialTons')])
+
+// What the Rivals chart can compare: `result` is a snapshot's figure as a result of `rule`.
 const RIVAL_METRICS = [
-  { value: 'population', text: 'Population', pick: (snapshot) => snapshot.population, format: people },
-  { value: 'colonies', text: 'Colonies', pick: (snapshot) => snapshot.colonies, format: (value) => `${roundToDecimal(value, 0)}` },
-  { value: 'fleet', text: 'Fleet tonnage', pick: (snapshot) => (snapshot.militaryTons || 0) + (snapshot.commercialTons || 0), format: (value) => `${compact(value)} t` },
-  { value: 'military', text: 'Military tonnage', pick: (snapshot) => snapshot.militaryTons, format: (value) => `${compact(value)} t` },
-  { value: 'research', text: 'Research', pick: (snapshot) => snapshot.research, format: (value) => `${compact(value)} RP` },
-  { value: 'systems', text: 'Known systems', pick: (snapshot) => snapshot.systems, format: (value) => `${roundToDecimal(value, 0)}` },
-  { value: 'wealth', text: 'Treasury', pick: (snapshot) => snapshot.wealth, format: compact },
+  { value: 'population', text: 'Population', rule: 'history.population', result: (snapshot) => snapshotResult(snapshot, 'population'), format: people },
+  { value: 'colonies', text: 'Colonies', rule: 'history.colonies', result: (snapshot) => snapshotResult(snapshot, 'colonies'), format: whole },
+  { value: 'fleet', text: 'Fleet tonnage', rule: 'history.fleetTonnage', result: fleetResult, format: (value) => withUnit(compact(value), 't') },
+  { value: 'military', text: 'Military tonnage', rule: 'history.fleetTonnage', result: (snapshot) => snapshotResult(snapshot, 'militaryTons'), format: (value) => withUnit(compact(value), 't') },
+  { value: 'research', text: 'Research', rule: 'history.research', result: (snapshot) => snapshotResult(snapshot, 'research'), format: (value) => withUnit(compact(value), 'RP') },
+  { value: 'systems', text: 'Known systems', rule: 'history.systems', result: (snapshot) => snapshotResult(snapshot, 'systems'), format: whole },
+  { value: 'wealth', text: 'Treasury', rule: 'history.treasury', result: (snapshot) => snapshotResult(snapshot, 'wealth'), format: compact },
+]
+
+// The table's figure columns.
+const MEASURES = [
+  { value: 'population', text: 'Population (M)', decimals: 1, rule: 'history.population' },
+  { value: 'colonies', text: 'Colonies', decimals: 0, rule: 'history.colonies' },
+  { value: 'wealth', text: 'Treasury', decimals: 0, rule: 'history.treasury' },
+  { value: 'militaryTons', text: 'Military (t)', decimals: 0, rule: 'history.fleetTonnage' },
+  { value: 'commercialTons', text: 'Commercial (t)', decimals: 0, rule: 'history.fleetTonnage' },
+  { value: 'research', text: 'Research (RP)', decimals: 0, rule: 'history.research' },
+  { value: 'systems', text: 'Systems', decimals: 0, rule: 'history.systems' },
 ]
 
 const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
 
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas, SeriesKey, StatTiles },
+  components: { ChartCanvas, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     persistedView({
       view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
@@ -168,6 +196,7 @@ export default {
     return {
       confirmClear: false,
       historyPageSizes: HISTORY_PAGE_SIZES,
+      measureColumns: MEASURES,
       rivalMetrics: RIVAL_METRICS,
       spanOptions: SPAN_OPTIONS,
       // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
@@ -255,16 +284,43 @@ export default {
       }
     },
 
+    // Whether the game's start year is known, which the calendar year of a snapshot needs.
+    yearKnown() {
+      return isKnownNumber(this.StartYear)
+    },
+
+    timeAxis() {
+      return this.yearKnown ? ofRule({ rule: 'history.timeAxis', value: Number(this.StartYear), inputs: { present: ['start year'] } }) : unavailable({ rule: 'history.timeAxis', missing: ['start year'] })
+    },
+
     tiles() {
       const first = this.snapshots[0]
       const last = this.latest
-      const change = (key, format) => (this.snapshots.length > 1 ? `${last[key] - first[key] >= 0 ? '+' : '−'}${format(Math.abs(last[key] - first[key]))} since ${this.date(first.t)}` : 'First snapshot')
+      const since = this.date(first.t)
+      // The change from the first snapshot of the window to the latest: its note and its result.
+      const change = (key, format) => {
+        if (this.snapshots.length < 2) {
+          return { note: 'First snapshot', result: null }
+        }
+
+        const result = changeResult(snapshotResult(first, key), snapshotResult(last, key))
+
+        return result.value === null ? { note: `Change since ${since} unavailable: no ${result.inputs.missing.join(' or ')}`, result } : { note: `${result.value >= 0 ? '+' : '−'}${format(Math.abs(result.value))} since ${since}`, result }
+      }
+      const tile = (label, result, text, note, moved = null) => ({ label, value: text, note, title: [describeResult(result), moved ? describeResult(moved) : ''].filter(Boolean).join(' | ') })
+      const population = snapshotResult(last, 'population')
+      const treasury = snapshotResult(last, 'wealth')
+      const research = snapshotResult(last, 'research')
+      const fleet = fleetResult(last)
+      const populationChange = change('population', people)
+      const treasuryChange = change('wealth', compact)
+      const researchChange = change('research', (value) => withUnit(compact(value), 'RP'))
 
       return [
-        { label: 'Population', value: people(last.population), note: change('population', people) },
-        { label: 'Treasury', value: compact(last.wealth), note: change('wealth', compact) },
-        { label: 'Fleet tonnage', value: `${compact(last.militaryTons + last.commercialTons)} t`, note: `${compact(last.militaryTons)} t military, ${compact(last.commercialTons)} t commercial` },
-        { label: 'Research', value: `${compact(last.research)} RP`, note: change('research', (value) => `${compact(value)} RP`) },
+        tile('Population', population, people(population.value), populationChange.note, populationChange.result),
+        tile('Treasury', treasury, compact(treasury.value), treasuryChange.note, treasuryChange.result),
+        tile('Fleet tonnage', fleet, withUnit(compact(fleet.value), 't'), `${withUnit(compact(valueOrNull(snapshotResult(last, 'militaryTons'))), 't')} military, ${withUnit(compact(valueOrNull(snapshotResult(last, 'commercialTons'))), 't')} commercial`),
+        tile('Research', research, withUnit(compact(research.value), 'RP'), researchChange.note, researchChange.result),
       ]
     },
 
@@ -276,14 +332,36 @@ export default {
       return [...ids].map((id) => ({ value: id, text: this.installationNames[id] || `Installation ${id}` })).sort((a, b) => a.text.localeCompare(b.text))
     },
 
+    // The installation types of the latest snapshot ranked by amount; a type with no stored amount is not ranked.
+    installationRanking() {
+      const entries = Object.entries((this.latest && this.latest.installations) || {})
+      const ranked = entries.filter(([, amount]) => isKnownNumber(amount)).sort((a, b) => b[1] - a[1])
+
+      return { ranked, unranked: entries.length - ranked.length }
+    },
+
     chosenInstallations() {
+      return this.installationIds ? this.installationIds : this.installationRanking.ranked.slice(0, DEFAULT_INSTALLATIONS).map(([id]) => Number(id))
+    },
+
+    // What the default choice of installation types leaves out: types tied with the last one shown, and types with no stored amount.
+    installationNotes() {
+      const { ranked, unranked } = this.installationRanking
+      const notes = []
+
       if (this.installationIds) {
-        return this.installationIds
+        return notes
       }
 
-      const latest = (this.latest && this.latest.installations) || {}
+      if (ranked.length > DEFAULT_INSTALLATIONS && ranked[DEFAULT_INSTALLATIONS - 1][1] === ranked[DEFAULT_INSTALLATIONS][1]) {
+        notes.push(`Types tied with the ${DEFAULT_INSTALLATIONS}th by amount are not shown by default; pick them above.`)
+      }
 
-      return Object.entries(latest).sort((a, b) => b[1] - a[1]).slice(0, DEFAULT_INSTALLATIONS).map(([id]) => Number(id))
+      if (unranked) {
+        notes.push(`${unranked} installation ${unranked === 1 ? 'type has' : 'types have'} no stored amount in the latest snapshot and ${unranked === 1 ? 'is' : 'are'} not ranked.`)
+      }
+
+      return notes
     },
 
     charts() {
@@ -299,12 +377,13 @@ export default {
         tension: 0,
         yAxisID: axis,
       })
-      const pick = (key) => this.snapshots.map((snapshot) => snapshot[key] || 0)
+      const pick = (key) => this.snapshots.map((snapshot) => valueOrNull(snapshotResult(snapshot, key)))
 
-      return [
+      const charts = [
         {
           key: 'population',
           title: 'Population',
+          rules: ['history.population', 'history.colonies'],
           summary: 'How the population and number of colonies have grown over the years, to show whether the expansion keeps pace.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
           options: this.options({ y: people, y1: (value) => `${value}` }),
@@ -312,6 +391,7 @@ export default {
         {
           key: 'wealth',
           title: 'Wealth',
+          rules: ['history.treasury', 'history.income'],
           summary: 'The treasury and annual income over time, to show whether the race is saving, spending or running short.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
           options: this.options({ y: compact, y1: compact }),
@@ -319,6 +399,7 @@ export default {
         {
           key: 'fleet',
           title: 'Fleet tonnage',
+          rules: ['history.fleetTonnage'],
           summary: 'The military and commercial tonnage fielded over time, to show how the fleet has grown or shrunk.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
           options: this.options({ y: (value) => `${compact(value)} t` }),
@@ -326,6 +407,7 @@ export default {
         {
           key: 'research',
           title: 'Research and exploration',
+          rules: ['history.research', 'history.systems'],
           summary: 'The research output and the number of systems known over time, to show how fast the race advances and explores.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
           options: this.options({ y: compact, y1: (value) => `${value}` }),
@@ -333,27 +415,34 @@ export default {
         {
           key: 'minerals',
           title: 'Mineral stockpiles',
+          rules: ['history.stockpile'],
           summary: 'Stockpiles of the selected minerals, over time, to spot shortages or surpluses before they hold up production.',
           picker: { model: this.mineralIds, options: MINERALS.map((mineral) => ({ value: mineral.id, text: mineral.name })), change: this.setMinerals },
-          data: { datasets: this.mineralIds.map((id, index) => line(MINERALS.find((mineral) => mineral.id === id).name, this.snapshots.map((snapshot) => (snapshot.minerals || [])[id - 1] || 0), index)) },
+          data: { datasets: this.mineralIds.map((id, index) => line(MINERALS.find((mineral) => mineral.id === id).name, this.snapshots.map((snapshot) => valueOrNull(mineralResult(snapshot, id, MINERALS.find((mineral) => mineral.id === id).name))), index)) },
           options: this.options({ y: (value) => `${compact(value)} t` }),
         },
         {
           key: 'installations',
           title: 'Installations',
+          rules: ['history.installations'],
           summary: 'How many installations of the selected types have been built over time, to track industrial growth.',
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
-          data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => (snapshot.installations || {})[id] || 0), index)) },
+          extraNotes: this.installationNotes,
+          data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => valueOrNull(installationResult(snapshot, id, this.installationNames[id] || `installation ${id}`))), index)) },
           options: this.options({ y: compact }),
         },
         {
           key: 'logistics',
           title: 'Fuel and maintenance supplies',
+          rules: ['history.stockpile'],
           summary: 'The fuel and maintenance supply stocks over time, to show whether the fleets can keep operating.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),
         },
       ]
+
+      // A snapshot with no figure for a series leaves a gap in its line; each series says how many.
+      return charts.map((chart) => ({ ...chart, notes: [...chart.data.datasets.map((dataset) => [dataset.label, dataset.data.filter((point) => point.y === null).length]).filter(([, missing]) => missing).map(([label, missing]) => `${label}: ${missing} of ${this.snapshots.length} snapshots have no figure, so the line breaks there.`), ...(chart.extraNotes || [])] }))
     },
 
     // Every recorded race in the game on one metric, players first; only in spy mode.
@@ -372,7 +461,7 @@ export default {
 
         return {
           label: record.raceName || `Race ${RaceID}`,
-          data: record.snapshots.filter((snapshot) => snapshot.t >= this.since).map((snapshot) => ({ x: this.year(snapshot.t), y: metric.pick(snapshot) || 0 })),
+          data: record.snapshots.filter((snapshot) => snapshot.t >= this.since).map((snapshot) => ({ x: this.year(snapshot.t), y: valueOrNull(metric.result(snapshot)) })),
           borderColor: color,
           backgroundColor: withAlpha(color, 0.1),
           borderWidth: selected ? 3 : 1.5,
@@ -383,34 +472,20 @@ export default {
         }
       })
 
-      return { data: { datasets }, options: this.options({ y: metric.format }, metric.format) }
+      return { rule: metric.rule, data: { datasets }, options: this.options({ y: metric.format }, metric.format) }
     },
 
     tableHeaders() {
-      return [
-        { text: 'Date', value: 'date' },
-        { text: 'Population (M)', value: 'population', align: 'end' },
-        { text: 'Colonies', value: 'colonies', align: 'end' },
-        { text: 'Treasury', value: 'wealth', align: 'end' },
-        { text: 'Military (t)', value: 'militaryTons', align: 'end' },
-        { text: 'Commercial (t)', value: 'commercialTons', align: 'end' },
-        { text: 'Research (RP)', value: 'research', align: 'end' },
-        { text: 'Systems', value: 'systems', align: 'end' },
-      ]
+      return [{ text: 'Date', value: 'date' }, ...MEASURES.map(({ value, text, rule }) => ({ text, value, rule, align: 'end' }))]
     },
 
+    // Each row keeps the numbers behind its cells (null when unknown) and the result of each figure.
     tableRows() {
-      return this.snapshots.slice().reverse().map((snapshot) => ({
-        t: snapshot.t,
-        date: this.date(snapshot.t),
-        population: this.count(snapshot.population, 1),
-        colonies: snapshot.colonies,
-        wealth: this.count(snapshot.wealth),
-        militaryTons: this.count(snapshot.militaryTons),
-        commercialTons: this.count(snapshot.commercialTons),
-        research: this.count(snapshot.research),
-        systems: snapshot.systems,
-      }))
+      return this.snapshots.slice().reverse().map((snapshot) => {
+        const results = Object.fromEntries(MEASURES.map(({ value }) => [value, snapshotResult(snapshot, value)]))
+
+        return { t: snapshot.t, date: this.date(snapshot.t), results, ...Object.fromEntries(MEASURES.map(({ value }) => [value, valueOrNull(results[value])])) }
+      })
     },
   },
   created() {
@@ -418,17 +493,44 @@ export default {
   },
   methods: {
     count(value, decimals = 0) {
-      return separatedNumber(roundToDecimal(value || 0, decimals), this.separator)
+      return countText(value, decimals, this.separator)
     },
+    // Sorts the table by the numbers behind its cells, a snapshot by its time, and an unknown figure last in either direction.
+    sortRows(items, sortBy, sortDesc) {
+      const [by] = sortBy
+
+      if (!by) {
+        return items
+      }
+
+      const key = by === 'date' ? 't' : by
+      const direction = sortDesc[0] ? -1 : 1
+
+      return items.slice().sort((a, b) => {
+        const x = a[key]
+        const y = b[key]
+
+        if (x === y) {
+          return 0
+        }
+
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          return Number.isFinite(x) ? -1 : 1
+        }
+
+        return (x - y) * direction
+      })
+    },
+    // The calendar year of a game time; without a start year, the game years elapsed.
     year(seconds) {
-      return (this.StartYear || 0) + seconds / SECONDS_PER_YEAR
+      return (this.yearKnown ? Number(this.StartYear) : 0) + seconds / SECONDS_PER_YEAR
     },
     date(seconds) {
-      return gameTime(this.StartYear, seconds).format('YYYY-MM-DD')
+      return this.yearKnown ? gameTime(this.StartYear, seconds).format('YYYY-MM-DD') : `${roundToDecimal(seconds / SECONDS_PER_YEAR, 2)} y elapsed`
     },
     options(axes, labelFormat = null) {
       const scales = {
-        x: { type: 'linear', title: { display: true, text: 'Year' }, ticks: { callback: (value) => `${roundToDecimal(value, 2)}` } },
+        x: { type: 'linear', title: { display: true, text: this.yearKnown ? 'Year' : 'Game years elapsed' }, ticks: { callback: (value) => `${roundToDecimal(value, 2)}` } },
         y: { ticks: { callback: axes.y } },
       }
 
@@ -441,7 +543,7 @@ export default {
         plugins: {
           tooltip: {
             callbacks: {
-              title: (items) => this.date((items[0].parsed.x - (this.StartYear || 0)) * SECONDS_PER_YEAR),
+              title: (items) => this.date((items[0].parsed.x - (this.yearKnown ? Number(this.StartYear) : 0)) * SECONDS_PER_YEAR),
               label: (item) => `${item.dataset.label}: ${labelFormat ? labelFormat(item.parsed.y) : this.count(item.parsed.y, item.parsed.y < 100 ? 1 : 0)}`,
             },
           },
@@ -470,9 +572,14 @@ export default {
     downloadCsv() {
       const names = Object.fromEntries(this.installationOptions.map((option) => [option.value, option.text]))
       const installationIds = Object.keys(names).map(Number)
-      const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id])]
+      const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id]), 'Figures not recorded']
       const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-      const rows = this.allSnapshots.map((snapshot) => [snapshot.t, this.date(snapshot.t), snapshot.population, snapshot.colonies, snapshot.wealth, snapshot.income, snapshot.fuel, snapshot.msp, ...MINERALS.map((mineral) => (snapshot.minerals || [])[mineral.id - 1] || 0), snapshot.militaryShips, snapshot.militaryTons, snapshot.commercialShips, snapshot.commercialTons, snapshot.research, snapshot.systems, snapshot.commanders, ...installationIds.map((id) => (snapshot.installations || {})[id] || 0)])
+      // A figure that was not recorded is an empty cell, never 0; the last column names every one of them, the stockpiles and installations included.
+      const rows = this.allSnapshots.map((snapshot) => {
+        const results = [...['population', 'colonies', 'wealth', 'income', 'fuel', 'msp'].map((key) => snapshotResult(snapshot, key)), ...MINERALS.map((mineral) => mineralResult(snapshot, mineral.id, mineral.name)), ...['militaryShips', 'militaryTons', 'commercialShips', 'commercialTons', 'research', 'systems', 'commanders'].map((key) => snapshotResult(snapshot, key)), ...installationIds.map((id) => installationResult(snapshot, id, names[id]))]
+
+        return [snapshot.t, this.date(snapshot.t), ...results.map(valueOrNull), results.filter((result) => !isAvailable(result)).flatMap((result) => result.inputs.missing).join('; ')]
+      })
       const csv = [header, ...rows].map((row) => row.map(quote).join(',')).join('\n')
       const link = document.createElement('a')
 

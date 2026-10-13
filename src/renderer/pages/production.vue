@@ -53,12 +53,12 @@
         <v-card class="panel" data-summary="Every job the colonies are building, researching, training or terraforming, with its status and finish time, to spot stalled work and shortages." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
-              <span>Work in progress</span>
+              <span>Work in progress<provenance-mark rule="production.jobCount" /></span>
               <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
             </span>
             <v-text-field v-model="search" label="Search" placeholder="Job or colony" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="jobHeaders" :items="visibleJobs" item-key="key" :group-by="groupByColony ? 'colonyName' : []" :sort-by.sync="jobTable.sortBy" :sort-desc.sync="jobTable.sortDesc" :items-per-page.sync="jobTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: jobPageSizes }" :no-data-text="jobs.length ? 'No jobs match the filters.' : 'Nothing is being built, researched, trained or terraformed.'">
+          <v-data-table :headers="jobHeaders" :items="visibleJobs" item-key="key" :group-by="groupByColony ? 'colonyName' : []" :custom-sort="sortNullLast" :sort-by.sync="jobTable.sortBy" :sort-desc.sync="jobTable.sortDesc" :items-per-page.sync="jobTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: jobPageSizes }" :no-data-text="jobs.length ? 'No jobs match the filters.' : 'Nothing is being built, researched, trained or terraformed.'">
             <template #[`group.header`]="{ group, items, headers, isOpen, toggle }">
               <td :colspan="headers.length">
                 <v-btn icon small :aria-label="isOpen ? `Collapse ${group}` : `Expand ${group}`" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
@@ -86,33 +86,34 @@
                   <router-link v-if="item.status.id === 'short' && item.shortage.mineralId" :to="mineralLink(item.shortage)">{{ item.status.label }}</router-link>
                   <span v-else>{{ item.status.label }}</span>
                 </div>
-                <div v-if="item.status.note" class="caption text--secondary">{{ item.status.note }}</div>
+                <div v-if="item.status.note" class="caption text--secondary">{{ item.status.note }}<provenance-mark v-if="item.status.id === 'short'" :result="item.covers" /></div>
                 <div v-if="item.shortage && item.status.id !== 'short'" class="caption">
                   <router-link v-if="item.shortage.mineralId" :to="mineralLink(item.shortage)">Short of {{ item.shortage.name }}</router-link>
                   <span v-else>Short of {{ item.shortage.name }}</span>
-                  <span class="text--secondary">: the stock covers {{ units(item.shortage.covered) }} of {{ units(item.amount) }}</span>
+                  <span class="text--secondary">: the stock covers {{ units(item.shortage.covered) }} of {{ units(item.amount) }}</span><provenance-mark :result="item.covers" />
                 </div>
+                <div v-else-if="item.stockUnknown" class="caption text--secondary">Stock not known<provenance-mark :result="item.covers" /></div>
               </div>
             </template>
             <template #[`item.rate`]="{ item }">
               <div class="py-2 text-no-wrap">
-                <div>{{ item.rateText }}</div>
+                <div>{{ item.rateText }}<provenance-mark :result="item.rateResult" /></div>
                 <div class="caption text--secondary">{{ item.rateNote }}</div>
               </div>
             </template>
             <template #[`item.finishSort`]="{ item }">
               <div class="py-2 text-no-wrap">
-                <span v-if="item.days === null" class="text--secondary">—</span>
-                <span v-else-if="item.days === 0">Done</span>
+                <span v-if="item.days === null" class="text--secondary">—<provenance-mark :result="item.finishResult" /></span>
+                <span v-else-if="item.days === 0">Done<provenance-mark :result="item.finishResult" /></span>
                 <template v-else>
-                  <div>{{ item.approx ? '~' : '' }}{{ duration(item.days) }}</div>
+                  <div>{{ item.approx ? '~' : '' }}{{ duration(item.days) }}<provenance-mark :result="item.finishResult" /></div>
                   <div class="caption text--secondary">{{ dateIn(item.days) }}</div>
                 </template>
               </div>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            An industrial project builds at its share of the colony's construction, ordnance or fighter capacity, and only as far as the colony's own stock of each mineral goes; each project is checked against the whole stock, so projects at one colony that need the same mineral run short sooner. A queued project starts when a project of the same kind at that colony finishes, in queue order, if the share left is enough for it. Paused jobs keep their share and build nothing. Times assume the minerals arrive; ~ marks estimates.
+            An industrial project builds at its share of the colony's construction, ordnance or fighter capacity, and only as far as the colony's own stock of each mineral goes; each project is checked against the whole stock, so projects at one colony that need the same mineral run short sooner. A queued project starts when a project of the same kind at that colony finishes, in queue order, if the share left is enough for it. Paused jobs keep their share and build nothing. Times assume the minerals arrive; ~ marks estimates. A dash in Finishes means the job has no date, because it is paused, has nothing to work with or never starts, or because an input is not known; its mark says which.
           </div>
         </v-card>
 
@@ -120,7 +121,7 @@
           <v-col cols="12" xl="5">
             <v-card class="panel" data-summary="How many jobs finish in each period ahead, by kind, to plan around coming completions." elevation="1">
               <div class="panel-head">
-                <span>Completions</span>
+                <span>Completions<provenance-mark rule="production.timeline" /></span>
                 <v-btn-toggle v-model="horizon" mandatory dense>
                   <v-btn v-for="option in horizons" :key="option.years" :value="option.years" small>{{ option.label }}</v-btn>
                 </v-btn-toggle>
@@ -133,7 +134,7 @@
                 <div v-else class="caption text--secondary">None of the jobs shown finishes in the next {{ timeline.option.label }}.</div>
               </div>
               <div class="panel-foot caption text--secondary">
-                The jobs in the table, per {{ timeline.option.unit }} they finish in. Paused jobs and jobs that never start are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts jobs the colony's stock can't finish, at the time they would finish if the minerals arrive.
+                The jobs in the table, per {{ timeline.option.unit }} they finish in. Paused jobs and jobs that never start are left out<span v-if="timeline.later">, and {{ timeline.later }} {{ timeline.later === 1 ? 'finishes' : 'finish' }} later</span>. Short of minerals counts jobs the colony's stock can't finish, at the time they would finish if the minerals arrive.<span v-if="timeline.skipped.unknown"> {{ timeline.skipped.unknown }} {{ timeline.skipped.unknown === 1 ? 'job has' : 'jobs have' }} no finish time known and {{ timeline.skipped.unknown === 1 ? 'is' : 'are' }} not counted<provenance-mark :result="timeline.result" />.</span><span v-else><provenance-mark :result="timeline.result" /></span>
               </div>
             </v-card>
           </v-col>
@@ -141,12 +142,12 @@
             <v-card class="panel" data-summary="The construction, ordnance, fighter, training, research and slipway capacity each colony leaves unused, to find where more work can start." elevation="1">
               <div class="panel-head">
                 <span class="d-flex align-center">
-                  <span>Idle capacity by colony</span>
+                  <span>Idle capacity by colony<provenance-mark rule="production.capacityFree" /></span>
                   <v-chip v-if="focusId" small close class="ml-3" close-label="Show every colony" @click:close="focusId = null">{{ focusName }}</v-chip>
                 </span>
                 <v-chip small>{{ capacityRows.length }} {{ capacityRows.length === 1 ? 'colony' : 'colonies' }}</v-chip>
               </div>
-              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :sort-by.sync="capacityTable.sortBy" :sort-desc.sync="capacityTable.sortDesc" :items-per-page.sync="capacityTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: capacityPageSizes }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
+              <v-data-table :headers="capacityHeaders" :items="capacityRows" item-key="PopulationID" :custom-sort="sortNullLast" :sort-by.sync="capacityTable.sortBy" :sort-desc.sync="capacityTable.sortDesc" :items-per-page.sync="capacityTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: capacityPageSizes }" :no-data-text="focusId ? 'This colony has no idle capacity.' : 'Every colony is using all its capacity.'">
                 <template #[`item.colonyName`]="{ item }">
                   <div class="py-2">
                     <div class="font-weight-medium">
@@ -162,16 +163,17 @@
                 </template>
                 <template v-for="column in capacityColumns" #[`item.${column.key}Free`]="{ item }">
                   <div :key="column.key" class="py-2 text-no-wrap">
-                    <span v-if="!item[`${column.key}Total`]" class="text--disabled">—</span>
+                    <span v-if="item[`${column.key}Free`] === null" class="text--secondary">—<provenance-mark :result="item.results[column.key].free" /></span>
+                    <span v-else-if="!item[`${column.key}Total`]" class="text--disabled">none<provenance-mark :result="item.results[column.key].total" /></span>
                     <template v-else>
-                      <div :class="{ 'text--secondary': item[`${column.key}Free`] < IDLE_MINIMUM }">{{ column.bp ? bp(item[`${column.key}Free`]) : count(item[`${column.key}Free`]) }}</div>
+                      <div :class="{ 'text--secondary': item[`${column.key}Free`] < IDLE_MINIMUM }">{{ column.bp ? bp(item[`${column.key}Free`]) : count(item[`${column.key}Free`]) }}<provenance-mark :result="item.results[column.key].free" /></div>
                       <div class="caption text--secondary">of {{ column.bp ? bp(item[`${column.key}Total`]) : count(item[`${column.key}Total`]) }}</div>
                     </template>
                   </div>
                 </template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">
-                What each colony leaves idle, of its total: build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out.
+                What each colony leaves idle, of its total: build points a year for construction, ordnance, fighters and ground training (GFCCs), and research facilities and slipways not assigned to a project or task. A paused job's share counts as idle. Colonies using everything they have are left out. None means the colony has none of that capacity; a dash means the figure is not known, and its mark names what is missing.
               </div>
             </v-card>
           </v-col>
@@ -189,6 +191,7 @@ import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
@@ -197,10 +200,14 @@ import persistedView, { tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
+import { crewFractionSql } from '../utilities/crew'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
-import { MINERALS, navalAdminChainBonus, projectShortages } from '../utilities/minerals'
+import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
+import { MINERALS, navalAdminChainBonus } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { describeResult, describeRule, isAvailable, valueOrNull } from '../utilities/provenance'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -214,17 +221,7 @@ const INPUT_LABELS = {
   navalAdmins: 'the naval admin commands',
 }
 
-const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
-
-const EARTH_SURFACE_AREA = 511187128
-
-// Water vapour, as the game has it: condensation a year, hydrographic extent per atm, relative humidity factor.
-const CONDENSATION_PER_YEAR = 0.1
-const CONDENSATION_TO_HYDRO_RATE = 40
-const WATER_VAPOUR_IN_ATMOSPHERE = 0.01
-// How far ahead the water vapour estimate looks.
-const WATER_VAPOUR_HORIZON = 200
 
 // Kinds of work, each with a fixed slot of the chart palette; short of minerals has the last.
 const TYPES = [
@@ -244,6 +241,7 @@ const STATUS = {
   queued: { order: 2, icon: 'mdi-timer-sand', color: undefined },
   paused: { order: 3, icon: 'mdi-pause-circle-outline', color: 'warning' },
   stalled: { order: 4, icon: 'mdi-cancel', color: 'error' },
+  unknown: { order: 5, icon: 'mdi-help-circle-outline', color: undefined },
 }
 
 // The completions chart's spans: a year by month, five years by quarter, twenty by year.
@@ -296,114 +294,11 @@ const CAPACITY_COLUMNS = [
 // Less than this left over reads as nothing (it rounds to 0).
 const IDLE_MINIMUM = 0.5
 
-// The capacity a project draws on: ordnance and fighters have their own, and everything else, components and space stations included, uses construction capacity.
-const categoryOf = (productionType) => (productionType === 1 ? 'ordnance' : productionType === 2 ? 'fighter' : 'construction')
-
-// When each industrial project of one colony and category starts and finishes, in days from now, as the game runs them. Every project out of the queue builds at its share of the capacity; a paused one keeps its share and builds nothing. When a project finishes, the queued ones start in queue order, each that fits in the share the running and paused ones leave, skipping any that don't, until none is left. Minerals aren't simulated. `capacity`: BP a year at 100%. Returns { [ProjectID]: { start, finish } }, null where that never happens.
-const industrySchedule = (projects, capacity) => {
-  const schedule = {}
-  const running = []
-  let used = 0
-
-  const begin = (project, start) => {
-    const rate = (capacity * project.Percentage) / 100
-    const finish = project.Paused || !(rate > 0) ? null : start + ((project.Amount * project.ProdPerUnit) / rate) * 365
-
-    used += project.Percentage
-    schedule[project.ID] = { start, finish }
-
-    if (finish !== null) {
-      running.push({ project, finish })
-    }
-  }
-
-  projects.filter((project) => !project.Queue).forEach((project) => begin(project, 0))
-
-  let queue = projects.filter((project) => project.Queue > 0).sort((a, b) => a.Queue - b.Queue)
-
-  while (queue.length && running.length) {
-    running.sort((a, b) => a.finish - b.finish)
-
-    const done = running.shift()
-    let full = false
-
-    used -= done.project.Percentage
-    queue = queue.filter((project) => {
-      if (full || 100 - used + 1e-9 < project.Percentage) {
-        return true
-      }
-
-      begin(project, done.finish)
-      full = 100 - used <= 0
-
-      return false
-    })
-  }
-
-  queue.forEach((project) => {
-    schedule[project.ID] = { start: null, finish: null }
-  })
-
-  return schedule
-}
-
-// How many construction cycles until adding or removing water vapour on a body with liquid water ends, as the game runs them: the terraformers change the gas each cycle and the job ends once it passes the target; vapour above the air's humidity then condenses into the oceans, up to 0.1 atm a year, and the oceans evaporate up to it. `step`: atm the terraformers move a cycle; `years`: a cycle's length. Null when that takes more than WATER_VAPOUR_HORIZON years.
-const waterVapourCycles = (terraform, step, years) => {
-  let gas = terraform.GasAtm || 0
-  let pressure = terraform.AtmosPress
-  let hydro = terraform.HydroExt
-  const cycles = Math.ceil(WATER_VAPOUR_HORIZON / years)
-
-  for (let cycle = 1; cycle <= cycles; cycle++) {
-    if (terraform.TerraformStatus) {
-      gas += step
-      pressure += step
-
-      if (gas > terraform.MaxAtm) {
-        return cycle
-      }
-    } else {
-      const removed = Math.min(step, gas)
-
-      gas -= removed
-      pressure -= removed
-
-      if (gas <= 0) {
-        if (!(hydro > 0)) {
-          return cycle
-        }
-      } else if (gas <= terraform.MaxAtm && terraform.MaxAtm > 0) {
-        return cycle
-      }
-    }
-
-    const humidity = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (gas > humidity) {
-      const condensed = Math.min(years * CONDENSATION_PER_YEAR, gas - humidity)
-
-      gas -= condensed
-      pressure -= condensed
-      hydro += condensed * CONDENSATION_TO_HYDRO_RATE
-    }
-
-    const target = pressure * (hydro / 100) * WATER_VAPOUR_IN_ATMOSPHERE
-
-    if (hydro > 0 && target > gas) {
-      hydro -= (target - gas) * CONDENSATION_TO_HYDRO_RATE
-      pressure += target - gas
-      gas = target
-    }
-  }
-
-  return null
-}
-
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas, LoadState, PageLink, SeriesKey, StatTiles },
+  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -429,6 +324,7 @@ export default {
       capacityPageSizes: CAPACITY_PAGE_SIZES,
       capacityColumns: CAPACITY_COLUMNS,
       STATUS,
+      sortNullLast,
       IDLE_MINIMUM,
     }
   },
@@ -465,10 +361,12 @@ export default {
       const { projects, queues } = this.researches
 
       return projects.flatMap((project) => {
-        const rate = this.populationResearchCapacity(project.PopulationID, project)
-        const ownDays = rate > 0 ? (project.RemainingProduction / rate) * 365 : null
-        const status = project.Paused ? { id: 'paused', label: 'Paused' } : rate > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', label: 'No labs', note: 'No research facilities are assigned' }
-        let start = project.Paused ? null : ownDays
+        const modifiers = this.populationProductionModifiers[project.PopulationID]
+        const paused = flagOf(project.Paused)
+        const rate = researchRate(modifiers, project)
+        const finish = finishDays({ rule: 'production.researchFinish', rate, remaining: project.RemainingProduction, remainingName: 'the project\'s remaining research points', paused })
+        const labs = `${this.count(project.Facilities)} ${project.Facilities === 1 ? 'lab' : 'labs'}`
+        let ahead = finish
 
         const jobs = [this.job({
           key: `research-${project.ID}`,
@@ -477,20 +375,18 @@ export default {
           TechSystemID: project.TechSystemID,
           name: project.Name,
           note: this.scientistNote(project, project.ProjectField),
-          rateText: `${this.count(rate)} RP/yr`,
-          rateNote: `${this.count(project.Facilities)} ${project.Facilities === 1 ? 'lab' : 'labs'}`,
-          days: project.Paused ? null : ownDays,
-          status,
+          rate,
+          finish,
+          rateText: this.rateText(rate, this.count, 'RP/yr'),
+          rateNote: labs,
+          status: jobStatus({ paused, rate, stalled: { label: 'No labs', note: 'No research facilities are assigned' } }),
         })]
 
         queues.filter((queue) => queue.CurrentProjectID === project.ID).sort((a, b) => a.ResearchOrder - b.ResearchOrder).forEach((queue, index) => {
-          const inField = project.ProjectField === queue.ProjectField
-          const queueRate = this.populationResearchCapacity(project.PopulationID, {
-            ...project,
-            ActualCommanderResearchBonus: inField ? (project.ActualCommanderResearchBonus || 1) : (project.CommanderBonus || 1),
-            ActualAnomalyBonus: inField ? project.ActualAnomalyBonus : 1,
-          })
-          const finish = start === null || !(queueRate > 0) ? null : start + (queue.DevelopCost / queueRate) * 365
+          const queueRate = researchRate(modifiers, queuedResearch(project, queue))
+          const queueFinish = finishDays({ rule: 'production.researchFinish', rate: queueRate, remaining: queue.DevelopCost, remainingName: 'the tech\'s development cost', ahead })
+          const start = isAvailable(ahead.result) ? this.duration(ahead.result.value) : null
+          const startNote = start !== null ? `Starts in ${start}` : ahead.idle ? (paused ? 'Never starts: the project ahead is paused' : 'Never starts: the project ahead makes no progress') : `Start not known: missing ${ahead.result.inputs.missing.join(', ')}`
 
           jobs.push(this.job({
             key: `research-${project.ID}-${queue.ResearchOrder}`,
@@ -499,18 +395,15 @@ export default {
             TechSystemID: queue.TechSystemID,
             name: queue.Name,
             note: this.scientistNote(project, queue.ProjectField),
-            rateText: `${this.count(queueRate)} RP/yr`,
-            rateNote: `${this.count(project.Facilities)} ${project.Facilities === 1 ? 'lab' : 'labs'}`,
-            days: finish,
+            rate: queueRate,
+            finish: queueFinish,
+            rateText: this.rateText(queueRate, this.count, 'RP/yr'),
+            rateNote: labs,
             queued: true,
-            status: {
-              id: 'queued',
-              label: `Queued #${index + 1}`,
-              note: start === null ? (project.Paused ? 'Never starts: the project ahead is paused' : 'Never starts: the project ahead makes no progress') : `Starts in ${this.duration(start)}`,
-            },
+            status: { id: 'queued', label: `Queued #${index + 1}`, note: startNote },
           }))
 
-          start = finish
+          ahead = queueFinish
         })
 
         return jobs
@@ -519,6 +412,7 @@ export default {
 
     industryJobs() {
       const groups = {}
+      const undecided = undecidedStarts(this.industry)
 
       this.industry.forEach((project) => {
         const key = `${project.PopulationID}-${categoryOf(project.ProductionType)}`
@@ -529,33 +423,38 @@ export default {
       return Object.values(groups).flatMap((group) => {
         const { PopulationID, ProductionType } = group[0]
         const category = categoryOf(ProductionType)
-        const capacity = this.categoryCapacity(PopulationID, category)
-        const schedule = industrySchedule(group, capacity)
-        const anyBuilding = capacity > 0 && group.some((project) => !project.Queue && !project.Paused)
+        const capacity = category === 'unknown' ? unknownKindCapacity() : this.populationCapacityResult(PopulationID, category)
+        const figures = industryFigures(group, capacity, undecided[PopulationID])
+        const anyBuilding = isAvailable(capacity) && capacity.value > 0 && group.some((project) => !project.Queue && !project.Paused)
         const pausedAhead = group.some((project) => !project.Queue && project.Paused)
 
-        return group.map((project) => {
-          const rate = (capacity * project.Percentage) / 100
-          const { start, finish } = schedule[project.ID]
+        return group.map((project, index) => {
+          const { rate, finish, start } = figures[index]
           // A spied NPR builds from its capital's stock.
-          const [shortage = null] = this.RaceNPR ? [] : projectShortages(project)
+          const { shortage, covers, unknown } = this.RaceNPR ? { shortage: null, covers: null, unknown: [] } : shortageOf(project)
+          const paused = flagOf(project.Paused)
+          const queued = Number.isFinite(project.Queue) && project.Queue > 0
           let status
 
-          if (project.Queue > 0) {
+          if (queued) {
             status = {
               id: 'queued',
               label: `Queued #${project.Queue}`,
-              note: start === null ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}` : `Starts in ${this.duration(start)}${project.Paused ? ', paused' : ''}`,
+              note: start !== null ? `Starts in ${this.duration(start)}${paused ? ', paused' : ''}` : finish.idle ? `Never starts: ${!anyBuilding ? 'nothing ahead of it is building' : pausedAhead ? 'a paused project keeps the share it needs' : 'not enough share frees up'}` : `Start not known: missing ${finish.result.inputs.missing.join(', ')}`,
             }
-          } else if (project.Paused) {
+          } else if (paused === true) {
             status = { id: 'paused', label: 'Paused' }
-          } else if (!(rate > 0)) {
+          } else if (!Number.isFinite(project.Queue) || paused === null) {
+            status = { id: 'unknown', label: 'Not known', note: 'Whether the project is queued or paused is not in the save' }
+          } else if (!isAvailable(rate)) {
+            status = { id: 'unknown', label: 'Not known', note: `Missing ${rate.inputs.missing.join(', ')}` }
+          } else if (!(rate.value > 0)) {
             status = { id: 'stalled', label: 'No capacity', note: `The colony has no ${category} capacity` }
           } else if (shortage) {
             status = {
               id: 'short',
               label: `Short of ${shortage.name}`,
-              note: `The stock covers ${this.units(shortage.covered)} of ${this.units(project.Amount)}, about ${this.duration((shortage.covered * project.ProdPerUnit / rate) * 365)}`,
+              note: `The stock covers ${this.units(shortage.covered)} of ${this.units(project.Amount)}${Number.isFinite(project.ProdPerUnit) ? `, about ${this.duration((shortage.covered * project.ProdPerUnit / rate.value) * 365)}` : ''}`,
             }
           } else {
             status = { id: 'running', label: 'Running' }
@@ -567,12 +466,15 @@ export default {
             PopulationID,
             name: `${this.units(project.Amount)} × ${project.Name}`,
             detail: PRODUCTION_TYPES[project.ProductionType],
-            rateText: `${this.bp(rate)} BP/yr`,
-            rateNote: `${this.count(project.Percentage, 1)}% of ${category}`,
-            days: finish,
+            rate,
+            finish,
+            rateText: this.rateText(rate, this.bp, 'BP/yr'),
+            rateNote: category === 'unknown' ? 'Production type not known' : isKnownNumber(project.Percentage) ? `${this.count(project.Percentage, 1)}% of ${category}` : `Share of ${category} not known`,
             amount: project.Amount,
-            queued: project.Queue > 0,
+            queued,
             shortage,
+            covers,
+            stockUnknown: unknown.length > 0 && !shortage,
             status,
           })
         })
@@ -581,7 +483,10 @@ export default {
 
     shipJobs() {
       return this.ships.map((ship) => {
-        const rate = this.populationShipyardCapacity(ship.PopulationID, ship)
+        const modifiers = this.populationProductionModifiers[ship.PopulationID]
+        const paused = flagOf(ship.Paused)
+        const rate = shipRate(modifiers, ship)
+        const finish = finishDays({ rule: 'production.shipFinish', rate, remaining: ship.RemainingProduction, remainingName: 'the task\'s remaining build points', paused })
 
         return this.job({
           key: `ship-${ship.ID}`,
@@ -589,18 +494,20 @@ export default {
           PopulationID: ship.PopulationID,
           name: ship.Name,
           detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName].filter(Boolean).join(' · '),
-          rateText: `${this.bp(rate)} BP/yr`,
+          rate,
+          finish,
+          rateText: this.rateText(rate, this.bp, 'BP/yr'),
           rateNote: ship.ShipyardName,
-          days: ship.Paused || !(rate > 0) ? null : (ship.RemainingProduction / rate) * 365,
-          status: ship.Paused ? { id: 'paused', label: 'Paused' } : rate > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', label: 'No capacity' },
+          status: jobStatus({ paused, rate, stalled: { label: 'No capacity' } }),
         })
       })
     },
 
     shipyardJobs() {
       return this.shipyards.map((shipyard) => {
-        const rate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, shipyard)
-        const days = shipyard.UpgradeTaskType === 8 ? this.shipyardContinualRemainingDays(shipyard) : rate > 0 ? shipyard.RemainingProduction / rate * SECONDS_PER_YEAR / SECONDS_PER_DAY / (shipyard.UpgradeTaskType === 7 ? shipyard.Slipways : 1) : null
+        const modifiers = this.populationProductionModifiers[shipyard.PopulationID]
+        const rate = shipyardUpgradeRate(modifiers, shipyard)
+        const finish = shipyardFinish(modifiers, shipyard, rate)
         const target = shipyard.UpgradeTaskType === 7 && shipyard.ClassName ? ` to ${shipyard.ClassName}` : shipyard.UpgradeTaskType === 8 ? ` to ${this.count(shipyard.CapacityTarget)} t` : ''
 
         return this.job({
@@ -609,11 +516,12 @@ export default {
           PopulationID: shipyard.PopulationID,
           name: shipyard.ShipyardName,
           detail: `${SHIPYARD_UPGRADE_TYPES[shipyard.UpgradeTaskType] || 'Activity'}${target}`,
-          rateText: `${this.bp(rate)} BP/yr`,
+          rate,
+          finish,
+          rateText: this.rateText(rate, this.bp, 'BP/yr'),
           rateNote: 'Modification rate',
-          days: shipyard.Paused ? null : days,
           approx: shipyard.UpgradeTaskType === 8,
-          status: shipyard.Paused ? { id: 'paused', label: 'Paused' } : days === null ? { id: 'stalled', label: 'No capacity' } : { id: 'running', label: 'Running' },
+          status: jobStatus({ paused: flagOf(shipyard.Paused), stalled: { label: 'No capacity' }, finish }),
         })
       })
     },
@@ -622,76 +530,65 @@ export default {
     trainingJobs() {
       return this.trainings.map((training) => {
         const gfccs = this.gfccCount(training.PopulationID)
-        const rate = (this.trainingCapacity(training.PopulationID) * training.TaskPercentage) / 100
+        const capacity = trainingCapacity(this.populationProductionModifiers[training.PopulationID], this.facilitiesByColony[training.PopulationID])
+        const rate = trainingRate(capacity, training)
+        const finish = finishDays({ rule: 'production.trainingFinish', rate, remaining: training.RemainingProduction, remainingName: 'the task\'s remaining build points' })
 
         return this.job({
           key: `training-${training.ID}`,
           type: 'training',
           PopulationID: training.PopulationID,
           name: training.Name,
-          rateText: `${this.bp(rate)} BP/yr`,
+          rate,
+          finish,
+          rateText: this.rateText(rate, this.bp, 'BP/yr'),
           rateNote: `${this.count(training.TaskPercentage, 1)}% of ${this.count(gfccs)} ${gfccs === 1 ? 'GFCC' : 'GFCCs'}`,
-          days: rate > 0 ? (training.RemainingProduction / rate) * 365 : null,
-          status: rate > 0 ? { id: 'running', label: 'Running' } : { id: 'stalled', label: 'No GFCC', note: 'The colony has no ground force construction complex' },
+          status: jobStatus({ paused: false, rate, stalled: { label: 'No GFCC', note: 'The colony has no ground force construction complex' } }),
         })
       })
     },
 
     terraformingJobs() {
       return Object.values(this.terraforms.reduce((map, terraform) => {
-        if (terraform.TerraformStatus && !terraform.MaxAtm) {
+        if (terraform.TerraformStatus && terraform.MaxAtm === 0) {
           return map
         }
 
         if (!map[terraform.PopulationID]) {
-          map[terraform.PopulationID] = {
-            ...terraform,
-
-            planetaryCapacity: 0,
-            orbitalCapacity: 0,
-          }
+          map[terraform.PopulationID] = { ...terraform, planetary: null, orbital: [] }
         }
+
+        const colony = map[terraform.PopulationID]
+        const terraformers = isKnownNumber(terraform.Terraformers) ? terraform.Terraformers : null
 
         // Orbital terraformers get their admin command chain's Terraforming bonus at the Industrial share.
         if (terraform.ParentCommandID) {
-          map[terraform.PopulationID].orbitalCapacity += this.terraformingRate(terraform.PopulationID) * navalAdminChainBonus(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID) * terraform.Terraformers
+          colony.orbital.push({ terraformers, adminBonus: navalAdminChainBonus(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID) })
         } else {
-          map[terraform.PopulationID].planetaryCapacity += this.populationTerraformingRate(terraform.PopulationID) * terraform.Terraformers
+          colony.planetary = { terraformers: colony.planetary === null ? terraformers : colony.planetary.terraformers === null || terraformers === null ? null : colony.planetary.terraformers + terraformers }
         }
 
         return map
       }, {})).map((terraform) => {
-        const localSurfaceArea = 4 * Math.PI * Math.pow(terraform.Radius, 2)
-        const totalCapacity = (terraform.planetaryCapacity + terraform.orbitalCapacity) * this.populationTerraformingSpeed(terraform.PopulationID)
-        const localCapacity = totalCapacity * (EARTH_SURFACE_AREA / localSurfaceArea)
+        const modifiers = this.populationProductionModifiers[terraform.PopulationID]
+        const rate = terraformRate(modifiers, { planetary: terraform.planetary, orbital: terraform.orbital, radius: terraform.Radius })
+        const finish = terraformFinish(modifiers, terraform, rate)
         const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
-        let days = null
-        let note
-
-        if (localCapacity > 0 && waterOnSurface) {
-          const period = this.populationMinConstructionPeriod(terraform.PopulationID)
-          const cycles = waterVapourCycles(terraform, (localCapacity * period) / SECONDS_PER_YEAR, period / SECONDS_PER_YEAR)
-
-          if (cycles === null) {
-            note = `Not within ${WATER_VAPOUR_HORIZON} years: the vapour condenses into the oceans`
-          } else {
-            days = (cycles * period) / SECONDS_PER_DAY
-          }
-        } else if (localCapacity > 0) {
-          days = Math.max(0, terraform.TerraformStatus ? terraform.MaxAtm - terraform.GasAtm : terraform.GasAtm - terraform.MaxAtm) / (localCapacity / 365)
-        }
+        const adding = flagOf(terraform.TerraformStatus)
+        const status = jobStatus({ paused: false, rate, stalled: { label: 'No capacity' } })
 
         return this.job({
           key: `terraforming-${terraform.PopulationID}`,
           type: 'terraforming',
           PopulationID: terraform.PopulationID,
-          name: `${terraform.GasName} to ${terraform.MaxAtm} atm`,
+          name: `${terraform.GasName || 'Unknown gas'} to ${isKnownNumber(terraform.MaxAtm) ? terraform.MaxAtm : UNKNOWN_TEXT} atm`,
           detail: waterOnSurface ? `Hydrographic extent ${this.count(terraform.HydroExt, 1)}%` : '',
-          rateText: `${this.count(localCapacity, 4)} atm/yr`,
-          rateNote: terraform.TerraformStatus ? 'Adding' : 'Removing',
-          days,
+          rate,
+          finish,
+          rateText: this.rateText(rate, (value) => this.count(value, 4), 'atm/yr'),
+          rateNote: adding === null ? 'Adding or removing not known' : adding ? 'Adding' : 'Removing',
           approx: true,
-          status: localCapacity > 0 ? { id: 'running', label: 'Running', note } : { id: 'stalled', label: 'No capacity' },
+          status: status.id === 'running' && finish.note ? { ...status, note: finish.note } : status,
         })
       })
     },
@@ -748,46 +645,36 @@ export default {
       ]
     },
 
-    // Idle capacity per colony with any: the share of each industrial capacity no running project uses, the share of GFCC capacity no training task uses, labs no project uses and slipways without a task (a yard's Slipways less its tasks, as the game's shipyard list counts them).
+    // Idle capacity per colony with any: the share of each industrial capacity no running project uses, the share of GFCC capacity no training task uses, labs no project uses and slipways without a task (a yard's Slipways less its tasks, as the game's shipyard list counts them). Each figure is a provenance result, kept in `results`; a figure not known is null and the row stays in the table.
     colonyCapacity() {
-      const shares = {}
-      const trainingShares = {}
-
-      this.industry.forEach((project) => {
-        if (!project.Queue && !project.Paused) {
-          const key = `${project.PopulationID}-${categoryOf(project.ProductionType)}`
-
-          shares[key] = (shares[key] || 0) + project.Percentage
-        }
-      })
-
-      this.trainings.forEach((training) => {
-        trainingShares[training.PopulationID] = (trainingShares[training.PopulationID] || 0) + training.TaskPercentage
-      })
+      const usage = industryUsage(this.industry)
+      const trainingShares = trainingUsage(this.trainings)
 
       return this.colonyFacilities.map((colony) => {
         const id = colony.PopulationID
-        const freeShare = (used) => Math.max(0, 100 - (used || 0)) / 100
-        const row = { PopulationID: id, Shipyards: colony.Shipyards, ...this.colony(id, colony.PopName) }
 
-        ;['construction', 'ordnance', 'fighter'].forEach((category) => {
-          row[`${category}Total`] = this.categoryCapacity(id, category)
-          row[`${category}Free`] = row[`${category}Total`] * freeShare(shares[`${id}-${category}`])
+        const results = {
+          construction: freeCapacity(this.populationCapacityResult(id, 'construction'), usage[`${id}-construction`]),
+          ordnance: freeCapacity(this.populationCapacityResult(id, 'ordnance'), usage[`${id}-ordnance`]),
+          fighter: freeCapacity(this.populationCapacityResult(id, 'fighter'), usage[`${id}-fighter`]),
+          training: freeCapacity(trainingCapacity(this.populationProductionModifiers[id], colony), trainingShares[id]),
+          research: idleFacilities(colony, 'research'),
+          slipways: idleFacilities(colony, 'slipways'),
+        }
+
+        const row = { PopulationID: id, Shipyards: colony.Shipyards, results, ...this.colony(id, colony.PopName) }
+
+        Object.entries(results).forEach(([key, { total, free }]) => {
+          row[`${key}Total`] = valueOrNull(total)
+          row[`${key}Free`] = valueOrNull(free)
         })
-
-        row.trainingTotal = this.trainingCapacity(id)
-        row.trainingFree = row.trainingTotal * freeShare(trainingShares[id])
-        row.researchTotal = colony.ResearchFacilities
-        row.researchFree = Math.max(0, colony.ResearchFacilities - colony.ResearchFacilitiesUsed)
-        row.slipwaysTotal = colony.Slipways
-        row.slipwaysFree = Math.max(0, colony.Slipways - colony.SlipwaysUsed)
 
         return row
       })
     },
 
     capacityRows() {
-      return this.colonyCapacity.filter((row) => (!this.focusId || row.PopulationID === this.focusId) && CAPACITY_COLUMNS.some((column) => row[`${column.key}Free`] >= IDLE_MINIMUM))
+      return this.colonyCapacity.filter((row) => (!this.focusId || row.PopulationID === this.focusId) && CAPACITY_COLUMNS.some((column) => row[`${column.key}Free`] === null || row[`${column.key}Free`] >= IDLE_MINIMUM))
     },
 
     capacityHeaders() {
@@ -802,62 +689,62 @@ export default {
       const paused = active.filter((job) => job.status.id === 'paused').length
       const queued = this.jobs.length - active.length
       const short = this.jobs.filter((job) => job.shortage)
+      const notKnown = this.jobs.filter((job) => job.status.id === 'unknown').length
       const shortLabel = short.some((job) => !job.shortage.mineralId) ? 'short of minerals or fuel' : 'short of minerals'
-      const jobNotes = [paused && `${paused} paused`, queued && `${queued} queued`, short.length && `${short.length} ${shortLabel}`].filter(Boolean)
+      const jobNotes = [paused && `${paused} paused`, queued && `${queued} queued`, short.length && `${short.length} ${shortLabel}`, notKnown && `${notKnown} not known`].filter(Boolean)
 
-      const sum = (key) => this.colonyCapacity.reduce((total, row) => total + row[key], 0)
-      const coloniesWith = (key) => this.colonyCapacity.filter((row) => row[key] >= IDLE_MINIMUM).length
+      const rows = this.colonyCapacity
+      const coloniesWith = (key) => rows.filter((row) => row[`${key}Free`] >= IDLE_MINIMUM).length
       const at = (colonies, none) => (colonies ? `At ${colonies} ${colonies === 1 ? 'colony' : 'colonies'}` : none)
 
-      const constructionTotal = sum('constructionTotal')
-      const researchTotal = sum('researchTotal')
-      const slipwaysTotal = sum('slipwaysTotal')
+      // The idle and the installed figure of one capacity summed over the colonies that have one, with how many do not.
+      const sums = (key, freeRule, totalRule) => ({
+        free: totalOf(freeRule, rows.map((row) => row.results[key].free), 'colonies'),
+        total: totalOf(totalRule, rows.map((row) => row.results[key].total), 'colonies'),
+      })
+
+      const note = (key, sum, ifAny, none) => {
+        const total = valueOrNull(sum.total.result)
+        const lead = total ? at(coloniesWith(key), ifAny) : sum.total.unknown ? 'No capacity known' : none
+
+        return sum.free.unknown ? `${lead} · ${sum.free.unknown} of ${rows.length} colonies not counted` : lead
+      }
+
+      const construction = sums('construction', 'production.capacityFree', 'production.populationCapacity')
+      const research = sums('research', 'production.researchLabs', 'production.researchLabs')
+      const slipways = sums('slipways', 'production.slipways', 'production.slipways')
 
       return [
         {
           label: 'Jobs',
           value: this.count(active.length),
           note: jobNotes.length ? jobNotes.join(', ') : active.length ? 'All running' : 'Nothing under way',
+          title: describeRule('production.jobCount'),
         },
         {
           label: 'Construction free',
-          value: `${this.bp(sum('constructionFree'))} BP/yr`,
-          note: constructionTotal ? at(coloniesWith('constructionFree'), 'Every colony is building') : 'No construction capacity',
+          value: isAvailable(construction.free.result) ? `${this.bp(construction.free.result.value)} BP/yr` : UNKNOWN_TEXT,
+          note: note('construction', construction, 'Every colony is building', 'No construction capacity'),
+          title: describeResult(construction.free.result),
         },
         {
           label: 'Research labs idle',
-          value: `${this.count(sum('researchFree'))} of ${this.count(researchTotal)}`,
-          note: researchTotal ? at(coloniesWith('researchFree'), 'All researching') : 'No research facilities',
+          value: isAvailable(research.free.result) && isAvailable(research.total.result) ? `${this.count(research.free.result.value)} of ${this.count(research.total.result.value)}` : UNKNOWN_TEXT,
+          note: note('research', research, 'All researching', 'No research facilities'),
+          title: describeResult(research.free.result),
         },
         {
           label: 'Slipways idle',
-          value: `${this.count(sum('slipwaysFree'))} of ${this.count(slipwaysTotal)}`,
-          note: slipwaysTotal ? at(coloniesWith('slipwaysFree'), 'All building') : 'No shipyards',
+          value: isAvailable(slipways.free.result) && isAvailable(slipways.total.result) ? `${this.count(slipways.free.result.value)} of ${this.count(slipways.total.result.value)}` : UNKNOWN_TEXT,
+          note: note('slipways', slipways, 'All building', 'No shipyards'),
+          title: describeResult(slipways.free.result),
         },
       ]
     },
 
     timeline() {
       const option = HORIZONS.find((horizon) => horizon.years === this.horizon) || HORIZONS[0]
-      const binDays = (option.years * 365) / option.bins
-      const counts = Object.fromEntries([...TYPE_IDS, 'short'].map((id) => [id, new Array(option.bins).fill(0)]))
-      let later = 0
-      let total = 0
-
-      this.visibleJobs.forEach((job) => {
-        if (!(job.days > 0)) {
-          return
-        }
-
-        const bin = Math.floor(job.days / binDays)
-
-        if (bin >= option.bins) {
-          later += 1
-        } else {
-          counts[job.shortage ? 'short' : job.type][bin] += 1
-          total += 1
-        }
-      })
+      const { counts, later, total, binDays, skipped, result } = completionBins(this.visibleJobs, option, TYPE_IDS)
 
       const series = [
         ...TYPES.map((type) => ({ id: type.id, label: type.label, color: this.typeColors[type.id] })),
@@ -866,7 +753,7 @@ export default {
 
       const labels = Array.from({ length: option.bins }, (_, index) => gameTime(this.StartYear, this.GameTime + index * binDays * SECONDS_PER_DAY).format(option.format))
 
-      return { option, counts, later, total, series, labels }
+      return { option, counts, later, total, skipped, result, series, labels }
     },
 
     timelineChart() {
@@ -915,8 +802,9 @@ export default {
     },
 
     // A table row: the colony's name and place, and the fields the table sorts and searches by.
-    job(fields) {
+    job({ rate, finish, ...fields }) {
       const colony = this.colony(fields.PopulationID, '')
+      const days = valueOrNull(finish.result)
 
       return {
         detail: '',
@@ -924,11 +812,17 @@ export default {
         approx: false,
         queued: false,
         shortage: null,
+        covers: null,
+        stockUnknown: false,
         amount: null,
         ...fields,
         ...colony,
+        rateResult: rate,
+        finishResult: finish.result,
+        finishIdle: finish.idle,
+        days,
         statusSort: STATUS[fields.status.id].order,
-        finishSort: fields.days === null ? Infinity : fields.days,
+        finishSort: days,
         searchText: `${fields.name} ${fields.detail || ''} ${colony.colonyName} ${colony.place}`.toLowerCase(),
       }
     },
@@ -974,122 +868,16 @@ export default {
       return this.count(value, value < 1 ? 2 : 1)
     },
 
-    categoryCapacity(populationId, category) {
-      return category === 'ordnance' ? this.populationOrdnanceCapacity(populationId) : category === 'fighter' ? this.populationFighterCapacity(populationId) : this.populationConstructionCapacity(populationId)
-    },
-
+    // The colony's GFCCs, null while the save does not give them.
     gfccCount(populationId) {
       const facilities = this.facilitiesByColony[populationId]
 
-      return facilities ? facilities.TrainingFacilities : 0
+      return facilities && isKnownNumber(facilities.TrainingFacilities) ? facilities.TrainingFacilities : null
     },
 
-    // BP a year the colony's GFCCs train at 100%: the race's rate per GFCC with its bonuses, times the GFCCs.
-    trainingCapacity(populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      return modifiers ? modifiers.OverallGroundUnitModifier * this.gfccCount(populationId) : 0
-    },
-
-    populationMinConstructionPeriod(populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.MinConstructionPeriod
-    },
-    populationShipyardCapacity(populationId, ship) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.ShipyardBuildRate * (1 + (ship.Size * ship.CommercialModifier / 100 - 1) / 2)
-    },
-    populationShipyardUpgradeCapacity(populationId, shipyard) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      const commercialModifier = shipyard.SYType === 1 ? 1 : 0.1
-
-      return (1 + (shipyard.Capacity * commercialModifier / 5000 - 1) / 2) * modifiers.ShipyardBuildRate
-    },
-    populationResearchCapacity(populationId, research) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return research.ActualCommanderResearchBonus * research.ActualAnomalyBonus * modifiers.OverallResearchModifier * research.Facilities
-    },
-
-    terraformingRate(populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.TerraformingRate
-    },
-    populationTerraformingRate(populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.PopulationTerraformingRate
-    },
-    populationTerraformingSpeed(populationId) {
-      const modifiers = this.populationProductionModifiers[populationId]
-
-      if (!modifiers) {
-        return 0
-      }
-
-      return modifiers.TerraformingSpeed
-    },
-
-    // Null when the yard can't grow (no build rate), which would otherwise never reach the target.
-    shipyardContinualRemainingDays(shipyard) {
-      const modifiers = this.populationProductionModifiers[shipyard.PopulationID]
-
-      if (!modifiers) {
-        return null
-      }
-
-      const roi = modifiers.MinConstructionPeriod / SECONDS_PER_YEAR
-      const periodDays = modifiers.MinConstructionPeriod / SECONDS_PER_DAY
-
-      let periods = 0
-      let lastUpgrade = 0
-      let newCapacity = shipyard.Capacity
-      do {
-        const wat = (120 * shipyard.Slipways) * modifiers.ShipyardOperations
-        const stepUpgradeRate = this.populationShipyardUpgradeCapacity(shipyard.PopulationID, {
-          SYType: shipyard.SYType,
-          Capacity: newCapacity,
-        }) * roi
-
-        lastUpgrade = stepUpgradeRate / wat * (shipyard.SYType === 1 ? 500 : 5000)
-
-        if (!(lastUpgrade > 0)) {
-          return null
-        }
-
-        newCapacity += lastUpgrade
-        periods += 1
-      } while (newCapacity < shipyard.CapacityTarget)
-
-      return periods * periodDays
+    // A job's rate with its unit, a dash while the rate is not known.
+    rateText(result, format, unit) {
+      return isAvailable(result) ? `${format(result.value)} ${unit}` : UNKNOWN_TEXT
     },
   },
   asyncComputed: {
@@ -1100,9 +888,10 @@ export default {
           return []
         }
 
-        const installed = (value) => `coalesce((select sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value}) from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID and DIM_PlanetaryInstallation.${value} > 0), 0)`
+        // A colony's count is not known while any installation row lacks its amount or value, a project's or yard's while any row lacks the figure; a colony with none of them has 0.
+        const installed = (value) => `(select case when sum(FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.${value} is null) > 0 then null else coalesce(sum(case when DIM_PlanetaryInstallation.${value} > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.${value} end), 0) end from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.PopID = FCT_Population.PopulationID)`
 
-        const [rows] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, ${installed('ResearchValue')} as ResearchFacilities, coalesce((select sum(FCT_ResearchProject.Facilities) from FCT_ResearchProject where FCT_ResearchProject.PopulationID = FCT_Population.PopulationID and FCT_ResearchProject.RaceID = ${this.RaceID}), 0) as ResearchFacilitiesUsed, ${installed('GroundTrainingValue')} as TrainingFacilities, coalesce((select sum(FCT_Shipyard.Slipways) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}), 0) as Slipways, coalesce((select sum(min(FCT_Shipyard.Slipways, (select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID))) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}), 0) as SlipwaysUsed, (select count(*) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Shipyards from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, ${installed('ResearchValue')} as ResearchFacilities, (select case when count(*) = count(FCT_ResearchProject.Facilities) then coalesce(sum(FCT_ResearchProject.Facilities), 0) end from FCT_ResearchProject where FCT_ResearchProject.PopulationID = FCT_Population.PopulationID and FCT_ResearchProject.RaceID = ${this.RaceID}) as ResearchFacilitiesUsed, ${installed('GroundTrainingValue')} as TrainingFacilities, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(FCT_Shipyard.Slipways), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Slipways, (select case when count(*) = count(FCT_Shipyard.Slipways) then coalesce(sum(min(FCT_Shipyard.Slipways, (select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID))), 0) end from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as SlipwaysUsed, (select count(*) from FCT_Shipyard where FCT_Shipyard.PopulationID = FCT_Population.PopulationID and FCT_Shipyard.RaceID = ${this.RaceID}) as Shipyards from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return rows
       }),
@@ -1144,7 +933,7 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
 
         return rows
       }),
@@ -1191,10 +980,12 @@ export default {
           return []
         }
 
-        // A commander without the terraforming bonus counts as 1.
-        const [orbitalTerraformers] = await this.database.query(`select sum(FCT_ShipClass.Terraformers * coalesce(FCT_CommanderBonuses.BonusValue, 1)) as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`)
+        // A commander without the terraforming bonus counts as 1. An orbital terraformer works at the share of its class crew aboard, and a colony with a ship whose crew or class crew is not in the save has no orbital figure; likewise a planetary installation without its amount.
+        const crew = crewFractionSql()
 
-        const [planetaryTerraformers] = await this.database.query(`select sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`)
+        const [orbitalTerraformers] = await this.database.query(`select case when count(*) = count(FCT_ShipClass.Terraformers * ${crew}) then sum(FCT_ShipClass.Terraformers * coalesce(FCT_CommanderBonuses.BonusValue, 1) * ${crew}) end as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`)
+
+        const [planetaryTerraformers] = await this.database.query(`select case when count(*) = count(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) then sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) end as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`)
 
         return [
           ...orbitalTerraformers,
