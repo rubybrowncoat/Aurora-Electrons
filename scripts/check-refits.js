@@ -96,7 +96,7 @@ const note = (result) => {
 }
 
 const worked = (refits, provenance) => {
-  const { classChanges, refitCost, refitTotal, costShare, noRetoolCheck, retoolCost, retoolTime, yardAccepts, yardRetools, refitRate, refitTime, inBand } = refits
+  const { classChanges, refitCost, refitTotal, costShare, noRetoolCheck, retoolCost, retoolTime, yardEligibility, refitRate, refitTime, inBand } = refits
   const { isAvailable, valueOrNull, STATUS } = provenance
   const part = (id, cost, minerals = {}) => ({ id, name: `part ${id}`, typeId: 1, cost, minerals: Object.fromEntries(MINERALS.map((name) => [name, minerals[name] ?? 0])) })
   const components = { 1: part(1, 10, { Duranium: 2 }), 2: part(2, 30, { Corbomite: 3 }), 3: part(3, 20, { Uridium: 1 }), 4: part(4, 4, { Duranium: 10 }), 5: part(5, null) }
@@ -144,17 +144,74 @@ const worked = (refits, provenance) => {
   check('worked: a yard with no tooled class retools at once for 0', retoolCost({ tooling: null, target: B, refit: ab.total, slipways: 2, operations: 0.5 }).kind === 'immediate' && near(valueOrNull(retoolCost({ tooling: null, target: B, refit: ab.total, slipways: 2, operations: 0.5 }).cost), 0))
   check('worked: an unknown operations figure leaves the retool unavailable and names it', !isAvailable(retoolCost({ tooling: A, target: B, refit: ab.total, slipways: 2, operations: null }).cost) && retoolCost({ tooling: A, target: B, refit: ab.total, slipways: 2, operations: null }).cost.inputs.missing.some((name) => name.includes('operations')))
 
-  const naval = { type: 1, capacity: 600, slipways: 2 }
-  const commercial = { type: 2, capacity: 600, slipways: 2 }
-  check('worked: a naval yard of 600 t takes a class of 12 but not 12.1', yardAccepts(naval, B).status === 'ok' && yardAccepts(naval, make('Big', 12.1, 1, {})).status === 'blocked')
-  check('worked: a commercial yard takes a commercial class only', yardAccepts(commercial, B).status === 'blocked' && yardAccepts(commercial, make('Merchant', 12, 1, {}, { commercial: true })).status === 'ok')
-  check('worked: a repair yard is unsupported, a yard with no type unknown, a missing capacity unknown', yardAccepts({ type: 3, capacity: 600 }, B).status === 'unsupported' && yardAccepts({ type: null, capacity: 600 }, B).status === 'unknown' && yardAccepts({ type: 1, capacity: null }, B).status === 'unknown')
-  check('worked: a shipping-line class is never taken', yardAccepts(naval, make('Line', 5, 1, {}, { shippingLine: true })).status === 'blocked')
-  note({ rule: 'refit.yardAccepts' })
+  const naval = { type: 1, capacity: 600, slipways: 2, tasks: 0 }
+  const commercial = { type: 2, capacity: 600, slipways: 2, tasks: 0 }
+  const contextOf = (...shipClasses) => ({ classesById: Object.fromEntries([A, B, ...shipClasses].map((shipClass) => [shipClass.id, shipClass])), components, version: '2.7.1', cache: new Map() })
+  const stateOf = (yard, target, operation = 'build', source = null, context = contextOf(target, ...(source ? [source] : []))) => yardEligibility(yard, target, operation, context, source).state
+  const merchant = make('Merchant', 12, 1, {}, { commercial: true })
+  const tooledB = { ...naval, tooledId: 'B' }
 
-  const tooledNaval = { type: 1, capacity: 600, slipways: 2, tooledId: 'B' }
-  check('worked: a yard cannot be retooled for the class it is tooled for, nor for an obsolete class or one with prototype components', yardRetools(tooledNaval, B).status === 'blocked' && yardRetools(naval, make('Old', 5, 1, {}, { obsolete: true })).status === 'blocked' && yardRetools(naval, make('Proto', 5, 1, {}, { prototype: true })).status === 'blocked' && yardRetools(naval, B).status === 'ok' && yardRetools({ type: 3, capacity: 600 }, B).status === 'unsupported')
-  check('worked: a commercial yard is retooled for a commercial class only, and an unknown obsolete flag leaves the retool unknown', yardRetools(commercial, B).status === 'blocked' && yardRetools(commercial, make('Merchant', 12, 1, {}, { commercial: true })).status === 'ok' && yardRetools(naval, make('Maybe', 5, 1, {}, { obsolete: null })).status === 'unknown')
+  check('worked: a yard tooled for a class takes it, with the yard\'s own tooling as the reason', stateOf(tooledB, B) === 'capable' && yardEligibility(tooledB, B, 'build', contextOf()).tooling.kind === 'tooled' && yardEligibility(tooledB, B, 'build', contextOf()).result.value === 'capable' && isAvailable(yardEligibility(tooledB, B, 'build', contextOf()).result))
+  check('worked: a naval yard of 600 t does not take a class of 12.1, naming the capacity, and a class over the capacity is not offered even when tooled for another', stateOf(tooledB, make('Big', 12.1, 1, {})) === 'ineligible' && yardEligibility(tooledB, make('Big', 12.1, 1, {}), 'build', contextOf()).blockers[0].includes('capacity'))
+  check('worked: a commercial yard takes a commercial class only, and its unassigned tooling makes a commercial class a free retool', stateOf({ ...commercial, tooledId: 'Merchant' }, B) === 'ineligible' && stateOf({ ...commercial, tooledId: null }, merchant) === 'retool' && yardEligibility({ ...commercial, tooledId: null }, merchant, 'build', contextOf(merchant)).tooling.kind === 'unassigned' && stateOf({ ...commercial, tooledId: 'Merchant' }, merchant, 'build', null, contextOf(merchant)) === 'capable')
+  check('worked: a repair yard is ineligible to build or refit, unsupported yard types and a null type are told apart', stateOf({ type: 3, capacity: 600, slipways: 1, tasks: 0, tooledId: null }, B) === 'ineligible' && stateOf({ type: 3, capacity: 600, slipways: 1, tasks: 0, tooledId: null }, B, 'refit', A) === 'ineligible' && stateOf({ type: 4, capacity: 600, slipways: 1, tasks: 0, tooledId: 'B' }, B) === 'unsupported' && stateOf({ ...tooledB, type: null }, B) === 'unknown' && yardEligibility({ ...tooledB, type: null }, B, 'build', contextOf()).missing.some((name) => name.includes('type')))
+  check('worked: an unsupported yard type has no result and names the type, never a guessed rule', !isAvailable(yardEligibility({ ...tooledB, type: 4 }, B, 'build', contextOf()).result) && yardEligibility({ ...tooledB, type: 4 }, B, 'build', contextOf()).result.inputs.missing.some((name) => name.includes('type 4')) && stateOf({ ...tooledB, type: 4, capacity: 5000 }, A) === 'unsupported')
+  check('worked: a type that is not known does not hide a known blocker (a capacity too small is ineligible)', stateOf({ ...tooledB, type: null }, make('Big', 12.1, 1, {})) === 'ineligible')
+  check('worked: a repair yard repairs a class within its capacity, a commercial one only a commercial class, and it needs no tooling', stateOf({ type: 3, capacity: 600, slipways: 1, tasks: 0, tooledId: null }, B, 'repair') === 'capable' && stateOf({ type: 3, capacity: 600, slipways: 1, tasks: 0, tooledId: null }, make('Big', 12.1, 1, {}), 'repair') === 'ineligible' && stateOf({ ...commercial, tooledId: null }, B, 'repair') === 'ineligible' && stateOf({ ...commercial, tooledId: null }, merchant, 'repair') === 'capable' && stateOf({ ...tooledB, tooledId: 'A' }, make('Old', 5, 1, {}, { obsolete: true, prototype: true }), 'repair') === 'capable')
+  check('worked: the class a yard is tooled for is offered whatever its other flags, with a note, but never with prototype components', stateOf({ ...naval, tooledId: 'Old' }, make('Old', 5, 1, {}, { obsolete: true, shippingLine: true, otherRace: true }), 'build', null, contextOf(make('Old', 5, 1, {}))) === 'capable' && yardEligibility({ ...naval, tooledId: 'Old' }, make('Old', 5, 1, {}, { obsolete: true }), 'build', contextOf()).notes.length === 1 && yardEligibility({ ...naval, tooledId: 'Old' }, make('Old', 5, 1, {}, { obsolete: true }), 'build', contextOf()).notes[0].includes('obsolete'))
+
+  const tooledA = { ...naval, capacity: 1000, tooledId: 'A' }
+  const compatible = yardEligibility(tooledA, cheap, 'build', contextOf(cheap))
+  const needsRetool = yardEligibility(tooledA, B, 'build', contextOf())
+  const farSize = make('W', 12.5, 500, { 1: 2, 2: 1 })
+  const unassigned = yardEligibility({ ...naval, tooledId: null }, B, 'build', contextOf())
+
+  check('worked: a yard tooled for A takes a class of 11 whose refit costs 13 against a limit of 20 without a retool', compatible.state === 'capable' && compatible.tooling.kind === 'compatible' && compatible.tooling.check.ok === true && near(valueOrNull(compatible.tooling.refit), 13))
+  check('worked: a class whose refit costs 42 against that limit of 20 needs a retool, and the reason says so', needsRetool.state === 'retool' && needsRetool.tooling.kind === 'retool' && needsRetool.tooling.tooled === A && needsRetool.reasons.some((reason) => reason.includes('fifth')) && near(valueOrNull(needsRetool.tooling.refit), 42))
+  check('worked: a class beyond 120% of the tooled size needs a retool however cheap the refit is', stateOf(tooledA, farSize, 'build', null, contextOf(farSize)) === 'retool' && yardEligibility(tooledA, farSize, 'build', contextOf(farSize)).reasons.some((reason) => reason.includes('80% to 120%')))
+  check('worked: a yard with no tooled class takes any class it may be tooled for after a free retool', unassigned.state === 'retool' && unassigned.tooling.kind === 'unassigned' && unassigned.tooling.tooled === null && stateOf({ ...naval, tooledId: null }, make('Big', 12.1, 1, {})) === 'ineligible')
+  check('worked: a yard whose tooled class the save does not give, or does not hold, is unknown for a class it is not tooled for, naming it', stateOf({ ...naval, tooledId: undefined }, A) === 'unknown' && stateOf({ ...naval, tooledId: 'Gone' }, A) === 'unknown' && yardEligibility({ ...naval, tooledId: 'Gone' }, A, 'build', contextOf()).missing.some((name) => name.includes('tooled')))
+  check('worked: a tooled class whose cost is unknown leaves a candidate unknown, a retool filter that fails decides it', stateOf({ ...naval, capacity: 1000, tooledId: 'Z' }, cheap, 'build', null, contextOf(make('Z', 10, null, { 1: 2, 2: 1 }), cheap)) === 'unknown' && stateOf({ ...naval, capacity: 1000, tooledId: 'Z' }, farSize, 'build', null, contextOf(make('Z', 10, null, { 1: 2, 2: 1 }), farSize)) === 'retool')
+  check('worked: a class that is obsolete, a shipping line\'s or has prototype components cannot be taken or retooled for, and another race\'s class needs a retool', stateOf(tooledA, make('Old', 11, 1, {}, { obsolete: true })) === 'ineligible' && stateOf(tooledA, make('Line', 11, 1, {}, { shippingLine: true })) === 'ineligible' && stateOf(tooledA, make('Proto', 11, 1, {}, { prototype: true })) === 'ineligible' && stateOf(tooledA, make('Other', 11, 1, { 1: 2, 2: 1 }, { otherRace: true })) === 'retool')
+
+  const busy = yardEligibility({ ...tooledB, tasks: 2 }, B, 'build', contextOf())
+  const noTasks = yardEligibility({ ...tooledB, tasks: null }, B, 'build', contextOf())
+
+  check('worked: a yard whose slipways all hold tasks is busy, with a free slipway it is capable, and the free count is slipways less tasks', busy.state === 'busy' && busy.slipways.free === 0 && stateOf({ ...tooledB, tasks: 1 }, B) === 'capable' && yardEligibility({ ...tooledB, tasks: 1 }, B, 'build', contextOf()).slipways.free === 1)
+  check('worked: a task count or slipway count the save lacks leaves a capable yard unknown, naming it, not busy and not capable', noTasks.state === 'unknown' && noTasks.missing.some((name) => name.includes('tasks')) && stateOf({ ...tooledB, slipways: null }, B) === 'unknown' && yardEligibility({ ...tooledB, slipways: null }, B, 'build', contextOf()).missing.some((name) => name.includes('slipways')))
+  check('worked: a retool verdict stands with every slipway working, with a note', yardEligibility({ ...tooledA, tasks: 2 }, B, 'build', contextOf()).state === 'retool' && yardEligibility({ ...tooledA, tasks: 2 }, B, 'build', contextOf()).notes.some((text) => text.includes('working')))
+  check('worked: a retool in progress is a note naming its class and does not change the state', yardEligibility({ ...tooledB, taskType: 7, retoolId: 'A' }, B, 'build', contextOf()).state === 'capable' && yardEligibility({ ...tooledB, taskType: 7, retoolId: 'A' }, B, 'build', contextOf()).notes.some((text) => text.includes('retooled for A')))
+
+  const refitContext = contextOf(cheap)
+  const sameCost = make('Same', 10, 100, { 1: 2, 2: 1 })
+  const wide = make('Wide', 20, 100, { 1: 2, 2: 1 })
+  const refitFrom = (yard, source, target, context = contextOf(source, target)) => yardEligibility(yard, target, 'refit', context, source)
+
+  check('worked: a refit from A to a class of 11 at a yard tooled for A is capable, and the refit time is the page\'s business', refitFrom(tooledA, A, cheap, refitContext).state === 'capable')
+  check('worked: a refit from a class outside the window of the class the yard is tooled for is ineligible, naming the window', refitFrom(tooledA, wide, cheap).state === 'ineligible' && refitFrom({ ...tooledA, capacity: 5000 }, wide, cheap).reasons.some((reason) => reason.includes('80% to 120%')))
+  check('worked: a refit from a class over the yard\'s capacity, or at a commercial yard from a military class, is ineligible', refitFrom({ ...tooledA, capacity: 450 }, A, cheap).state === 'ineligible' && refitFrom({ ...commercial, tooledId: 'Merchant' }, A, merchant, contextOf(A, merchant)).state === 'ineligible')
+  check('worked: a refit to the same class, or one that costs nothing, is ineligible', refitFrom(tooledA, A, A).state === 'ineligible' && refitFrom({ ...tooledA, tooledId: 'Same' }, A, sameCost, contextOf(A, sameCost)).blockers.some((reason) => reason.includes('costs nothing')))
+  check('worked: a retool-first refit measures the source against the target\'s window, because the yard is retooled to the target first', refitFrom(tooledA, A, B).state === 'retool' && refitFrom(tooledA, wide, B).state === 'ineligible' && refitFrom({ ...tooledA, tooledId: 'B' }, A, B).state === 'capable')
+  check('worked: the source decides a refit the target alone would allow: a yard that needs a retool for the target refuses a source of a shipping line, one over its capacity or outside the target\'s window, so a verdict without the source is not the refit\'s', yardEligibility(tooledA, cheap, 'refit', contextOf(cheap)).state === 'capable' && yardEligibility(tooledA, B, 'refit', contextOf()).state === 'retool' && refitFrom(tooledA, make('Line', 12, 100, { 1: 2 }, { shippingLine: true }), B).state === 'ineligible' && refitFrom({ ...tooledA, capacity: 600 }, make('Over', 12.1, 100, { 1: 2 }), B).blockers.some((reason) => reason.includes('source class') && reason.includes('capacity')) && refitFrom(tooledA, wide, B).state === 'ineligible')
+  const merchantRefit = make('Merchant', 12, 1, { 1: 3 }, { commercial: true })
+
+  check('worked: the class window\'s commercial mark is not copied: a refit across commercial flags at a naval yard tooled for the target is capable, with a note', refitFrom({ ...naval, tooledId: 'Merchant' }, A, merchantRefit, contextOf(A, merchantRefit)).state === 'capable' && refitFrom({ ...naval, tooledId: 'Merchant' }, A, merchantRefit, contextOf(A, merchantRefit)).notes.some((text) => text.includes('commercial')))
+  check('worked: a refit whose source is a unknown size, or whose cost cannot be told, is unknown, and the flag of a shipping line source blocks', refitFrom(tooledA, make('S', null, 100, { 1: 2 }), cheap).state === 'unknown' && refitFrom(tooledA, make('Line', 10, 100, { 1: 2 }, { shippingLine: true }), cheap).state === 'ineligible' && refitFrom(tooledA, make('N', 10, 100, { 1: null }), cheap).state === 'unknown')
+
+  const cached = contextOf(cheap)
+
+  yardEligibility(tooledA, cheap, 'build', cached)
+  yardEligibility(tooledA, cheap, 'build', cached)
+  check('worked: the refits between classes are kept in the cache the caller gives', cached.cache.size === 1 && cached.cache.has('A>C'))
+
+  const lightNaval = { type: 1, capacity: 1000, slipways: 1, tasks: 0, tooledId: 'A' }
+  const nineHundred = make('Nine', 18, 500, { 1: 4 })
+
+  check('worked: a 2.7 naval yard of 1000 t still needs tooling for a hull of 900 t: no unreleased Light Naval rule is inherited', stateOf(lightNaval, nineHundred, 'build', null, contextOf(nineHundred)) === 'retool' && stateOf({ ...lightNaval, type: 4 }, nineHundred, 'build', null, contextOf(nineHundred)) === 'unsupported')
+  check('worked: a game version the rule does not cover is unknown, naming the version, never decided; a save with no version label is decided as an estimate with the standing caveat', stateOf(tooledB, B, 'build', null, { ...contextOf(), version: '3.0.0' }) === 'unknown' && yardEligibility(tooledB, B, 'build', { ...contextOf(), version: '3.0.0' }).missing.some((name) => name.includes('3.0.0')) && yardEligibility(tooledB, B, 'build', { ...contextOf(), version: null }).result.assumptions.length > 0 && yardEligibility(tooledB, B, 'build', contextOf()).result.status === STATUS.ESTIMATED)
+  check('worked: an operation the rule does not know is an error', (() => { try { yardEligibility(tooledB, B, 'scrap', contextOf()) } catch (error) { return error instanceof Error } return false })())
+  note({ rule: 'refit.yardEligibility' })
+  note(compatible.result)
   check('worked: refitTotal agrees with refitCost without the minerals', near(valueOrNull(refitTotal(A, B, components, '2.7.1').total), valueOrNull(ab.total)) && refitTotal(A, B, components, '2.7.1').minerals === undefined)
   const rate = refitRate({ ShipyardBuildRate: 1000, ShipyardOperations: 1 }, B)
   const time = refitTime(ab.total, rate)
@@ -175,11 +232,11 @@ const worked = (refits, provenance) => {
   check('worked: a component absent from a class whose counts are given stays a real 0 (the refit adds it)', isAvailable(ab.total) && classChanges(A, B, components).find((change) => change.id === 3).unknown.length === 0 && classChanges(A, B, components).find((change) => change.id === 3).from === 0)
   check('worked: the size window is true, false, and null when a size is not known', inBand(A, make('N', 11, 1, {})) === true && inBand(A, make('F', 13, 1, {})) === false && inBand(A, make('S', null, 1, {})) === null && inBand(make('S', null, 1, {}), A) === null)
 
-  const unknownLine = yardAccepts(naval, make('Line', 5, 1, {}, { shippingLine: null }))
-  const unknownOther = yardAccepts(naval, make('Other', 5, 1, {}, { otherRace: null }))
-  check('worked: a class whose shipping-line or other-race flag is not known is unknown for a yard, naming the flag, never taken', unknownLine.status === 'unknown' && unknownLine.missing.some((name) => name.includes('shipping')) && unknownOther.status === 'unknown' && unknownOther.missing.some((name) => name.includes('race')))
-  check('worked: a known blocker still decides it with a flag unknown', yardAccepts(naval, make('Big', 12.1, 1, {}, { shippingLine: null })).status === 'blocked' && yardAccepts(naval, make('Big', 12.1, 1, {}, { shippingLine: null })).blockers.length === 1)
-  check('worked: a class with an unknown prototype flag leaves a retool unknown, a known prototype blocks it', yardRetools(naval, make('Maybe', 5, 1, {}, { prototype: null })).status === 'unknown' && yardRetools(naval, make('Proto', 5, 1, {}, { prototype: true })).status === 'blocked')
+  const unknownLine = yardEligibility({ ...naval, tooledId: 'B', tasks: 0 }, make('Line', 5, 1, {}, { shippingLine: null }), 'build', contextOf(B))
+  const unknownOther = yardEligibility({ ...naval, tooledId: 'B', tasks: 0 }, make('Other', 11, 1, {}, { otherRace: null }), 'build', contextOf(B))
+  check('worked: a class whose shipping-line or other-race flag is not known is unknown for a yard, naming the flag, never taken', unknownLine.state === 'unknown' && unknownLine.missing.some((name) => name.includes('shipping')) && unknownOther.state === 'unknown' && unknownOther.missing.some((name) => name.includes('race')) && !isAvailable(unknownLine.result))
+  check('worked: a known blocker still decides it with a flag unknown', yardEligibility(naval, make('Big', 12.1, 1, {}, { shippingLine: null }), 'build', contextOf(B)).state === 'ineligible' && yardEligibility(naval, make('Big', 12.1, 1, {}, { shippingLine: null }), 'build', contextOf(B)).blockers.length === 1)
+  check('worked: a class with an unknown prototype flag leaves a tooled class unknown, a known prototype blocks it even at the yard tooled for it', yardEligibility({ ...naval, tooledId: 'Maybe' }, make('Maybe', 5, 1, {}, { prototype: null }), 'build', contextOf(make('Maybe', 5, 1, {}, { prototype: null }))).state === 'unknown' && yardEligibility({ ...naval, tooledId: 'Proto' }, make('Proto', 5, 1, {}, { prototype: true }), 'build', contextOf(make('Proto', 5, 1, {}))).state === 'ineligible')
 }
 
 // The loader over a stand-in database whose rows hold a null component count and a null prototype flag.
@@ -286,7 +343,37 @@ const runSave = async (utilities, save, label) => {
 
     const [construction] = await database.query('select FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.ClassID from FCT_ShipyardTask where FCT_ShipyardTask.GameID = :GameID and FCT_ShipyardTask.RaceID = :RaceID and FCT_ShipyardTask.TaskTypeID = 0', { replacements: scope }).catch(() => [[]])
     const yardsById = Object.fromEntries(yards.map((yard) => [yard.id, yard]))
-    const outcome = { fits: 0, window: 0, nonTooled: 0, bad: [] }
+    const [taskCounts] = await database.query('select FCT_ShipyardTask.ShipyardID, count(*) as Tasks from FCT_ShipyardTask group by FCT_ShipyardTask.ShipyardID').catch(() => [[]])
+    const tasksOf = Object.fromEntries(taskCounts.map((row) => [row.ShipyardID, row.Tasks]))
+    const wrongTasks = yards.filter((yard) => yard.tasks !== (tasksOf[yard.id] || 0))
+
+    check(`${label}: every yard carries the count of its stored tasks (0 for none)`, wrongTasks.length === 0, wrongTasks.slice(0, 3).map((yard) => `yard ${yard.id}: ${yard.tasks} against ${tasksOf[yard.id] || 0}`).join('; '))
+
+    const context = { classesById, components, version, cache: new Map() }
+    const tally = Object.fromEntries(['build', 'repair'].map((operation) => [operation, Object.fromEntries(refits.YARD_STATES.map((state) => [state, 0]))]))
+    const odd = []
+
+    yards.forEach((yard) => {
+      classes.forEach((shipClass) => {
+        ['build', 'repair'].forEach((operation) => {
+          const result = refits.yardEligibility(yard, shipClass, operation, context)
+          const undecided = result.state === 'unknown' || result.state === 'unsupported'
+
+          tally[operation][result.state] = (tally[operation][result.state] || 0) + 1
+          note(result.result)
+
+          if (!refits.YARD_STATES.includes(result.state) || undecided === provenance.isAvailable(result.result) || (!result.reasons.length && result.state !== 'capable' && result.state !== 'busy')) {
+            odd.push(`yard ${yard.id} class ${shipClass.name} ${operation}: ${result.state}`)
+          }
+        })
+      })
+    })
+
+    check(`${label}: every yard and class pair has one known state, with a result that is unavailable exactly when it is unknown or unsupported, and a reason for any state other than capable or busy`, odd.length === 0, odd.slice(0, 3).join('; '))
+    ;['build', 'repair'].forEach((operation) => console.log(`INFO  ${label}: ${operation} over ${yards.length} yards and ${classes.length} classes: ${refits.YARD_STATES.map((state) => `${state} ${tally[operation][state]}`).join(', ')}`))
+
+    const misfit = []
+    const states = {}
 
     construction.forEach((task) => {
       const yard = yardsById[task.ShipyardID]
@@ -296,18 +383,18 @@ const runSave = async (utilities, save, label) => {
         return
       }
 
-      const accepted = refits.yardAccepts(yard, target)
+      const result = refits.yardEligibility(yard, target, 'build', context)
 
-      if (accepted.status === 'blocked') {
-        outcome.bad.push(`yard ${yard.id} class ${target.name}: ${accepted.reasons.join(', ')}`)
-      } else if (accepted.status === 'ok') {
-        outcome.fits++
+      states[result.state] = (states[result.state] || 0) + 1
+
+      if (yard.tooledId === target.id && target.prototype !== true && ['ineligible', 'retool', 'unsupported'].includes(result.state)) {
+        misfit.push(`yard ${yard.id} class ${target.name}: ${result.state} (${result.reasons.join(', ')})`)
       }
     })
 
     if (construction.length) {
-      note({ rule: 'refit.yardAccepts' })
-      console.log(`INFO  ${label}: ${outcome.fits} of ${construction.length} stored construction tasks are in a yard the capacity and type rule accepts${outcome.bad.length ? `; the others are listed, not failed: ${[...new Set(outcome.bad)].slice(0, 3).join('; ')}` : ''}`)
+      check(`${label}: a stored construction task at a yard tooled for its class is never ineligible, retool or unsupported`, misfit.length === 0, misfit.slice(0, 3).join('; '))
+      console.log(`INFO  ${label}: ${construction.length} stored construction tasks by the yard's state for their class: ${Object.entries(states).map(([state, count]) => `${state} ${count}`).join(', ') || 'none resolved'}`)
     } else {
       console.log(`INFO  ${label}: no stored construction task to test the yard rule with`)
     }
@@ -351,7 +438,7 @@ const main = async () => {
     await runSave(utilities, save, `save ${index + 1}`)
   }
 
-  const registered = ['refit.cost', 'refit.minerals', 'refit.share', 'refit.noRetool', 'refit.retool', 'refit.yardAccepts', 'refit.time']
+  const registered = ['refit.cost', 'refit.minerals', 'refit.share', 'refit.noRetool', 'refit.retool', 'refit.yardEligibility', 'refit.time']
 
   check('every refit rule is registered and was exercised', registered.every((id) => utilities.provenance.getRule(id) && covered.has(id)), `rules covered: ${[...covered].sort().join(', ')}`)
   console.log(`\n${checks - failures} of ${checks} checks passed`)

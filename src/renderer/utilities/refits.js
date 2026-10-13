@@ -71,12 +71,12 @@ registerRule({
 })
 
 registerRule({
-  id: 'refit.yardAccepts',
+  id: 'refit.yardEligibility',
   versions: REFIT_VERSIONS,
-  units: 'yes or no',
+  units: '',
   verification: 'estimated',
-  structure: ['FCT_Shipyard.SYType, Capacity', 'FCT_ShipClass.Size, Commercial, ClassShippingLineID, OtherRaceClassID'],
-  note: 'A naval yard takes a class of up to its capacity in tons (50 tons to the size unit); a commercial yard takes only a commercial class within its capacity. A repair yard, or a yard of a type this rule does not know, is left unsupported. Classes of a shipping line or of another race are never taken. Retooling a yard also leaves out an obsolete class, a class with prototype components and the class the yard is already tooled for. The rule is the documented one; no stored task decides a threshold case.',
+  structure: ['FCT_Shipyard.SYType, Slipways, Capacity, BuildClassID, RetoolClassID, TaskType', 'FCT_ShipyardTask.ShipyardID', 'FCT_ShipClass.Size, Cost, Commercial, Obsolete, ClassShippingLineID, OtherRaceClassID', 'refit.noRetool'],
+  note: 'Whether a yard can take work on a class, for one operation. Build and refit: the class a yard is tooled for is always offered; another class is offered without a retool when it is not obsolete, not a shipping line\'s or another race\'s, within the yard\'s capacity (50 tons to the size unit) and, at a commercial yard, a commercial class, and also within 20% of the tooled class\'s size with a refit from the tooled class costing at most a fifth of its cost. A class that fails only the size window or the cost needs a retool; one that fails the other filters, or has prototype components, cannot be taken. A refit also needs its source class within the capacity and, at a commercial yard, commercial, and within 20% of the size of the class the yard is tooled for when the work starts, and costs something. Repair: a ship of the class within the capacity at a naval or repair yard, or a commercial class at a commercial yard, with no tooling. Every operation needs a free slipway (the yard\'s slipways less its tasks). The class window\'s own marks are not copied: they compare two classes, not a yard. Only the 2.7 yard types (naval, commercial, repair) are covered: another type stays unsupported, and none of the unreleased Light Naval Shipyard rules (a fixed 1,000 ton capacity, slipway growth, no tooling up to 1,000 tons) is applied to a 2.7 save. The rule is the documented one; no stored task decides a threshold case.',
 })
 
 registerRule({
@@ -171,10 +171,11 @@ export const loadShipCounts = async (database, { GameID, RaceID }) => {
   return Object.freeze(Object.fromEntries(rows.map((row) => [row.ShipClassID, row.Ships])))
 }
 
-// The race's shipyards as { id, populationId, colony, name, type, slipways, capacity, tooledId (the class it is tooled for, null for none, undefined when the save does not say), taskType, shipBased }.
+// The race's shipyards as { id, populationId, colony, name, type, slipways, capacity, tooledId (the class it is tooled for, null for none, undefined when the save does not say), retoolId (the class a retool in progress is for, null for none), taskType, tasks (the tasks at the yard, a real 0 for none, null when the save has no task table), shipBased }.
 export const loadYards = async (database, { GameID, RaceID }) => {
-  const columns = await columnsOf(database, 'FCT_Shipyard')
-  const [rows] = await database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.PopulationID, FCT_Population.PopName, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.BuildClassID, FCT_Shipyard.TaskType, ${columns.has('ParentShipID') ? 'FCT_Shipyard.ParentShipID' : 'null as ParentShipID'} from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID where FCT_Shipyard.GameID = :GameID and FCT_Shipyard.RaceID = :RaceID order by FCT_Shipyard.ShipyardName`, { replacements: { GameID, RaceID } })
+  const [columns, taskColumns] = await Promise.all([columnsOf(database, 'FCT_Shipyard'), columnsOf(database, 'FCT_ShipyardTask')])
+  const tasks = taskColumns.has('ShipyardID') ? '(select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID)' : 'null'
+  const [rows] = await database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.PopulationID, FCT_Population.PopName, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.BuildClassID, ${columns.has('RetoolClassID') ? 'FCT_Shipyard.RetoolClassID' : 'null as RetoolClassID'}, FCT_Shipyard.TaskType, ${tasks} as Tasks, ${columns.has('ParentShipID') ? 'FCT_Shipyard.ParentShipID' : 'null as ParentShipID'} from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID where FCT_Shipyard.GameID = :GameID and FCT_Shipyard.RaceID = :RaceID order by FCT_Shipyard.ShipyardName`, { replacements: { GameID, RaceID } })
 
   return Object.freeze(rows.map((row) => Object.freeze({
     id: row.ShipyardID,
@@ -185,7 +186,9 @@ export const loadYards = async (database, { GameID, RaceID }) => {
     slipways: numberOf(row.Slipways),
     capacity: numberOf(row.Capacity),
     tooledId: isNumber(row.BuildClassID) ? (row.BuildClassID > 0 ? row.BuildClassID : null) : undefined,
+    retoolId: isNumber(row.RetoolClassID) && row.RetoolClassID > 0 ? row.RetoolClassID : null,
     taskType: numberOf(row.TaskType),
+    tasks: numberOf(row.Tasks),
     shipBased: isNumber(row.ParentShipID) ? row.ParentShipID > 0 : null,
   })))
 }
@@ -354,78 +357,245 @@ export const retoolCost = ({ tooling, target, refit, slipways, operations, versi
   return { kind: 'priced', cost: figure({ rule, value, present: ['the refit from the tooled class', 'the target\'s cost', 'the yard\'s slipways', 'the race\'s shipyard operations'], units: 'BP', version }) }
 }
 
-// Whether a yard can take `target` (to build it or to refit to it), as { status, reasons }: 'ok', 'blocked' (`reasons` says why: capacity, a commercial yard and a military class, a class of a shipping line or of another race), 'unsupported' (a repair yard or a yard of a type this rule does not know) or 'unknown' (a figure is missing: `reasons` names it). A yard's capacity is in tons and a class's size in hull spaces of 50 tons.
-export const yardAccepts = (yard, target) => {
-  if (yard.type !== SHIPYARD_TYPE.NAVAL && yard.type !== SHIPYARD_TYPE.COMMERCIAL) {
-    return { status: yard.type === null ? 'unknown' : 'unsupported', reasons: [yard.type === null ? 'the yard\'s type' : yard.type === SHIPYARD_TYPE.REPAIR ? 'a repair yard is not covered by this rule' : `yard type ${yard.type} is not covered by this rule`], blockers: [], missing: yard.type === null ? ['the yard\'s type'] : [] }
+export const YARD_OPERATIONS = Object.freeze(['build', 'refit', 'repair'])
+// What a yard can do for a class: take it now, take it once a slipway is free, take it after a retool, not take it, be of a type the rules do not cover, or not be decidable from the save.
+export const YARD_STATES = Object.freeze(['capable', 'busy', 'retool', 'ineligible', 'unsupported', 'unknown'])
+
+// The class a yard is tooled for: the class record, null for none, undefined when the save does not say or the class is not in `classesById`.
+export const tooledClassOf = (yard, classesById) => (yard.tooledId === null ? null : yard.tooledId === undefined ? undefined : classesById[yard.tooledId] || undefined)
+
+const flagged = (blockers, gaps, value, blocker, gap) => {
+  if (value === true) {
+    blockers.push(blocker)
+  } else if (value === null) {
+    gaps.push(gap)
+  }
+}
+
+const refitOf = (from, to, { components, version, cache }) => {
+  const key = `${from.id}>${to.id}`
+
+  if (cache && cache.has(key)) {
+    return cache.get(key)
   }
 
+  const total = refitTotal(from, to, components, version).total
+
+  if (cache) {
+    cache.set(key, total)
+  }
+
+  return total
+}
+
+// Whether `yard` can do `operation` ('build', 'refit' or 'repair') on `target`, with `source` the class being refitted from (only a refit has one): { operation, state (one of YARD_STATES), reasons (every blocker, every gap and the facts that decided it, as sentences), blockers, missing, notes (what does not change the state), slipways { total, tasks, free }, tooling, result }. `tooling` is { kind ('tooled', 'compatible', 'retool', 'unassigned' or 'unknown'), tooled (the class record, null for none), refit (the total result of tooled to target), check (the no-retool check), failed (why a retool is needed) }, null for a repair or a class that cannot be taken. `result` is a result of 'refit.yardEligibility' whose value is the state, unavailable for 'unknown' (naming the gaps) and for 'unsupported'. A figure the save lacks never reads as a pass: it leaves the state unknown unless a known blocker decides it. `context` is { classesById, components, version, cache (an optional Map for the refits between classes) }.
+export const yardEligibility = (yard, target, operation, context, source = null) => {
+  if (!YARD_OPERATIONS.includes(operation)) {
+    throw new Error(`Unknown yard operation ${operation}`)
+  }
+
+  const rule = 'refit.yardEligibility'
+  const { classesById = {}, version = null } = context
+  const total = numberOf(yard.slipways)
+  const tasks = numberOf(yard.tasks)
+  const slipways = { total, tasks, free: total !== null && tasks !== null ? total - tasks : null }
   const blockers = []
   const missing = []
+  const info = []
+  const notes = []
+  let tooling = null
+  let state = 'capable'
 
-  if (!isNumber(yard.capacity)) {
-    missing.push('the yard\'s capacity')
+  const finish = (final) => Object.freeze({
+    operation,
+    state: final,
+    reasons: Object.freeze([...blockers, ...[...new Set(missing)].map((item) => `Not known: ${item}`), ...(final === 'unknown' || final === 'ineligible' ? [] : info)]),
+    blockers: Object.freeze(blockers),
+    missing: Object.freeze([...new Set(missing)]),
+    notes: Object.freeze(notes),
+    slipways: Object.freeze(slipways),
+    tooling: tooling && Object.freeze(tooling),
+    result: final === 'unknown' ? unavailable({ rule, missing: [...new Set(missing)], units: '' }) : final === 'unsupported' ? unavailable({ rule, missing: [`the rules for yard type ${yard.type}`], units: '' }) : figure({ rule, value: final, present: ['the yard\'s type, slipways, tasks and capacity', 'the class\'s size and flags'], units: '', version }),
+  })
+
+  if (typeof version === 'string' && ruleSupports(rule, version) === false) {
+    missing.push(`the rules for game version ${version}`)
+
+    return finish('unknown')
   }
 
-  if (!isNumber(target.sizeHS)) {
-    missing.push(`the size of ${classLabel(target, 'target')}`)
+  if (yard.type !== null && !Object.values(SHIPYARD_TYPE).includes(yard.type)) {
+    info.push(`Yard type ${yard.type} is not covered by the rules`)
+
+    return finish('unsupported')
   }
 
-  if (isNumber(yard.capacity) && isNumber(target.sizeHS) && target.sizeHS > yard.capacity / TONS_PER_HS) {
-    blockers.push(`the class (${Math.ceil(target.sizeHS * TONS_PER_HS)} t) is larger than the yard's capacity (${yard.capacity} t)`)
+  if (yard.type === SHIPYARD_TYPE.REPAIR && operation !== 'repair') {
+    blockers.push('A repair yard neither builds nor refits ships')
+
+    return finish('ineligible')
   }
 
-  if (yard.type === SHIPYARD_TYPE.COMMERCIAL) {
-    if (target.commercial === null) {
-      missing.push(`the commercial flag of ${classLabel(target, 'target')}`)
-    } else if (!target.commercial) {
-      blockers.push('a commercial yard takes commercial classes only')
+  const whatOf = (role) => (role === 'source' ? 'The source class' : 'The class')
+
+  const sizeAndType = (shipClass, role, into, gaps) => {
+    if (!isNumber(yard.capacity)) {
+      gaps.push('the yard\'s capacity')
+    }
+
+    if (!isNumber(shipClass.sizeHS)) {
+      gaps.push(`the size of ${classLabel(shipClass, role)}`)
+    }
+
+    if (isNumber(yard.capacity) && isNumber(shipClass.sizeHS) && shipClass.sizeHS > yard.capacity / TONS_PER_HS) {
+      into.push(`${whatOf(role)} (${Math.ceil(shipClass.sizeHS * TONS_PER_HS)} t) is larger than the yard's capacity (${Math.round(yard.capacity)} t)`)
+    }
+
+    if (yard.type === SHIPYARD_TYPE.COMMERCIAL) {
+      if (shipClass.commercial === null) {
+        gaps.push(`the commercial flag of ${classLabel(shipClass, role)}`)
+      } else if (shipClass.commercial === false) {
+        into.push(`${whatOf(role)} is not commercial and a commercial yard takes commercial classes only`)
+      }
     }
   }
 
-  if (target.shippingLine === true) {
-    blockers.push('the class belongs to a shipping line')
-  } else if (target.shippingLine === null) {
-    missing.push(`whether ${classLabel(target, 'target')} belongs to a shipping line`)
+  if (yard.type === null) {
+    missing.push('the yard\'s type')
   }
 
-  if (target.otherRace === true) {
-    blockers.push('the class is another race\'s')
-  } else if (target.otherRace === null) {
-    missing.push(`whether ${classLabel(target, 'target')} is another race's`)
+  if (operation === 'repair') {
+    sizeAndType(target, 'target', blockers, missing)
+  } else {
+    const label = classLabel(target, 'target')
+    const hard = []
+    const gaps = []
+
+    flagged(blockers, missing, target.prototype, 'The class has prototype components', `whether ${label} has prototype components`)
+    sizeAndType(target, 'target', hard, gaps)
+    flagged(hard, gaps, target.obsolete, 'The class is obsolete', `whether ${label} is obsolete`)
+    flagged(hard, gaps, target.shippingLine, 'The class belongs to a shipping line', `whether ${label} belongs to a shipping line`)
+
+    if (yard.taskType === RETOOL_TASK_TYPE) {
+      const retooling = classesById[yard.retoolId]
+
+      notes.push(`The yard is being retooled${retooling ? ` for ${retooling.name}` : ''}; it keeps its tooled class until that completes`)
+    }
+
+    if (yard.tooledId === target.id) {
+      tooling = { kind: 'tooled', tooled: target, refit: null, check: null, failed: [] }
+      info.push('The yard is tooled for the class')
+
+      if (hard.length) {
+        notes.push(`The class is offered because the yard is tooled for it, whatever its other flags: ${hard.map((reason) => reason.charAt(0).toLowerCase() + reason.slice(1)).join('; ')}`)
+      }
+    } else {
+      blockers.push(...hard)
+      missing.push(...gaps)
+
+      if (!blockers.length && !gaps.length && yard.tooledId === null) {
+        state = 'retool'
+        tooling = { kind: 'unassigned', tooled: null, refit: null, check: null, failed: [] }
+        info.push('The yard has no tooled class: assigning one is free and immediate')
+      } else if (!blockers.length && !gaps.length) {
+        const tooled = tooledClassOf(yard, classesById)
+
+        if (tooled === undefined) {
+          missing.push('the class the yard is tooled for')
+          tooling = { kind: 'unknown', tooled: undefined, refit: null, check: null, failed: [] }
+        } else {
+          const refit = refitOf(tooled, target, context)
+          const check = noRetoolCheck(tooled, target, refit, version)
+          const failed = []
+
+          const otherRace = target.otherRace
+
+          if (otherRace === true) {
+            failed.push('The class is another race\'s')
+          }
+
+          if (check.withinSize === false) {
+            failed.push(`The class is outside 80% to 120% of the size of ${tooled.name}, the class the yard is tooled for`)
+          }
+
+          if (check.affordable === false) {
+            failed.push(`The refit from ${tooled.name} costs more than a fifth of its cost`)
+          }
+
+          if (failed.length) {
+            state = 'retool'
+            info.push(...failed)
+          } else {
+            if (otherRace === null) {
+              missing.push(`whether ${label} is another race's`)
+            }
+
+            if (check.ok === null) {
+              missing.push(...check.result.inputs.missing)
+            }
+
+            if (!missing.length) {
+              info.push(`Within 80% to 120% of the size of ${tooled.name}, the class the yard is tooled for, at a refit of at most a fifth of its cost`)
+            }
+          }
+
+          tooling = { kind: failed.length ? 'retool' : 'compatible', tooled, refit, check, failed }
+        }
+      }
+    }
+
+    if (operation === 'refit' && source) {
+      const own = classLabel(source, 'source')
+
+      if (source.id === target.id) {
+        blockers.push('A refit needs a source class other than its target')
+      }
+
+      sizeAndType(source, 'source', blockers, missing)
+      flagged(blockers, missing, source.shippingLine, 'The source class belongs to a shipping line', `whether ${own} belongs to a shipping line`)
+
+      if (tooling && tooling.kind !== 'unknown') {
+        const anchor = tooling.kind === 'compatible' ? tooling.tooled : target
+        const within = inBand(anchor, source)
+
+        if (within === false) {
+          blockers.push(`The source class is outside 80% to 120% of the size of ${anchor.name}, the class the yard is tooled for when the work starts`)
+        } else if (within === null) {
+          missing.push('the sizes of the source class and of the class the yard is tooled for')
+        }
+      }
+
+      if (source.id !== target.id) {
+        const cost = refitOf(source, target, context)
+
+        if (valueOrNull(cost) === 0) {
+          blockers.push('A refit that costs nothing is not created')
+        } else if (valueOrNull(cost) === null) {
+          missing.push(...cost.inputs.missing)
+        }
+      }
+
+      if (source.commercial !== null && target.commercial !== null && source.commercial !== target.commercial) {
+        notes.push('The two classes differ in their commercial flag: the class window marks that, but the yard\'s type decides here')
+      }
+    }
   }
 
-  return { status: blockers.length ? 'blocked' : missing.length ? 'unknown' : 'ok', reasons: [...blockers, ...missing], blockers, missing }
-}
+  let final = blockers.length ? 'ineligible' : missing.length ? 'unknown' : state
 
-// Whether a yard can be retooled to `target`, in the same shape as `yardAccepts` (which it includes): a retool also leaves out an obsolete class, a class with prototype components and the class the yard is already tooled for. A flag the save lacks leaves the answer unknown unless a known blocker already decides it.
-export const yardRetools = (yard, target) => {
-  const accepted = yardAccepts(yard, target)
-
-  if (accepted.status === 'unsupported') {
-    return accepted
+  if (final === 'capable') {
+    if (slipways.free === null) {
+      missing.push(...(total === null ? ['the yard\'s slipways'] : []), ...(tasks === null ? ['the tasks at the yard'] : []))
+      final = 'unknown'
+    } else if (slipways.free <= 0) {
+      final = 'busy'
+      info.push(`All ${total} slipway${total === 1 ? ' is' : 's are'} working`)
+    }
+  } else if (final === 'retool' && slipways.free !== null && slipways.free <= 0) {
+    notes.push(`All ${total} slipway${total === 1 ? ' is' : 's are'} working`)
   }
 
-  const blockers = [...accepted.blockers]
-  const missing = [...accepted.missing]
-
-  if (target.obsolete === true) {
-    blockers.push('the class is obsolete')
-  } else if (target.obsolete === null) {
-    missing.push(`whether ${classLabel(target, 'target')} is obsolete`)
-  }
-
-  if (target.prototype === true) {
-    blockers.push('the class has prototype components')
-  } else if (target.prototype === null) {
-    missing.push(`whether ${classLabel(target, 'target')} has prototype components`)
-  }
-
-  if (yard.tooledId === target.id) {
-    blockers.push('the yard is already tooled for the class')
-  }
-
-  return { status: blockers.length ? 'blocked' : missing.length ? 'unknown' : 'ok', reasons: [...blockers, ...missing], blockers, missing }
+  return finish(final)
 }
 
 // A yard's rate on a refit to `target`, a result of 'production.shipRate': the colony's build rate times a factor for the target's size, a quarter of the size for a commercial class. `modifiers` the colony's production modifiers row (undefined when the colony has none read).
