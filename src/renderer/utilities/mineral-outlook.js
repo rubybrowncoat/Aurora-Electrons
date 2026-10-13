@@ -1,7 +1,8 @@
 // How the Mineral Outlook page's figures are built as provenance results (utilities/provenance.js): what the race holds, what its mines take, a mineral's production, use, net and runway, a deposit's forecast, the stockpile projection and the industry queue's demand. The plain numbers stay in minerals.js (`surfaceRate`, `orbitalMinerRate`, `depositForecast`, `stockProjection`, `annualQueueDemand`); each builder here checks that the inputs it reads are there, calls them, and returns a result that names its rule, its missing inputs and its assumptions. A figure with a missing input is unavailable (a dash on screen), never 0.
 
+import { CATEGORIES, UNMODELLED } from './legacy-consumption'
 import { CRITICAL_RUNWAY_YEARS, WARNING_RUNWAY_YEARS, depositForecast, orbitalChainGap, orbitalMinerRate, stockProjection, surfaceRate } from './minerals'
-import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable } from './provenance'
+import { STATUS, combine, envelope, isAvailable, ofRule, registerRule, sumResults, unavailable, valueOrNull } from './provenance'
 
 const VERSIONS = ['2.7.x']
 
@@ -47,7 +48,7 @@ registerRule({
   units: 't/yr',
   verification: 'estimated',
   structure: ['FCT_RaceMineralData.MineralID, MineralDataType, Amount, Time', 'FCT_Game.GameTime'],
-  note: 'A mineral\'s production or use in a year: the game\'s mineral ledger over the chosen window, scaled by 365 days over the days the ledger covers, plus the mining the ledger leaves out (colonies shipping their civilian complexes\' output by mass driver); transfers between the race\'s colonies are not counted. A save without a ledger has production from the mines\' output and use from the industry queue alone. The ledger\'s mining matched the formula rate to within 0.2%; the annualising rests on the window being typical.',
+  note: 'A mineral\'s production or use in a year: the game\'s mineral ledger over the chosen window, scaled by 365 days over the days the ledger covers, plus the mining the ledger leaves out (colonies shipping their civilian complexes\' output by mass driver); transfers between the race\'s colonies are not counted. A save without a ledger has production from the mines\' output and use modelled from the industry queue, the refineries, the maintenance facilities and the shipyards (legacy.fuelUse, legacy.maintenanceUse, legacy.shipbuildingUse), not measured; ground unit training is not counted there. A use the page switches off is left out of the use, ledger or not. The ledger\'s mining matched the formula rate to within 0.2%; the annualising rests on the window being typical.',
   assumptions: ['the rate of the ledger window holds for a year'],
 })
 
@@ -222,27 +223,34 @@ export const queueDemandResult = (queue, name) => {
   return ofRule({ rule: 'mineral.queueDemand', value: queue.demand[name], inputs: { present: ['the industry queue', 'the colonies\' production capacity'] } })
 }
 
-const NO_LEDGER_USE = 'without a ledger, use is the industry queue alone: fuel refining, maintenance and shipbuilding are not counted'
+const NO_LEDGER_USE = 'without a ledger, use is modelled from the industry queue, the refineries, the maintenance facilities and the shipyards, not measured; ground unit training is not counted'
 const NO_LEDGER_PRODUCTION = 'without a ledger, production is the mines\' output alone'
 
+// The modelled uses of one mineral for `flowResults`, by category: `modelled` is the page's `{ [category key]: { byMineral } }` (null with a ledger, which observes the uses) and `disabled` the keys of the categories switched off. `result` is null where the category does not take the mineral.
+export const categoryUses = ({ modelled, disabled, mineralName }) => CATEGORIES.map((category) => ({ key: category.key, label: category.label, groups: category.groups, enabled: !disabled.includes(category.key), result: modelled && modelled[category.key] ? modelled[category.key].byMineral[mineralName] || null : null }))
+
+const switchedOff = (uses) => uses.filter((use) => !use.enabled).map((use) => `${use.label} is switched off and not counted`)
+
 // A figure the ledger gives per year: `value` t/yr over `coverageDays` of ledger, unavailable when the ledger covers none.
-const ledgerFlow = (value, coverageDays) => {
+const ledgerFlow = (value, coverageDays, assumptions = []) => {
   if (!(coverageDays > 0)) {
     return unavailable({ rule: 'mineral.flowPerYear', missing: ['the days the ledger covers'] })
   }
 
-  return ofRule({ rule: 'mineral.flowPerYear', value, inputs: { present: ['the mineral ledger'] }, assumptions: [`the last ${Math.round(coverageDays)} days of the ledger repeat for a year`] })
+  return ofRule({ rule: 'mineral.flowPerYear', value, inputs: { present: ['the mineral ledger'] }, assumptions: [`the last ${Math.round(coverageDays)} days of the ledger repeat for a year`, ...assumptions] })
 }
 
 const netResult = (produced, used) => combine({ rule: 'mineral.net', parts: { production: produced, use: used }, compute: (values) => values.production - values.use })
 
-// One mineral's yearly flows as results of 'mineral.flowPerYear' and 'mineral.net': `{ mining, otherIncome, produced, used, net }`. With a ledger, `ledger` holds its t/yr by flow group (mining excludes the mining the ledger leaves out, which is `unlogged`, a mining-rate result or null for none), over `coverageDays`. Without one (`hasLedger` false) production is `mined`, the mines' rate result, and use is `queue`, the industry queue's demand result.
-export const flowResults = ({ hasLedger, coverageDays, ledger, incomeGroups, spendGroups, unlogged = null, mined, queue }) => {
+// One mineral's yearly flows as results of 'mineral.flowPerYear' and 'mineral.net': `{ mining, otherIncome, produced, used, net }`. With a ledger, `ledger` holds its t/yr by flow group (mining excludes the mining the ledger leaves out, which is `unlogged`, a mining-rate result or null for none), over `coverageDays`. Without one (`hasLedger` false) production is `mined`, the mines' rate result. `uses` (`categoryUses`) are the categories that can be switched off: with a ledger a category switched off leaves its flow groups out of the use, and without one the use is the modelled results of the categories switched on, a category with no result for the mineral taking none of it. A save with a ledger never gets modelled use on top of the observed one.
+export const flowResults = ({ hasLedger, coverageDays, ledger, incomeGroups, spendGroups, unlogged = null, mined, uses = [] }) => {
   const sum = (groups) => groups.reduce((total, key) => total + ledger[key], 0)
 
   if (!hasLedger) {
     const produced = combine({ rule: 'mineral.flowPerYear', parts: { 'mines\' output': mined }, compute: (values) => values['mines\' output'], assumptions: [NO_LEDGER_PRODUCTION] })
-    const used = combine({ rule: 'mineral.flowPerYear', parts: { 'industry queue': queue }, compute: (values) => values['industry queue'], assumptions: [NO_LEDGER_USE] })
+    const counted = uses.filter((use) => use.enabled && use.result)
+    const assumptions = [NO_LEDGER_USE, ...switchedOff(uses)]
+    const used = counted.length ? combine({ rule: 'mineral.flowPerYear', parts: Object.fromEntries(counted.map((use) => [use.label, use.result])), compute: (values) => Object.values(values).reduce((total, value) => total + value, 0), assumptions }) : ofRule({ rule: 'mineral.flowPerYear', value: 0, inputs: { present: ['no use switched on takes this mineral'] }, assumptions })
     const otherIncome = ofRule({ rule: 'mineral.flowPerYear', value: 0, inputs: { present: ['no ledger'] }, assumptions: [NO_LEDGER_PRODUCTION] })
 
     return { mining: produced, otherIncome, produced, used, net: netResult(produced, used) }
@@ -252,10 +260,42 @@ export const flowResults = ({ hasLedger, coverageDays, ledger, incomeGroups, spe
   const mining = unlogged ? combine({ rule: 'mineral.flowPerYear', parts: { ledger: loggedMining, 'unlogged mining': unlogged }, compute: (values) => values.ledger + values['unlogged mining'] }) : loggedMining
   const otherIncome = ledgerFlow(sum(incomeGroups.filter((key) => key !== 'mining')), coverageDays)
   const produced = combine({ rule: 'mineral.flowPerYear', parts: { mining, 'other income': otherIncome }, compute: (values) => values.mining + values['other income'] })
-  const used = ledgerFlow(sum(spendGroups), coverageDays)
+  const left = uses.filter((use) => !use.enabled).flatMap((use) => use.groups)
+  const used = ledgerFlow(sum(spendGroups.filter((key) => !left.includes(key))), coverageDays, switchedOff(uses))
 
   return { mining, otherIncome, produced, used, net: netResult(produced, used) }
 }
+
+const sumFlows = (flows, groups) => groups.reduce((total, key) => total + flows[key], 0)
+
+// The table of what the race's uses are made of, one row per category and the unmodelled ground training: `{ key, label, toggle, enabled, coverage, basis, total, focus, result, reason, forecast }`. `coverage` is 'observed' (the ledger holds it), 'modelled' (worked out from the save without a ledger, a forecast) or 'missing' (not known, `reason` says why and `total` is null, never 0). `total` is t/yr over every mineral, `focus` the t/yr of the mineral `focus` ({ id, name }), null when not known; `result` a provenance result of the total. `ledgerFlows`: `{ [MaterialID]: { [group key]: t/yr } }`; `modelled`: as `categoryUses` (null with a ledger); `disabled`: the keys switched off.
+export const categoryRows = ({ hasLedger, coverageDays, ledgerFlows, minerals, modelled, disabled, focus }) => [...CATEGORIES, UNMODELLED].map((category) => {
+  const toggle = category !== UNMODELLED
+  const base = { key: category.key, label: category.label, toggle, enabled: !toggle || !disabled.includes(category.key) }
+  let result
+  let focused = null
+  let basis = ''
+
+  if (hasLedger) {
+    const total = minerals.reduce((sum, mineral) => sum + sumFlows(ledgerFlows[mineral.id], category.groups), 0)
+
+    result = ledgerFlow(total, coverageDays)
+    focused = focus && isAvailable(result) ? sumFlows(ledgerFlows[focus.id], category.groups) : null
+    basis = isAvailable(result) ? `the mineral ledger, last ${Math.round(coverageDays)} days` : ''
+  } else if (!toggle) {
+    result = unavailable({ rule: 'mineral.flowPerYear', missing: [UNMODELLED.reason] })
+  } else {
+    const model = modelled[category.key]
+
+    result = sumResults({ rule: category.rule, results: Object.values(model.byMineral) })
+    focused = focus ? (focus.name in model.byMineral ? valueOrNull(model.byMineral[focus.name]) : 0) : null
+    basis = model.basis
+  }
+
+  const known = isAvailable(result)
+
+  return { ...base, coverage: known ? (hasLedger ? 'observed' : 'modelled') : 'missing', basis, total: valueOrNull(result), focus: focused, result, reason: known ? '' : [...new Set(result.inputs.missing)].join('; '), forecast: known && !hasLedger }
+})
 
 // A mineral's runway as a result of 'mineral.runway': the years the held stock lasts at the yearly net, Infinity when the net is not a loss.
 export const runwayResult = (held, net) => combine({ rule: 'mineral.runway', parts: { 'stock and transit': held, 'yearly net': net }, compute: (values) => (values['yearly net'] < 0 ? values['stock and transit'] / -values['yearly net'] : Infinity) })

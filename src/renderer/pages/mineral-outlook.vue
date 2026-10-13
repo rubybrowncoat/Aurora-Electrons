@@ -21,7 +21,7 @@
 
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!forecastReady" class="mt-3" @retry="retryFailedInputs" />
       <v-alert v-if="forecastReady && !hasLedger" type="info" outlined dense class="mt-3">
-        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from the mines, and use is the industry queue only: fuel refining, maintenance and shipbuilding aren't counted.
+        This save has no mineral ledger (Aurora 2.6 adds one). Production comes from the mines. Use is modelled, not measured: the industry queue, the refineries, the maintenance facilities and the shipyards' tasks, each switchable under Mineral uses. Ground unit training is not counted.
       </v-alert>
 
       <!-- Runway, flows and the focused outlook need every read to have succeeded: never a guess (zero stock, no ledger) while one is loading or failed. -->
@@ -108,7 +108,34 @@
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is the industry queue over the next 12 months.' }} Click a row to see its outlook.
+            {{ hasLedger ? `Produced and used come from the game's mineral ledger over the last ${coverageText}, annualised. Freighter and mass-driver transfers between colonies aren't counted. The game doesn't log mining at colonies that buy their civilian complexes' minerals and send them by mass driver, so their mining is worked out from their mines and complexes. Industry queue: what the queued projects will use in the next 12 months.` : 'Produced comes from the mines; used is modelled, not measured, from the industry queue, the refineries, the maintenance facilities and the shipyards over the next 12 months (see Mineral uses).' }} Click a row to see its outlook.
+          </div>
+        </v-card>
+        <v-card class="panel" data-summary="The purposes that use minerals, observed in the game's ledger or modelled from the save when there is none, each with a switch to leave it out of the runway." elevation="1">
+          <div class="panel-head">
+            <span>Mineral uses<provenance-mark rule="mineral.flowPerYear" label /></span>
+            <v-chip small>{{ hasLedger ? 'Observed in the ledger' : 'Modelled, no ledger' }}</v-chip>
+          </div>
+          <v-data-table :headers="categoryHeaders" :items="categoryTable" item-key="key" disable-sort disable-pagination hide-default-footer dense>
+            <template #[`item.label`]="{ item }">
+              <span class="font-weight-medium" :class="{ 'text--secondary': !item.enabled }">{{ item.label }}</span>
+            </template>
+            <template #[`item.coverage`]="{ item }">
+              <v-chip small outlined :color="sourceColor(item)">{{ sourceLabel(item) }}</v-chip>
+            </template>
+            <template #[`item.basis`]="{ item }">
+              <span v-if="item.reason" class="text--secondary">{{ item.reason }}</span>
+              <span v-else class="text--secondary">{{ item.basis }}</span>
+            </template>
+            <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ tons(item.total) }}</span><provenance-mark :result="item.result" /></template>
+            <template #[`item.focus`]="{ item }"><span class="text-no-wrap">{{ tons(item.focus) }}</span></template>
+            <template #[`item.toggle`]="{ item }">
+              <v-switch v-if="item.toggle" :input-value="item.enabled" :aria-label="`Count ${item.label} in the runway`" dense hide-details class="mt-0 pt-0" @change="toggleCategory(item.key, $event)" />
+              <span v-else class="text--secondary">—</span>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            {{ hasLedger ? 'Observed uses are the ledger\'s, annualised; a switched-off use is left out of the Used column and the runway, and nothing is modelled on top of the ledger.' : 'Without a ledger every use is a modelled forecast, not a measurement: the industry queue and the shipyards\' tasks and activities running now over the next 12 months, the refineries and maintenance facilities at their current output. A use whose inputs the save does not hold is missing, with the reason, and leaves the runway unknown until it is switched off. Ground unit training has no rule and is not counted. Maintenance is held to the minerals the colonies hold, with no haul counted; where a stock is short of a year\'s need and a mine works a deposit of that mineral (at the colony, or at another colony sharing an NPR\'s stock), the figure is missing unless another mineral already settles it, as what the mine adds is not quantified. Shipbuilding minerals are assumed to reach the yard as fast as the tasks take them.' }}
           </div>
         </v-card>
 
@@ -140,6 +167,7 @@
                   <span :key="group.key" class="text-no-wrap">{{ tons(item[group.key]) }}</span>
                 </template>
               </v-data-table>
+              <div class="caption text--secondary mt-2">The ledger's uses are all shown here. The switches under Mineral uses apply to the runway and the Used column only.</div>
             </v-card-text>
           </v-card>
         </v-dialog>
@@ -226,9 +254,10 @@ import { activeAppearance } from '../utilities/appearance'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
+import { CATEGORY_KEYS, industryBasis, legacyColoniesQuery, legacyModels, shipyardActivitiesQuery, shipyardTasksQuery } from '../utilities/legacy-consumption'
 import { tracked } from '../utilities/load-tracking'
 import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
-import { depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
+import { categoryRows, categoryUses, depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { describeResult, describeRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
@@ -248,6 +277,9 @@ const INPUT_LABELS = {
   orbitalMining: 'orbital mining',
   navalAdmins: 'naval admin commands',
   industrialProjects: 'the industry queue',
+  legacyColonies: 'the refineries and maintenance facilities',
+  shipyardTasks: 'the shipyard tasks',
+  shipyardActivities: 'the shipyard activities',
   populationProductionModifiers: 'production modifiers',
 }
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
@@ -276,6 +308,7 @@ export default {
       horizon: { key: 'mineralOutlookHorizon', default: 50 },
       allDeposits: { key: 'mineralOutlookAllDeposits', default: false },
       onlyEmptying: { key: 'mineralOutlookOnlyEmptying', default: false },
+      disabledCategories: { key: 'mineralOutlookDisabledCategories', default: [], scope: 'race', valid: (value) => Array.isArray(value) && value.every((key) => CATEGORY_KEYS.includes(key)) },
       focusMineralId: { key: 'mineralOutlookFocus', default: null, scope: 'race', valid: oneOf(MINERALS.map((mineral) => mineral.id)) },
       flowsView: { key: 'mineralOutlookFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
       runwayTable: tableView('mineralOutlookRunwayTable', { sortBy: ['runwaySort'], sortDesc: [false] }),
@@ -479,15 +512,47 @@ export default {
       return annualQueueDemand(this.industrialProjects, (populationId, facility) => valueOrNull(this.populationCapacityResult(populationId, facility)))
     },
 
+    // The modelled uses of a save without a ledger (null with one, which observes them): `{ industry, fuel, maintenance, shipbuilding }`, each `{ byMineral, basis }`. A ledger save never gets a model on top of its observed uses.
+    legacyUse() {
+      if (this.hasLedger) {
+        return null
+      }
+
+      const { queueDemand, industrialProjects } = this
+      const industry = { byMineral: Object.fromEntries(MINERALS.map((mineral) => [mineral.name, queueDemandResult(queueDemand, mineral.name)])), basis: industryBasis({ projects: industrialProjects, npr: this.legacyColonies.some((colony) => colony.NPR) }) }
+
+      return { industry, ...legacyModels({ colonies: this.legacyColonies, tasks: this.shipyardTasks, activities: this.shipyardActivities, modifiers: this.populationProductionModifiers }) }
+    },
+
+    focusMineral() {
+      return MINERALS.find((mineral) => mineral.id === this.focusMineralId) || null
+    },
+
+    // One row per use of the runway table above: where its figure comes from (observed, modelled or missing, with the reason), what it stands on, its t/yr over every mineral and over the focused one, and whether it counts.
+    categoryTable() {
+      return categoryRows({ hasLedger: this.hasLedger, coverageDays: this.flowsKnown ? this.coverageDays : 0, ledgerFlows: this.ledgerFlows, minerals: MINERALS, modelled: this.legacyUse, disabled: this.disabledCategories, focus: this.focusMineral })
+    },
+
+    categoryHeaders() {
+      return [
+        { text: 'Use', value: 'label' },
+        { text: 'Figure', value: 'coverage' },
+        { text: 'Basis', value: 'basis' },
+        { text: 'Used / yr, all minerals', value: 'total', align: 'end' },
+        { text: `${this.focusMineral ? this.focusMineral.name : 'Focus mineral'} / yr`, value: 'focus', align: 'end' },
+        { text: 'Count in runway', value: 'toggle' },
+      ]
+    },
+
     // One row per mineral: plain figures (null when unknown, `runway` the years of a falling stock and null otherwise, `runwaySort` also Infinity for one that holds or grows) beside the provenance results in `results`.
     mineralRows() {
-      const { stockpile, cargo, packets, deposits, hasLedger, coverageDays, queueDemand } = this
+      const { stockpile, cargo, packets, deposits, hasLedger, coverageDays, queueDemand, legacyUse, disabledCategories } = this
 
       return MINERALS.map((mineral) => {
         const holdings = holdingsResult({ stockpile, cargo, packets, mineral })
         const queue = queueDemandResult(queueDemand, mineral.name)
         const mined = miningSum(deposits.filter((deposit) => deposit.MaterialID === mineral.id).map((deposit) => deposit.deliveredResult))
-        const flows = flowResults({ hasLedger, coverageDays, ledger: this.ledgerFlows[mineral.id], incomeGroups: INCOME_GROUPS, spendGroups: SPEND_GROUPS, unlogged: this.unloggedResults[mineral.id] || null, mined, queue })
+        const flows = flowResults({ hasLedger, coverageDays, ledger: this.ledgerFlows[mineral.id], incomeGroups: INCOME_GROUPS, spendGroups: SPEND_GROUPS, unlogged: this.unloggedResults[mineral.id] || null, mined, uses: categoryUses({ modelled: legacyUse, disabled: disabledCategories, mineralName: mineral.name }) })
         const runway = runwayResult(holdings.held, flows.net)
         const state = runwayStateResult(runway, flows.produced, flows.used)
         const years = valueOrNull(runway)
@@ -828,6 +893,20 @@ export default {
       }
     },
 
+    // A use of the table's Count switch: `on` brings it back into the runway, otherwise it is left out. The list is replaced, never changed in place, so the stored view sees it.
+    toggleCategory(key, on) {
+      const others = this.disabledCategories.filter((item) => item !== key)
+
+      this.disabledCategories = on ? others : [...others, key]
+    },
+
+    sourceLabel(row) {
+      return row.coverage === 'observed' ? 'Observed' : row.coverage === 'modelled' ? 'Modelled forecast' : 'Missing'
+    },
+    sourceColor(row) {
+      return row.coverage === 'observed' ? 'success' : row.coverage === 'modelled' ? 'info' : 'warning'
+    },
+
     flowColor(key) {
       return flowColor(this.appearance, key)
     },
@@ -1160,6 +1239,43 @@ export default {
         }
 
         return await this.database.query(`select FCT_IndustrialProjects.ProjectID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Duranium, FCT_IndustrialProjects.Neutronium, FCT_IndustrialProjects.Corbomite, FCT_IndustrialProjects.Tritanium, FCT_IndustrialProjects.Boronide, FCT_IndustrialProjects.Mercassium, FCT_IndustrialProjects.Vendarite, FCT_IndustrialProjects.Sorium, FCT_IndustrialProjects.Uridium, FCT_IndustrialProjects.Corundium, FCT_IndustrialProjects.Gallicite from FCT_IndustrialProjects where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID} and FCT_IndustrialProjects.Pause = 0`).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    // The refineries and maintenance facilities of each colony, the shipyards' tasks and their activities, for the model of the uses a save without a ledger cannot show. Not read for a save with a ledger, which observes them.
+    legacyColonies: {
+      get: tracked('legacyColonies', async function () {
+        const ledger = this.ledger
+
+        if (!this.database || !this.GameID || !this.RaceID || ledger === null || ledger.length) {
+          return []
+        }
+
+        return await this.database.query(legacyColoniesQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    shipyardTasks: {
+      get: tracked('shipyardTasks', async function () {
+        const ledger = this.ledger
+
+        if (!this.database || !this.GameID || !this.RaceID || ledger === null || ledger.length) {
+          return []
+        }
+
+        return await this.database.query(shipyardTasksQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    shipyardActivities: {
+      get: tracked('shipyardActivities', async function () {
+        const ledger = this.ledger
+
+        if (!this.database || !this.GameID || !this.RaceID || ledger === null || ledger.length) {
+          return []
+        }
+
+        return await this.database.query(shipyardActivitiesQuery({ GameID: this.GameID, RaceID: this.RaceID })).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
