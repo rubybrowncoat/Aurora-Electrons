@@ -4,7 +4,7 @@ import { gameTime } from './aurora'
 import { people } from './colonies'
 import { compact as compactLitres } from './logistics'
 import { MINERALS, compact as compactTons } from './minerals'
-import { roundToDecimal, separatedNumber } from './math'
+import { isKnownNumber, roundToDecimal, separatedNumber } from './math'
 import { bodyPointsSql } from './survey'
 
 const PEEK_WINDOW_DAYS = 30
@@ -16,6 +16,39 @@ const row = async (database, sql) => {
 }
 
 const plural = (count, one, many) => (count === 1 ? one : many)
+
+// How many systems the race has surveyed, the one read the Galaxy Map peek and the Colonization Planner peek share, so a flyout opened in one section reuses the other's cached read. Null when the read gives no row.
+const knownSystems = async (database, GameID, RaceID) => {
+  const found = await row(database, `select count(*) as Systems from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`)
+
+  return found ? found.Systems : null
+}
+
+// The capacity of the race's own transports, for the Transport page: ships of non-shipping-line fleets whose class can move (above 1 km/s) and has a cargo hold or colony bays, the same gate the page applies. `cargo` (tons) and `colonists` are null, not 0, when a class has no recorded capacity. One read of the race's ships, classes and fleets: no system body is touched.
+export const transportTotals = async (database, { GameID, RaceID }) => {
+  const found = await row(database, `select count(*) as Ships,
+    case when count(FCT_ShipClass.CargoCapacity) = count(*) then coalesce(sum(FCT_ShipClass.CargoCapacity), 0) else null end as Cargo,
+    case when count(FCT_ShipClass.ColonistCapacity) = count(*) then coalesce(sum(FCT_ShipClass.ColonistCapacity), 0) else null end as Colonists
+    from FCT_Ship
+    inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID
+    inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID
+    where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Fleet.ShippingLine = 0 and FCT_ShipClass.MaxSpeed > 1 and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0)`)
+
+  return found ? { ships: found.Ships, cargo: found.Cargo, colonists: found.Colonists } : null
+}
+
+// How far the race has settled the systems it knows, for the Colonization Planner, by the planner's own definition of a settled body (its Colonies view: `loadBodies` gives every body of a surveyed system, of the planner's body classes and types, the race's population records, and a body with at least one is settled): `known` systems surveyed, the `bodies` holding a colony or outpost of the race, whatever their people and however many records they have, and the `settled` systems that hold at least one such body. The planner's count of all the bodies of the known systems scans FCT_SystemBody, which took 21 to 25 ms on a large save, over the peek budget; this read reaches FCT_SystemBody only by primary key from the race's own population records. Null when any figure is not known.
+export const settlementTotals = async (database, { GameID, RaceID }) => {
+  const [known, found] = await Promise.all([
+    knownSystems(database, GameID, RaceID),
+    row(database, `select count(distinct FCT_Population.SystemBodyID) as Bodies, count(distinct FCT_SystemBody.SystemID) as Settled from FCT_Population
+      inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID
+      inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
+      where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5)`),
+  ])
+
+  return found && isKnownNumber(known) ? { known, bodies: found.Bodies, settled: found.Settled } : null
+}
 
 // `1'414 bodies`, with the user's separator.
 const counted = (count, separator, one, many) => `${separatedNumber(count, separator)} ${plural(count, one, many)}`
@@ -106,6 +139,17 @@ export const peeks = {
     return `${counted(Colonies, separator, 'colony', 'colonies')}, ${people(Millions)}`
   },
 
+  // The planner's own definition of a settled place (its Colonies view): a body of a surveyed system holding a colony or outpost of the race, whatever its people.
+  '/habitability': async ({ database, GameID, RaceID, separator }) => {
+    const totals = await settlementTotals(database, { GameID, RaceID })
+
+    if (!totals || !isKnownNumber(totals.bodies) || !isKnownNumber(totals.settled)) {
+      return null
+    }
+
+    return totals.known === 0 ? 'No known systems' : `${counted(totals.bodies, separator, 'colonised body', 'colonised bodies')} in ${separatedNumber(totals.settled, separator)} of ${counted(totals.known, separator, 'known system', 'known systems')}`
+  },
+
   '/logistics': async ({ database, GameID, RaceID }) => {
     const { Litres } = await row(database, `select
       (select coalesce(sum(FCT_Population.FuelStockpile), 0) from FCT_Population where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID})
@@ -124,8 +168,29 @@ export const peeks = {
     return counted(Routes, separator, 'repeating route', 'repeating routes')
   },
 
+  // Capacity of the race's own ships, never the shipping lines'. Unknown (null) when a class has no recorded capacity.
+  '/information': async ({ database, GameID, RaceID, separator }) => {
+    const totals = await transportTotals(database, { GameID, RaceID })
+
+    if (!totals || !isKnownNumber(totals.ships) || !isKnownNumber(totals.cargo) || !isKnownNumber(totals.colonists)) {
+      return null
+    }
+
+    if (totals.ships === 0) {
+      return 'No transport ships'
+    }
+
+    const named = [
+      counted(totals.ships, separator, 'ship', 'ships'),
+      totals.cargo > 0 ? `${compactTons(totals.cargo)} cargo` : null,
+      totals.colonists > 0 ? `${separatedNumber(totals.colonists, separator)} colonists` : null,
+    ].filter(Boolean)
+
+    return named.join(', ')
+  },
+
   '/map': async ({ database, GameID, RaceID, separator }) => {
-    const { Systems } = await row(database, `select count(*) as Systems from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`)
+    const Systems = await knownSystems(database, GameID, RaceID)
 
     return `${counted(Systems, separator, 'system', 'systems')} known`
   },
