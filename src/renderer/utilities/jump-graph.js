@@ -1,8 +1,44 @@
 // Routes over the jump points a race has explored, as its fleets fly them: a straight line inside a system, no distance through a jump point. The game's auto-route takes the fewest transits and breaks ties by whichever path it meets first; here ties go to the shorter distance. The galactic map's distance is the shortest in kilometres, centre to centre.
 
+import { ofRule, registerRule, unavailable } from './provenance'
+
 export const KM_PER_AU = 149600000
 
+const hasPosition = (point) => Number.isFinite(point.Xcor) && Number.isFinite(point.Ycor)
+
 const hypot = (a, b) => Math.hypot(a.Xcor - b.Xcor, a.Ycor - b.Ycor)
+
+// The rules of a route over the explored jump points, each registered once with the game versions it holds for and how far it is checked (utilities/provenance.js). The plan-level ones (totals, travel time, speed, avoid options) are in utilities/route-plan.js.
+const ROUTE_VERSIONS = ['2.7.x']
+
+registerRule({
+  id: 'route.jumps',
+  versions: ROUTE_VERSIONS,
+  units: 'jumps',
+  verification: 'confirmed',
+  structure: ['FCT_JumpPoint.WPLink', 'FCT_RaceJumpPointSurvey.Explored', 'FCT_RaceJumpPointSurvey.Charted'],
+  note: 'The fewest transits over the jump points the race has explored, the shorter way breaking a tie; the search was checked against the game\'s own routes (docs `fleet`). A link the race has not explored, or one with no position in the save, is never crossed, so a system only such links reach has no route.',
+})
+
+registerRule({
+  id: 'route.distanceKm',
+  versions: ROUTE_VERSIONS,
+  units: 'km',
+  verification: 'confirmed',
+  structure: ['FCT_JumpPoint.Xcor, Ycor', 'FCT_LagrangePoint.Xcor, Ycor', 'FCT_SystemBody.Xcor, Ycor'],
+  note: 'The straight-line distances flown inside each system between the places the route passes, summed; a jump takes no distance and a system\'s centre is where the galactic map measures from. Arithmetic over saved positions: a place with no position in the save has no distance.',
+})
+
+const ROUTE_INPUTS = ['the explored jump points', 'their positions']
+
+// The jumps and kilometres of a found route, or unavailable results naming `missing` for a route nothing explored reaches: `route` is a `searchRoutes` route or null. A route never has 0 for a missing one.
+export const routeResults = (route, missing = 'an explored route') => {
+  if (!route) {
+    return { jumps: unavailable({ rule: 'route.jumps', missing: [missing] }), km: unavailable({ rule: 'route.distanceKm', missing: [missing] }) }
+  }
+
+  return { jumps: ofRule({ rule: 'route.jumps', value: route.jumps, inputs: { present: ROUTE_INPUTS } }), km: ofRule({ rule: 'route.distanceKm', value: route.km, inputs: { present: ROUTE_INPUTS } }) }
+}
 
 // The jump points the race has charted in systems it knows, with its own flags on them. Only explored ones (`Explored`) can be travelled: the far side of the rest is unknown. `Distance` is how far the point sits from its star, which numbers the system's jump points (JP1, JP2, …) as the game lists them. `JumpGateStrength` > 0 is a gate, which ships without a jump drive need to transit from that side; `MilitaryRestricted` keeps civilian shipping out; `IgnoreForDistance` leaves it out of distance measures. The rows are frozen: they are read-only, and Vue would otherwise observe every field of thousands of them.
 export const loadJumpPoints = async (database, { GameID, RaceID }) => {
@@ -99,17 +135,18 @@ const inSystem = (a, b, lagrangePoints = []) => {
 // - `canTransit(jumpPoint)`: whether the route may jump out through it (a gate for ships without a jump drive).
 // - `canEnter(SystemID)`: whether the route may jump into the system; the game's avoid rules apply to the destination too. The origins' own systems are always left freely.
 // - `lagrangePoints`: [{ SystemID, Xcor, Ycor }] to jump between inside a system, or none. Returns `toSystem(SystemID)` (arrival at the system's jump point) and `toPlace({ SystemID, Xcor, Ycor })`, each giving { jumps, km, from, end } or null when nothing reaches it. `from` is the origin the route starts at, and `routeLegs(route)` spells out `end`.
-export const searchRoutes = (jumpPoints, origins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [] } = {}) => {
+export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [] } = {}) => {
   const before = BEFORE[order]
+  const origins = allOrigins.filter(hasPosition)
   const byId = {}
   const bySystem = {}
   const lagrangeBySystem = {}
 
-  jumpPoints.forEach((jumpPoint) => {
+  jumpPoints.filter(hasPosition).forEach((jumpPoint) => {
     byId[jumpPoint.WarpPointID] = jumpPoint
     ;(bySystem[jumpPoint.SystemID] = bySystem[jumpPoint.SystemID] || []).push(jumpPoint)
   })
-  lagrangePoints.forEach((point) => {
+  lagrangePoints.filter(hasPosition).forEach((point) => {
     ;(lagrangeBySystem[point.SystemID] = lagrangeBySystem[point.SystemID] || []).push(point)
   })
 
@@ -160,6 +197,10 @@ export const searchRoutes = (jumpPoints, origins, { order = 'jumps', canTransit 
       return origin ? { jumps: 0, km: 0, from: origin, end: null } : route(nearest(arrivals(systemId)))
     },
     toPlace(place) {
+      if (!hasPosition(place)) {
+        return null
+      }
+
       const lagrange = lagrangeBySystem[place.SystemID]
       const local = origins.filter((origin) => origin.SystemID === place.SystemID).map((origin) => ({ origin, previous: null, from: origin, jumps: 0, km: 0 }))
       const ends = [...local, ...arrivals(place.SystemID).map((state) => ({ origin: state.origin, previous: state, from: state.at, jumps: state.jumps, km: state.km }))].map(({ origin, previous, from, jumps, km }) => {

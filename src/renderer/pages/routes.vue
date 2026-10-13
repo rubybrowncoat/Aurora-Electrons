@@ -20,7 +20,7 @@
           </div>
           <div class="tool tool--speed">
             <div class="tool__label caption text--secondary">Speed</div>
-            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="String(effectiveSpeed)" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details>
+            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="speedPlaceholder" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details>
               <template #append>
                 <v-menu offset-y left max-height="420">
                   <template #activator="{ on, attrs }">
@@ -73,7 +73,7 @@
           <v-col cols="12" lg="7" xl="8">
             <v-card class="panel" data-summary="The known systems shaded by distance from the first stop, with the planned route drawn across them. Click a system to extend the route." elevation="1">
               <div class="panel-head">
-                <span>Route map</span>
+                <span>Route map<provenance-mark rule="route.reachShade" /></span>
                 <span class="legend">
                   <span class="legend-item"><span class="dot dot-ring" :style="{ borderColor: theme.ink }" />Stops</span>
                   <span class="legend-item"><span class="line" :style="{ background: colors.route }" />Route</span>
@@ -85,21 +85,21 @@
               <div class="panel-body">
                 <system-map :systems="mapNodes" :links="links" :route="plan.systems" :route-color="colors.route" :selected="lastStop ? lastStop.SystemID : null" aria-label="Known systems by distance from the first stop, with the route" @select="(systemId) => insertStop(stopKeys.length, { key: `system:${systemId}`, kind: 'system' })" />
               </div>
-              <div class="panel-foot caption text--secondary">Positions as on the game's galactic map, shaded by distance from the first stop. Numbers mark the stops. Click a system to add it as the last stop. A leg with no explored route is bridged by a straight line.</div>
+              <div class="panel-foot caption text--secondary">Positions as on the game's galactic map, shaded by distance from the first stop, and systems the save leaves at the game's centre are drawn beside a linked system. Numbers mark the stops. Click a system to add it as the last stop. A leg with no explored route is bridged by a straight line.</div>
             </v-card>
           </v-col>
         </v-row>
 
         <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way. It shows how long the whole journey will take." elevation="1">
           <div class="panel-head">
-            <span>Route detail</span>
+            <span>Route detail<provenance-mark rule="route.detailTotal" label /></span>
           </div>
           <v-data-table :headers="legHeaders" :items="detailRows" item-key="id" group-by="leg" disable-pagination disable-sort hide-default-footer dense>
             <template #[`group.header`]="{ group, headers, toggle, isOpen }">
               <td :colspan="headers.length" class="leg-group">
                 <v-btn icon x-small :aria-label="isOpen ? 'Collapse this leg' : 'Expand this leg'" class="mr-2" @click="toggle"><v-icon small>{{ isOpen ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon></v-btn>
                 <span class="font-weight-medium">{{ group + 1 }}. {{ legTitle(group) }}</span>
-                <span class="text--secondary ml-3">{{ legFigures(group) }}</span>
+                <span class="text--secondary ml-3">{{ legFigures(group) }}<provenance-mark v-if="legTimeResult(group)" :result="legTimeResult(group)" /></span>
               </td>
             </template>
             <template #[`item.SystemName`]="{ item }">
@@ -118,28 +118,28 @@
                 <div v-if="item.via" class="caption text--secondary">Lagrange jump from {{ item.via[0] }} to {{ item.via[1] }}</div>
               </div>
             </template>
-            <template #[`item.km`]="{ item }"><span class="text-no-wrap">{{ distance(item.km) }}</span></template>
-            <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ distance(item.total) }}</span></template>
-            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ travelTime(item.total) }}</span></template>
+            <template #[`item.km`]="{ item }"><span class="text-no-wrap">{{ distance(item.km) }}</span><provenance-mark v-if="item.kmResult.status !== 'confirmed'" :result="item.kmResult" /></template>
+            <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ distance(item.total) }}</span><provenance-mark v-if="item.totalResult.status !== 'confirmed'" :result="item.totalResult" /></template>
+            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ timeText(item.total) }}</span><provenance-mark :result="item.timeResult" /></template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Times are flying at {{ count(effectiveSpeed) }} km/s, counted from the first stop. Jumps take no time here; the jump shock after each and nebula speed limits are left out.</div>
+          <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. Jumps take no time here; the jump shock after each and nebula speed limits are left out.<provenance-mark :result="speedResult" /></div>
         </v-card>
 
         <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time. Click a row to add it as a stop." elevation="1">
           <div class="panel-head">
-            <span>Distances from {{ origin ? origin.name : '—' }}</span>
+            <span>Distances from {{ origin ? origin.name : '—' }}<provenance-mark rule="route.reachableCount" label /></span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
-          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => insertStop(stopKeys.length, { key: `system:${row.SystemID}`, kind: 'system' })">
+          <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :custom-sort="sortNullLast" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => insertStop(stopKeys.length, { key: `system:${row.SystemID}`, kind: 'system' })">
             <template #[`item.Name`]="{ item }">
               <span class="font-weight-medium">{{ item.Name }}</span>
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
-            <template #[`item.jumpsSort`]="{ item }">{{ item.route ? item.route.jumps : '—' }}</template>
-            <template #[`item.kmSort`]="{ item }">{{ item.route ? distance(item.route.km) : '—' }}</template>
-            <template #[`item.time`]="{ item }">{{ item.route ? travelTime(item.route.km) : '—' }}</template>
+            <template #[`item.jumpsSort`]="{ item }"><span v-if="item.route">{{ item.route.jumps }}</span><span v-else class="text--secondary">—<provenance-mark :result="item.jumpsResult" /></span></template>
+            <template #[`item.kmSort`]="{ item }"><span v-if="item.route" class="text-no-wrap">{{ distance(item.route.km) }}</span><span v-else class="text--secondary">—<provenance-mark :result="item.kmResult" /></span></template>
+            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ item.route ? timeText(item.route.km) : '—' }}</span><provenance-mark :result="item.timeResult" /></template>
             <template #[`item.status`]="{ item }">
-              <span :class="{ 'text--secondary': !item.reason }">{{ item.status }}</span>
+              <span :class="{ 'text--secondary': !item.reason }">{{ item.status }}</span><provenance-mark v-if="item.assumedAvoid" rule="route.avoidance" />
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
@@ -159,6 +159,7 @@ import { chartTheme, withAlpha } from '../components/charts/theme'
 import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import StopList from '../components/routes/StopList.vue'
 import countFormat from '../mixins/count-format'
@@ -168,11 +169,12 @@ import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, queryId, queryPlace, queryPlaceKeys } from '../utilities/deep-links'
-import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, searchRoutes } from '../utilities/jump-graph'
+import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, routeResults, searchRoutes } from '../utilities/jump-graph'
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
-import { planRoute } from '../utilities/route-plan'
+import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
+import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime } from '../utilities/route-plan'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -185,7 +187,6 @@ const INPUT_LABELS = {
   smallPlaces: 'the waypoints, wrecks and contacts',
   placeCounts: 'the bodies and survey locations',
 }
-const SECONDS_PER_DAY = 86400
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
 const OPTIONS = [
@@ -216,7 +217,7 @@ const firstOf = (value) => (Array.isArray(value) ? value[0] : value)
 // The route as a list of stops, each a place key of utilities/deep-links.js, planned leg by leg (utilities/route-plan.js), with the stops' places drawn on the map and listed with their legs.
 export default {
   name: 'RoutesPage',
-  components: { LoadState, PageLink, StatTiles, StopList, SystemMap },
+  components: { LoadState, PageLink, ProvenanceMark, StatTiles, StopList, SystemMap },
   mixins: [
     countFormat,
     deepLink,
@@ -362,13 +363,18 @@ export default {
       return this.routeStops[this.routeStops.length - 1] || null
     },
 
+    // The jump points a route may transit under the gate and civilian options, and what the options assume where the save lacks a gate strength or restriction.
+    transit() {
+      return transitOptions(this.options, this.jumpPoints)
+    },
+
     // A route's search options: its order, which jump points it may transit and which systems it may enter, and whether it uses Lagrange points.
     searchOptions() {
-      const { gatesOnly, civilian, useLagrange } = this.options
+      const { useLagrange } = this.options
 
       return {
         order: this.order,
-        canTransit: (jumpPoint) => (!gatesOnly || jumpPoint.JumpGateStrength > 0) && (!civilian || !jumpPoint.MilitaryRestricted),
+        canTransit: this.transit.canTransit,
         canEnter: (systemId) => !this.avoidReasons[systemId],
         lagrangePoints: useLagrange ? this.lagrangePoints : [],
       }
@@ -376,6 +382,11 @@ export default {
 
     plan() {
       return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, ...this.searchOptions })
+    },
+
+    // The plan's jumps and distance as results, null for a plan with no leg. Flags the save lacks that the options read are stated as assumptions on them.
+    planFigures() {
+      return planResults(this.plan, this.routeAssumptions)
     },
 
     // The ID of the route's fleet while its speed and movement settings are still the page's. Setting a speed or an option by hand, or taking another fleet's, ends that; editing the stops doesn't.
@@ -413,37 +424,52 @@ export default {
       return this.classes.slice().sort((a, b) => b.MaxSpeed - a.MaxSpeed)
     },
 
+    // The speed the route is flown at, as a result: the speed picked, else the class median, and unavailable with neither (`flightSpeed`).
+    speedResult() {
+      return flightSpeed(this.speed, this.classOptions.map((shipClass) => shipClass.MaxSpeed))
+    },
+
     effectiveSpeed() {
-      if (this.speed > 0) {
-        return this.speed
-      }
+      return valueOrNull(this.speedResult)
+    },
 
-      const speeds = this.classOptions.map((shipClass) => shipClass.MaxSpeed)
+    speedPlaceholder() {
+      return this.effectiveSpeed === null ? 'None known' : String(this.effectiveSpeed)
+    },
 
-      return speeds.length ? speeds[Math.floor(speeds.length / 2)] : 1000
+    speedText() {
+      return this.effectiveSpeed === null ? 'at no known speed, so no time is given' : `at ${this.count(this.effectiveSpeed)} km/s`
     },
 
     activeOptionCount() {
       return OPTIONS.filter((option) => this.options[option.key] !== option.default).length
     },
 
-    // Why a route may not enter each system, or nothing.
-    avoidReasons() {
-      const reasons = {}
+    // Why a route may not enter each system, and whether the reason rests on a flag or rating the save lacks (`avoidance`).
+    avoidDetails() {
+      const details = {}
 
       this.systems.forEach((system) => {
-        if (this.options.skipNoAutoRoute && system.NoAutoRoute) {
-          reasons[system.SystemID] = 'No auto-route'
-        } else if (this.options.avoidDanger && system.DangerRating > 0 && (system.Protection || 0) <= system.DangerRating) {
-          reasons[system.SystemID] = `Danger rating ${this.count(system.DangerRating)}`
-        } else if (this.options.avoidAlien && system.Controller && !system.TradeTreaty) {
-          reasons[system.SystemID] = `Held by ${system.Controller}`
-        } else if (this.options.civilian && system.MilitaryRestrictedSystem) {
-          reasons[system.SystemID] = 'Military restricted'
+        const found = avoidance(system, this.options, this.count)
+
+        if (found) {
+          details[system.SystemID] = found
         }
       })
 
-      return reasons
+      return details
+    },
+
+    // Why a route may not enter each system, or nothing.
+    avoidReasons() {
+      return Object.fromEntries(Object.entries(this.avoidDetails).map(([systemId, found]) => [systemId, found.reason]))
+    },
+
+    // What the options assume where the save lacks a flag, rating or restriction they read.
+    routeAssumptions() {
+      const assumed = Object.values(this.avoidDetails).filter((found) => found.assumed).length
+
+      return [...this.transit.assumptions, ...(assumed ? [`${assumed} ${assumed === 1 ? 'system is' : 'systems are'} avoided because the save lacks a flag or rating the options read`] : [])]
     },
 
     // The search from the first stop, for the distance table and the map's shading.
@@ -484,7 +510,7 @@ export default {
           key,
           status: place ? 'ok' : reading ? 'loading' : 'missing',
           place,
-          leg: leg ? { closing: leg.closing, toName: leg.to.name, summary: this.figures(leg), note: this.legNotes[leg.index] || '' } : null,
+          leg: leg ? { closing: leg.closing, toName: leg.to.name, summary: this.figures(leg), note: this.legNotes[leg.index] || '', result: leg.route ? this.travelResult(leg.route.km) : routeResults(null).km } : null,
         }
       })
     },
@@ -492,13 +518,22 @@ export default {
     // One row per system a leg crosses: where it comes in, where it leaves, and the distance flown there; the total runs on through the legs.
     detailRows() {
       const rows = []
+      const { speedResult } = this
+      const none = routeResults(null)
       let total = 0
+      let skipped = 0
 
       this.plan.legs.forEach((leg) => {
-        const row = (id, fields) => rows.push({ id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, ...fields })
+        const row = (id, fields) => {
+          const found = { id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, kmResult: distanceResult(0), totalResult: detailTotal(total, skipped), ...fields }
+
+          found.timeResult = travelTime(found.totalResult, speedResult)
+          rows.push(found)
+        }
 
         if (!leg.route) {
-          row('none', { SystemID: leg.start ? leg.start.SystemID : null, SystemName: leg.start ? this.systemNameOf(leg.start.SystemID) : leg.from.name, note: `No explored route${this.legNotes[leg.index] ? `: ${this.legNotes[leg.index]}` : ''}` })
+          skipped += 1
+          row('none', { SystemID: leg.start ? leg.start.SystemID : null, SystemName: leg.start ? this.systemNameOf(leg.start.SystemID) : leg.from.name, note: `No explored route${this.legNotes[leg.index] ? `: ${this.legNotes[leg.index]}` : ''}`, km: null, total: null, kmResult: none.km, totalResult: none.km })
 
           return
         }
@@ -518,7 +553,7 @@ export default {
               gate: Boolean(step.to.WarpPointID && step.to.JumpGateStrength > 0),
               via: step.via && step.via.map((point) => this.lagrangeName(point)),
               km: step.km,
-              total,
+              kmResult: distanceResult(step.km),
             })
           }
         })
@@ -535,7 +570,7 @@ export default {
 
     // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again.
     distanceRows() {
-      const { routes, openRoutes, origin, avoidReasons } = this
+      const { routes, openRoutes, origin, avoidDetails, speedResult } = this
 
       if (!routes) {
         return []
@@ -544,16 +579,22 @@ export default {
       return this.systems.map((system) => {
         const route = routes.toSystem(system.SystemID)
         const isOrigin = system.SystemID === origin.SystemID
-        const reason = isOrigin ? null : avoidReasons[system.SystemID] || null
+        const found = isOrigin ? null : avoidDetails[system.SystemID] || null
+        const reason = found ? found.reason : null
         const blocked = !route && !reason && Boolean(openRoutes.toSystem(system.SystemID))
+        const figures = routeResults(route, reason ? `a route into a system the options avoid (${reason})` : blocked ? 'a route the options allow' : 'an explored route from the first stop')
 
         return {
           ...system,
           route,
           reason,
+          assumedAvoid: Boolean(found && found.assumed),
           blocked,
-          jumpsSort: route ? route.jumps : Infinity,
-          kmSort: route ? route.km : Infinity,
+          jumpsResult: figures.jumps,
+          kmResult: figures.km,
+          timeResult: travelTime(figures.km, speedResult),
+          jumpsSort: route ? route.jumps : null,
+          kmSort: route ? route.km : null,
           status: isOrigin ? 'First stop' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
         }
       })
@@ -585,45 +626,54 @@ export default {
           color: row.route ? withAlpha(colors.near, 1 - 0.65 * reach) : row.reason ? colors.avoided : colors.out,
           ring: stop ? theme.ink : null,
           label: Boolean(stop),
-          title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${this.travelTime(row.route.km)}` : row.status}`,
+          title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${this.timeText(row.route.km)}` : row.status}`,
         }
       }).sort((a, b) => a.rank - b.rank)
     },
 
     tiles() {
-      const { plan } = this
+      const { plan, planFigures } = this
       const reachable = this.distanceRows.filter((row) => row.route).length
       const avoided = this.distanceRows.filter((row) => row.reason).length
       const blocked = this.distanceRows.filter((row) => row.blocked).length
       const out = this.distanceRows.length - reachable - avoided - blocked
       const steps = plan.legs.flatMap((leg) => leg.steps)
-      const stabilised = steps.filter((step) => step.kind === 'jump' && step.from.JumpGateStrength > 0).length
-      const lagrange = steps.filter((step) => step.via).length
+      const counts = stepCounts(steps)
+      const lagrange = counts.lagrange.value
       const legs = plan.legs.length
       const unrouted = this.readingStops ? 'reading the stops' : plan.missing ? `${plan.missing} of ${legs} legs ${plan.missing === 1 ? 'has' : 'have'} no explored route` : ''
       const warn = plan.missing > 0 && !this.readingStops
+      const jumps = planFigures && planFigures.jumps
+      const km = planFigures && planFigures.km
+      const time = km ? travelTime(km, this.speedResult) : null
+      const unrecorded = counts.stabilised.inputs.missing.length ? ` (${counts.stabilised.inputs.missing.join(', ')} not recorded)` : ''
+      const stabilised = plan.missing === legs ? '' : `${counts.stabilised.value} through stabilised jump points${unrecorded}${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}`
 
       return [
         {
           label: 'Jumps',
-          value: legs ? this.count(plan.jumps) : '—',
-          note: legs ? [`${stabilised} through stabilised jump points${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}`, unrouted].filter(Boolean).join('; ') : 'Add a second stop below, or click a system on the map',
+          value: jumps && jumps.value !== null ? this.count(jumps.value) : '—',
+          title: jumps ? describeResult(jumps) : describeRule('route.jumps'),
+          note: legs ? [stabilised, unrouted].filter(Boolean).join('; ') : 'Add a second stop below, or click a system on the map',
           icon: warn ? 'mdi-alert-outline' : undefined,
           iconColor: warn ? 'warning' : undefined,
         },
         {
           label: 'Distance',
-          value: legs ? this.distance(plan.km) : '—',
-          note: legs ? `${this.count(plan.km / KM_PER_AU, 1)} AU${warn ? ', without the legs that have no route' : ''}` : '',
+          value: km && km.value !== null ? this.distance(km.value) : '—',
+          title: km ? describeResult(km) : describeRule('route.distanceKm'),
+          note: km && km.value !== null ? `${this.count(km.value / KM_PER_AU, 1)} AU${warn ? ', without the legs that have no route' : ''}` : '',
         },
         {
           label: 'Travel time',
-          value: legs ? this.travelTime(plan.km) : '—',
-          note: `At ${this.count(this.effectiveSpeed)} km/s`,
+          value: time && time.value !== null ? this.flyTime(time.value) : '—',
+          title: time ? describeResult(time) : describeRule('route.travelTime'),
+          note: this.effectiveSpeed === null ? 'No speed known: enter one' : `At ${this.count(this.effectiveSpeed)} km/s`,
         },
         {
           label: 'Reachable systems',
-          value: `${this.count(reachable)} of ${this.count(this.distanceRows.length)}`,
+          value: this.origin ? `${this.count(reachable)} of ${this.count(this.distanceRows.length)}` : '—',
+          title: describeRule('route.reachableCount'),
           note: this.origin ? `From ${this.origin.name}: ${avoided} avoided, ${blocked ? `${blocked} cut off by the options, ` : ''}${out} out of reach` : 'From the first stop',
         },
       ]
@@ -890,13 +940,46 @@ export default {
       })
     },
 
-    // Flying time at the chosen speed, in the unit that reads best; nothing to fly is no time.
-    travelTime(km) {
-      return km > 0 ? this.duration(km / this.effectiveSpeed / SECONDS_PER_DAY) : '—'
+    // The time to fly a route of `km` at the chosen speed, as a result: unavailable with no known speed or no distance.
+    travelResult(km) {
+      return travelTime(distanceResult(km), this.speedResult)
+    },
+
+    // Flying time in the unit that reads best; a real 0 is 0 h and an unknown time a dash.
+    flyTime(days) {
+      return days === 0 ? '0 h' : this.duration(days)
+    },
+
+    timeText(km) {
+      const { value } = this.travelResult(km)
+
+      return value === null ? '—' : this.flyTime(value)
+    },
+
+    legTimeResult(index) {
+      const leg = this.plan.legs[index]
+
+      return leg && leg.route ? this.travelResult(leg.route.km) : null
+    },
+
+    sortNullLast(items, sortBy, sortDesc) {
+      const [key] = sortBy
+
+      if (!key) {
+        return items
+      }
+
+      const direction = sortDesc[0] ? -1 : 1
+      const known = (item) => item[key] !== null && item[key] !== undefined
+      const sorted = items.filter(known).sort((a, b) => (typeof a[key] === 'string' ? a[key].localeCompare(b[key]) : a[key] - b[key]) * direction)
+
+      return sorted.concat(items.filter((item) => !known(item)))
     },
 
     distance(km) {
-      if (km >= 1e9) {
+      if (!Number.isFinite(km)) {
+        return '—'
+      } else if (km >= 1e9) {
         return `${this.count(km / 1e9, 2)} bn km`
       } else if (km >= 1e6) {
         return `${this.count(km / 1e6, 1)} M km`
@@ -911,7 +994,7 @@ export default {
         return ''
       }
 
-      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.travelTime(leg.route.km)}`
+      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.timeText(leg.route.km)}`
     },
 
     legTitle(index) {
@@ -991,9 +1074,9 @@ export default {
         }
 
         if (gatesOnly && !(leg.from.JumpGateStrength > 0)) {
-          found.push(`the unstabilised jump point in ${this.systemNameOf(leg.from.SystemID)}`)
-        } else if (civilian && leg.from.MilitaryRestricted) {
-          found.push(`the military restricted jump point in ${this.systemNameOf(leg.from.SystemID)}`)
+          found.push(`the ${Number.isFinite(leg.from.JumpGateStrength) ? 'unstabilised' : 'unrecorded'} jump point in ${this.systemNameOf(leg.from.SystemID)}`)
+        } else if (civilian && !this.transit.canTransit(leg.from)) {
+          found.push(`the ${leg.from.MilitaryRestricted === null || leg.from.MilitaryRestricted === undefined ? 'unrecorded' : 'military restricted'} jump point in ${this.systemNameOf(leg.from.SystemID)}`)
         }
 
         const reason = this.avoidReasons[leg.to.SystemID]
@@ -1014,7 +1097,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, case when FCT_RaceSysSurvey.ControlRaceID in (0, ${this.RaceID}) then null else coalesce((select FCT_AlienRace.AlienRaceName from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 'an unknown race') end as Controller, coalesce((select FCT_AlienRace.TradeTreaty from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 0) as TradeTreaty, (select sum(FCT_ShipClass.ProtectionValue) from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.GameID = ${this.GameID}) as Protection from FCT_RaceSysSurvey where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.ControlRaceID is not null as ControlKnown, case when FCT_RaceSysSurvey.ControlRaceID is null or FCT_RaceSysSurvey.ControlRaceID in (0, ${this.RaceID}) then null else coalesce((select FCT_AlienRace.AlienRaceName from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 'an unknown race') end as Controller, case when exists (select 1 from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}) then (select FCT_AlienRace.TradeTreaty from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}) else 0 end as TradeTreaty, VIR_Protection.Protection, coalesce(VIR_Protection.ProtectionShips, 0) as ProtectionShips, coalesce(VIR_Protection.ProtectionKnown, 0) as ProtectionKnown from FCT_RaceSysSurvey left join (select FCT_Fleet.SystemID, sum(FCT_ShipClass.ProtectionValue) as Protection, count(FCT_Ship.ShipID) as ProtectionShips, count(FCT_ShipClass.ProtectionValue) as ProtectionKnown from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.GameID = ${this.GameID} group by FCT_Fleet.SystemID) as VIR_Protection on VIR_Protection.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },

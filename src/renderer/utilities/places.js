@@ -53,13 +53,13 @@ export const systemPlaces = (systems) => systems.slice().sort((a, b) => a.Name.l
   Ycor: 0,
 }))
 
-// `fleets`: [{ FleetID, FleetName, SystemID, Xcor, Ycor, Speed, Ships }]; `count(number)` formats a speed.
+// `fleets`: [{ FleetID, FleetName, SystemID, Xcor, Ycor, Speed, Ships }]; `count(number)` formats a speed. A fleet with no speed in the save is not called not moving.
 export const fleetPlaces = (fleets, systemName, count) => fleets.map((fleet) => ({
   key: place.fleet(fleet.FleetID),
   kind: 'fleet',
   group: 'fleet',
   name: fleet.FleetName,
-  subtitle: `Fleet in ${systemName(fleet.SystemID)}, ${fleet.Speed > 1 ? `${count(fleet.Speed)} km/s` : 'not moving'}, ${fleet.Ships} ${fleet.Ships === 1 ? 'ship' : 'ships'}`,
+  subtitle: `Fleet in ${systemName(fleet.SystemID)}, ${!Number.isFinite(fleet.Speed) ? 'speed not recorded' : fleet.Speed > 1 ? `${count(fleet.Speed)} km/s` : 'not moving'}, ${fleet.Ships} ${fleet.Ships === 1 ? 'ship' : 'ships'}`,
   icon: GROUP_ICON.fleet,
   SystemID: fleet.SystemID,
   Xcor: fleet.Xcor,

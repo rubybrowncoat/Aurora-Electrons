@@ -23,9 +23,9 @@
 
           <v-card class="panel" data-summary="Every alien race met, with its status, communication and diplomatic standing. Select one to study it in detail." elevation="1">
             <div class="panel-head">
-              <span>Known races</span>
+              <span>Known races<provenance-mark v-for="rule in RACE_RULES" :key="rule" :rule="rule" /></span>
             </div>
-            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
+            <v-data-table :headers="raceHeaders" :items="rows" item-key="AlienRaceID" :custom-sort="sortNullLast" :sort-by.sync="racesTable.sortBy" :sort-desc.sync="racesTable.sortDesc" :items-per-page.sync="racesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: racePageSizes }" :item-class="(item) => (item.AlienRaceID === selectedId ? 'selected-row' : '')" @click:row="(item) => select(item.AlienRaceID)">
               <template #[`item.AlienRaceName`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.AlienRaceName }}</div>
@@ -39,16 +39,16 @@
                 <span class="caption">{{ item.communication }}</span>
               </template>
               <template #[`item.DiplomaticPoints`]="{ item }">
-                <div>{{ count(item.DiplomaticPoints) }}</div>
-                <div class="caption text--secondary">{{ item.standing }}</div>
+                <div>{{ count(item.DiplomaticPoints) }}<provenance-mark :result="item.standingResult" /></div>
+                <div class="caption text--secondary">{{ item.standingText }}</div>
               </template>
-              <template #[`item.FirstDetected`]="{ item }">{{ date(item.FirstDetected) }}</template>
-              <template #[`item.LastContact`]="{ item }">{{ item.LastContact ? date(item.LastContact) : '—' }}</template>
+              <template #[`item.FirstDetected`]="{ item }">{{ dateText(item.firstContact) }}<provenance-mark :result="unknown(item.firstContact)" /></template>
+              <template #[`item.LastContact`]="{ item }">{{ item.lastContact ? dateText(item.lastContact) : '—' }}<provenance-mark :result="unknown(item.lastContact)" /></template>
               <template #[`item.KnownShips`]="{ item }">
-                <div>{{ count(item.KnownShips) }}</div>
-                <div v-if="item.KnownShips" class="caption text--secondary">{{ tons(item.KnownTons) }}</div>
+                <div>{{ count(item.KnownShips) }}<provenance-mark :result="unknown(item.aliveResult)" /></div>
+                <div v-if="item.KnownShips" class="caption text--secondary">{{ tons(item.KnownTons) }}<provenance-mark :result="unknown(item.tonsResult)" /></div>
               </template>
-              <template #[`item.DestroyedShips`]="{ item }">{{ count(item.DestroyedShips) }}</template>
+              <template #[`item.DestroyedShips`]="{ item }">{{ count(item.DestroyedShips) }}<provenance-mark :result="unknown(item.lostResult)" /></template>
             </v-data-table>
           </v-card>
 
@@ -60,13 +60,14 @@
                   <v-chip small outlined :color="selected.status.color" class="ml-2"><v-icon small left>{{ selected.status.icon }}</v-icon>{{ selected.status.label }}</v-chip>
                   <v-chip small outlined class="ml-1">{{ selected.communication }}</v-chip>
                   <v-chip v-if="selected.FixedRelationship" small outlined class="ml-1">Fixed relationship</v-chip>
+                  <provenance-mark v-for="rule in FACT_RULES" :key="rule" :rule="rule" />
                 </span>
               </div>
               <div class="panel-body">
                 <v-row dense>
                   <v-col v-for="fact in facts" :key="fact.label" cols="12" sm="6" md="4" lg="3">
                     <div class="caption text--secondary">{{ fact.label }}</div>
-                    <div>{{ fact.value }}</div>
+                    <div>{{ fact.value }}<provenance-mark v-for="(result, index) in fact.results" :key="index" :result="result" /></div>
                   </v-col>
                 </v-row>
               </div>
@@ -76,7 +77,7 @@
               <v-col v-for="chart in charts" :key="chart.key" cols="12" lg="4">
                 <v-card class="panel chart-panel" :data-summary="chart.summary" elevation="1">
                   <div class="panel-head">
-                    <span>{{ chart.title }}</span>
+                    <span>{{ chart.title }}<provenance-mark v-for="(result, index) in chart.results" :key="index" :result="result" /></span>
                     <span class="legend">
                       <span v-for="series in chart.data.datasets" :key="series.label" class="legend-item"><series-key :color="series.borderColor" :dash="series.borderDash" kind="line" />{{ series.label }}</span>
                     </span>
@@ -91,7 +92,7 @@
 
             <v-card class="panel" data-summary="The ship classes, colonies, sensors, ground units, systems and species observed for the selected race. Switch views to see each kind." elevation="1">
               <div class="panel-head">
-                <span>Observed</span>
+                <span>Observed<provenance-mark v-for="rule in DETAIL_RULES[detailView]" :key="rule" :rule="rule" /></span>
                 <v-btn-toggle v-model="detailView" mandatory dense class="flex-wrap">
                   <v-btn value="classes" small>Classes ({{ selectedClasses.length }})</v-btn>
                   <v-btn value="colonies" small>Colonies ({{ selectedPopulations.length }})</v-btn>
@@ -102,7 +103,7 @@
               </div>
 
               <template v-if="detailView === 'classes'">
-                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                <v-data-table v-if="selectedClasses.length" :headers="classHeaders" :items="selectedClasses" item-key="AlienClassID" :custom-sort="sortNullLast" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.ClassName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.ClassName }}</div>
@@ -111,55 +112,63 @@
                       </div>
                     </div>
                   </template>
-                  <template #[`item.TCS`]="{ item }">{{ tons(item.TCS * 50) }}</template>
-                  <template #[`item.MaxSpeed`]="{ item }">{{ count(item.MaxSpeed) }}</template>
-                  <template #[`item.alive`]="{ item }">{{ item.alive }} / {{ item.ShipCount }}</template>
-                  <template #[`item.FirstDetected`]="{ item }">{{ date(item.FirstDetected) }}</template>
+                  <template #[`item.TCS`]="{ item }">{{ tons(item.tons) }}<provenance-mark :result="unknown(item.sizeResult)" /></template>
+                  <template #[`item.MaxSpeed`]="{ item }">{{ count(item.MaxSpeed) }}<provenance-mark :result="gap(item.MaxSpeed, 'the top speed')" /></template>
+                  <template #[`item.ArmourStrength`]="{ item }">{{ count(item.ArmourStrength) }}<provenance-mark :result="gap(item.ArmourStrength, 'the armour strength')" /></template>
+                  <template #[`item.ShieldStrength`]="{ item }">{{ count(item.ShieldStrength) }}<provenance-mark :result="gap(item.ShieldStrength, 'the shield strength')" /></template>
+                  <template #[`item.alive`]="{ item }">{{ count(item.alive) }} / {{ count(item.ShipCount) }}<provenance-mark :result="unknown(item.aliveResult)" /><provenance-mark :result="gap(item.ShipCount, 'the ships seen')" /></template>
+                  <template #[`item.FirstDetected`]="{ item }">{{ date(item.FirstDetected) }}<provenance-mark :result="dateGap(item.FirstDetected)" /></template>
                   <template #[`item.Weapons`]="{ item }"><span class="caption">{{ item.Weapons || '—' }}</span></template>
                 </v-data-table>
                 <div v-else class="panel-body caption text--secondary">No classes observed.</div>
               </template>
 
               <template v-else-if="detailView === 'colonies'">
-                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :sort-by.sync="populationsTable.sortBy" :sort-desc.sync="populationsTable.sortDesc" :items-per-page.sync="populationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                <v-data-table v-if="selectedPopulations.length" :headers="populationHeaders" :items="selectedPopulations" item-key="PopulationID" :custom-sort="sortNullLast" :sort-by.sync="populationsTable.sortBy" :sort-desc.sync="populationsTable.sortDesc" :items-per-page.sync="populationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template #[`item.PopulationName`]="{ item }">
                     <div class="py-1">
                       <div class="font-weight-medium">{{ item.PopulationName }}</div>
-                      <div class="caption text--secondary">Thermal {{ count(item.ThermalSignature) }} · EM {{ count(item.EMSignature) }}</div>
+                      <div class="caption text--secondary">Thermal {{ count(item.ThermalSignature) }}<provenance-mark :result="gap(item.ThermalSignature, 'the thermal signature')" /> · EM {{ count(item.EMSignature) }}<provenance-mark :result="gap(item.EMSignature, 'the EM signature')" /></div>
                     </div>
                   </template>
                   <template #[`item.intelligence`]="{ item }">
-                    <div>{{ count(item.AlienPopulationIntelligencePoints) }} <span class="caption text--secondary">/ peak {{ count(item.MaxIntelligence) }}</span></div>
-                    <div class="caption text--secondary">{{ item.levelText }}</div>
+                    <div>{{ count(item.AlienPopulationIntelligencePoints) }}<provenance-mark :result="gap(item.AlienPopulationIntelligencePoints, 'the intelligence points')" /> <span class="caption text--secondary">/ peak {{ count(item.MaxIntelligence) }}</span><provenance-mark :result="gap(item.MaxIntelligence, 'the peak intelligence')" /></div>
+                    <div class="caption text--secondary">{{ item.levelText }}<provenance-mark :result="flagged(item.levelResult)" /></div>
                   </template>
                   <template v-for="field in POPULATION_FIELDS" #[`item.${field.value}`]="{ item }">
-                    <v-tooltip v-if="item.fields[field.value].known" :key="field.value" bottom :disabled="item.fields[field.value].current">
-                      <template #activator="{ on }">
-                        <span :class="{ 'stale-value': !item.fields[field.value].current }" v-on="on">{{ fieldText(field, item.fields[field.value].value) }}</span>
-                      </template>
-                      <span>Last seen at peak intelligence; current intelligence no longer covers it.</span>
-                    </v-tooltip>
-                    <span v-else :key="field.value" class="text--disabled">unknown</span>
+                    <span v-if="!available(item.fields[field.value].result)" :key="field.value">—<provenance-mark :result="item.fields[field.value].result" /></span>
+                    <span v-else-if="item.fields[field.value].known" :key="field.value">
+                      <v-tooltip bottom :disabled="item.fields[field.value].current === true">
+                        <template #activator="{ on }">
+                          <span :class="{ 'stale-value': item.fields[field.value].current !== true }" v-on="on">{{ fieldText(field, item.fields[field.value].value) }}</span>
+                        </template>
+                        <span>{{ item.fields[field.value].current === null ? 'Current intelligence is not saved; this is the last value seen.' : 'Last seen at peak intelligence; current intelligence no longer covers it.' }}</span>
+                      </v-tooltip><provenance-mark :result="flagged(item.fields[field.value].result)" />
+                    </span>
+                    <span v-else :key="field.value"><span class="text--disabled">unknown</span><provenance-mark :result="flagged(item.fields[field.value].result)" /></span>
                   </template>
                 </v-data-table>
                 <div v-else class="panel-body caption text--secondary">No colonies observed.</div>
               </template>
 
               <template v-else-if="detailView === 'sensors'">
-                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :sort-by.sync="sensorsTable.sortBy" :sort-desc.sync="sensorsTable.sortDesc" :items-per-page.sync="sensorsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                <v-data-table v-if="selectedSensors.length" :headers="sensorHeaders" :items="selectedSensors" item-key="AlienSensorID" :custom-sort="sortNullLast" :sort-by.sync="sensorsTable.sortBy" :sort-desc.sync="sensorsTable.sortDesc" :items-per-page.sync="sensorsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                  <template #[`item.Strength`]="{ item }">{{ count(item.Strength) }}<provenance-mark :result="gap(item.Strength, 'the strength')" /></template>
                   <template #[`item.Range`]="{ item }">
-                    <span v-if="item.IntelligencePoints > 100">{{ count(item.Range / 1e6, 1) }} M km, resolution {{ count(item.Resolution) }}</span>
-                    <span v-else class="text--disabled">unknown until 100 points</span>
+                    <span v-if="!available(item.reveal)">—<provenance-mark :result="item.reveal" /></span>
+                    <span v-else-if="item.reveal.value">{{ rangeText(item) }}<provenance-mark :result="flagged(item.reveal)" /><provenance-mark :result="gap(item.Range, 'the range')" /><provenance-mark :result="gap(item.Resolution, 'the resolution')" /></span>
+                    <span v-else><span class="text--disabled">unknown until {{ SENSOR_THRESHOLD }} points</span><provenance-mark :result="flagged(item.reveal)" /></span>
                   </template>
-                  <template #[`item.IntelligencePoints`]="{ item }">{{ count(item.IntelligencePoints) }}</template>
+                  <template #[`item.IntelligencePoints`]="{ item }">{{ count(item.IntelligencePoints) }}<provenance-mark :result="gap(item.IntelligencePoints, 'the intelligence points')" /></template>
                 </v-data-table>
                 <div v-else class="panel-body caption text--secondary">No sensors observed.</div>
               </template>
 
               <template v-else-if="detailView === 'ground'">
-                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" :items-per-page.sync="groundTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
+                <v-data-table v-if="selectedGroundUnits.length" :headers="groundHeaders" :items="selectedGroundUnits" item-key="AlienGroundUnitClassID" :custom-sort="sortNullLast" :sort-by.sync="groundTable.sortBy" :sort-desc.sync="groundTable.sortDesc" :items-per-page.sync="groundTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: detailPageSizes }" dense>
                   <template v-for="counter in GROUND_COUNTERS" #[`item.${counter.value}`]="{ item }">
-                    <span :key="counter.value" :class="{ 'text--disabled': item[counter.value] < GROUND_THRESHOLD }">{{ count(item[counter.value]) }}<span v-if="item[counter.value] < GROUND_THRESHOLD"> / {{ GROUND_THRESHOLD }}</span></span>
+                    <span v-if="!available(item.reveals[counter.value])" :key="counter.value">—<provenance-mark :result="item.reveals[counter.value]" /></span>
+                    <span v-else :key="counter.value"><span :class="{ 'text--disabled': !item.reveals[counter.value].value }">{{ count(item[counter.value]) }}<span v-if="!item.reveals[counter.value].value"> / {{ GROUND_THRESHOLD }}</span></span><provenance-mark :result="flagged(item.reveals[counter.value])" /></span>
                   </template>
                   <template #[`item.WeaponsKnown`]="{ item }">{{ item.WeaponsKnown ? 'Known' : 'Unknown' }}</template>
                 </v-data-table>
@@ -193,6 +202,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -201,11 +211,11 @@ import { activeAppearance, toneColor } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { historyConfig } from '../utilities/history'
-import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, COMM_STATUS, DIPLOMACY_LINES, ENGINE_TYPES, POPULATION_LEVELS, REWARD_COST, SPECIES_STATUS, alienRacesSql, contactStatus, intelSnapshot, populationField, populationLevel, rebuildFleet, rewardAttempts, standing, treatyNames } from '../utilities/intelligence'
+import { ATTEMPTING_COMMUNICATION, CLASS_ROLES, DIPLOMACY_LINES, ENGINE_TYPES, GROUND_THRESHOLD, POPULATION_LEVELS, REWARD_COST, SECONDS_PER_YEAR, SENSOR_THRESHOLD, SPECIES_STATUS, TONS_PER_SIZE, aliveByClass, aliveShips, alienRacesSql, classTons, coloniesObserved, communicationLabel, contactStatus, contactTime, diplomaticPoints, gameYear, groundReveal, intelSnapshot, lastShipContact, lostShips, observed, populationField, populationLevel, rebuildFleet, rewardAttempts, sensorReveal, sizedColonies, snapshotSeries, standing, trackedTons, translationProgress, treatiesGranted, treatiesReceived, treatyNames } from '../utilities/intelligence'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
-
-const SECONDS_PER_YEAR = 31536000
+import { describeResult, getRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
+import { loadFormulaVersion } from '../utilities/transport'
 
 const INPUT_LABELS = {
   races: 'the known races',
@@ -216,6 +226,7 @@ const INPUT_LABELS = {
   groundUnits: 'the observed ground units',
   systems: 'the systems they were seen in',
   species: 'the known species',
+  formulaVersion: 'the save\'s schema',
 }
 
 // Colony columns, each shown once intelligence has unlocked it.
@@ -232,8 +243,7 @@ const POPULATION_FIELDS = [
   { text: 'Naval HQ', value: 'NavalHeadquarters', kind: 'flag' },
 ]
 
-// A ground unit class's three observation counters, each revealing something at 20.
-const GROUND_THRESHOLD = 20
+// A ground unit class's three observation counters, each revealing something at the ground threshold.
 const GROUND_COUNTERS = [
   { text: 'Hits seen (type)', value: 'Hits' },
   { text: 'Penetrations seen (armour)', value: 'Penetrated' },
@@ -243,6 +253,17 @@ const GROUND_COUNTERS = [
 const DETAIL_VIEWS = ['classes', 'colonies', 'sensors', 'ground', 'places']
 const RACE_PAGE_SIZES = [15, 50, -1]
 const DETAIL_PAGE_SIZES = [5, 10, 15, -1]
+const COMMUNICATION_ESTABLISHED = 2
+// The rules each panel's figures follow, as the marks on its head.
+const RACE_RULES = ['intelligence.standing', 'intelligence.diplomaticPoints', 'intelligence.shipsTracked', 'intelligence.tonsTracked', 'intelligence.contactDate']
+const FACT_RULES = ['intelligence.contactDate', 'intelligence.diplomaticPoints', 'intelligence.standing', 'intelligence.treaties', 'intelligence.translationProgress', 'intelligence.observed']
+const DETAIL_RULES = {
+  classes: ['intelligence.tonsTracked', 'intelligence.shipsTracked', 'intelligence.contactDate', 'intelligence.observed'],
+  colonies: ['intelligence.coloniesObserved', 'intelligence.populationLevel', 'intelligence.observed'],
+  sensors: ['intelligence.sensorReveal', 'intelligence.observed'],
+  ground: ['intelligence.groundReveal', 'intelligence.observed'],
+  places: ['intelligence.observed'],
+}
 
 const compact = (value) => {
   const size = Math.abs(value)
@@ -260,7 +281,7 @@ const compact = (value) => {
 
 export default {
   name: 'IntelligencePage',
-  components: { ChartCanvas, LoadState, SeriesKey, StatTiles },
+  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -282,6 +303,10 @@ export default {
       POPULATION_FIELDS,
       GROUND_COUNTERS,
       GROUND_THRESHOLD,
+      SENSOR_THRESHOLD,
+      RACE_RULES,
+      FACT_RULES,
+      DETAIL_RULES,
       linkTo,
     }
   },
@@ -305,12 +330,29 @@ export default {
     rows() {
       return this.races.map((race) => {
         const status = contactStatus(race.ContactStatus)
+        const alive = aliveShips(race)
+        const lost = lostShips(race)
+        const tonnage = trackedTons(race)
+        const lastContact = lastShipContact(race, this.StartYear)
+        const standingResult = standing(race.DiplomaticPoints, this.formulaVersion)
 
+        // The figures that can be unknown replace their raw columns, so a table sorts them last and shows a dash; `source` is the row as the query gave it.
         return {
           ...race,
+          source: race,
           status: { ...status, color: toneColor(this.appearance, status.color) },
-          communication: COMM_STATUS[race.CommStatus] || `Status ${race.CommStatus}`,
-          standing: standing(race.DiplomaticPoints),
+          communication: communicationLabel(race.CommStatus),
+          standingResult,
+          standingText: valueOrNull(standingResult) || '—',
+          firstContact: this.dateResult(race.FirstDetected, 'the first contact time'),
+          lastContact,
+          LastContact: lastContact && isAvailable(lastContact) ? lastContact.value : null,
+          aliveResult: alive,
+          lostResult: lost,
+          tonsResult: tonnage,
+          KnownShips: valueOrNull(alive),
+          DestroyedShips: valueOrNull(lost),
+          KnownTons: valueOrNull(tonnage),
         }
       })
     },
@@ -347,7 +389,7 @@ export default {
         return []
       }
 
-      const now = intelSnapshot(this.selected)
+      const now = intelSnapshot(this.selected.source)
       const past = this.recorded.filter((snapshot) => snapshot.t < now.t)
 
       return [...past, now]
@@ -360,37 +402,58 @@ export default {
         byStatus[row.status.label] = (byStatus[row.status.label] || 0) + 1
       })
 
-      const alive = this.rows.reduce((sum, row) => sum + (row.KnownShips || 0), 0)
-      const tons = this.rows.reduce((sum, row) => sum + (row.KnownTons || 0), 0)
-      const lost = this.rows.reduce((sum, row) => sum + (row.DestroyedShips || 0), 0)
-      const colonies = this.populations.length
-      const sized = this.populations.filter((population) => population.MaxIntelligence > 100).length
+      const alive = sumResults({ rule: 'intelligence.shipsTracked', results: this.rows.map((row) => row.aliveResult) })
+      const lost = sumResults({ rule: 'intelligence.shipsTracked', results: this.rows.map((row) => row.lostResult) })
+      const tonnage = sumResults({ rule: 'intelligence.tonsTracked', results: this.rows.map((row) => row.tonsResult) })
+      const colonies = coloniesObserved(this.populations)
+      const sized = sizedColonies(this.populations, this.formulaVersion)
+      const sizedFlagged = this.flagged(sized)
+      const unknownRaces = this.rows.filter((row) => !isAvailable(row.aliveResult) || !isAvailable(row.lostResult) || !isAvailable(row.tonsResult)).length
+      const unknownNote = unknownRaces ? `; ${unknownRaces} of ${this.rows.length} races unknown` : ''
+      const ever = isAvailable(alive) && isAvailable(lost) ? alive.value + lost.value : null
 
       return [
         { label: 'Known races', value: this.count(this.rows.length), note: Object.entries(byStatus).map(([label, number]) => `${number} ${label.toLowerCase()}`).join(', ') },
-        { label: 'Ships tracked', value: this.count(alive), note: `${this.tons(tons)} still in service, of ${this.count(alive + lost)} ever tracked` },
-        { label: 'Ships destroyed', value: this.count(lost), note: lost ? `${this.count(this.classes.length)} classes observed` : 'None known' },
-        { label: 'Colonies observed', value: this.count(colonies), note: colonies ? `${sized} with their population known` : 'None known' },
+        { label: 'Ships tracked', title: [describeResult(alive), describeResult(tonnage)].join('. '), value: this.count(valueOrNull(alive)), note: `${this.tons(valueOrNull(tonnage))} still in service, of ${this.count(ever)} ever tracked${unknownNote}` },
+        { label: 'Ships destroyed', title: describeResult(lost), value: this.count(valueOrNull(lost)), note: !isAvailable(lost) ? `${unknownRaces} of ${this.rows.length} races unknown` : lost.value ? `${this.count(this.classes.length)} classes observed` : 'None known' },
+        { label: 'Colonies observed', title: [describeResult(colonies), sizedFlagged ? describeResult(sized) : null].filter(Boolean).join('. '), value: this.count(colonies.value), note: !colonies.value ? 'None known' : isAvailable(sized) ? `${sized.value} with their population known${sized.status === 'estimated' ? ' (estimate: thresholds not checked for this save)' : ''}` : 'Peak intelligence unknown for some' },
       ]
     },
 
     facts() {
       const race = this.selected
-      const granted = treatyNames(intelSnapshot(race).granted)
-      const received = treatyNames(intelSnapshot(race).received)
+      const granted = treatiesGranted(race.source)
+      const received = treatiesReceived(race.source)
+      const treaties = (result) => (isAvailable(result) ? treatyNames(result.value).join(', ') || 'No treaties' : '—')
+      const first = race.firstContact
+      const last = race.lastContact
+      const points = diplomaticPoints(race.DiplomaticPoints)
+      const progress = translationProgress(race.CommModifier)
+      const intelligence = observed(race.AlienRaceIntelligencePoints, 'the race intelligence points')
+      const damage = observed(race.DamageCausedByAlienRace, 'the damage received')
+      let communication = { value: race.communication, results: [] }
+
+      if (race.CommEstablished > 0) {
+        const established = this.dateResult(race.CommEstablished, 'the time communication was established')
+
+        communication = { value: `${race.communication} on ${this.dateText(established)}`, results: [established] }
+      } else if (race.CommStatus === COMMUNICATION_ESTABLISHED && !Number.isFinite(race.CommEstablished)) {
+        communication = { value: `${race.communication} on —`, results: [observed(race.CommEstablished, 'the time communication was established')] }
+      }
+
       const facts = [
-        { label: 'First contact', value: this.date(race.FirstDetected) },
-        { label: 'Last ship contact', value: race.LastContact ? this.date(race.LastContact) : 'None' },
-        { label: 'Diplomatic points', value: `${this.count(race.DiplomaticPoints)} (${race.standing.toLowerCase()})` },
-        { label: 'Communication', value: race.CommEstablished > 0 ? `${race.communication} on ${this.date(race.CommEstablished)}` : race.communication },
-        { label: 'Treaties granted', value: granted.length ? granted.join(', ') : 'No treaties' },
-        { label: 'Treaties received', value: received.length ? received.join(', ') : 'No treaties' },
-        { label: 'Race intelligence', value: `${this.count(race.AlienRaceIntelligencePoints, 1)} points; a discovery each time it passes ${REWARD_COST}` },
-        { label: 'Damage received', value: this.count(race.DamageCausedByAlienRace) },
+        { label: 'First contact', value: this.dateText(first), results: [first] },
+        { label: 'Last ship contact', value: last ? this.dateText(last) : last === null ? 'None' : '—', results: last ? [last] : [] },
+        { label: 'Diplomatic points', value: isAvailable(points) ? `${this.count(points.value)} (${race.standingText.toLowerCase()})` : '—', results: [points, race.standingResult] },
+        { label: 'Communication', ...communication },
+        { label: 'Treaties granted', value: treaties(granted), results: [granted] },
+        { label: 'Treaties received', value: treaties(received), results: [received] },
+        { label: 'Race intelligence', value: isAvailable(intelligence) ? `${this.count(intelligence.value, 1)} points; a discovery each time it passes ${REWARD_COST}` : '—', results: [intelligence] },
+        { label: 'Damage received', value: this.count(valueOrNull(damage)), results: [damage] },
       ]
 
       if (race.CommStatus === ATTEMPTING_COMMUNICATION) {
-        facts.splice(4, 0, { label: 'Translation progress', value: this.count(race.CommModifier, 1) })
+        facts.splice(4, 0, { label: 'Translation progress', value: this.count(valueOrNull(progress), 1), results: [progress] })
       }
 
       return facts
@@ -411,18 +474,28 @@ export default {
         ...extra,
       })
       const timeline = this.timeline
-      const at = (key) => timeline.map((snapshot) => ({ x: this.year(snapshot.t), y: snapshot[key] || 0 }))
+      const series = (key, rule, name) => snapshotSeries(timeline, key, this.StartYear, rule, name)
+      const pointsOf = (result) => valueOrNull(result) || []
+      // A series' unknown points stay null, which a chart draws as a gap, and one without a year is left out.
+      const placed = (points, key) => points.map((point) => ({ x: this.year(point.t), y: point[key] })).filter((point) => point.x !== null)
+      // What a panel's note says of a result that is missing inputs or not available at all.
+      const gapNote = (result) => (!isAvailable(result) ? ` ${describeResult(result)}.` : result.inputs.missing.length ? ` Missing ${result.inputs.missing.join(', ')}.` : '')
       const recordedNote = timeline.length > 1 ? `Recorded since ${this.date(timeline[0].t)}.` : 'Recording starts now: points are added when it changes.'
-      const fleet = rebuildFleet(this.selectedShips, this.selected.Now)
+      const fleet = rebuildFleet(this.selectedShips, this.selected.Now, this.StartYear)
       const translating = timeline.some((snapshot) => snapshot.comm === ATTEMPTING_COMMUNICATION)
-      const intelDatasets = [line('Race intelligence', at('intel'), 0)]
+      const diplomacy = series('points', 'intelligence.diplomaticPoints', 'the diplomatic points')
+      const intelligence = series('intel', 'intelligence.observed', 'the race intelligence')
+      const translation = translating ? series('translation', 'intelligence.translationProgress', 'the translation progress') : null
+      const rewards = rewardAttempts(timeline, this.formulaVersion, this.StartYear)
+      const intelDatasets = [line('Race intelligence', pointsOf(intelligence), 0)]
       // Diplomacy's axis reaches the nearest treaty or status line on each side, so where the race stands relative to them shows even with one point.
-      const points = timeline.map((snapshot) => snapshot.points)
-      const lineAbove = DIPLOMACY_LINES.find((entry) => entry.y >= Math.max(...points))
-      const lineBelow = DIPLOMACY_LINES.slice().reverse().find((entry) => entry.y <= Math.min(...points))
+      const known = pointsOf(diplomacy).map((point) => point.y).filter((y) => y !== null)
+      const lineAbove = known.length ? DIPLOMACY_LINES.find((entry) => entry.y >= Math.max(...known)) : undefined
+      const lineBelow = known.length ? DIPLOMACY_LINES.slice().reverse().find((entry) => entry.y <= Math.min(...known)) : undefined
+      const fleetPoints = pointsOf(fleet)
 
-      if (translating) {
-        intelDatasets.push(line('Translation progress', at('translation'), 1, { yAxisID: 'y1' }))
+      if (translation) {
+        intelDatasets.push(line('Translation progress', pointsOf(translation), 1, { yAxisID: 'y1' }))
       }
 
       return [
@@ -430,20 +503,22 @@ export default {
           key: 'diplomacy',
           title: 'Diplomatic points',
           summary: 'How the diplomatic points of the selected race have moved over time, against the levels where treaties and statuses change.',
-          note: `${recordedNote} Dashed lines are where treaties and statuses change.`,
-          data: { datasets: [line('Diplomatic points', at('points'), 0)] },
+          note: `${recordedNote} Dashed lines are where treaties and statuses change.${gapNote(diplomacy)}`,
+          results: [diplomacy],
+          data: { datasets: [line('Diplomatic points', pointsOf(diplomacy), 0)] },
           options: this.options({ y: (value) => this.count(value) }, { levels: DIPLOMACY_LINES }, { suggestedMax: lineAbove ? lineAbove.y : undefined, suggestedMin: lineBelow ? lineBelow.y : undefined }),
         },
         {
           key: 'fleet',
           title: 'Ships tracked',
           summary: 'How many ships of the selected race have been tracked in service and destroyed, and their tonnage, over time. It shows how its fleet has grown.',
-          note: fleet.length ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'No ships tracked.',
+          note: !this.selectedShips.length ? 'No ships tracked.' : `${isAvailable(fleet) ? 'Rebuilt from when each ship was first seen and last hit or seen, back to first contact.' : 'The fleet cannot be rebuilt.'}${gapNote(fleet)}`,
+          results: [fleet],
           data: {
             datasets: [
-              line('In service', fleet.map((point) => ({ x: this.year(point.t), y: point.alive })), 0),
-              line('Destroyed', fleet.map((point) => ({ x: this.year(point.t), y: point.lost })), 1),
-              line('Tonnage', fleet.map((point) => ({ x: this.year(point.t), y: point.tons })), 2, { yAxisID: 'y1', borderDash: [6, 4] }),
+              line('In service', placed(fleetPoints, 'alive'), 0),
+              line('Destroyed', placed(fleetPoints, 'lost'), 1),
+              line('Tonnage', placed(fleetPoints, 'tons'), 2, { yAxisID: 'y1', borderDash: [6, 4] }),
             ],
           },
           options: this.options({ y: (value) => this.count(value), y1: (value) => this.tons(value) }, {}, { beginAtZero: true, ticks: { precision: 0 } }),
@@ -452,9 +527,10 @@ export default {
           key: 'intelligence',
           title: translating ? 'Intelligence and translation' : 'Race intelligence',
           summary: 'The intelligence points gathered on the selected race over time, with translation progress while contact is being attempted.',
-          note: `${recordedNote} Marks show where points were spent on a discovery.`,
+          note: `${recordedNote} Marks show where points were spent on a discovery.${gapNote(intelligence)}${gapNote(rewards)}${translation ? gapNote(translation) : ''}`,
+          results: translation ? [intelligence, rewards, translation] : [intelligence, rewards],
           data: { datasets: intelDatasets },
-          options: this.options({ y: (value) => this.count(value), y1: translating ? (value) => this.count(value) : null }, { markers: rewardAttempts(timeline).map((t) => ({ x: this.year(t), label: 'Discovery' })) }, { min: 0, suggestedMax: REWARD_COST, ticks: { precision: 0 } }),
+          options: this.options({ y: (value) => this.count(value), y1: translating ? (value) => this.count(value) : null }, { markers: pointsOf(rewards).map((t) => ({ x: this.year(t), label: 'Discovery' })).filter((marker) => marker.x !== null) }, { min: 0, suggestedMax: REWARD_COST, ticks: { precision: 0 } }),
         },
       ]
     },
@@ -464,36 +540,36 @@ export default {
     },
 
     selectedClasses() {
-      const alive = {}
+      const classes = this.classes.filter((shipClass) => shipClass.AlienRaceID === this.selectedId)
+      const alive = aliveByClass(this.selectedShips, classes)
 
-      this.selectedShips.forEach((ship) => {
-        if (!ship.Destroyed) {
-          alive[ship.AlienClassID] = (alive[ship.AlienClassID] || 0) + 1
-        }
+      return classes.map((shipClass) => {
+        const size = classTons(shipClass.TCS)
+
+        return { ...shipClass, alive: valueOrNull(alive[shipClass.AlienClassID]), aliveResult: alive[shipClass.AlienClassID], sizeResult: size, tons: valueOrNull(size) }
       })
-
-      return this.classes.filter((shipClass) => shipClass.AlienRaceID === this.selectedId).map((shipClass) => ({ ...shipClass, alive: alive[shipClass.AlienClassID] || 0 }))
     },
 
     selectedPopulations() {
       return this.populations.filter((population) => population.AlienRaceID === this.selectedId).map((population) => {
-        const level = populationLevel(population)
+        const level = populationLevel(population, this.formulaVersion)
 
         return {
           ...population,
           intelligence: population.AlienPopulationIntelligencePoints,
-          levelText: level ? `Known: ${POPULATION_LEVELS.slice(0, level).map((entry) => entry.label.toLowerCase()).join('; ')}` : 'Only its signatures are known',
-          fields: Object.fromEntries(POPULATION_FIELDS.map((field) => [field.value, populationField(population, field.value)])),
+          levelResult: level,
+          levelText: !isAvailable(level) ? '—' : level.value ? `Known: ${POPULATION_LEVELS.slice(0, level.value).map((entry) => entry.label.toLowerCase()).join('; ')}` : 'Only its signatures are known',
+          fields: Object.fromEntries(POPULATION_FIELDS.map((field) => [field.value, populationField(population, field.value, this.formulaVersion)])),
         }
       })
     },
 
     selectedSensors() {
-      return this.sensors.filter((sensor) => sensor.AlienRaceID === this.selectedId).sort((a, b) => (a.Name || '').localeCompare(b.Name || '', undefined, { numeric: true }))
+      return this.sensors.filter((sensor) => sensor.AlienRaceID === this.selectedId).sort((a, b) => (a.Name || '').localeCompare(b.Name || '', undefined, { numeric: true })).map((sensor) => ({ ...sensor, reveal: sensorReveal(sensor.IntelligencePoints, this.formulaVersion) }))
     },
 
     selectedGroundUnits() {
-      return this.groundUnits.filter((unit) => unit.AlienRaceID === this.selectedId)
+      return this.groundUnits.filter((unit) => unit.AlienRaceID === this.selectedId).map((unit) => ({ ...unit, reveals: Object.fromEntries(GROUND_COUNTERS.map((counter) => [counter.value, groundReveal(unit[counter.value], this.formulaVersion)])) }))
     },
 
     selectedSystems() {
@@ -574,7 +650,7 @@ export default {
     selectDefault() {
       if (!this.selected && this.rows.length) {
         const saved = this.savedAlien
-        const fallback = this.rows.slice().sort((a, b) => (b.KnownShips + b.DestroyedShips) - (a.KnownShips + a.DestroyedShips))[0]
+        const fallback = this.rows.slice().sort((a, b) => b.source.TrackedShips - a.source.TrackedShips)[0]
 
         this.selectedId = this.rows.some((row) => row.AlienRaceID === saved) ? saved : fallback.AlienRaceID
       }
@@ -583,17 +659,64 @@ export default {
       this.selectedId = AlienRaceID
       this.savedAlien = AlienRaceID
     },
+    // A figure the save does not hold is a dash, never 0.
     count(value, decimals = 0) {
-      return separatedNumber(roundToDecimal(value || 0, decimals), this.separator)
+      return Number.isFinite(value) ? separatedNumber(roundToDecimal(value, decimals), this.separator) : '—'
     },
     tons(value) {
-      return `${compact(value || 0)} t`
+      return Number.isFinite(value) ? `${compact(value)} t` : '—'
+    },
+    scaled(value, divisor) {
+      return Number.isFinite(value) ? value / divisor : null
+    },
+    available(result) {
+      return isAvailable(result)
+    },
+    // The result when it is unavailable or has inputs missing, so a mark shows only where a figure is not whole.
+    unknown(result) {
+      return result && (!isAvailable(result) || result.inputs.missing.length) ? result : null
+    },
+    // The result when it is not whole or differs from its rule as registered (a weaker status, or assumptions beyond the rule's own, as an unverified save adds), so the figure's own mark stands where the panel's rule mark would say more than the figure can.
+    flagged(result) {
+      const rule = result ? getRule(result.rule.id) : null
+
+      return result && (this.unknown(result) || result.status !== rule.verification || result.assumptions.length > rule.assumptions.length) ? result : null
+    },
+    // An unavailable result for a stored figure that is not a number, else null.
+    gap(value, name) {
+      return Number.isFinite(value) ? null : observed(value, name)
     },
     year(seconds) {
-      return (this.StartYear || 0) + seconds / SECONDS_PER_YEAR
+      return valueOrNull(gameYear(this.StartYear, seconds))
+    },
+    dateResult(seconds, name) {
+      return contactTime(this.StartYear, seconds, name)
+    },
+    dateText(result) {
+      return isAvailable(result) ? gameTime(this.StartYear, result.value).format('YYYY-MM-DD') : '—'
     },
     date(seconds) {
-      return gameTime(this.StartYear, seconds).format('YYYY-MM-DD')
+      return this.dateText(this.dateResult(seconds))
+    },
+    dateGap(seconds) {
+      return this.unknown(this.dateResult(seconds))
+    },
+    rangeText(sensor) {
+      return `${this.count(this.scaled(sensor.Range, 1e6), 1)} M km, resolution ${this.count(sensor.Resolution)}`
+    },
+    // Table rows with the figure missing go last, whichever way it sorts.
+    sortNullLast(items, sortBy, sortDesc) {
+      const [key] = sortBy
+
+      if (!key) {
+        return items
+      }
+
+      const direction = sortDesc[0] ? -1 : 1
+      const known = (item) => item[key] !== null && item[key] !== undefined
+      const sorted = items.filter(known).sort((a, b) => (typeof a[key] === 'string' ? a[key].localeCompare(b[key]) : a[key] - b[key]) * direction)
+
+      return sorted.concat(items.filter((item) => !known(item)))
     },
     engineType(code) {
       return ENGINE_TYPES[code] || 'Unknown'
@@ -602,7 +725,7 @@ export default {
       return CLASS_ROLES[code] || 'Unknown'
     },
     speciesStatus(code) {
-      return SPECIES_STATUS[code] || 'Discovered'
+      return SPECIES_STATUS[code] || 'Unknown'
     },
     fieldText(field, value) {
       if (field.kind === 'flag') {
@@ -629,7 +752,7 @@ export default {
           guides,
           tooltip: {
             callbacks: {
-              title: (items) => this.date((items[0].parsed.x - (this.StartYear || 0)) * SECONDS_PER_YEAR),
+              title: (items) => this.date((items[0].parsed.x - this.StartYear) * SECONDS_PER_YEAR),
               label: (item) => `${item.dataset.label}: ${item.dataset.yAxisID === 'y1' && axes.y1 ? axes.y1(item.parsed.y) : axes.y(item.parsed.y)}`,
             },
           },
@@ -638,6 +761,17 @@ export default {
     },
   },
   asyncComputed: {
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
     races: {
       get: tracked('races', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -655,7 +789,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_AlienShip.AlienRaceID, FCT_AlienShip.AlienClassID, FCT_AlienShip.FirstDetected, FCT_AlienShip.Destroyed, FCT_AlienShip.GameTimeDamaged, FCT_AlienShip.LastContactTime, FCT_AlienClass.TCS * 50 as Tons from FCT_AlienShip inner join FCT_AlienClass on FCT_AlienClass.AlienClassID = FCT_AlienShip.AlienClassID where FCT_AlienShip.GameID = ${this.GameID} and FCT_AlienShip.ViewRaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_AlienShip.AlienRaceID, FCT_AlienShip.AlienClassID, FCT_AlienShip.FirstDetected, FCT_AlienShip.Destroyed, FCT_AlienShip.GameTimeDamaged, FCT_AlienShip.LastContactTime, FCT_AlienClass.TCS * ${TONS_PER_SIZE} as Tons from FCT_AlienShip left join FCT_AlienClass on FCT_AlienClass.AlienClassID = FCT_AlienShip.AlienClassID where FCT_AlienShip.GameID = ${this.GameID} and FCT_AlienShip.ViewRaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },
@@ -717,7 +851,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_AlienRaceSpecies.AlienRaceID, FCT_AlienRaceSpecies.SpeciesID, FCT_Species.SpeciesName, coalesce(FCT_KnownSpecies.Status, 0) as Status from FCT_AlienRaceSpecies inner join FCT_Species on FCT_Species.SpeciesID = FCT_AlienRaceSpecies.SpeciesID left join FCT_KnownSpecies on FCT_KnownSpecies.SpeciesID = FCT_AlienRaceSpecies.SpeciesID and FCT_KnownSpecies.ViewRaceID = FCT_AlienRaceSpecies.DetectRaceID and FCT_KnownSpecies.GameID = FCT_AlienRaceSpecies.GameID where FCT_AlienRaceSpecies.GameID = ${this.GameID} and FCT_AlienRaceSpecies.DetectRaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_AlienRaceSpecies.AlienRaceID, FCT_AlienRaceSpecies.SpeciesID, FCT_Species.SpeciesName, FCT_KnownSpecies.Status from FCT_AlienRaceSpecies inner join FCT_Species on FCT_Species.SpeciesID = FCT_AlienRaceSpecies.SpeciesID left join FCT_KnownSpecies on FCT_KnownSpecies.SpeciesID = FCT_AlienRaceSpecies.SpeciesID and FCT_KnownSpecies.ViewRaceID = FCT_AlienRaceSpecies.DetectRaceID and FCT_KnownSpecies.GameID = FCT_AlienRaceSpecies.GameID where FCT_AlienRaceSpecies.GameID = ${this.GameID} and FCT_AlienRaceSpecies.DetectRaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },

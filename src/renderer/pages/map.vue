@@ -66,7 +66,8 @@
               <v-radio-group v-model="linkLength" dense hide-details class="mt-2">
                 <v-radio v-for="option in linkLengths" :key="option.value" :value="option.value" :label="option.text" />
               </v-radio-group>
-              <div class="caption text--secondary mt-2">{{ linkLengthHint }}</div>
+              <div class="caption text--secondary mt-2">{{ linkLengthHint }}<provenance-mark v-if="linkLengthRule" :rule="linkLengthRule" /></div>
+              <div v-if="linkLengthGaps" class="caption text--secondary mt-2">{{ linkLengthGaps }}</div>
               <div class="free-actions">
                 <v-btn outlined small :disabled="linkLength === 'galactic'" title="A force-directed layout that keeps linked systems close" @click="applyForces">Forces</v-btn>
                 <v-btn outlined small title="Shakes the map loose and separates the systems" @click="scramble">Scramble</v-btn>
@@ -79,7 +80,7 @@
         </div>
       </div>
 
-      <v-card class="panel map-card" elevation="1">
+      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks. Use it to see the race's reach, plan where to go next and lay the map out." elevation="1">
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
@@ -96,10 +97,11 @@
                     <span>{{ discoveryAsOf.text }}</span>
                     <span class="discovery-text__widest" aria-hidden="true">{{ discoveryAsOf.widest }}</span>
                   </span>
+                  <provenance-mark :result="discoveryEra" />
                 </template>
                 <span v-else-if="item.kind === 'area'" class="area" :style="{ borderColor: item.color, background: item.tint }"><span v-if="item.dot" class="dot" :style="{ background: item.color }" /></span>
                 <span v-else-if="item.kind !== 'heading' && item.kind !== 'note'" class="dot" :style="{ background: item.color }" />
-                {{ item.label }}
+                {{ item.label }}<provenance-mark v-if="item.rule || item.result" :rule="item.rule || ''" :result="item.result || null" />
               </span>
             </span>
           </span>
@@ -121,7 +123,7 @@
                 <v-progress-linear class="busy-bar" :value="progress * 100" :indeterminate="busy !== 'arrange'" height="4" rounded />
                 <v-btn x-small text color="primary" @click="stopBusy">Stop</v-btn>
               </template>
-              <span v-else>{{ qualityText }}</span>
+              <span v-else>{{ qualityText }}<provenance-mark :result="straightResult" /></span>
             </div>
             <div v-if="!systemRows.length" class="map-empty text--secondary">The race knows no systems yet.</div>
           </div>
@@ -139,6 +141,7 @@
                 <dd :key="`${fact.label}-value`">
                   <a v-if="fact.action" :title="fact.title" @click="fact.action">{{ fact.value }}</a>
                   <template v-else>{{ fact.value }}</template>
+                  <provenance-mark v-if="fact.result" :result="fact.result" />
                 </dd>
               </template>
             </dl>
@@ -179,7 +182,7 @@
         </div>
         <div class="panel-foot caption text--secondary">
           <span class="panel-foot__text">
-            Positions are the game's galactic map, in its units; markers grow with the people living there. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
+            Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
             <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until the map is saved.</template>
           </span>
           <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->
@@ -254,22 +257,24 @@ import cola from 'cytoscape-cola'
 import { chartTheme } from '../components/charts/theme'
 import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
+import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import SystemView from '../components/SystemView.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
-import { gameTime } from '../utilities/aurora'
 import { linkTo, place, queryId } from '../utilities/deep-links'
 import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/grid-layout'
-import { buildDistanceMap, loadJumpPoints } from '../utilities/jump-graph'
+import { loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
-import { COLONY_COST_BANDS, CONTACT_ORDER, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
-import { scaleValue } from '../utilities/math'
+import { isAvailable, valueOrNull } from '../utilities/provenance'
+import { loadFormulaVersion } from '../utilities/transport'
 
 cytoscape.use(cxtmenu)
 cytoscape.use(cola)
@@ -281,6 +286,7 @@ const INPUT_LABELS = {
   sectors: 'the sectors',
   aliens: 'the known alien races',
   features: 'what the map can mark',
+  formulaVersion: 'the save\'s schema',
 }
 
 const LAYERS = [
@@ -413,6 +419,9 @@ const MARK_HEADERS = { glyph: 'Round the marker', line: 'Under the name' }
 
 const MARK_GROUPS = Object.keys(MARK_HEADERS).map((place) => ({ place, header: MARK_HEADERS[place], marks: MARKS.filter((mark) => mark.place === place) }))
 
+// The rule behind what a mark shows, for the marks that work a figure out (utilities/map-figures.js, map-features.js); the others show stored rows as they are.
+const MARK_RULES = { habitable: 'map.bodiesByCost', ruins: 'map.ruinState', danger: 'map.dangerFlag', discovered: 'map.discoveredDate' }
+
 const PHASES = {
   stress: 'Spreading the systems out',
   place: 'Putting them on the grid',
@@ -454,40 +463,7 @@ const blend = (hex, background, alpha) => {
 
 const rgba = (hex, alpha) => `rgba(${[1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(', ')}, ${alpha})`
 
-// Jumps from `origin` to every system an explored route reaches, over the page's `neighbours`.
-const hopsFrom = (origin, neighbours) => {
-  const hops = { [origin]: 0 }
-  const queue = [origin]
-
-  for (let i = 0; i < queue.length; i += 1) {
-    (neighbours[queue[i]] || []).forEach((other) => {
-      if (hops[other] === undefined) {
-        hops[other] = hops[queue[i]] + 1
-        queue.push(other)
-      }
-    })
-  }
-
-  return hops
-}
-
-const MARKER_BASE_SIZE = 44
-const COLONY_FULL_MILLIONS = 10
-
-// 44 units across for a system with nobody in it, growing towards 104 with colonies and people.
-const markerSize = (colonies, population) => {
-  if (!colonies) {
-    return MARKER_BASE_SIZE
-  }
-
-  const count = Math.log1p(colonies) / Math.log1p(100)
-  const people = Math.log1p(Math.max(0, population)) / Math.log1p(10000)
-  const blended = Math.exp(0.3 * Math.log(Math.max(1e-9, count)) + 0.7 * Math.log(Math.max(1e-9, people)))
-
-  return Math.round(MARKER_BASE_SIZE + 60 * (blended / (1 + blended)))
-}
-
-// The broken rings round empty systems (dots) and comets-only ones (dashes). Cytoscape's own dotted border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out. These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least `least` of them round a system.
+// The broken rings round empty systems (dots), and comets-only ones or those whose state the layer can't tell (dashes). Cytoscape's own dotted border puts dots one unit apart, which blur into a plain ring as soon as the map is zoomed out. These are drawn as dash patterns instead, `dash` long with `gap` between at zoom 1, and at least `least` of them round a system.
 const RING_DOTS = { dash: 0, gap: 6, least: 8 }
 const RING_DASHES = { dash: 7, gap: 4, least: 6 }
 
@@ -592,7 +568,7 @@ const ARRANGE_DEFAULTS = { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT
 
 export default {
   name: 'MapPage',
-  components: { LoadState, MapGlyph, SystemView },
+  components: { LoadState, MapGlyph, ProvenanceMark, SystemView },
   mixins: [
     countFormat,
     deepLink,
@@ -726,9 +702,9 @@ export default {
         Ycor: system.Ycor,
         SectorID: system.SectorID || null,
         ControlRaceID: system.ControlRaceID || null,
-        DiscoveredTime: system.DiscoveredTime,
-        // Light years, scaled as the old map did so a free layout's links stay on screen.
-        galactic: system.X === null || system.X === undefined ? null : { x: system.X * 18, y: system.Y * 18, z: system.Z * 18 },
+        // The game time the race found it, null where the save has none: unknown, not the game's start.
+        DiscoveredTime: Number.isFinite(system.DiscoveredTime) ? system.DiscoveredTime : null,
+        galactic: galacticPosition(system),
         bodies: system.Bodies || 0,
         surveyedBodies: system.SurveyedBodies || 0,
         cometsOnly: system.Bodies > 0 && !system.Planets && system.Comets === system.Bodies,
@@ -736,14 +712,16 @@ export default {
         locations: system.Locations || 0,
         surveyedLocations: system.SurveyedLocations || 0,
         colonies: system.Colonies || 0,
-        population: system.Population || 0,
+        // Millions of people, null where a colony there has no stored population.
+        population: colonyPopulation(system),
         capital: Boolean(system.Capital),
-        danger: system.DangerRating || 0,
+        // Null where the save has no danger rating: unknown, not no danger.
+        danger: Number.isFinite(system.DangerRating) ? system.DangerRating : null,
         stars: system.Stars || 0,
         starGroup: starGroup(system.SpectralClass, system.SizeText),
         star: starText(system),
         flags: [system.NoAutoRoute && 'Auto-routing blocked', system.MilitaryRestrictedSystem && 'Military restricted', system.MineralSearchFlag && 'Mineral search flagged'].filter(Boolean),
-        size: markerSize(system.Colonies || 0, system.Population || 0),
+        size: markerSize(system.Colonies || 0, colonyPopulation(system)),
       }))
     },
 
@@ -784,7 +762,7 @@ export default {
         const key = from < to ? `${from}-${to}` : `${to}-${from}`
 
         if (!links.has(key)) {
-          links.set(key, { id: `link-${key}`, source: from, target: to, gateSource: false, gateTarget: false, km: 0 })
+          links.set(key, { id: `link-${key}`, source: from, target: to, gateSource: false, gateTarget: false, points: [] })
         }
 
         const link = links.get(key)
@@ -793,19 +771,20 @@ export default {
           link[link.source === from ? 'gateSource' : 'gateTarget'] = true
         }
 
-        link.km += Math.hypot(jumpPoint.Xcor, jumpPoint.Ycor)
+        link.points.push(jumpPoint)
       })
 
-      const list = [...links.values()].map((link) => {
-        const a = rowById[link.source].galactic
-        const b = rowById[link.target].galactic
+      const list = [...links.values()].map(({ points, ...link }) => {
+        const distance = linkDistance(points)
+        const galactic = galacticDistance(rowById[link.source].galactic, rowById[link.target].galactic)
 
         return {
           ...link,
           gate: link.gateSource && link.gateTarget ? 'both' : link.gateSource ? 'source' : link.gateTarget ? 'target' : 'none',
-          // From star to star through the jump point, in billions of km, as the free layouts want it.
-          travel: scaleValue(link.km / 1e9),
-          galactic: a && b ? Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) : null,
+          distance,
+          // From star to star through the jump point, in billions of km, as the free layouts want it; null where a jump point has no stored position.
+          travel: travelLength(distance),
+          galactic: valueOrNull(galactic),
         }
       })
 
@@ -833,7 +812,7 @@ export default {
     },
 
     hops() {
-      return this.capitalId ? hopsFrom(this.capitalId, this.neighbours) : {}
+      return this.capitalId ? jumpsFromOrigin(this.capitalId, this.neighbours) : {}
     },
 
     // The one system selected, else the capital: where Jumps and Travel measure from, and what the centre button centres on.
@@ -852,37 +831,25 @@ export default {
         return {}
       }
 
-      return originId === this.capitalId ? this.hops : hopsFrom(originId, this.neighbours)
+      return originId === this.capitalId ? this.hops : jumpsFromOrigin(originId, this.neighbours)
     },
 
+    // The most jumps to a system from the origin, or null when no other system is reached.
     farthestHop() {
-      return Math.max(1, ...Object.values(this.originHops))
+      return farthestOf(this.originHops)
     },
 
-    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's galactic map measures distance.
+    // Kilometres from the origin's star to each system's on the shortest explored route, as the game's galactic map measures distance: { km, left }, `left` the explored jump points with no stored position, which no route uses.
+    originDistances() {
+      return kmFromOrigin(this.jumpPoints, this.systemRows, this.originId)
+    },
+
     originKm() {
-      const { originId } = this
-      const km = {}
-
-      if (!originId) {
-        return km
-      }
-
-      const distanceTo = buildDistanceMap(this.jumpPoints, [{ SystemID: Number(originId), Xcor: 0, Ycor: 0 }])
-
-      this.systemRows.forEach((row) => {
-        const found = distanceTo({ SystemID: row.SystemID, Xcor: 0, Ycor: 0 })
-
-        if (found) {
-          km[row.id] = found.km
-        }
-      })
-
-      return km
+      return this.originDistances.km
     },
 
     farthestKm() {
-      return Math.max(1, ...Object.values(this.originKm))
+      return farthestOf(this.originKm)
     },
 
     // Colony costs are worked out only while the map shows them: every body of a large galaxy takes a while.
@@ -912,6 +879,20 @@ export default {
       }
 
       return this.currentHabitability.species ? null : 'No species of the race to work out colony costs for'
+    },
+
+    // What the colony costs lack, as a missing input names it, or null once they are worked out.
+    habitabilityGap() {
+      if (this.currentHabitability) {
+        return this.currentHabitability.species ? null : 'a species of the race to work out colony costs for'
+      }
+
+      return this.loadErrors.habitability ? 'the colony costs, which couldn\'t be worked out' : 'the colony costs, not worked out yet'
+    },
+
+    // How many systems have each colony cost band as their best: unavailable until the costs are worked out, when every system's band is unknown rather than none.
+    habitabilityCounts() {
+      return legendCounts(this.currentHabitability, this.systemRows, { reason: this.habitabilityGap, version: this.formulaVersion })
     },
 
     // Each system's count of bodies per band of COLONY_COST_BANDS, for systems with any.
@@ -1083,6 +1064,7 @@ export default {
         'ruins-identified': { path: PILLAR_PATH, color: colors.ruins, label: 'Ruins, their builders identified' },
         'ruins-found': { path: PILLAR_PATH, color: colors.ruins, hollow: true, label: 'Ruins, builders unknown' },
         'ruins-used': { path: PILLAR_PATH, color: colors.ring, hollow: true, label: 'Ruins with nothing left to recover' },
+        'ruins-unknown': { path: PILLAR_PATH, color: colors.ring, label: 'Ruins, installations left not stored' },
         'constructs-active': { path: PYRAMID_PATH, color: colors.construct, label: 'Active ancient construct' },
         'constructs-dormant': { path: PYRAMID_PATH, color: colors.construct, hollow: true, label: 'Dormant ancient construct' },
         rifts: { path: HURRICANE_PATH, color: colors.rift, label: 'Aether rift' },
@@ -1104,29 +1086,32 @@ export default {
 
     // The first and last time the race found a system after the game began, in seconds of game time.
     discoveryRange() {
-      const times = this.systemRows.map((row) => row.DiscoveredTime).filter((time) => time > 0)
-
-      return times.length ? { first: Math.min(...times), last: Math.max(...times) } : null
+      return discoveryRange(this.systemRows)
     },
 
-    // The Discovery era's As of slider, from the game's start to the year the last system was found: the year chosen and the game time its end comes at, which the systems found from then on fade behind.
-    discoveryAsOf() {
-      const range = this.discoveryRange
+    // The game's start date as a result: unavailable while the start year is not read, when no date the map shows can be known.
+    gameStart() {
+      return discoveredDate(this.StartYear, 0)
+    },
 
-      if (!range) {
+    // The Discovery era's As of as a result (null when the race found no system after the game began), unavailable without the game's start year.
+    discoveryEra() {
+      return discoveryAsOf(this.systemRows, this.discoveryRange, this.StartYear, this.discoveryYear)
+    },
+
+    // The Discovery era's As of slider, from the game's start to the year the last system was found: the year chosen and the game time its end comes at, which the systems found from then on fade behind. Systems with no stored discovery time count in neither the known nor the total, and the text says how many there are.
+    discoveryAsOf() {
+      const era = this.discoveryEra
+
+      if (!isAvailable(era)) {
         return null
       }
 
-      const start = gameTime(this.StartYear, 0)
-      const min = start.year()
-      const max = gameTime(this.StartYear, range.last).year()
-      const year = this.discoveryYear === null ? max : Math.min(max, Math.max(min, this.discoveryYear))
-      const cutoff = year < max ? start.set('year', year + 1).diff(start, 'second') : null
-      const known = cutoff === null ? this.systemRows.length : this.systemRows.filter((row) => !(row.DiscoveredTime >= cutoff)).length
+      const { min, max, year, cutoff, known, dated, undated } = era.value
+      const unknown = undated ? `, ${this.count(undated)} with no date stored` : ''
+      const text = (shown, systems) => `As of ${discoveryYearText(this.StartYear, shown)}: ${this.count(systems)} of ${this.count(dated)} systems known${unknown}`
 
-      const text = (shown, systems) => `As of ${start.set('year', shown).format('YYYY')}: ${this.count(systems)} of ${this.count(this.systemRows.length)} systems known`
-
-      return { min, max, year, cutoff, text: text(year, known), widest: text(max, this.systemRows.length) }
+      return { min, max, year, cutoff, text: text(year, known), widest: text(max, dated) }
     },
 
     discoveryCutoff() {
@@ -1143,13 +1128,17 @@ export default {
       }))
 
       MARKS.filter((mark) => this.marksSet.has(mark.value)).forEach((mark) => {
+        const rule = MARK_RULES[mark.value]
+
         if (mark.value === 'habitable' && this.habitabilityNote) {
-          items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}` })
+          items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}`, result: this.habitabilityCounts })
+        } else if (mark.value === 'discovered' && !isAvailable(this.gameStart)) {
+          items.push({ kind: 'note', label: `${mark.text}: unknown, the game's start year is not read`, result: this.gameStart })
         } else if (mark.place === 'glyph') {
           const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
           const shown = names.filter((name) => counts[name])
 
-          shown.forEach((name) => items.push({ kind: 'glyph', ...this.glyphStyles[name], label: `${this.glyphStyles[name].label} (${counts[name]})` }))
+          shown.forEach((name) => items.push({ kind: 'glyph', ...this.glyphStyles[name], label: `${this.glyphStyles[name].label} (${counts[name]})`, rule }))
 
           if (!shown.length) {
             items.push({ kind: 'note', label: `${mark.text}: none known` })
@@ -1158,8 +1147,11 @@ export default {
           const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
           const sample = { danger: '40 / 25', discovered: 'Date' }[mark.value]
           const label = { danger: 'Danger / protection, ⚠ where it falls short', discovered: 'Date found after the game began' }[mark.value]
+          // Systems whose line can't be fully known: a danger line whose protection is not stored (shown with a dash, and among the systems with a line), and systems with no danger rating or no discovery time stored, which have no line.
+          const unknown = mark.value === 'danger' ? [[this.systemRows.filter((row) => row.danger > 0 && !isAvailable(this.dangerOf(row))).length, 'with the protection there unknown'], [this.systemRows.filter((row) => row.danger === null).length, 'with no danger rating stored']] : [[this.systemRows.filter((row) => discoveryUnknown(row.DiscoveredTime)).length, 'with no date stored']]
+          const unknownText = unknown.filter(([systems]) => systems).map(([systems, text]) => `, ${systems} ${text}`).join('')
 
-          items.push(systems ? { kind: 'sample', sample, label: `${label} (${systems})` } : { kind: 'note', label: `${mark.text}: none known` })
+          items.push(systems || unknownText ? { kind: 'sample', sample, label: `${label} (${systems}${unknownText})`, rule } : { kind: 'note', label: `${mark.text}: none known` })
         }
       })
 
@@ -1349,25 +1341,34 @@ export default {
       const hops = this.hops[system.id]
       const group = this.groupOf[system.id]
       const features = this.features[system.id] || NO_FEATURES
-      const bands = this.habitableBands[system.id]
+      const people = system.colonies ? populationText(system.population, this.count) : null
+      const geological = system.bodies ? surveyShare(system.surveyedBodies, system.bodies) : null
+      const gravitational = system.locations ? surveyShare(system.surveyedLocations, system.locations) : null
+      const discovered = discoveredDate(this.StartYear, system.DiscoveredTime)
+      const costs = bodiesByCost(this.currentHabitability, system.id, { reason: this.habitabilityGap, version: this.formulaVersion })
+      const ruins = features.ruins.map((ruin) => ({ ruin, state: ruinState(ruin) }))
+      const constructs = features.constructs.map((construct) => ({ construct, bonus: construct.active ? constructBonus(construct) : null }))
+      const bonuses = constructs.map((entry) => entry.bonus).filter(Boolean)
+      const danger = system.danger === 0 ? null : this.dangerOf(system)
       const facts = [
-        { label: 'From the capital', value: hops === undefined ? 'No explored route' : hops === 0 ? 'Capital' : `${hops} ${hops === 1 ? 'jump' : 'jumps'}` },
+        { label: 'From the capital', value: hops === undefined ? 'No explored route' : hops === 0 ? 'Capital' : `${hops} ${hops === 1 ? 'jump' : 'jumps'}`, result: jumpsTo(this.hops, system.id) },
         { label: 'Held by', value: this.controllerName(system) },
-        { label: 'Colonies', value: system.colonies ? `${system.colonies}, ${this.count(system.population, system.population < 10 ? 2 : 0)} m people` : 'None' },
-        { label: 'Geological', value: system.bodies ? `${this.count(system.surveyedBodies)} of ${this.count(system.bodies)} bodies surveyed${system.groundSurveys ? `, ${system.groundSurveys} with ground survey potential` : ''}` : 'No bodies' },
-        { label: 'Gravitational', value: system.locations ? `${system.surveyedLocations} of ${system.locations} survey locations` : 'No survey locations' },
+        { label: 'Colonies', value: people ? `${system.colonies}, ${isAvailable(people) ? people.value : 'population not stored'}` : 'None', result: people },
+        { label: 'Geological', value: system.bodies ? `${this.count(system.surveyedBodies)} of ${this.count(system.bodies)} bodies surveyed (${geological.value}%)${system.groundSurveys ? `, ${system.groundSurveys} with ground survey potential` : ''}` : 'No bodies', result: geological },
+        { label: 'Gravitational', value: system.locations ? `${system.surveyedLocations} of ${system.locations} survey locations (${gravitational.value}%)` : 'No survey locations', result: gravitational },
         { label: 'Jump points', value: this.jumpPointSummary(system) },
-        { label: 'Discovered', value: gameTime(this.StartYear, system.DiscoveredTime || 0).format('YYYY-MM-DD') },
+        { label: 'Discovered', value: isAvailable(discovered) ? discovered.value : '—', result: discovered },
         // What Show can mark, wherever the system has any, shown or not.
         system.star && { label: system.stars > 1 ? 'Stars' : 'Star', value: system.star },
-        // Each band counts the bodies not already in a lower one.
-        bands && { label: 'Bodies by colony cost', value: COLONY_COST_BANDS.map((limit, band) => ({ limit, bodies: bands[band] })).filter((part) => part.bodies).map((part, index) => `${part.bodies} ${index ? 'more ' : ''}under ${part.limit}`).join(', ') },
-        features.ruins.length && { label: 'Ruins', value: features.ruins.map((ruin) => `${ruin.body}: ${ruin.ruin}${ruin.race ? ` built by ${ruin.race}` : ''}, ${ruin.factories ? `${this.count(ruin.factories)} installations left` : 'nothing left'}`).join('; ') },
+        // Each band counts the bodies not already in a lower one. Unknown while the costs are not worked out, which the map does only while it shows them.
+        (isAvailable(costs) || this.needsHabitability) && { label: 'Bodies by colony cost', value: isAvailable(costs) ? costs.value || `None under ${COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]}` : '—', result: costs },
+        ruins.length && { label: 'Ruins', value: ruins.map(({ ruin, state }) => `${ruin.body}: ${ruin.ruin}${ruin.race ? ` built by ${ruin.race}` : ''}, ${!isAvailable(state) ? 'installations left not stored' : ruin.factories > 0 ? `${this.count(ruin.factories)} installations left` : 'nothing left'}`).join('; '), result: weakestResult(ruins.map((entry) => entry.state)) },
         // As the game shows them, a dormant construct keeps its field and bonus hidden.
-        features.constructs.length && { label: 'Ancient constructs', value: features.constructs.map((construct) => `${construct.body}: ${construct.active ? `${construct.field} research +${Math.round((construct.bonus - 1) * 100)}%` : 'dormant'}`).join('; ') },
+        constructs.length && { label: 'Ancient constructs', value: constructs.map(({ construct, bonus }) => `${construct.body}: ${!bonus ? 'dormant' : isAvailable(bonus) ? `${construct.field} research +${bonus.value}%` : `${construct.field} research, bonus not stored`}`).join('; '), result: bonuses.length ? weakestResult(bonuses) : null },
         features.wrecks && { label: 'Wrecks', value: this.count(features.wrecks) },
         features.rifts && { label: 'Aether rifts', value: this.count(features.rifts) },
-        system.danger > 0 && { label: 'Danger', value: `${this.count(system.danger)}, protection ${this.count(features.protection)}` },
+        // A system with no danger rating stored shows a dash; one whose ships' protection is not stored shows the rating and a dash for the protection, with no ⚠.
+        danger && { label: 'Danger', value: system.danger === null ? '—' : `${this.count(system.danger)}, protection ${Number.isFinite(features.protection) ? this.count(features.protection) : '—'}${danger.value ? ' ⚠' : ''}`, result: danger },
         features.ships && { label: 'Ships', value: `${this.count(features.ships)}${features.military ? `, ${this.count(features.military)} of them military` : ''}` },
         features.shipyards && { label: 'Shipyards', value: this.count(features.shipyards) },
         features.waypoints && { label: 'Waypoints', value: this.count(features.waypoints) },
@@ -1397,12 +1398,14 @@ export default {
       const group = (owner, label) => (merged && shaped.has(owner) ? { kind: 'area', dot: true, color: owner.color, tint: rgba(owner.color, TINT), label } : { kind: 'dot', color: owner.color, label })
       const systemsWhere = (test) => this.systemRows.filter(test).length
       const systemsText = (systems) => `${systems} ${systems === 1 ? 'system' : 'systems'}`
+      // A system whose state the layer can't tell is drawn hollow with a dashed ring.
+      const unknown = (label, extra = {}) => ({ kind: 'ring', color: colors.ring, style: 'dashed', label, ...extra })
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
 
         items.push(
-          { kind: 'dot', color: colors.done, label: geological ? 'Bodies surveyed' : 'Locations surveyed' },
+          { kind: 'dot', color: colors.done, label: geological ? 'Bodies surveyed' : 'Locations surveyed', rule: 'map.surveyShare' },
           { kind: 'dot', color: colors.left, label: 'Left to survey' },
           { kind: 'ring', color: colors.ring, style: 'dotted', label: `${geological ? 'No bodies' : 'No survey locations'} (${systemsWhere((row) => !(geological ? row.bodies : row.locations))})` }
         )
@@ -1416,12 +1419,18 @@ export default {
           items.push({ kind: 'spot', color: colors.unexplored, label: `Unexplored jump point (in ${systemsText(systemsWhere((row) => this.links.unexplored[row.id]))})` })
         }
       } else if (this.layer === 'colonies') {
+        const unstored = systemsWhere((row) => row.colonies && row.population === null)
+
         items.push(
           { kind: 'ring', color: colors.ink, label: 'Capital' },
-          { kind: 'dot', color: colors.colony, label: `People, full at ${COLONY_FULL_MILLIONS} M (${systemsWhere((row) => row.colonies && row.population > 0)})` },
-          { kind: 'dot', color: colors.outpost, label: `Zero people (${systemsWhere((row) => row.colonies && !(row.population > 0))}) / unfilled` },
+          { kind: 'dot', color: colors.colony, label: `People, full at ${COLONY_FULL_MILLIONS} M (${systemsWhere((row) => row.colonies && row.population > 0)})`, rule: 'map.colonyFill' },
+          { kind: 'dot', color: colors.outpost, label: `Zero people (${systemsWhere((row) => row.colonies && row.population !== null && !(row.population > 0))}) / unfilled` },
           { kind: 'dot', color: colors.none, label: `No colony (${systemsWhere((row) => !row.colonies)})` }
         )
+
+        if (unstored) {
+          items.push(unknown(`Population not stored (${unstored})`, { color: colors.colony }))
+        }
       } else if (this.layer === 'sectors') {
         this.sectors.forEach((sector) => items.push(group(this.sectorById[sector.SectorCommandID], `${sector.SectorName} (${systemsWhere((row) => row.SectorID === sector.SectorCommandID)})`)))
         items.push({ kind: 'dot', color: colors.none, label: `In no sector (${systemsWhere((row) => !this.sectorById[row.SectorID])})` })
@@ -1433,29 +1442,43 @@ export default {
         items.push({ kind: 'dot', color: colors.none, label: `In no cluster (${systemsWhere((row) => this.groupOf[row.id] === undefined)})` })
       } else if (this.layer === 'discovery') {
         const range = this.discoveryRange
-        const year = (time) => gameTime(this.StartYear, time).format('YYYY')
+        const year = (time) => {
+          const date = discoveredDate(this.StartYear, time)
 
-        items.push({ kind: 'ring', color: colors.ink, label: 'Capital' }, { kind: 'dot', color: this.discoveryColor(0), label: `Known from the start (${systemsWhere((row) => !(row.DiscoveredTime > 0))})` })
+          return isAvailable(date) ? date.value.slice(0, 4) : 'year unknown'
+        }
+        const undated = systemsWhere((row) => discoveryUnknown(row.DiscoveredTime))
+
+        items.push({ kind: 'ring', color: colors.ink, label: 'Capital' }, { kind: 'dot', color: this.discoveryColor(0), label: `Known from the start (${systemsWhere((row) => discoveredAtStart(row.DiscoveredTime))})` })
 
         if (range) {
-          items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})` })
+          items.push({ kind: 'dot', color: this.discoveryColor(range.first), label: `Found first (${year(range.first)})` }, { kind: 'dot', color: this.discoveryColor(range.last), label: `Found last (${year(range.last)})`, rule: 'map.discoveryShade' })
 
-          if (this.discoveryAsOf.max > this.discoveryAsOf.min) {
+          if (this.discoveryAsOf && this.discoveryAsOf.max > this.discoveryAsOf.min) {
             items.push({ kind: 'slider', label: '' })
           }
         }
+
+        if (undated) {
+          items.push(unknown(`Date found not stored (${undated})`))
+        }
+
+        if (!isAvailable(this.gameStart)) {
+          items.push({ kind: 'note', label: 'Dates unknown: the game\'s start year is not read', result: this.gameStart })
+        }
       } else if (this.layer === 'habitability') {
-        if (this.habitabilityNote) {
-          items.push({ kind: 'note', label: this.habitabilityNote })
+        const counts = this.habitabilityCounts
+
+        if (this.habitabilityNote || !isAvailable(counts)) {
+          items.push({ kind: 'note', label: this.habitabilityNote || 'Colony costs unknown' }, unknown(`Colony costs unknown (${this.systemRows.length})`, { result: counts }))
         } else {
-          const best = this.systemRows.map((row) => this.bestBand(row))
-          const systems = (band) => best.filter((value) => value === band).length
           const last = COLONY_COST_BANDS[COLONY_COST_BANDS.length - 1]
 
           items.push(
-            ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${systems(band)})` })),
-            { kind: 'dot', color: colors.none, label: `None under ${last} (${systems(-1)})` },
-            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds` }
+            ...COLONY_COST_BANDS.map((limit, band) => ({ kind: 'dot', color: colors.bands[band], label: `${band ? 'Best' : 'A habitable world,'} colony cost under ${limit} (${counts.value.bands[band]})`, rule: band ? '' : 'map.bestBand' })),
+            { kind: 'dot', color: colors.none, label: `None under ${last} (${counts.value.none})` },
+            ...(counts.value.unknown ? [unknown(`Colony costs unknown, a body's stored value is missing (${counts.value.unknown})`, { result: counts })] : []),
+            { kind: 'note', label: `The ${this.currentHabitability.species}'s colony costs now, before colonisation tech, as the game counts habitable worlds`, result: counts }
           )
         }
       } else if (this.layer === 'stars') {
@@ -1472,16 +1495,23 @@ export default {
         }
       } else {
         const origin = this.rowById[this.originId]
-        const far = this.layer === 'travel' ? `${this.count(this.farthestKm / 1e9, 1)} billion km` : `${this.farthestHop} ${this.farthestHop === 1 ? 'jump' : 'jumps'}`
-        const distances = this.layer === 'travel' ? this.originKm : this.originHops
+        const travel = this.layer === 'travel'
+        const farthest = travel ? this.farthestKm : this.farthestHop
+        const far = farthest === null ? 'no other system reached' : travel ? `${this.count(farthest / 1e9, 1)} billion km` : `${farthest} ${farthest === 1 ? 'jump' : 'jumps'}`
+        const distances = travel ? this.originKm : this.originHops
+        const { left } = this.originDistances
 
         items.push(
           { kind: 'ring', color: colors.ink, label: origin ? `From ${origin.Name}${origin.id === this.capitalId ? ', the capital' : ''}` : 'From the capital' },
           { kind: 'dot', color: colors.colony, label: 'Near' },
-          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${far})` },
+          { kind: 'dot', color: blend(colors.colony, colors.surface, 0.25), label: `Far (${far})`, rule: travel ? 'map.kmFromOrigin' : 'map.jumpsFromOrigin' },
           { kind: 'dot', color: colors.none, label: `No explored route (${systemsWhere((row) => distances[row.id] === undefined)})` },
           { kind: 'note', label: this.panelSystem ? 'Clear the selection to measure from the capital' : 'Select a system to measure from it' }
         )
+
+        if (travel && left) {
+          items.push({ kind: 'note', label: `${left} charted jump ${left === 1 ? 'point has' : 'points have'} no stored position; routes leave ${left === 1 ? 'it' : 'them'} out` })
+        }
       }
 
       const both = this.links.list.filter((link) => link.gate === 'both').length
@@ -1536,6 +1566,20 @@ export default {
       return LINK_LENGTHS.find((option) => option.value === this.linkLength).hint
     },
 
+    // The rule behind the link lengths the free layouts take from the save, or '' for a fixed length.
+    linkLengthRule() {
+      return { travel: 'map.linkDistance', galactic: 'map.galacticDistance' }[this.linkLength] || ''
+    },
+
+    // The links whose length the save can't give for the chosen measure: they take the standard length.
+    linkLengthGaps() {
+      const key = { travel: 'travel', galactic: 'galactic' }[this.linkLength]
+      const missing = key ? this.links.list.filter((link) => link[key] === null).length : 0
+      const why = key === 'travel' ? 'a jump point with no stored position' : 'a star with no stored place in the galaxy'
+
+      return missing ? `${missing} ${missing === 1 ? 'link has' : 'links have'} ${why}, so its length is unknown and the layout gives it ${LINK_LENGTHS.find((option) => option.value === 'standard').length} units.` : ''
+    },
+
     busyLabel() {
       if (this.busy === 'arrange') {
         return `${PHASES[this.phase] || 'Arranging'}, ${Math.round(this.progress * 100)}%`
@@ -1544,8 +1588,17 @@ export default {
       return 'Moving the systems'
     },
 
+    // The share of links straight or at 45° on the current layout, unavailable with no links rather than a full score.
+    straightResult() {
+      return straightShare(this.quality)
+    },
+
     qualityText() {
-      const straight = (quality) => `${quality.links ? Math.round((100 * (quality.straight + quality.diagonal)) / quality.links) : 100}%`
+      const straight = (quality) => {
+        const share = straightShare(quality)
+
+        return isAvailable(share) ? `${share.value}%` : '—'
+      }
       const part = (label, value) => (this.before ? `${label} ${value(this.before)} → ${value(this.quality)}` : `${label} ${value(this.quality)}`)
 
       return [
@@ -1891,29 +1944,31 @@ export default {
       ]
     },
 
-    // A system's fill, border, pie and overlay for the layer shown.
+    // A system's fill, border, pie and overlay for the layer shown. A system whose state the layer can't tell is hollow, with a dashed ring.
     markerData(row) {
       const { colors } = this
       let marker = { fill: colors.none, border: colors.ring, borderWidth: 2, borderStyle: 'solid', pieDone: 0, pieLeft: 0, pieDoneColor: colors.done, pieLeftColor: colors.left, spots: 0, spotColor: null }
+      const unknown = { fill: colors.surface, borderStyle: 'dashed', pieDone: 0, pieLeft: 0 }
 
       if (this.layer === 'geological' || this.layer === 'gravitational') {
         const geological = this.layer === 'geological'
         const total = geological ? row.bodies : row.locations
         const done = geological ? row.surveyedBodies : row.surveyedLocations
-        const share = total ? Math.round((100 * done) / total) : 0
+        // No share where there is nothing to survey: the dotted ring says so, not an empty pie.
+        const share = surveyPercent(done, total)
 
         marker = {
           ...marker,
           fill: total ? colors.surface : colors.none,
           border: total && share === 100 ? colors.done : colors.ring,
           borderStyle: !total ? 'dotted' : geological && row.cometsOnly ? 'dashed' : 'solid',
-          pieDone: share,
-          pieLeft: total ? 100 - share : 0,
+          pieDone: share || 0,
+          pieLeft: share === null ? 0 : 100 - share,
           spots: geological ? row.groundSurveys : this.links.unexplored[row.id] || 0,
           spotColor: geological ? colors.ground : colors.unexplored,
         }
       } else if (this.layer === 'colonies') {
-        const share = row.colonies ? Math.min(100, (100 * Math.max(0, row.population)) / COLONY_FULL_MILLIONS) : 0
+        const share = colonyFillPercent(row.colonies, row.population)
 
         marker = {
           ...marker,
@@ -1922,6 +1977,8 @@ export default {
           borderWidth: row.capital ? 4 : 2,
           pieDone: share,
           pieLeft: row.colonies ? 100 - share : 0,
+          // Colonies with no stored population: not an empty pie.
+          ...(share === null ? unknown : {}),
         }
       } else if (this.layer === 'sectors') {
         marker.fill = (this.sectorById[row.SectorID] || {}).color || colors.none
@@ -1930,16 +1987,19 @@ export default {
       } else if (this.layer === 'groups') {
         marker.fill = (this.groupOwners[this.groupOf[row.id]] || {}).color || colors.none
       } else if (this.layer === 'discovery') {
+        const shade = discoveryShade(row.DiscoveredTime, this.discoveryRange)
+
         marker = {
           ...marker,
-          fill: this.discoveryColor(row.DiscoveredTime),
+          fill: shade === null ? colors.surface : blend(colors.discovery, colors.surface, shade),
           border: row.capital ? colors.ink : colors.ring,
           borderWidth: row.capital ? 4 : 2,
+          ...(shade === null ? unknown : {}),
         }
       } else if (this.layer === 'habitability') {
-        const band = this.bestBand(row)
+        const band = isAvailable(this.habitabilityCounts) ? bestBandIndex(this.currentHabitability, row.id) : null
 
-        marker.fill = band < 0 ? colors.none : colors.bands[band]
+        marker = band === null ? { ...marker, ...unknown } : { ...marker, fill: band < 0 ? colors.none : colors.bands[band] }
       } else if (this.layer === 'stars') {
         marker = {
           ...marker,
@@ -1949,11 +2009,12 @@ export default {
       } else {
         const travel = this.layer === 'travel'
         const distance = travel ? this.originKm[row.id] : this.originHops[row.id]
+        const farthest = travel ? this.farthestKm : this.farthestHop
         const origin = row.id === this.originId
 
         marker = {
           ...marker,
-          fill: distance === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (0.75 * distance) / (travel ? this.farthestKm : this.farthestHop)),
+          fill: distance === undefined ? colors.none : blend(colors.colony, colors.surface, 1 - (farthest ? (0.75 * distance) / farthest : 0)),
           border: origin ? colors.ink : colors.ring,
           borderWidth: origin ? 4 : 2,
         }
@@ -1980,24 +2041,14 @@ export default {
       return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
     },
 
-    // The fill for a system found at `time`: palest for those known from the start, then from the first found after it to the last, the strongest.
+    // The fill for a system found at `time` (not null): palest for those known from the start, then from the first found after it to the last, the strongest.
     discoveryColor(time) {
-      const range = this.discoveryRange
-
-      if (!(time > 0) || !range) {
-        return blend(this.colors.discovery, this.colors.surface, 0.15)
-      }
-
-      const share = range.last > range.first ? (time - range.first) / (range.last - range.first) : 1
-
-      return blend(this.colors.discovery, this.colors.surface, 0.35 + 0.65 * share)
+      return blend(this.colors.discovery, this.colors.surface, discoveryShade(time, this.discoveryRange))
     },
 
-    // The best colony cost band a system has a body in, as an index of COLONY_COST_BANDS, or -1.
-    bestBand(row) {
-      const counts = this.habitableBands[row.id]
-
-      return counts ? counts.findIndex(Boolean) : -1
+    // The race's ships against a system's danger, a result of 'map.dangerFlag'.
+    dangerOf(row) {
+      return dangerFlag(row.danger, (this.features[row.id] || NO_FEATURES).protection)
     },
 
     // The glyphs Show puts round a system's marker, in the order they take their places: each `{ name, key, path, color, hollow }`, with `name` the glyph's entry in `glyphStyles`; the habitable worlds' badge has their count as `text`, at its own `angle`.
@@ -2007,9 +2058,10 @@ export default {
       const names = []
 
       if (marks.has('ruins') && features.ruins.length) {
-        const states = new Set(features.ruins.map(ruinState))
+        const states = new Set(features.ruins.map((ruin) => valueOrNull(ruinState(ruin)) || 'unknown'))
 
-        names.push(`ruins-${['identified', 'found', 'used'].find((state) => states.has(state))}`)
+        // A ruin whose installations left are not stored could still have some, so it outranks one with none left.
+        names.push(`ruins-${['identified', 'found', 'unknown', 'used'].find((state) => states.has(state))}`)
       }
 
       if (marks.has('constructs') && features.constructs.length) {
@@ -2065,14 +2117,15 @@ export default {
       const features = this.features[row.id] || NO_FEATURES
 
       if (mark === 'danger') {
-        // The game reds its danger line where the protection of the ships there falls short of the danger.
-        const protection = Math.round(features.protection)
+        // The game reds its danger line where the protection of the ships there falls short of the danger. A protection that is not stored shows a dash and no ⚠.
+        const flag = this.dangerOf(row)
+        const protection = features.protection
 
-        return row.danger > 0 ? `${protection < row.danger ? '⚠ ' : ''}${this.count(row.danger)} / ${this.count(protection)}` : ''
+        return row.danger > 0 ? `${flag.value ? '⚠ ' : ''}${this.count(row.danger)} / ${Number.isFinite(protection) ? this.count(Math.round(protection)) : '—'}` : ''
       }
 
       if (mark === 'discovered') {
-        return row.DiscoveredTime > 0 ? gameTime(this.StartYear, row.DiscoveredTime).format('YYYY-MM-DD') : ''
+        return row.DiscoveredTime > 0 ? valueOrNull(discoveredDate(this.StartYear, row.DiscoveredTime)) || '' : ''
       }
 
       return ''
@@ -2912,7 +2965,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
+        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.SectorID, FCT_RaceSysSurvey.ControlRaceID, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.DiscoveredTime, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.MineralSearchFlag, DIM_KnownSystems.X, DIM_KnownSystems.Y, DIM_KnownSystems.Z, Bodies.Bodies, Bodies.Planets, Bodies.Comets, Bodies.Surveyed as SurveyedBodies, Bodies.GroundSurveys, Locations.Locations, Locations.Surveyed as SurveyedLocations, Colonies.Colonies, Colonies.Population, Colonies.PopulationReported, Colonies.Capital, Stars.Stars, DIM_StellarType.SpectralClass, DIM_StellarType.SpectralNumber, DIM_StellarType.SizeText from FCT_RaceSysSurvey left join FCT_System on FCT_System.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_KnownSystems on DIM_KnownSystems.KnownSystemID = FCT_System.SystemNumber left join (select FCT_SystemBody.SystemID, count(*) as Bodies, sum(FCT_SystemBody.BodyClass in (1, 2)) as Planets, sum(FCT_SystemBody.BodyClass = 5) as Comets, count(FCT_SystemBodySurveys.SystemBodyID) as Surveyed, sum(FCT_SystemBodySurveys.SystemBodyID is not null and FCT_SystemBody.GroundMineralSurvey > 0) as GroundSurveys from FCT_SystemBody inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SystemBody.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} where FCT_SystemBody.GameID = ${this.GameID} group by FCT_SystemBody.SystemID) as Bodies on Bodies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_SurveyLocation.SystemID, count(*) as Locations, count(FCT_RaceSurveyLocation.SystemID) as Surveyed from FCT_SurveyLocation inner join FCT_RaceSysSurvey as Known on Known.SystemID = FCT_SurveyLocation.SystemID and Known.RaceID = ${this.RaceID} and Known.GameID = ${this.GameID} left join FCT_RaceSurveyLocation on FCT_RaceSurveyLocation.SystemID = FCT_SurveyLocation.SystemID and FCT_RaceSurveyLocation.LocationNumber = FCT_SurveyLocation.LocationNumber and FCT_RaceSurveyLocation.RaceID = ${this.RaceID} where FCT_SurveyLocation.GameID = ${this.GameID} group by FCT_SurveyLocation.SystemID) as Locations on Locations.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Population.SystemID, count(*) as Colonies, sum(FCT_Population.Population) as Population, count(FCT_Population.Population) as PopulationReported, max(FCT_Population.Capital) as Capital from FCT_Population where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} group by FCT_Population.SystemID) as Colonies on Colonies.SystemID = FCT_RaceSysSurvey.SystemID left join (select FCT_Star.SystemID, count(*) as Stars, max(case when FCT_Star.Component = 1 then FCT_Star.StarTypeID end) as PrimaryType from FCT_Star where FCT_Star.GameID = ${this.GameID} group by FCT_Star.SystemID) as Stars on Stars.SystemID = FCT_RaceSysSurvey.SystemID left join DIM_StellarType on DIM_StellarType.StellarTypeID = Stars.PrimaryType where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([rows]) => Object.freeze(rows))
       }),
       default: [],
     },
@@ -2955,6 +3008,17 @@ export default {
         return await loadMapFeatures(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: {},
+    },
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape. The colony costs are checked for that version only.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
     // Loaded the first time the map shows habitability for the race, and kept for it until the save changes.
     habitability: {
