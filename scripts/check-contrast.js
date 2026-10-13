@@ -3,6 +3,8 @@
 
   node scripts/check-contrast.js [--preset <id>] [--verbose]
 
+  Where a measurement needs no stylesheet and no browser (the WCAG ratios of the tokens against their surfaces), it lives in src/renderer/utilities/appearance-contrast.js, which the import of an appearance file measures a draft with as well; this script adds what needs the compiled stylesheet, the map page and the colour-vision simulation.
+
   For every preset it measures WCAG 2.x contrast ratios of the resolved tokens against the surfaces they are drawn on:
   - text (4.5:1): the inks on the page, card and chrome surfaces, the tooltip ink on the tooltip, axis ticks, links and the sky's labels;
   - essential graphics and state cues (3:1): the focus colour, the severities, the contact relationships, the status colours, the selection mark and each categorical slot, against the card and page surfaces; the system view's orbit and jump point lines against its sky;
@@ -24,8 +26,6 @@ const vm = require('vm')
 const sass = require('sass')
 const { loadUtilities } = require('./lib/utilities')
 
-const TEXT = 4.5
-const GRAPHIC = 3
 const CVD_NEIGHBOUR_DELTA = 8
 const SELECTION_DELTA = 20
 const WARNING_LEVELS = ['action', 'attention', 'info']
@@ -38,46 +38,10 @@ const MACHADO = {
   tritanopia: [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]],
 }
 
-const parseColor = (value) => {
-  const hex = /^#([0-9a-f]{3,8})$/i.exec(value)
+// The shared measurement (utilities/appearance-contrast.js), loaded by main(): the colour maths and the tables of what is measured against which surfaces.
+const contrast = {}
 
-  if (hex) {
-    const digits = hex[1].length <= 4 ? hex[1].replace(/./g, '$&$&') : hex[1]
-
-    return { r: parseInt(digits.slice(0, 2), 16), g: parseInt(digits.slice(2, 4), 16), b: parseInt(digits.slice(4, 6), 16), a: digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : 1 }
-  }
-
-  const rgb = /^rgba?\(([^)]+)\)$/i.exec(value)
-
-  if (rgb) {
-    const [r, g, b, a = 1] = rgb[1].split(',').map(Number)
-
-    return { r, g, b, a }
-  }
-
-  throw new Error(`Unreadable colour ${value}`)
-}
-
-// A colour drawn over an opaque one.
-const over = (top, bottom) => ({ r: top.r * top.a + bottom.r * (1 - top.a), g: top.g * top.a + bottom.g * (1 - top.a), b: top.b * top.a + bottom.b * (1 - top.a), a: 1 })
-
-const linear = (channel) => {
-  const value = channel / 255
-
-  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-}
-
-const luminance = ({ r, g, b }) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-
-const ratio = (foreground, background) => {
-  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
-
-  return (light + 0.05) / (dark + 0.05)
-}
-
-const hex = ({ r, g, b }) => `#${[r, g, b].map((channel) => Math.round(Math.max(0, Math.min(255, channel))).toString(16).padStart(2, '0')).join('')}`
-
-const toLinear = (color) => [linear(color.r), linear(color.g), linear(color.b)]
+const toLinear = (color) => [contrast.linear(color.r), contrast.linear(color.g), contrast.linear(color.b)]
 
 const fromLinear = (channels) => {
   const encode = (value) => 255 * (value <= 0.0031308 ? 12.92 * value : 1.055 * Math.max(0, value) ** (1 / 2.4) - 0.055)
@@ -151,62 +115,6 @@ const deltaE = (first, second) => {
 
   return Math.sqrt((dLp / Sl) ** 2 + (dCp / Sc) ** 2 + (dHp / Sh) ** 2 + Rt * (dCp / Sc) * (dHp / Sh))
 }
-
-const at = (object, path) => path.split('.').reduce((value, key) => (value === undefined ? undefined : value[key]), object)
-
-// What the gate measures against which surfaces: [label, token path of the foreground, surfaces]. A surface is a token path; the tooltip's is composited over the card. Surfaces that resolve to the same colour in a preset are measured once.
-const SURFACES = ['surfaces.background', 'surfaces.card', 'surfaces.chrome']
-
-// The planner's tones: each is drawn as text (an outlined chip, a label) and as the fill of a chip, so each is measured on both. `selected` is a button colour only, measured as a graphic.
-const PLAN_TONES = ['mining', 'terraformFree', 'terraformPartial', 'terraformCheaper', 'cheap', 'moderate', 'costly', 'severe', 'insufficient', 'rich', 'cmc', 'unsurveyed']
-
-// Colours that fill a chip or a control with text on it, which `inks.onFill` draws (styles/appearance.scss).
-const FILL_TONES = ['focus.primary', 'severity.action', 'severity.attention', 'severity.info', 'severity.success', 'status.inactive', ...PLAN_TONES.map((tone) => `plan.${tone}`)]
-const TEXT_CHECKS = [
-  ['Body text', 'inks.body', SURFACES],
-  ['Vuetify text (fields, lists, cards, tables, buttons)', 'inks.text', SURFACES],
-  ['Vuetify secondary text (.text--secondary, labels, table heads)', 'inks.textMuted', SURFACES],
-  ['Secondary text, rail icons, axis ticks', 'inks.muted', SURFACES],
-  ['Links and selected text', 'focus.primary', SURFACES],
-  ['Tooltip text', 'inks.onTooltip', ['charts.tooltip']],
-  ['Sky labels', 'space.label', ['space.background']],
-  ['Needs-action tone as text (outlined chips)', 'severity.action', ['surfaces.background', 'surfaces.card']],
-  ['Attention tone as text', 'severity.attention', ['surfaces.background', 'surfaces.card']],
-  ['Info tone as text', 'severity.info', ['surfaces.background', 'surfaces.card']],
-  ['Success tone as text', 'severity.success', ['surfaces.background', 'surfaces.card']],
-  ['Inactive tone as text', 'status.inactive', ['surfaces.background', 'surfaces.card']],
-  ...PLAN_TONES.map((tone) => [`Planner tone ${tone} as text`, `plan.${tone}`, ['surfaces.background', 'surfaces.card']]),
-]
-
-const GRAPHIC_CHECKS = [
-  ['Keyboard focus ring and selection mark', 'focus.primary', SURFACES],
-  ['Compared-row mark', 'rows.differsMark', SURFACES],
-  ['Needs-action severity', 'severity.action', SURFACES],
-  ['Attention severity', 'severity.attention', SURFACES],
-  ['Info severity', 'severity.info', SURFACES],
-  ['Success', 'severity.success', SURFACES],
-  ['Hostile contact', 'contacts.hostile', SURFACES],
-  ['Unidentified contact', 'contacts.unknown', SURFACES],
-  ['Neutral contact', 'contacts.neutral', SURFACES],
-  ['Friendly contact', 'contacts.friendly', SURFACES],
-  ['Allied contact', 'contacts.allied', SURFACES],
-  ['Civilian contact', 'contacts.civilian', SURFACES],
-  ['Inactive standing', 'status.inactive', SURFACES],
-  ['Shortfall standing', 'status.shortfall', SURFACES],
-  ['Orbit line in the system view', 'space.bodyOrbit', ['space.background']],
-  ['Unexplored jump point in the system view', 'space.jumpUnexplored', ['space.background']],
-  ['Explored jump point in the system view', 'space.jumpExplored', ['space.background']],
-  ...[...PLAN_TONES, 'selected'].map((tone) => [`Planner tone ${tone}`, `plan.${tone}`, SURFACES]),
-]
-
-// The washes a table row takes over the card (styles/appearance.scss: the hover wash; a row that carries a wash of its own keeps it, or none, under the pointer; the picked and compared rows' washes are the pages'), and the text drawn in a row: the inks, the links and the tones a figure is coloured with.
-const ROW_STATES = [
-  ['hovered row', ['focus.hover']],
-  ['selected row', ['rows.selected']],
-  ['compared row that differs', ['rows.differs']],
-  ['focused row, dark band of the hatching', ['rows.stripe']],
-  ['focused row, light band of the hatching', ['rows.stripeSoft']],
-]
 
 // The rows that carry a wash of their own (the classes their pages or Vuetify give them) and the wash. appearance.scss settles each one's hover with a `.<class>:hover` rule; for a class it does not settle, the hover wash layers over the row's own, and that composition is measured too.
 const WASHED_ROWS = [
@@ -299,12 +207,7 @@ const VUETIFY_FILL_INK = '#ffffff'
 // Vuetify's own text colours of each theme (a baseline preset keeps them; the other theme of an adaptation does too).
 const VUETIFY_TEXT = { light: { text: 'rgba(0, 0, 0, 0.87)', textMuted: 'rgba(0, 0, 0, 0.6)' }, dark: { text: '#ffffff', textMuted: 'rgba(255, 255, 255, 0.7)' } }
 
-// Vuetify's own ink on a dark-theme surface filled with a named colour (the baselines keep it): white for a title, an icon and a button, 87 % white for a snackbar's message.
-const VUETIFY_ON_COLOR = { onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' }
 const ON_COLOR_VARIABLES = { onColor: '--ae-on-color', onSnackbar: '--ae-on-snackbar' }
-
-// The named colours a toolbar or a snackbar is filled with in the app, and the token of the colour Vuetify's theme gives each (`vuetifyColors` in appearance.js).
-const COLOUR_FILLS = [['primary', 'focus.primary'], ['success', 'severity.success'], ['error', 'severity.action'], ['warning', 'severity.attention'], ['info', 'severity.info']]
 
 // The selectors of appearance.scss that draw the ink on such a surface (`{name}` is the colour), and the ordinary text ink rules that apply to the same elements where those are missing.
 const COLOUR_SHEET = '.v-application .v-sheet.theme--dark.{name}:not(.v-snack__wrapper)'
@@ -346,26 +249,6 @@ const INK_RULES = [
   ['.v-application.theme--{theme} .text--secondary', 'muted', true],
 ]
 
-// Vuetify's fill of a pressed button of a toggle group, which the selected-row wash is drawn over (the bar is drawn on top).
-const PRESSED_BUTTON = { light: '#f5f5f5', dark: '#272727' }
-
-// Vuetify's own ink of disabled text (a disabled field's value and label, a disabled list item), drawn over the surface by its theme; the preset does not set it. WCAG exempts inactive components, so this is not a conformance floor but the Electrons one: the text stays readable (2.5:1 or more) on every surface of every preset, Light's own 2.7 being the lowest of the baseline presets.
-const DISABLED_INK = { light: 'rgba(0, 0, 0, 0.38)', dark: 'rgba(255, 255, 255, 0.5)' }
-const DISABLED_TEXT = 2.5
-
-const ROW_TEXT = [
-  ['body text', 'inks.body'],
-  ['secondary text', 'inks.muted'],
-  ['Vuetify text', 'inks.text'],
-  ['Vuetify secondary text (.text--secondary)', 'inks.textMuted'],
-  ['link', 'focus.primary'],
-  ['needs-action figure', 'severity.action'],
-  ['attention figure', 'severity.attention'],
-  ['info figure', 'severity.info'],
-  ['success figure', 'severity.success'],
-  ['inactive standing', 'status.inactive'],
-]
-
 // Measured nowhere, and why.
 const EXCEPTIONS = [
   ['surfaces.border', 'Hairlines between regions repeat a boundary the layout already gives; decorative.'],
@@ -389,45 +272,12 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
   const mapSource = options.mapSource === undefined ? readMapSource() : options.mapSource
 
   appearances.forEach((appearance) => {
+    const { TEXT, GRAPHIC, VUETIFY_ON_COLOR, parseColor, over, ratio, hex, at, measureAppearance, measureNamedFills } = contrast
     const card = parseColor(appearance.surfaces.card)
     const resolve = (path) => {
       const color = parseColor(at(appearance, path))
 
       return color.a < 1 ? over(color, card) : color
-    }
-
-    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: [], graphics: [], rows: [], categorical: [], cvd: [], selection: [], disabled: [], inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
-    const distinct = (surfaces) => surfaces.filter((surface, index) => surfaces.findIndex((other) => hex(resolve(other)) === hex(resolve(surface))) === index)
-
-    TEXT_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
-      const background = resolve(surface)
-      const foreground = over(parseColor(at(appearance, path)), background)
-      const value = ratio(foreground, background)
-
-      report.text.push({ label, foreground: at(appearance, path), surface: at(appearance, surface), surfacePath: surface, ratio: value, minimum: TEXT, pass: value >= TEXT })
-    }))
-
-    GRAPHIC_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
-      const background = resolve(surface)
-      const foreground = over(parseColor(at(appearance, path)), background)
-      const value = ratio(foreground, background)
-
-      report.graphics.push({ label, foreground: at(appearance, path), surface: at(appearance, surface), surfacePath: surface, ratio: value, minimum: GRAPHIC, pass: value >= GRAPHIC })
-    }))
-
-    distinct(SURFACES).forEach((surface) => {
-      const background = resolve(surface)
-      const value = ratio(over(parseColor(DISABLED_INK[appearance.mode]), background), background)
-
-      report.disabled.push({ label: 'Disabled text', foreground: DISABLED_INK[appearance.mode], surface: at(appearance, surface), surfacePath: surface, ratio: value, minimum: DISABLED_TEXT, pass: value >= DISABLED_TEXT })
-    })
-
-    if (appearance.reference) {
-      WARNING_LEVELS.forEach((level) => {
-        const value = deltaE(parseColor(appearance.focus.primary), parseColor(appearance.severity[level]))
-
-        report.selection.push({ label: `Selection colour against the ${level} severity`, foreground: appearance.focus.primary, surface: appearance.severity[level], ratio: value, minimum: SELECTION_DELTA, pass: value >= SELECTION_DELTA })
-      })
     }
 
     const layered = WASHED_ROWS.flatMap(([state, classes, wash]) => {
@@ -436,22 +286,16 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       return unsettled.length ? [[`hovered ${state}, washes layered (${unsettled.join(', ')})`, ['focus.hover', wash]]] : []
     })
 
-    ROW_STATES.concat(layered).forEach(([state, washes]) => {
-      const background = washes.reduce((below, path) => over(parseColor(at(appearance, path)), below), card)
+    const measured = measureAppearance(appearance, { extraRowStates: layered })
+    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: measured.text, graphics: measured.graphics, rows: measured.rows, categorical: measured.categorical, cvd: [], selection: [], disabled: measured.disabled, inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
 
-      ROW_TEXT.forEach(([label, path]) => {
-        const ink = at(appearance, path)
-        const value = ratio(over(parseColor(ink), background), background)
+    if (appearance.reference) {
+      WARNING_LEVELS.forEach((level) => {
+        const value = deltaE(parseColor(appearance.focus.primary), parseColor(appearance.severity[level]))
 
-        report.rows.push({ label: `${label} on a ${state}`, foreground: ink, surface: hex(background), ratio: value, minimum: TEXT, pass: value >= TEXT })
+        report.selection.push({ label: `Selection colour against the ${level} severity`, foreground: appearance.focus.primary, surface: appearance.severity[level], ratio: value, minimum: SELECTION_DELTA, pass: value >= SELECTION_DELTA })
       })
-    })
-
-    const pressed = over(parseColor(appearance.rows.selected), parseColor(PRESSED_BUTTON[appearance.mode]))
-    const bar = parseColor(appearance.focus.primary)
-    const barRatio = ratio(bar, pressed)
-
-    report.graphics.push({ label: 'Pressed toggle button bar, focused, hovered or not (the selected-row wash over the button)', foreground: appearance.focus.primary, surface: hex(pressed), surfacePath: 'buttons.pressed', ratio: barRatio, minimum: GRAPHIC, pass: barRatio >= GRAPHIC })
+    }
 
     const menuLabel = 'Map right-click menu icon'
     const menuFailure = (error) => report.menu.push({ label: 'Map right-click menu options', message: error.message, ratio: 0, minimum: GRAPHIC, pass: false })
@@ -490,12 +334,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
 
     const encodings = SERIES_ENCODINGS
     const unique = (key) => new Set(encodings.map((encoding) => JSON.stringify(encoding[key]))).size === encodings.length
-    report.fills = FILL_TONES.map((path) => {
-      const fill = resolve(path)
-      const value = ratio(parseColor(appearance.inks.onFill), fill)
-
-      return { label: path, foreground: appearance.inks.onFill, surface: at(appearance, path), ratio: value, minimum: TEXT, pass: value >= TEXT }
-    })
+    report.fills = measured.fills
 
     FILL_RULES.forEach(([label, selector]) => {
       const rule = declaredColor(rules, selector)
@@ -555,8 +394,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       }
       const ordinary = (selector) => declared(selector, '') || VUETIFY_ON_COLOR.onColor
 
-      COLOUR_FILLS.forEach(([name, path]) => {
-        const fill = resolve(path)
+      report.colourSurfaces = measureNamedFills(appearance, (name) => {
         const own = (selector, fallback, parent) => {
           const found = declared(selector, name)
           const drawn = found === null ? fallback : found
@@ -570,32 +408,11 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
         const message = own(COLOUR_SNACKBAR, VUETIFY_ON_COLOR.onSnackbar, null)
         const snackbarButton = own(COLOUR_SNACKBAR + COLOUR_BUTTON, ordinary(ORDINARY_BUTTON), message)
 
-        ;[['toolbar title', title, TEXT], ['toolbar text button', textButton, TEXT], ['toolbar icon', icon, GRAPHIC], ['toolbar icon button', buttonIcon, GRAPHIC], ['snackbar message', message, TEXT], ['snackbar text button', snackbarButton, TEXT]].forEach(([what, drawn, minimum]) => {
-          let value = 0
-          let resolved = String(drawn)
-
-          try {
-            resolved = resolveVariable(drawn, style)
-            value = ratio(over(parseColor(resolved), fill), fill)
-          } catch (error) {
-            value = 0
-          }
-
-          report.colourSurfaces.push({ label: `${what} on the ${name} fill`, foreground: String(resolved), surface: hex(fill), ratio: value, minimum, pass: value >= minimum })
-        })
-      })
+        return { title, textButton, icon, buttonIcon, message, snackbarButton }
+      }, (drawn) => resolveVariable(drawn, style))
     }
 
     report.encodings = { slots: encodings.length, markers: unique('marker'), dashes: unique('dash'), patterns: unique('pattern'), colours: new Set(appearance.charts.categorical.map((color) => color.toLowerCase())).size === appearance.charts.categorical.length }
-    appearance.charts.categorical.forEach((color, slot) => {
-      distinct(SURFACES).forEach((surface) => {
-        const background = resolve(surface)
-        const value = ratio(parseColor(color), background)
-
-        report.categorical.push({ slot, color, surface: at(appearance, surface), surfacePath: surface, ratio: value, minimum: GRAPHIC, pass: value >= GRAPHIC })
-      })
-    })
-
     Object.entries(MACHADO).concat([['normal vision', null]]).forEach(([vision, matrix]) => {
       const seen = appearance.charts.categorical.map((color) => (matrix ? simulate(parseColor(color), matrix) : parseColor(color)))
       let any = { delta: Infinity, pair: null }
@@ -675,7 +492,7 @@ const format = (reports, verbose) => {
 
     lines.push(`Links: the focus colour is ${report.links.delta.toFixed(1)} CIEDE2000 from the text ink (minimum ${SELECTION_DELTA} to tell a link by colour); --ae-link-line ${report.links.variable || 'not set'}, the stylesheet's link rule draws ${report.links.rule || 'nothing'}: ${report.links.pass ? 'ok' : 'FAIL'}`)
 
-    lines.push(`Disabled text (Vuetify's own ink), legibility floor ${DISABLED_TEXT}:1`)
+    lines.push(`Disabled text (Vuetify's own ink), legibility floor ${contrast.DISABLED_TEXT}:1`)
     report.disabled.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
 
     lines.push(`Encodings: ${report.encodings.slots} slots, markers unique ${report.encodings.markers}, dashes unique ${report.encodings.dashes}, patterns unique ${report.encodings.patterns}`)
@@ -760,7 +577,10 @@ const main = async () => {
     }
   }
 
-  const { appearance } = await loadUtilities(['appearance'], { stubs: { vue: 'export default { observable: (value) => value }' } })
+  const { appearance, 'appearance-contrast': shared } = await loadUtilities(['appearance', 'appearance-contrast'], { stubs: { vue: 'export default { observable: (value) => value }' } })
+
+  Object.assign(contrast, shared)
+
   const reports = analyse(appearance, options)
   const problems = failures(reports)
 
@@ -784,4 +604,4 @@ if (require.main === module) {
   main()
 }
 
-module.exports = { analyse, deltaE, parseColor, ratio, simulate }
+module.exports = { analyse, deltaE, simulate }

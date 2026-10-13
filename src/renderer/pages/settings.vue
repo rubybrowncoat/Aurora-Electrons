@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and the colour preset. Use it to set the app up, and to preview a preset on every page before keeping it." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format and the colour preset. Use it to set the app up, to preview a preset on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting setting--block">
@@ -15,11 +15,41 @@
                   <preset-card v-for="preset in presets" :key="preset.id" :appearance="preset" :active="preset.id === activeId" :applied="preset.id === appliedId" @select="preview" />
                 </div>
                 <div class="presets__actions">
-                  <v-btn small depressed color="primary" :disabled="!previewing" data-preset-action="apply" @click="applyDraft">Apply</v-btn>
+                  <v-btn small depressed color="primary" :disabled="applyBlocked" data-preset-action="apply" @click="applyDraft">Apply</v-btn>
                   <v-btn small outlined :disabled="!previewing" data-preset-action="cancel" @click="cancelDraft">Cancel</v-btn>
                   <v-btn small text :disabled="activeId === defaultId" data-preset-action="reset" @click="resetDraft">Reset to {{ defaultName }}</v-btn>
                 </div>
+                <v-checkbox v-if="needsAcknowledgement" v-model="acknowledged" :label="acknowledgementLabel" dense hide-details class="mt-0" data-appearance-confirm />
                 <preset-reference v-if="shown.reference" :appearance="shown" />
+              </div>
+              <div class="setting setting--block" data-appearance-file>
+                <div class="setting__text">
+                  <div class="body-2">Appearance file</div>
+                  <div class="caption text--secondary">{{ fileNote }}</div>
+                </div>
+                <div class="presets__actions">
+                  <v-btn small outlined data-appearance-action="export" @click="exportAppearance">Export {{ shown.name }}</v-btn>
+                  <v-btn small outlined data-appearance-action="choose" @click="chooseAppearance">Choose file</v-btn>
+                  <input ref="appearanceFile" type="file" accept=".json,application/json" hidden aria-label="Appearance file to import" data-appearance-input @change="readAppearance">
+                  <v-btn v-if="removable" small text color="error" data-appearance-action="remove" @click="removeImported">Remove imported appearance</v-btn>
+                </div>
+
+                <v-alert v-if="fileProblem" type="error" text dense class="mb-0" data-appearance-errors>
+                  <div class="body-2">{{ fileProblem.fileName }} is rejected, and nothing is changed.</div>
+                  <ul class="transfer__list">
+                    <li v-for="(error, index) in shownFileErrors" :key="index" data-appearance-error><strong>{{ kindLabel(error.kind) }}.</strong> <span class="transfer__field">{{ error.field }}</span> {{ error.message }}</li>
+                  </ul>
+                  <div v-if="hiddenFileErrors" class="caption">and {{ count(hiddenFileErrors) }} more</div>
+                </v-alert>
+
+                <v-alert v-if="imported.problem" type="warning" text dense class="mb-0" data-appearance-stored-problem>
+                  <div class="body-2">The kept appearance file cannot be read, so it is not offered. It stays in the settings as it is until it is removed or another file is applied.</div>
+                  <ul class="transfer__list">
+                    <li v-for="(error, index) in storedErrors" :key="index"><strong>{{ kindLabel(error.kind) }}.</strong> <span class="transfer__field">{{ error.field }}</span> {{ error.message }}</li>
+                  </ul>
+                </v-alert>
+
+                <appearance-file v-if="detail" :entry="detail" :kept="detailKept" />
               </div>
               <div class="setting">
                 <div class="setting__text">
@@ -43,7 +73,7 @@
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
 
@@ -199,10 +229,12 @@
 import { mapActions, mapGetters, mapState } from 'vuex'
 import Config from 'electron-store'
 
+import AppearanceFile from '../components/settings/AppearanceFile.vue'
 import PresetCard from '../components/settings/PresetCard.vue'
 import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
-import { APPEARANCE_KEY, DEFAULT_PRESET_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, isPreviewing, listAppearances, previewPreset, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
+import { APPEARANCE_KEY, CUSTOM_ID, CUSTOM_KEY, DEFAULT_PRESET_ID, DRAFT_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
+import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 import { declaredViews } from '../mixins/persisted-view'
 import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportName, parseBundle, planImport, sameValue, shorten, undoImport, validBackup } from '../utilities/preferences'
@@ -210,7 +242,7 @@ import { CATEGORIES, MAX_BYTES, buildExport, buildSchema, commitImport, exportNa
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
 // The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
-const APP_SETTINGS = [APPEARANCE_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
+const APP_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
 // What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
 const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
 
@@ -275,7 +307,7 @@ const download = (text, name) => {
 
 export default {
   name: 'SettingsPage',
-  components: { PresetCard, PresetReference },
+  components: { AppearanceFile, PresetCard, PresetReference },
   mixins: [countFormat],
   data() {
     return {
@@ -291,6 +323,9 @@ export default {
       confirmed: false,
       busy: false,
       backup: null,
+      // The appearance file: what a file that failed said (`fileName`, `errors`, `omitted`), and whether the contrast findings of the draft are accepted.
+      fileProblem: null,
+      acknowledged: false,
     }
   },
   computed: {
@@ -309,8 +344,67 @@ export default {
       return activeAppearance().mode === 'dark'
     },
 
+    // The imported appearances (the kept one, the draft of a file just read, what kept the stored one from loading), reactive.
+    imported() {
+      return importedAppearances()
+    },
+
+    // The presets, then the kept imported appearance and the draft.
     presets() {
-      return listAppearances()
+      return [...listAppearances(), ...[this.imported.custom, this.imported.draft].filter(Boolean).map(({ appearance }) => appearance)]
+    },
+
+    // The entry of the imported appearance whose details are shown: the one in force when it is one, else the draft, else the kept one.
+    detail() {
+      const { custom, draft } = this.imported
+
+      return this.activeId === CUSTOM_ID ? custom : this.activeId === DRAFT_ID ? draft : draft || custom
+    },
+
+    detailKept() {
+      return this.detail !== null && this.detail === this.imported.custom
+    },
+
+    // The draft when it is the one in force, which Apply would keep.
+    draftInForce() {
+      return this.activeId === DRAFT_ID ? this.imported.draft : null
+    },
+
+    // Apply waits for a preview, and for a draft that can be read: not one that blocks, and one with contrast findings only once they are accepted.
+    applyBlocked() {
+      const draft = this.draftInForce
+
+      return !this.previewing || Boolean(draft && (draft.report.blocking.length || (draft.report.findings.length && !this.acknowledged)))
+    },
+
+    needsAcknowledgement() {
+      const draft = this.draftInForce
+
+      return Boolean(draft && draft.report.findings.length && !draft.report.blocking.length)
+    },
+
+    acknowledgementLabel() {
+      return `Apply despite ${this.count(this.draftInForce.report.findings.length)} contrast ${this.draftInForce.report.findings.length === 1 ? 'finding' : 'findings'}`
+    },
+
+    removable() {
+      return Boolean(this.imported.custom || this.imported.problem)
+    },
+
+    shownFileErrors() {
+      return this.fileProblem ? this.fileProblem.errors.slice(0, SHOWN_ERRORS) : []
+    },
+
+    hiddenFileErrors() {
+      return this.fileProblem ? this.fileProblem.errors.length - this.shownFileErrors.length + (this.fileProblem.omitted || 0) : 0
+    },
+
+    storedErrors() {
+      return this.imported.problem ? this.imported.problem.errors.slice(0, SHOWN_ERRORS) : []
+    },
+
+    fileNote() {
+      return 'Saves the appearance shown, or reads one back, in the app\'s own JSON format for Electrons appearances. It is not an Aurora game file and no game reads it. A file is checked whole and shown as a draft: nothing is kept until Apply, and a file that fails changes nothing.'
     },
 
     // The preset in force (the previewed one while a preview is open), resolved: the explanation of its reference is shown for it.
@@ -352,7 +446,7 @@ export default {
       }
 
       if (this.unsupportedId) {
-        return `The saved preset "${this.unsupportedId}" isn't available in this version, so ${applied} is shown. Applying a preset replaces it.`
+        return this.unsupportedId === CUSTOM_ID ? `The kept appearance file cannot be read (see below), so ${applied} is shown. Applying a preset replaces the saved choice.` : `The saved preset "${this.unsupportedId}" isn't available in this version, so ${applied} is shown. Applying a preset replaces it.`
       }
 
       return `${applied} is applied. Choose a preset to preview it on every page before keeping it.`
@@ -480,12 +574,15 @@ export default {
   created() {
     // Beside config.json, not in a `preferences` folder: on a disk that ignores case that name is taken by the Chromium `Preferences` file in the same user-data folder.
     this.backupStore = new Config({ name: 'preference-import-undo' })
+    // The number of the latest appearance file read; a read whose number is no longer the latest, or that finishes after the page is gone, is dropped.
+    this.appearanceRead = 0
 
     const kept = this.backupStore.get('backup')
 
     this.backup = validBackup(kept) ? kept : null
   },
   beforeDestroy() {
+    this.appearanceRead++
     cancelPreview()
   },
   methods: {
@@ -512,12 +609,97 @@ export default {
     },
 
     applyDraft() {
-      applyPreset(this.config, this.activeId)
+      try {
+        applyPreset(this.config, this.activeId)
+      } catch (error) {
+        console.error("Couldn't write the colour preset", error)
+        this.activateSnackbar({ text: "Couldn't write the settings, so the appearance was not applied", color: 'error' })
+
+        return
+      }
+
+      this.acknowledged = false
       this.reinstantiateConfig()
     },
 
     cancelDraft() {
       cancelPreview()
+    },
+
+    // The label of a kind of failure of an appearance file.
+    kindLabel(kind) {
+      return KIND_LABELS[kind]
+    },
+
+    // The appearance in force, preset or imported, as a file.
+    exportAppearance() {
+      const file = exportAppearanceFile(this.activeId)
+
+      download(JSON.stringify(file, null, 2), appearanceFileName(file.name))
+      this.activateSnackbar({ text: `${file.name} exported as an appearance file`, color: 'success' })
+    },
+
+    chooseAppearance() {
+      this.$refs.appearanceFile.click()
+    },
+
+    // Reads and checks a file: a valid one becomes the draft and is previewed, and one that fails changes nothing, the draft and the kept file included. Only the latest read counts: a read that is superseded by a newer one, or that finishes after the page was left, publishes nothing and starts no preview.
+    async readAppearance(event) {
+      const [file] = event.target.files
+
+      event.target.value = ''
+
+      if (!file) {
+        return
+      }
+
+      const read = ++this.appearanceRead
+      let text = null
+      let unreadable = false
+
+      if (file.size <= FILE_BYTES) {
+        try {
+          text = await file.text()
+        } catch (error) {
+          unreadable = true
+        }
+      }
+
+      if (read !== this.appearanceRead) {
+        return
+      }
+
+      let result
+
+      if (file.size > FILE_BYTES) {
+        result = { ok: false, errors: [{ kind: 'field', field: 'file', message: `is ${file.size} bytes; the limit is ${FILE_BYTES}` }], omitted: 0 }
+      } else if (unreadable) {
+        result = { ok: false, errors: [{ kind: 'field', field: 'file', message: 'could not be read' }], omitted: 0 }
+      } else {
+        result = importAppearanceFile(text)
+      }
+
+      if (result.ok) {
+        this.fileProblem = null
+        this.acknowledged = false
+        this.activateSnackbar({ text: `${result.entry.appearance.name} is previewed from ${file.name}. Apply keeps it.`, color: 'info' })
+      } else {
+        this.fileProblem = { fileName: file.name, errors: result.errors, omitted: result.omitted }
+      }
+    },
+
+    removeImported() {
+      try {
+        removeCustom(this.config)
+      } catch (error) {
+        console.error("Couldn't remove the imported appearance", error)
+        this.activateSnackbar({ text: "Couldn't write the settings, so the imported appearance was not removed", color: 'error' })
+
+        return
+      }
+
+      this.reinstantiateConfig()
+      this.activateSnackbar({ text: 'The imported appearance is removed', color: 'success' })
     },
 
     // The bundled default as a draft: Apply keeps it, and nothing but the `appearance` key is ever written.
@@ -677,7 +859,7 @@ export default {
       if (keys.includes(APPEARANCE_KEY)) {
         const id = this.config.get(APPEARANCE_KEY)
 
-        if (listAppearances().some((preset) => preset.id === id)) {
+        if (listAppearances().some((preset) => preset.id === id) || (id === CUSTOM_ID && this.imported.custom)) {
           applyPreset(this.config, id)
         } else if (id === undefined) {
           const legacy = this.config.get('darkMode')

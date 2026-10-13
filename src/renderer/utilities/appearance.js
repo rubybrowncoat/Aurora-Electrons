@@ -1,4 +1,5 @@
 import Vue from 'vue'
+import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appearance-file'
 
 // The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
 //
@@ -20,6 +21,8 @@ import Vue from 'vue'
 // Physical colours (stars and the star orbit lines drawn in their colour, planet terrain) depict the world, not a meaning, and stay out of presets.
 //
 // The categorical palette is measured by scripts/check-contrast.js against the surfaces of every preset (page, card, chrome): every slot is 3:1 or more as a colour, in the light preset too (its slots 1, 2, 3, 4 and 8, the three weak hues and the ninth, were darkened to get there, which is why the preset's version is 2), a marker or pattern never standing in for it, and under protanopia, deuteranopia and tritanopia (Machado et al., severity 1.0) neighbouring slots differ by a CIEDE2000 of 9.6 or more. Two slots that are not neighbours can still come close under a colour-vision deficiency (as low as 1.9), which is what SERIES_ENCODINGS is for. A preset that changes the categorical list or the surfaces has to pass the script again; severity, status, planner and contact colours are measured by it too (text 4.5:1, graphics 3:1), and so is `inks.onFill` on every colour a chip is filled with (4.5:1). The planner tones are measured as text and as fills, which is why version 3 moved them (lighter in Dark, darker in Light): one tone has to read as text on the surface and carry the fill's text.
+//
+// An imported appearance file (utilities/appearance-file.js) is a resolved appearance of its own beside the presets, not a preset: `custom` is the one the settings keep (under CUSTOM_KEY, the validated document, which `loadAppearance` reads back through the same parser) and `custom-draft` the one a file just read is previewed as. `file` on a resolved appearance is null for a preset and, for an imported one, what the file said besides its colours: `description`, `author`, `base` (`{ id, explicit }`), `font`, `provenance` and `defaults` (the roles the base filled in). Reading a file changes nothing that is kept: the draft is only in memory, and `applyPreset` writes the document and the choice in one write, or neither.
 
 const LIGHT = {
   id: 'light',
@@ -221,6 +224,13 @@ const BASELINE_BY_MODE = { light: LIGHT.id, dark: DARK.id }
 // The settings key the chosen preset's id is kept under: app-wide, written only by `applyPreset`. Settings from before presets hold a boolean `darkMode` instead; `loadAppearance` turns it into this key once and nothing writes `darkMode` any more.
 export const APPEARANCE_KEY = 'appearance'
 
+// The ids of an imported appearance: the kept one, and the draft of a file just read.
+export const CUSTOM_ID = 'custom'
+export const DRAFT_ID = 'custom-draft'
+
+// The settings key the kept imported appearance is stored under: the document of the file, as `parseAppearanceFile` accepted it. Written only by `applyPreset` (with the draft) and `removeCustom`.
+export const CUSTOM_KEY = 'appearanceCustom'
+
 // Categorical slots of the colours that carry a meaning, by role; `muted` is the preset's muted ink.
 export const CONTACT_SLOTS = { hostile: 7, unknown: 7, neutral: 3, friendly: 2, allied: 0, civilian: 'muted' }
 
@@ -250,8 +260,44 @@ const ROLE_SLOTS = {
 
 const resolved = new WeakMap()
 
-// The resolved appearance of a preset: the object every renderer reads. The same preset gives the same object (its `key`, `id@version`, names it), so a component can watch it.
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key)
+
+// The imported appearances, each `{ appearance, parsed, report }` (the resolved appearance, what the parser returned and its contrast report) and frozen, so that Vue leaves it alone. `problem` is what stopped the stored one from loading, or null.
+const imported = Vue.observable({ custom: null, draft: null, problem: null })
+let revision = 0
+
+const freezeDeep = (value) => {
+  Object.values(value).forEach((inner) => {
+    if (inner !== null && typeof inner === 'object') {
+      freezeDeep(inner)
+    }
+  })
+
+  return Object.freeze(value)
+}
+
+// Gives a parsed file an id, a version (one per registration, so a watcher sees a new file as a new appearance) and a resolved appearance.
+const register = (id, parsed) => {
+  revision++
+
+  const file = { description: parsed.description, author: parsed.author, base: parsed.base, font: parsed.font, provenance: parsed.provenance, defaults: parsed.defaults }
+  const appearance = freezeDeep({ id, name: parsed.name, version: revision, key: `${id}@${revision}`, mode: parsed.mode, reference: null, file, ...JSON.parse(JSON.stringify(parsed.roles)) })
+
+  return Object.freeze({ appearance, parsed, report: contrastReport(appearance, { baseline: resolveAppearance(BASELINE_BY_MODE[parsed.mode]) }) })
+}
+
+const isKnown = (id) => hasOwn(PRESETS, id) || (id === CUSTOM_ID && imported.custom !== null) || (id === DRAFT_ID && imported.draft !== null)
+
+// The resolved appearance of a preset, or of the imported one an id names: the object every renderer reads. The same preset gives the same object (its `key`, `id@version`, names it), so a component can watch it.
 export const resolveAppearance = (id) => {
+  if (id === CUSTOM_ID && imported.custom) {
+    return imported.custom.appearance
+  }
+
+  if (id === DRAFT_ID && imported.draft) {
+    return imported.draft.appearance
+  }
+
   const preset = PRESETS[id] || PRESETS[DEFAULT_PRESET_ID]
 
   if (!resolved.has(preset)) {
@@ -267,6 +313,7 @@ export const resolveAppearance = (id) => {
       surfaces: { ...preset.surfaces },
       inks: { ...preset.inks },
       reference: preset.reference || null,
+      file: null,
       focus: { ...preset.focus },
       rows: { ...preset.rows },
       severity: { ...preset.severity },
@@ -297,27 +344,90 @@ export const isPreviewing = () => state.id !== state.applied
 // Every preset, resolved, in the order they are listed.
 export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))
 
+// The imported appearances (reactive): `custom`, the kept one, and `draft`, the file just read, each `{ appearance, parsed, report }` or null, and `problem`, what kept the stored one from loading (`{ errors, omitted }`) or null.
+export const importedAppearances = () => ({ custom: imported.custom, draft: imported.draft, problem: imported.problem })
+
+// Reads the text of an appearance file and, when it holds a valid one, makes it the draft and puts it in force as a preview, so every page shows it. A file with a failure changes nothing and gives `{ ok: false, errors, omitted }`; a valid one gives `{ ok: true, entry }`. Nothing is kept until `applyPreset` is given the draft's id.
+export const importAppearanceFile = (text) => {
+  const parsed = parseAppearanceFile(text, { builtIn: (id) => (hasOwn(PRESETS, id) ? resolveAppearance(id) : null), baselines: BASELINE_BY_MODE })
+
+  if (!parsed.ok) {
+    return parsed
+  }
+
+  imported.draft = register(DRAFT_ID, parsed)
+  state.id = DRAFT_ID
+
+  return { ok: true, entry: imported.draft }
+}
+
+// The file of a preset or an imported appearance (an id of `custom` or `custom-draft`), as an object ready to be written as JSON, or null for an id that names none. `now` is the time of the export.
+export const exportAppearanceFile = (id, now = Date.now()) => (isKnown(id) ? buildAppearanceFile(resolveAppearance(id), { now }) : null)
+
 // Puts a preset in force without keeping it, so every page shows it (Vuetify's theme follows through the watcher in plugins/vuetify.js). An unknown id changes nothing. Writes nothing.
 export const previewPreset = (id) => {
-  if (PRESETS[id]) {
+  if (isKnown(id)) {
     state.id = id
   }
 }
 
 // Drops the preview: the applied preset is in force again.
 export const cancelPreview = () => {
+  imported.draft = null
   state.id = state.applied
 }
 
-// Keeps a preset: puts it in force, makes it the applied one and writes its id to the settings (`config` is the settings store). An unknown id changes nothing and returns false. The settings are written first, so a failed write leaves the selection as it was.
+// Keeps a preset or an imported appearance: puts it in force, makes it the applied one and writes its id to the settings (`config` is the settings store). An unknown id changes nothing and returns false. The settings are written first, so a failed write leaves the selection as it was. The draft of a file is kept as `custom` (replacing the one kept before): its document and the choice are written together, in one assignment of the store, so the settings hold both or neither.
 export const applyPreset = (config, id) => {
-  if (!PRESETS[id]) {
+  if (!isKnown(id)) {
     return false
+  }
+
+  if (id === DRAFT_ID) {
+    const entry = imported.draft
+
+    config.store = { ...config.store, [CUSTOM_KEY]: entry.parsed.document, [APPEARANCE_KEY]: CUSTOM_ID }
+    imported.custom = register(CUSTOM_ID, entry.parsed)
+    imported.draft = null
+    imported.problem = null
+    state.id = CUSTOM_ID
+    state.applied = CUSTOM_ID
+
+    return true
   }
 
   config.set(APPEARANCE_KEY, id)
   state.id = id
   state.applied = id
+
+  return true
+}
+
+// Forgets the kept imported appearance: removes its document from the settings and, when it was the chosen appearance, falls back to the baseline of its mode, in one write. Returns false when there is none.
+export const removeCustom = (config) => {
+  const stored = config.get(CUSTOM_KEY)
+
+  if (stored === undefined && !imported.custom) {
+    return false
+  }
+
+  const rest = { ...config.store }
+  const chosen = config.get(APPEARANCE_KEY) === CUSTOM_ID
+  const fallback = state.applied === CUSTOM_ID ? baselinePresetId(imported.custom ? imported.custom.appearance.mode : DEFAULT_PRESET_ID) : state.applied
+
+  delete rest[CUSTOM_KEY]
+
+  config.store = chosen ? { ...rest, [APPEARANCE_KEY]: fallback } : rest
+  imported.custom = null
+  imported.problem = null
+
+  if (state.applied === CUSTOM_ID) {
+    state.applied = fallback
+  }
+
+  if (state.id === CUSTOM_ID) {
+    state.id = fallback
+  }
 
   return true
 }
@@ -329,17 +439,22 @@ export const applyMode = (config, mode) => applyPreset(config, baselinePresetId(
 export const unsupportedPresetId = (config) => {
   const id = config.get(APPEARANCE_KEY)
 
-  return id === undefined || PRESETS[id] ? null : id
+  return id === undefined || isKnown(id) ? null : id
 }
 
-// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. `config` is the settings store.
+// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. The kept imported appearance is read back through the parser whenever there is one, so the card is there beside the presets; one that no longer passes (a file from a newer version, a damaged value) is not loaded, is left in the settings as it is and is reported by `importedAppearances().problem`. `config` is the settings store.
 export const loadAppearance = (config) => {
   const stored = config.get(APPEARANCE_KEY)
   const legacy = config.get('darkMode')
+  const document = config.get(CUSTOM_KEY)
+  const parsed = document === undefined ? null : parseAppearanceFile(JSON.stringify(document), { builtIn: (id) => (hasOwn(PRESETS, id) ? resolveAppearance(id) : null), baselines: BASELINE_BY_MODE })
+
+  imported.custom = parsed && parsed.ok ? register(CUSTOM_ID, parsed) : null
+  imported.problem = parsed && !parsed.ok ? { errors: parsed.errors, omitted: parsed.omitted } : null
 
   if (stored === undefined && typeof legacy === 'boolean') {
     applyMode(config, legacy ? 'dark' : 'light')
-  } else if (PRESETS[stored]) {
+  } else if (isKnown(stored)) {
     state.id = stored
     state.applied = stored
   } else {
