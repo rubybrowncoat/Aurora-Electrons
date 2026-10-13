@@ -348,6 +348,80 @@
             A dash is a figure the save does not record, never 0: hover its mark for what is missing. A colony with nothing queued needs 0.
           </div>
         </v-card>
+
+        <v-card class="panel" data-summary="Each colony whose civilian mining complexes produce: whether the race buys or taxes their output, where a bought output is shipped by mass driver and what holds the transfer back, to review the policy colony by colony." elevation="1">
+          <div class="panel-head">
+            <span>Civilian mining policy<provenance-mark rule="cmcPolicy.choice" /></span>
+            <span class="head-tools body-2">
+              <span v-if="policySummary" class="text--secondary">{{ policySummary }}</span>
+              <router-link v-if="policyHasStockpiling" :to="stockpilingLink">Stockpiling check in Warnings</router-link>
+            </span>
+          </div>
+          <v-data-table :headers="policyHeaders" :items="policyRows" :custom-sort="sortNullLast" item-key="key" :sort-by.sync="policyTable.sortBy" :sort-desc.sync="policyTable.sortDesc" disable-pagination hide-default-footer no-data-text="No colony of the race has civilian mining complexes that produce.">
+            <template v-for="(rule, column) in policyRules" #[`header.${column}`]="{ header }">
+              <span :key="column">{{ header.text }}<provenance-mark :rule="rule" /></span>
+            </template>
+            <template #[`item.name`]="{ item }">
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
+                  <div class="caption text--secondary text-no-wrap">{{ item.place }}</div>
+                </div>
+                <page-link class="ml-2" :to="colonyLink(item)" :name="item.name" />
+              </div>
+            </template>
+            <template #[`item.outputSort`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap">{{ item.complexes === null ? '—' : counted(item.complexes, 'complex', 'complexes') }}<provenance-mark v-if="!isAvailable(item.production)" :result="item.production" /></div>
+                <div class="caption text--secondary text-no-wrap" :title="isAvailable(item.output) ? `${count(item.output.value)} t a year` : describeResult(item.output)">{{ isAvailable(item.output) ? `${compact(item.output.value)} a year` : '—' }}<provenance-mark :result="item.output" /></div>
+              </div>
+            </template>
+            <template #[`item.choiceSort`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap">{{ choiceLabels[item.choice] || '—' }}<provenance-mark v-if="unsure(item.choiceResult)" :result="item.choiceResult" /></div>
+                <div class="caption text--secondary text-no-wrap">{{ wealthText(item.wealth) }}<provenance-mark :result="item.wealth" /></div>
+              </div>
+            </template>
+            <template #[`item.targetSort`]="{ item }">
+              <div class="py-2 wrap-cell policy-wrap" :title="item.target ? `From ${item.name} to ${item.destinationName || 'no destination'}` : null">
+                <div>{{ item.target ? `→ ${item.destinationName || 'no destination'}` : '→ —' }}</div>
+                <div class="caption" :class="targetClass(item)">{{ targetText(item) }}<provenance-mark :result="item.targetResult" /></div>
+              </div>
+            </template>
+            <template #[`item.drivers`]="{ item }">
+              <div class="py-2 text-no-wrap">
+                <div><v-icon small :color="driverIcon(item.sourceDrivers).color" class="mr-1">{{ driverIcon(item.sourceDrivers).icon }}</v-icon>{{ driverText(item.sourceDrivers, item.row.Drivers, 'Source') }}<provenance-mark :result="item.sourceDrivers" /></div>
+                <div v-if="item.receiverDrivers"><v-icon small :color="driverIcon(item.receiverDrivers).color" class="mr-1">{{ driverIcon(item.receiverDrivers).icon }}</v-icon>{{ driverText(item.receiverDrivers, item.row.DestinationDrivers, 'Destination') }}<provenance-mark :result="item.receiverDrivers" /></div>
+                <div v-else-if="item.target" class="caption text--secondary"><v-icon small class="mr-1">mdi-minus</v-icon>No destination to receive</div>
+                <div v-else class="caption text--secondary"><v-icon small class="mr-1">mdi-help-circle-outline</v-icon>Destination: —<provenance-mark :result="item.targetResult" /></div>
+              </div>
+            </template>
+            <template #[`item.throughput`]="{ item }">
+              <div class="py-2 wrap-cell policy-wrap">
+                <div>{{ throughputText(item) }}<provenance-mark v-if="item.throughput.result" :result="item.throughput.result" /></div>
+                <div v-if="throughputNote(item)" class="caption text--secondary">{{ throughputNote(item) }}<provenance-mark v-if="item.throughput.state === 'stays' && unsure(item.held)" :result="item.held" /></div>
+              </div>
+            </template>
+            <template #[`item.switchSort`]="{ item }">
+              <div v-if="!item.switch" class="text--secondary text-no-wrap">{{ item.choice === 'npr' ? 'No choice for an NPR' : '—' }}<provenance-mark v-if="!item.choice" :result="item.choiceResult" /></div>
+              <div v-else-if="!isAvailable(item.switch)" class="text-no-wrap"><span class="text--secondary">—</span><provenance-mark :result="item.switch" /></div>
+              <div v-else class="py-2">
+                <div class="text-no-wrap">{{ item.choice === 'buy' ? 'Taxed' : 'Bought' }}: {{ signed(item.switch.value.minerals, compact) }} a year<provenance-mark :result="item.switch" /></div>
+                <div class="caption text--secondary text-no-wrap">{{ signed(item.switch.value.wealth, (value) => count(value)) }} wealth a year</div>
+              </div>
+            </template>
+            <template #[`item.stateOrder`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap"><v-icon small :color="policyStates[item.state].color" class="mr-1">{{ policyStates[item.state].icon }}</v-icon>{{ policyStates[item.state].label }}<provenance-mark v-if="item.unknownResult" :result="item.unknownResult" /></div>
+                <v-btn v-if="item.acknowledgeable" x-small text class="px-1 acknowledge-button" :aria-label="`${item.acknowledged ? 'Withdraw the acknowledgement of' : 'Acknowledge as intended'} the taxation at ${item.name}`" @click="toggleAcknowledged(item)">{{ item.acknowledged ? 'Withdraw' : 'Acknowledge as intended' }}</v-btn>
+              </div>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            A row for each colony of the race whose civilian mining complexes produce, in every system whatever the view<span v-if="policyAudit.idle">; {{ counted(policyAudit.idle, 'colony', 'colonies') }} with complexes that produce nothing {{ policyAudit.idle === 1 ? 'is' : 'are' }} left out, as the game neither charges nor pays for them</span>. A bought output goes to the colony's stockpile, or by mass driver to its destination when that colony exists; a taxed output reaches no stockpile, and an NPR keeps its output at no charge. {{ policyRatesNote }} The bought output leaves in a packet of its own whatever the source's drivers can send, so a destination alone does not show what arrives: the output is set against the drivers' capacity, which limits the stock above the reserve, only where both are known. A destination the game never offers (another race's colony, another system, the colony itself) is invalid, and a missing mass driver at either end is listed apart. If switched is hypothetical: the choice is made in the game, and nothing here changes the save. Acknowledging a taxed colony as intended is kept for this race and colony, can be withdrawn and leaves the row listed.
+            A dash is a figure the save does not record, never 0: hover its mark for what is missing.
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -368,6 +442,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
+import { CMC_PURCHASE_COST, CMC_TAX_INCOME, NO_CMC_POLICY, POLICY_STATES, TARGET_STATES, cmcPolicyRows, loadCmcPolicy } from '../utilities/cmc-policy'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadRoutes } from '../utilities/colonization-data'
 import { linkTo, queryBodies, queryId, queryIds } from '../utilities/deep-links'
@@ -376,7 +451,8 @@ import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utiliti
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MASS_DRIVER_TONS, MINERALS, bestSiteResult, betterSite, bodyPotentialResult, compact, depositPotential, depositPotentialResult, depositReadable, massDriverRateResult, miningDistanceResult, pastHalf, perMineResult, qualifiesForCmc, withinOrbitalReach } from '../utilities/minerals'
-import { describeResult, isAvailable, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
+import { describeResult, isAvailable, ruleSupports, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
+import { loadFormulaVersion } from '../utilities/transport'
 
 const INPUT_LABELS = {
   race: "the race's mining tech",
@@ -388,6 +464,8 @@ const INPUT_LABELS = {
   packets: 'the mass-driver packets',
   miners: 'the orbital miners',
   aliens: 'the alien colonies',
+  policy: 'the civilian mining policy',
+  formulaVersion: "the save's game version",
 }
 
 const SHORT_NAMES = { 1: 'Du', 2: 'Ne', 3: 'Co', 4: 'Tr', 5: 'Bo', 6: 'Me', 7: 'Ve', 8: 'So', 9: 'Ur', 10: 'Cr', 11: 'Ga' }
@@ -449,6 +527,8 @@ export default {
       colonySearch: { key: 'mineralsColonySearch', default: '', scope: 'race' },
       depositTable: tableView('mineralsDepositsTable', { sortBy: ['potential'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       colonyTable: tableView('mineralsColoniesTable', { sortBy: ['stateOrder'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      policyTable: tableView('mineralsCmcPolicyTable', { sortBy: ['stateOrder'], sortDesc: [false] }),
+      cmcAcknowledged: { key: 'mineralsCmcTaxAcknowledged', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter(Number.isInteger) : undefined) },
     }),
   ],
   data() {
@@ -466,6 +546,9 @@ export default {
       accessibilitySteps: ACCESSIBILITY_STEPS,
       groundSurvey: GROUND_SURVEY,
       stockStates: STOCK_STATES,
+      policyStates: POLICY_STATES,
+      policyRules: { outputSort: 'cmcPolicy.output', choiceSort: 'cmcPolicy.choice', targetSort: 'cmcPolicy.destination', drivers: 'cmcPolicy.drivers', throughput: 'cmcPolicy.throughput', switchSort: 'cmcPolicy.switch' },
+      choiceLabels: { buy: 'Bought', tax: 'Taxed', npr: 'Kept (NPR)' },
       tonnageColumns: ['stock', 'reserve', 'free', 'needs', 'inbound'],
       headerRules: { stock: 'minerals.colonyStock', reserve: 'minerals.colonyStock', free: 'minerals.colonyStock', needs: 'minerals.queueNeeds', inbound: 'minerals.inFlight', driverSort: 'minerals.massDriverRate', stateOrder: 'minerals.stockState' },
       mapHeight: 'clamp(320px, calc(100vh - 460px), 560px)',
@@ -1049,6 +1132,68 @@ export default {
       })
     },
 
+    // The civilian mining policy (utilities/cmc-policy.js) of every colony of the race whose complexes produce, in every system whatever the view.
+    policyAudit() {
+      return cmcPolicyRows(this.policy, { RaceID: this.RaceID, version: this.formulaVersion, acknowledged: this.cmcAcknowledged })
+    },
+
+    policyRows() {
+      const stocks = Object.fromEntries(this.colonyStocks.map((entry) => [entry.colony.PopulationID, entry]))
+
+      return this.policyAudit.rows.map((row) => {
+        const colony = this.coloniesById[row.PopulationID]
+        const stock = stocks[row.PopulationID]
+        const held = stock ? sumResults({ rule: 'minerals.colonyStock', results: stock.minerals.map((mineral) => mineral.results.stock) }) : unavailable({ rule: 'minerals.colonyStock', missing: ["the colony's stockpile"] })
+        const unknownResult = row.state === 'unknown' ? [row.production, row.choiceResult, row.targetResult, row.sourceDrivers, row.receiverDrivers, row.throughput.result].find((result) => result && !isAvailable(result)) || null : null
+
+        return {
+          ...row,
+          key: row.PopulationID,
+          name: colony ? colony.PopName : `Colony #${row.PopulationID}`,
+          place: colony ? [colony.SystemName, systemBodyName(colony)].filter(Boolean).join(' · ') : '',
+          destinationName: this.destinationName(row),
+          held,
+          unknownResult,
+          outputSort: valueOrNull(row.output),
+          choiceSort: row.choice,
+          targetSort: row.target ? Object.keys(TARGET_STATES).indexOf(row.target) : null,
+          switchSort: isAvailable(row.switch) ? row.switch.value.wealth : null,
+          stateOrder: POLICY_STATES[row.state].order,
+        }
+      })
+    },
+
+    // How many colonies are in each state, most pressing first.
+    policySummary() {
+      return Object.entries(POLICY_STATES).map(([state, { label }]) => [this.policyRows.filter((row) => row.state === state).length, label]).filter(([count]) => count).map(([count, label]) => `${this.count(count)} ${label.toLowerCase()}`).join(' · ')
+    },
+
+    policyHasStockpiling() {
+      return this.policyRows.some((row) => row.state === 'stockpiling')
+    },
+
+    stockpilingLink() {
+      return linkTo.warnings({ check: 'stockpiling-civilian-minerals' })
+    },
+
+    policyHeaders() {
+      return [
+        { text: 'Colony', value: 'name' },
+        { text: 'Complexes', value: 'outputSort', align: 'end' },
+        { text: 'Choice', value: 'choiceSort' },
+        { text: 'Export', value: 'targetSort' },
+        { text: 'Mass drivers', value: 'drivers', sortable: false },
+        { text: 'Throughput', value: 'throughput', sortable: false },
+        { text: 'If switched', value: 'switchSort', align: 'end' },
+        { text: 'Verdict', value: 'stateOrder' },
+      ]
+    },
+
+    // The rates sentence of the policy panel's foot: the 2.7 constants where they hold for the save, or why the wealth figures show a dash.
+    policyRatesNote() {
+      return ruleSupports('cmcPolicy.rates', this.formulaVersion) === true ? `Buying a complex's output costs ${this.count(CMC_PURCHASE_COST)} wealth a year and taxing it brings in ${this.count(CMC_TAX_INCOME)}, the 2.7 rates; the save stores neither.` : "No purchase or tax rate is verified for the save's game version, so the wealth figures and If switched show a dash."
+    },
+
     mapLinks() {
       return jumpLinks(this.routes.jumpPoints)
     },
@@ -1129,6 +1274,8 @@ export default {
     roundToDecimal,
     compact,
     withAlpha,
+    isAvailable,
+    describeResult,
 
     setFocus(id) {
       this.focusId = id
@@ -1283,6 +1430,107 @@ export default {
     plannerLink(rows) {
       return linkTo.planner({ bodies: rows.map((row) => row.body || row) })
     },
+
+    colonyLink(row) {
+      return linkTo.colonyOutlook(row.PopulationID)
+    },
+
+    // The name of a policy row's destination: a colony of the race by its name, one of another race unnamed, one that is gone by its id.
+    destinationName(row) {
+      if (!row.destination) {
+        return null
+      } else if (row.target === 'foreign') {
+        return TARGET_STATES.foreign
+      }
+
+      const colony = this.coloniesById[row.destination.PopulationID]
+
+      return colony ? colony.PopName : row.destination.name || `Colony #${row.destination.PopulationID}`
+    },
+
+    // What a row's destination does: for a bought output, whether it ships or stays; otherwise what the destination means for the stock above the reserve.
+    targetText(row) {
+      if (!row.target) {
+        return 'Destination not known'
+      } else if (row.target === 'valid') {
+        return row.choice === 'buy' ? 'Destination valid' : 'Ships the stock above the reserve'
+      } else if (row.target === 'none' || row.target === 'gone') {
+        const what = row.target === 'none' ? 'No destination' : 'Destination gone'
+
+        return row.choice === 'buy' ? `${what}: the bought output stays here` : what
+      }
+
+      return `Invalid: ${TARGET_STATES[row.target]}, never offered by the game`
+    },
+
+    targetClass(row) {
+      return ['self', 'foreign', 'elsewhere'].includes(row.target) ? 'error--text' : row.choice === 'buy' && (row.target === 'none' || row.target === 'gone') ? 'warning--text' : 'text--secondary'
+    },
+
+    // A mass driver verdict as an icon: present, missing or not known.
+    driverIcon(result) {
+      if (!isAvailable(result)) {
+        return { icon: 'mdi-help-circle-outline', color: undefined }
+      }
+
+      return result.value ? { icon: 'mdi-check', color: 'success' } : { icon: 'mdi-close', color: 'error' }
+    },
+
+    driverText(result, drivers, where) {
+      return isAvailable(result) ? `${where}: ${result.value ? this.counted(drivers, 'driver', 'drivers') : 'no driver'}` : `${where}: —`
+    },
+
+    // What of a row's output ships, and against what.
+    throughputText(row) {
+      const { state, result } = row.throughput
+
+      if (state === 'unbought') {
+        return row.choice === 'tax' ? 'The taxed output reaches no stockpile' : 'Kept at the source'
+      } else if (state === 'stays') {
+        return 'Nothing ships'
+      } else if (state === 'invalid') {
+        return 'No valid destination to ship to'
+      } else if (state === 'unknown') {
+        return 'Not known'
+      }
+
+      return `${compact(result.value.output)} a year ${state === 'within' ? 'within' : 'over'} the drivers' ${compact(result.value.capacity)}`
+    },
+
+    throughputNote(row) {
+      const { state } = row.throughput
+
+      if (state === 'over') {
+        return 'Ships in full in a packet of its own; the drivers\' capacity limits the stock above the reserve.'
+      } else if (state === 'stays') {
+        return isAvailable(row.held) ? `${compact(row.held.value)} held here` : 'Stock here not known'
+      } else if (state === 'unbought' && row.target === 'valid' && isAvailable(row.capacity)) {
+        return `Drivers ship up to ${compact(row.capacity.value)} a year of the stock above the reserve.`
+      }
+
+      return ''
+    },
+
+    // A signed figure: a plus for a gain, a minus sign for a loss, 0 as 0.
+    signed(value, text) {
+      return value > 0 ? `+${text(value)}` : value < 0 ? `\u2212${text(-value)}` : text(0)
+    },
+
+    wealthText(result) {
+      return isAvailable(result) ? `${this.signed(result.value, (value) => this.count(value))} wealth a year` : '—'
+    },
+
+    toggleAcknowledged(row) {
+      const ids = new Set(this.cmcAcknowledged)
+
+      if (ids.has(row.PopulationID)) {
+        ids.delete(row.PopulationID)
+      } else {
+        ids.add(row.PopulationID)
+      }
+
+      this.cmcAcknowledged = [...ids].sort((a, b) => a - b)
+    },
   },
   asyncComputed: {
     race: {
@@ -1400,6 +1648,30 @@ export default {
         return Object.freeze(aliens)
       }),
       default: [],
+    },
+
+    // The race's civilian mining complex colonies and their output, for the policy panel.
+    policy: {
+      get: tracked('policy', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_CMC_POLICY
+        }
+
+        return await loadCmcPolicy(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_CMC_POLICY,
+    },
+
+    // The formula version the save's schema stands for (`loadFormulaVersion`): the stated one for a 2.7-shaped save, null for any other shape. The civilian mining rates hold for that version only.
+    formulaVersion: {
+      get: tracked('formulaVersion', async function () {
+        if (!this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
     },
   },
 }
@@ -1551,12 +1823,21 @@ export default {
     max-width: 260px;
   }
 
+  .policy-wrap {
+    min-width: 180px;
+  }
+
   .worker-cell {
     min-width: 140px;
   }
 
   .distance-cell {
     max-width: 140px;
+  }
+
+  .acknowledge-button {
+    margin-top: 2px;
+    text-transform: none;
   }
 
   .expand-cell {
