@@ -232,6 +232,10 @@ export const READS = {
     raceEngines: { label: 'the race\'s engines', reads: 'FCT_RaceTech(GameID Obsolete RaceID TechID) FCT_ShipDesignComponents(ComponentTypeID ComponentValue Cost Crew EnginePowerMod ExplosionChance FuelEfficiency GameID HTK MaxExplosionSize MilitarySystem Name SDComponentID Size StealthRating)' },
     classFigures: { label: 'the classes\' cargo, hangar and deployment', reads: 'FCT_ShipClass(CargoCapacity Commercial GameID ParasiteCapacity PlannedDeployment RaceID ShipClassID)' },
   },
+  '/missile-designer': {
+    tech: { label: 'the race\'s tech lines, researched levels and research graph', reads: 'DIM_TechType(Description FieldID TechTypeID) FCT_EligibleProjects(GameID RaceID TechSystemID) FCT_PausedResearch(GameID PointsAccumulated RaceID TechSystemID) FCT_Population(PopulationID RaceID) FCT_RaceTech(GameID Obsolete RaceID TechID) FCT_ResearchProject(GameID RaceID ResearchPointsRequired TechID) FCT_ResearchQueue(GameID PopulationID TechSystemID) FCT_TechSystem(AdditionalInfo AdditionalInfo2 AutomaticResearch ComponentName ConventionalSystem DevelopCost GameID Name Prerequisite1 Prerequisite2 RaceID RuinOnly StartingSystem TechDescription TechSystemID TechTypeID)' },
+    designs: { label: 'the missile designs the race has researched and owns', reads: 'FCT_MissileType(* GameID MissileID) FCT_Race(GameID RaceID RaceName) FCT_RaceTech(GameID Obsolete RaceID TechID) FCT_ShipDesignComponents(BGTech1 BGTech2 ComponentValue Cost FuelEfficiency GameID Name SDComponentID Size) FCT_TechSystem(AdditionalInfo DevelopCost RaceID TechSystemID TechTypeID)' },
+  },
   '/shipyards': {
     refitData: { label: 'the ship classes and their components', reads: 'FCT_ClassComponent(ClassID ComponentID NumComponent) FCT_ShipClass(ClassName ClassShippingLineID Commercial Cost GameID Obsolete OtherRaceClassID RaceID ShipClassID Size) FCT_ShipDesignComponents(* ComponentTypeID Cost Name Prototype SDComponentID)' },
     shipCounts: { label: 'the ships', reads: 'FCT_Ship(Destroyed GameID RaceID ShipClassID)' },
