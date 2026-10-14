@@ -410,7 +410,7 @@ export default {
 
   .scarce {
     font-weight: 500;
-    color: var(--sc);
+    color: var(--sc-text);
   }
 
   .flex-none {

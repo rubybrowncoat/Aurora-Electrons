@@ -119,7 +119,119 @@ export const PRESSED_BUTTON = { light: '#f5f5f5', dark: '#272727' }
 // Vuetify's own ink of disabled text (a disabled field's value and label, a disabled list item), drawn over the surface by its theme; the preset does not set it. WCAG exempts inactive components, so this is not a conformance floor but the Electrons one: the text stays readable (2.5:1 or more) on every surface of every preset, Light's own 2.7 being the lowest of the baseline presets.
 export const DISABLED_INK = { light: 'rgba(0, 0, 0, 0.38)', dark: 'rgba(255, 255, 255, 0.5)' }
 
-// Measures a resolved appearance: `{ text, graphics, rows, disabled, fills, categorical, named }`, each a list of `{ label, foreground, surface, ratio, minimum, pass }`. `extraRowStates` are more row states ([label, washes]) the caller found (the gate adds the ones its stylesheet leaves unsettled). `baseline` is the resolved baseline preset of the appearance's mode, for `named`. A colour a measurement cannot read is a row that fails with ratio 0, so a damaged value is a finding and not an exception.
+// How the nine section accents are drawn: `on` each section in its own accent (`sections.accents`), `restrained` each accent mixed halfway toward the neutral one, `off` every section in the neutral accent, so that a section is told by its label, icon and place alone.
+export const ACCENT_MODES = ['on', 'restrained', 'off']
+export const DEFAULT_ACCENT_MODE = 'on'
+
+// The share of the neutral accent in a restrained one.
+const RESTRAINT = 0.5
+
+const restrained = new WeakMap()
+
+// The colour of each of the nine sections (the order of `sections.accents`, which `accent` of the registry in utilities/navigation.js indexes) in an accent mode: the colours the navigation is drawn in, and the ones scripts/check-contrast.js measures. They come from `sections` alone, never from the chart categories.
+export const sectionAccents = (appearance, mode = DEFAULT_ACCENT_MODE) => {
+  const { accents, neutral } = appearance.sections
+
+  if (mode === 'off') {
+    return accents.map(() => neutral)
+  }
+
+  if (mode === 'restrained') {
+    if (!restrained.has(appearance)) {
+      restrained.set(appearance, accents.map((color) => hex(over({ ...parseColor(color), a: 1 - RESTRAINT }, parseColor(neutral)))))
+    }
+
+    return restrained.get(appearance)
+  }
+
+  return accents
+}
+
+// The colour of a section in an accent mode, or the neutral accent for a place without a section (Settings, About, Empires). `section` is a row of the registry in utilities/navigation.js.
+export const sectionColor = (appearance, section, mode = DEFAULT_ACCENT_MODE) => (section ? sectionAccents(appearance, mode)[section.accent] : appearance.sections.neutral)
+
+const solid = (appearance, path) => {
+  const color = parseColor(at(appearance, path))
+
+  return color.a < 1 ? over(color, parseColor(appearance.surfaces.card)) : color
+}
+
+// The opacity of the overlay Vuetify 2.7.2 draws over a tab in the colour of its text (`.v-tab::before` in `currentColor`), by theme: `activated` while an active tab is hovered, `pressed` while it holds focus. They are the `states` of the theme (src/styles/settings/_light.scss and _dark.scss) that `+states` in components/VTabs/VTabs.sass applies to a tab; the stylesheet of the app does not change them, and they do not depend on the appearance's washes. scripts/check-contrast.js and scripts/check-section-accents.js read those two files and fail when these numbers differ from them.
+export const VUETIFY_TAB_STATES = { light: { activated: 0.12, pressed: 0.16 }, dark: { activated: 0.24, pressed: 0.32 } }
+
+// What a section colour drawn as text sits on, each as { state, surfacePath, background } composited into one opaque colour: the page, the card and the chrome (the tab strip and the breadcrumb, the flyout, the palette, the planner), each plain, under the hover wash (the palette's selected row), under Vuetify's overlay of an active tab in the text colour itself at the opacity of a hovered tab and of a focused one (`VUETIFY_TAB_STATES` of the appearance's mode), and the card under each wash of a table row (the planner's figures sit in tables). Backgrounds that come out the same are listed once.
+export const sectionBackdrops = (appearance, color) => {
+  const states = VUETIFY_TAB_STATES[appearance.mode]
+  const text = parseColor(color)
+  const seen = new Set()
+  const card = solid(appearance, 'surfaces.card')
+  const rows = ROW_STATES.map(([state, washes]) => ({ state, surfacePath: 'surfaces.card', background: washes.reduce((below, path) => over(parseColor(at(appearance, path)), below), card) }))
+  const surfaces = SURFACES.flatMap((surfacePath) => {
+    const surface = solid(appearance, surfacePath)
+
+    return [['plain', surface], ['hovered', over(parseColor(appearance.focus.hover), surface)], ['active tab hovered', over({ ...text, a: states.activated }, surface)], ['active tab focused', over({ ...text, a: states.pressed }, surface)]].map(([state, background]) => ({ state, surfacePath, background }))
+  })
+
+  return [...surfaces, ...rows].filter(({ surfacePath, background }) => {
+    const key = `${surfacePath === 'surfaces.card' ? '' : surfacePath}:${hex(background)}`
+
+    return seen.has(key) ? false : Boolean(seen.add(key))
+  })
+}
+
+// The mixes tried, from the colour toward the body ink, in this many equal steps.
+const MIX_STEPS = 256
+
+// The colour a section is drawn in when it colours text (a title, a label, an active tab), as a hex colour: the colour itself when it reads at 4.5:1 on every backdrop, else the first mix of it with the body ink, in 1/256 steps from the colour, that reads on every backdrop, so that the hue holds as far as the contrast allows (the ink itself when no mix reads). Whether a mix reads is not monotone in the share of ink, because a backdrop is drawn in the text colour itself, so every step is tried and none is skipped. A mix of two colours that each read need not read itself, so the text colour is worked out from the colour in force (the accent, its restrained mix or the neutral accent) and never from its ends. Graphics (an icon, a bar, a wash) keep the colour of `sectionColor` at 3:1.
+export const readableSectionText = (appearance, color) => {
+  const base = parseColor(color)
+  const ink = over(parseColor(appearance.inks.body), solid(appearance, 'surfaces.card'))
+  const reads = (candidate) => sectionBackdrops(appearance, hex(candidate)).every(({ background }) => ratio(candidate, background) >= TEXT)
+
+  if (reads(base)) {
+    return color
+  }
+
+  for (let step = 1; step <= MIX_STEPS; step++) {
+    const candidate = parseColor(hex(over({ ...ink, a: step / MIX_STEPS }, base)))
+
+    if (reads(candidate)) {
+      return hex(candidate)
+    }
+  }
+
+  return hex(ink)
+}
+
+const sectionTextKept = new WeakMap()
+
+// The text colour of each of the nine sections in an accent mode (the order of `sections.accents`): `readableSectionText` of the colour `sectionAccents` gives.
+export const sectionTexts = (appearance, mode = DEFAULT_ACCENT_MODE) => {
+  if (!sectionTextKept.has(appearance)) {
+    sectionTextKept.set(appearance, {})
+  }
+
+  const kept = sectionTextKept.get(appearance)
+
+  if (!kept[mode]) {
+    const read = new Map()
+
+    kept[mode] = sectionAccents(appearance, mode).map((color) => {
+      if (!read.has(color)) {
+        read.set(color, readableSectionText(appearance, color))
+      }
+
+      return read.get(color)
+    })
+  }
+
+  return kept[mode]
+}
+
+// The text colour of a section in an accent mode, or of the neutral accent for a place without a section: what `--sc-text` carries (components/navigation/section-style.js).
+export const sectionText = (appearance, section, mode = DEFAULT_ACCENT_MODE) => (section ? sectionTexts(appearance, mode)[section.accent] : sectionTexts(appearance, 'off')[0])
+
+// Measures a resolved appearance: `{ text, graphics, rows, disabled, fills, categorical, sections, sectionText, named }`, each a list of `{ label, foreground, surface, ratio, minimum, pass }`. `extraRowStates` are more row states ([label, washes]) the caller found (the gate adds the ones its stylesheet leaves unsettled). `baseline` is the resolved baseline preset of the appearance's mode, for `named`. A colour a measurement cannot read is a row that fails with ratio 0, so a damaged value is a finding and not an exception.
 export const measureAppearance = (appearance, { extraRowStates = [], baseline = null } = {}) => {
   const card = parseColor(appearance.surfaces.card)
   const resolve = (path) => {
@@ -128,7 +240,7 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
     return color.a < 1 ? over(color, card) : color
   }
   const distinct = (surfaces) => surfaces.filter((surface, index) => surfaces.findIndex((other) => hex(resolve(other)) === hex(resolve(surface))) === index)
-  const measured = { text: [], graphics: [], rows: [], disabled: [], fills: [], categorical: [], named: [] }
+  const measured = { text: [], graphics: [], rows: [], disabled: [], fills: [], categorical: [], sections: [], sectionText: [], named: [] }
   const guard = (list, row, compute) => {
     try {
       const value = compute()
@@ -188,6 +300,26 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
   appearance.charts.categorical.forEach((color, slot) => {
     distinct(SURFACES).forEach((surface) => {
       guard(measured.categorical, { slot, color, surface: at(appearance, surface), surfacePath: surface, minimum: GRAPHIC }, () => ratio(parseColor(color), resolve(surface)))
+    })
+  })
+
+  ACCENT_MODES.forEach((mode) => {
+    const colors = sectionAccents(appearance, mode)
+
+    ;(mode === 'off' ? [colors[0]] : colors).forEach((color, index) => {
+      distinct(SURFACES).forEach((surface) => {
+        guard(measured.sections, { mode, section: mode === 'off' ? null : index, color, surface: at(appearance, surface), surfacePath: surface, minimum: GRAPHIC }, () => ratio(parseColor(color), resolve(surface)))
+      })
+    })
+  })
+
+  ACCENT_MODES.forEach((mode) => {
+    const colors = sectionTexts(appearance, mode)
+
+    ;(mode === 'off' ? [colors[0]] : colors).forEach((color, index) => {
+      sectionBackdrops(appearance, color).forEach(({ state, surfacePath, background }) => {
+        guard(measured.sectionText, { mode, section: mode === 'off' ? null : index, color, state, surface: hex(background), surfacePath, minimum: TEXT }, () => ratio(parseColor(color), background))
+      })
     })
   })
 

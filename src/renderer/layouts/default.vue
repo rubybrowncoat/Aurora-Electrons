@@ -769,7 +769,7 @@ export default {
   text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
-  color: var(--sc);
+  color: var(--sc-text);
 }
 
 .breadcrumb__separator {
@@ -790,7 +790,7 @@ export default {
   }
 
   ::v-deep .v-tab--active {
-    color: var(--sc) !important;
+    color: var(--sc-text) !important;
   }
 
   ::v-deep .v-tabs-slider {

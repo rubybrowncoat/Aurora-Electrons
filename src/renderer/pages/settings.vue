@@ -3,7 +3,7 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the theme, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the theme, how strongly the nine sections are coloured, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to tone the section colours down or switch them off, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
               <div class="setting" data-theme-policy>
@@ -13,6 +13,15 @@
                 </div>
                 <div class="setting__buttons" role="group" aria-label="Theme">
                   <v-btn v-for="option in policies" :key="option.id" small :depressed="option.id === shownPolicy" :outlined="option.id !== shownPolicy" :color="option.id === shownPolicy ? 'primary' : undefined" :aria-pressed="String(option.id === shownPolicy)" :data-policy="option.id" @click="setPolicy(option.id)">{{ option.label }}</v-btn>
+                </div>
+              </div>
+              <div class="setting" data-accent-modes>
+                <div class="setting__text">
+                  <div class="body-2">Section accents</div>
+                  <div class="caption text--secondary">{{ accentNote }}</div>
+                </div>
+                <div class="setting__buttons" role="group" aria-label="Section accents">
+                  <v-btn v-for="option in accentOptions" :key="option.id" small :depressed="option.id === accents" :outlined="option.id !== accents" :color="option.id === accents ? 'primary' : undefined" :aria-pressed="String(option.id === accents)" :data-accent-mode="option.id" @click="setAccents(option.id)">{{ option.label }}</v-btn>
                 </div>
               </div>
               <div class="setting setting--block">
@@ -76,7 +85,7 @@
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system and changes with it; a named preset replaces the theme until a theme is chosen again, and the theme is kept meanwhile. The lamp in the app bar sets the opposite of the mode drawn now as Light or Dark, so it ends System or a named preset too. A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system and changes with it; a named preset replaces the theme until a theme is chosen again, and the theme is kept meanwhile. The lamp in the app bar sets the opposite of the mode drawn now as Light or Dark, so it ends System or a named preset too. The section accents apply at once and are kept whatever preset is chosen; the nine sections keep their labels, icons and places with the accents restrained or off. A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
 
@@ -109,7 +118,7 @@
 
       <v-row>
         <v-col cols="12" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Moves the theme, the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Moves the theme, the section accents, the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
             <div class="panel-head">
               <span>Export and import preferences</span>
               <v-chip v-if="backup" small>Undo kept</v-chip>
@@ -244,7 +253,7 @@ import FontChoice from '../components/settings/FontChoice.vue'
 import PresetCard from '../components/settings/PresetCard.vue'
 import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
-import { APPEARANCE_KEY, APPEARANCE_SETTINGS, BASELINE_POLICIES, CUSTOM_ID, DEFAULT_PRESET_ID, DRAFT_ID, NO_OVERRIDE, POLICIES, POLICY_KEY, activeAppearance, adoptAppearance, appearanceOverride, appearancePolicy, appliedPresetId, applyPolicy, applyPreset, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, systemMode, unsupportedPresetId } from '../utilities/appearance'
+import { ACCENTS_KEY, ACCENT_MODES, APPEARANCE_KEY, APPEARANCE_SETTINGS, BASELINE_POLICIES, CUSTOM_ID, DEFAULT_PRESET_ID, DRAFT_ID, NO_OVERRIDE, POLICIES, POLICY_KEY, accentMode, activeAppearance, adoptAppearance, appearanceOverride, appearancePolicy, appliedPresetId, applyAccents, applyPolicy, applyPreset, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, systemMode, unsupportedPresetId } from '../utilities/appearance'
 import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
 import { FONT_KEY, loadFont, previewFont, readFont } from '../utilities/appearance-font'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
@@ -261,6 +270,9 @@ const APP_SETTINGS = [...APPEARANCE_SETTINGS, 'darkMode', 'spyNPR', 'selectedSep
 
 // The theme policies as the Theme control offers them.
 const THEMES = POLICIES.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }))
+
+// The accent modes as the Section accents control offers them, with what each does.
+const ACCENTS = ACCENT_MODES.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1), note: { on: 'Each section is drawn in its own accent: the icon in the rail, the tab, the breadcrumb and the washes.', restrained: 'Each accent is mixed halfway toward the neutral one, so the sections are told apart gently.', off: 'Every section is drawn in the neutral accent and is told by its label, icon and place.' }[id] }))
 const appViews = (store) => appViewsOf(store, APP_SETTINGS)
 const withoutViews = (store, only) => withoutViewsOf(store, APP_SETTINGS, only)
 
@@ -342,6 +354,18 @@ export default {
 
     shownPolicy() {
       return appearanceOverride() ? null : appearancePolicy()
+    },
+
+    accentOptions() {
+      return ACCENTS
+    },
+
+    accents() {
+      return accentMode()
+    },
+
+    accentNote() {
+      return `${ACCENTS.find(({ id }) => id === this.accents).note} The labels, icons and places of the nine sections stay as they are.`
     },
 
     themeNote() {
@@ -627,6 +651,20 @@ export default {
       this.reinstantiateConfig()
     },
 
+    // The accent mode at once.
+    setAccents(mode) {
+      try {
+        applyAccents(this.config, mode)
+      } catch (error) {
+        console.error("Couldn't write the section accents", error)
+        this.activateSnackbar({ text: "Couldn't write the settings, so the section accents were not changed", color: 'error' })
+
+        return
+      }
+
+      this.reinstantiateConfig()
+    },
+
     preview(id) {
       previewPreset(id)
     },
@@ -765,7 +803,7 @@ export default {
       this.busy = true
 
       try {
-        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: [...listAppearances().map(({ id }) => id), NO_OVERRIDE], none: NO_OVERRIDE, baselines: BASELINE_POLICIES }, policy: { key: POLICY_KEY, values: POLICIES }, font: { key: FONT_KEY, read: readFont }, separators: SEPARATORS })
+        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: [...listAppearances().map(({ id }) => id), NO_OVERRIDE], none: NO_OVERRIDE, baselines: BASELINE_POLICIES }, policy: { key: POLICY_KEY, values: POLICIES }, accents: { key: ACCENTS_KEY, values: ACCENT_MODES }, font: { key: FONT_KEY, read: readFont }, separators: SEPARATORS })
       } catch (error) {
         console.error("Couldn't load the pages' declared preferences", error)
         this.activateSnackbar({ text: "Couldn't load the list of preferences that can be exported", color: 'error' })
@@ -908,13 +946,13 @@ export default {
       this.activateSnackbar({ text: `${this.count(result.restored)} ${values(result.restored)} put back`, color: 'success' })
     },
 
-    // The theme, the colour preset and the typeface in force follow the settings once they changed under them, and every reader takes a new settings instance.
+    // The theme, the section accents, the colour preset and the typeface in force follow the settings once they changed under them, and every reader takes a new settings instance.
     afterWrite(keys) {
       if (keys.includes(FONT_KEY)) {
         loadFont(this.config)
       }
 
-      if (keys.includes(APPEARANCE_KEY) || keys.includes(POLICY_KEY)) {
+      if (keys.includes(APPEARANCE_KEY) || keys.includes(POLICY_KEY) || keys.includes(ACCENTS_KEY)) {
         adoptAppearance(this.config)
       }
 

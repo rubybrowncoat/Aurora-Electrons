@@ -1,16 +1,16 @@
 // The page registry: one row per route. The layout (rail, flyout, tabs, breadcrumb, Ctrl+K palette, titles) and the smoke tests' page list (scripts/smoke-pages.js) all read from here.
 
-// `slot` indexes `chartTheme(appearance).categorical` in components/charts/theme.js.
+// `accent` indexes `sections.accents` of the appearance (utilities/appearance.js): the section's colour, which the accent mode (`on`, `restrained`, `off`) may soften or turn off, so a section is also told by its title, its icon and its place in this list. The accents are kept apart from the chart categories.
 const SECTIONS = [
-  { id: 'command', title: 'Command', icon: 'mdi-view-dashboard-outline', slot: 0 },
-  { id: 'economy', title: 'Economy', icon: 'mdi-pickaxe', slot: 1 },
-  { id: 'colonies', title: 'Colonies', icon: 'mdi-home-group', slot: 2 },
-  { id: 'logistics', title: 'Logistics', icon: 'mdi-truck-fast-outline', slot: 3 },
-  { id: 'galaxy', title: 'Galaxy', icon: 'mdi-orbit', slot: 6 },
-  { id: 'exploration', title: 'Exploration', icon: 'mdi-telescope', slot: 7 },
-  { id: 'empire', title: 'Empire', icon: 'mdi-shield-crown-outline', slot: 4 },
-  { id: 'research', title: 'Research', icon: 'mdi-flask-outline', slot: 5 },
-  { id: 'design', title: 'Design', icon: 'mdi-pencil-ruler', slot: 8 },
+  { id: 'command', title: 'Command', icon: 'mdi-view-dashboard-outline', accent: 0 },
+  { id: 'economy', title: 'Economy', icon: 'mdi-pickaxe', accent: 1 },
+  { id: 'colonies', title: 'Colonies', icon: 'mdi-home-group', accent: 2 },
+  { id: 'logistics', title: 'Logistics', icon: 'mdi-truck-fast-outline', accent: 3 },
+  { id: 'galaxy', title: 'Galaxy', icon: 'mdi-orbit', accent: 6 },
+  { id: 'exploration', title: 'Exploration', icon: 'mdi-telescope', accent: 7 },
+  { id: 'empire', title: 'Empire', icon: 'mdi-shield-crown-outline', accent: 4 },
+  { id: 'research', title: 'Research', icon: 'mdi-flask-outline', accent: 5 },
+  { id: 'design', title: 'Design', icon: 'mdi-pencil-ruler', accent: 8 },
 ]
 
 // `tab` labels the page in its section's tab strip. `requiresHistory` pages are disabled while the selected race isn't recorded. `hidden` pages keep a title but appear in no navigation, palette or default smoke list. `noRace` pages (Empires, Settings, About) work before a game and race are picked; every other page shows the selected race's data, so it can't be opened until one is. `planned` pages have no page file yet: the section flyout lists them dimmed with a "Planned" chip, and they are never navigable and appear in no tabs, palette, history or smoke list. Pages within a section appear in this order. `/`, the Empires page, is where the app starts.

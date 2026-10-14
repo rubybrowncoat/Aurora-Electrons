@@ -1,5 +1,6 @@
 import Vue from 'vue'
 import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appearance-file'
+import { ACCENT_MODES, DEFAULT_ACCENT_MODE } from './appearance-contrast'
 import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 
 // The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
@@ -14,7 +15,7 @@ import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 // - `contacts`, `survey`, `habitability`, `accessibility`, `status` (each optional): the meaning of a colour, not its place in the palette. `contacts`: how the race regards an alien contact (hostile, unknown, neutral, friendly, allied, civilian). `survey`: surveyed, remaining, ground (a ground survey location), unexplored (an unexplored jump point), and the geological, gravitational and both kinds of survey. `habitability`: `band`, the hue the colony-cost bands shade from. `accessibility`: a mineral deposit's good, fair and poor band. `status`: `shortfall` and `inactive` (a standing that is neither good nor bad). Each defaults to its slot in ROLE_SLOTS of the categorical list; a colour here replaces it.
 // - `plan`: the Colonization Planner's hues that are not a severity (mining, terraformFree, terraformPartial, terraformCheaper, cheap, moderate, costly, severe, insufficient, rich, cmc, unsurveyed, selected), each given in full. `toneColor` turns a tone, a severity name or a key of `plan` or `status`, into its colour.
 // - `charts`: `axis` (axis lines, gridlines at 60%), `tooltip` (its background) and `categorical`, the nine slots every chart series, section accent and status colour is taken from.
-// - `sections`: `neutral` (the accent without a section: Settings, About, Empires).
+// - `sections`: `neutral` (the accent without a section: Settings, About, Empires, and every section while the accents are off) and `accents`, one colour for each of the nine sections of the navigation registry (`accent` of a section indexes it). They start as the colours of the chart categories and are kept apart from them, so that a change of the chart palette never recolours a section; each is 3:1 or more on the page and the card like a category (scripts/check-contrast.js), and none repeats.
 // - `space`: the system view's sky and what is drawn on it: `background`, `label` (names), `labelShadow`, `bodyOrbit`, `jumpUnexplored`, `jumpExplored`. The sky is dark in every preset, so the ink on it does not follow the mode.
 // - `washes`: alphas of a section's colour for an active item (`sectionSoft`), a hovered one (`sectionTint`), and of the available-status colour in the research tree (`statusSoft`).
 // - `reference` (optional, adaptations only): what the preset is an adaptation of and how far. `title` and `summary` (what it looks like), `source` (the inspected community theme: `name`, `author`, `repository`, `revision`, `revisionDate`, `license`, `inspected` (what was read and how it was used: values, not code), `copied` (what was copied: nothing), `note` (what the source does not say)), `roles` (each reference value: `role`, `value`, `maps` (where the preset uses it)) and `modifications` (what the Electrons adaptation changes or adds). Nothing in it claims that a version of the game ships the palette: a reference is a historical or community one, and the preset an adaptation of it. Settings shows it beside the preview and About's credits list the source. scripts/check-contrast.js keeps the selection colour of a preset with a reference apart from every warning severity.
@@ -42,7 +43,7 @@ const LIGHT = {
     tooltip: 'rgba(97, 97, 97, 0.95)',
     categorical: ['#2a78d6', '#e95c24', '#189d6e', '#ba7e00', '#e25a8e', '#008300', '#4a3aa7', '#e34948', '#0099a8'],
   },
-  sections: { neutral: '#546e7a' },
+  sections: { neutral: '#546e7a', accents: ['#2a78d6', '#e95c24', '#189d6e', '#ba7e00', '#e25a8e', '#008300', '#4a3aa7', '#e34948', '#0099a8'] },
   space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.14, sectionTint: 0.08, statusSoft: 0.18 },
 }
@@ -107,7 +108,7 @@ const CLASSIC = {
     tooltip: 'rgba(40, 40, 160, 0.97)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#a0a8d8' },
+  sections: { neutral: '#a0a8d8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#000040', label: '#ffffc0', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -145,7 +146,7 @@ const SOLARIS = {
     tooltip: 'rgba(43, 48, 69, 0.97)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#9aa0b8' },
+  sections: { neutral: '#9aa0b8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#0c0c0c', label: '#d2d2d2', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#808080', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -187,7 +188,7 @@ const T2D = {
     tooltip: 'rgba(255, 255, 255, 0.97)',
     categorical: ['#c4c4c4', '#919191', '#d1d1d1', '#9d9d9d', '#dedede', '#aaaaaa', '#ececec', '#b7b7b7', '#f9f9f9'],
   },
-  sections: { neutral: '#b3b3b3' },
+  sections: { neutral: '#b3b3b3', accents: ['#c4c4c4', '#919191', '#d1d1d1', '#9d9d9d', '#dedede', '#aaaaaa', '#ececec', '#b7b7b7', '#f9f9f9'] },
   space: { background: '#000000', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#808080', jumpUnexplored: '#ffffff', jumpExplored: '#a0a0a0' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -209,7 +210,7 @@ const DARK = {
     tooltip: 'rgba(97, 97, 97, 0.95)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#90a4ae' },
+  sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -244,8 +245,12 @@ export const DRAFT_ID = 'custom-draft'
 // The settings key the kept imported appearance is stored under: the document of the file, as `parseAppearanceFile` accepted it. Written only by `applyPreset` (with the draft) and `removeCustom`.
 export const CUSTOM_KEY = 'appearanceCustom'
 
-// The settings the appearance holds, which a reset of the remembered views keeps: the named appearance, the kept imported one, the typeface and the policy.
-export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY]
+// The settings key of how the section accents are drawn (`on`, `restrained` or `off`, ACCENT_MODES of utilities/appearance-contrast.js) and what a settings file without it means. App-wide, written only by `applyAccents`, kept whatever preset is chosen. It is written for every choice, the default too, so that a preferences file can say `on` and an import ends a `restrained` it finds.
+export const ACCENTS_KEY = 'appearanceAccents'
+export { ACCENT_MODES, DEFAULT_ACCENT_MODE }
+
+// The settings the appearance holds, which a reset of the remembered views keeps: the named appearance, the kept imported one, the typeface, the policy and the section accents.
+export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY, ACCENTS_KEY]
 
 // Categorical slots of the colours that carry a meaning, by role; `muted` is the preset's muted ink.
 export const CONTACT_SLOTS = { hostile: 7, unknown: 7, neutral: 3, friendly: 2, allied: 0, civilian: 'muted' }
@@ -336,7 +341,7 @@ export const resolveAppearance = (id) => {
       ...roles,
       plan: { ...preset.plan },
       charts: { ...preset.charts, categorical: [...categorical] },
-      sections: { ...preset.sections },
+      sections: { ...preset.sections, accents: [...preset.sections.accents] },
       space: { ...preset.space },
       washes: { ...preset.washes },
     })
@@ -346,7 +351,7 @@ export const resolveAppearance = (id) => {
 }
 
 // `id` is the preset in force (what every renderer draws with), `applied` what the kept choices draw. They differ while a preview is open; `previewing` says one is open, and is kept apart from the two being equal, because `applied` moves with the operating system under the System policy and a preview of the baseline the system has just reached is still a preview, with its Apply and Cancel. `policy` and `override` are the kept choices (`override` is null for none) and `system` is the operating system's colour scheme as last observed, which only the System policy reads.
-const state = Vue.observable({ id: DEFAULT_PRESET_ID, applied: DEFAULT_PRESET_ID, previewing: false, policy: DEFAULT_POLICY, override: null, system: 'light' })
+const state = Vue.observable({ id: DEFAULT_PRESET_ID, applied: DEFAULT_PRESET_ID, previewing: false, policy: DEFAULT_POLICY, override: null, system: 'light', accents: DEFAULT_ACCENT_MODE })
 
 // The preset the kept choices draw: the named appearance, else the baseline of the policy's mode (under System, the mode the operating system is in).
 const keptId = () => state.override || BASELINE_BY_MODE[state.policy === SYSTEM ? state.system : state.policy]
@@ -378,6 +383,9 @@ export const appearancePolicy = () => state.policy
 export const appearanceOverride = () => state.override
 
 export const systemMode = () => state.system
+
+// How the section accents are drawn now (reactive): what `sectionStyle` of components/navigation/section-style.js reads.
+export const accentMode = () => state.accents
 
 // Whether a preview is open: a preset other than the applied one was put in force, and neither a cancel nor a kept choice has ended it since (reactive). A change of the applied preset under the preview, by the operating system, does not end it.
 export const isPreviewing = () => state.previewing
@@ -470,6 +478,18 @@ export const applyPolicy = (config, policy) => {
   return true
 }
 
+// Keeps how the section accents are drawn (`on`, `restrained` or `off`) and draws it at once. An unknown mode changes nothing and returns false. The settings are written first, so a failed write leaves the choice as it was.
+export const applyAccents = (config, mode) => {
+  if (!ACCENT_MODES.includes(mode)) {
+    return false
+  }
+
+  config.set(ACCENTS_KEY, mode)
+  state.accents = mode
+
+  return true
+}
+
 // Forgets the kept imported appearance: removes its document from the settings and, when it was the named appearance, ends it and keeps the policy that applies in its place (the policy in force, which is the mode of the file unless one was kept), in one write over the settings as they are then. Returns false when there is none.
 export const removeCustom = (config) => {
   const stored = config.get(CUSTOM_KEY)
@@ -511,8 +531,12 @@ export const unsupportedPresetId = (config) => {
   return id === undefined || id === NO_OVERRIDE || isKnown(id) ? null : id
 }
 
-// Reads the kept choices from the settings into the state, ends any preview and does what the settings from before the policy need once (`config` is the settings store). A saved policy is applied, and a named appearance this version has replaces the theme. The id of a baseline under APPEARANCE_KEY is the older form of a policy: it becomes the policy, replacing a stored one, and is written back as the policy with `theme` under APPEARANCE_KEY. A file with neither and only the older boolean `darkMode` gets the policy of that mode written the same way; `darkMode` stays in the file and is not read again once a policy is there. A named appearance without a stored policy takes the mode of that appearance as the policy, with no write: the settings stay as they are until a choice is made. A saved id this version doesn't have (a preset from a newer version, a damaged value) is left in the settings and not overwritten, and the policy draws instead. A failed write of the migration is reported and costs only a repeat at the next start.
+// Reads the kept choices from the settings into the state, ends any preview and does what the settings from before the policy need once (`config` is the settings store). A saved section accent mode is applied (an unknown one reads as `on`). A saved policy is applied, and a named appearance this version has replaces the theme. The id of a baseline under APPEARANCE_KEY is the older form of a policy: it becomes the policy, replacing a stored one, and is written back as the policy with `theme` under APPEARANCE_KEY. A file with neither and only the older boolean `darkMode` gets the policy of that mode written the same way; `darkMode` stays in the file and is not read again once a policy is there. A named appearance without a stored policy takes the mode of that appearance as the policy, with no write: the settings stay as they are until a choice is made. A saved id this version doesn't have (a preset from a newer version, a damaged value) is left in the settings and not overwritten, and the policy draws instead. A failed write of the migration is reported and costs only a repeat at the next start.
 export const adoptAppearance = (config) => {
+  const accents = config.get(ACCENTS_KEY)
+
+  state.accents = ACCENT_MODES.includes(accents) ? accents : DEFAULT_ACCENT_MODE
+
   const stored = config.get(APPEARANCE_KEY)
   const legacy = config.get('darkMode')
   let policy = storedPolicy(config)

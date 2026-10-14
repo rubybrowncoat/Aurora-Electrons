@@ -982,7 +982,7 @@ const MUTATIONS = [
   ['a lamp that switches the system scheme instead of the mode drawn', { file: APPEARANCE, from: "mode: activeAppearance().mode === 'dark' ? 'light' : 'dark'", to: "mode: state.policy === SYSTEM && state.system === 'dark' ? 'dark' : activeAppearance().mode === 'dark' ? 'light' : 'dark'" }],
   ['the preferences without the policy', { file: 'preferences.js', from: "  add('appearance', 'app', policy.key, (value) => (typeof value === 'string' && policy.values.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of $" + "{policy.values.join(', ')}` }))\n", to: '' }],
   ['any policy imported', { file: 'preferences.js', from: "typeof value === 'string' && policy.values.includes(value) ? { ok: true, value }", to: "typeof value === 'string' ? { ok: true, value }" }],
-  ['the policy treated as a view by the preferences', { file: 'preferences.js', from: ' && key !== appearance.key && key !== policy.key)', to: ' && key !== appearance.key)' }],
+  ['the policy treated as a view by the preferences', { file: 'preferences.js', from: ' && key !== appearance.key && key !== policy.key && !(accents && key === accents.key))', to: ' && key !== appearance.key && !(accents && key === accents.key))' }],
   ['an older baseline id imported without the policy', { file: 'preferences.js', from: 'also: { [policy.key]: appearance.baselines[value] } }', to: 'also: {} }' }],
   ['an older baseline id imported as it is', { file: 'preferences.js', from: 'appearance.baselines && has(appearance.baselines, value) ?', to: 'false ?' }],
   ['an older baseline id imported under the policy of the other mode', { file: APPEARANCE, from: 'map(([mode, id]) => [id, mode]))', to: "map(([mode, id]) => [id, mode === 'dark' ? 'light' : 'dark']))" }],
@@ -996,7 +996,7 @@ const MUTATIONS = [
   ['a native reply used for a source no longer wanted', { file: APPEARANCE, from: ' && nativeThemeSource() === SYSTEM && observations === seen', to: ' && observations === seen' }],
   ['the observations never counted', { file: APPEARANCE, from: '    observations++\n', to: '' }],
   ['no answer left unread', { file: APPEARANCE, from: 'following.refresh(answer && typeof answer.dark === \'boolean\' ? answer.dark : undefined)', to: 'following.refresh(answer.dark)' }],
-  ['the policy not among the settings a reset keeps', { file: APPEARANCE, from: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY]', to: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY]' }],
+  ['the policy not among the settings a reset keeps', { file: APPEARANCE, from: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY, ACCENTS_KEY]', to: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, ACCENTS_KEY]' }],
 ]
 
 const mutatedCopy = ({ file, from, to }) => {

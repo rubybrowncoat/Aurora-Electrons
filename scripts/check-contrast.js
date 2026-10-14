@@ -7,7 +7,7 @@
 
   For every preset it measures WCAG 2.x contrast ratios of the resolved tokens against the surfaces they are drawn on:
   - text (4.5:1): the inks on the page, card and chrome surfaces, the tooltip ink on the tooltip, axis ticks, links and the sky's labels;
-  - essential graphics and state cues (3:1): the focus colour, the severities, the contact relationships, the status colours, the selection mark and each categorical slot, against the card and page surfaces; the system view's orbit and jump point lines against its sky;
+  - essential graphics and state cues (3:1): the focus colour, the severities, the contact relationships, the status colours, the selection mark, each categorical slot and each section accent (as a graphic at 3:1 and as text at 4.5:1: the nine of `sections.accents` as they are, mixed halfway toward the neutral accent for the restrained mode, and the neutral accent alone for the off mode), against the card and page surfaces; the system view's orbit and jump point lines against its sky;
   - text on a table row's washes (4.5:1): the inks and severity tones on the card under the hover wash, the selected row's wash and the wash of a compared row that differs, and under the two layered whenever styles/appearance.scss leaves a washed row's hover unsettled, so a row state never takes the text or a severity figure below its own contrast;
   - the pressed-button bar of a toggle group (3:1) on the button as drawn: the selected-row wash over Vuetify's pressed fill, which the wash keeps the same focused, hovered or not;
   - selection against warnings (CIEDE2000 of 20 or more): for a preset that adapts a reference (`reference` in appearance.js), the focus colour against each of the three warning severities, so a selected row, a link or a focus ring is never taken for a warning.
@@ -287,7 +287,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
     })
 
     const measured = measureAppearance(appearance, { extraRowStates: layered })
-    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: measured.text, graphics: measured.graphics, rows: measured.rows, categorical: measured.categorical, cvd: [], selection: [], disabled: measured.disabled, inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
+    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: measured.text, graphics: measured.graphics, rows: measured.rows, categorical: measured.categorical, sections: measured.sections, sectionText: measured.sectionText, cvd: [], selection: [], disabled: measured.disabled, inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
 
     if (appearance.reference) {
       WARNING_LEVELS.forEach((level) => {
@@ -446,6 +446,8 @@ const failures = (reports) => reports.flatMap((report) => [
   ...report.graphics.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.rows.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.categorical.filter((row) => !row.pass).map((row) => `${report.id}: slot ${row.slot} ${row.color} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (a marker or pattern does not stand in for the colour)`),
+  ...report.sections.filter((row) => !row.pass).map((row) => `${report.id}: ${row.section === null ? 'the neutral section accent (accents off)' : `section ${row.section} accent (${row.mode})`} ${row.color} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (a label and an icon tell the section, but its colour must still be seen)`),
+  ...report.sectionText.filter((row) => !row.pass).map((row) => `${report.id}: ${row.section === null ? 'the neutral section accent as text (accents off)' : `section ${row.section} accent as text (${row.mode})`} ${row.color} on the ${row.surfacePath.split('.')[1]} (${row.state}) ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (the colour of a title, a label or an active tab is the accent made readable, not the accent)`),
   ...report.selection.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} against ${row.surface} differs by only ${row.ratio.toFixed(1)}, under ${row.minimum}`),
   ...report.disabled.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.fills.filter((row) => !row.pass).map((row) => `${report.id}: text ${row.foreground} on the ${row.label} fill ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
@@ -473,6 +475,10 @@ const format = (reports, verbose) => {
     report.rows.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surface}`))
     lines.push('Categorical slots against the card and the page, minimum 3:1 (the encodings come on top of the colour, they do not replace it)')
     report.categorical.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  slot ${row.slot}: ${row.color} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
+    lines.push('Section accents (on, restrained, and the neutral accent of the off mode) against the card and the page, minimum 3:1')
+    report.sections.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.color} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
+    lines.push('Section accents as text (the accent made readable: titles, labels, the active tab) on the page, the card and the chrome, plain, under the hover wash and under a wash of the colour itself, minimum 4.5:1')
+    report.sectionText.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.color} on ${row.surfacePath.split('.')[1]} ${row.state} ${row.surface}`))
     lines.push(`Text on filled chips and controls, ink ${report.fills[0].foreground}, minimum 4.5:1`)
     report.fills.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surface}`))
     if (report.colourSurfaces.length) {
@@ -516,6 +522,10 @@ const format = (reports, verbose) => {
 // Mutations the gate must catch, so that it can't pass by measuring nothing: a slot the colour of the card (its markers and patterns don't make it visible), a chip whose text is the colour of its fill, a row wash as dark as Vuetify's own dark-theme hover, a compared row whose hover the stylesheet leaves unsettled (so the two washes layer), a pressed-button wash that takes the bar under 3:1, a selection colour that is a warning's, an orbit line the colour of the sky, surfaces that take Vuetify's disabled text under its floor, an edgeless card with a faint outline, two slots of one colour, a pastel too dark for black text, a link that is the colour of its text with no underline and, on the stylesheet, a fill rule or a text rule that keeps its selector and draws another colour, one that loses its selector or its disabled exclusion, a link rule that loses its selector or draws no line, and baselines whose text inks differ from Vuetify's. The fifth item, when there is one, mutates the source of appearance.scss (it is compiled afterwards; a pattern that does not apply is an error).
 const MUTATIONS = [
   ['a categorical slot the colour of the card', 'light', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 5 ? appearance.surfaces.card : color)) } }), /slot 5 .* under 3:1/],
+  ['a section accent the colour of the card', 'light', (appearance) => ({ ...appearance, sections: { ...appearance.sections, accents: appearance.sections.accents.map((color, index) => (index === 4 ? appearance.surfaces.card : color)) } }), /section 4 accent \(on\) .* under 3:1/],
+  ['a neutral accent the colour of the card', 'solaris', (appearance) => ({ ...appearance, sections: { ...appearance.sections, neutral: appearance.surfaces.card } }), /neutral section accent \(accents off\) .* under 3:1/],
+  ['a body ink the colour of the card, which leaves no readable section text', 'light', (appearance) => ({ ...appearance, inks: { ...appearance.inks, body: appearance.surfaces.card } }), /section 4 accent as text \(on\) .* under 4.5:1/],
+  ['a neutral accent and a body ink the colour of the card, which leave no readable neutral text', 'solaris', (appearance) => ({ ...appearance, sections: { ...appearance.sections, neutral: appearance.surfaces.card }, inks: { ...appearance.inks, body: appearance.surfaces.card } }), /neutral section accent as text \(accents off\) .* under 4.5:1/],
   ['a chip whose text is its fill', 'dark', (appearance) => ({ ...appearance, plan: { ...appearance.plan, rich: appearance.inks.onFill } }), /plan\.rich fill .* under 4\.5:1/],
   ['a chip with white text on a light fill', 'light', (appearance) => ({ ...appearance, plan: { ...appearance.plan, costly: '#ffb74d' } }), /plan\.costly fill .* under 4\.5:1/],
   ['a hover wash as dark as Vuetify\'s own on the dark theme', 'dark', (appearance) => ({ ...appearance, focus: { ...appearance.focus, hover: '#616161' } }), /needs-action figure .* hovered row .* under 4\.5:1/],
@@ -562,6 +572,15 @@ const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected, mut
   return { label, caught: found.some((problem) => expected.test(problem)) }
 })
 
+// The overlay opacities Vuetify draws over a tab, read from its own theme files, as { activated, pressed } of a mode.
+const vuetifyTabStates = (mode) => {
+  const text = fs.readFileSync(join(__dirname, '..', 'node_modules', 'vuetify', 'src', 'styles', 'settings', `_${mode}.scss`), 'utf8')
+  const states = /'states': \(([^)]*)\)/.exec(text)
+  const value = (name) => Number(new RegExp(`'${name}': ([0-9.]+)`).exec(states ? states[1] : '')?.[1])
+
+  return { activated: value('activated'), pressed: value('pressed') }
+}
+
 const main = async () => {
   const argv = process.argv.slice(2)
   const options = { preset: null, verbose: false }
@@ -583,6 +602,15 @@ const main = async () => {
 
   const reports = analyse(appearance, options)
   const problems = failures(reports)
+
+  ;['light', 'dark'].forEach((mode) => {
+    const wanted = vuetifyTabStates(mode)
+    const have = shared.VUETIFY_TAB_STATES[mode]
+
+    if (have.activated !== wanted.activated || have.pressed !== wanted.pressed) {
+      problems.push(`VUETIFY_TAB_STATES.${mode} is ${JSON.stringify(have)}, and Vuetify's own ${mode} theme draws ${JSON.stringify(wanted)} over a hovered and a focused active tab`)
+    }
+  })
 
   console.log(format(reports, options.verbose))
 

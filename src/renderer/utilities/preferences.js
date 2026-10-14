@@ -14,7 +14,7 @@ export const BACKUP_FORMAT = 'aurora-electrons-preferences-backup'
 export const MAX_BYTES = 1024 * 1024
 
 export const CATEGORIES = [
-  { id: 'appearance', title: 'Theme, colour preset, typeface and text size', note: 'The theme (Light, Dark or System), the named colour preset that replaces it, the typeface and the text size applied to every page. App-wide.' },
+  { id: 'appearance', title: 'Theme, colour preset, section accents, typeface and text size', note: 'The theme (Light, Dark or System), the named colour preset that replaces it, how the section accents are drawn, the typeface and the text size applied to every page. App-wide.' },
   { id: 'display', title: 'Number format and Computer-run empires', note: 'The thousands separator and whether Computer-run empires are listed. App-wide.' },
   { id: 'views', title: 'Remembered views', note: "Each page's options, filters, searches, views and each table's sort and rows per page: app-wide, or for the one empire where a value is about its own things." },
   { id: 'mapGroups', title: 'Galaxy Map pins and clusters', note: "The Galaxy Map's pinned systems and clusters of the empire. They name the systems of one campaign." },
@@ -155,9 +155,10 @@ const checkDeclared = (declarations) => (value) => {
 //   declarations: `declaredViews()` of mixins/persisted-view.js, once every page and component module is loaded.
 //   appearance: `{ key, ids, none, baselines }`, the settings key of the named colour preset and the values it may hold: the ids of the presets this version has, and the value that says none replaces the theme (`none`). `baselines` maps the id of a baseline preset to the policy it stands for: a file from before the policy holds one under `key`, and an import reads it as that policy with `none` under `key` (see `legacy` of a field), so that the import, its plan and its backup name both settings.
 //   policy: `{ key, values }`, the settings key of the theme policy and the policies this version has.
+//   accents (optional): `{ key, values }`, the settings key of how the section accents are drawn and the modes this version has; without it the setting is not part of the allowlist.
 //   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
 //   separators: the thousands separators the Display panel offers.
-export const buildSchema = ({ declarations, appearance, policy, font, separators }) => {
+export const buildSchema = ({ declarations, appearance, policy, accents = null, font, separators }) => {
   const fields = new Map()
   const add = (category, scope, key, check) => fields.set(`${category}:${scope}:${key}`, { category, scope, key, check })
 
@@ -166,6 +167,10 @@ export const buildSchema = ({ declarations, appearance, policy, font, separators
   // What a value stands for under the settings of today, when it is the older form: the value to keep and the other settings it sets, which replace the file's own.
   fields.get(`appearance:app:${appearance.key}`).legacy = (value) => (appearance.baselines && has(appearance.baselines, value) ? { value: appearance.none, also: { [policy.key]: appearance.baselines[value] } } : null)
   add('appearance', 'app', policy.key, (value) => (typeof value === 'string' && policy.values.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${policy.values.join(', ')}` }))
+  if (accents) {
+    add('appearance', 'app', accents.key, (value) => (typeof value === 'string' && accents.values.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${accents.values.join(', ')}` }))
+  }
+
   add('appearance', 'app', font.key, (value) => {
     const read = font.read(value)
 
@@ -176,7 +181,7 @@ export const buildSchema = ({ declarations, appearance, policy, font, separators
 
   const byKey = new Map()
 
-  declarations.filter(({ key }) => !EXCLUDED_KEYS.includes(key) && !DISPLAY_KEYS.includes(key) && key !== appearance.key && key !== policy.key).forEach((declaration) => {
+  declarations.filter(({ key }) => !EXCLUDED_KEYS.includes(key) && !DISPLAY_KEYS.includes(key) && key !== appearance.key && key !== policy.key && !(accents && key === accents.key)).forEach((declaration) => {
     const id = `${declaration.scope}:${declaration.key}`
 
     byKey.set(id, [...(byKey.get(id) || []), declaration])

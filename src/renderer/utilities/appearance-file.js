@@ -39,7 +39,7 @@ export const ROLES = {
   status: { shortfall: 'hex', inactive: 'hex' },
   plan: { mining: 'hex', terraformFree: 'hex', terraformPartial: 'hex', terraformCheaper: 'hex', cheap: 'hex', moderate: 'hex', costly: 'hex', severe: 'hex', insufficient: 'hex', rich: 'hex', cmc: 'hex', unsurveyed: 'hex', selected: 'hex' },
   charts: { axis: 'hex', tooltip: 'color', categorical: 'list' },
-  sections: { neutral: 'hex' },
+  sections: { neutral: 'hex', accents: 'list' },
   space: { background: 'hex', label: 'hex', labelShadow: 'color', bodyOrbit: 'hex', jumpUnexplored: 'hex', jumpExplored: 'hex' },
   washes: { sectionSoft: 'alpha', sectionTint: 'alpha', statusSoft: 'alpha' },
 }
@@ -351,7 +351,7 @@ export const parseAppearanceFile = (text, { builtIn, baselines }) => {
                 fail('field', `${field}[${slot}]`, problem)
               } else if (seen.has(color.toLowerCase())) {
                 sound = false
-                fail('field', `${field}[${slot}]`, `repeats slot ${seen.get(color.toLowerCase())}; a series is told which slot it is by its colour, so no two slots may share one`)
+                fail('field', `${field}[${slot}]`, group === 'sections' ? `repeats section ${seen.get(color.toLowerCase())}; the sections' accents are told apart by colour, so no two may share one` : `repeats slot ${seen.get(color.toLowerCase())}; a series is told which slot it is by its colour, so no two slots may share one`)
               } else {
                 seen.set(color.toLowerCase(), slot)
               }
@@ -444,6 +444,8 @@ export const contrastReport = (appearance, { baseline = null } = {}) => {
     ...measured.named,
     ...measured.fills.map((row) => ({ ...row, label: `Text on the ${row.label} fill` })),
     ...measured.categorical.map((row) => ({ ...row, label: `Chart slot ${row.slot + 1}` })),
+    ...measured.sections.map((row) => ({ ...row, label: row.section === null ? 'Neutral section accent (accents off)' : `Section ${row.section + 1} accent (${row.mode})` })),
+    ...measured.sectionText.map((row) => ({ ...row, label: row.section === null ? 'Neutral section accent as text (accents off)' : `Section ${row.section + 1} accent as text (${row.mode})` })),
   ]
   const findings = labelled.filter((row) => !row.pass).map(({ label, foreground, surface, ratio: value, minimum }) => ({ label, foreground, surface, ratio: value, minimum }))
   const page = parseColor(appearance.surfaces.background)

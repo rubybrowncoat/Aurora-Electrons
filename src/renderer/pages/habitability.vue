@@ -1102,7 +1102,7 @@ export default {
   }
 
   .mineral-high {
-    color: var(--sc);
+    color: var(--sc-text);
   }
 
   .view-count {

@@ -220,7 +220,7 @@ export default {
   font-weight: 500;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--sc);
+  color: var(--sc-text);
 }
 
 .page-palette__locked {
