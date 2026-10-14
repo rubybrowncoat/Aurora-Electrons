@@ -11,7 +11,7 @@
 // Annotations are the scenario records of the planners. A record is restored with its uuid when the campaign's file holds no record of that uuid and has not held one before (a deleted record stays deleted); the repository's import creates the record afresh, so its revision and times are the restore's and the original ones are kept in its provenance.
 
 import { EARLY_COUNTS, REGISTRY_VERSION, STEP, anchorRelation, branchFileName, commonPrefix, hashValue, mergeAnchors, readRegistry, readThinning, writeRegistry } from './campaign'
-import { MAX_SNAPSHOTS, recordedSpan, thinCounted, thinningOfMerge } from './history'
+import { MAX_SNAPSHOTS, isChain, recordedSpan, thinCounted, thinningOfMerge } from './history'
 import { requireRecording } from './recording-owner'
 import { BUNDLE_FORMAT, BUNDLE_VERSION } from './scenario-records'
 
@@ -186,7 +186,7 @@ const allowed = (object, keys, where) => {
 
 const nullableNumber = (value) => value === null || isNumber(value)
 
-const checkSnapshot = (snapshot, units, where) => {
+const checkSnapshot = (snapshot, units, where, race) => {
   if (!isObject(snapshot)) {
     bad(where, 'is not an object')
   }
@@ -196,6 +196,14 @@ const checkSnapshot = (snapshot, units, where) => {
   }
 
   Object.entries(snapshot).forEach(([field, value]) => {
+    if (field === 'chain' && race) {
+      if (!isChain(value) || Object.keys(value).length !== 2) {
+        bad(where, 'chain is not the increment count and 16-digit digest of the ledger the snapshot was taken on')
+      }
+
+      return
+    }
+
     if (!Object.prototype.hasOwnProperty.call(units, field)) {
       bad(where, `holds the figure ${field}, whose units the backup does not state`)
     }
@@ -240,7 +248,7 @@ const checkSeries = (series, where, { race, units }) => {
   }
 
   series.snapshots.forEach((snapshot, index) => {
-    checkSnapshot(snapshot, units, `${where} snapshot ${index}`)
+    checkSnapshot(snapshot, units, `${where} snapshot ${index}`, race)
 
     if (index > 0 && !(snapshot.t > series.snapshots[index - 1].t)) {
       bad(where, `snapshot ${index} is not later than the one before it`)

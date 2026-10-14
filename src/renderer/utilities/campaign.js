@@ -47,7 +47,7 @@ const wholeNumber = (value) => {
 
 export const anchorSql = (GameID) => `select FCT_System.SystemID, FCT_System.SystemNumber, round(FCT_System.Age, 4) as Age, FCT_System.AbundanceModifier, FCT_System.Stars, FCT_System.DustDensity, FCT_System.SystemTypeID from FCT_System where FCT_System.GameID = ${wholeNumber(GameID)} and FCT_System.SolSystem = 0 order by FCT_System.SystemID limit ${ANCHOR_LIMIT}`
 
-export const ledgerSql = (GameID) => `select FCT_Increments.IncrementID, FCT_Increments.GameTime from FCT_Increments where FCT_Increments.GameID = ${wholeNumber(GameID)} order by FCT_Increments.IncrementID`
+export const ledgerSql = (GameID) => `select FCT_Increments.IncrementID, FCT_Increments.GameTime, FCT_Increments.Length from FCT_Increments where FCT_Increments.GameID = ${wholeNumber(GameID)} order by FCT_Increments.IncrementID`
 
 export const GAMES_SQL = 'select FCT_Game.GameID, FCT_Game.GameName, FCT_Game.GameTime from FCT_Game'
 
@@ -72,19 +72,22 @@ export const hashText = (text) => {
 // A short, order-stable text of a JSON value, for the hashes that guard preserved originals.
 export const hashValue = (value) => hashText(value === undefined ? 'undefined' : JSON.stringify(value))
 
-// The chained digest of a game's ledger, `rows` being [{ IncrementID, GameTime }] in IncrementID order: { count, lastId, digest, checkpoints, times, exact, early }. `checkpoints[i]` is the digest after (i + 1) * STEP increments and `times[i]` the game time there; `exact` holds the digest after each of the counts in `marks` (the stored tips the caller will compare against), so a save that extends a stored tip is checked at that exact position and not only at the last checkpoint below it; `early` holds the digest after each of EARLY_COUNTS that the ledger reaches, so two short ledgers that already differ are told apart before STEP increments exist.
+// The chained digest of a game's ledger, `rows` being [{ IncrementID, GameTime, Length }] in IncrementID order: { count, lastId, digest, checkpoints, times, exact, early, lengthDigest, exactLength }. `checkpoints[i]` is the digest after (i + 1) * STEP increments and `times[i]` the game time there; `exact` holds the digest after each of the counts in `marks` (the stored tips the caller will compare against), so a save that extends a stored tip is checked at that exact position and not only at the last checkpoint below it; `early` holds the digest after each of EARLY_COUNTS that the ledger reaches, so two short ledgers that already differ are told apart before STEP increments exist. `lengthDigest` and `exactLength` are the same chain with each increment's Length folded in, the digest a snapshot's witness keeps (utilities/history.js `isChain`): two forks of one ledger can share the ID and game time of the increment where they part and differ only in its Length. The identity digest above never changes, so the tips already stored keep their meaning.
 export const scanLedger = (rows, marks = []) => {
   const wanted = new Set(marks)
   const checkpoints = []
   const times = []
   const exact = {}
   const early = {}
+  const exactLength = {}
   let digest = ''
+  let lengthDigest = ''
 
   rows.forEach((row, index) => {
     const count = index + 1
 
     digest = hashText(`${digest}${row.IncrementID}:${row.GameTime};`)
+    lengthDigest = hashText(`${lengthDigest}${row.IncrementID}:${row.GameTime}:${row.Length};`)
 
     if (count % STEP === 0) {
       checkpoints.push(digest)
@@ -93,6 +96,7 @@ export const scanLedger = (rows, marks = []) => {
 
     if (wanted.has(count)) {
       exact[count] = digest
+      exactLength[count] = lengthDigest
     }
 
     if (EARLY_COUNTS.includes(count)) {
@@ -100,7 +104,7 @@ export const scanLedger = (rows, marks = []) => {
     }
   })
 
-  return { count: rows.length, lastId: rows.length ? Number(rows[rows.length - 1].IncrementID) : null, digest, checkpoints, times, exact, early }
+  return { count: rows.length, lastId: rows.length ? Number(rows[rows.length - 1].IncrementID) : null, digest, checkpoints, times, exact, early, lengthDigest, exactLength }
 }
 
 const numberOrNull = (value) => (value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))

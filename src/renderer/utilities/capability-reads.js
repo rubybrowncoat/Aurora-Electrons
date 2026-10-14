@@ -93,6 +93,8 @@ export const READS = {
   '/finances': {
     treasury: { label: 'the treasury', reads: 'FCT_Game(GameID GameTime StartYear) FCT_Race(AnnualWealth GameID RaceID WealthPoints)' },
     wealth: { label: 'the wealth history', reads: 'DIM_WealthUse(Description DisplayOrder Income WealthUseID) FCT_Game(GameID GameTime) FCT_WealthData(Amount GameID RaceID TimeUsed UseID)' },
+    treasuryLog: { label: 'the treasury log', reads: 'DIM_WealthUse(Income WealthUseID) FCT_WealthData(Amount GameID RaceID TimeUsed UseID)' },
+    treasuryLedger: { label: 'the ledger of the save', reads: 'FCT_Increments(GameID GameTime IncrementID Length)' },
   },
   '/colony-outlook': {
     colonies: { label: 'the colonies', reads: 'DIM_PlanetaryInstallation(Cost InfrastructureValue LGInfrastructureValue PlanetaryInstallationID Workers) FCT_Commander(CommandID CommandType CommanderID GameID RaceID) FCT_CommanderBonuses(BonusID BonusValue CommanderID) FCT_Population(Capital Efficiency GameID PopName Population PopulationID RaceID ReqInf SpeciesID SystemBodyID SystemID) FCT_PopulationInstallations(Amount GameID PlanetaryInstallationID PopID) FCT_RaceSysSurvey(Name RaceID SectorID SystemID) FCT_Shipyard(Capacity GameID PopulationID RaceID SYType Slipways) FCT_Species(GravDev Gravity PopulationDensityModifier PopulationGrowthModifier SpeciesID SpeciesName) FCT_Star(Component StarID) FCT_SystemBody(BodyClass Gravity HydroExt OrbitNumber PlanetNumber RadiationLevel Radius StarID SystemBodyID TidalLock) FCT_SystemBodyName(Name RaceID SystemBodyID)' },

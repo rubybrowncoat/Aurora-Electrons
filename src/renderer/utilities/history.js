@@ -636,6 +636,15 @@ export const takeSnapshot = async (database, { GameID, RaceID }, options = {}) =
   }
 }
 
+// The witness a snapshot carries of the ledger it was taken on: `{ n, digest }`, the increments the save's ledger held and the chained digest after them that also covers each increment's Length (utilities/campaign.js `scanLedger`, `lengthDigest`), so a later save's own ledger digested the same way up to `n` can show whether the snapshot lies on its history. Length is part of it because two forks can share the ID and game time of the increment where they part and differ only in its Length. A snapshot recorded before this was kept has none, and so does one taken of an empty ledger.
+export const isChain = (chain) => chain !== null && typeof chain === 'object' && !Array.isArray(chain) && Number.isInteger(chain.n) && chain.n > 0 && typeof chain.digest === 'string' && /^[0-9a-f]{16}$/.test(chain.digest)
+
+const withChain = (snapshot, observation) => {
+  const chain = { n: observation.count, digest: observation.lengthDigest }
+
+  return isChain(chain) ? { ...snapshot, chain } : snapshot
+}
+
 // Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, observation, taken, intel }] per game of the save, `observation` being what identifies its campaign (utilities/campaign.js `observeGame`), `taken` [{ RaceID, raceName, npr, gameName, snapshot }] for each recorded race and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. `marks` is { [GameID]: [increment counts] }, the stored tips the ledger is compared at exactly. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries and one scan of the game's increments, and the history files are written after it ends.
 const readSave = (database, marks = {}) => database.transaction(async (transaction) => {
   const options = { transaction }
@@ -661,7 +670,7 @@ const readSave = (database, marks = {}) => database.transaction(async (transacti
         const result = await takeSnapshot(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
 
         if (result) {
-          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: result.snapshot })
+          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: withChain(result.snapshot, observation) })
           intel[race.RaceID] = await takeIntel(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
         }
       }

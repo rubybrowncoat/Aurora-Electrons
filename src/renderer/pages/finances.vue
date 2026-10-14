@@ -88,12 +88,35 @@
                 <div class="panel-body">
                   <div v-if="treasurySeriesMissing" class="caption text--secondary">{{ treasurySeriesMissing }}</div>
                   <chart-canvas v-else type="line" :data="treasuryChart" :options="treasuryOptions" :height="280" label="Treasury balance over the window, worked back from today" />
-                  <div class="caption text--secondary mt-2">Worked back from today's treasury through each cycle's net. Anything the game doesn't log as income or spending (trade deals, events) isn't in it.</div>
+                  <div class="caption text--secondary mt-2">Worked back from today's treasury through each cycle's net, so it holds only what the game logs as income or spending. What it leaves out shows as a residual under Treasury against the log, where earlier snapshots of this race are recorded.</div>
                 </div>
               </v-card>
             </v-col>
           </v-row>
         </template>
+
+        <v-card class="panel" data-summary="The treasury set against the log: between each pair of recorded snapshots of this race on this branch, how much the stored treasury changed, how much the logged cycles add up to, and the residual the log does not hold, or why a span cannot be compared." elevation="1">
+          <div class="panel-head">
+            <span>Treasury against the log<provenance-mark rule="finances.treasuryResidual" label /></span>
+            <v-chip small>Every recorded snapshot on this branch</v-chip>
+          </div>
+          <div class="panel-body">
+            <div v-if="anchorCheck.reason" class="caption text--secondary">{{ anchorCheck.reason }}.</div>
+            <template v-else>
+              <div v-if="anchorCheck.total" class="mb-3">Whole span, {{ date(anchorCheck.total.from) }} to {{ date(anchorCheck.total.to) }}: the treasury changed by <span class="font-weight-medium">{{ signed(anchorCheck.total.storedChange) }}</span>, the logged cycles add up to <span class="font-weight-medium">{{ signed(anchorCheck.total.loggedNet) }}</span>, and the log does not hold <span class="font-weight-medium">{{ residualText(anchorCheck.total.residual) }}</span><provenance-mark :result="anchorCheck.total.result" /></div>
+              <v-data-table :headers="anchorHeaders" :items="anchorRows" item-key="key" :custom-sort="sortSteps" :sort-by.sync="anchorsTable.sortBy" :sort-desc.sync="anchorsTable.sortDesc" :items-per-page.sync="anchorsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: anchorPageSizes }" dense>
+                <template #[`item.from`]="{ item }">{{ date(item.from) }}</template>
+                <template #[`item.to`]="{ item }">{{ date(item.to) }}</template>
+                <template #[`item.days`]="{ item }">{{ daysText(item.days) }}</template>
+                <template #[`item.storedChange`]="{ item }">{{ signed(item.storedChange) }}</template>
+                <template #[`item.loggedNet`]="{ item }">{{ signed(item.loggedNet) }}</template>
+                <template #[`item.residual`]="{ item }"><span class="text-no-wrap">{{ residualText(item.residual) }}<provenance-mark :result="item.result" /></span></template>
+                <template #[`item.coverageText`]="{ item }"><span class="caption text--secondary">{{ item.coverageText }}</span></template>
+              </v-data-table>
+            </template>
+          </div>
+          <div class="panel-foot caption text--secondary">Stored change is the later snapshot's treasury less the earlier one's. Logged net is the cycles after the earlier snapshot, up to and including the later one, income less spending. The residual is the difference: what the log does not hold, with no cause named. A residual of 0 means the log accounts for the whole change. A snapshot counts only when it carries a digest of the ledger it was taken on and this save's own ledger reproduces it, so it is an earlier point of this save. A dash means the span cannot be compared: a snapshot recorded before the app kept that digest, one taken on another branch, a merged history or a replayed past, one later than this save, or a log that does not cover the span.</div>
+        </v-card>
 
         <v-card class="panel" data-summary="What a civilian shipping line is paid per unit carried and per billion km in this save's game version, a worked payout estimate, and the wealth log's civilian uses, kept apart from the race's complete spending." elevation="1">
           <div class="panel-head">
@@ -182,21 +205,27 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
+import { ledgerSql } from '../utilities/campaign'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { CATEGORIES, amountText, civilianCategories, describeTariffVersion, netCostResult, payoutEstimate, rateOf, treasuryMapping } from '../utilities/civilian-tariff'
 import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, reasonText, statusText } from '../utilities/finances'
+import { branchStore } from '../utilities/history'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { valueOrNull } from '../utilities/provenance'
+import { ledgerEvidence, recordedAnchors, reconcileTreasury, residualLabel, wealthLogSql } from '../utilities/treasury-anchors'
 
 const WINDOW_DAYS = [30, 90, 180, 365]
 const FLOWS_VIEWS = ['chart', 'table']
 const STEP_PAGE_SIZES = [15, 30, -1]
+const ANCHOR_PAGE_SIZES = [10, 25, 50, -1]
 
 const INPUT_LABELS = {
   treasury: 'the treasury',
   wealth: 'the wealth history',
   formulaVersion: 'the save\'s schema',
+  treasuryLog: 'the treasury log',
+  treasuryLedger: 'the ledger of the save',
 }
 
 const TARIFF_MAPPING = treasuryMapping()
@@ -227,12 +256,14 @@ export default {
       windowDays: { key: 'financesWindowDays', default: 365 },
       flowsView: { key: 'financesFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
       stepsTable: tableView('financesStepsTable', { itemsPerPage: 15, itemsPerPageOptions: STEP_PAGE_SIZES }),
+      anchorsTable: tableView('financesAnchorsTable', { sortBy: ['to'], sortDesc: true, itemsPerPage: 10, itemsPerPageOptions: ANCHOR_PAGE_SIZES }),
     }),
   ],
   data() {
     return {
       windowOptions: WINDOW_DAYS,
       stepPageSizes: STEP_PAGE_SIZES,
+      anchorPageSizes: ANCHOR_PAGE_SIZES,
       tariffCategories: CATEGORIES,
       tariffCategory: 'tradeGood',
       tariffQuantity: '100',
@@ -240,7 +271,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'historyRecorded']),
     ...mapState(['RaceNPR']),
 
     separator() {
@@ -263,6 +294,61 @@ export default {
 
     ledger() {
       return buildLedger({ treasury: this.treasury, wealth: this.wealth, windowDays: this.windowDays })
+    },
+
+    // The campaign and branch the recorder settled the open save to, null until it has.
+    resolved() {
+      return this.$store.getters['history/campaign']
+    },
+
+    // The recorded snapshots of this race on that branch with the witness each carries of the ledger it was taken on, read again whenever the recorder writes.
+    recordedAnchorList() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision
+
+      const resolved = this.resolved
+
+      if (!resolved || !this.RaceID) {
+        return []
+      }
+
+      return recordedAnchors({ snapshots: branchStore(resolved.campaignId, resolved.branchId).get(`races.${this.RaceID}.snapshots`, []) })
+    },
+
+    // Whether an earlier snapshot is recorded, so the log is worth reading.
+    anchorsWanted() {
+      return !!this.treasury && !!this.resolved && this.recordedAnchorList.some((anchor) => anchor.t < this.treasury.GameTime)
+    },
+
+    // Whether an earlier snapshot has a witness, so the save's own ledger is worth reading to verify it.
+    witnessWanted() {
+      return this.anchorsWanted && this.recordedAnchorList.some((anchor) => anchor.chain)
+    },
+
+    // The treasury against the log: the windows between recorded snapshots and the open save, each with its residual or the reason it cannot be compared.
+    anchorCheck() {
+      if (!this.historyRecorded) {
+        return { reason: 'Empire History does not record this race, so no snapshot of its treasury is kept to compare with the log', windows: [], total: null }
+      }
+
+      return reconcileTreasury({ settled: !!this.resolved, anchors: this.recordedAnchorList, live: this.treasury ? { t: this.treasury.GameTime, wealth: this.treasury.WealthPoints } : null, log: this.treasuryLog, ledger: this.treasuryLedger })
+    },
+
+    anchorHeaders() {
+      return [
+        { text: 'From', value: 'from' },
+        { text: 'To', value: 'to' },
+        { text: 'Span', value: 'days', align: 'end' },
+        { text: 'Stored change', value: 'storedChange', align: 'end' },
+        { text: 'Logged net', value: 'loggedNet', align: 'end' },
+        { text: 'Residual', value: 'residual', align: 'end' },
+        { text: 'What the log holds', value: 'coverageText', sortable: false },
+      ]
+    },
+
+    // Newest window first.
+    anchorRows() {
+      return this.anchorCheck.windows.map((window) => ({ ...window, key: `${window.from}:${window.to}`, coverageText: this.anchorCoverage(window) })).reverse()
     },
 
     // Each logged time stands for the cycle before it.
@@ -560,6 +646,21 @@ export default {
     daysText(value) {
       return value < 1 ? `${roundToDecimal(value * 24, 1)} hours` : `${roundToDecimal(value, 1)} days`
     },
+    // A residual as the table prints it: 0 only for a balanced window, so a residual that is not 0 never reads as 0.
+    residualText(value) {
+      return residualLabel(value, this.signed)
+    },
+    // What the log holds of a window, or why it cannot be compared.
+    anchorCoverage(window) {
+      if (window.status !== 'known') {
+        return window.reason
+      }
+
+      const { cycles, loggedThrough, unloggedTail } = window.coverage
+      const tail = unloggedTail > 0 ? `, the last one ${this.daysText(unloggedTail)} before the later snapshot` : ''
+
+      return `${cycles} ${cycles === 1 ? 'cycle' : 'cycles'} logged through ${this.date(loggedThrough)}${tail}`
+    },
     // What the net per year means for the treasury; an unknown net or treasury reads as unknown, never as a covered treasury.
     runwayNote(runway, balance) {
       if (runway.value === null) {
@@ -635,6 +736,30 @@ export default {
         return await this.database.query(`select FCT_WealthData.UseID, coalesce(DIM_WealthUse.Description, 'Unknown (' || FCT_WealthData.UseID || ')') as Description, DIM_WealthUse.Income as Income, DIM_WealthUse.DisplayOrder, FCT_WealthData.TimeUsed, case when count(FCT_WealthData.Amount) = count(*) then sum(FCT_WealthData.Amount) end as Amount from FCT_WealthData left join DIM_WealthUse on DIM_WealthUse.WealthUseID = FCT_WealthData.UseID inner join FCT_Game on FCT_Game.GameID = FCT_WealthData.GameID where FCT_WealthData.GameID = ${this.GameID} and FCT_WealthData.RaceID = ${this.RaceID} and FCT_WealthData.TimeUsed >= coalesce((select max(previous.TimeUsed) from FCT_WealthData previous where previous.GameID = ${this.GameID} and previous.RaceID = ${this.RaceID} and previous.TimeUsed <= (select FCT_Game.GameTime from FCT_Game where FCT_Game.GameID = ${this.GameID}) - ${HISTORY_DAYS * SECONDS_PER_DAY}), 0) group by FCT_WealthData.UseID, FCT_WealthData.TimeUsed order by FCT_WealthData.TimeUsed`).then(([items]) => Object.freeze(items))
       }),
       default: [],
+    },
+    // The race's whole wealth log as one row per logged time (utilities/treasury-anchors.js `wealthLogSql`), read only when an earlier snapshot of this branch is recorded to compare the treasury with. It is the open save's own log, so it ends at the save's time.
+    treasuryLog: {
+      get: tracked('treasuryLog', async function () {
+        if (!this.database || !this.GameID || !this.RaceID || !this.anchorsWanted) {
+          return []
+        }
+
+        return await this.database.query(wealthLogSql(this.GameID, this.RaceID)).then(([items]) => items)
+      }),
+      default: [],
+    },
+    // What the open save's own ledger shows of the recorded snapshots (utilities/treasury-anchors.js `ledgerEvidence`): its increment count and its chained digest at each increment count a snapshot was taken at. It is read only when an earlier snapshot has a witness to verify.
+    treasuryLedger: {
+      get: tracked('treasuryLedger', async function () {
+        const anchors = this.recordedAnchorList
+
+        if (!this.database || !this.GameID || !this.witnessWanted) {
+          return null
+        }
+
+        return await this.database.query(ledgerSql(this.GameID)).then(([rows]) => ledgerEvidence(rows, anchors))
+      }),
+      default: null,
     },
   },
 }

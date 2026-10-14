@@ -25,7 +25,7 @@ registerRule({
   units: 'wealth per cycle',
   verification: 'confirmed',
   structure: WEALTH_STRUCTURE,
-  note: 'A cycle\'s income, spending and net are the stored amounts of its uses added up, income by the use\'s Income flag. Arithmetic on stored values; it holds only what the game logs as income or spending, so trade deals and events are not in it.',
+  note: 'A cycle\'s income, spending and net are the stored amounts of its uses added up, income by the use\'s Income flag. Arithmetic on stored values; it holds only what the game logs as income or spending.',
 })
 
 registerRule({

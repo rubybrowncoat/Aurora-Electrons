@@ -506,6 +506,29 @@ const defineSuite = (m) => {
     refused(edited((doc) => { doc.campaigns[0].branches.b1.intel[1][2].snapshots[0].unknownFigure = 1 }), /holds the figure unknownFigure/)
   })
 
+  check('rejection', 'a snapshot may carry the chain of the ledger it was taken on, which is kept through a restore, and a malformed one or one on an intelligence snapshot is refused', async () => {
+    const digest = '0123456789abcdef'
+    const snapshotsOf = (doc) => doc.campaigns[0].branches.b1.races[1].snapshots
+    const read = (change) => backup.parseBackup(edited(change))
+    const kept = read((doc) => { snapshotsOf(doc)[0].chain = { n: 12, digest } })
+
+    assert.ok(kept.envelope, JSON.stringify(kept.errors))
+    assert.deepEqual(kept.envelope.campaigns[0].branches.b1.races[1].snapshots[0].chain, { n: 12, digest })
+    assert.ok(read(() => {}).envelope, 'a snapshot with no chain is read as before')
+
+    const target = installation({ first: 2 })
+
+    await restore(target, kept.envelope)
+
+    assert.deepEqual(target.fileOf('c1', 'b1').races[1].snapshots[0].chain, { n: 12, digest })
+
+    ;[{ n: 0, digest }, { n: 1.5, digest }, { n: -3, digest }, { n: 12, digest: 'xyz' }, { n: 12, digest: digest.toUpperCase() }, { n: 12 }, { digest }, { n: 12, digest, extra: 1 }, 'text', 7, [12, digest], null].forEach((chain) => {
+      refused(edited((doc) => { snapshotsOf(doc)[0].chain = chain }), /chain is not the increment count and 16-digit digest/)
+    })
+
+    refused(edited((doc) => { doc.campaigns[0].branches.b1.intel[1][2].snapshots[0].chain = { n: 12, digest } }), /holds the figure chain/)
+  })
+
   check('rejection', 'a series whose coverage does not match its snapshots, or that is longer than the retention cap, is refused', async () => {
     refused(edited((doc) => { doc.campaigns[0].branches.b1.races[1].coverage.count = 99 }), /coverage does not match/)
     refused(edited((doc) => { doc.campaigns[0].branches.b1.races[1].coverage.last = 1 }), /coverage does not match/)
@@ -2073,6 +2096,8 @@ const MUTANTS = [
   { name: 'a game time that does not increase is accepted', find: 'if (index > 0 && !(snapshot.t > series.snapshots[index - 1].t)) {', replace: 'if (false) {', fails: ['a game time that is not finite'] },
   { name: 'the units of the race figures are not compared', find: 'sameUnits(envelope.units.race, UNITS, \'The units of a race\\\'s figures\')', replace: '', fails: ['a figure with units'] },
   { name: 'the units of the intelligence figures are not compared', find: 'sameUnits(envelope.units.intelligence, INTEL_UNITS, \'The units of what a race knows of another\')', replace: '', fails: ['a figure with units'] },
+  { name: 'a malformed chain on a snapshot is accepted', find: 'if (!isChain(value) || Object.keys(value).length !== 2) {', replace: 'if (false) {', fails: ['a snapshot may carry the chain'] },
+  { name: 'a chain is accepted on an intelligence snapshot', find: 'if (field === \'chain\' && race) {', replace: 'if (field === \'chain\') {', fails: ['a snapshot may carry the chain'] },
   { name: 'the coverage of a series is not compared', find: 'if (!isObject(series.coverage) || series.coverage.count !== count || series.coverage.first !== first || series.coverage.last !== last || Object.keys(series.coverage).length !== 3) {', replace: 'if (false) {', fails: ['a series whose coverage'] },
   { name: 'the size of a file is checked after it is parsed', find: 'if (!fitsLimit(body)) {', replace: 'if (false) {', fails: ['a file larger than the limit'] },
   { name: 'a campaign id may name a path', find: 'const ID = /^[A-Za-z0-9_-]+$/', replace: 'const ID = /^.+$/', fails: ['an id that could name'] },
