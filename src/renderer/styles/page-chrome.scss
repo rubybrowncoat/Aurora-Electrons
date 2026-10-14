@@ -158,3 +158,22 @@ tr.selected-row > td:last-child:not(:first-child),
 tr.v-data-table__selected > td:last-child:not(:first-child) {
   box-shadow: inset -3px 0 0 var(--ae-primary), inset 0 1px 0 var(--ae-primary), inset 0 -1px 0 var(--ae-primary);
 }
+
+// The popup plugins/truncated-text.js shows beside a control with focus when text in it is cut: the full text, in the card colour with the body ink, so its contrast is the one already measured for the preset.
+.truncated-text-tip {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(32rem, calc(100vw - 16px));
+  padding: 6px 12px;
+  border: 1px solid var(--ae-border);
+  border-radius: 4px;
+  background: var(--ae-card);
+  color: var(--ae-ink);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-family: var(--ae-font);
+  font-size: calc(14px * var(--ae-font-scale));
+  line-height: calc(20px * var(--ae-font-scale));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
