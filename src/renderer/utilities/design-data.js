@@ -1,6 +1,6 @@
 // The race's ship classes and the parts the propulsion planner starts from: the classes with the engines, fuel tanks and jump drives they mount, the stock fuel tanks the race may fit, and the race's own engine designs; then the shared component contract every planner builds on (a component record with its quantities, flags and provenance, the loaders that read the race's own components, and additive totals that refuse to mix saves or races). Sizes are in hull spaces (HS), power in engine power (EP), fuel in litres, as in design-rules.js.
 
-import { TONS_PER_HS } from './design-rules'
+import { MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, MSP_PER_HS, TONS_PER_HS, agrees, missileLaserStrength, missileReactorMsp, missileReactorOutput, missileSensorStrength, missileWarheadStrength } from './design-rules'
 import { STATUS, combine, envelope, getRule, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
 import { loadFormulaVersion } from './capabilities'
 
@@ -117,8 +117,8 @@ export const splitClasses = (classes, classParts) => {
 
 // The shared component contract. A component is one record whatever its source: read from the save (`imported`), worked out by a registered design rule (`recomputed`) or entered by the player (`manual`). A figure its source does not give is null, which means unknown and never 0, and every answer comes through `quantityOf` or `flagOf` as a provenance result, so an unknown figure is unavailable and cannot satisfy a condition. A record lists the `capabilities` it can speak to: a manual component supplies only the additive figures (size, cost, crew, power demand, minerals), so a sensor range, a weapon figure or a fuel capacity asked of it is unavailable, not 0.
 
-// The size scale of a missile is in MSP; a hull space is this many. A component converts between the two only within the family it declares.
-export const MSP_PER_HS = 20
+// The size scale of a missile is in MSP; a hull space is this many (the constant of design-rules.js). A component converts between the two only within the family it declares.
+export { MSP_PER_HS }
 
 export const COMPONENT_ORIGIN = Object.freeze({ IMPORTED: 'imported', RECOMPUTED: 'recomputed', MANUAL: 'manual' })
 
@@ -740,3 +740,256 @@ export const componentTotals = (entries) => {
     conflicts: Object.freeze(conflicts),
   })
 }
+
+// ---------- missile designs ----------
+
+// The tech types a missile design reads, as the save numbers them: warhead 12, thermal 19, active 20, engine 40, power plant 41, fuel 65, ECCM 83, geo 89, EM 125, max thrust 130, radiation 163, laser efficiency 274, terminal guidance 275, retargeting 276, laser focus 277, missile ECM 279, multiple warheads 280 and ship decoy 281.
+export const MISSILE_TECH = Object.freeze({ warhead: 12, thermal: 19, active: 20, reactor: 41, eccm: 83, geo: 89, em: 125, maxThrust: 130, radiation: 163, laserEfficiency: 274, terminal: 275, retarget: 276, laserFocus: 277, missileEcm: 279, multipleWarheads: 280, shipDecoy: 281, engine: 40, fuel: 65 })
+export const MISSILE_TECH_TYPES = Object.freeze(Object.values(MISSILE_TECH).sort((a, b) => a - b))
+
+// The columns of FCT_MissileType the missile rules read.
+export const MISSILE_COLUMNS = Object.freeze(['Name', 'EngineID', 'NumEngines', 'Cost', 'Size', 'Speed', 'RadDamage', 'FuelRequired', 'Endurance', 'MaxRange', 'WarheadStrength', 'SensorStrength', 'SensorResolution', 'SensorRange', 'ThermalStrength', 'EMStrength', 'Geostrength', 'TotalFlightTime', 'SecondStageID', 'NumSS', 'Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite', 'MSPReactor', 'MSPWarhead', 'MSPEngine', 'MSPFuel', 'MSPActive', 'MSPThermal', 'MSPEM', 'MSPGeo', 'ECCM', 'EMSensitivity', 'GroundShots', 'PowerMod', 'ATG', 'Retargeting', 'LaserWarhead', 'LaserWarheadRangeModifier', 'NumDecoys', 'MSPDecoys', 'MissileECM', 'MultipleWarheads', 'MSPMultipleWarheads', 'ShipDecoy'])
+
+const MISSILES_SQL = `select FCT_MissileType.MissileID, ${MISSILE_COLUMNS.map((column) => `FCT_MissileType.${column}`).join(', ')}, FCT_TechSystem.RaceID as OwnerID from FCT_MissileType left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game`
+
+// A missile has no owner column: the race that researched it is the RaceID of its FCT_TechSystem row (tech type 122, TechSystemID = MissileID), the row the Designed Tech page joins. `race` null reads every design of the game.
+export const ownedMissiles = async (database, game, race = null) => {
+  const [rows] = race === null ? await database.query(`${MISSILES_SQL} order by FCT_MissileType.MissileID`, { replacements: { game } }) : await database.query(`${MISSILES_SQL} and FCT_TechSystem.RaceID = :race order by FCT_MissileType.MissileID`, { replacements: { game, race } })
+
+  return rows
+}
+
+const missileDesign = (row, stageOnly) => ({ id: row.MissileID, race: row.OwnerID === undefined ? null : row.OwnerID, row: Object.fromEntries(MISSILE_COLUMNS.map((column) => [column, row[column]])), ...(stageOnly ? { stageOnly: true } : {}) })
+
+// The fixture a set of designs needs, as plain data: `{ game, levels: { id: { type, info, cost } }, races: { id: { name, held: { type: [level ids] } } }, components: { id: { id, name, size, cost, power, fuelEfficiency, tech1, tech2 } }, designs: [{ id, race, row, stageOnly? }] }` with `row` the FCT_MissileType columns the rules read. The designs are `owned` (rows of `ownedMissiles`) and the second stages they name (`stageOnly`), the levels of the missile tech types each owner holds and the engine components with their two techs.
+export const loadMissileFixture = async (database, game, owned) => {
+  const designs = new Map(owned.map((row) => [row.MissileID, missileDesign(row, false)]))
+  const pending = [...owned]
+
+  while (pending.length) {
+    const stageId = pending.pop().SecondStageID
+
+    if (stageId > 0 && !designs.has(stageId)) {
+      const [[stage]] = await database.query(`${MISSILES_SQL} and FCT_MissileType.MissileID = :id`, { replacements: { game, id: stageId } })
+
+      if (stage) {
+        designs.set(stageId, missileDesign(stage, true))
+        pending.push(stage)
+      }
+    }
+  }
+
+  const levels = {}
+  const races = {}
+  const levelOf = (row) => {
+    levels[row.id] = { type: row.type, info: row.info, cost: row.cost }
+  }
+  const raceIds = [...new Set([...designs.values()].map((design) => design.race).filter((race) => race !== null))]
+
+  for (const raceId of raceIds) {
+    const [[race]] = await database.query('select FCT_Race.RaceName from FCT_Race where FCT_Race.GameID = :game and FCT_Race.RaceID = :race', { replacements: { game, race: raceId } })
+    const [held] = await database.query(`select FCT_TechSystem.TechSystemID as id, FCT_TechSystem.TechTypeID as type, FCT_TechSystem.AdditionalInfo as info, FCT_TechSystem.DevelopCost as cost from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race and FCT_TechSystem.TechTypeID in (${MISSILE_TECH_TYPES.join(',')}) order by FCT_TechSystem.TechSystemID`, { replacements: { game, race: raceId } })
+
+    held.forEach(levelOf)
+    races[raceId] = { name: race ? race.RaceName : null, held: Object.fromEntries([...new Set(held.map((row) => row.type))].map((type) => [type, held.filter((row) => row.type === type).map((row) => row.id)])) }
+  }
+
+  const engineIds = [...new Set([...designs.values()].map((design) => design.row.EngineID).filter((id) => id > 0))].map(Number)
+  const components = {}
+
+  if (engineIds.length) {
+    const [rows] = await database.query(`select FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.Size, FCT_ShipDesignComponents.Cost, FCT_ShipDesignComponents.ComponentValue, FCT_ShipDesignComponents.FuelEfficiency, FCT_ShipDesignComponents.BGTech1, FCT_ShipDesignComponents.BGTech2 from FCT_ShipDesignComponents where FCT_ShipDesignComponents.GameID = :game and FCT_ShipDesignComponents.SDComponentID in (${engineIds.join(',')})`, { replacements: { game } })
+
+    for (const row of rows) {
+      components[row.SDComponentID] = { id: row.SDComponentID, name: row.Name, size: row.Size, cost: row.Cost, power: row.ComponentValue, fuelEfficiency: row.FuelEfficiency, tech1: row.BGTech1, tech2: row.BGTech2 }
+    }
+
+    const techIds = [...new Set(rows.flatMap((row) => [row.BGTech1, row.BGTech2]).filter((id) => id > 0))].map(Number)
+
+    if (techIds.length) {
+      const [techs] = await database.query(`select FCT_TechSystem.TechSystemID as id, FCT_TechSystem.TechTypeID as type, FCT_TechSystem.AdditionalInfo as info, FCT_TechSystem.DevelopCost as cost from FCT_TechSystem where FCT_TechSystem.TechSystemID in (${techIds.join(',')})`, { replacements: {} })
+
+      techs.forEach(levelOf)
+    }
+  }
+
+  return { game, levels, races, components, designs: [...designs.values()] }
+}
+
+// A level held by the race: { id, info, cost } with `cost` its development cost, the order the game picks by.
+const byGamePick = (levels) => levels.reduce((best, level) => (!best || level.cost > best.cost ? level : best), null)
+
+// The levels of a line whose figure reproduces what the design stored, the game's pick among them (the one that cost the most to develop) and every one of them. `reproduces(info)` is true when the level, used as the design's, gives the stored figure.
+export const matchLevels = (levels, reproduces) => {
+  const matches = (levels || []).filter((level) => reproduces(level.info))
+
+  return { matches, level: byGamePick(matches) }
+}
+
+export const missileLevelRecord = (fixture, id) => (fixture.levels[id] ? { id: Number(id), info: fixture.levels[id].info, cost: fixture.levels[id].cost } : null)
+
+// The levels a race holds, by tech type, as resolveMissileLevels reads them.
+export const heldMissileLevels = (fixture, race) => {
+  const entry = fixture.races[race]
+  const held = {}
+
+  for (const [type, ids] of Object.entries(entry ? entry.held : {})) {
+    held[type] = ids.map((id) => missileLevelRecord(fixture, id)).filter(Boolean)
+  }
+
+  return held
+}
+
+export const missileLevelsOfType = (fixture, type) => Object.keys(fixture.levels).filter((id) => fixture.levels[id].type === type).map((id) => missileLevelRecord(fixture, id))
+
+export const LINE_STATE = Object.freeze({ UNUSED: 'unused', RESOLVED: 'resolved', UNRESOLVED: 'unresolved', UNSUPPORTED: 'unsupported' })
+
+const line = (state, level, reason, extra = {}) => ({ state, level: level || null, reason: reason || null, ...extra })
+
+// What a stored design says it used, as the options a candidate takes.
+export const missileOptionsOf = (row) => ({ eccm: row.ECCM, terminal: row.ATG, retarget: row.Retargeting, laser: row.LaserWarhead > 0 })
+
+// Whether a stored design has a warhead whose radiation damage differs from its strength: an enhanced radiation warhead, the multiplier of which is a design choice the rules do not cover.
+const hasEnhancedRadiation = (row) => row.RadDamage > 0 && row.WarheadStrength > 0 && !agrees(row.RadDamage, row.WarheadStrength) && row.ShipDecoy !== 1
+
+// Resolves the technology levels of a design from the levels its race holds (`held`: { [tech type]: [{ id, info, cost }] }). Each line is `unused` (the design does not use it), `resolved` (a held level reproduces the stored figure; `level` is the game's pick among those that do, `matches` all of them, `current` the race's current pick of the line so that a historical level shows), `unresolved` (no held level does: the reason says which stored figure is left unexplained) or `unsupported` (a use the rules do not cover). `tech` is the figures of the resolved levels, null for every other line. A resolved level is the one the stored figure picks, so the level agrees with the figure by construction: it is an estimate of the tech, not an independent reading of it.
+export const resolveMissileLevels = (row, held) => {
+  const lines = {}
+  const options = missileOptionsOf(row)
+  const decoy = row.ShipDecoy === 1
+  const resolveBy = (name, type, used, reproduces, why) => {
+    if (!used) {
+      lines[name] = line(LINE_STATE.UNUSED)
+
+      return
+    }
+
+    const { matches, level } = matchLevels(held[type], reproduces)
+    const current = byGamePick(held[type] || [])
+
+    lines[name] = level ? line(LINE_STATE.RESOLVED, level, null, { matches, current, historical: current !== null && current.id !== level.id && current.info !== level.info }) : line(LINE_STATE.UNRESOLVED, null, why, { matches: [], current })
+  }
+
+  if (row.GroundShots > 0) {
+    lines.warhead = line(LINE_STATE.UNSUPPORTED, null, 'a ground attack pod: its cost and size follow other rules')
+  } else if (hasEnhancedRadiation(row)) {
+    lines.warhead = line(LINE_STATE.UNSUPPORTED, null, 'an enhanced radiation warhead: its multiplier is a design choice the rules do not cover')
+  } else if (decoy) {
+    lines.warhead = line(LINE_STATE.UNUSED)
+  } else {
+    resolveBy('warhead', MISSILE_TECH.warhead, row.MSPWarhead > 0, (info) => agrees(row.WarheadStrength, missileWarheadStrength({ warheadMsp: row.MSPWarhead, warheadTech: info })), `no held warhead level gives the stored strength ${row.WarheadStrength} from ${row.MSPWarhead} MSP`)
+  }
+
+  const strengthOfWarhead = row.WarheadStrength
+
+  resolveBy('laserEfficiency', MISSILE_TECH.laserEfficiency, options.laser, (info) => agrees(row.LaserWarhead, missileLaserStrength({ strength: strengthOfWarhead, efficiency: info })), `no held laser efficiency level gives the stored laser strength ${row.LaserWarhead} from a warhead of ${strengthOfWarhead}`)
+  resolveBy('terminal', MISSILE_TECH.terminal, options.terminal > 1, (info) => agrees(row.ATG, info), `no held terminal guidance level is the stored ${row.ATG}`)
+  resolveBy('retarget', MISSILE_TECH.retarget, options.retarget > 0, (info) => Math.trunc(info) === row.Retargeting, `no held retargeting level is the stored ${row.Retargeting}`)
+  resolveBy('eccm', MISSILE_TECH.eccm, options.eccm > 0, (info) => Math.trunc(info) === row.ECCM, `no held ECCM level is the stored ${row.ECCM}`)
+  resolveBy('multipleWarheads', MISSILE_TECH.multipleWarheads, row.MultipleWarheads > 1, (info) => info > 0, `no held multiple warheads tech level (type ${MISSILE_TECH.multipleWarheads}) is above 0 for the stored ${row.MultipleWarheads} warheads`)
+  resolveBy('shipDecoy', MISSILE_TECH.shipDecoy, decoy, (info) => info > 0, `no held ship decoy tech level (type ${MISSILE_TECH.shipDecoy}) is above 0 for the stored ship decoy`)
+
+  // Three levels the design records as they stood and the figures above do not follow from: the EM sensitivity behind the active sensor's range, the laser focus range modifier and the missile ECM level. An unresolved one is unknown provenance, not a difference.
+  resolveBy('emSensitivity', MISSILE_TECH.em, row.EMSensitivity > 0, (info) => info === row.EMSensitivity, `no held EM sensitivity level is the recorded ${row.EMSensitivity}`)
+  resolveBy('laserFocus', MISSILE_TECH.laserFocus, row.LaserWarheadRangeModifier > 0, (info) => info === row.LaserWarheadRangeModifier, `no held laser focus level is the recorded ${row.LaserWarheadRangeModifier}`)
+  resolveBy('missileEcm', MISSILE_TECH.missileEcm, row.MissileECM > 0, (info) => Math.trunc(info) === row.MissileECM, `no held missile ECM level is the recorded ${row.MissileECM}`)
+
+  // A sensor under 0.25 MSP has no strength and needs no tech; the tech of a bigger one is the level whose strength the design stored.
+  const sensorLine = (name, type, msp, stored) => resolveBy(name, type, msp >= MIN_SENSOR_MSP, (info) => agrees(stored, missileSensorStrength({ sensorMsp: msp, sensorTech: info })), `no held level gives the stored ${name} strength ${stored} from ${msp} MSP`)
+
+  sensorLine('active', MISSILE_TECH.active, row.MSPActive, row.SensorStrength)
+  sensorLine('thermal', MISSILE_TECH.thermal, row.MSPThermal, row.ThermalStrength)
+  sensorLine('em', MISSILE_TECH.em, row.MSPEM, row.EMStrength)
+  sensorLine('geo', MISSILE_TECH.geo, row.MSPGeo, row.Geostrength)
+
+  const figuresOf = (name) => (lines[name].state === LINE_STATE.RESOLVED ? lines[name].level.info : null)
+  const strengths = [row.MSPActive >= MIN_SENSOR_MSP ? row.SensorStrength : 0, row.MSPThermal >= MIN_SENSOR_MSP ? row.ThermalStrength : 0, row.MSPEM >= MIN_SENSOR_MSP ? row.EMStrength : 0, row.MSPGeo >= MIN_SENSOR_MSP ? row.Geostrength : 0]
+  const output = missileReactorOutput(strengths)
+
+  resolveBy('reactor', MISSILE_TECH.reactor, output > 0, (info) => agrees(row.MSPReactor, missileReactorMsp({ output, reactorTech: info })), `no held power plant level gives the stored reactor ${row.MSPReactor} MSP for an output of ${output}`)
+
+  const tech = { warhead: figuresOf('warhead'), laserEfficiency: figuresOf('laserEfficiency'), reactor: figuresOf('reactor'), active: figuresOf('active'), thermal: figuresOf('thermal'), em: figuresOf('em'), geo: figuresOf('geo') }
+
+  return { lines, tech }
+}
+
+// Whether a stored design mounts an engine: its row names an engine component or gives the engine a size or a speed. The engine-less designs of the saves (decoys, buoys) store 1 engine with none of the three.
+const mountsMissileEngine = (row) => row.EngineID > 0 || row.MSPEngine > 0 || row.Speed > 0
+
+// An engine the design mounts and the record of which is absent: its size is the stored one where the row has it, and nothing else is known.
+const missingMissileEngine = (row) => ({ missing: true, storedMsp: row.MSPEngine > 0 ? row.MSPEngine : null })
+
+// The engine component a stored design mounts, as a candidate's engine: null where the row shows none mounted, { missing: true, storedMsp } for an engine whose component the save does not hold.
+export const missileEngineOf = (fixture, row) => {
+  if (!mountsMissileEngine(row)) {
+    return null
+  }
+
+  const component = row.EngineID > 0 ? fixture.components[row.EngineID] : null
+
+  if (!component) {
+    return missingMissileEngine(row)
+  }
+
+  return { sizeMsp: component.size, cost: component.cost, power: component.power, fuelEfficiency: component.fuelEfficiency }
+}
+
+// The minerals a stored design lists, summed: null when one is not known.
+export const storedMineralTotal = (row) => (MISSILE_STORED_MINERALS.some((name) => row[name] === null || row[name] === undefined) ? null : MISSILE_STORED_MINERALS.reduce((total, name) => total + row[name], 0))
+
+// Whether a stored design mounts a second stage: its row names one or counts one.
+const mountsMissileStage = (row) => row.SecondStageID > 0 || row.NumSS > 0
+
+// The second stage a stored design names, as a candidate's stage: another design of the fixture; what its Cost holds beyond its stored minerals is its Corundium (the one mineral with no column), so the stage carries it as such, and its Vendarite is the known 0 of a stage with no ground pod. Null for no stage, { missing: true } for one the fixture does not hold, whose minerals are not stored or which carries a ground pod (its Vendarite is not stored).
+export const missileStageOf = (fixture, row) => {
+  if (!mountsMissileStage(row)) {
+    return null
+  }
+
+  const stage = row.SecondStageID > 0 ? fixture.designs.find((design) => design.id === row.SecondStageID) : null
+
+  if (!stage) {
+    return { missing: true }
+  }
+
+  const stored = storedMineralTotal(stage.row)
+
+  if (stored === null || stage.row.GroundShots > 0) {
+    return { missing: true }
+  }
+
+  return { size: stage.row.Size, cost: stage.row.Cost, fuelRequired: stage.row.FuelRequired, totalFlightTime: stage.row.TotalFlightTime, minerals: { ...Object.fromEntries(MISSILE_STORED_MINERALS.map((name) => [name, stage.row[name]])), Corundium: stage.row.Cost - stored, Vendarite: 0 } }
+}
+
+// A stored design as a candidate: its sizes, options and counts from the row, the engine, the stage and the levels' figures given (`missileEngineOf`, `missileStageOf`, the `tech` of `resolveMissileLevels`), and `sizeLimit` the size the design was capped at (0 for none: the save does not store it). Whether an engine or a stage is mounted is read from the row, not from the record given: a row that shows one mounted gets its count, and a missing marker where the record is absent (unknown, never none); a row that shows none is counted 0 (the engine-less designs store 1). A record given for a part the row does not mount, or a count of 0 for one it does, is a contradiction and throws. A ground pod and an enhanced radiation warhead are marked, as the rules do not cover them.
+export const savedMissileCandidate = (row, { engine, stage, tech, sizeLimit = 0 }) => {
+  const engineMounted = mountsMissileEngine(row)
+  const stageMounted = mountsMissileStage(row)
+
+  if (!engineMounted && engine) {
+    throw new Error(`The design ${row.MissileID} shows no engine mounted but was given one`)
+  }
+
+  if (!stageMounted && stage) {
+    throw new Error(`The design ${row.MissileID} shows no second stage mounted but was given one`)
+  }
+
+  if ((engineMounted && !(row.NumEngines > 0)) || (stageMounted && !(row.NumSS > 0))) {
+    throw new Error(`The design ${row.MissileID} shows a part mounted but counts none`)
+  }
+
+  return { warheadMsp: row.MSPWarhead, warheads: row.MultipleWarheads, shipDecoy: row.ShipDecoy === 1, decoys: row.NumDecoys, fuelMsp: row.MSPFuel, activeMsp: row.MSPActive, thermalMsp: row.MSPThermal, emMsp: row.MSPEM, geoMsp: row.MSPGeo, sizeLimit, engine: engineMounted ? engine || missingMissileEngine(row) : null, engines: engineMounted ? row.NumEngines : 0, stage: stageMounted ? stage || { missing: true } : null, stages: stageMounted ? row.NumSS : 0, options: missileOptionsOf(row), tech, sensor: { resolution: row.SensorResolution, emSensitivity: row.EMSensitivity }, groundPod: row.GroundShots > 0, enhancedRadiation: hasEnhancedRadiation(row) }
+}
+
+// A design of a fixture as a candidate: its levels resolved from the levels its race holds, its engine and stage from the fixture. `sizeLimit` as in savedMissileCandidate.
+export const missileCandidateOf = (fixture, design, { sizeLimit = 0 } = {}) => savedMissileCandidate(design.row, { engine: missileEngineOf(fixture, design.row), stage: missileStageOf(fixture, design.row), tech: resolveMissileLevels(design.row, heldMissileLevels(fixture, design.race)).tech, sizeLimit })
+
+registerRule({
+  id: 'design.missileLevels',
+  versions: ['2.7.x'],
+  units: 'tech level',
+  verification: 'estimated',
+  structure: ['FCT_RaceTech.TechID', 'FCT_TechSystem.TechTypeID, AdditionalInfo, DevelopCost', 'FCT_MissileType'],
+  note: 'A saved missile design records no tech level. The level it was made with is the one the race holds whose figure reproduces the stored one, the held level that cost the most to develop when several do; a design whose figure no held level gives has an unknown level. The level therefore agrees with the stored figure by construction, and a comparison made from it says that some held level gives the figure, not that the rule gives it independently (scripts/check-design-rules.js reports these as resolved from the stored figure).',
+  assumptions: ['The race has not lost or replaced a level it held when the design was made', 'The game picks the level of greatest development cost among those that give the stored figure'],
+})

@@ -1,6 +1,7 @@
 // The game's design rules, for the planners: what a component or a class built from the race's tech comes out at, as the game's design windows work it out. Pure functions with the units in their argument names: sizes in hull spaces (HS), power in engine power (EP), fuel in litres, speed in km/s, distance in km, cost in BP. docs/DATABASE.md § Design rules states each rule in prose.
 
-import { combine, envelope, ofRule, registerRule, STATUS, unavailable } from './provenance'
+import { combine, envelope, getRule, isAvailable, ofRule, registerRule, STATUS, unavailable } from './provenance'
+import { HIT_RULES, hitScenario } from './missile-hit'
 import { PACKAGE_STATUS, REQUEST_TOLERANCE, packerFor } from './tank-packing'
 
 export { PACKAGE_STATUS, REQUEST_TOLERANCE, createTankPacker, meetsRequest, packerFor } from './tank-packing'
@@ -396,6 +397,666 @@ export const incrementFailureChance = ({ baseFailureChance, clockYears, elapsedY
   return ofRule({ rule, value: Number(elapsedYears) * (rate * Number(uncoveredFraction)) * (2 - Number(crewPerformance)) * (2 - Number(engineeringBonus)), inputs: { present } })
 }
 
+// ---------- missile designs ----------
+
+// A missile is built from its engine, the sizes the designer allots to fuel, warhead, sensors and decoys, the options switched on, a second stage and a size limit. Its size is in MSP and an engine's size scales by hull spaces, 20 MSP to the HS. Every function below is one formula as plain numbers: a figure that needs an input the caller does not have is null, never 0. `evaluateMissile` gives the provenance results. docs/DATABASE.md § Design rules states each rule in prose.
+export const MSP_PER_HS = 20
+export const FUEL_LITRES_PER_MSP = 2500
+export const MAX_MISSILE_SPEED = 270000
+export const MIN_MISSILE_SIZE = 1
+export const MIN_SHIP_DECOY_SIZE = 5
+export const MIN_SENSOR_MSP = 0.25
+export const SENSOR_STRENGTH_FACTOR = 0.05
+export const REACTOR_OUTPUT_DIVISOR = 5
+export const REACTOR_BP_PER_OUTPUT = 3
+export const WARHEAD_BP_DIVISOR = 4
+export const ECCM_MSP = 0.25
+export const TERMINAL_GUIDANCE_MSP = 0.25
+export const RETARGETING_MSP = 0.5
+export const LASER_WARHEAD_MSP = 0.25
+export const EXTRA_WARHEAD_MSP = 0.1
+export const DECOY_MSP = 0.5
+export const SHIP_DECOY_BP_PER_MSP = 4
+export const SHIP_DECOY_STRENGTH_PER_MSP = 200
+export const ECCM_BP_DIVISOR = 20
+export const THRUST_BOOST_SLOPE = 4
+export const SENSOR_PI = 3.1416
+// The highest retargeting level whose size and cost a saved design shows; a higher one is not validated.
+export const VALIDATED_RETARGETING = 1
+
+// The highest value of each quantity the cost and mineral formulas read, among the saved designs whose cost and minerals the accounting reproduces (the fixtures of scripts/lib/missile-fixtures.json: scripts/check-design-rules.js derives these from them and fails when they differ). The formulas take products of a size and a tech (a strength, a damage), so the products are bounded as well as the sizes, and no tech level is bounded alone. A candidate with a quantity above its value is beyond what the cost and minerals are checked for, so they are estimated there (design.missileAccountingExtended).
+export const MISSILE_COST_DOMAIN = Object.freeze({ warheadMsp: 23, warheadDamage: 46, shipDecoyMsp: 39, warheads: 4, activeMsp: 0.675, thermalMsp: 0.25, emMsp: 0.25, geoMsp: 0.343, activeStrength: 0.65, thermalStrength: 0.18, emStrength: 0.08, geoStrength: 0.02, reactorOutput: 0.13, laserEfficiency: 60, eccm: 15, terminal: 1.9, decoys: 3, engineBp: 22.5, enginePower: 45, stages: 9 })
+
+// The minerals a saved missile design stores, and the two the game also charges for which it has no column: a laser warhead's Corundium and a ground pod's Vendarite.
+export const MISSILE_STORED_MINERALS = Object.freeze(['Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite'])
+export const MISSILE_UNSTORED_MINERALS = Object.freeze(['Corundium', 'Vendarite'])
+export const MISSILE_MINERALS = Object.freeze([...MISSILE_STORED_MINERALS, ...MISSILE_UNSTORED_MINERALS])
+
+// The options of a missile, in the order the game adds their sizes: each has an MSP, a BP and a mineral amount.
+export const MISSILE_OPTIONS = Object.freeze({ engine: 'Engine', fuel: 'Fuel', warhead: 'Warhead', reactor: 'Sensor reactor', active: 'Active sensor', thermal: 'Thermal sensor', em: 'EM sensor', geo: 'Geo sensor', decoys: 'ECM decoys', extraWarheads: 'Extra warheads', secondStage: 'Second stage', eccm: 'ECCM', terminal: 'Terminal guidance', retarget: 'Retargeting', laser: 'Laser warhead' })
+export const CONTRIBUTIONS = Object.freeze(Object.keys(MISSILE_OPTIONS))
+
+// Whether two figures reproduce one another: 1e-9 of the larger, and never closer than 1e-12 absolute, so two zeros agree.
+export const REPRODUCTION_TOLERANCE = 1e-9
+
+export const agrees = (stored, computed) => Math.abs(stored - computed) <= Math.max(1e-12, REPRODUCTION_TOLERANCE * Math.max(Math.abs(stored), Math.abs(computed)))
+
+const isKnown = (value) => value !== null && value !== undefined && !Number.isNaN(value)
+
+const allKnown = (...values) => values.every(isKnown)
+
+const zeroMinerals = () => Object.fromEntries(MISSILE_MINERALS.map((name) => [name, 0]))
+
+const mineralsOf = (amounts) => ({ ...zeroMinerals(), ...amounts })
+
+// An engine's power and fuel use as the game designs a missile engine from its engine tech (EP per HS at thrust 1), fuel tech (litres per EP-hour at thrust 1 and 10 HS), thrust modifier and size in MSP. Above the race's greatest thrust modifier the fuel use is boosted by the excess over it, four times over; the power and the cost are not. Returns { power, fuelEfficiency, cost }.
+export const missileEngineDesign = ({ sizeMsp, thrust, engineTech, fuelTech, maxThrust }) => {
+  const sizeHS = sizeMsp / MSP_PER_HS
+  const boost = thrust > maxThrust ? (thrust - maxThrust) / maxThrust * THRUST_BOOST_SLOPE + 1 : 1
+  const power = roundHalfEven(engineTech * sizeHS * thrust, 2)
+
+  return { power, fuelEfficiency: fuelTech * thrust ** THRUST_EXPONENT * boost * Math.sqrt(10 / sizeHS), cost: power / 2 * (thrust < 1 ? thrust : 1) }
+}
+
+// The thrust modifier an engine was designed at, from its stored power: the design rounds the power to 2 decimals, so this is exact to that rounding.
+export const thrustOfMissileEngine = ({ power, sizeMsp, engineTech }) => power / (engineTech * (sizeMsp / MSP_PER_HS))
+
+// A warhead's strength: its MSP times the warhead tech, cut by the radiation multiplier, to 3 decimals. A ship decoy has 200 a MSP and no tech.
+export const missileWarheadStrength = ({ warheadMsp, warheadTech, radiationMultiplier = 1, shipDecoy = false }) => {
+  if (!(warheadMsp > 0)) {
+    return 0
+  }
+
+  if (shipDecoy) {
+    return roundHalfEven(warheadMsp * SHIP_DECOY_STRENGTH_PER_MSP / radiationMultiplier, 3)
+  }
+
+  return isKnown(warheadTech) ? roundHalfEven(warheadMsp * warheadTech / radiationMultiplier, 3) : null
+}
+
+// The damage the warhead does before the radiation split, unrounded: what the Tritanium of the warhead is a quarter of.
+export const missileWarheadDamage = ({ warheadMsp, warheadTech, shipDecoy = false }) => {
+  if (!(warheadMsp > 0)) {
+    return 0
+  }
+
+  if (shipDecoy) {
+    return warheadMsp * SHIP_DECOY_STRENGTH_PER_MSP
+  }
+
+  return isKnown(warheadTech) ? warheadMsp * warheadTech : null
+}
+
+// A sensor's strength: its MSP times the sensor tech times 0.05, to 2 decimals; a sensor under a quarter of an MSP has none.
+export const missileSensorStrength = ({ sensorMsp, sensorTech }) => {
+  if (!(sensorMsp >= MIN_SENSOR_MSP)) {
+    return 0
+  }
+
+  return isKnown(sensorTech) ? roundHalfEven(sensorMsp * sensorTech * SENSOR_STRENGTH_FACTOR, 2) : null
+}
+
+// The reactor that feeds the sensors: a fifth of the summed strength is the output the reactor must give, to 4 decimals, and its size is that over the power plant tech times 0.05, to 4 decimals. With no output the reactor is not needed, whatever the tech.
+export const missileReactorOutput = (strengths) => (strengths.every(isKnown) ? roundHalfEven(strengths.reduce((total, value) => total + value, 0) / REACTOR_OUTPUT_DIVISOR, 4) : null)
+
+export const missileReactorMsp = ({ output, reactorTech }) => {
+  if (!isKnown(output)) {
+    return null
+  }
+
+  if (output === 0) {
+    return 0
+  }
+
+  return isKnown(reactorTech) && reactorTech > 0 ? roundHalfEven(output / (reactorTech * SENSOR_STRENGTH_FACTOR), 4) : null
+}
+
+// A laser warhead keeps the share of the strength its efficiency tech (a percentage) gives, to 3 decimals.
+export const missileLaserStrength = ({ strength, efficiency }) => (allKnown(strength, efficiency) ? roundHalfEven(strength * (efficiency / 100), 3) : null)
+
+// An active sensor's range in km: the square root of its strength times the EM sensitivity the design recorded times the resolution to the power 2/3, over pi as the game approximates it, in millions of km, rounded to a whole number.
+export const missileSensorRange = ({ strength, emSensitivity, resolution }) => {
+  if (!(resolution !== 0 && strength !== 0)) {
+    return 0
+  }
+
+  return allKnown(strength, emSensitivity) ? roundHalfEven(Math.sqrt(strength * emSensitivity * resolution ** (2 / 3) / SENSOR_PI) * 1e6, 0) : null
+}
+
+const contribution = (msp, bp, minerals, unknown = null) => ({ msp, bp, minerals: minerals === null ? null : mineralsOf(minerals), unknown })
+
+const sumOf = (contributions, field) => (contributions.some((entry) => !isKnown(entry[field])) ? null : contributions.reduce((total, entry) => total + entry[field], 0))
+
+const sumMinerals = (contributions) => Object.fromEntries(MISSILE_MINERALS.map((name) => [name, contributions.some((entry) => entry.minerals === null || entry.minerals[name] === null) ? null : contributions.reduce((total, entry) => total + entry.minerals[name], 0)]))
+
+// The size of a design from the sum of its contributions: no under 5 for a ship decoy and 1 otherwise, and no over the designer's size limit (0 for none).
+const clampSize = (sum, { shipDecoy, sizeLimit }) => {
+  let size = sum
+
+  if (shipDecoy && size < MIN_SHIP_DECOY_SIZE) {
+    size = MIN_SHIP_DECOY_SIZE
+  } else if (size < MIN_MISSILE_SIZE) {
+    size = MIN_MISSILE_SIZE
+  }
+
+  if (sizeLimit > 0 && size > sizeLimit) {
+    size = sizeLimit
+  }
+
+  return size
+}
+
+const ENGINE_MISSING = 'the engine component the design names is not in the save'
+const STAGE_MISSING = 'the second stage design is not in the save'
+
+// A design built by the game's own order of work. `input`:
+//   warheadMsp, warheads (the count, 1 or more; each warhead after the first adds 0.1 MSP to the size and to the Tritanium and cost), shipDecoy (whether the decoy tech was held and chosen), decoys (ECM decoys), fuelMsp, activeMsp, thermalMsp, emMsp, geoMsp, sizeLimit (0 for none: the designer's limit on the missile's size, which a save does not store);
+//   engine ({ sizeMsp, cost, power, fuelEfficiency } of the engine component; { missing: true, storedMsp, reason } for an engine the design has but the figures of which are not known, `storedMsp` its size or null where that is not known; null for no engine) and engines (the count);
+//   stage ({ size, cost, fuelRequired, totalFlightTime, minerals } of the second-stage design, { missing: true, reason } for one not known, or null) and stages (its count);
+//   options { eccm, terminal, retarget, laser } as the values the design stored (`eccm` the ECCM level, `terminal` the guidance multiplier, `retarget` the retargeting level, `laser` whether a laser warhead is fitted);
+//   tech { warhead, laserEfficiency, reactor, active, thermal, em, geo } the levels' figures, null where the level is not known;
+//   unsupported { [option]: { reason, size } } the options whose accounting the rules do not cover: the option's cost and minerals are unknown, and its size too when `size` is true.
+// Returns { contributions: { name: { msp, bp, minerals, unknown } }, figures }. A figure that depends on an unknown input is null and the contribution that lacks it says why; the size of a contribution can be known while its cost is not (a sensor's MSP is the designer's, its cost needs its tech).
+export const missileAccounting = (input) => {
+  const { warheadMsp, warheads, shipDecoy, decoys, fuelMsp, activeMsp, thermalMsp, emMsp, geoMsp, sizeLimit = 0, engine, engines, stage, stages, options, tech, unsupported = {} } = input
+  const baseDamage = missileWarheadDamage({ warheadMsp, warheadTech: tech.warhead, shipDecoy })
+  const strength = unsupported.warhead ? null : missileWarheadStrength({ warheadMsp, warheadTech: tech.warhead, shipDecoy })
+  const strengths = [missileSensorStrength({ sensorMsp: activeMsp, sensorTech: tech.active }), missileSensorStrength({ sensorMsp: thermalMsp, sensorTech: tech.thermal }), missileSensorStrength({ sensorMsp: emMsp, sensorTech: tech.em }), missileSensorStrength({ sensorMsp: geoMsp, sensorTech: tech.geo })]
+  const output = missileReactorOutput(strengths)
+  const reactor = missileReactorMsp({ output, reactorTech: tech.reactor })
+  const laserWarhead = options.laser ? missileLaserStrength({ strength, efficiency: tech.laserEfficiency }) : 0
+  const extra = warheads > 1 ? EXTRA_WARHEAD_MSP * (warheads - 1) : 0
+  const hasEngine = Boolean(engine) && engines > 0
+  const contributions = {}
+
+  if (!hasEngine) {
+    contributions.engine = contribution(0, 0, {})
+  } else if (engine.missing) {
+    contributions.engine = contribution(engine.storedMsp, null, { Boronide: null, Gallicite: null }, engine.reason || ENGINE_MISSING)
+  } else {
+    const engineBp = roundHalfEven(engine.cost * engines, 4)
+
+    contributions.engine = contribution(roundHalfEven(engine.sizeMsp * engines, 4), engineBp, { Boronide: engineBp / 2, Gallicite: engineBp / 2 })
+  }
+
+  contributions.fuel = contribution(fuelMsp, 0, {})
+
+  if (shipDecoy) {
+    contributions.warhead = contribution(warheadMsp, SHIP_DECOY_BP_PER_MSP * warheadMsp, { Corbomite: SHIP_DECOY_BP_PER_MSP * warheadMsp })
+  } else if (warheadMsp > 0 && !isKnown(baseDamage)) {
+    contributions.warhead = contribution(warheadMsp, null, null, 'the warhead tech level (type 12) is not known')
+  } else {
+    const warheadBp = isKnown(baseDamage) ? baseDamage / WARHEAD_BP_DIVISOR : 0
+
+    contributions.warhead = contribution(warheadMsp, warheadBp, { Tritanium: warheadBp })
+  }
+
+  const reactorBp = isKnown(output) ? roundHalfEven(output * REACTOR_BP_PER_OUTPUT, 3) : null
+
+  if (!isKnown(output)) {
+    contributions.reactor = contribution(null, null, null, 'the strength of a sensor is not known: its tech level is not')
+  } else if (!isKnown(reactor)) {
+    contributions.reactor = contribution(null, reactorBp, { Boronide: reactorBp }, 'the power plant tech level (type 41) is not known')
+  } else {
+    contributions.reactor = contribution(reactor, reactorBp, { Boronide: reactorBp })
+  }
+
+  const sensorContribution = (name, msp, value) => {
+    contributions[name] = isKnown(value) ? contribution(msp, value, { Uridium: value }) : contribution(msp, null, null, `the ${name} sensor tech level is not known`)
+  }
+
+  sensorContribution('active', activeMsp, strengths[0])
+  sensorContribution('thermal', thermalMsp, strengths[1])
+  sensorContribution('em', emMsp, strengths[2])
+  sensorContribution('geo', geoMsp, strengths[3])
+  contributions.decoys = contribution(decoys * DECOY_MSP, decoys > 0 ? decoys : 0, { Corbomite: decoys > 0 ? decoys : 0 })
+  contributions.extraWarheads = contribution(extra, extra, { Tritanium: extra })
+
+  if (stage && stages > 0 && stage.missing) {
+    contributions.secondStage = contribution(null, null, null, stage.reason || STAGE_MISSING)
+  } else if (stage && stages > 0) {
+    contributions.secondStage = contribution(stage.size * stages, stage.cost * stages, Object.fromEntries(Object.entries(stage.minerals).map(([name, amount]) => [name, amount * stages])))
+  } else {
+    contributions.secondStage = contribution(0, 0, {})
+  }
+
+  contributions.eccm = contribution(options.eccm > 0 ? ECCM_MSP : 0, options.eccm / ECCM_BP_DIVISOR, { Corbomite: options.eccm / ECCM_BP_DIVISOR })
+  contributions.terminal = options.terminal > 1 ? contribution(TERMINAL_GUIDANCE_MSP, options.terminal - 1, { Uridium: options.terminal - 1 }) : contribution(0, 0, {})
+  contributions.retarget = contribution(options.retarget > 0 ? RETARGETING_MSP : 0, options.retarget === 1 ? 0.5 : 0, { Uridium: options.retarget === 1 ? 0.5 : 0 })
+
+  if (!options.laser) {
+    contributions.laser = contribution(0, 0, {})
+  } else if (!isKnown(tech.laserEfficiency)) {
+    contributions.laser = contribution(null, null, null, 'the laser warhead efficiency tech level (type 274) is not known')
+  } else {
+    contributions.laser = contribution(LASER_WARHEAD_MSP, tech.laserEfficiency / 100, { Corundium: tech.laserEfficiency / 100 })
+  }
+
+  for (const [name, { reason, size }] of Object.entries(unsupported)) {
+    contributions[name] = contribution(size ? null : contributions[name].msp, null, null, reason)
+  }
+
+  const list = CONTRIBUTIONS.map((name) => contributions[name])
+  const sum = sumOf(list, 'msp')
+  const cost = sumOf(list, 'bp')
+  const size = isKnown(sum) ? clampSize(sum, { shipDecoy, sizeLimit }) : null
+  const powerKnown = !hasEngine || !engine.missing
+  const enginePower = !hasEngine ? 0 : powerKnown ? roundHalfEven(engine.power * engines, 4) : null
+  const speed = size === null || enginePower === null ? null : Math.min(MAX_MISSILE_SPEED, roundHalfEven(enginePower / (size / MSP_PER_HS) * 1000, 1))
+  const ownFuel = floorExact(FUEL_LITRES_PER_MSP * fuelMsp)
+  const fuelRequired = stage && stages > 0 && stage.missing ? null : ownFuel + (stage && stages > 0 ? stage.fuelRequired * stages : 0)
+  const endurance = enginePower === null ? null : enginePower > 0 ? roundHalfEven(ownFuel / (enginePower * engine.fuelEfficiency) * 3600, 1) : 1
+  const maxRange = speed === null || endurance === null ? null : speed * endurance
+  const stageFlight = stage && stages > 0 ? (stage.missing ? null : stage.totalFlightTime) : 0
+
+  return {
+    contributions,
+    figures: {
+      baseWarheadDamage: baseDamage,
+      warheadStrength: strength,
+      laserWarhead,
+      strengths: { active: strengths[0], thermal: strengths[1], em: strengths[2], geo: strengths[3] },
+      reactorOutput: output,
+      sizeSum: sum,
+      size,
+      cost,
+      minerals: sumMinerals(list),
+      enginePower,
+      fuelRequired,
+      speed,
+      endurance,
+      maxRange,
+      totalFlightTime: endurance === null || stageFlight === null ? null : endurance + stageFlight,
+    },
+  }
+}
+
+// ---------- the missile candidate evaluator ----------
+
+// The rules a missile evaluation reports under, so a check or a screen names them in one place.
+export const MISSILE_RULES = Object.freeze({ engine: 'design.missileEngineDesign', accounting: 'design.missileAccounting', extended: 'design.missileAccountingExtended', feasibility: 'design.missileFeasibility', efficacy: 'design.missileEfficacy' })
+
+// What a candidate's accounting does not cover. The reasons are shown as they are.
+const GROUND_POD_REASON = 'a ground pod\'s size, cost and Vendarite are not covered by the missile accounting rules'
+const ENHANCED_RADIATION_REASON = 'the cost of a warhead with an enhanced radiation share is not covered by the missile accounting rules'
+const RETARGETING_REASON = `a retargeting level above ${VALIDATED_RETARGETING} has no saved design to check its size and cost against`
+const MULTIPLE_WARHEADS_ASSUMPTION = 'Each warhead after the first adds 0.1 MSP, which the size floor or limit of some saved designs hides'
+const STAGED_FLIGHT_ASSUMPTION = 'The flight time and the endurance of a design with second stages reproduce for every saved design but one (design 154678 of the stock 2.7.1 sample, 0.08% under, the cause not identified), so they are not confirmed'
+
+// The quantities the cost and mineral formulas read, each { id, label, read(input, raw) }: the value in a candidate, null where the candidate does not give it (an unknown tech) or the quantity does not apply. The ids are those of MISSILE_COST_DOMAIN.
+const COST_QUANTITIES = Object.freeze([
+  { id: 'warheadMsp', label: 'warhead size', read: (input) => (input.shipDecoy ? 0 : input.warheadMsp) },
+  { id: 'warheadDamage', label: 'warhead damage', read: (input, raw) => (input.shipDecoy ? 0 : raw.baseWarheadDamage) },
+  { id: 'shipDecoyMsp', label: 'ship decoy size', read: (input) => (input.shipDecoy ? input.warheadMsp : 0) },
+  { id: 'warheads', label: 'warhead count', read: (input) => input.warheads },
+  { id: 'activeMsp', label: 'active sensor size', read: (input) => input.activeMsp },
+  { id: 'thermalMsp', label: 'thermal sensor size', read: (input) => input.thermalMsp },
+  { id: 'emMsp', label: 'EM sensor size', read: (input) => input.emMsp },
+  { id: 'geoMsp', label: 'geo sensor size', read: (input) => input.geoMsp },
+  { id: 'activeStrength', label: 'active sensor strength', read: (_input, raw) => raw.strengths.active },
+  { id: 'thermalStrength', label: 'thermal sensor strength', read: (_input, raw) => raw.strengths.thermal },
+  { id: 'emStrength', label: 'EM sensor strength', read: (_input, raw) => raw.strengths.em },
+  { id: 'geoStrength', label: 'geo sensor strength', read: (_input, raw) => raw.strengths.geo },
+  { id: 'reactorOutput', label: 'sensor reactor output', read: (_input, raw) => raw.reactorOutput },
+  { id: 'laserEfficiency', label: 'laser efficiency', read: (input) => (input.options.laser ? input.tech.laserEfficiency : 0) },
+  { id: 'eccm', label: 'ECCM level', read: (input) => input.options.eccm },
+  { id: 'terminal', label: 'terminal guidance multiplier', read: (input) => input.options.terminal },
+  { id: 'decoys', label: 'ECM decoy count', read: (input) => input.decoys },
+  { id: 'engineBp', label: 'engine cost', read: (input) => (input.engine && input.engines > 0 ? (input.engine.missing ? null : input.engine.cost * input.engines) : 0) },
+  { id: 'enginePower', label: 'engine power', read: (_input, raw) => raw.enginePower },
+  { id: 'stages', label: 'second stage count', read: (input) => input.stages },
+])
+
+const CANDIDATE_FIELDS = Object.freeze(['engine', 'engines', 'fuelMsp', 'warheadMsp', 'warheads', 'shipDecoy', 'decoys', 'activeMsp', 'thermalMsp', 'emMsp', 'geoMsp', 'sizeLimit', 'stage', 'stages', 'options', 'tech', 'sensor', 'groundPod', 'enhancedRadiation'])
+const OPTION_FIELDS = Object.freeze(['eccm', 'terminal', 'retarget', 'laser'])
+const TECH_FIELDS = Object.freeze(['warhead', 'laserEfficiency', 'reactor', 'active', 'thermal', 'em', 'geo'])
+const BUDGET_FIELDS = Object.freeze(['maxMsp', 'maxBp', 'minerals'])
+
+const refuse = (message) => {
+  throw new Error(`Missile evaluation: ${message}`)
+}
+
+const amountOf = (value, name) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    refuse(`${name} must be a number of 0 or more, not ${String(value)}`)
+  }
+
+  return value
+}
+
+const countOf = (value, name) => {
+  if (!Number.isInteger(amountOf(value, name))) {
+    refuse(`${name} must be a whole number, not ${String(value)}`)
+  }
+
+  return value
+}
+
+const optional = (value, fallback) => (value === undefined ? fallback : value)
+
+const techOf = (value, name) => (value === null || value === undefined ? null : amountOf(value, name))
+
+const unknownKeys = (object, allowed, name) => {
+  const extra = Object.keys(object).filter((key) => !allowed.includes(key))
+
+  if (extra.length) {
+    refuse(`${name} has no field ${extra.join(', ')}`)
+  }
+}
+
+const objectOf = (value, name) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    refuse(`${name} must be an object`)
+  }
+
+  return value
+}
+
+// The engine of a candidate: null for none; { sizeMsp, cost, power, fuelEfficiency } for a stored engine component; { sizeMsp, thrust, engineTech, fuelTech, maxThrust } for one designed by the rule (a missing tech leaves the engine unknown, with the size it takes); { missing: true, storedMsp, reason } for an engine whose figures are not known.
+const normaliseMissileEngine = (engine, engines) => {
+  if (engine === null || engine === undefined) {
+    return null
+  }
+
+  objectOf(engine, 'engine')
+
+  if (engine.missing) {
+    unknownKeys(engine, ['missing', 'storedMsp', 'reason'], 'engine')
+
+    return { missing: true, storedMsp: techOf(engine.storedMsp, 'engine.storedMsp'), reason: engine.reason || ENGINE_MISSING }
+  }
+
+  const sizeMsp = amountOf(engine.sizeMsp, 'engine.sizeMsp')
+
+  if (engine.thrust !== undefined) {
+    unknownKeys(engine, ['sizeMsp', 'thrust', 'engineTech', 'fuelTech', 'maxThrust'], 'engine')
+
+    const thrust = amountOf(engine.thrust, 'engine.thrust')
+    const techs = { engineTech: techOf(engine.engineTech, 'engine.engineTech'), fuelTech: techOf(engine.fuelTech, 'engine.fuelTech'), maxThrust: techOf(engine.maxThrust, 'engine.maxThrust') }
+
+    if (!(sizeMsp > 0 && thrust > 0) || Object.values(techs).includes(0)) {
+      refuse('a designed engine needs a size, a thrust and techs above 0')
+    }
+
+    const lacking = Object.keys(techs).filter((name) => techs[name] === null)
+
+    if (lacking.length) {
+      return { missing: true, storedMsp: roundHalfEven(sizeMsp * engines, 4), reason: `the ${lacking.join(', ')} of the engine design are not known` }
+    }
+
+    const { cost, power, fuelEfficiency } = missileEngineDesign({ sizeMsp, thrust, ...techs })
+
+    return { sizeMsp, cost, power, fuelEfficiency }
+  }
+
+  unknownKeys(engine, ['sizeMsp', 'cost', 'power', 'fuelEfficiency'], 'engine')
+
+  return { sizeMsp, cost: amountOf(engine.cost, 'engine.cost'), power: amountOf(engine.power, 'engine.power'), fuelEfficiency: amountOf(engine.fuelEfficiency, 'engine.fuelEfficiency') }
+}
+
+// The second stage: null for none, { size, cost, fuelRequired, totalFlightTime, minerals } of the stage design with every mineral of MISSILE_MINERALS given (an omitted one is a fault, never 0), or { missing: true, reason } for a stage whose design is not known.
+const normaliseMissileStage = (stage) => {
+  if (stage === null || stage === undefined) {
+    return null
+  }
+
+  objectOf(stage, 'stage')
+
+  if (stage.missing) {
+    unknownKeys(stage, ['missing', 'reason'], 'stage')
+
+    return { missing: true, reason: stage.reason || STAGE_MISSING }
+  }
+
+  unknownKeys(stage, ['size', 'cost', 'fuelRequired', 'totalFlightTime', 'minerals'], 'stage')
+  objectOf(stage.minerals, 'stage.minerals')
+  unknownKeys(stage.minerals, MISSILE_MINERALS, 'stage.minerals')
+
+  return { size: amountOf(stage.size, 'stage.size'), cost: amountOf(stage.cost, 'stage.cost'), fuelRequired: amountOf(stage.fuelRequired, 'stage.fuelRequired'), totalFlightTime: amountOf(stage.totalFlightTime, 'stage.totalFlightTime'), minerals: Object.fromEntries(MISSILE_MINERALS.map((name) => [name, amountOf(stage.minerals[name], `stage.minerals.${name}`)])) }
+}
+
+// A candidate in the form the accounting reads, every field checked: a number is finite and 0 or more, a count a whole number, a tech a number or null (not known), a part counted at 1 or more has its record (a count of 0 is no part). A fault in the candidate is the caller's, so it throws; an unknown tech is no fault and stays null.
+export const normaliseMissileCandidate = (candidate) => {
+  objectOf(candidate, 'candidate')
+  unknownKeys(candidate, CANDIDATE_FIELDS, 'candidate')
+
+  const options = objectOf(optional(candidate.options, {}), 'options')
+  const tech = objectOf(optional(candidate.tech, {}), 'tech')
+  const sensor = objectOf(optional(candidate.sensor, {}), 'sensor')
+
+  unknownKeys(options, OPTION_FIELDS, 'options')
+  unknownKeys(tech, TECH_FIELDS, 'tech')
+  unknownKeys(sensor, ['resolution', 'emSensitivity'], 'sensor')
+
+  const hasEngine = candidate.engine !== null && candidate.engine !== undefined
+  const hasStage = candidate.stage !== null && candidate.stage !== undefined
+  const engines = countOf(optional(candidate.engines, hasEngine ? 1 : 0), 'engines')
+  const stages = countOf(optional(candidate.stages, hasStage ? 1 : 0), 'stages')
+
+  if (engines > 0 && !hasEngine) {
+    refuse(`engines is ${engines} but the candidate has no engine: a counted engine needs its record, or { missing: true } where its figures are not known`)
+  }
+
+  if (stages > 0 && !hasStage) {
+    refuse(`stages is ${stages} but the candidate has no stage: a counted stage needs its record, or { missing: true } where its design is not known`)
+  }
+
+  return {
+    engine: normaliseMissileEngine(candidate.engine, engines),
+    engines,
+    fuelMsp: amountOf(optional(candidate.fuelMsp, 0), 'fuelMsp'),
+    warheadMsp: amountOf(optional(candidate.warheadMsp, 0), 'warheadMsp'),
+    warheads: countOf(optional(candidate.warheads, 1), 'warheads'),
+    shipDecoy: Boolean(candidate.shipDecoy),
+    decoys: countOf(optional(candidate.decoys, 0), 'decoys'),
+    activeMsp: amountOf(optional(candidate.activeMsp, 0), 'activeMsp'),
+    thermalMsp: amountOf(optional(candidate.thermalMsp, 0), 'thermalMsp'),
+    emMsp: amountOf(optional(candidate.emMsp, 0), 'emMsp'),
+    geoMsp: amountOf(optional(candidate.geoMsp, 0), 'geoMsp'),
+    sizeLimit: amountOf(optional(candidate.sizeLimit, 0), 'sizeLimit'),
+    stage: normaliseMissileStage(candidate.stage),
+    stages,
+    options: { eccm: amountOf(optional(options.eccm, 0), 'options.eccm'), terminal: amountOf(optional(options.terminal, 1), 'options.terminal'), retarget: countOf(optional(options.retarget, 0), 'options.retarget'), laser: Boolean(options.laser) },
+    tech: Object.fromEntries(TECH_FIELDS.map((name) => [name, techOf(tech[name], `tech.${name}`)])),
+    sensor: { resolution: techOf(sensor.resolution, 'sensor.resolution'), emSensitivity: techOf(sensor.emSensitivity, 'sensor.emSensitivity') },
+    groundPod: Boolean(candidate.groundPod),
+    enhancedRadiation: Boolean(candidate.enhancedRadiation),
+  }
+}
+
+// A budget: { maxMsp, maxBp, minerals: { Name: limit } }, every limit optional (null for none). A limit that is not a number of 0 or more, a field or a mineral that does not exist throws.
+export const normaliseMissileBudget = (budget = {}) => {
+  objectOf(budget, 'budget')
+  unknownKeys(budget, BUDGET_FIELDS, 'budget')
+
+  const minerals = objectOf(optional(budget.minerals, {}), 'budget.minerals')
+
+  unknownKeys(minerals, MISSILE_MINERALS, 'budget.minerals')
+
+  return { maxMsp: techOf(budget.maxMsp, 'budget.maxMsp'), maxBp: techOf(budget.maxBp, 'budget.maxBp'), minerals: Object.fromEntries(Object.entries(minerals).map(([name, limit]) => [name, amountOf(limit, `budget.minerals.${name}`)])) }
+}
+
+// The options the accounting rules do not cover, as { [option]: { reason, size } }: `size` is true where the option's size is not covered either.
+const unsupportedMissileOptions = (input) => {
+  const found = {}
+
+  if (input.groundPod) {
+    for (const id of CONTRIBUTIONS) {
+      found[id] = { reason: GROUND_POD_REASON, size: true }
+    }
+  }
+
+  if (input.enhancedRadiation && !found.warhead) {
+    found.warhead = { reason: ENHANCED_RADIATION_REASON, size: false }
+  }
+
+  if (input.options.retarget > VALIDATED_RETARGETING && !found.retarget) {
+    found.retarget = { reason: RETARGETING_REASON, size: true }
+  }
+
+  return found
+}
+
+// A figure of the accounting: unavailable (never 0) where it is not known, confirmed in the domain the rules are checked in, and estimated by design.missileAccountingExtended where `outside` lists why the figure is beyond it.
+const missileFigure = (value, units, missing, outside = []) => (isKnown(value) ? ofRule({ rule: outside.length ? MISSILE_RULES.extended : MISSILE_RULES.accounting, value, inputs: { present: ['candidate'] }, units, assumptions: outside }) : unavailable({ rule: MISSILE_RULES.accounting, missing, units }))
+
+const costQuantitiesOf = (input, raw) => Object.fromEntries(COST_QUANTITIES.map(({ id, read }) => [id, read(input, raw)]))
+
+// The quantities of a candidate that the cost and mineral formulas read (the ids of MISSILE_COST_DOMAIN), null where a figure behind one is not known: what scripts/check-design-rules.js takes the highest of, among the saved designs whose cost reproduces, to check the domain.
+export const missileCostQuantities = (candidate) => {
+  const input = normaliseMissileCandidate(candidate)
+
+  return costQuantitiesOf(input, missileAccounting(input).figures)
+}
+
+// Why the cost and minerals of a candidate are beyond what the rules are checked for: each quantity the formulas read that is above the highest of a saved design whose cost reproduces.
+const missileCostOutside = (input, raw) => {
+  const found = costQuantitiesOf(input, raw)
+
+  return COST_QUANTITIES.filter(({ id }) => isKnown(found[id]) && found[id] > MISSILE_COST_DOMAIN[id] && !agrees(found[id], MISSILE_COST_DOMAIN[id])).map(({ id, label }) => `The ${label} ${found[id]} is above ${MISSILE_COST_DOMAIN[id]}, the highest of a saved design whose cost and minerals reproduce`)
+}
+
+const missileOption = (id, entry, rejection, input, outside) => {
+  const minerals = entry.minerals !== null && MISSILE_MINERALS.every((name) => isKnown(entry.minerals[name])) ? entry.minerals : null
+  const complete = isKnown(entry.msp) && isKnown(entry.bp) && minerals !== null
+  const status = rejection ? 'unsupported' : complete ? 'known' : 'unknown'
+  const reasons = status === 'known' ? [] : [entry.unknown || 'the accounting of the option is not known']
+  const assumptions = id === 'extraWarheads' && input.warheads > 1 ? [MULTIPLE_WARHEADS_ASSUMPTION] : []
+  const result = (value, units, beyond = []) => (isKnown(value) ? ofRule({ rule: beyond.length ? MISSILE_RULES.extended : MISSILE_RULES.accounting, value, inputs: { present: [id] }, units, assumptions: [...assumptions, ...beyond] }) : unavailable({ rule: MISSILE_RULES.accounting, missing: reasons, present: [], units, assumptions }))
+
+  return { id, label: MISSILE_OPTIONS[id], status, reasons, msp: result(entry.msp, 'MSP'), bp: result(entry.bp, 'BP', outside), minerals: result(minerals, 'minerals', outside) }
+}
+
+const readResult = (result) => (isAvailable(result) ? { value: result.value, reason: null, status: result.status, caveats: result.assumptions } : { value: null, reason: result.inputs.missing.join('; '), status: result.status, caveats: [] })
+
+const readFigure = (name) => ({ figures }) => readResult(figures[name])
+
+// What a candidate's options are expected to do, each effect `{ id, option, label, units, rule, applies, read }`: `rule` the id of the rule that models it (null where no rule does), `applies` whether the candidate has the option, `read` the figure as { value, reason }. An effect counts toward a ranking only when its rule is confirmed against saved data; the hit effects rest on the missile-hit rules, which are not.
+export const MISSILE_EFFECTS = Object.freeze([
+  { id: 'warheadStrength', option: 'warhead', label: 'Warhead strength', units: 'damage', rule: MISSILE_RULES.accounting, applies: ({ input }) => input.warheadMsp > 0 && !input.shipDecoy, read: readFigure('warheadStrength') },
+  { id: 'laserStrength', option: 'laser', label: 'Laser warhead strength', units: 'damage', rule: MISSILE_RULES.accounting, applies: ({ input }) => input.options.laser, read: readFigure('laserWarhead') },
+  { id: 'speed', option: 'engine', label: 'Speed', units: 'km/s', rule: MISSILE_RULES.accounting, applies: ({ input }) => Boolean(input.engine) && input.engines > 0, read: readFigure('speed') },
+  { id: 'endurance', option: 'fuel', label: 'Endurance', units: 'seconds', rule: MISSILE_RULES.accounting, applies: ({ input }) => Boolean(input.engine) && input.engines > 0, read: readFigure('endurance') },
+  { id: 'maxRange', option: 'fuel', label: 'Maximum range', units: 'km', rule: MISSILE_RULES.accounting, applies: ({ input }) => Boolean(input.engine) && input.engines > 0, read: readFigure('maxRange') },
+  { id: 'sensorRange', option: 'active', label: 'Active sensor range', units: 'km', rule: MISSILE_RULES.accounting, applies: ({ input }) => input.activeMsp > 0 && input.sensor.resolution !== null && input.sensor.emSensitivity !== null, read: readFigure('sensorRange') },
+  { id: 'eccmHit', option: 'eccm', label: 'Hit chance multiplier against a jammer', units: 'multiplier', rule: HIT_RULES.jammer, applies: ({ input, scenario }) => input.options.eccm > 0 && scenario !== null, read: ({ hit }) => readResult(hit.effect) },
+  { id: 'terminalHit', option: 'terminal', label: 'Hit chance with terminal guidance', units: '%', rule: HIT_RULES.raw, applies: ({ input, scenario }) => input.options.terminal > 1 && scenario !== null, read: ({ hit }) => readResult(hit.raw) },
+  { id: 'warheadHits', option: 'extraWarheads', label: 'Expected warhead hits', units: 'hits', rule: HIT_RULES.hits, applies: ({ input, scenario }) => input.warheads > 1 && scenario !== null, read: ({ hit }) => readResult(hit.hitsCapped) },
+  { id: 'retargeting', option: 'retarget', label: 'Retargeting', units: '', rule: null, applies: ({ input }) => input.options.retarget > 0, read: () => ({ value: null, reason: null }) },
+  { id: 'shipDecoy', option: 'warhead', label: 'Ship decoy', units: '', rule: null, applies: ({ input }) => input.shipDecoy, read: () => ({ value: null, reason: null }) },
+  { id: 'ecmDecoys', option: 'decoys', label: 'ECM decoys', units: '', rule: null, applies: ({ input }) => input.decoys > 0, read: () => ({ value: null, reason: null }) },
+  { id: 'secondStageHit', option: 'secondStage', label: 'Hit of the second stage', units: '', rule: null, applies: ({ input }) => input.stages > 0, read: () => ({ value: null, reason: null }) },
+])
+
+const missileEffect = (definition, context) => {
+  const rule = definition.rule ? getRule(definition.rule) : null
+  const { value, reason: unavailableReason, status = null, caveats = [] } = definition.read(context)
+  const weak = status === STATUS.ESTIMATED || status === STATUS.ASSUMED
+  const verified = Boolean(rule) && rule.verification === STATUS.CONFIRMED && !weak
+  const unverifiedReason = rule ? (rule.verification === STATUS.CONFIRMED ? `the figure is ${status} here, not confirmed against saved data: ${caveats.join('; ')}` : `${rule.id} is ${rule.verification}, not confirmed against saved data`) : 'no rule models this effect'
+  const counted = verified && value !== null
+
+  return { id: definition.id, option: definition.option, label: definition.label, units: definition.units, rule: definition.rule, verification: rule ? rule.verification : null, verified, counted, value, reason: counted ? null : verified ? unavailableReason : unverifiedReason }
+}
+
+// The effects of the candidate's options. Only an effect whose rule is confirmed against saved data counts: `counted` lists those for a ranking to use, `excluded` the others with the reason, and no effect gives a score of its own. A hit effect is worked out only when a scenario `{ targetSpeed, jammer, modifier, version }` is given.
+const missileEfficacy = ({ input, figures, scenario, effects }) => {
+  const speed = isAvailable(figures.speed) ? figures.speed.value : null
+  const missile = { key: 'candidate', name: 'Candidate', kind: 'candidate', speed, atg: input.options.terminal, eccm: input.options.eccm, warheads: input.warheads, shipDecoy: input.shipDecoy, obsolete: false, secondStageId: input.stages > 0 ? 1 : 0, secondStages: input.stages }
+  const hit = scenario === null ? null : hitScenario({ missile, targetSpeed: scenario.targetSpeed, jammer: scenario.jammer, modifier: scenario.modifier, version: scenario.version })
+  const context = { input, figures, scenario, hit }
+  const listed = effects.filter((definition) => definition.applies(context)).map((definition) => missileEffect(definition, context))
+
+  return { rule: MISSILE_RULES.efficacy, scenario, effects: listed, counted: listed.filter((effect) => effect.counted).map(({ id, value, units }) => ({ id, value, units })), excluded: listed.filter((effect) => !effect.counted).map(({ id, reason }) => ({ id, reason })) }
+}
+
+const over = (found, allowed) => found > allowed && !agrees(found, allowed)
+
+const violationText = ({ limit, allowed, found }) => `${limit} is ${found}, over the ${allowed} allowed`
+
+// The candidate against the budget, from figures that are all known: the size compared is the one the options ask for, or the least size the game gives, whichever is larger.
+const missileViolations = (totals, limits) => {
+  const checks = [['size', limits.maxMsp, Math.max(totals.size.value, totals.sizeSum.value)], ['cost', limits.maxBp, totals.cost.value], ...Object.entries(limits.minerals).map(([name, allowed]) => [name, allowed, totals.minerals[name].value])]
+
+  return checks.filter(([, allowed, found]) => allowed !== null && over(found, allowed)).map(([limit, allowed, found]) => ({ limit, allowed, found }))
+}
+
+// The feasibility result: the verdict at the weakest status of the totals a limit was compared with, so a cost that is only estimated gives an estimated verdict.
+const missileFeasibility = (totals, limits, violations) => {
+  const compared = {}
+
+  if (limits.maxMsp !== null) {
+    compared.size = totals.size
+    compared.sizeSum = totals.sizeSum
+  }
+
+  if (limits.maxBp !== null) {
+    compared.cost = totals.cost
+  }
+
+  for (const name of Object.keys(limits.minerals)) {
+    compared[name] = totals.minerals[name]
+  }
+
+  return combine({ rule: MISSILE_RULES.feasibility, parts: compared, compute: () => ({ feasible: violations.length === 0, violations, limits }), units: 'MSP, BP', inputs: { present: ['candidate', 'budget'] } })
+}
+
+// A candidate's missile as the game builds it, with the budget it has to fit and the scenario its hit effects are read in. Returns { candidate, budget, verdict, feasibility, unknown, unsupported, options, totals, figures, efficacy }.
+//   options: one record per option, { id, label, status ('known', 'unknown' or 'unsupported'), reasons, msp, bp, minerals } with each figure a result of design.missileAccounting (unavailable, never 0, where it is not known; estimated, by design.missileAccountingExtended, where the tech figures it rests on are above those the rules are checked for).
+//   totals: { sizeSum, size, cost, minerals: { name: result } }.
+//   verdict: 'unsupported' when an option is outside the rules, 'unknown' when an option's accounting is not known (feasibility is then not claimed either way), else 'feasible' or 'infeasible' against the budget. `feasibility` is the result of design.missileFeasibility, at the weakest status of the totals it compared with a limit.
+//   efficacy: the options' effects apart from the accounting, see missileEfficacy.
+export const evaluateMissile = (candidate, { budget = {}, scenario = null, effects = MISSILE_EFFECTS } = {}) => {
+  const input = normaliseMissileCandidate(candidate)
+  const limits = normaliseMissileBudget(budget)
+  const rejections = unsupportedMissileOptions(input)
+  const { contributions, figures: raw } = missileAccounting({ ...input, unsupported: rejections })
+  const outside = missileCostOutside(input, raw)
+  const staged = input.stages > 0 ? [STAGED_FLIGHT_ASSUMPTION] : []
+  const options = CONTRIBUTIONS.map((id) => missileOption(id, contributions[id], rejections[id], input, outside))
+  const unsupported = options.filter((option) => option.status === 'unsupported').map(({ id, label, reasons }) => ({ option: id, label, reason: reasons.join('; ') }))
+  const unknown = options.filter((option) => option.status === 'unknown').map(({ id, label, reasons }) => ({ option: id, label, reason: reasons.join('; ') }))
+  const why = [...new Set([...unsupported, ...unknown].map(({ reason }) => reason))]
+  const rangeInputs = input.sensor.resolution !== null && input.sensor.emSensitivity !== null
+  const range = rangeInputs && input.activeMsp > 0 ? missileSensorRange({ strength: raw.strengths.active, emSensitivity: input.sensor.emSensitivity, resolution: input.sensor.resolution }) : null
+  const rangeWhy = input.activeMsp > 0 ? (rangeInputs ? why : ['the resolution and the EM sensitivity of the active sensor are not given']) : ['the missile has no active sensor']
+  const figures = { speed: missileFigure(raw.speed, 'km/s', why), endurance: missileFigure(raw.endurance, 'seconds', why, staged), maxRange: missileFigure(raw.maxRange, 'km', why, staged), fuelRequired: missileFigure(raw.fuelRequired, 'L', why), totalFlightTime: missileFigure(raw.totalFlightTime, 'seconds', why, staged), warheadStrength: missileFigure(raw.warheadStrength, 'damage', why), laserWarhead: missileFigure(raw.laserWarhead, 'damage', why), sensorStrengths: Object.fromEntries(Object.entries(raw.strengths).map(([name, value]) => [name, missileFigure(value, 'strength', why)])), sensorRange: missileFigure(range, 'km', rangeWhy) }
+  const totals = { sizeSum: missileFigure(raw.sizeSum, 'MSP', why), size: missileFigure(raw.size, 'MSP', why), cost: missileFigure(raw.cost, 'BP', why, outside), minerals: Object.fromEntries(MISSILE_MINERALS.map((name) => [name, missileFigure(raw.minerals[name], 'minerals', why, outside)])) }
+  const efficacy = missileEfficacy({ input, figures, scenario, effects })
+  const base = { candidate: input, budget: limits, unknown, unsupported, options, totals, figures, efficacy }
+
+  if (unsupported.length) {
+    return { ...base, verdict: 'unsupported', feasibility: unavailable({ rule: MISSILE_RULES.feasibility, missing: why }) }
+  }
+
+  if (unknown.length) {
+    return { ...base, verdict: 'unknown', feasibility: unavailable({ rule: MISSILE_RULES.feasibility, missing: why }) }
+  }
+
+  const violations = missileViolations(totals, limits)
+  const feasible = violations.length === 0
+
+  return { ...base, verdict: feasible ? 'feasible' : 'infeasible', feasibility: missileFeasibility(totals, limits, violations) }
+}
+
+// Sorts evaluations before any ranking: `admitted` holds only those whose verdict is 'feasible', `rejected` the others with the verdict and the reasons ({ evaluation, verdict, reasons }). An infeasible candidate is over its budget; an unknown or unsupported one is withheld, since nothing shows it fits.
+export const admitMissiles = (evaluations) => {
+  const admitted = []
+  const rejected = []
+
+  for (const evaluation of evaluations) {
+    if (evaluation.verdict === 'feasible') {
+      admitted.push(evaluation)
+    } else {
+      const reasons = evaluation.verdict === 'infeasible' ? evaluation.feasibility.value.violations.map(violationText) : [...evaluation.unsupported, ...evaluation.unknown].map(({ label, reason }) => `${label}: ${reason}`)
+
+      rejected.push({ evaluation, verdict: evaluation.verdict, reasons })
+    }
+  }
+
+  return { admitted, rejected }
+}
+
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
 const DESIGN_VERSIONS = ['2.7.x']
 const SAVE_CHECK = 'scripts/check-design-rules.js'
@@ -594,4 +1255,54 @@ registerRule({
   structure: ['FCT_ShipClass.BaseFailureChance', 'FCT_Ship.LastOverhaul'],
   note: 'Elapsed years times the annual failure rate times the clock, doubled in a training command, times the uncovered share, times 2 minus the crew performance modifier and 2 minus the engineering bonus. Read from the game; the save stores no ship\'s failure chance to compare it with.',
   assumptions: ['The ship\'s engineering is undamaged, so its annual failure rate is the class\'s'],
+})
+
+registerRule({
+  id: 'design.missileEngineDesign',
+  versions: DESIGN_VERSIONS,
+  units: 'EP, L/EPH, BP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, ComponentValue, FuelEfficiency of a missile engine', 'FCT_TechSystem.AdditionalInfo of the engine, fuel and greatest thrust techs'],
+  note: `A missile engine's power, fuel use and cost from its size, thrust modifier and techs; the fuel use is boosted four times over the excess of the thrust over the race's greatest. Reproduces the thrust of every missile engine a saved design uses, to the rounding of its stored power (${SAVE_CHECK}).`,
+  assumptions: ['The engine techs are the levels the race held at the highest development cost'],
+})
+
+registerRule({
+  id: 'design.missileAccounting',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP, BP, minerals',
+  verification: 'confirmed',
+  structure: ['FCT_MissileType.Size, Cost, MSPFuel, MSPWarhead, MSPActive, MSPThermal, MSPEM, MSPGeo, MSPReactor, NumDecoys, MultipleWarheads, NumEngines, NumSS, ECCM, ATG, Retargeting, LaserWarhead, Speed, Endurance, MaxRange, FuelRequired, TotalFlightTime', 'FCT_MissileType.Corbomite, Tritanium, Boronide, Uridium, Gallicite', 'FCT_TechSystem.AdditionalInfo of the warhead, sensor, power plant and laser efficiency techs'],
+  note: `The size, cost and minerals of a missile as the sum of its options (engine, fuel, warhead, sensor reactor, four sensors, ECM decoys, extra warheads, second stage, ECCM, terminal guidance, retargeting, laser warhead), with the speed, endurance and range they give. Compared with every stored design of six saves of two game versions (${SAVE_CHECK}): the rows it does not reproduce are listed there as explained or as unknown where a tech level is not held. An option the rules do not cover (a ground pod, an enhanced radiation warhead, a retargeting level above ${VALIDATED_RETARGETING}) is unavailable, never 0.`,
+  assumptions: ['The techs are the levels the race held at the highest development cost', 'The sensor, warhead, laser and reactor figures are read from the tech level the stored figure resolves to'],
+})
+
+registerRule({
+  id: 'design.missileAccountingExtended',
+  versions: DESIGN_VERSIONS,
+  units: 'BP, minerals, seconds, km',
+  verification: 'estimated',
+  structure: ['design.missileAccounting', 'FCT_MissileType.Cost, Uridium, Corundium, Endurance, MaxRange, TotalFlightTime of designs 500724 (game 140) and 154678 (game 138)'],
+  note: `The cost and minerals of a missile in which a quantity the cost formulas read (a size, a sensor strength, a warhead damage, the reactor output, the engine cost and power, a count or level; MISSILE_COST_DOMAIN) is above the highest of a saved design whose cost reproduces (${SAVE_CHECK}), and the endurance, range and flight time of one with second stages: the accounting's formulas applied past what a saved design confirms. The modded design 500724 (thermal sensor strength 150, reactor output 30, laser 90) is stored 137.2 BP under the rule with its Uridium and Corundium short, and design 154678 (nine second stages) 0.08% under in endurance; the cause of neither is identified. The bound is on the quantities the formulas read, not on a tech level alone: a size and a tech that give the same strength are the same case.`,
+  assumptions: ['The formulas of design.missileAccounting hold past the quantities and the stage counts a saved design reproduces'],
+})
+
+registerRule({
+  id: 'design.missileFeasibility',
+  versions: DESIGN_VERSIONS,
+  units: 'MSP, BP, minerals',
+  verification: 'confirmed',
+  structure: ['design.missileAccounting'],
+  note: `Whether a candidate's size, cost and minerals are within the limits it was given: each over a limit by more than ${REPRODUCTION_TOLERANCE} of it is a violation. Only a candidate whose every option is known is judged; a candidate with an unknown or an unsupported option has no verdict (${SAVE_CHECK}).`,
+  assumptions: ['The limits are the player\'s own, not the game\'s'],
+})
+
+registerRule({
+  id: 'design.missileEfficacy',
+  versions: DESIGN_VERSIONS,
+  units: '',
+  verification: 'assumed',
+  structure: ['design.missileAccounting', 'the missileHit rules'],
+  note: `The effects a candidate's options are meant to have, apart from the accounting. Only an effect whose rule is confirmed against saved data counts toward a ranking, and no effect adds a score of its own: the planner's own policy, since the game has no such rule (${SAVE_CHECK}).`,
+  assumptions: ['An effect counts only when its rule is confirmed against saved data'],
 })

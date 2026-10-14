@@ -5,24 +5,27 @@
 
   Zero mismatches means the rules reproduce every stored row. A row the rules cannot reproduce for a reason outside them (a modded tech, a missing tech row, a design made under older rules) is counted as explained, with its reason; any other difference is a mismatch and sets exit code 1. The race's components are the FCT_ShipDesignComponents rows of its game that it holds through FCT_RaceTech (TechID = SDComponentID), the way the Propulsion Planner selects them; --all-game checks every component of the game instead, other races' designs included. Each check is printed under the id, verification and game versions of the rules it checks, read from the rule registry (utilities/provenance.js, filled by design-rules.js), and a registered rule that no check run covers is listed at the end. The save is opened read-only through the same sqlite3 module the app uses.
 
-  The missile check rebuilds every missile design (FCT_MissileType) from the engine component it names, the sizes it allots and the technology levels its race held when it was designed, and compares size in MSP, the cost in BP with each mineral, the speed, endurance, range and fuel with what the game stored, at 1e-9 relative. The levels are not stored with a design: each is the held level that reproduces the stored figure (scripts/lib/missile-accounting.js, the prototype of the rules AE-152-02 moves into utilities/design-rules.js). A figure the save lacks, or whose level the race does not hold, is counted as unknown and never as 0; a case the rules do not cover (a ground attack pod, an enhanced radiation warhead) is counted as unsupported and never as agreement; neither is a match. --all-game checks the missiles of every race with the techs of the race that researched each; --ledger prints the size, cost and levels of each contribution of each design.
+  The missile check rebuilds every missile design (FCT_MissileType) from the engine component it names, the sizes it allots and the technology levels its race held when it was designed, and compares size in MSP, the cost in BP with each mineral, the speed, endurance, range and fuel with what the game stored, at 1e-9 relative. The levels are not stored with a design: each is the held level that reproduces the stored figure (utilities/design-data.js `resolveMissileLevels`; the rules are the design.missile* ones of utilities/design-rules.js, the comparison is scripts/lib/missile-reconcile.js). A figure the save lacks, or whose level the race does not hold, is counted as unknown and never as 0; a case the rules do not cover (a ground attack pod, an enhanced radiation warhead) is counted as unsupported and never as agreement; neither is a match. --all-game checks the missiles of every race with the techs of the race that researched each; --ledger prints the size, cost and levels of each contribution of each design.
 
-  node scripts/check-design-rules.js --fixtures                  runs the missile reports on the fixtures in scripts/lib/missile-fixtures.json, the checks of the rules on them, and every planted fault of the library (each must fail the checks it names); no save is read
+  node scripts/check-design-rules.js --fixtures                  runs the missile reports on the fixtures in scripts/lib/missile-fixtures.json, the checks of the rules and of the candidate evaluator (utilities/design-rules.js `evaluateMissile`) on them, and every planted fault of the rules, the loaders and the reconciliation (each must fail the checks it names); no save is read
   node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]   writes the designs of the scope into the fixtures file
+  node scripts/check-design-rules.js --run-mutant <name>        one planted fault of the rules in this process, its result printed as JSON: what --fixtures starts for each fault, so no fault shares module state with another or with the checks
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { spawn } = require('child_process')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 
 const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance', 'missile']
 
 // The registered rules whose formulas each check compares with stored values. The range check compares only the stored fuel efficiency with the class's engines, an input of the burn and range formulas, so it names no rule: design.burnPerHour and design.fullPowerRangeKm stay in the list of rules no check covers.
-const RULE_IDS = { engine: ['design.engineDesign'], speed: ['design.classSpeed'], range: [], jump: ['design.jumpDriveDesign'], maintenance: ['design.engineeringMsp', 'design.maintenanceStorage', 'design.classMaintenanceSupplies', 'design.annualFailureRate', 'design.damageAllocation'], missile: [] }
-const INPUT_ONLY = { range: 'input check only: the stored fuel efficiency against the class\'s engines; the burn and range formulas are not compared with a stored value', missile: 'the design rules of missiles (size, cost and minerals per contribution, speed, endurance, range) are not registered in design-rules.js yet: scripts/lib/missile-accounting.js is their prototype, loaded from the scripts folder' }
+const RULE_IDS = { engine: ['design.engineDesign'], speed: ['design.classSpeed'], range: [], jump: ['design.jumpDriveDesign'], maintenance: ['design.engineeringMsp', 'design.maintenanceStorage', 'design.classMaintenanceSupplies', 'design.annualFailureRate', 'design.damageAllocation'], missile: ['design.missileEngineDesign', 'design.missileAccounting', 'design.missileLevels'] }
+const INPUT_ONLY = { range: 'input check only: the stored fuel efficiency against the class\'s engines; the burn and range formulas are not compared with a stored value' }
 const MISSILE_LIBRARY = path.resolve(__dirname, 'lib')
 const MISSILE_FIXTURES = path.join(MISSILE_LIBRARY, 'missile-fixtures.json')
+const UTILITIES = path.resolve(__dirname, '..', 'src', 'renderer', 'utilities')
 const RELATIVE_TOLERANCE = 1e-6
 const ABSOLUTE_TOLERANCE = 1e-9
 const NAMED_CLASSES = [64475, 62944]
@@ -49,7 +52,7 @@ const fail = (message) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { save: null, race: null, rules: RULES, allGame: false, ledger: false, fixtures: false, exportFile: null, label: null, note: '' }
+  const options = { save: null, race: null, rules: RULES, allGame: false, ledger: false, fixtures: false, mutant: null, exportFile: null, label: null, note: '' }
 
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
@@ -70,6 +73,8 @@ const parseArguments = (argv) => {
       options.label = String(argv[++index])
     } else if (argument === '--note') {
       options.note = String(argv[++index])
+    } else if (argument === '--run-mutant') {
+      options.mutant = String(argv[++index])
     } else if (argument.startsWith('--')) {
       fail(`Unknown option ${argument}`)
     } else {
@@ -77,7 +82,7 @@ const parseArguments = (argv) => {
     }
   }
 
-  if (!options.fixtures && (!options.save || !Number.isInteger(options.race))) {
+  if (!options.fixtures && options.mutant === null && (!options.save || !Number.isInteger(options.race))) {
     fail('Usage: node scripts/check-design-rules.js <save.db> --race <RaceID> [--rules engine,speed,range,jump,maintenance,missile] [--all-game] [--ledger]\n       node scripts/check-design-rules.js <save.db> --race <RaceID> [--all-game] --export-missile-fixture <file.json> --label <name> [--note <text>]\n       node scripts/check-design-rules.js --fixtures')
   }
 
@@ -483,11 +488,15 @@ const checkMaintenance = async (context) => {
 
 // ---------- missile designs ----------
 
-// The columns of FCT_MissileType the missile rules read, and the tech types they read through the levels a race holds: warhead 12, thermal 19, active 20, engine 40, power plant 41, fuel 65, ECCM 83, geo 89, EM 125, max thrust 130, radiation 163, laser efficiency 274, terminal guidance 275, retargeting 276, laser focus 277, missile ECM 279, multiple warheads 280 and ship decoy 281.
-const MISSILE_COLUMNS = ['Name', 'EngineID', 'NumEngines', 'Cost', 'Size', 'Speed', 'RadDamage', 'FuelRequired', 'Endurance', 'MaxRange', 'WarheadStrength', 'SensorStrength', 'SensorResolution', 'SensorRange', 'ThermalStrength', 'EMStrength', 'Geostrength', 'TotalFlightTime', 'SecondStageID', 'NumSS', 'Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite', 'MSPReactor', 'MSPWarhead', 'MSPEngine', 'MSPFuel', 'MSPActive', 'MSPThermal', 'MSPEM', 'MSPGeo', 'ECCM', 'EMSensitivity', 'GroundShots', 'PowerMod', 'ATG', 'Retargeting', 'LaserWarhead', 'LaserWarheadRangeModifier', 'NumDecoys', 'MSPDecoys', 'MissileECM', 'MultipleWarheads', 'MSPMultipleWarheads', 'ShipDecoy']
-const MISSILE_TECH_TYPES = [12, 19, 20, 40, 41, 65, 83, 89, 125, 130, 163, 274, 275, 276, 277, 279, 280, 281]
+// The rules, loaders and comparison of the missile checks, loaded from the utilities (design-rules, design-data, provenance, missile-hit) and the reconciliation of scripts/lib: one flat library of what the checks call. `utilities` and `library` name other copies of the two folders, for a check that plants a fault in one.
+const loadMissileLibrary = async ({ utilities = UTILITIES, library = MISSILE_LIBRARY } = {}) => {
+  const loaded = await loadUtilities(['design-rules', 'design-data', 'provenance', 'missile-hit'], { directory: utilities })
+  const { 'missile-reconcile': reconcile } = await loadUtilities(['missile-reconcile'], { directory: library })
+  const rules = loaded['design-rules']
+  const data = loaded['design-data']
 
-const loadMissileLibrary = async (directory = MISSILE_LIBRARY) => (await loadUtilities(['missile-accounting'], { directory }))['missile-accounting']
+  return { ...rules, ...data, ...reconcile.createMissileReconciler({ rules, data }), provenance: loaded.provenance, hit: loaded['missile-hit'] }
+}
 
 const groupBy = (entries, keyOf) => {
   const groups = new Map()
@@ -572,8 +581,8 @@ const levelText = (lines) => Object.entries(lines).filter(([, line]) => line.sta
 const LEDGER_ORDER = ['engine', 'fuel', 'warhead', 'reactor', 'active', 'thermal', 'em', 'geo', 'decoys', 'extraWarheads', 'secondStage', 'eccm', 'terminal', 'retarget', 'laser']
 
 // Every comparison of a fixture's designs and engines, in a report. A design that only supplies a second stage to another is read, not reported.
-const reconcileFixture = (library, fixture, scope, { ledger = false } = {}) => {
-  const report = new MissileReport('missile', RULE_IDS.missile, scope, library, fixture.game)
+const reconcileFixture = (library, fixture, scope, { ledger = false, ruleIds = RULE_IDS.missile } = {}) => {
+  const report = new MissileReport('missile', ruleIds, scope, library, fixture.game)
   const designs = fixture.designs.filter((design) => !design.stageOnly)
   const engines = new Set()
   const results = []
@@ -613,77 +622,27 @@ const reconcileFixture = (library, fixture, scope, { ledger = false } = {}) => {
   return report
 }
 
-const ownedMissilesSql = 'select FCT_MissileType.*, FCT_TechSystem.RaceID as OwnerID from FCT_MissileType left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_MissileType.MissileID and FCT_TechSystem.TechTypeID = 122 where FCT_MissileType.GameID = :game'
+// The loaders of utilities/design-data.js read through the app's database object, `query(sql, { replacements })` giving `[rows]` with `:name` placeholders: this is that object over the read-only sqlite3 handle.
+const appDatabase = (database) => ({ query: async (sql, { replacements = {} } = {}) => [await all(database, sql, Object.fromEntries(Object.entries(replacements).map(([name, value]) => [`:${name}`, value])))] })
 
-// A missile has no owner column: the race that researched it is the RaceID of its FCT_TechSystem row (tech type 122, TechSystemID = MissileID), the row the Designed Tech page joins.
-const ownedMissiles = (database, game, race) => (race === null ? all(database, `${ownedMissilesSql} order by FCT_MissileType.MissileID`, { ':game': game }) : all(database, `${ownedMissilesSql} and FCT_TechSystem.RaceID = :race order by FCT_MissileType.MissileID`, { ':game': game, ':race': race }))
+// The fixture of the scope's designs, read by the loaders of utilities/design-data.js.
+const loadSavedFixture = async (library, database, parameters, allGame) => {
+  const store = appDatabase(database)
 
-const missileDesign = (row, stageOnly) => ({ id: row.MissileID, race: row.OwnerID === undefined ? null : row.OwnerID, row: Object.fromEntries(MISSILE_COLUMNS.map((column) => [column, row[column]])), ...(stageOnly ? { stageOnly: true } : {}) })
-
-// The fixture a set of designs needs, as plain data the library reads (the shape is described in scripts/lib/missile-accounting.js): the designs and the second stages they name, the levels of the missile tech types each owner holds, the engine components and their two techs.
-const loadMissileFixture = async (database, game, owned) => {
-  const designs = new Map(owned.map((row) => [row.MissileID, missileDesign(row, false)]))
-  const pending = [...owned]
-
-  while (pending.length) {
-    const stageId = pending.pop().SecondStageID
-
-    if (stageId > 0 && !designs.has(stageId)) {
-      const [stage] = await all(database, `${ownedMissilesSql} and FCT_MissileType.MissileID = :id`, { ':game': game, ':id': stageId })
-
-      if (stage) {
-        designs.set(stageId, missileDesign(stage, true))
-        pending.push(stage)
-      }
-    }
-  }
-
-  const levels = {}
-  const races = {}
-  const levelOf = (row) => { levels[row.id] = { type: row.type, info: row.info, cost: row.cost } }
-  const raceIds = [...new Set([...designs.values()].map((design) => design.race).filter((race) => race !== null))]
-
-  for (const raceId of raceIds) {
-    const [race] = await all(database, 'select RaceName from FCT_Race where GameID = :game and RaceID = :race', { ':game': game, ':race': raceId })
-    const held = await all(database, `select FCT_TechSystem.TechSystemID as id, FCT_TechSystem.TechTypeID as type, FCT_TechSystem.AdditionalInfo as info, FCT_TechSystem.DevelopCost as cost from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race and FCT_TechSystem.TechTypeID in (${MISSILE_TECH_TYPES.join(',')}) order by FCT_TechSystem.TechSystemID`, { ':game': game, ':race': raceId })
-
-    held.forEach(levelOf)
-    races[raceId] = { name: race ? race.RaceName : null, held: Object.fromEntries([...new Set(held.map((row) => row.type))].map((type) => [type, held.filter((row) => row.type === type).map((row) => row.id)])) }
-  }
-
-  const engineIds = [...new Set([...designs.values()].map((design) => design.row.EngineID).filter((id) => id > 0))]
-  const components = {}
-
-  if (engineIds.length) {
-    const rows = await all(database, `select SDComponentID, Name, Size, Cost, ComponentValue, FuelEfficiency, BGTech1, BGTech2 from FCT_ShipDesignComponents where GameID = :game and SDComponentID in (${engineIds.join(',')})`, { ':game': game })
-
-    for (const row of rows) {
-      components[row.SDComponentID] = { id: row.SDComponentID, name: row.Name, size: row.Size, cost: row.Cost, power: row.ComponentValue, fuelEfficiency: row.FuelEfficiency, tech1: row.BGTech1, tech2: row.BGTech2 }
-    }
-
-    const techIds = [...new Set(rows.flatMap((row) => [row.BGTech1, row.BGTech2]).filter((id) => id > 0))]
-
-    if (techIds.length) {
-      const techs = await all(database, `select TechSystemID as id, TechTypeID as type, AdditionalInfo as info, DevelopCost as cost from FCT_TechSystem where TechSystemID in (${techIds.join(',')})`)
-
-      techs.forEach(levelOf)
-    }
-  }
-
-  return { game, levels, races, components, designs: [...designs.values()] }
+  return library.loadMissileFixture(store, parameters[':game'], await library.ownedMissiles(store, parameters[':game'], allGame ? null : parameters[':race']))
 }
 
 const checkMissiles = async (context) => {
   const { database, parameters, allGame, library, ledger } = context
-  const fixture = await loadMissileFixture(database, parameters[':game'], await ownedMissiles(database, parameters[':game'], allGame ? null : parameters[':race']))
+  const fixture = await loadSavedFixture(library, database, parameters, allGame)
 
-  return reconcileFixture(library, fixture, `${INPUT_ONLY.missile}; ${allGame ? 'every missile design of the game, each with the techs of the race that researched it' : 'the missile designs the race researched'}`, { ledger })
+  return reconcileFixture(library, fixture, allGame ? 'every missile design of the game, each with the techs of the race that researched it' : 'the missile designs the race researched', { ledger })
 }
 
 // Writes the designs of the scope (the race's, or every design of the game with --all-game) as a fixture under `options.label` in the fixtures file, replacing a fixture of that label and keeping the others. The saves are not tracked and the fixtures are, so the checks of the rules and their mutants run without a save.
 const exportMissileFixture = async (context, options) => {
-  const { database, parameters, allGame } = context
-  const fixture = await loadMissileFixture(database, parameters[':game'], await ownedMissiles(database, parameters[':game'], allGame ? null : parameters[':race']))
+  const { database, parameters, allGame, library } = context
+  const fixture = await loadSavedFixture(library, database, parameters, allGame)
   const existing = fs.existsSync(options.exportFile) ? JSON.parse(fs.readFileSync(options.exportFile, 'utf8')) : { fixtures: [] }
   const entry = { label: options.label, save: path.basename(options.save), game: parameters[':game'], note: options.note, scope: allGame ? 'every missile design of the game' : `the missile designs of race ${parameters[':race']}`, ...fixture }
   const fixtures = [...existing.fixtures.filter((held) => held.label !== options.label), entry].sort((a, b) => a.label.localeCompare(b.label))
@@ -773,6 +732,15 @@ const CHECK_NAMES = {
   sizeRounding: 'an oversize is a size limit only where it equals the 4-decimal rounding of the engine size',
   lines: 'a line whose tech type the race does not hold is reported as an unknown level',
   basis: 'a figure rebuilt from a level picked by matching a stored figure is marked resolved from the stored figure',
+  roundTrip: 'every saved design evaluated as a candidate gives the size, cost and minerals of its reconciliation, and the options add up to the totals and to the stored figures',
+  overBudget: 'a candidate over its size, cost or mineral budget is rejected before ranking, and one at its limits is feasible',
+  unknownAccounting: 'a candidate with an option whose accounting is unknown has no feasibility, whatever its budget, and is not admitted',
+  mounting: 'a saved design counts the engine and the second stages its row shows mounted, whatever record is given: an absent record is unknown, never none, and a contradiction is refused',
+  unsupportedOptions: 'a ground pod, an enhanced radiation warhead and a retargeting level above 1 are unsupported: no feasibility, no total, never 0',
+  efficacy: 'only an effect whose rule is confirmed counts, a targeting effect that is not verified is listed and counts for nothing, and no score is made',
+  validation: 'a candidate or budget that is not valid is refused, and a tech that is not known is not',
+  registered: 'the missile rules are registered with the verification the evidence supports',
+  provenance: 'a figure beyond what the fixtures reproduce is estimated, one inside it confirmed; the feasibility takes the weakest of the figures it compared, and an estimated effect is not counted',
 }
 
 const N = CHECK_NAMES
@@ -846,7 +814,7 @@ const fixtureProblems = (library, data) => {
 }
 
 // The checks of the missile rules over the fixtures `data` (label to fixture), run on `library`: the real one, or a mutated copy that must fail the checks its mutant names. Each is [name, test], the test returning true or the reason it failed.
-const missileChecks = (library, data) => {
+const reconciliationChecks = (library, data) => {
   const modded = data.get('modded-g140')
   const stock = data.get('stock-271-g138')
   const older = data.get('v260-solid-core-g137')
@@ -880,8 +848,8 @@ const missileChecks = (library, data) => {
       return firstFailure(expectNear('ECCM size', ledger.eccm.msp, 0.25), expectNear('ECCM Corbomite', ledger.eccm.minerals.Corbomite, 0.15), expectNear('terminal guidance size', ledger.terminal.msp, 0.25), expectNear('terminal guidance Uridium', ledger.terminal.minerals.Uridium, 0.4), expectNear('laser size', ledger.laser.msp, 0.25), expectNear('laser Corundium', ledger.laser.minerals.Corundium, 0.6), expectNear('laser efficiency level', levelInfo(lines.laserEfficiency), 60), expectNear('retargeting size', ledger.retarget.msp, 0))
     }],
     [N.retargeting, () => {
-      const levelOne = library.buildMissile(plainInput({ options: { eccm: 0, terminal: 1, retarget: 1, laser: false } })).contributions.retarget
-      const levelTwo = library.buildMissile(plainInput({ options: { eccm: 0, terminal: 1, retarget: 2, laser: false } })).contributions.retarget
+      const levelOne = library.missileAccounting(plainInput({ options: { eccm: 0, terminal: 1, retarget: 1, laser: false } })).contributions.retarget
+      const levelTwo = library.missileAccounting(plainInput({ options: { eccm: 0, terminal: 1, retarget: 2, laser: false } })).contributions.retarget
 
       return firstFailure(expectNear('level 1 size', levelOne.msp, 0.5), expectNear('level 1 Uridium', levelOne.minerals.Uridium, 0.5), expectNear('level 2 size', levelTwo.msp, 0.5), expectNear('level 2 Uridium', levelTwo.minerals.Uridium, 0), expectVerdicts(library, rebuilt(stock, 153731), ['Size', 'Uridium', 'Cost'], 'agree'))
     }],
@@ -896,7 +864,7 @@ const missileChecks = (library, data) => {
 
       return firstFailure(expectNear('reactor size', ledger.reactor.msp, 0.072), expectNear('reactor BP', ledger.reactor.bp, 0.108), expectNear('reactor Boronide', ledger.reactor.minerals.Boronide, 0.108), expectNear('power plant level', levelInfo(lines.reactor), 10), expectVerdicts(library, rebuilt(stock, 153826), ['MSPReactor', 'ThermalStrength', 'Boronide'], 'agree'))
     }],
-    [N.rounding, () => firstFailure(expectNear('0.125 at 2 decimals', library.roundHalfEven(0.125, 2), 0.12), expectNear('0.175 at 2 decimals', library.roundHalfEven(0.175, 2), 0.18), expectNear('2.5 at 0 decimals', library.roundHalfEven(2.5, 0), 2), expectNear('the strength of a 0.25 MSP sensor of tech 10', library.sensorStrength({ sensorMsp: 0.25, sensorTech: 10 }), 0.12))],
+    [N.rounding, () => firstFailure(expectNear('0.125 at 2 decimals', library.roundHalfEven(0.125, 2), 0.12), expectNear('0.175 at 2 decimals', library.roundHalfEven(0.175, 2), 0.18), expectNear('2.5 at 0 decimals', library.roundHalfEven(2.5, 0), 2), expectNear('the strength of a 0.25 MSP sensor of tech 10', library.missileSensorStrength({ sensorMsp: 0.25, sensorTech: 10 }), 0.12))],
     [N.thrust, () => firstFailure(...[154259, 154262].map((id) => {
       const engine = engineOf(modded, id)
 
@@ -916,13 +884,13 @@ const missileChecks = (library, data) => {
     [N.capAndFloor, () => {
       const result = rebuilt(modded, 500726)
 
-      const unit = library.buildMissile(plainInput({ fuelMsp: 0.1, engine: { sizeMsp: 1, cost: 1, power: 100, fuelEfficiency: 1 }, engines: 1 })).figures
+      const unit = library.missileAccounting(plainInput({ fuelMsp: 0.1, engine: { sizeMsp: 1, cost: 1, power: 100, fuelEfficiency: 1 }, engines: 1 })).figures
 
       return firstFailure(expectThat('the sum of the sizes is not under 1', result.figures.sizeSum < 1), expectNear('size', result.figures.size, 1), expectNear('speed', result.figures.speed, 270000), expectVerdicts(library, result, ['Size', 'Speed', 'Endurance', 'MaxRange'], 'agree'), expectNear('speed of an engine of 100 EP in 1.1 MSP, where no design of the saves is over the cap', unit.speed, 270000))
     }],
     [N.decoy, () => {
       const result = rebuilt(modded, 154198)
-      const small = library.buildMissile(plainInput({ shipDecoy: true, warheadMsp: 1 })).figures
+      const small = library.missileAccounting(plainInput({ shipDecoy: true, warheadMsp: 1 })).figures
 
       return firstFailure(expectNear('size', result.figures.size, 25), expectNear('strength of 25 MSP', result.figures.warheadStrength, 5000), expectNear('cost of 25 MSP', result.figures.cost, 100), expectVerdicts(library, result, ['Size', 'WarheadStrength', 'RadDamage', 'Cost', 'Corbomite', 'Speed'], 'agree'), expectNear('size of a 1 MSP decoy', small.size, 5), expectNear('cost of a 1 MSP decoy', small.cost, 4), expectVerdicts(library, rebuilt(older, 153501), ['Size', 'WarheadStrength', 'Cost'], 'agree'))
     }],
@@ -1014,7 +982,7 @@ const missileChecks = (library, data) => {
       return problems.length ? `${problems.length} engine figures do not agree, first ${problems.slice(0, 3).join('; ')}` : true
     }],
     [N.tolerance, () => firstFailure(expectThat('5e-10 apart is not in agreement', library.agrees(1, 1 + 5e-10)), expectThat('2e-9 apart is in agreement', !library.agrees(1, 1 + 2e-9)), expectThat('two zeros are not in agreement', library.agrees(0, 0)))],
-    [N.noWarhead, () => firstFailure(expectVerdicts(library, rebuilt(stock, 154192), ['WarheadStrength', 'RadDamage', 'Tritanium'], 'agree'), expectNear('a 0.2 MSP sensor', library.sensorStrength({ sensorMsp: 0.2, sensorTech: 10 }), 0), expectNear('no warhead', library.warheadStrength({ warheadMsp: 0, warheadTech: null }), 0))],
+    [N.noWarhead, () => firstFailure(expectVerdicts(library, rebuilt(stock, 154192), ['WarheadStrength', 'RadDamage', 'Tritanium'], 'agree'), expectNear('a 0.2 MSP sensor', library.missileSensorStrength({ sensorMsp: 0.2, sensorTech: 10 }), 0), expectNear('no warhead', library.missileWarheadStrength({ warheadMsp: 0, warheadTech: null }), 0))],
     [N.unresolved, () => {
       const { result } = edited(stock, 153728, (_fixture, design) => { design.row.WarheadStrength = 6.5; design.row.RadDamage = 6.5 })
 
@@ -1074,7 +1042,365 @@ const missileChecks = (library, data) => {
   ]
 }
 
-// A planted fault: `find` (text found once in missile-accounting.js) becomes `replace` in a copy of the library, and every check named in `fails` must then fail.
+// The checks of the candidate evaluator (utilities/design-rules.js `evaluateMissile` and `admitMissiles`) over the fixtures `data`, run on `library`. The modded Arrow (154261) stands for a candidate whose every option is known, made from the options of a saved design.
+const evaluatorChecks = (library, data) => {
+  const { isAvailable, valueOrNull, getRule } = library.provenance
+  const modded = data.get('modded-g140')
+  const stock = data.get('stock-271-g138')
+  const arrow = () => library.missileCandidateOf(modded, designOf(modded, 154261))
+  const boxcar = () => library.missileCandidateOf(stock, designOf(stock, 154678))
+  const without = (minerals, name) => Object.fromEntries(Object.entries(minerals).filter(([mineral]) => mineral !== name))
+  const evaluate = (candidate, options) => library.evaluateMissile(candidate, options)
+  const optionOf = (evaluation, id) => evaluation.options.find((option) => option.id === id)
+  const effectOf = (evaluation, id) => evaluation.efficacy.effects.find((effect) => effect.id === id)
+  const present = (value) => value !== null && value !== undefined
+  const throws = (action) => {
+    try {
+      action()
+    } catch {
+      return true
+    }
+
+    return false
+  }
+  const mineralVector = (entry) => (entry.minerals !== null && library.MISSILE_MINERALS.every((name) => present(entry.minerals[name])) ? entry.minerals : null)
+  const pair = (stored, result) => (present(stored) ? isAvailable(result) && near(result.value, stored) : !isAvailable(result))
+  const unavailableTotals = (evaluation, names) => names.filter((name) => isAvailable(evaluation.totals[name]) || evaluation.totals[name].value !== null)
+
+  return [
+    [N.roundTrip, () => {
+      const problems = []
+      const counts = { feasible: 0, infeasible: 0, unknown: 0, unsupported: 0 }
+
+      for (const fixture of data.values()) {
+        for (const design of fixture.designs.filter((entry) => !entry.stageOnly)) {
+          const result = library.reconcileMissile(fixture, design)
+          const row = design.row
+          const evaluation = evaluate(library.missileCandidateOf(fixture, design, { sizeLimit: result.limited ? row.Size : 0 }))
+          const key = `${fixture.label} ${design.id}`
+
+          counts[evaluation.verdict]++
+
+          if (result.lines.warhead.state === 'unsupported') {
+            if (evaluation.verdict !== 'unsupported') {
+              problems.push(`${key} is ${evaluation.verdict}, not unsupported`)
+            }
+
+            continue
+          }
+
+          const lacking = library.CONTRIBUTIONS.filter((id) => !(present(result.ledger[id].msp) && present(result.ledger[id].bp) && mineralVector(result.ledger[id]) !== null))
+
+          if (evaluation.verdict !== (lacking.length ? 'unknown' : 'feasible')) {
+            problems.push(`${key} is ${evaluation.verdict} with ${lacking.length} unknown options`)
+          }
+
+          if (evaluation.unknown.map(({ option }) => option).join() !== lacking.join()) {
+            problems.push(`${key} lists the unknown options ${evaluation.unknown.map(({ option }) => option).join()}, not ${lacking.join()}`)
+          }
+
+          for (const id of library.CONTRIBUTIONS) {
+            const entry = result.ledger[id]
+            const option = optionOf(evaluation, id)
+            const vector = mineralVector(entry)
+            const mineralsAgree = vector === null ? !isAvailable(option.minerals) : isAvailable(option.minerals) && library.MISSILE_MINERALS.every((name) => near(option.minerals.value[name], vector[name]))
+
+            if (!pair(entry.msp, option.msp) || !pair(entry.bp, option.bp) || !mineralsAgree) {
+              problems.push(`${key} ${id} does not carry its size, cost and minerals`)
+            }
+          }
+
+          const everyKnown = (field) => library.CONTRIBUTIONS.every((id) => present(result.ledger[id][field]))
+
+          if (isAvailable(evaluation.totals.sizeSum) !== everyKnown('msp') || isAvailable(evaluation.totals.cost) !== everyKnown('bp')) {
+            problems.push(`${key} has a size or cost total that is not known exactly when its options are`)
+          }
+
+          if (lacking.length) {
+            continue
+          }
+
+          const total = (field) => library.CONTRIBUTIONS.reduce((sum, id) => sum + optionOf(evaluation, id)[field].value, 0)
+          const totals = evaluation.totals
+
+          if (!near(totals.sizeSum.value, total('msp')) || !near(totals.cost.value, total('bp')) || library.MISSILE_MINERALS.some((name) => !near(totals.minerals[name].value, library.CONTRIBUTIONS.reduce((sum, id) => sum + optionOf(evaluation, id).minerals.value[name], 0)))) {
+            problems.push(`${key} has totals that are not the sums of its options`)
+          }
+
+          if (!near(totals.size.value, result.figures.size) || !near(totals.cost.value, result.figures.cost)) {
+            problems.push(`${key} has a size or cost that is not the rebuilt one`)
+          }
+
+          if (library.judge(entryOf(result, 'Cost')) === 'agree' && !library.agrees(row.Cost, totals.cost.value)) {
+            problems.push(`${key} cost is ${totals.cost.value}, stored ${row.Cost}`)
+          }
+
+          if ((library.judge(entryOf(result, 'Size')) === 'agree' || result.limited) && !library.agrees(row.Size, totals.size.value)) {
+            problems.push(`${key} size is ${totals.size.value}, stored ${row.Size}`)
+          }
+
+          for (const name of library.MISSILE_STORED_MINERALS.filter((mineral) => library.judge(entryOf(result, mineral)) === 'agree')) {
+            if (!library.agrees(row[name], totals.minerals[name].value)) {
+              problems.push(`${key} ${name} is ${totals.minerals[name].value}, stored ${row[name]}`)
+            }
+          }
+        }
+      }
+
+      return firstFailure(problems.length ? `${problems.length} problems, first ${problems.slice(0, 3).join('; ')}` : true, expectThat('no design is feasible', counts.feasible > 0), expectThat('no design is unknown', counts.unknown > 0))
+    }],
+    [N.overBudget, () => {
+      const base = evaluate(arrow())
+      const { size, cost, minerals } = { size: base.totals.size.value, cost: base.totals.cost.value, minerals: base.totals.minerals }
+      const mineral = library.MISSILE_MINERALS.find((name) => minerals[name].value > 0)
+      const run = (budget, candidate = arrow()) => evaluate(candidate, { budget })
+      const overSize = run({ maxMsp: size - 0.5 })
+      const overCost = run({ maxBp: cost - 0.01 })
+      const overMineral = run({ minerals: { [mineral]: minerals[mineral].value - 0.01 } })
+      const capped = run({ maxMsp: 8 }, { ...arrow(), sizeLimit: 5 })
+      const atLimits = run({ maxMsp: size, maxBp: cost, minerals: Object.fromEntries(library.MISSILE_MINERALS.map((name) => [name, minerals[name].value])) })
+      const noise = run({ maxMsp: size * (1 - 1e-12), maxBp: cost * (1 - 1e-12) })
+      const slightly = run({ maxBp: cost * (1 - 1e-6) })
+      const violation = (evaluation, limit) => (isAvailable(evaluation.feasibility) ? evaluation.feasibility.value.violations.find((entry) => entry.limit === limit) : undefined)
+      const { admitted, rejected } = library.admitMissiles([overSize, atLimits, overCost, overMineral, capped, base, noise, slightly])
+
+      return firstFailure(
+        expectThat('a candidate with every option known has no verdict', base.verdict === 'feasible' && isAvailable(base.feasibility) && base.feasibility.value.feasible === true),
+        expectThat('a candidate over its size budget is not infeasible', overSize.verdict === 'infeasible' && Boolean(violation(overSize, 'size')) && near(violation(overSize, 'size').found, size) && near(violation(overSize, 'size').allowed, size - 0.5)),
+        expectThat('a candidate over its cost budget is not infeasible', overCost.verdict === 'infeasible' && Boolean(violation(overCost, 'cost'))),
+        expectThat(`a candidate over its ${mineral} budget is not infeasible`, overMineral.verdict === 'infeasible' && Boolean(violation(overMineral, mineral))),
+        expectThat('a candidate whose options ask for more than its budget under a smaller size limit is not infeasible', capped.verdict === 'infeasible' && near(capped.totals.size.value, 5) && Boolean(violation(capped, 'size'))),
+        expectThat('a candidate at its limits is not feasible', atLimits.verdict === 'feasible' && atLimits.feasibility.value.violations.length === 0),
+        expectThat('a limit under the figure by float noise is not feasible', noise.verdict === 'feasible'),
+        expectThat('a limit 1e-6 under the figure is not infeasible', slightly.verdict === 'infeasible'),
+        expectThat('the evaluations admitted before ranking are not the feasible ones', admitted.length === 3 && admitted.includes(atLimits) && admitted.includes(base) && admitted.includes(noise) && rejected.length === 5),
+        expectThat('a rejected evaluation does not say why', rejected.every((entry) => entry.verdict === 'infeasible' && entry.reasons.length > 0 && !admitted.includes(entry.evaluation)))
+      )
+    }],
+    [N.unknownAccounting, () => {
+      const generous = { maxMsp: 1000, maxBp: 1000000 }
+      const tight = { maxMsp: 0.5, maxBp: 0.01 }
+      const noWarheadTech = { ...arrow(), tech: { ...arrow().tech, warhead: null } }
+      const noReactorTech = { ...arrow(), tech: { ...arrow().tech, reactor: null } }
+      const noEngineTech = { ...arrow(), engine: { sizeMsp: 6, thrust: 2, engineTech: null, fuelTech: 1, maxThrust: 3 } }
+      const noEngine = library.missileCandidateOf(stock, designOf(stock, 154110))
+      const cases = [['warhead', noWarheadTech], ['reactor', noReactorTech], ['engine', noEngineTech], ['engine', noEngine]]
+      const problems = cases.flatMap(([id, candidate], index) => [generous, tight].map((budget) => {
+        const evaluation = evaluate(candidate, { budget })
+        const option = optionOf(evaluation, id)
+
+        return firstFailure(
+          expectThat(`case ${index} is ${evaluation.verdict}, not unknown`, evaluation.verdict === 'unknown'),
+          expectThat(`case ${index} has a feasibility`, !isAvailable(evaluation.feasibility) && evaluation.feasibility.value === null && evaluation.feasibility.inputs.missing.length > 0),
+          expectThat(`case ${index} lists no unknown option`, evaluation.unknown.some((entry) => entry.option === id && entry.reason.length > 0) && option.status === 'unknown' && option.reasons.length > 0),
+          expectThat(`case ${index} has a total of 0 where its options are not known`, ['sizeSum', 'size', 'cost'].some((name) => !isAvailable(evaluation.totals[name])) && ['sizeSum', 'size', 'cost'].every((name) => isAvailable(evaluation.totals[name]) || evaluation.totals[name].value === null)),
+          expectThat(`case ${index} is admitted`, library.admitMissiles([evaluation]).admitted.length === 0 && library.admitMissiles([evaluation]).rejected[0].verdict === 'unknown')
+        )
+      }))
+      const warhead = optionOf(evaluate(noWarheadTech), 'warhead')
+      const engine = optionOf(evaluate(noEngineTech), 'engine')
+      const designed = evaluate({ ...arrow(), engine: { sizeMsp: 6, thrust: 2, engineTech: 10, fuelTech: 1, maxThrust: 3 } }, { budget: generous })
+      const expected = library.missileEngineDesign({ sizeMsp: 6, thrust: 2, engineTech: 10, fuelTech: 1, maxThrust: 3 })
+
+      return firstFailure(
+        ...problems,
+        expectThat('a warhead with no tech has no cost or its size is lost', isAvailable(warhead.msp) && !isAvailable(warhead.bp) && !isAvailable(warhead.minerals)),
+        expectThat('an engine with no tech has a cost, or its size is lost', isAvailable(engine.msp) && near(engine.msp.value, 6) && !isAvailable(engine.bp) && engine.reasons.join().includes('engineTech')),
+        expectThat('the speed of an engine with no tech is not unavailable', !isAvailable(evaluate(noEngineTech).figures.speed) && evaluate(noEngineTech).figures.speed.value === null),
+        expectThat('an engine designed from its techs is not feasible', designed.verdict === 'feasible' && near(optionOf(designed, 'engine').bp.value, library.roundHalfEven(expected.cost, 4)) && near(optionOf(designed, 'engine').msp.value, 6))
+      )
+    }],
+    [N.unsupportedOptions, () => {
+      const generous = { maxMsp: 1000, maxBp: 1000000 }
+      const base = arrow()
+      const pod = evaluate({ ...base, groundPod: true }, { budget: generous })
+      const radiation = evaluate({ ...base, enhancedRadiation: true }, { budget: generous })
+      const retargetTwo = evaluate({ ...base, options: { ...base.options, retarget: 2 } }, { budget: generous })
+      const retargetOne = evaluate({ ...base, options: { ...base.options, retarget: 1 } }, { budget: generous })
+      const refused = [pod, radiation, retargetTwo]
+
+      return firstFailure(
+        expectThat('a ground pod is not unsupported in every option', pod.verdict === 'unsupported' && pod.options.every((option) => option.status === 'unsupported') && pod.unsupported.length === library.CONTRIBUTIONS.length && pod.unsupported[0].reason.includes('ground pod')),
+        expectThat('an enhanced radiation warhead is not unsupported in its cost alone', radiation.verdict === 'unsupported' && optionOf(radiation, 'warhead').status === 'unsupported' && isAvailable(optionOf(radiation, 'warhead').msp) && !isAvailable(optionOf(radiation, 'warhead').bp) && radiation.options.filter((option) => option.id !== 'warhead').every((option) => option.status === 'known') && !isAvailable(radiation.figures.warheadStrength) && isAvailable(radiation.totals.size) && !isAvailable(radiation.totals.cost)),
+        expectThat('a retargeting level above 1 is not unsupported in its size and cost', retargetTwo.verdict === 'unsupported' && optionOf(retargetTwo, 'retarget').status === 'unsupported' && !isAvailable(optionOf(retargetTwo, 'retarget').msp) && !isAvailable(retargetTwo.totals.size) && retargetTwo.options.filter((option) => option.id !== 'retarget').every((option) => option.status === 'known')),
+        expectThat('a retargeting level 1 is not feasible with its 0.5 MSP and 0.5 Uridium', retargetOne.verdict === 'feasible' && near(optionOf(retargetOne, 'retarget').msp.value, 0.5) && near(optionOf(retargetOne, 'retarget').bp.value, 0.5) && near(optionOf(retargetOne, 'retarget').minerals.value.Uridium, 0.5)),
+        expectThat('an unsupported candidate has a feasibility, a total of 0 or is admitted', refused.every((evaluation) => !isAvailable(evaluation.feasibility) && evaluation.totals.cost.value === null && library.admitMissiles([evaluation]).admitted.length === 0 && library.admitMissiles([evaluation]).rejected[0].verdict === 'unsupported' && unavailableTotals(evaluation, ['cost']).length === 0))
+      )
+    }],
+    [N.efficacy, () => {
+      const candidate = { ...arrow(), warheads: 2, options: { ...arrow().options, retarget: 1 } }
+      const scenario = { targetSpeed: 3000, jammer: 2, modifier: 1, version: '2.7.1' }
+      const evaluation = evaluate(candidate, { budget: { maxMsp: 1000, maxBp: 1000000 }, scenario })
+      const plain = evaluate(candidate)
+      const speed = valueOrNull(evaluation.figures.speed)
+      const hitRules = [['eccmHit', library.hit.HIT_RULES.jammer], ['terminalHit', library.hit.HIT_RULES.raw], ['warheadHits', library.hit.HIT_RULES.hits]]
+      const raw = valueOrNull(library.hit.rawHitChance({ missileSpeed: speed, targetSpeed: scenario.targetSpeed, atg: candidate.options.terminal, modifier: scenario.modifier, jammer: scenario.jammer, eccm: candidate.options.eccm, version: scenario.version }))
+      const hitProblems = hitRules.map(([id, rule]) => {
+        const effect = effectOf(evaluation, id)
+        const confirmed = getRule(rule).verification === 'confirmed'
+
+        return effect ? firstFailure(expectThat(`${id} is verified ${effect.verified}, its rule is ${getRule(rule).verification}`, effect.rule === rule && effect.verified === confirmed), expectThat(`${id} is counted ${effect.counted}`, effect.counted === (confirmed && effect.value !== null)), expectThat(`${id} is not excluded with a reason`, effect.counted || ((effect.reason || '').length > 0 && evaluation.efficacy.excluded.some((entry) => entry.id === id))), expectThat(`${id} has no reason to be unverified`, confirmed || effect.reason.includes('not confirmed'))) : `${id} is not among the effects`
+      })
+      const payload = ['warheadStrength', 'speed', 'endurance', 'maxRange'].map((id) => effectOf(evaluation, id))
+      const retargeting = effectOf(evaluation, 'retargeting')
+      const effects = [
+        { id: 'confirmedValue', option: 'warhead', label: 'a confirmed value', units: '', rule: 'design.missileAccounting', applies: () => true, read: () => ({ value: 7, reason: null }) },
+        { id: 'confirmedMissing', option: 'warhead', label: 'a confirmed value that is not known', units: '', rule: 'design.missileAccounting', applies: () => true, read: () => ({ value: null, reason: 'an input is missing' }) },
+        { id: 'estimatedValue', option: 'warhead', label: 'an estimated value', units: '', rule: 'design.missileAccountingExtended', applies: () => true, read: () => ({ value: 9, reason: null }) },
+      ]
+
+      const injected = evaluate(arrow(), { effects })
+
+      return firstFailure(
+        ...hitProblems,
+        expectThat('a validated candidate with a targeting effect that is not verified cannot be designed', evaluation.verdict === 'feasible' && isAvailable(evaluation.feasibility)),
+        expectThat('the payload figures are not verified and counted', payload.every((effect) => Boolean(effect) && effect.verified && effect.counted && effect.value !== null && effect.rule === 'design.missileAccounting')),
+        expectThat('the speed counted is not the speed of the candidate', near(effectOf(evaluation, 'speed').value, speed)),
+        expectThat('the terminal guidance hit chance is not the raw chance of the missile hit rules', near(effectOf(evaluation, 'terminalHit').value, raw)),
+        expectThat('retargeting with no rule is counted or has no reason', Boolean(retargeting) && retargeting.rule === null && !retargeting.verified && !retargeting.counted && retargeting.reason === 'no rule models this effect'),
+        expectThat('an effect that is not counted is not excluded', evaluation.efficacy.effects.filter((effect) => !effect.counted).every((effect) => evaluation.efficacy.excluded.some((entry) => entry.id === effect.id)) && evaluation.efficacy.counted.length === evaluation.efficacy.effects.filter((effect) => effect.counted).length),
+        expectThat('a candidate has a score of its own', !('score' in evaluation) && !('score' in evaluation.efficacy) && evaluation.efficacy.counted.every((entry) => Object.keys(entry).sort().join() === 'id,units,value')),
+        expectThat('a hit effect is worked out with no scenario', plain.efficacy.scenario === null && ['eccmHit', 'terminalHit', 'warheadHits'].every((id) => !effectOf(plain, id))),
+        expectThat('an effect of a confirmed rule is not counted, or one of an estimated rule is', injected.efficacy.counted.length === 1 && injected.efficacy.counted[0].id === 'confirmedValue' && injected.efficacy.counted[0].value === 7),
+        expectThat('an effect of a confirmed rule with no value is not excluded with its reason', injected.efficacy.excluded.some((entry) => entry.id === 'confirmedMissing' && entry.reason === 'an input is missing')),
+        expectThat('an effect of an estimated rule is not excluded as not confirmed', injected.efficacy.excluded.some((entry) => entry.id === 'estimatedValue' && entry.reason.includes('estimated')))
+      )
+    }],
+    [N.validation, () => {
+      const base = arrow()
+      const invalid = [
+        ['a negative fuel size', () => evaluate({ ...base, fuelMsp: -1 })],
+        ['a fraction of an engine', () => evaluate({ ...base, engines: 1.5 })],
+        ['a size that is not a number', () => evaluate({ ...base, warheadMsp: Number.NaN })],
+        ['a field the candidate does not have', () => evaluate({ ...base, colour: 'red' })],
+        ['an option the candidate does not have', () => evaluate({ ...base, options: { ...base.options, speed: 1 } })],
+        ['a tech given as text', () => evaluate({ ...base, tech: { ...base.tech, warhead: '4' } })],
+        ['no candidate', () => evaluate(null)],
+        ['a negative size limit of the budget', () => evaluate(base, { budget: { maxMsp: -1 } })],
+        ['a budget field that does not exist', () => evaluate(base, { budget: { maxCost: 5 } })],
+        ['a mineral that does not exist', () => evaluate(base, { budget: { minerals: { Unobtainium: 1 } } })],
+        ['a cost limit given as text', () => evaluate(base, { budget: { maxBp: '10' } })],
+        ['a stage with no Uridium given', () => evaluate({ ...boxcar(), stage: { ...boxcar().stage, minerals: without(boxcar().stage.minerals, 'Uridium') } })],
+        ['a stage with no minerals given', () => evaluate({ ...boxcar(), stage: { ...boxcar().stage, minerals: {} } })],
+        ['a stage mineral that is not a number', () => evaluate({ ...boxcar(), stage: { ...boxcar().stage, minerals: { ...boxcar().stage.minerals, Uridium: null } } })],
+        ['an engine counted with no engine', () => evaluate({ ...base, engine: null, engines: 1 })],
+        ['two engines counted with no engine', () => evaluate({ ...base, engine: undefined, engines: 2 })],
+        ['a stage counted with no stage', () => evaluate({ ...boxcar(), stage: null, stages: 9 })],
+      ]
+      const accepted = invalid.filter(([, action]) => !throws(action)).map(([what]) => what)
+      const zero = evaluate(base, { budget: { maxMsp: 0 } })
+
+      return firstFailure(
+        expectThat(`${accepted.join(', ')} not refused`, accepted.length === 0),
+        expectThat('a tech that is not known is refused', !throws(() => evaluate({ ...base, tech: { ...base.tech, warhead: null } }))),
+        expectThat('a count of 0 with no part is refused', !throws(() => evaluate({ ...base, engine: null, engines: 0 })) && !throws(() => evaluate({ ...boxcar(), stage: null, stages: 0 }))),
+        expectThat('an engine-less saved design is counted with no engine', library.missileCandidateOf(modded, designOf(modded, 154198)).engines === 0 && evaluate(library.missileCandidateOf(modded, designOf(modded, 154198))).verdict !== undefined),
+        expectThat('a stage with its minerals given is refused', !throws(() => evaluate(boxcar()))),
+        expectThat('a limit of 0 is not a limit', zero.verdict === 'infeasible')
+      )
+    }],
+    [N.registered, () => {
+      const wanted = [['design.missileEngineDesign', 'confirmed'], ['design.missileAccounting', 'confirmed'], ['design.missileAccountingExtended', 'estimated'], ['design.missileFeasibility', 'confirmed'], ['design.missileEfficacy', 'assumed'], ['design.missileLevels', 'estimated']]
+      const wrong = wanted.filter(([id, status]) => getRule(id)?.verification !== status).map(([id, status]) => `${id} is ${getRule(id)?.verification ?? 'not registered'}, expected ${status}`)
+
+      return wrong.length ? wrong.join('; ') : true
+    }],
+    [N.provenance, () => {
+      const costFields = ['Cost', 'Corbomite', 'Tritanium', 'Boronide', 'Uridium', 'Gallicite', 'UnstoredMinerals']
+      const domain = library.MISSILE_COST_DOMAIN
+      const quantities = Object.keys(domain)
+      const observed = Object.fromEntries(quantities.map((name) => [name, 0]))
+
+      for (const fixture of data.values()) {
+        for (const design of fixture.designs.filter((entry) => !entry.stageOnly)) {
+          const result = library.reconcileMissile(fixture, design)
+
+          if (costFields.every((field) => entryOf(result, field) && library.judge(entryOf(result, field)) === 'agree')) {
+            const found = library.missileCostQuantities(library.missileCandidateOf(fixture, design))
+
+            for (const name of quantities) {
+              observed[name] = Math.max(observed[name], found[name] ?? 0)
+            }
+          }
+        }
+      }
+
+      const mjolnirCandidate = library.missileCandidateOf(modded, designOf(modded, 500724))
+      const mjolnir = evaluate(mjolnirCandidate, { budget: { maxBp: 300 } })
+      const mjolnirSized = evaluate(mjolnirCandidate, { budget: { maxMsp: 1000 } })
+      const base = arrow()
+      const inside = evaluate(base, { budget: { maxMsp: 1000, maxBp: 1000000 } })
+      const staged = evaluate(boxcar(), { budget: { maxBp: 1000000 } })
+      const withBudget = (candidate) => evaluate(candidate, { budget: { maxBp: 1000 } })
+      const sameTechs = (candidate) => Object.keys(base.tech).every((line) => candidate.tech[line] === base.tech[line])
+      const thermalSize = 150 / (base.tech.thermal * 0.05)
+      const sameStrength = withBudget({ ...base, thermalMsp: thermalSize })
+      const nextLevel = withBudget({ ...base, tech: { ...base.tech, thermal: base.tech.thermal + 1 } })
+      const damageAtBound = withBudget({ ...base, warheadMsp: domain.warheadDamage / base.tech.warhead })
+      const damageOver = withBudget({ ...base, warheadMsp: (domain.warheadDamage + 0.5) / base.tech.warhead })
+      const statusOf = (result) => (result ? result.status : 'no result')
+      const ruleOf = (result) => (result ? result.rule.id : 'no result')
+      const costOf = (evaluation) => [evaluation.totals.cost, ...library.MISSILE_MINERALS.map((name) => evaluation.totals.minerals[name]), ...evaluation.options.flatMap((option) => [option.bp, option.minerals])]
+      const estimated = (evaluation) => costOf(evaluation).every((result) => statusOf(result) === 'estimated' && ruleOf(result) === 'design.missileAccountingExtended') && statusOf(evaluation.feasibility) === 'estimated'
+      const confirmed = (evaluation) => [...costOf(evaluation), evaluation.feasibility].every((result) => statusOf(result) === 'confirmed')
+      const named = (evaluation, text) => evaluation.totals.cost.assumptions.some((entry) => entry.includes(text))
+      const flight = ['endurance', 'maxRange', 'totalFlightTime']
+      const counted = (evaluation, id) => evaluation.efficacy.counted.some((entry) => entry.id === id)
+
+      return firstFailure(
+        expectThat(`the cost domain is ${JSON.stringify(domain)}, the highest of the designs whose cost reproduces is ${JSON.stringify(observed)}`, quantities.every((name) => domain[name] === observed[name])),
+        expectThat('a design beyond the domain has unknown or unsupported options', mjolnir.unknown.length === 0 && mjolnir.unsupported.length === 0),
+        expectThat('the cost and minerals beyond the domain are not estimated by the extended rule', estimated(mjolnir)),
+        expectThat('the size beyond the domain is not confirmed', [mjolnir.totals.size, mjolnir.totals.sizeSum, ...mjolnir.options.map((option) => option.msp)].every((result) => statusOf(result) === 'confirmed' && ruleOf(result) === 'design.missileAccounting')),
+        expectThat('the quantities beyond the domain are not all named', ['thermal sensor strength 150', 'sensor reactor output 30', 'laser efficiency 90'].every((text) => named(mjolnir, text))),
+        expectThat(`the verdict on a cost beyond the domain is ${mjolnir.verdict} at ${statusOf(mjolnir.feasibility)}`, mjolnir.verdict === 'infeasible' && statusOf(mjolnir.feasibility) === 'estimated' && ruleOf(mjolnir.feasibility) === 'design.missileFeasibility'),
+        expectThat(`the verdict on a size of a design beyond the domain is ${statusOf(mjolnirSized.feasibility)}, not confirmed`, mjolnirSized.verdict === 'feasible' && statusOf(mjolnirSized.feasibility) === 'confirmed'),
+        expectThat('a design at the highest figures of the domain is not confirmed', confirmed(inside) && inside.options.every((option) => statusOf(option.msp) === 'confirmed')),
+        expectThat(`a thermal sensor of the same strength as design 500724 with a tech level within the domain is ${statusOf(sameStrength.totals.cost)}, not estimated`, sameTechs(sameStrength.candidate) && near(valueOrNull(sameStrength.figures.sensorStrengths.thermal), 150) && estimated(sameStrength) && named(sameStrength, 'thermal sensor strength 150')),
+        expectThat(`a thermal sensor one tech level up at the size of the domain is ${statusOf(nextLevel.totals.cost)}, not estimated`, near(valueOrNull(nextLevel.figures.sensorStrengths.thermal), 0.19) && estimated(nextLevel) && named(nextLevel, 'thermal sensor strength 0.19') && !named(nextLevel, 'thermal sensor size')),
+        expectThat('a warhead at the damage of the domain is not confirmed', confirmed(damageAtBound) && damageAtBound.candidate.warheadMsp < domain.warheadMsp),
+        expectThat('a warhead over the damage of the domain, with a size and a tech within it, is not estimated', estimated(damageOver) && named(damageOver, 'warhead damage') && !named(damageOver, 'warhead size') && damageOver.candidate.warheadMsp < domain.warheadMsp),
+        expectThat('a design with second stages has a flight time or an endurance that is confirmed', flight.every((name) => statusOf(staged.figures[name]) === 'estimated' && ruleOf(staged.figures[name]) === 'design.missileAccountingExtended' && isAvailable(staged.figures[name]))),
+        expectThat('the speed, fuel, size or cost of a design with second stages is not confirmed', [staged.figures.speed, staged.figures.fuelRequired, staged.totals.size].every((result) => statusOf(result) === 'confirmed') && confirmed(staged)),
+        expectThat('an estimated endurance or range is counted', !counted(staged, 'endurance') && !counted(staged, 'maxRange') && counted(staged, 'speed')),
+        expectThat('an estimated endurance is not excluded with its reason', staged.efficacy.excluded.some((entry) => entry.id === 'endurance' && entry.reason.includes('estimated') && entry.reason.includes('154678'))),
+        expectThat('the flight figures of a design with no second stage are not confirmed', flight.every((name) => statusOf(inside.figures[name]) === 'confirmed') && counted(inside, 'endurance') && counted(inside, 'maxRange'))
+      )
+    }],
+    [N.mounting, () => {
+      const tech = arrow().tech
+      const rowOf = (fixture, id) => ({ ...designOf(fixture, id).row })
+      const arrowRow = rowOf(modded, 154261)
+      const decoyRow = rowOf(modded, 154198)
+      const boxcarRow = rowOf(stock, 154678)
+      const project = (row, parts) => library.savedMissileCandidate(row, { tech, ...parts })
+      const budget = { maxMsp: 1000, maxBp: 10 }
+      const noEngine = project(arrowRow, { engine: null, stage: null })
+      const undefinedEngine = project(arrowRow, { stage: null })
+      const noStage = library.savedMissileCandidate(boxcarRow, { engine: library.missileEngineOf(stock, boxcarRow), stage: null, tech: boxcar().tech })
+      const noSize = project({ ...arrowRow, MSPEngine: 0, Speed: 0 }, { engine: null, stage: null })
+      const none = project(decoyRow, { engine: null, stage: null })
+      const evaluated = [noEngine, undefinedEngine, noStage, noSize].map((candidate) => evaluate(candidate, { budget }))
+
+      return firstFailure(
+        expectThat('the row of the Arrow, given no record of its engine, counts no engine', noEngine.engines === 1 && Boolean(noEngine.engine) && noEngine.engine.missing === true && noEngine.engine.storedMsp === 6 && undefinedEngine.engines === 1 && undefinedEngine.engine.missing === true),
+        expectThat('a row that shows a part mounted, given no record of it, is feasible or confirmed', evaluated.every((evaluation) => evaluation.verdict === 'unknown' && !isAvailable(evaluation.feasibility) && library.admitMissiles([evaluation]).admitted.length === 0)),
+        expectThat('the engine of a row given no record is given a cost', !isAvailable(optionOf(evaluated[0], 'engine').bp) && !isAvailable(evaluated[0].totals.cost)),
+        expectThat('the row of the Sticky Bomb, given no record of its second stages, counts none', noStage.stages === 9 && noStage.stage.missing === true && optionOf(evaluated[2], 'secondStage').status === 'unknown'),
+        expectThat('an engine whose size the row does not store is given a size', noSize.engine.missing === true && noSize.engine.storedMsp === null && !isAvailable(optionOf(evaluated[3], 'engine').msp)),
+        expectThat('a design with no engine mounted is not counted 0 engines', none.engine === null && none.engines === 0),
+        expectThat('an engine given for a row that shows none mounted is not refused', throws(() => project(decoyRow, { engine: library.missileEngineOf(modded, arrowRow), stage: null }))),
+        expectThat('a second stage given for a row that shows none mounted is not refused', throws(() => project(arrowRow, { engine: library.missileEngineOf(modded, arrowRow), stage: noStage.stage }))),
+        expectThat('a row that shows an engine mounted and counts none is not refused', throws(() => project({ ...arrowRow, NumEngines: 0 }, { engine: null, stage: null }))),
+        expectThat('a row that shows a second stage mounted and counts none is not refused', throws(() => library.savedMissileCandidate({ ...boxcarRow, NumSS: 0 }, { engine: library.missileEngineOf(stock, boxcarRow), stage: null, tech: boxcar().tech })))
+      )
+    }],
+  ]
+}
+
+const missileChecks = (library, data) => [...reconciliationChecks(library, data), ...evaluatorChecks(library, data)]
+
+// A planted fault: `find` (text found once in design-rules.js, design-data.js or missile-reconcile.js) becomes `replace` in a copy of them, and every check named in `fails` must then fail.
 const MISSILE_MUTANTS = [
   { name: 'the ECCM add-on given no size', find: 'export const ECCM_MSP = 0.25', replace: 'export const ECCM_MSP = 0', fails: [N.twelve, N.addOns] },
   { name: 'the terminal guidance add-on given no size', find: 'export const TERMINAL_GUIDANCE_MSP = 0.25', replace: 'export const TERMINAL_GUIDANCE_MSP = 0', fails: [N.twelve, N.addOns] },
@@ -1094,15 +1420,15 @@ const MISSILE_MUTANTS = [
   { name: 'the speed not capped', find: 'Math.min(MAX_MISSILE_SPEED, roundHalfEven(enginePower / (size / MSP_PER_HS) * 1000, 1))', replace: 'roundHalfEven(enginePower / (size / MSP_PER_HS) * 1000, 1)', fails: [N.capAndFloor] },
   { name: 'the size not floored at 1', find: '} else if (size < MIN_MISSILE_SIZE) {', replace: '} else if (false) {', fails: [N.capAndFloor] },
   { name: 'the endurance rounded to 2 decimals', find: 'roundHalfEven(ownFuel / (enginePower * engine.fuelEfficiency) * 3600, 1)', replace: 'roundHalfEven(ownFuel / (enginePower * engine.fuelEfficiency) * 3600, 2)', fails: [N.stockArrow, N.fuel] },
-  { name: 'the fuel rounded to a litre instead of cut', find: 'export const floorExact = (value) => Math.floor(value + 1e-9)', replace: 'export const floorExact = (value) => Math.round(value)', fails: [N.fuel] },
+  { name: 'the fuel rounded to a litre instead of cut', find: 'const floorExact = (value) => Math.floor(value + 1e-9)', replace: 'const floorExact = (value) => Math.round(value)', fails: [N.fuel] },
   { name: 'a ship decoy not given 5 MSP at least', find: 'if (shipDecoy && size < MIN_SHIP_DECOY_SIZE) {', replace: 'if (false) {', fails: [N.decoy] },
   { name: 'a ship decoy costed at 1 BP a MSP', find: 'export const SHIP_DECOY_BP_PER_MSP = 4', replace: 'export const SHIP_DECOY_BP_PER_MSP = 1', fails: [N.decoy] },
   { name: 'a ship decoy given 100 strength a MSP', find: 'export const SHIP_DECOY_STRENGTH_PER_MSP = 200', replace: 'export const SHIP_DECOY_STRENGTH_PER_MSP = 100', fails: [N.decoy] },
   { name: 'a warhead after the first given no size', find: 'export const EXTRA_WARHEAD_MSP = 0.1', replace: 'export const EXTRA_WARHEAD_MSP = 0', fails: [N.extraWarhead] },
   { name: 'a second stage counted once whatever their number', find: 'contribution(stage.size * stages, stage.cost * stages,', replace: 'contribution(stage.size, stage.cost * stages,', fails: [N.stage] },
   { name: 'the fuel of the second stages left out', find: 'ownFuel + (stage && stages > 0 ? stage.fuelRequired * stages : 0)', replace: 'ownFuel', fails: [N.stage] },
-  { name: 'a second stage the save lacks counted as nothing', find: "contributions.secondStage = contribution(null, null, null, 'the second stage design is not in the save')", replace: 'contributions.secondStage = contribution(0, 0, {})', fails: [N.noStage] },
-  { name: 'a case the rules do not cover counted as agreement', find: "if (comparison.unsupported) {\n    return 'unsupported'", replace: "if (comparison.unsupported) {\n    return 'agree'", fails: [N.unsupported] },
+  { name: 'a second stage the save lacks counted as nothing', find: 'contributions.secondStage = contribution(null, null, null, stage.reason || STAGE_MISSING)', replace: 'contributions.secondStage = contribution(0, 0, {})', fails: [N.noStage] },
+  { name: 'a case the rules do not cover counted as agreement', find: "if (comparison.unsupported) {\n      return 'unsupported'", replace: "if (comparison.unsupported) {\n      return 'agree'", fails: [N.unsupported] },
   { name: 'a figure the rules cannot give read as 0', find: 'computed: isKnown(computed) ? computed : null, kind', replace: 'computed: isKnown(computed) ? computed : 0, kind', fails: [N.noReactor, N.noEngine, N.noStage, N.unresolved] },
   { name: 'a figure the save does not store read as 0', find: 'stored: isKnown(stored) ? stored : null,', replace: 'stored: isKnown(stored) ? stored : 0,', fails: [N.nullMineral] },
   { name: 'a size limit taken as the cause of an oversize without the speed', find: ' && isKnown(capped.figures.speed) && agrees(row.Speed, capped.figures.speed)', replace: '', fails: [N.sizeLimit] },
@@ -1111,78 +1437,197 @@ const MISSILE_MUTANTS = [
   { name: 'a pinned difference explained in any game', find: 'candidate.game === game && ', replace: '', fails: [N.known] },
   { name: 'a pinned difference explained at 1e-6 of its figures', find: 'const pinned = (audited, found) => agrees(audited, found)', replace: 'const pinned = (audited, found) => Math.abs(audited - found) <= 1e-9 + 1e-6 * Math.max(Math.abs(audited), Math.abs(found))', fails: [N.known] },
   { name: 'a resolved level not marked as resolved from the stored figure', find: "RESOLVED: 'resolved-from-stored'", replace: "RESOLVED: 'reproduced'", fails: [N.basis] },
-  { name: 'an engine the save lacks costed at 0 BP', find: "contribution(engine.storedMsp, null, { Boronide: null, Gallicite: null }, 'the engine component the design names is not in the save')", replace: "contribution(engine.storedMsp, 0, { Boronide: 0, Gallicite: 0 }, 'the engine component the design names is not in the save')", fails: [N.noEngine] },
+  { name: 'an engine the save lacks costed at 0 BP', find: 'contribution(engine.storedMsp, null, { Boronide: null, Gallicite: null }, engine.reason || ENGINE_MISSING)', replace: 'contribution(engine.storedMsp, 0, { Boronide: 0, Gallicite: 0 }, engine.reason || ENGINE_MISSING)', fails: [N.noEngine] },
   { name: 'the engine cost not shared between Boronide and Gallicite', find: '{ Boronide: engineBp / 2, Gallicite: engineBp / 2 }', replace: '{ Boronide: engineBp, Gallicite: 0 }', fails: [N.engineMsp, N.twelve] },
   { name: 'the resolution of a sensor to the power 1/3', find: 'resolution ** (2 / 3)', replace: 'resolution ** (1 / 3)', fails: [N.sensorRange] },
   { name: 'the EM sensor given the strength of the thermal one', find: "sensorContribution('em', emMsp, strengths[2])", replace: "sensorContribution('em', emMsp, strengths[1])", fails: [N.emGeo] },
   { name: 'a decoy given 1 MSP', find: 'export const DECOY_MSP = 0.5', replace: 'export const DECOY_MSP = 1', fails: [N.decoys] },
   { name: 'the tolerance of 1e-6', find: 'export const REPRODUCTION_TOLERANCE = 1e-9', replace: 'export const REPRODUCTION_TOLERANCE = 1e-6', fails: [N.tolerance] },
-  { name: 'a design with no warhead given an unknown strength', find: 'export const warheadStrength = ({ warheadMsp, warheadTech, radiationMultiplier = 1, shipDecoy = false }) => {\n  if (!(warheadMsp > 0)) {', replace: 'export const warheadStrength = ({ warheadMsp, warheadTech, radiationMultiplier = 1, shipDecoy = false }) => {\n  if (false) {', fails: [N.noWarhead] },
+  { name: 'a design with no warhead given an unknown strength', find: 'export const missileWarheadStrength = ({ warheadMsp, warheadTech, radiationMultiplier = 1, shipDecoy = false }) => {\n  if (!(warheadMsp > 0)) {', replace: 'export const missileWarheadStrength = ({ warheadMsp, warheadTech, radiationMultiplier = 1, shipDecoy = false }) => {\n  if (false) {', fails: [N.noWarhead] },
   { name: 'a stored figure no held level gives taken from the level held now', find: ': line(LINE_STATE.UNRESOLVED, null, why, { matches: [], current })', replace: ': line(LINE_STATE.RESOLVED, current, null, { matches: [], current })', fails: [N.unresolved] },
-  { name: 'a level the race does not hold not reported', find: '    if (entry.state === LINE_STATE.UNRESOLVED) {', replace: '    if (false) {', fails: [N.recorded, N.lines] },
-  { name: 'only the recorded levels reported when the race does not hold them', find: '    if (entry.state === LINE_STATE.UNRESOLVED) {', replace: "    if (entry.state === LINE_STATE.UNRESOLVED && ['emSensitivity', 'laserFocus', 'missileEcm'].includes(name)) {", fails: [N.lines] },
+  { name: 'a level the race does not hold not reported', find: '      if (entry.state === LINE_STATE.UNRESOLVED) {', replace: '      if (false) {', fails: [N.recorded, N.lines] },
+  { name: 'only the recorded levels reported when the race does not hold them', find: '      if (entry.state === LINE_STATE.UNRESOLVED) {', replace: "      if (entry.state === LINE_STATE.UNRESOLVED && ['emSensitivity', 'laserFocus', 'missileEcm'].includes(name)) {", fails: [N.lines] },
   { name: 'the Tritanium and cost of a warhead half its damage', find: 'export const WARHEAD_BP_DIVISOR = 4', replace: 'export const WARHEAD_BP_DIVISOR = 2', fails: [N.historical, N.twelve] },
   { name: 'the fuel given no size', find: 'contributions.fuel = contribution(fuelMsp, 0, {})', replace: 'contributions.fuel = contribution(0, 0, {})', fails: [N.twelve, N.stockArrow] },
+  { name: 'a candidate over a limit never infeasible', find: 'const over = (found, allowed) => found > allowed && !agrees(found, allowed)', replace: 'const over = () => false', fails: [N.overBudget] },
+  { name: 'a limit compared without the tolerance of the figures', find: 'const over = (found, allowed) => found > allowed && !agrees(found, allowed)', replace: 'const over = (found, allowed) => found > allowed', fails: [N.overBudget] },
+  { name: 'the size compared without what the options ask for', find: 'Math.max(totals.size.value, totals.sizeSum.value)', replace: 'totals.size.value', fails: [N.overBudget] },
+  { name: 'the cost limit never compared', find: "['cost', limits.maxBp, totals.cost.value]", replace: "['cost', null, totals.cost.value]", fails: [N.overBudget] },
+  { name: 'the mineral limits never compared', find: ', ...Object.entries(limits.minerals).map(([name, allowed]) => [name, allowed, totals.minerals[name].value])]', replace: ']', fails: [N.overBudget] },
+  { name: 'an unknown option left out of the verdict', find: "if (unknown.length) {\n    return { ...base, verdict: 'unknown'", replace: "if (false) {\n    return { ...base, verdict: 'unknown'", fails: [N.unknownAccounting] },
+  { name: 'an unsupported option left out of the verdict', find: "if (unsupported.length) {\n    return { ...base, verdict: 'unsupported'", replace: "if (false) {\n    return { ...base, verdict: 'unsupported'", fails: [N.unsupportedOptions] },
+  { name: 'every evaluation admitted before ranking', find: "if (evaluation.verdict === 'feasible') {", replace: 'if (true) {', fails: [N.overBudget, N.unknownAccounting, N.unsupportedOptions] },
+  { name: 'every evaluation not infeasible admitted before ranking', find: "if (evaluation.verdict === 'feasible') {", replace: "if (evaluation.verdict !== 'infeasible') {", fails: [N.unknownAccounting, N.unsupportedOptions] },
+  { name: 'an effect with a rule counted without the rule confirmed', find: 'const verified = Boolean(rule) && rule.verification === STATUS.CONFIRMED', replace: 'const verified = Boolean(rule)', fails: [N.efficacy] },
+  { name: 'an effect with a value counted without being verified', find: 'const counted = verified && value !== null', replace: 'const counted = value !== null', fails: [N.efficacy] },
+  { name: 'the guidance of the candidate left out of its hit chance', find: 'atg: input.options.terminal, eccm: input.options.eccm', replace: 'atg: 1, eccm: input.options.eccm', fails: [N.efficacy] },
+  { name: 'a ground pod not unsupported', find: 'if (input.groundPod) {', replace: 'if (false) {', fails: [N.unsupportedOptions] },
+  { name: 'an enhanced radiation warhead not unsupported', find: 'if (input.enhancedRadiation && !found.warhead) {', replace: 'if (false) {', fails: [N.unsupportedOptions] },
+  { name: 'a retargeting level above 1 not unsupported', find: 'if (input.options.retarget > VALIDATED_RETARGETING && !found.retarget) {', replace: 'if (false) {', fails: [N.unsupportedOptions] },
+  { name: 'a retargeting level above 1 given its size', find: 'found.retarget = { reason: RETARGETING_REASON, size: true }', replace: 'found.retarget = { reason: RETARGETING_REASON, size: false }', fails: [N.unsupportedOptions] },
+  { name: 'the size and the cost of an option swapped', find: "msp: result(entry.msp, 'MSP'), bp: result(entry.bp, 'BP', outside)", replace: "msp: result(entry.bp, 'MSP'), bp: result(entry.msp, 'BP', outside)", fails: [N.roundTrip] },
+  { name: 'an option with an unknown figure reported known', find: "const status = rejection ? 'unsupported' : complete ? 'known' : 'unknown'", replace: "const status = rejection ? 'unsupported' : 'known'", fails: [N.roundTrip, N.unknownAccounting] },
+  { name: 'the minerals of the totals taken from one mineral', find: "missileFigure(raw.minerals[name], 'minerals', why, outside)", replace: "missileFigure(raw.minerals.Tritanium, 'minerals', why, outside)", fails: [N.roundTrip] },
+  { name: 'the size limit of a candidate dropped', find: "sizeLimit: amountOf(optional(candidate.sizeLimit, 0), 'sizeLimit'),", replace: 'sizeLimit: 0,', fails: [N.roundTrip, N.overBudget] },
+  { name: 'the decoys of a candidate dropped', find: "decoys: countOf(optional(candidate.decoys, 0), 'decoys'),", replace: 'decoys: 0,', fails: [N.roundTrip] },
+  { name: 'the second stages of a candidate dropped', find: "const stages = countOf(optional(candidate.stages, hasStage ? 1 : 0), 'stages')", replace: 'const stages = 0', fails: [N.roundTrip] },
+  { name: 'the size of an engine that is not known dropped', find: "storedMsp: techOf(engine.storedMsp, 'engine.storedMsp'),", replace: 'storedMsp: 0,', fails: [N.roundTrip] },
+  { name: 'a tech that is not known read as 0', find: '(value === null || value === undefined ? null : amountOf(value, name))', replace: '(value === null || value === undefined ? 0 : amountOf(value, name))', fails: [N.unknownAccounting] },
+  { name: 'an engine with a tech that is not known designed from nothing', find: 'if (lacking.length) {', replace: 'if (false) {', fails: [N.unknownAccounting] },
+  { name: 'a size that is not valid accepted', find: "if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {", replace: 'if (false) {', fails: [N.validation] },
+  { name: 'a field the candidate does not have accepted', find: 'if (extra.length) {', replace: 'if (false) {', fails: [N.validation] },
+  { name: 'the efficacy rule registered as confirmed', find: "units: '',\n  verification: 'assumed',\n  structure: ['design.missileAccounting', 'the missileHit rules'],", replace: "units: '',\n  verification: 'confirmed',\n  structure: ['design.missileAccounting', 'the missileHit rules'],", fails: [N.registered] },
+  { name: 'a cost beyond the checked quantities confirmed', find: 'const outside = missileCostOutside(input, raw)', replace: 'const outside = []', fails: [N.provenance] },
+  { name: 'the highest checked quantity itself estimated', find: 'found[id] > MISSILE_COST_DOMAIN[id] && !agrees(found[id], MISSILE_COST_DOMAIN[id])', replace: 'found[id] >= MISSILE_COST_DOMAIN[id]', fails: [N.provenance] },
+  { name: 'the checked thermal sensor strength raised past the modded sample', find: 'thermalStrength: 0.18', replace: 'thermalStrength: 150', fails: [N.provenance] },
+  { name: 'the sensor strengths left out of the cost domain', find: "{ id: 'thermalStrength', label: 'thermal sensor strength', read: (_input, raw) => raw.strengths.thermal },", replace: "{ id: 'thermalStrength', label: 'thermal sensor strength', read: () => null },", fails: [N.provenance] },
+  { name: 'the sensor sizes left out of the cost domain', find: "{ id: 'thermalMsp', label: 'thermal sensor size', read: (input) => input.thermalMsp },", replace: "{ id: 'thermalMsp', label: 'thermal sensor size', read: () => null },", fails: [N.provenance] },
+  { name: 'the warhead damage left out of the cost domain', find: "{ id: 'warheadDamage', label: 'warhead damage', read: (input, raw) => (input.shipDecoy ? 0 : raw.baseWarheadDamage) },", replace: "{ id: 'warheadDamage', label: 'warhead damage', read: () => null },", fails: [N.provenance] },
+  { name: 'the reactor output left out of the cost domain', find: "{ id: 'reactorOutput', label: 'sensor reactor output', read: (_input, raw) => raw.reactorOutput },", replace: "{ id: 'reactorOutput', label: 'sensor reactor output', read: () => null },", fails: [N.provenance] },
+  { name: 'the engine cost left out of the cost domain', find: "{ id: 'engineBp', label: 'engine cost', read: (input) => (input.engine && input.engines > 0 ? (input.engine.missing ? null : input.engine.cost * input.engines) : 0) },", replace: "{ id: 'engineBp', label: 'engine cost', read: () => null },", fails: [N.provenance] },
+  { name: 'the endurance and flight time of second stages confirmed', find: 'const staged = input.stages > 0 ? [STAGED_FLIGHT_ASSUMPTION] : []', replace: 'const staged = []', fails: [N.provenance] },
+  { name: 'the feasibility taken at its own status', find: 'parts: compared, compute:', replace: 'parts: {}, compute:', fails: [N.provenance] },
+  { name: 'an estimated figure counted as confirmed', find: 'rule.verification === STATUS.CONFIRMED && !weak', replace: 'rule.verification === STATUS.CONFIRMED', fails: [N.provenance] },
+  { name: 'an omitted stage mineral read as 0', find: '[name, amountOf(stage.minerals[name], ', replace: '[name, amountOf(stage.minerals[name] ?? 0, ', fails: [N.validation] },
+  { name: 'an engine counted with no engine accepted', find: 'if (engines > 0 && !hasEngine) {', replace: 'if (false) {', fails: [N.validation] },
+  { name: 'a stage counted with no stage accepted', find: 'if (stages > 0 && !hasStage) {', replace: 'if (false) {', fails: [N.validation] },
+  { name: 'the engines of an engine-less saved design counted', find: 'engines: engineMounted ? row.NumEngines : 0', replace: 'engines: row.NumEngines', fails: [N.roundTrip, N.validation] },
+  { name: 'the Vendarite of a saved stage left out', find: 'Corundium: stage.row.Cost - stored, Vendarite: 0 }', replace: 'Corundium: stage.row.Cost - stored }', fails: [N.roundTrip] },
+  { name: 'the engine of a saved design counted from the record given', find: 'engines: engineMounted ? row.NumEngines : 0', replace: 'engines: engine ? row.NumEngines : 0', fails: [N.mounting] },
+  { name: 'the second stages of a saved design counted from the record given', find: 'stages: stageMounted ? row.NumSS : 0', replace: 'stages: stage ? row.NumSS : 0', fails: [N.mounting] },
+  { name: 'a mounted engine given no record dropped', find: 'engine: engineMounted ? engine || missingMissileEngine(row) : null', replace: 'engine: engine || null', fails: [N.mounting] },
+  { name: 'a mounted second stage given no record dropped', find: 'stage: stageMounted ? stage || { missing: true } : null', replace: 'stage: stage || null', fails: [N.mounting] },
+  { name: 'an engine given for a row that mounts none accepted', find: 'if (!engineMounted && engine) {', replace: 'if (false) {', fails: [N.mounting] },
+  { name: 'a second stage given for a row that mounts none accepted', find: 'if (!stageMounted && stage) {', replace: 'if (false) {', fails: [N.mounting] },
+  { name: 'a mounted part with no count accepted', find: 'if ((engineMounted && !(row.NumEngines > 0)) || (stageMounted && !(row.NumSS > 0))) {', replace: 'if (false) {', fails: [N.mounting] },
+  { name: 'the engine size the row does not store read as 0', find: 'storedMsp: row.MSPEngine > 0 ? row.MSPEngine : null', replace: 'storedMsp: row.MSPEngine', fails: [N.mounting] },
+  { name: 'an engine mounted read from the count of the row', find: 'const mountsMissileEngine = (row) => row.EngineID > 0 || row.MSPEngine > 0 || row.Speed > 0', replace: 'const mountsMissileEngine = (row) => row.NumEngines > 0', fails: [N.mounting] },
 ]
 
-const copiedLibrary = (find, replace) => {
-  const source = fs.readFileSync(path.join(MISSILE_LIBRARY, 'missile-accounting.js'), 'utf8')
-  const found = source.split(find).length - 1
+// What a planted fault can change: the rules and the loaders of the utilities and the reconciliation of scripts/lib. `UTILITY_CLOSURE` is every utility the first two load, copied with them so the mutant loads on its own.
+const PLANTABLE = [{ name: 'design-rules', directory: UTILITIES }, { name: 'design-data', directory: UTILITIES }, { name: 'missile-reconcile', directory: MISSILE_LIBRARY }]
+const UTILITY_CLOSURE = ['design-rules', 'design-data', 'provenance', 'tank-packing', 'missile-hit', 'capabilities', 'capability-reads']
+
+// Copies the utilities and the reconciliation into a temporary folder with `replace` in place of `find`, which must be found once in one of the files that can be planted. Returns the folder and the two folders to load from.
+const plantedFault = (find, replace) => {
+  const holders = PLANTABLE.map((file) => ({ ...file, source: fs.readFileSync(path.join(file.directory, `${file.name}.js`), 'utf8') })).filter(({ source }) => source.includes(find))
+
+  if (holders.length !== 1) {
+    throw new Error(`the text to cut is in ${holders.length} files, not one`)
+  }
+
+  const found = holders[0].source.split(find).length - 1
 
   if (found !== 1) {
     throw new Error(`the text to cut is found ${found} times, not once`)
   }
 
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-missile-mutant-'))
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-missile-mutant-'))
+  const utilities = path.join(root, 'utilities')
+  const library = path.join(root, 'lib')
 
-  fs.writeFileSync(path.join(directory, 'missile-accounting.js'), source.replace(find, () => replace))
+  fs.mkdirSync(utilities)
+  fs.mkdirSync(library)
 
-  return directory
+  for (const { name, directory, target } of [...UTILITY_CLOSURE.map((name) => ({ name, directory: UTILITIES, target: utilities })), { name: 'missile-reconcile', directory: MISSILE_LIBRARY, target: library }]) {
+    const source = fs.readFileSync(path.join(directory, `${name}.js`), 'utf8')
+
+    fs.writeFileSync(path.join(target, `${name}.js`), holders[0].name === name ? source.replace(find, () => replace) : source)
+  }
+
+  return { root, utilities, library }
 }
 
-// Every mutant runs on its own copy of the library, loaded from a temporary folder that is removed after, and only the checks it names are run. It is caught when each of them fails.
-const runMutants = async (data) => {
-  const caught = []
-  const missed = []
+// One planted fault on its own copy of the rules, loaders and reconciliation, loaded from a temporary folder that is removed after, with only the checks it names run. The result is { status: 'caught' | 'survived' | 'not run', message }: caught when each named check fails.
+const tryMutant = async ({ find, replace, fails }, data) => {
+  let planted = null
 
-  for (const { name, find, replace, fails } of MISSILE_MUTANTS) {
-    let directory = null
+  try {
+    planted = plantedFault(find, replace)
 
+    const named = missileChecks(await loadMissileLibrary(planted), data).filter(([checkName]) => fails.includes(checkName))
+    const absent = fails.filter((start) => !named.some(([checkName]) => checkName === start))
+    const passing = named.filter(([, test]) => outcome(test) === true).map(([checkName]) => checkName)
+
+    if (absent.length || passing.length) {
+      return { status: 'survived', message: absent.length ? `no check is named ${absent.join('; ')}` : `these checks still pass: ${passing.join('; ')}` }
+    }
+
+    return { status: 'caught', message: `${named.length} named checks fail` }
+  } catch (error) {
+    return { status: 'not run', message: error.message }
+  } finally {
+    if (planted) {
+      fs.rmSync(planted.root, { recursive: true, force: true })
+    }
+  }
+}
+
+// A mutant in a process of its own: the loader of the utilities imports modules from data URLs made of their source, so two copies of an unchanged utility in one process are one module with one rule registry, and a fault that changes what is registered would reach the checks that follow it. A process that dies with no result is a mutant that did not run.
+const mutantInProcess = (name) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [__filename, '--run-mutant', name], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = ''
+  let errors = ''
+
+  child.stdout.on('data', (chunk) => {
+    output += chunk
+  })
+  child.stderr.on('data', (chunk) => {
+    errors += chunk
+  })
+  child.on('error', reject)
+  child.on('close', (code) => {
     try {
-      directory = copiedLibrary(find, replace)
+      resolve(JSON.parse(output.trim().split('\n').pop()))
+    } catch {
+      resolve({ status: 'not run', message: `the process exited with ${code} and no result: ${(errors || output).trim().slice(0, 400)}` })
+    }
+  })
+})
 
-      const named = missileChecks(await loadMissileLibrary(directory), data).filter(([checkName]) => fails.includes(checkName))
-      const absent = fails.filter((start) => !named.some(([checkName]) => checkName === start))
-      const passing = named.filter(([, test]) => outcome(test) === true).map(([checkName]) => checkName)
+const MUTANT_PROCESSES = Math.max(1, Math.min(4, os.cpus().length - 1))
 
-      if (absent.length || passing.length) {
-        missed.push(name)
-        console.log(`MUTANT SURVIVED: ${name}: ${absent.length ? `no check is named ${absent.join('; ')}` : `these checks still pass: ${passing.join('; ')}`}`)
-      } else {
-        caught.push(name)
-        console.log(`mutant caught: ${name}: ${named.length} named checks fail`)
-      }
-    } catch (error) {
-      missed.push(name)
-      console.log(`MUTANT NOT RUN: ${name}: ${error.message}`)
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
+// Every mutant runs in a process of its own, at most MUTANT_PROCESSES at a time, and the results are printed in the order of the list. A mutant is caught when each check it names fails.
+const runMutants = async () => {
+  const results = new Array(MISSILE_MUTANTS.length)
+  let next = 0
+
+  const worker = async () => {
+    while (next < MISSILE_MUTANTS.length) {
+      const index = next++
+
+      results[index] = await mutantInProcess(MISSILE_MUTANTS[index].name)
     }
   }
 
-  return { caught: caught.length, missed: missed.length }
+  await Promise.all(Array.from({ length: Math.min(MUTANT_PROCESSES, MISSILE_MUTANTS.length) }, worker))
+
+  let caught = 0
+
+  results.forEach(({ status, message }, index) => {
+    const { name } = MISSILE_MUTANTS[index]
+
+    if (status === 'caught') {
+      caught++
+      console.log(`mutant caught: ${name}: ${message}`)
+    } else {
+      console.log(`${status === 'survived' ? 'MUTANT SURVIVED' : 'MUTANT NOT RUN'}: ${name}: ${message}`)
+    }
+  })
+
+  return { caught, missed: MISSILE_MUTANTS.length - caught }
 }
 
 // The reports of the fixtures, the checks of the rules and the mutants of the library, with no save. The exit code is 1 when a report has a mismatch, a check fails or a mutant survives.
 const runFixtures = async () => {
   const data = loadFixtures()
   const library = await loadMissileLibrary()
+  const registry = () => JSON.stringify(library.provenance.listRules())
+  const registryBefore = registry()
   const totals = { checked: 0, mismatches: 0, explained: 0, unsupported: 0, unknown: 0, resolved: 0 }
 
   for (const fixture of data.values()) {
-    const report = reconcileFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`)
+    const report = reconcileFixture(library, fixture, `fixture ${fixture.label} (${fixture.save}, game ${fixture.game}; ${fixture.scope}): ${fixture.note}`, { ruleIds: [] })
 
     report.print(null)
     totals.checked += report.checked
@@ -1206,18 +1651,32 @@ const runFixtures = async () => {
     console.log(result === true ? `check passed: ${name}` : `CHECK FAILED: ${name}: ${result}`)
   }
 
-  const mutants = await runMutants(data)
+  const mutants = await runMutants()
+  const registryAfter = registry()
+  const registrySame = registryBefore === registryAfter
 
+  console.log(registrySame ? 'check passed: the rule registry of the checks is the same after the checks and the mutants' : 'CHECK FAILED: the rule registry of the checks is not the same after the checks and the mutants: a check or a mutant registered or changed a rule of the shared registry')
   console.log(`fixtures: ${data.size}, ${totals.checked} compared, ${totals.mismatches} mismatches, ${totals.explained} explained, ${totals.unsupported} unsupported, ${totals.unknown} unknown; ${totals.resolved} of the compared resolved from the stored figure`)
-  console.log(`checks: ${checks.length - failedChecks} of ${checks.length} pass; mutants: ${mutants.caught} of ${MISSILE_MUTANTS.length} caught`)
+  console.log(`checks: ${checks.length + 1 - failedChecks - (registrySame ? 0 : 1)} of ${checks.length + 1} pass; mutants: ${mutants.caught} of ${MISSILE_MUTANTS.length} caught`)
 
-  return totals.mismatches || failedChecks || mutants.missed ? 1 : 0
+  return totals.mismatches || failedChecks || !registrySame || mutants.missed ? 1 : 0
 }
 
 const CHECKS = { engine: checkEngines, speed: checkSpeeds, range: checkRanges, jump: checkJumpDrives, maintenance: checkMaintenance, missile: checkMissiles }
 
 const main = async () => {
   const options = parseArguments(process.argv.slice(2))
+
+  if (options.mutant !== null) {
+    const mutant = MISSILE_MUTANTS.find(({ name }) => name === options.mutant)
+
+    if (!mutant) {
+      fail(`No planted fault named ${options.mutant}`)
+    }
+
+    console.log(JSON.stringify(await tryMutant(mutant, loadFixtures())))
+    process.exit(0)
+  }
 
   if (options.fixtures) {
     process.exit(await runFixtures())
