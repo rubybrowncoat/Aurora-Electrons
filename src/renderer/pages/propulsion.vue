@@ -235,6 +235,8 @@
           </div>
         </v-card>
 
+        <mission-brief-panel :draft="briefDraft" :identity="briefOpening" :saved="briefSaved" :ahead="briefAhead" :selected="briefEntry ? briefEntry.uuid : null" :dirty="briefDirty" :can-save="briefCanSave" :problems="briefProblems" :evaluation="briefEvaluation" :preview="briefPreview" :accepted="briefAccepted" :presets="briefPresets" :size-unit="briefSizeUnit" :message="briefNotice" :conflict="briefConflict" :pending="pendingBrief" @select="selectBrief" @new="newBrief" @preset="previewBriefPreset" @field="setBriefField" @axes="setBriefAxes" @invalid="setBriefInvalid" @size-unit="briefSizeUnit = $event" @toggle="toggleBriefItem" @apply="applyBriefPreview" @cancel-preview="cancelBriefPreview" @save="saveBriefDraft(false)" @save-over="saveBriefDraft(true)" @remove="removeBrief" @move="moveBriefHere" @discard="discardPendingBrief" @keep="keepPendingBrief" />
+
         <v-card class="panel" data-summary="The sets no other beats on the share of the ship the propulsion takes against speed or range, to see what extra speed or range costs in hull." elevation="1">
           <div class="panel-head">
             <span>Trade-off</span>
@@ -448,6 +450,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import MissionBriefPanel from '../components/planner/MissionBriefPanel.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -459,6 +462,7 @@ import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TO
 import { engineFields, engineSweep, normaliseEngineOptions, propulsionRun } from '../utilities/design-search'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
+import { NO_CLASS_FIGURES, PRESETS, PRESET_KEYS, additionsOf, applyPreview, deleteBrief, emptyBrief, evaluateBrief, loadClassFigures, moveBrief, normaliseBrief, previewPreset, problemsOf, propulsionAlternative, readBriefs, registerBriefs, sameBrief, saveBrief, withAxes, withField } from '../utilities/mission-briefs'
 import { PARETO_AXES, axesOf, describeEmpty, describeFront, normaliseChoice } from '../utilities/pareto'
 import { STATUS, STATUSES, STATUS_MARKS, combine, describeResult, envelope, exportFields, isAvailable, ofRule, unavailable, valueOrNull, weakestStatus } from '../utilities/provenance'
 import { derive } from '../utilities/query-cache'
@@ -473,6 +477,7 @@ const INPUT_LABELS = {
   classParts: 'the engines, tanks and jump drives of the classes',
   tanks: 'the fuel tanks',
   raceEngines: 'the race\'s engines',
+  classFigures: 'the classes\' cargo, hangar and deployment',
 }
 
 // The search runs in slices of RESPONSIVENESS.sliceMs, handing the browser a turn between them to draw, and starts this long after the last change to an input.
@@ -644,7 +649,7 @@ const engineCard = (engine, name, count) => ({
 // A page for the propulsion of one hull: the engines and fuel tanks that give it a speed and a range, searched over the race's engine tech and ranked by the HS they take.
 export default {
   name: 'PropulsionPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, LoadState, MissionBriefPanel, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -661,6 +666,8 @@ export default {
       tradeView: { key: 'propulsionTradeView', default: 'chart', valid: oneOf(TRADE_VIEWS) },
       paretoAxes: { key: 'propulsionParetoAxes', default: {}, normalise: normaliseChoice, valid: (value) => value !== null && typeof value === 'object' && !Array.isArray(value) },
       sweepUnit: { key: 'propulsionSweepUnit', default: 'hs', valid: oneOf(SWEEP_UNITS) },
+      briefSelected: { key: 'propulsionBrief', default: null, scope: 'race', valid: (value) => value === null || typeof value === 'string' },
+      briefSizeUnit: { key: 'propulsionBriefSizeUnit', default: 'tons', valid: oneOf(SWEEP_UNITS) },
     }),
   ],
   data() {
@@ -691,6 +698,22 @@ export default {
       // Why the last choice was not kept in the record, and a count that makes the record be read again after a write.
       scenarioMessage: '',
       scenarioRevision: 0,
+      // The mission brief being edited: the draft every alternative is judged against, the saved brief it was opened from (its uuid) and what a preset would change, as ticked fields, before it is applied.
+      briefDraft: emptyBrief(),
+      briefOrigin: null,
+      // The revision and the payload the draft was opened at (or last saved at), kept apart from the list, which a later read moves on: a save is judged against these, so a change another writer made meanwhile is found however often the list was read again.
+      briefBaseline: null,
+      // The fields whose typed text is not a figure (the panel reports them) and a count the panel starts its text over at when another brief is opened.
+      briefInvalid: [],
+      briefOpening: 0,
+      briefPreview: null,
+      briefAccepted: [],
+      briefPresets: PRESET_KEYS.map((key) => ({ key, label: PRESETS[key].label, summary: PRESETS[key].summary })),
+      // Why the last write of a brief failed, the stored brief a stale save found, a brief waiting for the answer to discarding the unsaved changes, and a count that makes the briefs be read again after a write.
+      briefMessage: '',
+      briefConflict: null,
+      pendingBrief: null,
+      briefRevision: 0,
     }
   },
   computed: {
@@ -825,6 +848,56 @@ export default {
     // Why a record's choices are not all applied or kept: a write that failed, a file that cannot be read or made at another game time or by another version.
     scenarioNotice() {
       const parts = [this.scenarioMessage, this.records && this.records.error ? `The scenario records are not available (${this.records.error}), so the choice is kept for this page only.` : '', this.scenario.error ? `The scenario records cannot be read (${this.scenario.error.message}), so saved choices are not applied.` : '', ...this.scenario.notes.map((note) => note.reason)]
+
+      return parts.filter(Boolean).join(' ')
+    },
+
+    // The briefs of the race in the campaign as the open save reads them (see readBriefs); one made at a later game time is listed apart and is not applied.
+    briefRead() {
+      return { ...readBriefs(this.records ? this.records.repository : null, this.scope), revision: this.briefRevision }
+    },
+
+    briefSaved() {
+      return this.briefRead.entries.filter((entry) => !entry.ahead)
+    },
+
+    briefAhead() {
+      return this.briefRead.entries.filter((entry) => entry.ahead)
+    },
+
+    // The saved brief the draft was opened from, at the revision it was opened at, or null for a new one (or one another tab deleted). The list's own revision is never used: it moves on with every read.
+    briefEntry() {
+      const listed = this.briefOrigin !== null && this.briefBaseline !== null && this.briefSaved.some((entry) => entry.uuid === this.briefOrigin)
+
+      return listed ? { uuid: this.briefOrigin, revision: this.briefBaseline.revision, payload: this.briefBaseline.payload } : null
+    },
+
+    briefProblems() {
+      return problemsOf(this.briefDraft)
+    },
+
+    briefCanSave() {
+      return this.briefProblems.length === 0 && this.briefInvalid.length === 0
+    },
+
+    // Whether the draft says something else than the saved brief it was opened from (or than a blank one), or a field holds text that is not a figure yet.
+    briefDirty() {
+      return this.briefInvalid.length > 0 || !sameBrief(this.briefDraft, this.briefEntry ? this.briefEntry.payload : emptyBrief())
+    },
+
+    // Every row, the saved class and the sets, as the alternatives the brief is judged against.
+    briefAlternatives() {
+      const figures = this.selectedClass ? this.classFigures[this.selectedClass.id] || null : null
+
+      return this.rows.map((row) => propulsionAlternative(row, row.pinned ? figures : null))
+    },
+
+    briefEvaluation() {
+      return evaluateBrief(this.briefDraft, this.briefAlternatives)
+    },
+
+    briefNotice() {
+      const parts = [this.briefMessage, this.records && this.records.error ? `The scenario records are not available (${this.records.error}), so a brief cannot be kept.` : '', this.briefRead.error ? `The briefs cannot be read (${this.briefRead.error.message}).` : '', ...this.briefRead.notes.map((note) => note.reason)]
 
       return parts.filter(Boolean).join(' ')
     },
@@ -1353,6 +1426,7 @@ export default {
       this.sweepDrafts = {}
       this.heldChoices = {}
       this.scenarioMessage = ''
+      this.clearBrief()
     },
 
     database() {
@@ -1360,6 +1434,12 @@ export default {
       this.startSearch(this.searchInput)
       this.heldChoices = {}
       this.scenarioMessage = ''
+      this.clearBrief()
+    },
+
+    // The briefs are read again (the records load after the page, a save was made, a write landed): the brief the race last opened is restored once it is there.
+    briefSaved() {
+      this.restoreBrief()
     },
 
     searchInput: {
@@ -1760,6 +1840,175 @@ export default {
         this.searchError = error.message
       }
     },
+
+    // Empties the draft and what hangs on it. The brief the race last opened stays remembered, so the briefs of the next save restore it.
+    clearBrief() {
+      this.briefDraft = emptyBrief()
+      this.briefOrigin = null
+      this.briefBaseline = null
+      this.briefInvalid = []
+      this.briefOpening += 1
+      this.briefPreview = null
+      this.briefAccepted = []
+      this.briefMessage = ''
+      this.briefConflict = null
+      this.pendingBrief = null
+    },
+
+    // Opens a saved brief (target.uuid) or a blank one (target.blank) as the draft.
+    enterBrief(target) {
+      const entry = target.blank ? null : this.briefSaved.find((item) => item.uuid === target.uuid) || null
+
+      this.clearBrief()
+      this.briefOrigin = entry ? entry.uuid : null
+      this.briefBaseline = entry ? { revision: entry.revision, payload: normaliseBrief(entry.payload) } : null
+      this.briefDraft = entry ? normaliseBrief(entry.payload) : emptyBrief()
+      this.briefSelected = entry ? entry.uuid : null
+    },
+
+    // Opens the target at once, or asks first when the draft has changes that would be lost.
+    requestBrief(target) {
+      if (this.briefDirty) {
+        this.pendingBrief = target
+      } else {
+        this.enterBrief(target)
+      }
+    },
+
+    // Opens the saved brief `uuid` (none or null opens a blank one). A brief that is not listed as applying to this save, one made at a later game time among them, is not opened.
+    selectBrief(uuid) {
+      if (uuid && !this.briefSaved.some((entry) => entry.uuid === uuid)) {
+        return
+      }
+
+      this.requestBrief(uuid ? { uuid } : { blank: true })
+    },
+
+    newBrief() {
+      this.requestBrief({ blank: true })
+    },
+
+    discardPendingBrief() {
+      if (this.pendingBrief) {
+        this.enterBrief(this.pendingBrief)
+      }
+    },
+
+    keepPendingBrief() {
+      this.pendingBrief = null
+    },
+
+    // Opens the brief the race last had open, once its briefs are read and nothing has been opened or typed.
+    restoreBrief() {
+      if (this.briefOrigin === null && !this.briefDirty && this.briefSelected && this.briefSaved.some((entry) => entry.uuid === this.briefSelected)) {
+        this.enterBrief({ uuid: this.briefSelected })
+      }
+    },
+
+    setBriefField(key, value) {
+      this.briefDraft = withField(this.briefDraft, key, value)
+    },
+
+    // The fields the panel holds text in that is not a figure: the draft cannot be kept while there are any, and they count as changes.
+    setBriefInvalid(keys) {
+      this.briefInvalid = keys
+    },
+
+    setBriefAxes(axes) {
+      this.briefDraft = withAxes(this.briefDraft, axes)
+    },
+
+    // Lists what a preset would change in the draft, every empty field ticked and every field that has a value not, and changes nothing.
+    previewBriefPreset(key) {
+      this.briefPreview = previewPreset(this.briefDraft, key)
+      this.briefAccepted = additionsOf(this.briefPreview)
+      this.briefMessage = ''
+    },
+
+    toggleBriefItem(key) {
+      this.briefAccepted = this.briefAccepted.includes(key) ? this.briefAccepted.filter((item) => item !== key) : [...this.briefAccepted, key]
+    },
+
+    // Writes the ticked fields of the preview to the draft. The saved brief changes only on Save.
+    applyBriefPreview() {
+      if (!this.briefPreview) {
+        return
+      }
+
+      const outcome = applyPreview(this.briefDraft, this.briefPreview, this.briefAccepted)
+
+      this.briefDraft = outcome.draft
+      this.briefMessage = outcome.applied.length ? `${outcome.applied.length} ${outcome.applied.length === 1 ? 'field' : 'fields'} of the ${this.briefPreview.label} preset applied to the draft. The saved brief stays as it is until Save.` : 'No field was ticked, so the draft is unchanged.'
+      this.briefPreview = null
+      this.briefAccepted = []
+    },
+
+    cancelBriefPreview() {
+      this.briefPreview = null
+      this.briefAccepted = []
+    },
+
+    // Keeps the draft: a new record, or the saved brief it was opened from. A saved brief that changed meanwhile is not written over unless `overwrite` says so.
+    async saveBriefDraft(overwrite) {
+      if (!this.briefCanSave) {
+        this.briefMessage = this.briefInvalid.length ? 'A field holds text that is not a figure, so the brief is not kept. Correct the field or empty it.' : `The brief is not valid: ${this.briefProblems.join('; ')}`
+
+        return
+      }
+
+      const payload = normaliseBrief(this.briefDraft)
+      const outcome = await saveBrief(this.records ? this.records.repository : null, this.scope, { entry: this.briefEntry, payload, overwrite })
+
+      if (outcome.ok) {
+        this.briefOrigin = outcome.record.uuid
+        this.briefBaseline = { revision: outcome.record.revision, payload }
+        this.briefSelected = outcome.record.uuid
+        this.briefConflict = null
+        this.briefMessage = ''
+        this.briefRevision += 1
+      } else if (outcome.code === 'revision-conflict') {
+        this.briefConflict = { name: outcome.stored.name, revision: outcome.revision }
+        this.briefMessage = ''
+      } else {
+        this.briefMessage = outcome.message
+      }
+    },
+
+    async removeBrief() {
+      const entry = this.briefEntry
+
+      if (!entry) {
+        return
+      }
+
+      const outcome = await deleteBrief(this.records ? this.records.repository : null, this.scope, entry)
+
+      if (outcome.ok) {
+        this.clearBrief()
+        this.briefSelected = null
+        this.briefRevision += 1
+      } else {
+        this.briefMessage = outcome.message
+      }
+    },
+
+    // Moves a brief made at a later game time to this save, so that it applies here.
+    async moveBriefHere(uuid) {
+      const entry = this.briefAhead.find((item) => item.uuid === uuid)
+
+      if (!entry) {
+        return
+      }
+
+      const outcome = await moveBrief(this.records ? this.records.repository : null, this.scope, entry)
+
+      if (outcome.ok) {
+        this.briefMessage = `The brief ${entry.name} now applies to this save.`
+        this.briefRevision += 1
+      } else {
+        this.briefMessage = outcome.message
+      }
+    },
   },
   asyncComputed: {
     tech: {
@@ -1779,6 +2028,7 @@ export default {
           const records = await import('../utilities/scenario-records')
 
           registerTechScenarios(records.registerAdapter)
+          registerBriefs(records.registerAdapter)
 
           return Object.freeze({ repository: records.openScenarioRecords(), error: null })
         } catch (error) {
@@ -1826,6 +2076,16 @@ export default {
         return await loadRaceEngines(this.database, this.context)
       }),
       default: EMPTY_LIST,
+    },
+    classFigures: {
+      get: tracked('classFigures', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_CLASS_FIGURES
+        }
+
+        return await loadClassFigures(this.database, this.context)
+      }),
+      default: NO_CLASS_FIGURES,
     },
   },
 }
