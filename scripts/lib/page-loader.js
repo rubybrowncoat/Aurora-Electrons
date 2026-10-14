@@ -27,6 +27,7 @@ const PACKAGE_STUBS = {
     export const mapState = (namespace, list) => (typeof namespace === 'string' ? Object.fromEntries(pairs(list).map(([key, name]) => [key, function () { return space(this.$store.state, namespace)[name] }])) : Object.fromEntries(pairs(namespace).map(([key, name]) => [key, function () { return this.$store.state[name] }])))
     export const mapActions = (list) => Object.fromEntries(pairs(list).map(([key, name]) => [key, function (...args) { return this.$store.dispatch(name, ...args) }]))
   `,
+  electron: 'export const ipcRenderer = { invoke: () => Promise.resolve(null) }',
 }
 
 // Modules that need the app around them, by name from the renderer folder. The persisted view declares each field as data with its default; the helpers it takes describe a field and need nothing else.
@@ -38,8 +39,9 @@ const MODULE_STUBS = {
   `,
   'mixins/deep-link': 'export default {}',
   'mixins/load-state': 'export default () => ({})',
-  'components/charts/theme': 'export const chartTheme = () => ({ categorical: [], ink: \'\', inkMuted: \'\' }); export const withAlpha = (color) => color',
+  'components/charts/theme': 'export const chartTheme = () => ({ categorical: [], ink: \'\', inkMuted: \'\' }); export const withAlpha = (color) => color; export const chartFont = () => ({ family: \'Test\', size: (px) => px, font: (px, weight = 400) => weight + \' \' + px + \'px Test\' }); export const seriesIdentity = () => ({ dash: [] })',
   'utilities/appearance': 'export const activeAppearance = () => ({})',
+  'utilities/appearance-font': 'export const whenFontsReady = () => Promise.resolve()',
 }
 
 const pageScript = (text) => require(path.join(rendererDirectory, '..', '..', 'node_modules', 'vue', 'compiler-sfc')).parse({ source: text }).script.content

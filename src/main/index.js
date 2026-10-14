@@ -100,9 +100,9 @@ ipcMain.handle('read-flag', async (event, name, database) => {
   }
 })
 
-ipcMain.handle('save-png', (_event, imageData, filePath) => {
+ipcMain.handle('save-png', (_event, imageData, filePath, title = 'Save Map as PNG') => {
   return dialog.showSaveDialog({
-    title: 'Save Map as PNG',
+    title,
     defaultPath: filePath,
     filters: [
       { name: 'PNG Image', extensions: ['png'] },

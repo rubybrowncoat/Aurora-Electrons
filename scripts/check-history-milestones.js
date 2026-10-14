@@ -39,10 +39,17 @@ const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root,
 
 const STUBS = {
   'electron-store': 'export default class Config { get store() { return {} } set store(value) {} update(change) { this.store = change(this.store) } }',
+  electron: 'export const ipcRenderer = { invoke: () => Promise.resolve(null) }',
   dayjs: `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs')}`,
   'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs/plugin/utc.js')}`,
   romanum: 'export default { toNumeral: String }',
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
+}
+
+// What the page imports for its exports (the picture of a chart): the ipc channel, the chart typeface and the fonts. The checks of this file read none of them.
+const PAGE_MODULES = {
+  'components/charts/theme': 'export const chartTheme = () => ({ categorical: [], ink: \'\', inkMuted: \'\' }); export const withAlpha = (color) => color; export const chartFont = () => ({ family: \'Test\', size: (px) => px, font: (px) => px + \'px Test\' }); export const seriesIdentity = () => ({ dash: [] })',
+  'utilities/appearance-font': 'export const whenFontsReady = () => Promise.resolve()',
 }
 
 const localRequire = createRequire(path.join(root, 'package.json'))
@@ -1490,7 +1497,7 @@ const realPair = async (m) => {
 const pageSource = () => fs.readFileSync(pageFile, 'utf8').replace(/\r\n/g, '\n')
 
 const pageSuite = async (m, { mutate = null } = {}) => {
-  const options = await loadPage('pages/history', { stubs: STUBS, mutate })
+  const options = await loadPage('pages/history', { stubs: STUBS, modules: PAGE_MODULES, mutate })
   const checks = []
   const check = (name, run) => checks.push({ group: 'page', name, run })
   const { milestones } = m

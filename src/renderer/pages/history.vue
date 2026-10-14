@@ -22,7 +22,7 @@
             <v-btn value="charts" small><v-icon small>mdi-chart-line</v-icon></v-btn>
             <v-btn value="table" small><v-icon small>mdi-table</v-icon></v-btn>
           </v-btn-toggle>
-          <v-btn small text :disabled="!allSnapshots.length" class="ml-2" @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
+          <v-btn small text :disabled="!allSnapshots.length" class="ml-2" title="Every retained snapshot and every series, whatever the span and the view, with the figures not recorded and the sampling notes. The CSV under each chart holds only what that chart shows." @click="downloadCsv"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
           <v-btn small text color="error" :disabled="!allSnapshots.length" @click="confirmClear = true">Clear</v-btn>
         </v-col>
       </v-row>
@@ -112,7 +112,11 @@
             <v-btn-toggle v-model="rivalMetric" mandatory dense class="mb-2 flex-wrap">
               <v-btn v-for="metric in rivalMetrics" :key="metric.value" :value="metric.value" small>{{ metric.text }}</v-btn>
             </v-btn-toggle>
-            <chart-canvas type="line" :data="rivals.data" :options="rivals.options" :height="280" label="Rivals" />
+            <chart-canvas type="line" :data="rivals.data" :options="rivals.options" :height="280" label="Rivals" data-chart="rivals" />
+            <div class="history-export mt-1">
+              <v-btn x-small text :disabled="exportEmpty(rivals)" title="Download the races, window and annotations this chart shows now as a CSV, in spy mode: exact game times, units, rules and what was not recorded" @click="downloadChartCsv(rivals.key)"><v-icon x-small left>mdi-download</v-icon>Shown CSV</v-btn>
+              <v-btn x-small text :disabled="exportEmpty(rivals)" title="Save this chart as a PNG with a caption of the races shown, the window, the rules and the limits of the sampling" @click="exportChartPng(rivals.key)"><v-icon x-small left>mdi-image-outline</v-icon>PNG</v-btn>
+            </div>
           </div>
         </v-card>
 
@@ -138,14 +142,21 @@
                     <v-chip v-for="option in chart.picker.options" :key="option.value" :value="option.value" :title="option.title" small filter outlined><series-key v-if="option.color" :color="option.color" :dash="option.dash" kind="line" />{{ option.text }}<span v-if="option.flag" class="caption text--secondary ml-1">{{ option.flag }}</span></v-chip>
                   </v-chip-group>
                 </div>
-                <chart-canvas type="line" :data="chart.data" :options="chart.options" :height="240" :label="chart.title" />
+                <chart-canvas type="line" :data="chart.data" :options="chart.options" :height="240" :label="chart.title" :data-chart="chart.key" />
                 <div v-for="note in chart.notes" :key="note" class="caption text--secondary mt-1">{{ note }}</div>
+                <div class="history-export mt-1">
+                  <v-btn x-small text :disabled="exportEmpty(chart)" title="Download the series, window and annotations this chart shows now as a CSV: exact game times, units, rules and what was not recorded" @click="downloadChartCsv(chart.key)"><v-icon x-small left>mdi-download</v-icon>Shown CSV</v-btn>
+                  <v-btn x-small text :disabled="exportEmpty(chart)" title="Save this chart as a PNG with a caption of the series shown, the window, the rules and the limits of the sampling" @click="exportChartPng(chart.key)"><v-icon x-small left>mdi-image-outline</v-icon>PNG</v-btn>
+                </div>
               </div>
             </v-card>
           </v-col>
         </v-row>
 
         <v-card v-else class="panel" elevation="1">
+          <div class="history-export px-4 pt-2">
+            <v-btn x-small text :disabled="exportEmpty(tableChart)" title="Download every snapshot of the window, oldest first, as a CSV: exact game times, units, rules and what was not recorded. The page and sort of the table do not apply." @click="downloadChartCsv(tableChart.key)"><v-icon x-small left>mdi-download</v-icon>Shown CSV</v-btn>
+          </div>
           <v-data-table :headers="tableHeaders" :items="tableRows" item-key="t" :custom-sort="sortRows" :sort-by.sync="historyTable.sortBy" :sort-desc.sync="historyTable.sortDesc" :items-per-page.sync="historyTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: historyPageSizes }" dense>
             <template v-for="column in tableHeaders" #[`header.${column.value}`]="{ header }">{{ header.text }}<provenance-mark v-if="column.rule" :key="column.value" :rule="column.rule" /></template>
             <template v-for="column in measureColumns" #[`item.${column.value}`]="{ item }">{{ count(item[column.value], column.decimals) }}<provenance-mark v-if="item.results[column.value].status === 'unavailable'" :key="column.value" :result="item.results[column.value]" /></template>
@@ -439,20 +450,23 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { ipcRenderer } from 'electron'
+import { mapActions, mapGetters } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
-import { chartTheme, withAlpha } from '../components/charts/theme'
+import { chartFont, chartTheme, seriesIdentity, withAlpha } from '../components/charts/theme'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
+import { whenFontsReady } from '../utilities/appearance-font'
 import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
-import { DEFAULT_RETENTION, RETENTION_PROFILES, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
+import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
+import { captionLines, drawExport, exportCsv, exportModel } from '../utilities/history-export'
 import { LINK_STATUS_TEXT, LINK_TYPES, LINK_TYPE_KEYS, MILESTONE_TYPES, TEXT_LENGTH, adoptMilestone, branchLineage, deleteMilestone, gameDateText, gameSecondsOf, incrementsOf, linkChoices, loadObjects, markersOf, moveMilestone, nearestSample, readAttachedMilestones, readMilestones, registerMilestones, saveMilestone, scopeOf as milestoneScopeOf, typeText, withinSamples } from '../utilities/history-milestones'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '../utilities/mineral-compare'
@@ -498,26 +512,26 @@ const percentTick = (value) => (!isKnownNumber(value) ? UNKNOWN_TEXT : value ===
 
 const fleetResult = (snapshot) => totalResult('history.fleetTonnage', [snapshotResult(snapshot, 'militaryTons'), snapshotResult(snapshot, 'commercialTons')])
 
-// What the Rivals chart can compare: `result` is a snapshot's figure as a result of `rule`.
+// What the Rivals chart can compare: `result` is a snapshot's figure as a result of `rule`, in `unit`.
 const RIVAL_METRICS = [
-  { value: 'population', text: 'Population', rule: 'history.population', result: (snapshot) => snapshotResult(snapshot, 'population'), format: people },
-  { value: 'colonies', text: 'Colonies', rule: 'history.colonies', result: (snapshot) => snapshotResult(snapshot, 'colonies'), format: whole },
-  { value: 'fleet', text: 'Fleet tonnage', rule: 'history.fleetTonnage', result: fleetResult, format: (value) => withUnit(compact(value), 't') },
-  { value: 'military', text: 'Military tonnage', rule: 'history.fleetTonnage', result: (snapshot) => snapshotResult(snapshot, 'militaryTons'), format: (value) => withUnit(compact(value), 't') },
-  { value: 'research', text: 'Research', rule: 'history.research', result: (snapshot) => snapshotResult(snapshot, 'research'), format: (value) => withUnit(compact(value), 'RP') },
-  { value: 'systems', text: 'Known systems', rule: 'history.systems', result: (snapshot) => snapshotResult(snapshot, 'systems'), format: whole },
-  { value: 'wealth', text: 'Treasury', rule: 'history.treasury', result: (snapshot) => snapshotResult(snapshot, 'wealth'), format: compact },
+  { value: 'population', text: 'Population', rule: 'history.population', unit: 'M people', result: (snapshot) => snapshotResult(snapshot, 'population'), format: people },
+  { value: 'colonies', text: 'Colonies', rule: 'history.colonies', unit: 'colonies', result: (snapshot) => snapshotResult(snapshot, 'colonies'), format: whole },
+  { value: 'fleet', text: 'Fleet tonnage', rule: 'history.fleetTonnage', unit: 't', result: fleetResult, format: (value) => withUnit(compact(value), 't') },
+  { value: 'military', text: 'Military tonnage', rule: 'history.fleetTonnage', unit: 't', result: (snapshot) => snapshotResult(snapshot, 'militaryTons'), format: (value) => withUnit(compact(value), 't') },
+  { value: 'research', text: 'Research', rule: 'history.research', unit: 'RP', result: (snapshot) => snapshotResult(snapshot, 'research'), format: (value) => withUnit(compact(value), 'RP') },
+  { value: 'systems', text: 'Known systems', rule: 'history.systems', unit: 'systems', result: (snapshot) => snapshotResult(snapshot, 'systems'), format: whole },
+  { value: 'wealth', text: 'Treasury', rule: 'history.treasury', unit: 'wealth', result: (snapshot) => snapshotResult(snapshot, 'wealth'), format: compact },
 ]
 
-// The table's figure columns.
+// The table's figure columns, each in `unit`.
 const MEASURES = [
-  { value: 'population', text: 'Population (M)', decimals: 1, rule: 'history.population' },
-  { value: 'colonies', text: 'Colonies', decimals: 0, rule: 'history.colonies' },
-  { value: 'wealth', text: 'Treasury', decimals: 0, rule: 'history.treasury' },
-  { value: 'militaryTons', text: 'Military (t)', decimals: 0, rule: 'history.fleetTonnage' },
-  { value: 'commercialTons', text: 'Commercial (t)', decimals: 0, rule: 'history.fleetTonnage' },
-  { value: 'research', text: 'Research (RP)', decimals: 0, rule: 'history.research' },
-  { value: 'systems', text: 'Systems', decimals: 0, rule: 'history.systems' },
+  { value: 'population', text: 'Population (M)', decimals: 1, rule: 'history.population', unit: 'M people' },
+  { value: 'colonies', text: 'Colonies', decimals: 0, rule: 'history.colonies', unit: 'colonies' },
+  { value: 'wealth', text: 'Treasury', decimals: 0, rule: 'history.treasury', unit: 'wealth' },
+  { value: 'militaryTons', text: 'Military (t)', decimals: 0, rule: 'history.fleetTonnage', unit: 't' },
+  { value: 'commercialTons', text: 'Commercial (t)', decimals: 0, rule: 'history.fleetTonnage', unit: 't' },
+  { value: 'research', text: 'Research (RP)', decimals: 0, rule: 'history.research', unit: 'RP' },
+  { value: 'systems', text: 'Systems', decimals: 0, rule: 'history.systems', unit: 'systems' },
 ]
 
 const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
@@ -528,6 +542,9 @@ const LINK_WORDS = { linked: 'linked', missing: 'unresolved, gone', changed: 'un
 
 // A link as the list shows it: the status in words, the colour of its chip and the reason in full.
 const linkView = (link) => ({ ...link, color: link.status === 'linked' ? undefined : link.status === 'unknown' ? 'grey' : 'warning', word: LINK_WORDS[link.status] || link.status, reason: link.reason || LINK_STATUS_TEXT[link.status] || '' })
+
+// A link as the export names it: the chip's words.
+const linkText = (link) => (link ? `${link.label}: ${link.name || link.id}${link.nowNamed ? ` (now ${link.nowNamed})` : ''}, ${link.word}` : '')
 
 export default {
   name: 'HistoryPage',
@@ -1169,6 +1186,7 @@ export default {
           }),
         },
         options,
+        series: drawn.map((entry) => ({ unit: percent ? '%' : 't', rule: percent ? 'history.mineralChange' : 'history.stockpile', times: this.snapshots.map((snapshot) => snapshot.t), results: this.snapshots.map((snapshot) => mineralResult(snapshot, entry.id, entry.name)), ...(percent ? { baseline: entry.baseline } : {}) })),
       }
     },
 
@@ -1186,6 +1204,8 @@ export default {
         yAxisID: axis,
       })
       const pick = (key) => this.snapshots.map((snapshot) => valueOrNull(snapshotResult(snapshot, key)))
+      // The figures behind a line, as the export reads them: the unit, the rule, the game time of each sample and its result.
+      const field = (key, unit) => ({ unit, rule: SNAPSHOT_FIELDS[key].rule, times: this.snapshots.map((snapshot) => snapshot.t), results: this.snapshots.map((snapshot) => snapshotResult(snapshot, key)) })
 
       const charts = [
         {
@@ -1194,6 +1214,7 @@ export default {
           rules: ['history.population', 'history.colonies'],
           summary: 'How the population and number of colonies have grown over the years, to show whether the expansion keeps pace.',
           data: { datasets: [line('Population', pick('population'), 0), line('Colonies', pick('colonies'), 1, 'y1')] },
+          series: [field('population', 'M people'), field('colonies', 'colonies')],
           options: this.options({ y: people, y1: (value) => `${value}` }),
         },
         {
@@ -1202,6 +1223,7 @@ export default {
           rules: ['history.treasury', 'history.income'],
           summary: 'The treasury and annual income over time, to show whether the race is saving, spending or running short.',
           data: { datasets: [line('Treasury', pick('wealth'), 0), line('Annual income', pick('income'), 1, 'y1')] },
+          series: [field('wealth', 'wealth'), field('income', 'wealth/yr')],
           options: this.options({ y: compact, y1: compact }),
         },
         {
@@ -1210,6 +1232,7 @@ export default {
           rules: ['history.fleetTonnage'],
           summary: 'The military and commercial tonnage fielded over time, to show how the fleet has grown or shrunk.',
           data: { datasets: [line('Military', pick('militaryTons'), 0), line('Commercial', pick('commercialTons'), 1)] },
+          series: [field('militaryTons', 't'), field('commercialTons', 't')],
           options: this.options({ y: (value) => `${compact(value)} t` }),
         },
         {
@@ -1218,6 +1241,7 @@ export default {
           rules: ['history.research', 'history.systems'],
           summary: 'The research output and the number of systems known over time, to show how fast the race advances and explores.',
           data: { datasets: [line('Research (RP)', pick('research'), 0), line('Known systems', pick('systems'), 1, 'y1')] },
+          series: [field('research', 'RP'), field('systems', 'systems')],
           options: this.options({ y: compact, y1: (value) => `${value}` }),
         },
         this.mineralChart,
@@ -1229,6 +1253,7 @@ export default {
           picker: { model: this.chosenInstallations, options: this.installationOptions, change: this.setInstallations },
           extraNotes: this.installationNotes,
           data: { datasets: this.chosenInstallations.map((id, index) => line(this.installationNames[id] || `Installation ${id}`, this.snapshots.map((snapshot) => valueOrNull(installationResult(snapshot, id, this.installationNames[id] || `installation ${id}`))), index)) },
+          series: this.chosenInstallations.map((id) => ({ unit: 'installations', rule: 'history.installations', times: this.snapshots.map((snapshot) => snapshot.t), results: this.snapshots.map((snapshot) => installationResult(snapshot, id, this.installationNames[id] || `installation ${id}`)) })),
           options: this.options({ y: compact }),
         },
         {
@@ -1237,6 +1262,7 @@ export default {
           rules: ['history.stockpile'],
           summary: 'The fuel and maintenance supply stocks over time, to show whether the fleets can keep operating.',
           data: { datasets: [line('Fuel (L)', pick('fuel'), 0), line('MSP', pick('msp'), 1, 'y1')] },
+          series: [field('fuel', 'L'), field('msp', 'MSP')],
           options: this.options({ y: (value) => `${compact(value)} L`, y1: compact }),
         },
       ]
@@ -1255,13 +1281,14 @@ export default {
 
       const metric = RIVAL_METRICS.find((option) => option.value === this.rivalMetric) || RIVAL_METRICS[0]
       const palette = this.theme.categorical
+      const kept = races.map(([, record]) => record.snapshots.filter((snapshot) => snapshot.t >= this.since))
       const datasets = races.map(([RaceID, record], index) => {
         const selected = Number(RaceID) === Number(this.RaceID)
         const color = palette[index % palette.length]
 
         return {
           label: record.raceName || `Race ${RaceID}`,
-          data: record.snapshots.filter((snapshot) => snapshot.t >= this.since).map((snapshot) => ({ x: this.year(snapshot.t), y: valueOrNull(metric.result(snapshot)) })),
+          data: kept[index].map((snapshot) => ({ x: this.year(snapshot.t), y: valueOrNull(metric.result(snapshot)) })),
           borderColor: color,
           backgroundColor: withAlpha(color, 0.1),
           borderWidth: selected ? 3 : 1.5,
@@ -1272,7 +1299,8 @@ export default {
         }
       })
 
-      return { rule: metric.rule, data: { datasets }, options: this.options({ y: metric.format }, metric.format) }
+      // `races` is what an export states of each race apart: its record (the retention note) and the samples it draws.
+      return { key: 'rivals', title: `Rivals: ${metric.text}`, notes: [], rule: metric.rule, data: { datasets }, options: this.options({ y: metric.format }, metric.format), series: kept.map((list) => ({ unit: metric.unit, rule: metric.rule, times: list.map((snapshot) => snapshot.t), results: list.map(metric.result) })), races: races.map(([RaceID, record], index) => ({ label: `${datasets[index].label} (race ${RaceID})`, record, times: kept[index].map((snapshot) => snapshot.t) })) }
     },
 
     tableHeaders() {
@@ -1286,6 +1314,20 @@ export default {
 
         return { t: snapshot.t, date: this.date(snapshot.t), results, ...Object.fromEntries(MEASURES.map(({ value }) => [value, valueOrNull(results[value])])) }
       })
+    },
+
+    // The table as an export sees it: every snapshot of the window, oldest first, a series for each figure column. The page of the table and its sort do not apply.
+    tableChart() {
+      const results = (key) => this.snapshots.map((snapshot) => snapshotResult(snapshot, key))
+
+      return {
+        key: 'table',
+        title: 'History table',
+        notes: [],
+        annotated: false,
+        data: { datasets: MEASURES.map(({ value, text }) => ({ label: text, data: results(value).map((result) => ({ y: valueOrNull(result) })) })) },
+        series: MEASURES.map(({ value, rule, unit }) => ({ unit, rule, times: this.snapshots.map((snapshot) => snapshot.t), results: results(value) })),
+      }
     },
   },
   watch: {
@@ -1309,6 +1351,8 @@ export default {
     this.spyNPR = this.config.get('spyNPR', false)
   },
   methods: {
+    ...mapActions('snackbar', ['activateSnackbar']),
+
     count(value, decimals = 0) {
       return countText(value, decimals, this.separator)
     },
@@ -1397,6 +1441,121 @@ export default {
       link.download = fileName
       link.click()
       URL.revokeObjectURL(link.href)
+    },
+    // The view with this key as the page shows it now: a chart in the charts view (the Rivals chart only in spy mode, when it is on screen) or the table in the table view. Null for any other, so nothing that is not on screen is exported.
+    exportView(key) {
+      const views = this.view === 'charts' ? [...this.charts, ...(this.rivals ? [this.rivals] : [])] : [this.tableChart]
+
+      return views.find((candidate) => candidate.key === key) || null
+    },
+    // Whether a view has nothing to export: no series drawn, or no sample in the window.
+    exportEmpty(view) {
+      return !view.data.datasets.length || !this.snapshots.length
+    },
+    // The export of one view (utilities/history-export.js), read from what the view draws: its datasets, the snapshots of the window and the annotations the charts draw. Returns `{ view, model }` (the view is kept for the legend of the picture), or null when there is nothing on screen to export.
+    exportOf(key) {
+      const view = this.exportView(key)
+
+      if (!view || this.exportEmpty(view)) {
+        return null
+      }
+
+      const datasets = view.data.datasets
+
+      if (view.series.length !== datasets.length) {
+        throw new Error(`The ${view.title} view draws ${datasets.length} series and describes ${view.series.length}`)
+      }
+
+      const series = datasets.map((dataset, index) => {
+        const trace = view.series[index]
+
+        if (trace.times.length !== dataset.data.length) {
+          throw new Error(`${dataset.label} draws ${dataset.data.length} samples and describes ${trace.times.length}`)
+        }
+
+        return { label: dataset.label, unit: trace.unit, rule: trace.rule, baseline: trace.baseline, samples: trace.times.map((t, position) => ({ t, value: dataset.data[position].y, missing: trace.results[position].inputs.missing || [], stock: trace.baseline ? valueOrNull(trace.results[position]) : null })) }
+      })
+      const annotated = view.annotated !== false
+      const drawn = annotated ? this.milestoneEntries.filter((entry) => entry.drawn) : []
+      const annotations = drawn.map((entry) => {
+        const near = nearestSample(this.snapshots, entry.t)
+
+        return { id: entry.uuid, t: entry.t, type: entry.typeText, text: entry.text, link: linkText(entry.link), nearest: near ? { t: near.sampleT, offset: near.offset } : null }
+      })
+      const times = this.snapshots.map((snapshot) => snapshot.t)
+      // A chart of one race states the window and sampling of the selected race. A chart of several (Rivals) states each race's own over the samples it draws: the selected race's bounds and sampling say nothing of another race.
+      const races = view.races ? view.races.map((race) => ({ label: race.label, window: { count: race.times.length, retained: race.record.snapshots.length, from: race.times[0], to: race.times[race.times.length - 1] }, retention: retentionNote(race.record, (t) => this.date(t)) })) : null
+      const model = exportModel({
+        chart: { key, title: view.title, notes: view.notes },
+        series,
+        annotations,
+        annotated,
+        unseen: annotated ? this.milestoneEntries.length - drawn.length : 0,
+        scope: { race: this.record.raceName || `Race ${this.RaceID}`, RaceID: this.RaceID, GameID: this.GameID, campaignId: this.resolved ? this.resolved.campaignId : null, branchId: this.shownBranchId, spy: key === 'rivals' },
+        window: { span: this.span, count: times.length, retained: this.allSnapshots.length, from: times[0], to: times[times.length - 1] },
+        retention: retentionNote(this.record, (t) => this.date(t)),
+        races,
+        date: (t) => this.date(t),
+        dateTime: (t) => this.dateTimeText(t),
+      })
+
+      return { view, model }
+    },
+    exportFileName(key, extension) {
+      return `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-${key}-shown.${extension}`
+    },
+    // The CSV of the series, window and annotations one view shows now (not every retained snapshot: that is the CSV above).
+    downloadChartCsv(key) {
+      const exported = this.exportOf(key)
+
+      if (exported) {
+        this.saveCsv(exportCsv(exported.model), this.exportFileName(key, 'csv'))
+      }
+    },
+    // The picture of one chart as it is on screen, with a caption of what it shows and what its sampling cannot say. The model and the bitmap are taken in one turn after every wait (the fonts, the redraw a change of the page asks for), and only when the view still reads as it did when the picture was asked for: the CSV text holds the race, branch, window, series and annotations, so a change of any of them while waiting gives no picture rather than a chart under the caption of another.
+    async exportChartPng(key) {
+      try {
+        const asked = this.exportOf(key)
+
+        if (!asked) {
+          return
+        }
+
+        const wanted = exportCsv(asked.model)
+
+        await whenFontsReady()
+        await this.$nextTick()
+
+        const exported = this.exportOf(key)
+
+        if (!exported || exportCsv(exported.model) !== wanted) {
+          this.activateSnackbar({ color: 'warning', text: 'The chart changed while its picture was being made, so nothing was saved. Export it again.' })
+
+          return
+        }
+
+        const canvas = this.$el.querySelector(`[data-chart="${key}"] canvas`)
+
+        if (!canvas || !canvas.clientWidth) {
+          return
+        }
+
+        const { view, model } = exported
+        const legend = view.data.datasets.map((dataset) => {
+          const identity = seriesIdentity(this.appearance, dataset.borderColor)
+
+          return { color: dataset.borderColor, dash: dataset.borderDash && dataset.borderDash.length ? dataset.borderDash : identity ? identity.dash : [] }
+        })
+        const make = (width, height) => Object.assign(document.createElement('canvas'), { width, height })
+        const picture = drawExport({ make, source: { canvas, width: canvas.clientWidth, height: canvas.clientHeight }, caption: captionLines(model), legend, theme: this.theme, type: chartFont() })
+        const result = await ipcRenderer.invoke('save-png', picture.canvas.toDataURL('image/png').split(',')[1], this.exportFileName(key, 'png'), `Save ${model.title} as PNG`)
+
+        if (!result?.canceled) {
+          this.activateSnackbar({ color: 'success', text: `${model.title} exported as PNG (${picture.canvas.width} × ${picture.canvas.height})` })
+        }
+      } catch (error) {
+        this.activateSnackbar({ color: 'error', text: `Couldn't export the chart: ${error.message}` })
+      }
     },
     setInstallations(ids) {
       this.installationIds = ids
