@@ -701,15 +701,71 @@ const migrateLegacy = (io, { opened, registry, guard, newId, now, path, matched 
   return { verdict: verdict.verdict, reason: verdict.reason, campaignId, poolId }
 }
 
+// ---- A series' thinning record -------------------------------------------------------------------------------------
+
+// A series' thinning record, `thinning`, says what is known of how its snapshots were thinned (utilities/history.js): { complete, passes, dropped, last, witness }. `complete` is true only when the series was started by the recorder and nothing but the recorder has written it since, or when every series it was made from was complete and never thinned, so `passes` (how many times the older half was thinned) and `dropped` (how many snapshots that removed) are the whole story. `last` is the latest thinning, { at (wall-clock ms, or null for a thinning a merge made, which is dated by game time only), t (game time of the latest snapshot then), passes, dropped, cap }, or null. `witness` is a digest of the game times the series held when the record was written: a series written by something else since no longer matches it, and the counts then stand only as a lower bound.
+const THINNING_KEYS = ['complete', 'passes', 'dropped', 'last', 'witness']
+const LAST_KEYS = ['at', 'cap', 'dropped', 'passes', 't']
+const isCount = (value) => Number.isInteger(value) && value >= 0
+const isWallClock = (value) => value === null || (typeof value === 'number' && Number.isFinite(new Date(value).getTime()))
+const hasOnly = (value, keys) => Object.keys(value).every((key) => keys.includes(key))
+
+// A series' thinning record as the file holds it, normalised, or null when it is absent or is not a valid record (a file from before it, a hand edit, a time no calendar date can hold): nothing is then known, which is not the same as nothing thinned.
+export const readThinning = (raw) => {
+  if (!isObject(raw) || !hasOnly(raw, THINNING_KEYS) || typeof raw.complete !== 'boolean' || !isCount(raw.passes) || !isCount(raw.dropped) || typeof raw.witness !== 'string' || !raw.witness) {
+    return null
+  }
+
+  if (raw.dropped < raw.passes || (raw.passes === 0) !== (raw.last === null)) {
+    return null
+  }
+
+  if (raw.last === null) {
+    return { complete: raw.complete, passes: 0, dropped: 0, last: null, witness: raw.witness }
+  }
+
+  const { last } = raw
+
+  if (!isObject(last) || !hasOnly(last, LAST_KEYS) || !isWallClock(last.at) || !Number.isFinite(last.t) || !isCount(last.passes) || last.passes < 1 || !isCount(last.dropped) || last.dropped < last.passes || !Number.isInteger(last.cap) || last.cap < 1 || last.passes > raw.passes || last.dropped > raw.dropped) {
+    return null
+  }
+
+  return { complete: raw.complete, passes: raw.passes, dropped: raw.dropped, last: { at: last.at, t: last.t, passes: last.passes, dropped: last.dropped, cap: last.cap }, witness: raw.witness }
+}
+
+// The digest of the game times a series holds, which a thinning record carries as its witness.
+export const witnessOf = (snapshots) => hashValue((snapshots || []).map((snapshot) => snapshot.t))
+
+// The thinning record of a series after a fork cut its snapshots to `kept` (those at or before game time `t`), or undefined when nothing stays established. The record is believed only if it is intact (complete, and the series still holds the game times it was written for) and every thinning in it happened while the series' latest snapshot was no later than `t`: the snapshots those thinnings dropped were then all at or before `t`, so they belong to the fork's timeline and the counts are the fork's own. A thinning later than the fork, or a record that is not intact, says nothing about what the fork lost, so it is not carried over.
+export const thinningUpTo = (record, kept, t) => {
+  const thinning = readThinning(record.thinning)
+
+  if (!thinning || !thinning.complete || thinning.witness !== witnessOf(record.snapshots) || (thinning.passes && thinning.last.t > t)) {
+    return undefined
+  }
+
+  return { ...thinning, witness: witnessOf(kept) }
+}
+
 // ---- Settling an opened game ---------------------------------------------------------------------------------------
 
-// The seed of a branch forked from `parent` at game time `t`: the parent's records without any snapshot after the fork point, so the branch reads as one timeline.
+// The seed of a branch forked from `parent` at game time `t`: the parent's records without any snapshot after the fork point, so the branch reads as one timeline. A series' thinning record comes along only where it still holds for the cut (`thinningUpTo`); otherwise the fork's series reads as thinned unknown.
 const upTo = (history, t) => {
   if (!isObject(history) || t === null) {
     return {}
   }
 
-  const cut = (records) => Object.fromEntries(Object.entries(isObject(records) ? records : {}).map(([id, record]) => [id, { ...record, snapshots: (record.snapshots || []).filter((snapshot) => snapshot.t <= t) }]).filter(([, record]) => record.snapshots.length))
+  const seeded = (record) => {
+    const snapshots = (record.snapshots || []).filter((snapshot) => snapshot.t <= t)
+    const fields = { ...record, snapshots }
+    const thinning = thinningUpTo(record, snapshots, t)
+
+    delete fields.thinning
+
+    return thinning ? { ...fields, thinning } : fields
+  }
+
+  const cut = (records) => Object.fromEntries(Object.entries(isObject(records) ? records : {}).map(([id, record]) => [id, seeded(record)]).filter(([, record]) => record.snapshots.length))
 
   return { gameName: history.gameName, races: cut(history.races), intel: Object.fromEntries(Object.entries(isObject(history.intel) ? history.intel : {}).map(([view, aliens]) => [view, cut(aliens)]).filter(([, aliens]) => Object.keys(aliens).length)) }
 }

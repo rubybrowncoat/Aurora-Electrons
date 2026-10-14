@@ -2,14 +2,16 @@
 //
 // The envelope is `{ format, version, exportedAt, schemas, retention, units, excludes, campaigns, digest }`. Each campaign is `{ id, entry, branches, annotations }`: `entry` is the campaign's registry entry (its names, game ids, anchor, branches with their tips and the saves attached), `branches` holds each branch's history file as it is stored (`{ gameName, races: { [RaceID]: { raceName, npr, coverage, snapshots } }, intel: { [ViewRaceID]: { [AlienRaceID]: { name, coverage, snapshots } } } }`) and `annotations` the scenario records of the campaign as bundles of utilities/scenario-records.js, one per race and branch. Where a series sits in the file is its scope: a race's own figures are under `races`, what a viewing race knows of another under `intel` and the viewing race, so no figure of one race is ever read as another's. `units` states what each figure is measured in, `coverage` what each series spans, and `digest` makes an altered or truncated file known.
 //
+// A series the recorder wrote may also carry `thinning` (utilities/history.js `readThinning`: how many times its older half was thinned, how many snapshots that dropped and when last, with a digest of the game times it held). It is optional, so a backup made before it reads as before and carries no claim about thinning; a build from before it refuses a backup that has it. A restore keeps the record the series had or the backup's; where the restored game times no longer match its digest, the record reads as a lower bound, never as complete.
+//
 // Association rules (the decision of CP-DATA-01, explicit association). Campaign ids are the app's own random ids and are never renamed. A restore only ever adds to what is stored: names, game ids, attached saves, branches and a branch tip that is further along the same timeline. It never changes an answer the player gave, a merge, a legacy mark or a tip that is not on the same timeline, never merges two campaigns and never rebinds a branch; a campaign of another id that shares a game id is restored as a campaign of its own. Whatever is not applied is reported with its reason.
 //
 // Each history file is restored by its own policy: `merge` keeps what is stored and adds the backup's snapshots at other game times (at one game time the stored snapshot stays, as when a history is attached to a campaign), `replace` makes the selected series the backup's, `keep` leaves the file as it is. A policy applies to the series of the races selected, all of them by default. Metadata (a race's name, an alien race's name) comes from the side whose series reaches the later game time, the stored one on a tie.
 //
 // Annotations are the scenario records of the planners. A record is restored with its uuid when the campaign's file holds no record of that uuid and has not held one before (a deleted record stays deleted); the repository's import creates the record afresh, so its revision and times are the restore's and the original ones are kept in its provenance.
 
-import { EARLY_COUNTS, REGISTRY_VERSION, STEP, anchorRelation, branchFileName, commonPrefix, hashValue, mergeAnchors, readRegistry, writeRegistry } from './campaign'
-import { MAX_SNAPSHOTS, recordedSpan, thinSnapshots } from './history'
+import { EARLY_COUNTS, REGISTRY_VERSION, STEP, anchorRelation, branchFileName, commonPrefix, hashValue, mergeAnchors, readRegistry, readThinning, writeRegistry } from './campaign'
+import { MAX_SNAPSHOTS, recordedSpan, thinCounted, thinningOfMerge } from './history'
 import { requireRecording } from './recording-owner'
 import { BUNDLE_FORMAT, BUNDLE_VERSION } from './scenario-records'
 
@@ -217,7 +219,11 @@ const checkSeries = (series, where, { race, units }) => {
     bad(where, 'is not an object')
   }
 
-  allowed(series, race ? ['raceName', 'npr', 'coverage', 'snapshots'] : ['name', 'coverage', 'snapshots'], where)
+  allowed(series, race ? ['raceName', 'npr', 'coverage', 'snapshots', 'thinning'] : ['name', 'coverage', 'snapshots', 'thinning'], where)
+
+  if (series.thinning !== undefined && !readThinning(series.thinning)) {
+    bad(where, 'its thinning record is not valid')
+  }
 
   if (race) {
     text(series.raceName, `${where} raceName`, { optional: true })
@@ -687,7 +693,7 @@ const labelOf = (entry) => {
   return entry.kind === 'race' ? `race ${entry.RaceID}${name ? ` (${name})` : ''}` : `what race ${entry.RaceID} knows of race ${entry.alien}${name ? ` (${name})` : ''}`
 }
 
-// One series of a file merged, replaced or kept: { snapshots, stats }.
+// One series of a file merged, replaced or kept: { snapshots, outcome, stats }. `outcome` is what thinning the united snapshots gave (see `thinCounted`) and is there for a merge only; the file's thinning record for the series comes from it (`thinningOfMerge`), because the game times of a merge alone never show that nothing was lost.
 const planSeries = (stored, given, policy) => {
   const known = new Map(stored.map((snapshot) => [snapshot.t, snapshot]))
   const offered = new Map(given.map((snapshot) => [snapshot.t, snapshot]))
@@ -707,12 +713,12 @@ const planSeries = (stored, given, policy) => {
   }
 
   const united = [...stored, ...given.filter((snapshot) => !known.has(snapshot.t))].sort((a, b) => a.t - b.t)
-  const thinned = thinSnapshots(united)
+  const outcome = thinCounted(united)
 
-  stats.thinned = united.length - thinned.length
-  stats.result = thinned.length
+  stats.thinned = united.length - outcome.snapshots.length
+  stats.result = outcome.snapshots.length
 
-  return { snapshots: thinned, stats }
+  return { snapshots: outcome.snapshots, outcome, stats }
 }
 
 const lastTime = (snapshots) => (snapshots.length ? snapshots[snapshots.length - 1].t : -Infinity)
@@ -757,6 +763,16 @@ const planFile = (stored, given, { policy, races }) => {
     } else if (policy !== 'keep') {
       const newer = !kept || policy === 'replace' || lastTime(snapshotsOf(entry.record)) > lastTime(before)
       const record = { ...(newer ? entry.record : kept.record), snapshots: clone(planned.snapshots) }
+
+      if (policy === 'merge') {
+        delete record.thinning
+
+        const thinning = thinningOfMerge([kept && kept.record, theirs.record], planned.outcome)
+
+        if (thinning) {
+          record.thinning = clone(thinning)
+        }
+      }
 
       if (entry.kind === 'race') {
         result.races[entry.RaceID] = record

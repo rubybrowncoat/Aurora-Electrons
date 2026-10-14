@@ -395,6 +395,53 @@ const defineSuite = (m) => {
     assert.equal(Object.keys(registryOf(inst).campaigns[id].branches).length, 2)
   })
 
+  test('matrix', 'a branch seeded at a fork carries the parent\'s thinning record only where it holds for the cut: a thinning after the fork is not the fork\'s, one before it is, a series never thinned stays so, and a record that was not intact is dropped', async () => {
+    const replayed = async (thinning) => {
+      const inst = installation()
+      const early = await pass(inst, saveOf({ n: 64 }))
+      const id = early.resolution.campaignId
+
+      await pass(inst, saveOf({ n: 300 }))
+
+      const file = fileOf(inst, id)
+      const series = file.races[7]
+      const [first, last] = series.snapshots.map((snapshot) => snapshot.t)
+      const witness = campaign.witnessOf(series.snapshots)
+
+      if (thinning) {
+        series.thinning = thinning({ first, last, witness })
+        inst.files.set(`file:campaign-${id}-b1`, clone(file))
+      }
+
+      const replay = await pass(inst, saveOf({ n: 250, fork: { at: 100, salt: 77 } }))
+
+      assert.equal(replay.resolution.branchId, 'b2')
+
+      return { parent: fileOf(inst, id, 'b1').races[7], branch: fileOf(inst, id, 'b2').races[7], forkAt: first }
+    }
+    const record = (last, extra = {}) => ({ complete: true, passes: 2, dropped: 5, last: { at: 1, t: last, passes: 1, dropped: 3, cap: 500 }, ...extra })
+
+    const after = await replayed(({ last, witness }) => record(last, { witness }))
+
+    assert.equal(history.thinningStatus(after.parent).status, 'thinned')
+    assert.equal(history.thinningStatus(after.branch).status, 'unknown', 'the thinning that came after the fork is not the fork\'s')
+    assert.equal('thinning' in after.branch, false)
+
+    const before = await replayed(({ first, witness }) => record(first, { witness }))
+
+    assert.deepEqual([before.branch.snapshots.length, history.thinningStatus(before.branch).status, history.thinningStatus(before.branch).passes, history.thinningStatus(before.branch).dropped], [2, 'thinned', 2, 5], 'a thinning that happened by the fork point is kept')
+    assert.equal(history.thinningStatus(before.parent).status, 'thinned')
+
+    const never = await replayed(null)
+
+    assert.equal(history.thinningStatus(never.parent).status, 'untouched')
+    assert.equal(history.thinningStatus(never.branch).status, 'untouched')
+
+    const stale = await replayed(({ first }) => record(first, { witness: 'not the digest of these times' }))
+
+    assert.equal(history.thinningStatus(stale.branch).status, 'unknown', 'a record the parent itself no longer matched says nothing of the fork')
+  })
+
   test('matrix', 'a longer save that left the recorded tip at an exact point is a branch, found at the stored position', async () => {
     const inst = installation()
     const first = await pass(inst, saveOf({ n: 300 }))
@@ -869,11 +916,12 @@ const defineSuite = (m) => {
     const [target, source] = [first.resolution.campaignId, other.resolution.campaignId]
 
     assert.deepEqual(other.resolution.pending, [{ campaignId: target, branchId: 'b1' }])
-    attachModule.attach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'same' })
+    attachModule.attach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'same', now: 7000000 })
 
     const done = everything(inst)
 
-    attachModule.attach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'same' })
+    // A later clock, so an attach that is applied again writes a later time and cannot pass for one that changed nothing in the same millisecond.
+    attachModule.attach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'same', now: 8000000 })
     assert.equal(everything(inst), done, 'a second attach changed the records')
 
     const moved = await pass(inst, saveOf({ n: 150, anchorCount: 5 }), { path: 'C:/saves/c.db' })
@@ -2108,6 +2156,10 @@ const MUTATIONS = [
   { name: 'a migration clears the legacy file', file: 'campaign.js', find: "units[opened.GameID] = { ...unit, state: 'committed', committedAt: now }", replace: "units[opened.GameID] = { ...unit, state: 'committed', committedAt: now }\n  io.file(legacyFileName(opened.GameID)).store = {}", fails: ['the legacy file and the legacy settings are byte for byte'] },
   { name: 'a campaign is identified by its name', file: 'campaign.js', find: 'const judged = campaignsOfGame(registry, opened.GameID).map(', replace: 'const judged = campaignsOfGame(registry, opened.GameID).filter((candidate) => candidate.names[candidate.names.length - 1].name === opened.gameName).map(', fails: ['a game renamed in the game'] },
   { name: 'a branch is seeded with the whole parent', file: 'campaign.js', find: 'store = upTo(io.file(branchFileName(campaign.id, parent.id)).store, forkTime)', replace: 'store = upTo(io.file(branchFileName(campaign.id, parent.id)).store, Infinity)', fails: ['a save replayed from an earlier point'] },
+  { name: 'a branch inherits the parent\'s thinning record unchanged', file: 'campaign.js', find: 'return thinning ? { ...fields, thinning } : fields', replace: 'return { ...fields, thinning: record.thinning }', fails: ['a branch seeded at a fork carries the parent'] },
+  { name: 'a thinning after the fork is carried over to the branch', file: 'campaign.js', find: ' || (thinning.passes && thinning.last.t > t)) {', replace: ') {', fails: ['a branch seeded at a fork carries the parent'] },
+  { name: 'a record the parent no longer matched is believed by the branch', file: 'campaign.js', find: '!thinning.complete || thinning.witness !== witnessOf(record.snapshots) || (thinning.passes', replace: '!thinning.complete || (thinning.passes', fails: ['a branch seeded at a fork carries the parent'] },
+  { name: 'a branch keeps the parent\'s digest of game times', file: 'campaign.js', find: 'return { ...thinning, witness: witnessOf(kept) }', replace: 'return thinning', fails: ['a branch seeded at a fork carries the parent'] },
   { name: 'an attach overwrites the settings the target has', file: 'campaign-attach.js', find: 'if (merged.race[RaceID][key] === undefined) {', replace: 'if (true) {', fails: ['attaching a campaign to another merges'] },
   { name: 'a contradicting ledger no longer separates campaigns', file: 'campaign.js', find: 'if (contradicts(stored.tip, opened, known, agrees)) {', replace: 'if (false) {', fails: ['a path alone never joins a save', 'a short save of another campaign'] },
   { name: 'a path attaches a save whose ledger does not hold the recorded tip', file: 'campaign.js', find: 'thin.some((row) => row.consistent && row.branch.id === attachment.branchId)', replace: 'thin.some((row) => row.branch.id === attachment.branchId)', fails: ['a thin-anchor continuation at its own path'] },

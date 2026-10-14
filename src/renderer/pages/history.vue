@@ -11,6 +11,7 @@
         <v-col class="caption text--secondary">
           <template v-if="recording">{{ recording.headline }}<provenance-mark rule="history.recordedSpan" /></template>
           The app records one each time Aurora saves while it's open, for every player race and NPR empire in the save.<provenance-mark :result="timeAxis" />
+          <div v-if="recording" class="history-recording-note" data-recording-sampling>{{ recording.sampling }}</div>
           <div v-if="recording && recording.note" class="history-recording-note">{{ recording.note }}</div>
         </v-col>
         <v-col cols="auto">
@@ -151,6 +152,51 @@
           </v-data-table>
         </v-card>
       </template>
+
+      <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned." elevation="1">
+        <div class="panel-head">
+          <span>Retention</span>
+          <span class="caption text--secondary">{{ retentionView.sampling }}</span>
+        </div>
+        <div class="panel-body">
+          <div class="history-retention__row"><span class="history-retention__label">Samples</span><span class="history-retention__value" data-retention-samples>{{ count(retentionView.stats.count, 0) }} kept for this race; the {{ retentionView.profile.label }} profile keeps at most {{ count(retentionView.profile.cap, 0) }} per series<template v-if="retentionView.over">. This series is above that, and is thinned when the recorder next saves it</template></span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Time covered</span><span class="history-retention__value">{{ duration(retentionView.stats.seconds) }}<template v-if="retentionView.stats.first !== null"> ({{ date(retentionView.stats.first) }} to {{ date(retentionView.stats.last) }})</template></span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Time between samples</span><span class="history-retention__value" data-retention-gaps>largest {{ duration(retentionView.stats.gaps.largest) }}, typical {{ duration(retentionView.stats.gaps.typical) }}</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Thinning</span><span class="history-retention__value" data-retention-thinning :data-status="retentionView.status">{{ retentionView.thinning }}.</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Size, measured</span><span class="history-retention__value" data-retention-measured>{{ size(retentionView.measured) }} for this race's series, {{ size(retentionView.file) }} for the whole branch file. Measured as compact JSON; the file on disk is larger by its indentation.</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Size, predicted</span><span class="history-retention__value" data-retention-predicted>About {{ size(retentionView.current.bytesAtCap) }} for this series once it holds {{ count(retentionView.profile.cap, 0) }} samples, predicted from the average size of its samples.</span></div>
+
+          <div class="history-retention__profiles mt-3">
+            <table>
+              <thead>
+                <tr><th>Profile</th><th>Cap per series</th><th>Kept if the stored samples were thinned now</th><th>Largest gap then</th><th>Size if thinned now (predicted)</th><th>Size at the cap (predicted)</th><th /></tr>
+              </thead>
+              <tbody>
+                <tr v-for="option in retentionView.profiles" :key="option.id" :class="{ 'history-retention__active': option.active }" :data-profile="option.id">
+                  <td>{{ option.label }}<template v-if="option.active"> (in force)</template></td>
+                  <td>{{ count(option.cap, 0) }}</td>
+                  <td>{{ count(option.kept, 0) }}<template v-if="option.thins"> ({{ count(option.dropped, 0) }} thinned)</template></td>
+                  <td>{{ duration(option.largestGap) }}</td>
+                  <td>{{ size(option.bytes) }}</td>
+                  <td>{{ size(option.bytesAtCap) }}</td>
+                  <td><v-btn x-small outlined :disabled="option.active" :data-retention="option.id" @click="pickRetention(option.id)">Choose</v-btn></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="caption text--secondary mt-2" data-retention-limits>A profile applies only to samples that are observed or still kept. It cannot restore samples that were thinned, and a larger cap brings none back. A smaller cap thins each series when the recorder next saves it, and a series that is not saved again keeps the samples it has. Saves are only read, never changed.</div>
+
+          <v-alert v-if="retentionChange" type="warning" outlined dense class="mt-3" data-retention-confirm>
+            <div>Change the retention profile from {{ retentionChange.current.label }} ({{ count(retentionChange.current.cap, 0) }}) to {{ retentionChange.picked.label }} ({{ count(retentionChange.picked.cap, 0) }})?</div>
+            <div>{{ retentionChange.text }}</div>
+            <div class="mt-2">
+              <v-btn small depressed color="warning" data-retention-apply @click="applyRetention">Apply {{ retentionChange.picked.label }}</v-btn>
+              <v-btn small text class="ml-2" data-retention-cancel @click="retentionPick = null">Cancel</v-btn>
+            </div>
+          </v-alert>
+        </div>
+      </v-card>
 
       <v-card class="panel history-backup" data-summary="A file of the campaigns, the history of each race and what it knows of the others, and the planners' annotations, to keep or to move to another computer. A restore shows what it would add, keep and replace for each campaign and branch before anything is written, and keeps a copy of what it touches first. The save is never touched." elevation="1">
         <div class="panel-head">
@@ -322,7 +368,7 @@ import { activeAppearance } from '../utilities/appearance'
 import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
-import { MAX_SNAPSHOTS, branchStore, campaignStorage, changeResult, clearRaceHistory, installationResult, mineralResult, recordedSpan, shownBranch, snapshotResult, totalResult } from '../utilities/history'
+import { DEFAULT_RETENTION, RETENTION_PROFILES, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '../utilities/mineral-compare'
@@ -404,6 +450,7 @@ export default {
       installationIds: { key: 'historyInstallations', default: null, scope: 'race' },
       rivalMetric: { key: 'historyRivalsMetric', default: 'population', valid: oneOf(RIVAL_METRIC_VALUES) },
       span: { key: 'historySpan', default: 0, valid: oneOf(SPAN_OPTIONS.map((option) => option.value)) },
+      retentionProfile: { key: 'historyRetention', default: DEFAULT_RETENTION, valid: oneOf(RETENTION_PROFILES.map((profile) => profile.id)) },
     }),
   ],
   data() {
@@ -436,6 +483,8 @@ export default {
       backupInput: 0,
       // Bumped when the copies kept before a restore change.
       backupKept: 0,
+      // The retention profile picked and waiting for confirmation (Retention panel); the profile in force is the persisted `retentionProfile`.
+      retentionPick: null,
     }
   },
   computed: {
@@ -615,7 +664,7 @@ export default {
       return this.snapshots[this.snapshots.length - 1]
     },
 
-    // What the recording covers, labelled for the header: first and latest game dates, the span between them and how much of the chosen window it fills. Null when nothing is recorded.
+    // What the recording covers, labelled for the header: first and latest game dates, the span between them, how much of the chosen window it fills and how sparsely it is sampled (the thinning is stated in the Retention panel). Null when nothing is recorded.
     recording() {
       const coverage = recordedSpan(this.allSnapshots, this.span * SECONDS_PER_YEAR)
 
@@ -623,8 +672,10 @@ export default {
         return null
       }
 
+      const sampling = retentionNote(this.record, (t) => this.date(t))
+
       if (coverage.count === 1) {
-        return { headline: `1 snapshot, ${this.date(coverage.first)}. No span is recorded yet, and nothing earlier was observed.`, note: '' }
+        return { headline: `1 snapshot, ${this.date(coverage.first)}. No span is recorded yet, and nothing earlier was observed.`, sampling, note: '' }
       }
 
       const years = (seconds) => (seconds / SECONDS_PER_YEAR).toFixed(1)
@@ -633,8 +684,49 @@ export default {
 
       return {
         headline: `${coverage.count} snapshots, ${dates}: ${covered}.`,
-        note: `Game time before the first snapshot was never observed by the app and cannot be rebuilt, since snapshots keep only aggregate figures. Gaps between snapshots are expected: one is taken per save while the app is open, and past ${MAX_SNAPSHOTS} snapshots the older ones are thinned to every other one, so older stretches can be coarser than recent ones.`,
+        sampling,
+        note: 'Game time before the first snapshot was never observed by the app and cannot be rebuilt, since snapshots keep only aggregate figures. Gaps between snapshots are expected: one is taken per save while the app is open, and a series past the retention cap has its older half thinned to every other snapshot, so older stretches can be coarser than recent ones.',
       }
+    },
+
+    // The Retention panel: the readouts of the shown race's series (samples, gaps, thinning, measured size), what each profile would do to it now, and the choice waiting for confirmation. Predicted sizes are never shown as measured ones.
+    retentionView() {
+      const record = this.record
+      const profile = retentionProfile(this.retentionProfile)
+      const stats = retentionStats(this.allSnapshots)
+      const status = thinningStatus(record)
+      const profiles = RETENTION_PROFILES.map((option) => ({ ...option, active: option.id === profile.id, ...predictRetention(record, option) }))
+
+      return {
+        profile,
+        stats,
+        sampling: samplingText(stats),
+        thinning: thinningText(status, (t) => this.date(t)),
+        status: status.status,
+        measured: measuredBytes(record),
+        file: this.gameHistory ? measuredBytes(this.gameHistory) : null,
+        over: stats.count > profile.cap,
+        profiles,
+        current: profiles.find((option) => option.active),
+      }
+    },
+
+    // The profile picked and not yet confirmed: what the recorder's next save would do to the shown branch under it (the new sample goes in, then every thinning pass runs, so that is more than thinning the stored samples alone when the count sits at a pass boundary), the figure for the stored samples as they are now labelled as such, and what it cannot undo. Null when none is waiting.
+    retentionChange() {
+      const picked = this.retentionPick ? retentionProfile(this.retentionPick) : null
+
+      if (!picked) {
+        return null
+      }
+
+      const current = retentionProfile(this.retentionProfile)
+      const held = seriesOverCap(this.gameHistory, picked.cap)
+      const cap = this.count(picked.cap, 0)
+      const stored = held.over ? ` (${held.over} ${held.over === 1 ? 'holds' : 'hold'} more than ${cap} now, and thinning only the samples stored now would drop ${this.count(held.dropped, 0)})` : ''
+      const replaced = held.next.replaced ? ` The figure also allows for an observation that matches the intelligence sample before it, which removes the sample stored at its time before the thinning runs; that adds up to ${this.count(held.next.replaced, 0)} to what thinning alone would discard.` : ''
+      const consequence = held.next.thins ? `The next save thins ${held.next.thins} of the ${held.series} series in this branch to at most ${cap} samples and discards up to ${this.count(held.next.dropped, 0)} stored samples in all${stored}. A series is thinned by dropping every other sample of its older half, repeated until it fits, once the new sample is in; the newest samples stay.${replaced}` : `No series in this branch holds as many as ${cap} samples, so the next save thins nothing. A series is thinned when the recorder saves a sample that takes it past ${cap}.`
+
+      return { picked, current, text: `${consequence} Samples that are already thinned are gone for good: a larger cap keeps the samples observed from now on and never brings them back.` }
     },
 
     // Whether the game's start year is known, which the calendar year of a snapshot needs.
@@ -955,6 +1047,12 @@ export default {
     date(seconds) {
       return this.yearKnown ? gameTime(this.StartYear, seconds).format('YYYY-MM-DD') : `${roundToDecimal(seconds / SECONDS_PER_YEAR, 2)} y elapsed`
     },
+    duration(seconds) {
+      return durationText(seconds)
+    },
+    size(bytes) {
+      return bytesText(bytes)
+    },
     options(axes, labelFormat = null) {
       const scales = {
         x: { type: 'linear', title: { display: true, text: this.yearKnown ? 'Year' : 'Game years elapsed' }, ticks: { callback: (value) => `${roundToDecimal(value, 2)}` } },
@@ -986,7 +1084,7 @@ export default {
       this.span = 0
     },
     downloadMineralCsv() {
-      const csv = comparisonCsv({ comparison: this.mineralComparison, scale: this.mineralScale, palette: this.theme.categorical, date: (seconds) => this.date(seconds) })
+      const csv = comparisonCsv({ comparison: this.mineralComparison, scale: this.mineralScale, palette: this.theme.categorical, date: (seconds) => this.date(seconds), retention: retentionNote(this.record, (t) => this.date(t)) })
 
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-minerals-${this.mineralScale}.csv`)
     },
@@ -1093,17 +1191,30 @@ export default {
     downloadCsv() {
       const names = Object.fromEntries(this.installationOptions.map((option) => [option.value, option.text]))
       const installationIds = Object.keys(names).map(Number)
-      const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id]), 'Figures not recorded']
+      // The seconds since the previous row and the retention note, so an export of thinned or sparse history says so.
+      const sparse = sparseColumns(this.allSnapshots, retentionNote(this.record, (t) => this.date(t)))
+      const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id]), 'Figures not recorded', ...sparse.header]
       const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
       // A figure that was not recorded is an empty cell, never 0; the last column names every one of them, the stockpiles and installations included.
-      const rows = this.allSnapshots.map((snapshot) => {
+      const rows = this.allSnapshots.map((snapshot, index) => {
         const results = [...['population', 'colonies', 'wealth', 'income', 'fuel', 'msp'].map((key) => snapshotResult(snapshot, key)), ...MINERALS.map((mineral) => mineralResult(snapshot, mineral.id, mineral.name)), ...['militaryShips', 'militaryTons', 'commercialShips', 'commercialTons', 'research', 'systems', 'commanders'].map((key) => snapshotResult(snapshot, key)), ...installationIds.map((id) => installationResult(snapshot, id, names[id]))]
 
-        return [snapshot.t, this.date(snapshot.t), ...results.map(valueOrNull), results.filter((result) => !isAvailable(result)).flatMap((result) => result.inputs.missing).join('; ')]
+        return [snapshot.t, this.date(snapshot.t), ...results.map(valueOrNull), results.filter((result) => !isAvailable(result)).flatMap((result) => result.inputs.missing).join('; '), ...sparse.rows[index]]
       })
       const csv = [header, ...rows].map((row) => row.map(quote).join(',')).join('\n')
 
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`)
+    },
+    // Picks a retention profile: the choice waits for confirmation, which states what it does and does not do.
+    pickRetention(id) {
+      this.retentionPick = id === this.retentionProfile ? null : id
+    },
+    applyRetention() {
+      if (this.retentionPick) {
+        this.retentionProfile = this.retentionPick
+      }
+
+      this.retentionPick = null
     },
     // The adapter the backup reads and restores the planners' annotations through: { adapter, error }, the adapter null with the reason when the records cannot be opened here. The modules load when a backup is made or read, so the page doesn't carry them otherwise.
     async backupAnnotations() {
@@ -1409,6 +1520,39 @@ export default {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .history-retention__row {
+    column-gap: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    padding: 2px 0;
+  }
+
+  .history-retention__label {
+    flex: 0 0 180px;
+    opacity: 0.75;
+  }
+
+  .history-retention__value {
+    flex: 1 1 260px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .history-retention__profiles {
+    overflow-x: auto;
+  }
+
+  .history-retention__profiles th,
+  .history-retention__profiles td {
+    padding: 2px 12px 2px 0;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .history-retention__active {
+    font-weight: 600;
   }
 }
 </style>

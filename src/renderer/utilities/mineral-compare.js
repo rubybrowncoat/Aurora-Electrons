@@ -68,18 +68,18 @@ export const compareMinerals = (snapshots, ids) => ({
 
 const cell = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value === null || value === undefined ? '' : value)
 
-// The CSV of a comparison as the page shows it: a row for each mineral at each snapshot of the window, the mineral's ID and the slot and colour it is drawn in, the scale, the stock in tonnes, the baseline's stock and game time (and its date) and the change from it in percent. A figure that is not recorded or not defined is an empty cell, and the note says why. `palette` is the categorical colours in force and `date(seconds)` the date of a game time.
-export const comparisonCsv = ({ comparison, scale, palette, date }) => {
+// The CSV of a comparison as the page shows it: a row for each mineral at each snapshot of the window, the mineral's ID and the slot and colour it is drawn in, the scale, the stock in tonnes, the baseline's stock and game time (and its date), the change from it in percent, the seconds since the mineral's previous row and the retention note of the history (how sparsely it is sampled and what is known of its thinning), on the first row. A figure that is not recorded or not defined is an empty cell, and the note says why. `palette` is the categorical colours in force, `date(seconds)` the date of a game time and `retention` the retention note.
+export const comparisonCsv = ({ comparison, scale, palette, date, retention }) => {
   const named = MINERAL_SCALES.find((entry) => entry.value === scale) || MINERAL_SCALES[0]
-  const header = ['Mineral ID', 'Mineral', 'Palette slot', 'Colour', 'Scale', 'Game time (s)', 'Date', 'Stock (t)', 'Baseline stock (t)', 'Baseline game time (s)', 'Baseline date', 'Change from baseline (%)', 'Note']
-  const rows = comparison.series.flatMap((series) => {
+  const header = ['Mineral ID', 'Mineral', 'Palette slot', 'Colour', 'Scale', 'Game time (s)', 'Date', 'Stock (t)', 'Baseline stock (t)', 'Baseline game time (s)', 'Baseline date', 'Change from baseline (%)', 'Note', 'Gap since previous row (s)', 'Retention']
+  const rows = comparison.series.flatMap((series, order) => {
     const style = mineralStyle(palette, series.id)
     const baseline = series.baseline
 
     return series.samples.map((sample, position) => {
       const notes = [sample.stock === null ? 'stock not recorded' : '', series.normalisation.defined ? '' : `change undefined: ${series.normalisation.reason}`].filter(Boolean)
 
-      return [series.id, series.name, style.slot + 1, style.color, named.label, sample.t, date(sample.t), sample.stock, baseline.stock, baseline.t, date(baseline.t), series.percent[position], notes.join('; ')]
+      return [series.id, series.name, style.slot + 1, style.color, named.label, sample.t, date(sample.t), sample.stock, baseline.stock, baseline.t, date(baseline.t), series.percent[position], notes.join('; '), position ? sample.t - series.samples[position - 1].t : null, order || position ? null : retention]
     })
   })
 

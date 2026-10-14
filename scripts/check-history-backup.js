@@ -2079,7 +2079,7 @@ const MUTANTS = [
   { name: 'a race id need not be canonical', find: 'const NUMERIC = /^(0|[1-9]\\d*)$/', replace: 'const NUMERIC = /^[0-9.]+$/', fails: ['an id that could name'] },
   { name: 'a branch id may be anything', find: 'const BRANCH = /^b[1-9]\\d*$/', replace: 'const BRANCH = /^.+$/', fails: ['an id that could name'] },
   { name: 'the backup wins at a shared game time under merge', find: 'const united = [...stored, ...given.filter((snapshot) => !known.has(snapshot.t))].sort(', replace: 'const united = [...stored.filter((snapshot) => !offered.has(snapshot.t)), ...given].sort(', fails: ['a merge keeps the stored snapshot', 'a stored snapshot at a shared game time'] },
-  { name: 'what passes the cap is not thinned', find: 'const thinned = thinSnapshots(united)', replace: 'const thinned = united', fails: ['a merge keeps the stored snapshot'] },
+  { name: 'what passes the cap is not thinned', find: 'const outcome = thinCounted(united)', replace: 'const outcome = { snapshots: united, passes: 0, dropped: 0, cap: MAX_SNAPSHOTS }', fails: ['a merge keeps the stored snapshot'] },
   { name: 'a kept target is written', find: 'if (row.policy !== \'keep\' && canonical(planned.file)', replace: 'if (canonical(planned.file)', fails: ['each target takes its own policy'] },
   { name: 'a replace does not count what it removes', find: 'stats.removed = stored.filter((snapshot) => !offered.has(snapshot.t)).length', replace: 'stats.removed = 0', fails: ['a replace that removes', 'replace makes the selected'] },
   { name: 'a restore that asks for a confirmation is applied without it', find: 'if (preview.needsConfirmation.length && !confirmed) {', replace: 'if (false) {', fails: ['a replace that removes', 'a campaign of another id that shares'] },

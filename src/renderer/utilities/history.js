@@ -3,10 +3,10 @@
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
-import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, settle } from './campaign'
+import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readThinning, settle, witnessOf } from './campaign'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
-import { isKnownNumber } from './math'
+import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
 import { combine, ofRule, registerRule, sumResults, unavailable } from './provenance'
 import { ReadOnly, recordingOwner, requireRecording, withRegistry } from './recording-owner'
 
@@ -184,7 +184,7 @@ export const changeResult = (earlier, later) => combine({ rule: 'history.change'
 // The sum of results of one rule (the military and commercial tonnage): unavailable when any is.
 export const totalResult = (rule, results) => sumResults({ rule, results })
 
-// More than this many snapshots per race and the older half is thinned to every other one, so a long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap).
+// The default and largest cap on snapshots per series (the Standard retention profile): more than this and the older half is thinned to every other one, so a long campaign keeps its whole span at a coarser grain (about 1 MB per race at the cap). A smaller cap is a chosen profile (`RETENTION_PROFILES`).
 export const MAX_SNAPSHOTS = 2000
 
 const HISTORY_FOLDER = 'history'
@@ -227,8 +227,8 @@ const openStore = (cwd, name) => {
 }
 
 // The files of Empire History, all beside the settings and never the save. `campaigns` in the history folder is the registry (utilities/campaign.js): each campaign the app has recorded with its branches, attached saves and the unattached legacy history. Each branch of a campaign has its own file, `campaign-<campaignId>-<branchId>.json`, holding:
-// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...] } },
-//   intel: { [ViewRaceID]: { [AlienRaceID]: { name, snapshots: [...] } } } }
+// { gameName, races: { [RaceID]: { raceName, npr, snapshots: [...], thinning? } },
+//   intel: { [ViewRaceID]: { [AlienRaceID]: { name, snapshots: [...], thinning? } } } }
 // A history file written before campaigns, `game-<GameID>.json`, is kept as it was (the preserved original of the migration, see campaign.js) and read only by that migration. `migrations/campaigns-v1.json` holds the migration's record and copies of those originals.
 export const registryStore = () => openStore(HISTORY_FOLDER, 'campaigns')
 
@@ -273,17 +273,122 @@ export const campaignStorage = (settings = null) => {
 // Player races and NPR empires are recorded. Aurora's special factions (Precursors, Invaders, Rakhas, Eldar, Ancients and the like, `SpecialNPRID` > 0) have no empire to chart.
 export const recordsHistory = ({ NPR, SpecialNPRID }) => !toBoolean(NPR) || !(toNumber(SpecialNPRID) > 0)
 
-// Drop every other snapshot in the older half until the list fits.
-export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => {
+// Drop every other snapshot in the older half until the list fits, and say how many passes that took and how many snapshots went: { snapshots, passes, dropped, cap }. The first and the latest snapshot stay, as does the order. A pass that cannot shrink the list (a cap below 3) keeps the newest `cap` snapshots instead, so the loop always ends.
+export const thinCounted = (snapshots, limit = MAX_SNAPSHOTS) => {
+  const cap = Number.isInteger(limit) && limit > 0 ? limit : MAX_SNAPSHOTS
   let result = snapshots
+  let passes = 0
 
-  while (result.length > limit) {
+  while (result.length > cap) {
     const half = Math.floor(result.length / 2)
+    const next = [...result.slice(0, half).filter((_, index) => index % 2 === 0), ...result.slice(half)]
 
-    result = [...result.slice(0, half).filter((_, index) => index % 2 === 0), ...result.slice(half)]
+    passes++
+    result = next.length < result.length ? next : result.slice(result.length - cap)
   }
 
-  return result
+  return { snapshots: result, passes, dropped: snapshots.length - result.length, cap }
+}
+
+export const thinSnapshots = (snapshots, limit = MAX_SNAPSHOTS) => thinCounted(snapshots, limit).snapshots
+
+// The bounded retention profiles: how many snapshots one series (a race, or one alien race a race knows) keeps before its older half is thinned. Every cap is within `MAX_SNAPSHOTS`, the most a history backup accepts for a series, so no profile makes a history that cannot be backed up.
+export const RETENTION_PROFILES = [
+  { id: 'compact', label: 'Compact', cap: 500 },
+  { id: 'balanced', label: 'Balanced', cap: 1000 },
+  { id: 'standard', label: 'Standard', cap: MAX_SNAPSHOTS },
+]
+
+export const DEFAULT_RETENTION = 'standard'
+
+// The profile of an id; the default when the id is not one of the profiles (a setting from another version, a hand-edited file).
+export const retentionProfile = (id) => RETENTION_PROFILES.find((profile) => profile.id === id) || RETENTION_PROFILES.find((profile) => profile.id === DEFAULT_RETENTION)
+
+// The profile the app's settings hold (`historyRetention`); the default when there are none.
+export const retentionOfSettings = (settings) => retentionProfile(settings && settings.store ? settings.store.historyRetention : undefined)
+
+// What a series record says of its thinning: { status, passes, dropped, last }. `status` is 'untouched' (started by the recorder, never thinned), 'thinned' (started by the recorder, thinned `passes` times), 'partial' (thinned at least `passes` times; something else wrote the series, or it began before the record, so more may have happened) or 'unknown' (nothing is known: `passes`, `dropped` and `last` are null, never 0).
+export const thinningStatus = (record) => {
+  const thinning = record ? readThinning(record.thinning) : null
+
+  if (!thinning) {
+    return { status: 'unknown', passes: null, dropped: null, last: null }
+  }
+
+  if (thinning.complete && thinning.witness === witnessOf(record.snapshots)) {
+    return { status: thinning.passes ? 'thinned' : 'untouched', passes: thinning.passes, dropped: thinning.dropped, last: thinning.last }
+  }
+
+  return thinning.passes ? { status: 'partial', passes: thinning.passes, dropped: thinning.dropped, last: thinning.last } : { status: 'unknown', passes: null, dropped: null, last: null }
+}
+
+// The `thinning` entry a series record carries after the recorder wrote `outcome` (what `thinCounted` gave for it) over `previous`, the record before, or undefined when nothing is worth writing: a series that began before the record, whose thinning is still unknown, stays as it was.
+const retained = (previous, outcome, now) => {
+  const prior = previous ? readThinning(previous.thinning) : null
+  const intact = prior && prior.witness === witnessOf(previous.snapshots)
+  const base = !previous ? { complete: true, passes: 0, dropped: 0, last: null } : { complete: Boolean(intact && prior.complete), passes: prior ? prior.passes : 0, dropped: prior ? prior.dropped : 0, last: prior ? prior.last : null }
+  const passes = base.passes + outcome.passes
+  const latest = outcome.snapshots[outcome.snapshots.length - 1]
+
+  if (!base.complete && !passes) {
+    return undefined
+  }
+
+  return {
+    complete: base.complete,
+    passes,
+    dropped: base.dropped + outcome.dropped,
+    last: outcome.passes ? { at: now(), t: latest.t, passes: outcome.passes, dropped: outcome.dropped, cap: outcome.cap } : base.last,
+    witness: witnessOf(outcome.snapshots),
+  }
+}
+
+// A record's fields with its thinning entry for the new rows, left out when there is none to write.
+const withThinning = (fields, previous, outcome, now) => {
+  const thinning = retained(previous, outcome, now)
+
+  return thinning ? { ...fields, thinning } : fields
+}
+
+// What one series that goes into a merge says of its own thinning: the rows, the valid record or null, whether the record is intact (it was written for exactly these rows' game times), whether its counts are the whole story (an intact complete record, or a series with no rows at all), and the counts.
+const reading = (record) => {
+  const rows = record && Array.isArray(record.snapshots) ? record.snapshots : []
+  const thinning = record ? readThinning(record.thinning) : null
+  const intact = !!thinning && thinning.witness === witnessOf(rows)
+
+  return { rows, thinning, intact, complete: thinning ? thinning.complete && intact : !rows.length, passes: thinning ? thinning.passes : 0, dropped: thinning ? thinning.dropped : 0 }
+}
+
+// The `thinning` entry of a series made by merging the series `records` (each a record or undefined for a side that has none), `outcome` being what `thinCounted` gave for the union of their rows, or undefined when nothing is known. A merge is the one place two histories are written as one, so it is where thinning is reconciled, and the game times alone never decide it (two different histories can be thinned to the same times, and a merge cannot bring back what either side lost). The merge's own thinning is dated by game time only (`at` is null), so planning the same merge twice gives the same record:
+// - a source whose rows are exactly the result, with nothing thinned by the merge, stands as it was, but only when every other source adds nothing it did not already hold and says nothing against it (it was complete and never thinned, or it carries the very same record and that record is intact, so a record whose rows have changed since never vouches for another): a source with no record, one that was thinned, or one whose record is stale, may have lost samples this one never had, so the result is then never more complete than the least known source;
+// - every source complete and never thinned: the result is complete, and the merge's own thinning is all there is;
+// - otherwise the counts are a floor (the most any one source or the merge reports, since two histories can describe the same drops) and the result is not complete; with no thinning reported at all nothing is known.
+export const thinningOfMerge = (records, outcome) => {
+  const sources = records.map(reading)
+  const witness = witnessOf(outcome.snapshots)
+  const silent = (source) => source.complete && !source.passes
+  const standing = outcome.dropped ? undefined : sources.find((source) => source.thinning && witnessOf(source.rows) === witness && sources.every((other) => other === source || silent(other) || (other.intact && JSON.stringify(other.thinning) === JSON.stringify(source.thinning))))
+
+  if (standing) {
+    return standing.thinning
+  }
+
+  const latest = outcome.snapshots[outcome.snapshots.length - 1]
+  const own = outcome.passes ? { at: null, t: latest.t, passes: outcome.passes, dropped: outcome.dropped, cap: outcome.cap } : null
+
+  if (sources.every((source) => source.complete && !source.passes)) {
+    return { complete: true, passes: outcome.passes, dropped: outcome.dropped, last: own, witness }
+  }
+
+  const passes = Math.max(outcome.passes, ...sources.map((source) => source.passes))
+
+  if (!passes) {
+    return undefined
+  }
+
+  const lasts = [own, ...sources.map((source) => source.thinning && source.thinning.last)].filter(Boolean)
+
+  return { complete: false, passes, dropped: Math.max(outcome.dropped, ...sources.map((source) => source.dropped)), last: lasts.reduce((newest, candidate) => (candidate.t > newest.t ? candidate : newest)), witness }
 }
 
 // What a race's recording covers, from its time-ordered snapshots: { count, first, last, seconds } with the game times of the first and latest snapshot (null when there are none) and the span between them; `covered` is how much of the last `windowSeconds` that span fills, or the whole span when `windowSeconds` is 0, and `inWindow` how many snapshots fall in that window. Nothing is inferred for time before the first snapshot.
@@ -300,33 +405,177 @@ export const recordedSpan = (snapshots, windowSeconds = 0) => {
   return { count: snapshots.length, first, last, seconds, covered: windowSeconds ? Math.min(seconds, windowSeconds) : seconds, inWindow: snapshots.filter((snapshot) => snapshot.t >= since).length }
 }
 
-// The snapshots with `snapshot` in time order: it takes the place of one at the same game time, and none at another time is touched, so a save older than what is recorded lands in the past of the record and the later snapshots stay.
-const withSnapshot = (snapshots, snapshot) => thinSnapshots([...snapshots.filter((existing) => existing.t !== snapshot.t), snapshot].sort((a, b) => a.t - b.t))
+const SECONDS_PER_DAY = 86400
+const SECONDS_PER_YEAR = 31536000
+
+// A span of game time as one figure with its unit (s, min, h, d, y); a dash when it is not known, never 0.
+export const durationText = (seconds) => {
+  if (!isKnownNumber(seconds)) {
+    return UNKNOWN_TEXT
+  }
+
+  const value = Number(seconds)
+
+  if (value >= SECONDS_PER_YEAR) {
+    return `${roundToDecimal(value / SECONDS_PER_YEAR, 1)} y`
+  } else if (value >= SECONDS_PER_DAY) {
+    return `${roundToDecimal(value / SECONDS_PER_DAY, 1)} d`
+  } else if (value >= 3600) {
+    return `${roundToDecimal(value / 3600, 1)} h`
+  } else if (value >= 60) {
+    return `${roundToDecimal(value / 60, 1)} min`
+  }
+
+  return `${roundToDecimal(value, 0)} s`
+}
+
+// A size in bytes as B, KiB or MiB; a dash when it is not known, never 0.
+export const bytesText = (bytes) => {
+  if (!isKnownNumber(bytes)) {
+    return UNKNOWN_TEXT
+  }
+
+  const value = Number(bytes)
+
+  return value >= 1048576 ? `${roundToDecimal(value / 1048576, 2)} MiB` : value >= 1024 ? `${roundToDecimal(value / 1024, 1)} KiB` : `${value} B`
+}
+
+// What a time-ordered list of snapshots holds: { count, first, last, seconds, gaps } with the game times of the first and latest snapshot and the span between them, and `gaps` { count, largest, typical } over the time between neighbours (`typical` the median). Everything that needs two snapshots is null, not 0, when there are fewer.
+export const retentionStats = (snapshots) => {
+  const times = snapshots.map((snapshot) => snapshot.t).filter((t) => Number.isFinite(t))
+  const gaps = times.slice(1).map((t, index) => t - times[index]).sort((a, b) => a - b)
+  const middle = Math.floor(gaps.length / 2)
+
+  return {
+    count: snapshots.length,
+    first: times.length ? times[0] : null,
+    last: times.length ? times[times.length - 1] : null,
+    seconds: times.length > 1 ? times[times.length - 1] - times[0] : null,
+    gaps: {
+      count: gaps.length,
+      largest: gaps.length ? gaps[gaps.length - 1] : null,
+      typical: gaps.length ? (gaps.length % 2 ? gaps[middle] : (gaps[middle - 1] + gaps[middle]) / 2) : null,
+    },
+  }
+}
+
+// The size of a value as the history file stores it, in bytes of compact JSON (the file on disk is indented, so it is larger).
+const storedBytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
+
+// The measured size of a series record as stored, or null when there is none.
+export const measuredBytes = (record) => (record ? storedBytes(record) : null)
+
+// What a retention profile would do to a series record's snapshots as they are now: { cap, thins, kept, dropped, passes, largestGap, bytes, bytesAtCap }. `kept`, `dropped`, `largestGap` and `bytes` are exact for thinning the stored rows now; `bytesAtCap` is a prediction (the average size of a stored snapshot times the cap) of the series' size once it holds as many as the cap. All are null when the series has no snapshots, because nothing is then known to predict from.
+export const predictRetention = (record, profile) => {
+  const snapshots = record && Array.isArray(record.snapshots) ? record.snapshots : []
+
+  if (!snapshots.length) {
+    return { cap: profile.cap, thins: null, kept: null, dropped: null, passes: null, largestGap: null, bytes: null, bytesAtCap: null }
+  }
+
+  const thinned = thinCounted(snapshots, profile.cap)
+
+  return {
+    cap: profile.cap,
+    thins: thinned.dropped > 0,
+    kept: thinned.snapshots.length,
+    dropped: thinned.dropped,
+    passes: thinned.passes,
+    largestGap: retentionStats(thinned.snapshots).gaps.largest,
+    bytes: storedBytes({ ...record, snapshots: thinned.snapshots }),
+    bytesAtCap: Math.round((storedBytes(snapshots) / snapshots.length) * profile.cap),
+  }
+}
+
+// How many samples a series holds and how far apart they are, in one line: "N samples; gaps up to X (typical Y)". One sample has no gap, which is stated, not shown as 0.
+export const samplingText = (stats) => {
+  if (!stats.count) {
+    return 'No samples'
+  }
+
+  if (stats.gaps.largest === null) {
+    return `${stats.count} sample${stats.count === 1 ? '' : 's'}; gaps unknown`
+  }
+
+  return `${stats.count} samples; gaps up to ${durationText(stats.gaps.largest)} (typical ${durationText(stats.gaps.typical)})`
+}
+
+// What the thinning of a series is known to be (`thinningStatus`), in words. `date` writes a game time; the wall-clock time of the latest thinning is a calendar date in UTC.
+export const thinningText = ({ status, passes, dropped, last }, date) => {
+  if (status === 'unknown') {
+    return 'Thinning unknown: this history was recorded or merged without its thinning being noted, so its older half may have been thinned and it is not assumed complete'
+  }
+
+  if (status === 'untouched') {
+    return 'Never thinned'
+  }
+
+  const latest = last ? `; latest thinning at ${date(last.t)} (${last.at === null ? 'made by a merge' : `saved ${new Date(last.at).toISOString().slice(0, 10)}`}, cap ${last.cap})` : ''
+  const times = `${passes} time${passes === 1 ? '' : 's'}, dropping ${status === 'partial' ? 'at least ' : ''}${dropped} sample${dropped === 1 ? '' : 's'}`
+
+  return status === 'partial' ? `Older half thinned at least ${times}; the series was also written by something other than the recorder, so more may be unknown${latest}` : `Older half thinned ${times}${latest}`
+}
+
+// The sparse-sampling line a chart, table or export of a series advertises: the sampling and the thinning in one sentence.
+export const retentionNote = (record, date) => `${samplingText(retentionStats(record && Array.isArray(record.snapshots) ? record.snapshots : []))}. ${thinningText(thinningStatus(record), date)}.`
+
+// The columns the history CSV adds for the sparse sampling: the seconds since the previous row (empty for the first, which has none) and the retention note on the first row.
+export const sparseColumns = (snapshots, note) => ({
+  header: ['Gap since previous row (s)', 'Retention'],
+  rows: snapshots.map((snapshot, index) => [index && Number.isFinite(snapshot.t) && Number.isFinite(snapshots[index - 1].t) ? snapshot.t - snapshots[index - 1].t : null, index ? null : note]),
+})
+
+// The snapshots with `snapshot` in time order, thinned to `limit` (see `thinCounted`): it takes the place of one at the same game time, and none at another time is touched, so a save older than what is recorded lands in the past of the record and the later snapshots stay.
+const withSnapshot = (snapshots, snapshot, limit) => thinCounted([...snapshots.filter((existing) => existing.t !== snapshot.t), snapshot].sort((a, b) => a.t - b.t), limit)
+
+// How a branch's history file stands against a cap: { series, over, dropped, next: { thins, dropped, replaced } }. `series` counts what it holds (every race and every alien race a race knows), `over` how many hold more snapshots than `cap` and `dropped` how many snapshots thinning the rows stored now would drop. `next` is what the recorder's next save would do, a later snapshot being added before the thinning (that is what the recorder does, so it can thin a series that holds no more than `cap` now, or more passes than thinning the stored rows alone): `thins` how many series it thins and `dropped` how many stored snapshots it discards in all, for an alien series at most, each series taking the way that discards most. An alien series whose new observation matches the snapshot before it gains no snapshot and loses the one stored at that time, which goes before the thinning runs, so the most it discards can be one more than any thinning: `replaced` is the allowance that adds to `dropped` over what thinning alone would give, not a count of the samples that can be removed (a save can remove one from each alien series that holds two or more, and a series whose thinning already discards more than that adds nothing to the allowance). A series is not counted in `thins` for that alone.
+export const seriesOverCap = (history, cap) => {
+  const races = Object.values(history && history.races ? history.races : {})
+  const aliens = Object.values(history && history.intel ? history.intel : {}).flatMap((views) => Object.values(views))
+  const measured = (records, intel) => records.filter((record) => record && Array.isArray(record.snapshots)).map(({ snapshots }) => {
+    const stored = thinCounted(snapshots, cap).dropped
+    const added = snapshots.length ? withSnapshot(snapshots, { t: snapshots[snapshots.length - 1].t + 1 }, cap).dropped : 0
+    const thinned = intel ? Math.max(stored, added) : added
+    const removed = intel && snapshots.length ? 1 + thinCounted(snapshots.slice(1), cap).dropped : 0
+
+    return { held: snapshots.length, stored, thinned, next: Math.max(thinned, removed) }
+  })
+  const series = [...measured(races, false), ...measured(aliens, true)]
+  const total = (list, key) => list.reduce((sum, entry) => sum + entry[key], 0)
+
+  return { series: series.length, over: series.filter((entry) => entry.held > cap).length, dropped: total(series, 'stored'), next: { thins: series.filter((entry) => entry.thinned > 0).length, dropped: total(series, 'next'), replaced: total(series, 'next') - total(series, 'thinned') } }
+}
 
 // Add one save's snapshots to a branch's history. `history` is the file's contents (or empty); `gameName` is the name the save gave the game, kept as the label of the file, and each snapshot carries the game time it was taken at:
 // - `races`: [{ RaceID, raceName, npr, snapshot }];
 // - `intel`: { [ViewRaceID]: [{ AlienRaceID, name, snapshot }] }, what each race knows of the others.
+// `limit` is how many snapshots a series keeps before its older half is thinned (the chosen retention profile's cap), and `now` gives the wall-clock time a thinning is recorded at; each series record carries what is known of its thinning (`thinning`, see `readThinning`).
 // Rules:
 // - Which campaign and branch the file belongs to is decided before this (utilities/campaign.js), so a name or an id is never compared here: a different campaign has a different file.
-// - Nothing is removed. A save at a recorded time replaces that snapshot; a save older than the latest one is inserted in time order, an older save reloaded (a rewind) leaves the later snapshots in place, and a rewound past that is then played differently goes to a branch of its own.
+// - Nothing is removed but by thinning. A save at a recorded time replaces that snapshot; a save older than the latest one is inserted in time order, an older save reloaded (a rewind) leaves the later snapshots in place, and a rewound past that is then played differently goes to a branch of its own.
 // - A race (or an alien race) missing from this save keeps its past.
 // - Intelligence changes slowly, so its snapshot is kept only when something besides the time changed from the snapshot before it.
-export const mergeGame = (history, { gameName, races, intel = {} }) => {
+export const mergeGame = (history, { gameName, races, intel = {} }, { limit = MAX_SNAPSHOTS, now = Date.now } = {}) => {
   const merged = Object.fromEntries(Object.entries(history && history.races ? history.races : {}).map(([RaceID, record]) => [RaceID, { ...record, snapshots: record.snapshots || [] }]))
   const mergedIntel = Object.fromEntries(Object.entries(history && history.intel ? history.intel : {}).map(([ViewRaceID, aliens]) => [ViewRaceID, { ...aliens }]))
 
   races.forEach(({ RaceID, raceName, npr, snapshot }) => {
-    merged[RaceID] = { raceName, npr, snapshots: withSnapshot(merged[RaceID] ? merged[RaceID].snapshots : [], snapshot) }
+    const previous = merged[RaceID]
+    const outcome = withSnapshot(previous ? previous.snapshots : [], snapshot, limit)
+
+    merged[RaceID] = withThinning({ raceName, npr, snapshots: outcome.snapshots }, previous, outcome, now)
   })
 
   Object.entries(intel).forEach(([ViewRaceID, aliens]) => {
     const view = (mergedIntel[ViewRaceID] = mergedIntel[ViewRaceID] || {})
 
     aliens.forEach(({ AlienRaceID, name, snapshot }) => {
-      const snapshots = view[AlienRaceID] ? view[AlienRaceID].snapshots : []
+      const previous = view[AlienRaceID]
+      const snapshots = previous ? previous.snapshots : []
       const last = snapshots.filter((existing) => existing.t < snapshot.t).pop()
+      const outcome = !last || intelChanged(last, snapshot) ? withSnapshot(snapshots, snapshot, limit) : thinCounted(snapshots.filter((existing) => existing.t !== snapshot.t), limit)
 
-      view[AlienRaceID] = { name, snapshots: !last || intelChanged(last, snapshot) ? withSnapshot(snapshots, snapshot) : snapshots.filter((existing) => existing.t !== snapshot.t) }
+      view[AlienRaceID] = withThinning({ name, snapshots: outcome.snapshots }, previous, outcome, now)
     })
   })
 
@@ -506,7 +755,7 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
 
           const store = storage.file(branchFileName(resolution.campaignId, resolution.branchId))
 
-          store.store = mergeGame(store.store, { gameName: observation.gameName, races: taken, intel })
+          store.store = mergeGame(store.store, { gameName: observation.gameName, races: taken, intel }, { limit: retentionOfSettings(storage.settings).cap, now })
           recorded += taken.length
           onSaved(GameID)
         }

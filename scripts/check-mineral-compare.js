@@ -139,7 +139,7 @@ const tableOf = (text) => {
   return { header, rows: rows.map((row) => Object.fromEntries(header.map((name, index) => [name, row[index]]))) }
 }
 
-const VALUE_COLUMNS = ['Game time (s)', 'Stock (t)', 'Baseline stock (t)', 'Baseline game time (s)', 'Change from baseline (%)']
+const VALUE_COLUMNS = ['Game time (s)', 'Stock (t)', 'Baseline stock (t)', 'Baseline game time (s)', 'Change from baseline (%)', 'Gap since previous row (s)']
 
 // The palette slot each mineral ID is drawn in: the first nine own one each; Corundium takes Corbomite's and Gallicite Tritanium's.
 const SLOT_OF = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 10: 2, 11: 3 }
@@ -152,7 +152,8 @@ const pure = (m, themes) => {
   const ids = MINERALS.map((mineral) => mineral.id)
   const seriesOf = (snapshots, list) => compareMinerals(snapshots, list).series
   const one = (snapshots, id) => seriesOf(snapshots, [id])[0]
-  const csvOf = (comparison, scale, palette, date = dateOf) => tableOf(comparisonCsv({ comparison, scale, palette, date }))
+  const NOTE = '18 samples; gaps up to 5 y (typical 5 y). Older half thinned 2 times, dropping at least 40 samples.'
+  const csvOf = (comparison, scale, palette, date = dateOf, retention = NOTE) => tableOf(comparisonCsv({ comparison, scale, palette, date, retention }))
   const everyTheme = (test) => Object.entries(themes).map(([name, palette]) => [name, test(palette)]).filter(([, result]) => result !== true).map(([name, result]) => `${name}: ${result}`).join('; ') || true
   const encodings = m.encodings
 
@@ -232,7 +233,7 @@ const pure = (m, themes) => {
       const comparison = { series: seriesOf(SNAPSHOTS, [1, 11]) }
       const first = csvOf(comparison, 'absolute', themes.light).header
       const second = csvOf(comparison, 'percent', themes.light).header
-      const plain = ['Mineral ID', 'Mineral', 'Palette slot', 'Colour', 'Scale', 'Date', 'Baseline date', 'Note']
+      const plain = ['Mineral ID', 'Mineral', 'Palette slot', 'Colour', 'Scale', 'Date', 'Baseline date', 'Note', 'Retention']
       const value = first.filter((name) => !plain.includes(name))
 
       return equal(first, second) && equal(value, VALUE_COLUMNS) && value.every((name) => /\((t|s|%)\)$/.test(name)) ? true : short([first, second])
@@ -241,6 +242,19 @@ const pure = (m, themes) => {
       const table = csvOf(compareMinerals(SNAPSHOTS.slice(6), [1, 11]), 'percent', themes.light)
 
       return table.rows.length === 6 && table.rows.every((row) => (row['Mineral ID'] === '1' ? row['Baseline stock (t)'] === '400' : row['Baseline stock (t)'] === '60') && row['Baseline game time (s)'] === String(30 * YEAR) && row['Baseline date'] === dateOf(30 * YEAR)) ? true : short(table.rows.map((row) => [row['Mineral ID'], row['Baseline stock (t)'], row['Baseline game time (s)'], row['Baseline date']]))
+    }],
+    ['the CSV gives the seconds since each mineral\'s previous row, empty on its first, and the retention note once, on the first row of the file', () => {
+      const table = csvOf(compareMinerals(SNAPSHOTS.slice(6), [1, 11]), 'percent', themes.light)
+      const duranium = table.rows.filter((row) => row['Mineral ID'] === '1')
+      const gallicite = table.rows.filter((row) => row['Mineral ID'] === '11')
+      const retention = table.rows.map((row) => row.Retention)
+
+      return equal(duranium.map((row) => row['Gap since previous row (s)']), ['', String(5 * YEAR), String(5 * YEAR)]) && equal(gallicite.map((row) => row['Gap since previous row (s)']), ['', String(5 * YEAR), String(5 * YEAR)]) && retention[0] === NOTE && retention.slice(1).every((cell) => cell === '') && table.header.slice(-2).join('|') === 'Gap since previous row (s)|Retention' ? true : short([duranium.map((row) => row['Gap since previous row (s)']), retention])
+    }],
+    ['the CSV of a comparison with no rows has its header and no note', () => {
+      const table = csvOf({ series: [] }, 'absolute', themes.light)
+
+      return table.rows.length === 0 && table.header.includes('Retention') ? true : short(table)
     }],
     ['the CSV states the scale on every row', () => {
       const comparison = compareMinerals(SNAPSHOTS, [1, 4])
@@ -914,6 +928,11 @@ const MUTATIONS = [
   { name: 'the cells of the CSV not quoted', find: 'value.replace(/"/g, \'""\')', replace: 'value', fails: ['the CSV quotes a cell that holds a comma, a quote or a newline'] },
   { name: 'the change not registered in percent', find: 'units: \'%\',', replace: 'units: \'\',', fails: ['the change is registered as a rule'] },
   { name: 'the axis of the percent scale without its unit', find: 'axis: \'Change from baseline (%)\'', replace: 'axis: \'Change from baseline\'', fails: ['the scales are the stock in tonnes and the change in percent, each with its axis title and unit'] },
+  { name: 'the gap of the CSV taken from the first row', find: 'position ? sample.t - series.samples[position - 1].t : null', replace: 'position ? sample.t - series.samples[0].t : null', fails: ['the CSV gives the seconds since each mineral'] },
+  { name: 'the gap of the CSV left out', find: 'position ? sample.t - series.samples[position - 1].t : null', replace: 'null', fails: ['the CSV gives the seconds since each mineral'] },
+  { name: 'the retention note left out of the CSV', find: 'order || position ? null : retention]', replace: 'null]', fails: ['the CSV gives the seconds since each mineral'] },
+  { name: 'the retention note on every row of the CSV', find: 'order || position ? null : retention]', replace: 'retention]', fails: ['the CSV gives the seconds since each mineral'] },
+  { name: 'the retention note on the first row of each mineral', find: 'order || position ? null : retention]', replace: 'position ? null : retention]', fails: ['the CSV gives the seconds since each mineral'] },
 ]
 
 const mutatedCopy = (file, from, to) => {
@@ -965,7 +984,7 @@ const PAGE_MUTATIONS = [
   { name: 'the CSV always offered', find: 'csvDisabled: !this.mineralIds.length || !this.snapshots.length', replace: 'csvDisabled: false', fails: ['page: the CSV is offered only with a mineral picked', 'page: a stored pick this version does not offer is cleaned'] },
   { name: 'the CSV always on the stock scale', find: 'scale: this.mineralScale, palette: this.theme.categorical', replace: 'scale: \'absolute\', palette: this.theme.categorical', fails: ['page: the CSV the page writes follows the scale shown'] },
   { name: 'the CSV of every snapshot, not the span', find: 'comparisonCsv({ comparison: this.mineralComparison,', replace: 'comparisonCsv({ comparison: compareMinerals(this.allSnapshots, this.mineralIds),', fails: ['page: the CSV follows the span chosen'] },
-  { name: 'the CSV in the colours of another theme', find: 'palette: this.theme.categorical, date: (seconds) => this.date(seconds) })', replace: 'palette: MINERALS.map(() => \'#000000\'), date: (seconds) => this.date(seconds) })', fails: ['page: the CSV the page writes follows the scale shown'] },
+  { name: 'the CSV in the colours of another theme', find: 'palette: this.theme.categorical, date: (seconds) => this.date(seconds), retention', replace: 'palette: MINERALS.map(() => \'#000000\'), date: (seconds) => this.date(seconds), retention', fails: ['page: the CSV the page writes follows the scale shown'] },
   { name: 'the axis left without its title', find: 'options.scales.y.title = { display: true, text: scale.axis }', replace: 'options.scales.y.title = { display: false, text: \'\' }', fails: ['page: the axis names its unit on each scale'] },
   { name: 'the level of the baseline left off the percent chart', find: 'options.plugins.guides = { levels: [{ y: 0 }] }', replace: 'options.plugins.guides = { levels: [] }', fails: ['page: the axis names its unit on each scale'] },
   // eslint-disable-next-line no-template-curly-in-string

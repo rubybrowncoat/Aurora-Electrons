@@ -1,21 +1,23 @@
 // What the player can do with a record that could not be tied to a campaign by itself (utilities/campaign.js): a new campaign recorded beside candidates that share its GameID (pending), and legacy history that was kept unattached (the pool). Attaching copies: the history of the source is merged into a branch of the chosen campaign (a snapshot at a game time the branch already holds is kept as the branch has it, none is removed), the settings the source holds are copied where the campaign has none (a value the campaign holds is never overwritten), and the source stays as it was, marked as attached. An attachment is idempotent, so one that stopped part way is run again. Nothing here touches a save.
 
 import { branchFileName, campaignSettingsOf, legacyFileName, legacyGameSettings, mergeAnchors, readRegistry, writeRegistry } from './campaign'
-import { thinSnapshots } from './history'
+import { thinCounted, thinningOfMerge } from './history'
 import { requireRecording } from './recording-owner'
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
-// Two lists of snapshots as one in time order; where both hold one at a game time, the first list's stays. `overlaps` counts those.
+// Two lists of snapshots as one in time order; where both hold one at a game time, the first list's stays. `overlaps` counts those. `outcome` is what thinning the union gave (`thinCounted`).
 const unionSnapshots = (kept, added) => {
   const known = new Set(kept.map((snapshot) => snapshot.t))
   const fresh = added.filter((snapshot) => !known.has(snapshot.t))
+  const outcome = thinCounted([...kept, ...fresh].sort((a, b) => a.t - b.t))
 
-  return { snapshots: thinSnapshots([...kept, ...fresh].sort((a, b) => a.t - b.t)), overlaps: added.length - fresh.length, added: fresh.length }
+  return { snapshots: outcome.snapshots, outcome, overlaps: added.length - fresh.length, added: fresh.length }
 }
 
+// The records of `kept` with those of `added` merged in. A merged series' thinning record is made from both series and the thinning the merge itself needed (`thinningOfMerge`): the game times of the result alone never show that nothing was lost.
 const mergeRecords = (kept, added) => {
   const merged = { ...kept }
   let overlaps = 0
@@ -23,8 +25,11 @@ const mergeRecords = (kept, added) => {
 
   Object.entries(isObject(added) ? added : {}).forEach(([id, record]) => {
     const result = unionSnapshots(merged[id] && Array.isArray(merged[id].snapshots) ? merged[id].snapshots : [], Array.isArray(record.snapshots) ? record.snapshots : [])
+    const series = { ...record, ...(merged[id] || {}), snapshots: result.snapshots }
+    const thinning = thinningOfMerge([merged[id], record], result.outcome)
 
-    merged[id] = { ...record, ...(merged[id] || {}), snapshots: result.snapshots }
+    delete series.thinning
+    merged[id] = thinning ? { ...series, thinning } : series
     overlaps += result.overlaps
     count += result.added
   })
