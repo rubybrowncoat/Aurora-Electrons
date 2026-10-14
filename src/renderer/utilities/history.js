@@ -189,6 +189,8 @@ export const MAX_SNAPSHOTS = 2000
 
 const HISTORY_FOLDER = 'history'
 const MIGRATION_FOLDER = 'migrations'
+const BACKUP_FOLDER = 'backups'
+const BACKUP_NAME = 'history-before-restore'
 const openStores = {}
 
 // A store on one of the app's own files (the registry, a history file, the migration record): reads as electron-store's, and every write is refused unless this tab is the recording owner (utilities/recording-owner.js), so no page or utility can write what the owner alone may.
@@ -253,7 +255,7 @@ export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegist
 
 let appSettings = null
 
-// The stores the campaign rules work on, `settings` being the app's settings store (the store's `config` getter in the app); without one, a store on the settings file is opened.
+// The stores the campaign rules work on, `settings` being the app's settings store (the store's `config` getter in the app); without one, a store on the settings file is opened. `backup` keeps the backups taken before a history restore (utilities/history-backup.js).
 export const campaignStorage = (settings = null) => {
   if (!settings && !appSettings) {
     appSettings = new Config({})
@@ -264,6 +266,7 @@ export const campaignStorage = (settings = null) => {
     migration: openStore(MIGRATION_FOLDER, MIGRATION_NAME),
     settings: settings || appSettings,
     file: (name) => openStore(HISTORY_FOLDER, name),
+    backup: openStore(BACKUP_FOLDER, BACKUP_NAME),
   }
 }
 

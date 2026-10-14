@@ -95,6 +95,9 @@ const digestOf = (text) => {
   return `${(a >>> 0).toString(16).padStart(8, '0')}${(b >>> 0).toString(16).padStart(8, '0')}`
 }
 
+// What an import preview is bound to: the bundle, the target and the choice of uuids; the restore policy adds a marker so a preview of another policy never matches.
+const importKey = (bundle, target, keepUuids, restore) => JSON.stringify(restore ? [bundle, target, !!keepUuids, 'restore'] : [bundle, target, !!keepUuids])
+
 const randomId = () => globalThis.crypto.randomUUID()
 
 const oldestFirst = (a, b) => a.createdAt - b.createdAt || (a.uuid < b.uuid ? -1 : 1)
@@ -734,8 +737,8 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
     return copy(next)
   }
 
-  // The records of a bundle against a file: for each, whether it would be imported and under which uuid, and the payload an import would store. Writes nothing.
-  const planImport = (file, bundle, target, keepUuids) => {
+  // The records of a bundle against a file: for each, whether it would be imported and under which uuid, and the payload an import would store. With `restore` a record whose uuid the file holds or held once is 'skipped' (never copied under a fresh uuid, never brought back) and every other record keeps its uuid. Writes nothing.
+  const planImport = (file, bundle, target, keepUuids, restore = false) => {
     const seen = new Set()
 
     return bundle.records.map((record, index) => {
@@ -792,9 +795,9 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
         index,
         uuid,
         kind: isObject(record) && typeof record.kind === 'string' ? record.kind : null,
-        status: reasons.length ? 'rejected' : 'import',
+        status: reasons.length ? 'rejected' : restore && (collides || tombstoned) ? 'skipped' : 'import',
         reasons,
-        keepsUuid: !!keepUuids && !collides && !tombstoned,
+        keepsUuid: (!!keepUuids || restore) && !collides && !tombstoned,
         collides,
         tombstoned,
         foreign: !isObject(record) || record.campaignId !== target.campaignId || record.RaceID !== target.RaceID,
@@ -1015,24 +1018,25 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
       return { format: BUNDLE_FORMAT, version: BUNDLE_VERSION, exportedAt: now(), source: { campaignId: s.campaignId, RaceID: s.RaceID, branchId: s.branchId, gameTime: s.gameTime }, records: copy(records) }
     },
 
-    // What importing the bundle into `target` ({ campaignId, RaceID, branch }, always explicit) would do: `{ target, digest, keepUuids, items, importable, rejected }`, an item being { index, uuid, kind, status ('import' or 'rejected'), reasons, keepsUuid, collides (the target's file holds the uuid), tombstoned (it held it once, so a kept uuid is never reused), foreign, migratedFrom }. Writes nothing.
-    previewImport (bundle, target, { keepUuids = false } = {}) {
+    // What importing the bundle into `target` ({ campaignId, RaceID, branch }, always explicit) would do: `{ target, digest, keepUuids, restore, items, importable, rejected }`, an item being { index, uuid, kind, status ('import', 'rejected', or under `restore` 'skipped'), reasons, keepsUuid, collides (the target's file holds the uuid), tombstoned (it held it once, so a kept uuid is never reused), foreign, migratedFrom }. `restore` is the policy of putting a record back from a backup: a record keeps its uuid, unless the file holds that uuid or held it once, when it is skipped. Writes nothing.
+    previewImport (bundle, target, { keepUuids = false, restore = false } = {}) {
       const b = bundleOf(bundle)
       const t = targetOf(target)
-      const plan = planImport(readFile(t.campaignId), b, t, keepUuids)
+      const plan = planImport(readFile(t.campaignId), b, t, keepUuids, restore)
 
       return {
         target: t,
-        digest: digestOf(JSON.stringify([b, t, !!keepUuids])),
+        digest: digestOf(importKey(b, t, keepUuids, restore)),
         keepUuids: !!keepUuids,
+        restore: !!restore,
         items: plan.map((entry) => entry.item),
         importable: plan.filter((entry) => entry.item.status === 'import').length,
         rejected: plan.filter((entry) => entry.item.status === 'rejected').length,
       }
     },
 
-    // Imports the records of the bundle that the preview of this very bundle and target said could be, as new records of the target's campaign, race and branch; returns { imported, rejected, ids: [{ from, to }] }. Nothing is imported without an explicit target and its preview.
-    importRecords (bundle, target, { preview, keepUuids = false } = {}) {
+    // Imports the records of the bundle that the preview of this very bundle and target said could be, as new records of the target's campaign, race and branch; returns { imported, rejected, ids: [{ from, to }] }. Nothing is imported without an explicit target and its preview. With `restore` the records the file holds or held are skipped as the file is at the time of the import, not as it was at the preview.
+    importRecords (bundle, target, { preview, keepUuids = false, restore = false } = {}) {
       const b = bundleOf(bundle)
       const t = targetOf(target)
 
@@ -1040,12 +1044,12 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
         throw refuse('preview-required', 'An import is made from the preview of the same bundle and target')
       }
 
-      if (preview.digest !== digestOf(JSON.stringify([b, t, !!keepUuids]))) {
+      if (preview.digest !== digestOf(importKey(b, t, keepUuids, restore))) {
         throw refuse('preview-mismatch', 'The preview is not of this bundle, target and choice of uuids')
       }
 
       return transact(t.campaignId, (file) => {
-        const plan = planImport(file, b, t, keepUuids)
+        const plan = planImport(file, b, t, keepUuids, restore)
         const stamp = now()
         const imported = []
         const ids = []

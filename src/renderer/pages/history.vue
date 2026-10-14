@@ -152,6 +152,148 @@
         </v-card>
       </template>
 
+      <v-card class="panel history-backup" data-summary="A file of the campaigns, the history of each race and what it knows of the others, and the planners' annotations, to keep or to move to another computer. A restore shows what it would add, keep and replace for each campaign and branch before anything is written, and keeps a copy of what it touches first. The save is never touched." elevation="1">
+        <div class="panel-head">
+          <span>Backup</span>
+          <span class="caption text--secondary">Export the history, or restore it from a file</span>
+        </div>
+        <div class="panel-body">
+          <div class="history-backup__actions">
+            <v-btn small outlined :disabled="backupBusy" title="Every campaign recorded on this computer, with its branches, race and intelligence history and annotations" @click="exportBackup(true)"><v-icon small left>mdi-download</v-icon>Export all campaigns</v-btn>
+            <v-btn small outlined :disabled="backupBusy || !resolved" title="Only the campaign this save belongs to" @click="exportBackup(false)"><v-icon small left>mdi-download</v-icon>Export this campaign</v-btn>
+            <v-file-input :key="backupInput" accept="application/json,.json" label="Restore from a backup file" prepend-icon="" prepend-inner-icon="mdi-upload" dense outlined hide-details class="history-backup__file" :disabled="backupBusy" @change="readBackup" />
+          </div>
+          <div class="caption text--secondary mt-2">A backup holds the campaign records, the history of every race, what each race knows of the others and the annotations. The unattached history from before campaigns were recorded, the migration record and the settings of each race are not in it. A restore only adds to a campaign record; it never changes an answer already given and never merges two campaigns.</div>
+
+          <v-alert v-if="backupErrors.length" type="error" outlined dense class="mt-3">
+            <div>{{ backupFile }} was not read, and nothing was changed:</div>
+            <div v-for="message in backupErrors" :key="message">{{ message }}</div>
+          </v-alert>
+          <v-alert v-if="backupError" type="error" outlined dense class="mt-3">{{ backupError }}</v-alert>
+          <v-alert v-if="backupResult" type="success" outlined dense class="mt-3">{{ backupResult }}</v-alert>
+          <v-alert v-if="unfinishedBackup" type="warning" outlined dense class="mt-3">
+            <div v-if="unfinishedBackup.problem">The restore started {{ stamp(unfinishedBackup.at) }} ({{ unfinishedBackup.label }}) did not finish, and the history kept for it cannot be read back ({{ unfinishedBackup.problem }}). It is kept as it is, and no restore is applied until it is abandoned. Download it to save what it holds, or abandon it to put it among the other copies.</div>
+            <div v-else>The restore started {{ stamp(unfinishedBackup.at) }} ({{ unfinishedBackup.label }}) did not finish. The history it began with is kept. Apply the same backup again with the same choices to finish it, or abandon it to keep the files as they are now. No other restore is applied until then.</div>
+            <div class="mt-1">
+              <v-btn x-small text :disabled="backupBusy" title="The history as it was before the restore began, as a backup file" @click="downloadUnfinished"><v-icon x-small left>mdi-download</v-icon>Download the kept history</v-btn>
+              <v-btn x-small text :disabled="backupBusy || (failure && failure.stage === 'readonly')" class="ml-2" title="Stop treating the restore as unfinished: the kept history joins the other copies and no file changes" @click="abandonBackup"><v-icon x-small left>mdi-close</v-icon>Abandon</v-btn>
+            </div>
+          </v-alert>
+
+          <div v-if="backupPlan" class="history-backup__preview mt-3">
+            <div class="font-weight-medium">{{ backupFile }}<span class="caption text--secondary ml-2">made {{ stamp(backupPlan.preview.exportedAt) }}</span></div>
+            <div class="caption text--secondary">Nothing is written until the restore is applied. Merge keeps what is stored where both have a snapshot at the same game time; Replace takes the backup's and drops stored snapshots it lacks; Keep leaves the target as it is.</div>
+
+            <div v-for="item in backupPlan.preview.campaigns" :key="item.id" class="history-backup__campaign mt-3">
+              <div class="history-backup__title">
+                <span class="font-weight-medium">{{ item.name }}</span><span class="caption text--secondary ml-2" title="The app's own id of this campaign">{{ item.id }}</span>
+                <v-chip x-small outlined :color="statusColor(item.status)" class="ml-2">{{ statusText(item.status) }}</v-chip>
+                <v-chip v-if="item.skipped" x-small outlined class="ml-1">not restored</v-chip>
+              </div>
+              <div v-for="note in item.notes" :key="note" class="caption text--secondary">{{ note }}</div>
+
+              <div v-if="!item.skipped" class="history-backup__row mt-1">
+                <span class="history-backup__label">Campaign record</span>
+                <v-btn-toggle :value="item.requested" mandatory dense @change="chooseAssociation(item.id, $event)">
+                  <v-btn value="merge" small title="Add the names, game ids, saves, branches and later tips the backup has">Add</v-btn>
+                  <v-btn value="keep" small title="Leave the campaign record as it is">Keep</v-btn>
+                </v-btn-toggle>
+                <span class="caption text--secondary ml-2">{{ changesText(item) }}</span>
+              </div>
+              <div v-for="note in item.association.kept" :key="note" class="caption text--secondary">Kept as stored: {{ note }}.</div>
+
+              <v-simple-table dense class="history-backup__table mt-1">
+                <thead>
+                  <tr>
+                    <th>Branch</th>
+                    <th>Policy</th>
+                    <th>Races</th>
+                    <th class="text-right" title="Snapshots stored now">Stored</th>
+                    <th class="text-right" title="Snapshots in the backup">Backup</th>
+                    <th class="text-right" title="Backup snapshots at a game time with none stored">Added</th>
+                    <th class="text-right" title="Snapshots at the same game time with the same figures">Same</th>
+                    <th class="text-right" title="Snapshots at the same game time with different figures">Conflicts</th>
+                    <th class="text-right" title="Stored snapshots a replace drops">Removed</th>
+                    <th class="text-right" title="Snapshots thinned to keep the retention cap">Thinned</th>
+                    <th class="text-right" title="Snapshots in the result">After</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="file in item.files">
+                    <tr :key="file.branchId">
+                      <td>{{ file.branchId }}<span class="caption text--secondary ml-1">{{ relationText(file) }}</span></td>
+                      <td>
+                        <v-btn-toggle :value="file.requested" mandatory dense :class="{ 'history-backup__locked': file.locked }" @change="choosePolicy(item.id, file.branchId, $event)">
+                          <v-btn value="merge" x-small :disabled="item.skipped">Merge</v-btn>
+                          <v-btn value="replace" x-small :disabled="item.skipped">Replace</v-btn>
+                          <v-btn value="keep" x-small :disabled="item.skipped">Keep</v-btn>
+                        </v-btn-toggle>
+                      </td>
+                      <td class="history-backup__races">
+                        <v-select :value="file.races || []" :items="file.raceChoices" item-value="RaceID" item-text="label" multiple chips small-chips deletable-chips dense hide-details placeholder="All races" :disabled="item.skipped || file.policy === 'keep' || file.raceChoices.length < 2" @change="chooseRaces(item.id, file.branchId, $event)" />
+                      </td>
+                      <td class="text-right">{{ count(file.totals.stored) }}</td>
+                      <td class="text-right">{{ count(file.totals.backup) }}</td>
+                      <td class="text-right">{{ count(file.policy === 'keep' ? 0 : file.totals.added) }}</td>
+                      <td class="text-right">{{ count(file.totals.identical) }}</td>
+                      <td class="text-right" :class="{ 'warning--text': file.totals.conflicts && file.policy !== 'keep' }">{{ count(file.totals.conflicts) }}</td>
+                      <td class="text-right" :class="{ 'warning--text': file.policy === 'replace' && file.totals.removed }">{{ count(file.policy === 'replace' ? file.totals.removed : 0) }}</td>
+                      <td class="text-right">{{ count(file.totals.thinned) }}</td>
+                      <td class="text-right">{{ count(file.totals.result) }}</td>
+                    </tr>
+                    <tr v-if="file.locked || file.series.length" :key="`${file.branchId}-detail`" class="history-backup__detail">
+                      <td colspan="11">
+                        <div v-if="file.locked" class="caption text--secondary">Kept as stored: {{ file.locked }}.</div>
+                        <details v-if="file.series.length">
+                          <summary class="caption text--secondary">Every series in branch {{ file.branchId }}, one by one</summary>
+                          <div v-for="row in file.series" :key="row.key" class="caption">{{ row.label }}: {{ count(row.stored) }} stored, {{ count(row.backup) }} in the backup, {{ count(row.added) }} added, {{ count(row.identical) }} the same, {{ count(row.conflicts) }} in conflict<template v-if="file.policy === 'replace'">, {{ count(row.removed) }} removed</template><template v-if="row.thinned">, {{ count(row.thinned) }} thinned</template></div>
+                        </details>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </v-simple-table>
+
+              <div v-if="item.annotations.total" class="history-backup__row mt-2">
+                <span class="history-backup__label">Annotations</span>
+                <v-btn-toggle :value="item.annotations.requested" mandatory dense :class="{ 'history-backup__locked': item.skipped }" @change="chooseAnnotations(item.id, $event)">
+                  <v-btn value="merge" small :disabled="item.skipped || !item.annotations.available" title="Add the annotations stored here lacks, never over one stored and never one deleted here">Add</v-btn>
+                  <v-btn value="keep" small :disabled="item.skipped" title="Leave the annotations as they are">Keep</v-btn>
+                </v-btn-toggle>
+                <span class="caption text--secondary ml-2">{{ item.annotations.total }} in the backup<template v-if="!item.annotations.available">; the planners' records are not available here</template></span>
+              </div>
+              <div v-for="group in item.annotations.groups" :key="`${group.RaceID}-${group.branchId}`" class="caption text--secondary">
+                Race {{ group.RaceID }}, branch {{ group.branchId }}: {{ count(group.records) }} in the backup, {{ count(group.add) }} to add, {{ count(group.existing) }} here already, {{ count(group.deleted) }} deleted here, {{ count(group.rejected) }} refused<template v-if="group.locked">; kept as stored ({{ group.locked }})</template><template v-if="group.refused">; {{ group.refused }}</template>
+                <div v-for="reason in group.reasons" :key="reason">{{ reason }}</div>
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div v-if="backupPlan.preview.nothingToDo" class="caption text--secondary">Nothing to restore with these choices: what the backup holds is stored already, or kept.</div>
+              <div v-else class="caption">{{ totalsText(backupPlan.preview.totals) }}</div>
+              <v-alert v-if="backupPlan.preview.needsConfirmation.length" type="warning" outlined dense class="mt-2">
+                <div v-for="message in backupPlan.preview.needsConfirmation" :key="message">{{ message }}.</div>
+                <v-checkbox v-model="backupConfirmed" label="Confirm these changes" dense hide-details class="mt-1" />
+              </v-alert>
+              <v-alert v-if="failure && failure.stage === 'readonly'" type="info" outlined dense class="mt-2">Another window or tab records this history, so a restore can only be applied there.</v-alert>
+              <div class="mt-2">
+                <v-btn small color="primary" :disabled="backupBusy || backupPlan.preview.nothingToDo || (backupPlan.preview.needsConfirmation.length > 0 && !backupConfirmed) || (failure && failure.stage === 'readonly')" @click="applyBackup"><v-icon small left>mdi-backup-restore</v-icon>Apply</v-btn>
+                <v-btn small text :disabled="backupBusy" class="ml-2" @click="cancelBackup">Cancel</v-btn>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="keptBackupList.length" class="mt-4">
+            <div class="font-weight-medium">Copies kept before a restore</div>
+            <div class="caption text--secondary">The newest few stay here. To bring the files of a copy back as they were, download it and restore it with Replace; campaign records a restore added stay.</div>
+            <div v-for="entry in keptBackupList" :key="entry.at" class="history-backup__kept">
+              <span>{{ stamp(entry.at) }}</span><span class="caption text--secondary ml-2">{{ entry.label }}</span>
+              <v-btn x-small text class="ml-2" @click="downloadKept(entry.at)"><v-icon x-small left>mdi-download</v-icon>Download</v-btn>
+            </div>
+          </div>
+        </div>
+      </v-card>
+
       <v-dialog v-model="confirmClear" max-width="440">
         <v-card>
           <v-card-title>Clear this race's history?</v-card-title>
@@ -181,6 +323,7 @@ import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { MAX_SNAPSHOTS, branchStore, campaignStorage, changeResult, clearRaceHistory, installationResult, mineralResult, recordedSpan, shownBranch, snapshotResult, totalResult } from '../utilities/history'
+import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '../utilities/mineral-compare'
 import { MINERALS } from '../utilities/minerals'
@@ -279,6 +422,20 @@ export default {
       // Bumped when this page changes the campaign registry, so the Campaign panel re-reads it.
       campaignChanges: 0,
       campaignError: '',
+      // The Backup panel: the file picked (its envelope is frozen, so Vue doesn't walk it), what it would change, and the choices made for it.
+      backupEnvelope: null,
+      backupFile: '',
+      backupErrors: [],
+      backupError: '',
+      backupResult: '',
+      backupChoices: null,
+      backupPlan: null,
+      backupConfirmed: false,
+      backupBusy: false,
+      // Changes the key of the file input, so it is empty again after a cancel.
+      backupInput: 0,
+      // Bumped when the copies kept before a restore change.
+      backupKept: 0,
     }
   },
   computed: {
@@ -419,6 +576,24 @@ export default {
     // Why the recorder missed this game's latest snapshots, if it did (see store/history.js).
     failure() {
       return this.$store.state.history.failures.find(({ GameID }) => GameID === null || GameID === Number(this.GameID)) || null
+    },
+
+    // The copies kept before earlier restores, newest first. Only this page changes them, so they are read once and again after a restore, not at every snapshot.
+    keptBackupList() {
+      // eslint-disable-next-line no-unused-expressions
+      this.backupKept
+
+      return keptBackups(campaignStorage(this.config)).map(({ at, label }) => ({ at, label }))
+    },
+
+    // The restore that did not finish, if any: its kept history stays until that restore is finished or abandoned. `id` is what an action on it names, so it never acts on another restore that took its place; `problem` is why the kept history cannot be read back, when it cannot.
+    unfinishedBackup() {
+      // eslint-disable-next-line no-unused-expressions
+      this.backupKept
+
+      const held = unfinishedRestore(campaignStorage(this.config))
+
+      return held ? { id: held.id, at: held.at, label: held.label, problem: unfinishedProblem(held) } : null
     },
 
     // Every snapshot recorded for the race; the CSV and Clear work on these.
@@ -816,9 +991,12 @@ export default {
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-minerals-${this.mineralScale}.csv`)
     },
     saveCsv(csv, fileName) {
+      this.saveFile(csv, fileName, 'text/csv')
+    },
+    saveFile(text, fileName, type) {
       const link = document.createElement('a')
 
-      link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+      link.href = URL.createObjectURL(new Blob([text], { type }))
       link.download = fileName
       link.click()
       URL.revokeObjectURL(link.href)
@@ -927,6 +1105,229 @@ export default {
 
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`)
     },
+    // The adapter the backup reads and restores the planners' annotations through: { adapter, error }, the adapter null with the reason when the records cannot be opened here. The modules load when a backup is made or read, so the page doesn't carry them otherwise.
+    async backupAnnotations() {
+      try {
+        const [records, tech, briefs] = await Promise.all([import('../utilities/scenario-records'), import('../utilities/tech-scenarios'), import('../utilities/mission-briefs')])
+
+        tech.registerTechScenarios(records.registerAdapter)
+        briefs.registerBriefs(records.registerAdapter)
+
+        return { adapter: annotationsOf(records.openScenarioRecords(), records.scenarioStorage()), error: null }
+      } catch (error) {
+        return { adapter: null, error: error.message }
+      }
+    },
+    stamp(milliseconds) {
+      return new Date(milliseconds).toLocaleString()
+    },
+    statusText(status) {
+      return { new: 'New here', known: 'Already recorded', conflict: 'Different galaxy', ambiguous: 'Possibly a campaign already recorded' }[status] || status
+    },
+    statusColor(status) {
+      return status === 'conflict' || status === 'ambiguous' ? 'warning' : undefined
+    },
+    relationText(file) {
+      return { same: 'same timeline', extends: 'the backup is further along', behind: 'the stored one is further along', different: 'a different timeline', unknown: 'timeline cannot be told', new: 'new branch' }[file.relation] || ''
+    },
+    // What the backup would do to a campaign record, in words.
+    changesText(item) {
+      const { association } = item
+      const parts = [['names', 'names'], ['gameIds', 'game ids'], ['attachments', 'saved paths'], ['branches', 'branches'], ['tips', 'later tips'], ['anchor', 'anchor']].filter(([key]) => association.added[key]).map(([key, text]) => `${association.added[key]} ${text}`)
+
+      return association.policy === 'keep' ? 'Left as stored' : item.status === 'new' || item.status === 'ambiguous' ? 'Adds this campaign as a record of its own' : parts.length ? `Adds ${parts.join(', ')}` : 'Nothing to add'
+    },
+    // The preview's totals in words.
+    totalsText(totals) {
+      const plural = (amount, noun) => `${this.count(amount)} ${noun}${amount === 1 ? '' : 's'}`
+      const parts = [`adds ${plural(totals.added, 'snapshot')}`, `meets ${plural(totals.conflicts, 'conflict')} at a shared game time (Merge keeps the stored snapshot, Replace takes the backup's)`, `drops ${plural(totals.removed, 'stored snapshot')} under Replace`, `restores ${plural(totals.annotations, 'annotation')}`, `changes ${plural(totals.registry, 'campaign record')}`]
+
+      return `Applying ${parts.join('; ')}. A copy of what it touches is kept first.`
+    },
+    // A file of the stored campaigns (all, or the one this save belongs to) with their branches, race and intelligence history and annotations, saved by the browser.
+    async exportBackup(all) {
+      this.backupBusy = true
+      this.backupError = ''
+      this.backupResult = ''
+
+      try {
+        const { adapter, error } = await this.backupAnnotations()
+        const envelope = buildBackup(campaignStorage(this.config), { campaignIds: all ? null : [this.resolved.campaignId], at: Date.now(), annotations: adapter })
+        const name = backupFileName(envelope)
+
+        this.saveFile(JSON.stringify(envelope), name, 'application/json')
+        this.backupResult = `Exported ${envelope.campaigns.length === 1 ? 'one campaign' : `${envelope.campaigns.length} campaigns`} as ${name}.${adapter ? '' : ` The annotations are not in it: ${error}.`}`
+      } catch (error) {
+        this.backupError = `The backup could not be made: ${error.message}`
+      } finally {
+        this.backupBusy = false
+      }
+    },
+    // Reads a backup file and previews it. A file that is too large, damaged, altered or of a newer version is refused here, with nothing previewed and nothing changed.
+    async readBackup(file) {
+      this.backupEnvelope = null
+      this.backupPlan = null
+      this.backupChoices = null
+      this.backupConfirmed = false
+      this.backupErrors = []
+      this.backupError = ''
+      this.backupResult = ''
+
+      if (!file) {
+        return
+      }
+
+      this.backupFile = file.name
+
+      if (file.size > MAX_BYTES) {
+        this.backupErrors = [`The file is larger than ${MAX_BYTES / (1024 * 1024)} MB, the most a backup is read at`]
+
+        return
+      }
+
+      this.backupBusy = true
+
+      try {
+        const read = parseBackup(await file.text())
+
+        if (read.errors) {
+          this.backupErrors = read.errors
+
+          return
+        }
+
+        this.backupEnvelope = Object.freeze(read.envelope)
+        this.backupChoices = defaultChoices(read.envelope)
+        await this.planBackup()
+      } catch (error) {
+        this.backupErrors = [`The file could not be read: ${error.message}`]
+      } finally {
+        this.backupBusy = false
+      }
+    },
+    // What applying the envelope with the current choices would do, read from the stores as they are now; nothing is written.
+    async planBackup() {
+      try {
+        const { adapter } = await this.backupAnnotations()
+        const planned = planRestore({ io: campaignStorage(this.config), envelope: this.backupEnvelope, choices: this.backupChoices, annotations: adapter })
+
+        this.backupPlan = Object.freeze({ preview: Object.freeze(planned.preview), digest: planned.digest })
+      } catch (error) {
+        this.backupPlan = null
+        this.backupError = `The backup could not be previewed: ${error.message}`
+      }
+    },
+    // A choice made for one campaign: the preview is made again, and an earlier confirmation no longer stands.
+    async chooseBackup(id, change) {
+      change(this.backupChoices.campaigns[id])
+      this.backupConfirmed = false
+      this.backupError = ''
+      this.backupResult = ''
+      await this.planBackup()
+    },
+    chooseAssociation(id, value) {
+      return this.chooseBackup(id, (choice) => { choice.association = value })
+    },
+    choosePolicy(id, branchId, value) {
+      return this.chooseBackup(id, (choice) => { choice.files[branchId].policy = value })
+    },
+    chooseRaces(id, branchId, value) {
+      return this.chooseBackup(id, (choice) => { choice.files[branchId].races = value.length ? value : null })
+    },
+    chooseAnnotations(id, value) {
+      return this.chooseBackup(id, (choice) => { choice.annotations = value })
+    },
+    // Applies what the preview showed, once the registry lock is held. A plan that changed since is refused and previewed again; one that stopped part way is applied again to finish.
+    async applyBackup() {
+      if (!this.backupEnvelope || !this.backupPlan || this.backupBusy) {
+        return
+      }
+
+      this.backupBusy = true
+      this.backupError = ''
+      this.backupResult = ''
+
+      try {
+        const { adapter } = await this.backupAnnotations()
+        const result = await withRegistry(() => applyRestore({ io: campaignStorage(this.config), envelope: this.backupEnvelope, choices: this.backupChoices, expected: this.backupPlan.digest, confirmed: this.backupConfirmed, annotations: adapter }))
+
+        this.backupResult = result.applied ? `Restored ${result.files} history ${result.files === 1 ? 'file' : 'files'} and ${result.imports} ${result.imports === 1 ? 'annotation' : 'annotations'}${result.registry ? ', and updated the campaign records' : ''}. A copy of what it touched is kept below.` : result.backup ? 'The unfinished restore is finished: what the backup holds is stored. Its kept history is among the copies below.' : 'Nothing was restored: what the backup holds is stored already.'
+        this.$store.commit('history/recorded')
+        this.campaignChanges++
+        this.backupKept++
+        this.backupConfirmed = false
+        await this.planBackup()
+      } catch (error) {
+        this.backupError = error instanceof Changed || error instanceof Rejected ? error.message : unfinishedRestore(campaignStorage(this.config)) ? `The restore did not finish: ${error.message}. The history it began with is kept; apply it again with the same choices to finish it.` : `The restore was not applied: ${error.message}`
+        this.backupKept++
+        this.backupConfirmed = false
+        await this.planBackup()
+      } finally {
+        this.backupBusy = false
+      }
+    },
+    // Drops the file and the preview. Nothing was written.
+    cancelBackup() {
+      this.backupEnvelope = null
+      this.backupPlan = null
+      this.backupChoices = null
+      this.backupConfirmed = false
+      this.backupErrors = []
+      this.backupError = ''
+      this.backupResult = ''
+      this.backupInput++
+    },
+    // A kept copy is named by the time it was kept, whatever it holds, and a copy that cannot be serialized or saved is reported.
+    downloadCopy(entry) {
+      this.backupError = ''
+
+      try {
+        this.saveFile(JSON.stringify(entry.envelope), recoveryFileName(entry), 'application/json')
+      } catch (error) {
+        this.backupError = `The kept history could not be downloaded: ${error.message}`
+      }
+    },
+    downloadKept(at) {
+      const entry = keptBackups(campaignStorage(this.config)).find((item) => item.at === at)
+
+      if (entry) {
+        this.downloadCopy(entry)
+      }
+    },
+    downloadUnfinished() {
+      const shown = this.unfinishedBackup
+      const entry = unfinishedRestore(campaignStorage(this.config))
+
+      if (entry && shown && entry.id === shown.id) {
+        this.downloadCopy(entry)
+      } else {
+        this.backupError = 'The unfinished restore shown is no longer the one kept, so nothing was downloaded. The one kept now is shown.'
+        this.backupKept++
+      }
+    },
+    // Stops treating the restore shown as unfinished: its kept history is filed with the others and no file changes. The restore is named by its id, so one that took its place since is left alone and shown.
+    async abandonBackup() {
+      const shown = this.unfinishedBackup
+
+      if (this.backupBusy || !shown) {
+        return
+      }
+
+      this.backupBusy = true
+      this.backupError = ''
+      this.backupResult = ''
+
+      try {
+        const filed = await withRegistry(() => abandonRestore(campaignStorage(this.config), shown.id))
+
+        this.backupResult = filed ? 'The unfinished restore was abandoned. The history it began with is among the copies kept below.' : 'No restore is unfinished any more.'
+      } catch (error) {
+        this.backupError = `The restore could not be abandoned: ${error.message}`
+      } finally {
+        this.backupKept++
+        this.backupBusy = false
+      }
+    },
   },
   asyncComputed: {
     installationNames: {
@@ -960,6 +1361,54 @@ export default {
     display: flex;
     flex-wrap: wrap;
     row-gap: 4px;
+  }
+
+  .history-backup__actions {
+    align-items: center;
+    column-gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .history-backup__file {
+    flex: 1 1 260px;
+    max-width: 360px;
+  }
+
+  .history-backup__row {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .history-backup__label {
+    min-width: 130px;
+  }
+
+  .history-backup__campaign {
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    padding-top: 8px;
+  }
+
+  .history-backup__races {
+    min-width: 180px;
+  }
+
+  .history-backup__locked {
+    opacity: 0.6;
+  }
+
+  .history-backup__detail td {
+    height: auto !important;
+    padding-bottom: 6px !important;
+  }
+
+  .history-backup__kept {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
   }
 }
 </style>

@@ -1375,6 +1375,96 @@ const defineSuite = (m) => {
     assert.ok(home.items.every((item) => item.collides && !item.foreign))
   })
 
+  check('import', 'a restore of records keeps the uuid of every record the file neither holds nor held, skips the rest as the file is inside the import, and never copies or brings back a record', () => {
+    const home = { campaignId: 'c1', RaceID: 7, branch: 'b1' }
+    const whole = exported()
+    const uuids = whole.bundle.records.map((record) => record.uuid)
+
+    // a restore into the file the records came from skips every one: they are held, and none is copied under a new uuid
+    const held = whole.w.repo.previewImport(whole.bundle, home, { restore: true })
+    const before = whole.w.inst.snapshot()
+
+    assert.equal(held.restore, true)
+    assert.deepEqual(held.items.map((item) => item.status), ['skipped', 'skipped'])
+    assert.ok(held.items.every((item) => item.collides && !item.keepsUuid))
+    assert.equal(held.importable, 0)
+    assert.equal(whole.w.repo.importRecords(whole.bundle, home, { preview: held, restore: true }).imported.length, 0)
+    assert.equal(whole.w.inst.snapshot(), before)
+
+    // a preview is of its policy: a restore preview is not an import preview and the other way round
+    const plain = whole.w.repo.previewImport(whole.bundle, TARGET, { keepUuids: true })
+    const restoring = whole.w.repo.previewImport(whole.bundle, TARGET, { restore: true })
+
+    assert.notEqual(plain.digest, restoring.digest)
+    refusal(() => whole.w.repo.importRecords(whole.bundle, TARGET, { preview: restoring, keepUuids: true }), 'preview-mismatch')
+    refusal(() => whole.w.repo.importRecords(whole.bundle, TARGET, { preview: plain, restore: true }), 'preview-mismatch')
+    refusal(() => whole.w.repo.importRecords(whole.bundle, TARGET, { preview: restoring }), 'preview-mismatch')
+
+    // another campaign: every record keeps its uuid, with the provenance of any import
+    assert.deepEqual(restoring.items.map((item) => [item.status, item.keepsUuid]), [['import', true], ['import', true]])
+
+    const done = whole.w.repo.importRecords(whole.bundle, TARGET, { preview: restoring, restore: true })
+
+    assert.deepEqual(done.imported.map((record) => record.uuid), uuids)
+    done.imported.forEach((record) => {
+      assert.equal(record.campaignId, 'c2')
+      assert.equal(record.revision, 1)
+      assert.equal(record.provenance.via, 'import')
+      assert.ok(uuids.includes(record.provenance.from.uuid))
+    })
+
+    // a deleted record stays deleted: it is skipped and its uuid is not issued again
+    const gone = exported()
+    const goneIds = gone.bundle.records.map((record) => record.uuid)
+
+    gone.w.repo.delete(scope('c1', 7), goneIds[0], 1)
+
+    const deleted = gone.w.repo.previewImport(gone.bundle, home, { restore: true })
+
+    assert.deepEqual(deleted.items.map((item) => [item.status, item.collides, item.tombstoned]), [['skipped', false, true], ['skipped', true, false]])
+    assert.equal(gone.w.repo.importRecords(gone.bundle, home, { preview: deleted, restore: true }).imported.length, 0)
+    assert.deepEqual(Object.keys(gone.w.inst.files.get('campaign-c1').records).filter((uuid) => goneIds.includes(uuid)), [goneIds[1]])
+    assert.equal(Object.keys(gone.w.inst.files.get('campaign-c1').records).length, 3)
+    assert.deepEqual(Object.keys(gone.w.inst.files.get('campaign-c1').tombstones), [goneIds[0]])
+
+    // a record stored after the preview is not copied: the skip is decided inside the import
+    const stored = exported()
+    const storedIds = stored.bundle.records.map((record) => record.uuid)
+    const early = stored.w.repo.previewImport(stored.bundle, TARGET, { restore: true })
+    const single = { ...stored.bundle, records: [stored.bundle.records[0]] }
+
+    stored.w.repo.importRecords(single, TARGET, { preview: stored.w.repo.previewImport(single, TARGET, { restore: true }), restore: true })
+
+    const late = stored.w.repo.importRecords(stored.bundle, TARGET, { preview: early, restore: true })
+
+    assert.deepEqual(late.imported.map((record) => record.uuid), [storedIds[1]])
+    assert.deepEqual(Object.keys(stored.w.inst.files.get('campaign-c2').records).sort(), [...storedIds].sort())
+
+    // a record stored and then deleted after the preview is not brought back
+    const removed = exported()
+    const removedIds = removed.bundle.records.map((record) => record.uuid)
+    const first = removed.w.repo.previewImport(removed.bundle, TARGET, { restore: true })
+    const one = { ...removed.bundle, records: [removed.bundle.records[0]] }
+
+    removed.w.repo.importRecords(one, TARGET, { preview: removed.w.repo.previewImport(one, TARGET, { restore: true }), restore: true })
+    removed.w.repo.delete(scope('c2', 8, 'b9'), removedIds[0], 1)
+
+    const after = removed.w.repo.importRecords(removed.bundle, TARGET, { preview: first, restore: true })
+
+    assert.deepEqual(after.imported.map((record) => record.uuid), [removedIds[1]])
+    assert.deepEqual(Object.keys(removed.w.inst.files.get('campaign-c2').records), [removedIds[1]])
+    assert.deepEqual(Object.keys(removed.w.inst.files.get('campaign-c2').tombstones), [removedIds[0]])
+
+    // a uuid twice in a bundle is rejected, not restored once and copied once
+    const twice = exported()
+    const repeated = { ...twice.bundle, records: [twice.bundle.records[0], twice.bundle.records[0]] }
+    const repeats = twice.w.repo.previewImport(repeated, TARGET, { restore: true })
+
+    assert.deepEqual(repeats.items.map((item) => item.status), ['import', 'rejected'])
+    assert.match(repeats.items[1].reasons.join(' '), /uuid/)
+    assert.deepEqual(twice.w.repo.importRecords(repeated, TARGET, { preview: repeats, restore: true }).imported.map((record) => record.uuid), [twice.bundle.records[0].uuid])
+  })
+
   check('import', 'an import never takes a record its adapter rejects, a kind it does not know, a newer schema or a malformed record', () => {
     const { w, bundle } = exported()
     const tampered = copy(bundle)
@@ -1660,9 +1750,9 @@ const MUTANTS = [
   { name: 'a failing validation is read as valid', find: 'return [`the validation failed (', replace: 'return [] || [`the validation failed (', fails: ['an adapter whose validation throws'] },
   { name: 'an import does not need a target', find: 'if (!isObject(target) || !isSegment(target.campaignId) || !Number.isInteger(target.RaceID) || !isText(target.branch)) {', replace: 'if (false) {', fails: ['an import without an explicit target'] },
   { name: 'an import does not need a preview', find: "if (!isObject(preview) || typeof preview.digest !== 'string') {", replace: 'if (false) {', fails: ['an import is made from the preview'] },
-  { name: 'an import is not tied to the previewed bundle and target', find: 'if (preview.digest !== digestOf(JSON.stringify([b, t, !!keepUuids]))) {', replace: 'if (false) {', fails: ['an import is made from the preview'] },
+  { name: 'an import is not tied to the previewed bundle and target', find: 'if (preview.digest !== digestOf(importKey(b, t, keepUuids, restore))) {', replace: 'if (false) {', fails: ['an import is made from the preview'] },
   { name: 'an imported record keeps its uuid', find: 'const uuid = item.keepsUuid ? record.uuid : freshId(file)', replace: 'const uuid = record.uuid', fails: ['an imported record takes a new uuid', 'keeping uuids is explicit'] },
-  { name: 'a kept uuid overwrites a colliding record', find: 'keepsUuid: !!keepUuids && !collides && !tombstoned,', replace: 'keepsUuid: !!keepUuids && !tombstoned,', fails: ['keeping uuids is explicit'] },
+  { name: 'a kept uuid overwrites a colliding record', find: 'keepsUuid: (!!keepUuids || restore) && !collides && !tombstoned,', replace: 'keepsUuid: (!!keepUuids || restore) && !tombstoned,', fails: ['keeping uuids is explicit'] },
   { name: 'an imported record keeps its source campaign and race', find: 'campaignId: target.campaignId,\n    RaceID: target.RaceID,\n    association: { policy: record.association.policy, branchId: target.branch },', replace: 'campaignId: record.campaignId,\n    RaceID: record.RaceID,\n    association: { policy: record.association.policy, branchId: target.branch },', fails: ['an imported record takes a new uuid'] },
   { name: 'an imported record keeps its source branch', find: 'association: { policy: record.association.policy, branchId: target.branch },', replace: 'association: copy(record.association),', fails: ['an imported record takes a new uuid'] },
   { name: 'an import does not ask the adapter', find: 'reasons.push(...problemsOf(adapter, payload).map((problem) =>', replace: 'reasons.push(...[].map((problem) =>', fails: ['an import never takes a record its adapter rejects'] },
@@ -1672,7 +1762,11 @@ const MUTANTS = [
   { name: 'every campaign shares one file', find: 'const name = scenarioFileName(campaignId)\n\n      if (!stores[name]) {', replace: "const name = 'campaign-shared'\n\n      if (!stores[name]) {", fails: ['the factory opens one file per campaign'] },
   { name: 'an unsafe campaign id names a file', find: "if (!isSegment(campaignId)) {\n    throw refuse('invalid-scope', 'A campaign id is letters, digits, hyphens and underscores')\n  }", replace: 'void 0', fails: ['an unsafe campaign id'] },
   { name: 'a deleted uuid leaves no tombstone', find: 'define(file.tombstones, uuid, { revision: record.revision, deletedAt: now() })\n        ', replace: '', fails: ['a deleted uuid leaves a tombstone', 'an edit prepared before its record was deleted'] },
-  { name: 'an import keeps the uuid of a tombstone', find: 'keepsUuid: !!keepUuids && !collides && !tombstoned,', replace: 'keepsUuid: !!keepUuids && !collides,', fails: ['a deleted uuid leaves a tombstone', 'an edit prepared before its record was deleted'] },
+  { name: 'an import keeps the uuid of a tombstone', find: 'keepsUuid: (!!keepUuids || restore) && !collides && !tombstoned,', replace: 'keepsUuid: (!!keepUuids || restore) && !collides,', fails: ['a deleted uuid leaves a tombstone', 'an edit prepared before its record was deleted'] },
+  { name: 'a restore copies a record the file holds', find: "status: reasons.length ? 'rejected' : restore && (collides || tombstoned) ? 'skipped' : 'import',", replace: "status: reasons.length ? 'rejected' : 'import',", fails: ['a restore of records'] },
+  { name: 'a restore gives a record a new uuid', find: 'keepsUuid: (!!keepUuids || restore) && !collides && !tombstoned,', replace: 'keepsUuid: !!keepUuids && !collides && !tombstoned,', fails: ['a restore of records'] },
+  { name: 'a restore decides what is stored before the import', find: 'const plan = planImport(file, b, t, keepUuids, restore)\n        const stamp', replace: 'const plan = planImport({ records: {}, tombstones: {} }, b, t, keepUuids, restore)\n        const stamp', fails: ['a restore of records'] },
+  { name: 'a restore preview is not tied to its policy', find: 'restore ? [bundle, target, !!keepUuids, \'restore\'] : [bundle, target, !!keepUuids]', replace: '[bundle, target, !!keepUuids]', fails: ['a restore of records'] },
   { name: 'a write needs no owner', find: "if (!claim || claim.state !== 'owner') {\n              throw refusal(campaignId, claim)\n            }", replace: 'if (false) {\n              throw refusal(campaignId, claim)\n            }', fails: ['two tabs of web mode', 'a browser with no Web Locks'] },
   { name: 'a browser with no Web Locks owns its file', find: "state: locks ? 'waiting' : 'unavailable'", replace: "state: locks ? 'waiting' : 'owner'", fails: ['a browser with no Web Locks'] },
   { name: 'a tab that released its file keeps writing', find: "claims.delete(name)\n        claim.state = 'released'\n        claim.free()", replace: 'claim.free()', fails: ['two tabs of web mode'] },
