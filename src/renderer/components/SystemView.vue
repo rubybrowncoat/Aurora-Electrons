@@ -26,6 +26,7 @@ import { mapGetters } from 'vuex'
 import { mapFont } from '~/components/charts/theme'
 import { activeAppearance } from '~/utilities/appearance'
 import { whenFontsReady } from '~/utilities/appearance-font'
+import { DEFAULT_HIERARCHY, skyStyle } from '~/utilities/map-hierarchy'
 import { starName, systemBodyName, toNumber } from '~/utilities/aurora'
 import { approximatelyEquals, safeModulo360 } from '~/utilities/math'
 
@@ -354,6 +355,11 @@ export default {
       type: [String, Number],
       required: true,
     },
+    // The level of the visual hierarchy (utilities/map-hierarchy.js), kept by the map.
+    hierarchy: {
+      type: String,
+      default: DEFAULT_HIERARCHY,
+    },
   },
   data() {
     return {
@@ -380,6 +386,7 @@ export default {
     elements: 'scheduleInitPixi',
     'appearance.key': 'scheduleInitPixi',
     typeface: 'scheduleInitPixi',
+    hierarchy: 'scheduleInitPixi',
   },
   mounted() {
     window.addEventListener('resize', this._onResize, { passive: true })
@@ -1621,7 +1628,7 @@ export default {
       // Label
       let label = null
       if (nameText) {
-        label = new PIXI.Text(String(nameText), this._textStyles.body)
+        label = new PIXI.Text(String(nameText), this._textStyles.secondary)
         label.anchor.set(0, 0.5)
         // label.position.set(marker.x + (labelPadPx ?? 8), marker.y)
         label._baseWpx = label.width
@@ -1803,6 +1810,11 @@ export default {
 
       this._space = spaceColors(this.appearance.space)
       this._textStyles = textStyles(this._space.label, this.typeface)
+      // The names of the bodies are secondary marks: the level of the hierarchy dims them, the names of stars and jump points stay at full strength.
+      const sky = skyStyle(this.hierarchy, this.appearance.space)
+
+      this._textStyles.secondary = this._textStyles.body.clone()
+      this._textStyles.secondary.fill = hexInt(sky.bodyLabel)
 
       console.log('SystemView initPixi', this.$props)
 
@@ -1859,14 +1871,14 @@ export default {
 
       this._starsResult = this.drawSystem(this.elements.system, this.elements.stars, {
         origin: { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 },
-        orbitStyle: { alpha: 1, width: 1 },
+        orbitStyle: { alpha: sky.orbit.alpha, width: sky.orbit.starWidth },
         starSize: { exaggeration: 1, minPx: 0, maxPx: 1e7 },
         minStarRadius: 8,
         markerProvider: this._markerSpecForBody,
       })
 
       this.drawBodiesForSystem(this.elements.systemBodies, {
-        style: { color: this._space.bodyOrbit, alpha: 1, width: 2 },
+        style: { color: this._space.bodyOrbit, alpha: sky.orbit.alpha, width: sky.orbit.bodyWidth },
         sizeOpts: {
           // choose what you prefer:
           // radiusUnits: 'km', exaggeration: 1,  minPx: 0,    // strict physical realism

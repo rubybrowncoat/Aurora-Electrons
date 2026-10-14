@@ -256,6 +256,7 @@ import { systemBodyName, populationName } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { CATEGORY_KEYS, industryBasis, legacyColoniesQuery, legacyModels, shipyardActivitiesQuery, shipyardTasksQuery } from '../utilities/legacy-consumption'
 import { tracked } from '../utilities/load-tracking'
+import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
 import { categoryRows, categoryUses, depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
@@ -314,6 +315,7 @@ export default {
       runwayTable: tableView('mineralOutlookRunwayTable', { sortBy: ['runwaySort'], sortDesc: [false] }),
       flowsTable: tableView('mineralOutlookFlowsTable', {}),
       depositTable: tableView('mineralOutlookDepositsTable', { sortBy: ['emptySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: DEPOSIT_PAGE_SIZES }),
+      hierarchy: hierarchyView,
     }),
   ],
   data() {
@@ -722,7 +724,7 @@ export default {
           x: {
             stacked: true,
             ticks: { callback: (value) => compact(Math.abs(value)) },
-            grid: { color: (context) => (context.tick && context.tick.value === 0 ? this.theme.inkMuted : `${this.theme.border}99`) },
+            grid: { color: (context) => (context.tick && context.tick.value === 0 ? this.theme.inkMuted : chartGridColor(this.hierarchy, this.theme.border)) },
           },
           y: { stacked: true, grid: { display: false } },
         },

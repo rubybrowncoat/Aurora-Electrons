@@ -87,7 +87,7 @@
               <span v-for="(item, position) in row" :key="`${position}-${item.kind}-${item.label}`" class="legend-item" :class="{ 'legend-item--heading': item.kind === 'heading', 'text--secondary': item.kind === 'note' }" :title="item.title">
                 <span v-if="item.kind === 'ring'" class="dot dot-ring" :style="{ borderColor: item.color, borderStyle: item.style || 'solid', borderWidth: item.width && `${item.width}px` }" />
                 <span v-else-if="item.kind === 'spot'" class="spot" :style="{ background: item.color }" />
-                <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color }" />
+                <span v-else-if="item.kind === 'line'" class="line" :class="{ 'line--dashed': item.dashed }" :style="item.dashed ? { borderColor: item.color } : { background: item.color, height: item.thickness && `${item.thickness}px` }" />
                 <v-icon v-else-if="item.kind === 'icon'" x-small class="mr-1">{{ item.icon }}</v-icon>
                 <map-glyph v-else-if="item.kind === 'glyph'" :path="item.path" :text="item.text" :color="item.color" :hollow="item.hollow" :offset="item.offset" :surface="colors.surface" />
                 <span v-else-if="item.kind === 'sample'" class="sample">{{ item.sample }}</span>
@@ -107,7 +107,7 @@
           </span>
         </div>
         <div class="map-body">
-          <div ref="stage" class="map-stage" @wheel.capture="shiftWheel">
+          <div ref="stage" class="map-stage" :style="stageStyle" @wheel.capture="shiftWheel">
             <canvas ref="borders" class="map-borders" />
             <div ref="canvas" class="map-canvas" aria-label="Galactic map of the known systems and their jump links" />
             <div ref="minimap" class="map-minimap" @pointerdown="fitted = false" />
@@ -208,6 +208,12 @@
                   <v-icon class="mr-3" :color="dimUnmarked ? 'primary' : undefined">{{ dimUnmarked ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
                   <v-list-item-title>Dim systems with none of these</v-list-item-title>
                 </v-list-item>
+                <v-divider />
+                <v-subheader>Hierarchy</v-subheader>
+                <v-list-item v-for="level in hierarchyLevels" :key="level.value" role="menuitemradio" :aria-checked="String(hierarchy === level.value)" :title="level.hint" @click="hierarchy = level.value">
+                  <v-icon class="mr-3" :color="hierarchy === level.value ? 'primary' : undefined">{{ hierarchy === level.value ? 'mdi-radiobox-marked' : 'mdi-radiobox-blank' }}</v-icon>
+                  <v-list-item-title>{{ level.text }}</v-list-item-title>
+                </v-list-item>
               </v-list>
             </v-card>
           </v-menu>
@@ -239,7 +245,7 @@
           <v-toolbar-title>{{ systemDialogTitle }}</v-toolbar-title>
         </v-toolbar>
         <v-card-text v-if="systemDialog">
-          <system-view v-if="systemViewId" :system-id="systemViewId" @jump="(id) => (systemViewId = String(id))" />
+          <system-view v-if="systemViewId" :system-id="systemViewId" :hierarchy="hierarchy" @jump="(id) => (systemViewId = String(id))" />
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -271,8 +277,10 @@ import { gridLayout, GRID_LAYOUT_DEFAULTS, layoutQuality } from '../utilities/gr
 import { loadJumpPoints } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
+import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
 import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
+import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
@@ -609,6 +617,8 @@ export default {
       marks: { key: 'mapMarks', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => MARKS.some((mark) => mark.value === value)) : undefined) },
       // Show can leave the systems it marks nothing at faint.
       dimUnmarked: { key: 'mapDim', default: false, scope: 'race' },
+      // How strongly the secondary marks are drawn (utilities/map-hierarchy.js), shared with the system view and the charts.
+      hierarchy: hierarchyView,
     }),
   ],
   data() {
@@ -648,6 +658,7 @@ export default {
       spacings: SPACINGS,
       keepTogetherOptions: KEEP_TOGETHER,
       markGroups: MARK_GROUPS,
+      hierarchyLevels: HIERARCHY_LEVELS,
 
       linkTo,
       place,
@@ -683,6 +694,21 @@ export default {
       return mapFont(this.roles)
     },
 
+    // The links' colour and width at the level of the hierarchy.
+    linkLook() {
+      return linkStyle(this.hierarchy, this.theme)
+    },
+
+    // The dots of the stage's grid at the level of the hierarchy, as the PNG's grid is drawn.
+    stageStyle() {
+      return { '--map-grid': gridDotColor(this.hierarchy, { border: this.appearance.surfaces.border, background: this.appearance.surfaces.background }) }
+    },
+
+    // What the PNG takes from the screen's state besides the picture of the graph: the hierarchy, background, grid, names and legend (utilities/map-export.js).
+    composition() {
+      return exportComposition({ hierarchy: this.hierarchy, appearance: this.appearance, theme: this.theme, legendRows: this.legendRows, asOf: this.discoveryAsOf && this.discoveryAsOf.text, iconPaths: { 'mdi-lock': LOCK_PATH } })
+    },
+
     colors() {
       const { categorical, inkMuted, surface, ink, primary } = this.theme
       const { contacts, survey, habitability } = this.appearance
@@ -701,7 +727,7 @@ export default {
         ink,
         surface,
         primary,
-        link: blend(inkMuted, surface, 0.6),
+        link: this.linkLook.color,
         gate: violet,
         danger: red,
         ruins: amber,
@@ -1546,6 +1572,10 @@ export default {
       const both = this.links.list.filter((link) => link.gate === 'both').length
       const oneEnd = this.links.list.filter((link) => link.gate === 'source' || link.gate === 'target').length
 
+      if (this.links.list.length > both + oneEnd) {
+        items.push({ kind: 'line', color: colors.link, thickness: this.linkLook.width, label: 'Jump link' })
+      }
+
       if (both) {
         items.push({ kind: 'line', color: colors.gate, label: `Stabilised at both ends (${both})` })
       }
@@ -1775,6 +1805,19 @@ export default {
         }
       }
     },
+
+    // A level of the hierarchy restyles the links and the names, redraws the borders' names and the minimap.
+    hierarchy() {
+      if (this.graph) {
+        this.graph.style(this.stylesheet())
+        this.restyle()
+        this.paintBorders()
+
+        if (this.minimap) {
+          this.minimap.refresh()
+        }
+      }
+    },
   },
   // The map's own state (its places, view and selection) is set by `resetGraph`, which the RaceID watcher has run by now.
   created() {
@@ -1919,7 +1962,7 @@ export default {
             'bounds-expansion': (node) => Math.max(8, Math.ceil((node.data('size') * (node.data('imageScale') - 1)) / 2)),
             label: 'data(label)',
             'text-wrap': 'wrap',
-            color: theme.ink,
+            color: 'data(labelInk)',
             'font-family': this.typeface.family,
             'font-size': this.typeface.size(14),
             'text-valign': 'bottom',
@@ -1928,7 +1971,7 @@ export default {
             'text-background-opacity': 0.8,
             'text-background-padding': 2,
             'text-background-shape': 'round-rectangle',
-            'min-zoomed-font-size': 9,
+            'min-zoomed-font-size': 'data(labelMinPx)',
           },
         },
         // Rings follow the zoom; `setZoomStyle` restyles them.
@@ -1962,12 +2005,14 @@ export default {
             'border-width': 5,
             'border-style': 'solid',
             'font-weight': 'bold',
+            color: theme.ink,
+            'min-zoomed-font-size': 9,
           },
         },
         {
           selector: 'edge',
           style: {
-            width: 3,
+            width: this.linkLook.width,
             'line-color': colors.link,
             'curve-style': 'straight',
           },
@@ -1982,6 +2027,7 @@ export default {
         {
           selector: 'edge[gate = "source"]',
           style: {
+            width: 3,
             'line-color': colors.gate,
             'line-style': 'dashed',
             'target-arrow-shape': 'triangle',
@@ -1992,6 +2038,7 @@ export default {
         {
           selector: 'edge[gate = "target"]',
           style: {
+            width: 3,
             'line-color': colors.gate,
             'line-style': 'dashed',
             'source-arrow-shape': 'triangle',
@@ -2008,6 +2055,7 @@ export default {
         {
           selector: 'edge.hover, edge:selected',
           style: {
+            width: (edge) => (edge.data('gate') === 'both' ? 5 : 3),
             'line-color': colors.primary,
             'source-arrow-color': colors.primary,
             'target-arrow-color': colors.primary,
@@ -2115,9 +2163,12 @@ export default {
       // Show marks the system where it has a glyph or a line under its name.
       const marked = glyphs.length > 0 || label !== row.Name
 
+      // A system Show marks keeps its name at full strength at either level of the hierarchy: only the names of systems with nothing to report recede.
       return {
         ...data,
         label,
+        labelInk: labelInk(this.hierarchy, this.theme, marked),
+        labelMinPx: labelMinPx(this.hierarchy, marked),
         imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM * this.roles.scale) / row.size : 1,
         image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface, { family: this.roles.svg, scale: this.roles.scale, face: this.glyphFace && this.glyphFace.family === this.roles.family ? this.glyphFace.uri : null }),
         marked,
@@ -2390,7 +2441,7 @@ export default {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * pan.x, ratio * pan.y)
-      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.theme.ink, halo: this.theme.surface, places: showsLabels(zoom, this.typeface) ? this.borderLabels() : null, type: this.typeface })
+      drawBorders(context, this.borderParts, { ...this.borderGeometry(), zoom, ink: this.composition.names.ink, halo: this.composition.names.halo, places: showsLabels(zoom, this.typeface) ? this.borderLabels() : null, type: this.typeface })
     },
 
     // The overview: the borders, links and systems, without names. A system is a dot in the colour it shows most: the larger share of its pie, else its fill.
@@ -3051,6 +3102,7 @@ export default {
       const graph = this.graph
       const requestedScale = 2 * (window.devicePixelRatio || 1)
       const geometry = this.borderGeometry()
+      const composition = this.composition
 
       try {
         const image = new Image()
@@ -3061,6 +3113,7 @@ export default {
         let width
         let height
         let scale
+        let legend
 
         // Export with the rings as zoom 1 draws them, and put the screen's back before the next frame.
         this.setZoomStyle(1)
@@ -3074,7 +3127,13 @@ export default {
           y1 = Math.min(systems.y1, borders.y1) - 20
           width = Math.ceil(Math.max(systems.x2, borders.x2) + 20 - x1)
           height = Math.ceil(Math.max(systems.y2, borders.y2) + 20 - y1)
-          scale = Math.min(requestedScale, 8192 / width, 8192 / height, Math.sqrt((32 * 1024 * 1024) / (width * height)))
+          // The picture is at least as wide as the legend needs, with the map centred, and the legend's band is under it.
+          const wide = Math.max(width, LEGEND_MIN_WIDTH)
+
+          x1 -= (wide - width) / 2
+          width = wide
+          legend = legendLayout(document.createElement('canvas').getContext('2d'), composition.legend.rows, { width, type: this.typeface })
+          scale = Math.min(requestedScale, 8192 / width, 8192 / (height + legend.height), Math.sqrt((32 * 1024 * 1024) / (width * (height + legend.height))))
           // max dimensions use output pixels, independently of display DPI. They also keep the graph raster at the same scale as the border canvas.
           image.src = graph.png({ full: true, maxWidth: Math.ceil(systems.w) * scale, maxHeight: Math.ceil(systems.h) * scale })
         } finally {
@@ -3084,19 +3143,23 @@ export default {
         const canvas = document.createElement('canvas')
 
         canvas.width = Math.max(1, Math.floor(width * scale))
-        canvas.height = Math.max(1, Math.floor(height * scale))
+        canvas.height = Math.max(1, Math.floor((height + legend.height) * scale))
         const context = canvas.getContext('2d')
 
         await image.decode()
         context.setTransform(scale, 0, 0, scale, -x1 * scale, -y1 * scale)
-        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: this.theme.ink, halo: this.theme.surface, places, type: this.typeface })
-        context.setTransform(1, 0, 0, 1, 0, 0)
-        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour (the appearance's page background, as the stage draws it), not transparency or the card surface.
+        drawBorders(context, this.borderParts, { ...geometry, zoom: 1, ink: composition.names.ink, halo: composition.names.halo, places, type: this.typeface })
+        context.setTransform(scale, 0, 0, scale, 0, 0)
+        // Border painting cuts out its interiors. Fill behind the finished layer so its tint blends over the map's base colour (the appearance's page background, as the stage draws it), not transparency or the card surface. The page's dots lie on that colour, as the stage draws them, and the legend's band is drawn under the map, from the same state as the legend on screen.
         context.globalCompositeOperation = 'destination-over'
-        context.fillStyle = this.appearance.surfaces.background
-        context.fillRect(0, 0, canvas.width, canvas.height)
+        drawGrid(context, { width, height }, composition.grid)
+        context.fillStyle = composition.background
+        context.fillRect(0, 0, width, height)
         context.globalCompositeOperation = 'source-over'
+        context.setTransform(1, 0, 0, 1, 0, 0)
         context.drawImage(image, Math.round((systems.x1 - x1) * scale), Math.round((systems.y1 - y1) * scale))
+        context.setTransform(scale, 0, 0, scale, 0, 0)
+        drawLegend(context, legend, composition.legend, { top: height, width, type: this.typeface })
 
         const result = await ipcRenderer.invoke('save-png', canvas.toDataURL('image/png').split(',')[1], `map-${this.GameID}-${this.RaceID}-${this.GameTime}.png`)
 
@@ -3440,7 +3503,7 @@ export default {
     min-width: 0;
     overflow: hidden;
     background-color: var(--ae-bg);
-    background-image: radial-gradient(var(--ae-border) 1px, transparent 0);
+    background-image: radial-gradient(var(--map-grid, var(--ae-border)) 1px, transparent 0);
     background-size: 20px 20px;
   }
 

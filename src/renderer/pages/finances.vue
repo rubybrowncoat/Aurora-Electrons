@@ -211,6 +211,7 @@ import { CATEGORIES, amountText, civilianCategories, describeTariffVersion, netC
 import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, reasonText, statusText } from '../utilities/finances'
 import { branchStore } from '../utilities/history'
 import { tracked } from '../utilities/load-tracking'
+import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { valueOrNull } from '../utilities/provenance'
 import { ledgerEvidence, recordedAnchors, reconcileTreasury, residualLabel, wealthLogSql } from '../utilities/treasury-anchors'
@@ -257,6 +258,7 @@ export default {
       flowsView: { key: 'financesFlowsView', default: 'chart', valid: oneOf(FLOWS_VIEWS) },
       stepsTable: tableView('financesStepsTable', { itemsPerPage: 15, itemsPerPageOptions: STEP_PAGE_SIZES }),
       anchorsTable: tableView('financesAnchorsTable', { sortBy: ['to'], sortDesc: true, itemsPerPage: 10, itemsPerPageOptions: ANCHOR_PAGE_SIZES }),
+      hierarchy: hierarchyView,
     }),
   ],
   data() {
@@ -533,7 +535,7 @@ export default {
           y: {
             stacked: true,
             ticks: { callback: (value) => compact(value) },
-            grid: { color: (context) => (context.tick && context.tick.value === 0 ? this.theme.inkMuted : `${this.theme.border}99`) },
+            grid: { color: (context) => (context.tick && context.tick.value === 0 ? this.theme.inkMuted : chartGridColor(this.hierarchy, this.theme.border)) },
           },
         },
         plugins: {

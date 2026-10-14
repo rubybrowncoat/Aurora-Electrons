@@ -9,6 +9,8 @@ import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, L
 
 import { activeAppearance } from '../../utilities/appearance'
 import { whenFontsReady } from '../../utilities/appearance-font'
+import { chartGridColor, hierarchyView } from '../../utilities/map-hierarchy'
+import persistedView from '../../mixins/persisted-view'
 import { barPattern, chartFont, chartTheme, seriesIdentity } from './theme'
 
 Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip)
@@ -163,6 +165,8 @@ const labelColor = (context) => {
 
 export default {
   name: 'ChartCanvas',
+  // The gridlines follow the level of the visual hierarchy the Galaxy Map keeps (utilities/map-hierarchy.js).
+  mixins: [persistedView({ hierarchy: hierarchyView })],
   props: {
     type: { type: String, required: true },
     data: { type: Object, required: true },
@@ -191,6 +195,9 @@ export default {
       this.update()
     },
     appearance () {
+      this.update()
+    },
+    hierarchy () {
       this.update()
     },
     typeface () {
@@ -242,7 +249,7 @@ export default {
       const { family, size, font } = this.typeface
       const text = { family, size: size(12) }
       const axis = {
-        grid: { color: `${border}99`, drawTicks: false },
+        grid: { color: chartGridColor(this.hierarchy, border), drawTicks: false },
         border: { color: border },
         ticks: { color: inkMuted, padding: 6, font: text },
         title: { color: inkMuted, font: text },
