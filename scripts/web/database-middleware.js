@@ -240,12 +240,21 @@ const savesSelect = (requested, active) => {
   return { ok: true, action: 'switched', path: file, active: file }
 }
 
-const allowedSave = (requested) => {
+// The path of a save on the allow-list, whether or not the file is there.
+const listedSave = (requested) => {
   const file = typeof requested === 'string' ? path.resolve(requested) : ''
 
   if (!ALLOWED_SAVES.includes(file)) {
     throw new HttpError(400, 'Web mode opens only the saves the server was started with.')
-  } else if (!fs.existsSync(file)) {
+  }
+
+  return file
+}
+
+const allowedSave = (requested) => {
+  const file = listedSave(requested)
+
+  if (!fs.existsSync(file)) {
     throw new HttpError(503, `No database at ${file}. Run \`unzip fixtures/AuroraDB.zip\`.`)
   }
 
@@ -253,7 +262,20 @@ const allowedSave = (requested) => {
 }
 
 const routes = {
-  'GET /stat': async (_body, req) => ({ mtimeMs: fs.statSync(allowedSave(new URL(req.url, 'http://localhost').searchParams.get('path'))).mtimeMs }),
+  // The file's modification time, or `missing` when the file is not there; a file that cannot be looked at (locked, no permission) is answered 503 with the reason. The page's watcher reads these as add, change, unlink and error.
+  'GET /stat': async (_body, req) => {
+    const file = listedSave(new URL(req.url, 'http://localhost').searchParams.get('path'))
+
+    try {
+      return { mtimeMs: fs.statSync(file).mtimeMs }
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+        return { missing: true }
+      }
+
+      throw new HttpError(503, String(error.message).split(/\r?\n/)[0])
+    }
+  },
 
   // Opens a new copy of an allowed save for this page; the answer names it.
   'POST /reset': async ({ storagePath }) => {

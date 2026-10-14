@@ -3,6 +3,32 @@
 // The scoped probe: the game clocks, one small read of the table every page's game row comes from. It fails when the save can't be read (the game is writing it, the file is gone or malformed), so a success shows the new copy answers.
 export const PROBE_SQL = 'select GameID, StartYear, GameTime from FCT_Game'
 
+// What the watcher's recovery says about the connection to the save file: 'ok' (nothing is wrong or waiting), 'reconnecting' (a change was heard and the save is about to be opened again, or is being), 'missing' (the file is gone and the app waits for it to come back), 'unreadable' (the latest open or read failed). `attempt` of `limit` counts the automatic retries of a failed reload; `nextAt` is when the next one runs, null when none is scheduled (they ran out, so only a manual retry goes on); `message` is why.
+export const recovered = () => ({ state: 'ok', attempt: 0, limit: 0, nextAt: null, message: null })
+
+// The recovery in words, or null while nothing is wrong or waiting: what the watcher found, and what happens next (`now` is the wall clock in ms).
+export const describeRecovery = (recovery, now) => {
+  const because = recovery.message ? ` (${recovery.message})` : ''
+
+  switch (recovery.state) {
+    case 'reconnecting':
+      return recovery.attempt ? `Reopening the save, retry ${recovery.attempt} of ${recovery.limit}` : 'The save changed on disk and is being opened again'
+    case 'missing':
+      return 'The save file is missing; the app waits for it to come back'
+    case 'unreadable': {
+      if (recovery.nextAt === null) {
+        return `The save could not be read after ${recovery.attempt} ${recovery.attempt === 1 ? 'retry' : 'retries'}${because}; Retry opens it again`
+      }
+
+      const seconds = Math.max(0, Math.ceil((recovery.nextAt - now) / 1000))
+
+      return `The save could not be read${because}; retry ${recovery.attempt} of ${recovery.limit} in ${seconds} s`
+    }
+    default:
+      return null
+  }
+}
+
 export const state = () => {
   return {
     // Counts the copies of the save the app has opened (the root store's `renew`). A read belongs to the generation it ran on.
@@ -15,6 +41,8 @@ export const state = () => {
     read: null,
     // { [page route]: { [input key]: { label, readAt, generation, failedAt, message } } } for the pages that track their inputs (mixins/load-state.js). `readAt` and `generation` move only when the input's read succeeds; `failedAt` is set while its latest read has failed and cleared by the next success.
     inputs: {},
+    // See `recovered`.
+    recovery: recovered(),
   }
 }
 
@@ -41,7 +69,14 @@ export const mutations = {
     state.refresh = null
     state.read = null
     state.inputs = {}
+    state.recovery = recovered()
   },
+  // The watcher's recovery moved on; only the fields it names change.
+  recovery (state, patch) {
+    state.recovery = { ...state.recovery, ...patch }
+  },
+  // The user asked to open the save again now (the watcher plugin answers it).
+  retryRequested () {},
   // The watcher spoke. This records the event only; the read time moves when a probe succeeds.
   watched (state, { kind, at, message = null }) {
     state.file = { kind, at, message }

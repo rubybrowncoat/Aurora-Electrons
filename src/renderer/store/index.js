@@ -104,6 +104,12 @@ export const mutations = {
   clearSelection (state) {
     Object.assign(state, selection())
   },
+  // The race picked is gone from the save: the game stays picked, and no other race takes its place.
+  clearRace (state) {
+    state.RaceID = null
+    state.RaceNPR = false
+    state.RaceSpecialNPRID = 0
+  },
   setDatabaseError (state, { message }) {
     state.databaseError = message
   },
@@ -183,6 +189,7 @@ export const actions = {
   },
 
   changeGame ({ commit }, { game, race = null }) {
+    commit('empires/dropped', null)
     commit('setGame', game)
     commit('setGameTime', game)
     commit('setCivilianShippingLinesActive', game)

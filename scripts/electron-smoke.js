@@ -136,6 +136,9 @@ const run = async () => {
   let problems = []
   const checks = []
   const check = (name, ok, detail) => checks.push({ name, ok, detail })
+  // Set while the recovery step holds a lock on the save: the refusals that lock causes are what the step is about, not problems.
+  let expectLocked = false
+  const lockRefusal = (text) => expectLocked && /SQLITE_BUSY|database is locked/i.test(text)
 
   app.process().stderr.on('data', (data) => String(data).split(/\r?\n/).filter((line) => line.trim() && !MAIN_NOISE.some((noise) => noise.test(line))).forEach((line) => problems.push(`main: ${line.trim()}`)))
 
@@ -158,7 +161,7 @@ const run = async () => {
   const page = await appWindow()
 
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    if (message.type() === 'error' && !lockRefusal(message.text())) {
       problems.push(`console: ${message.text()}`)
     }
   })
@@ -178,7 +181,7 @@ const run = async () => {
     while (true) {
       const state = await smokeState()
 
-      state.errors.forEach((error) => problems.push(`db: ${error}`))
+      state.errors.filter((error) => !lockRefusal(error)).forEach((error) => problems.push(`db: ${error}`))
 
       if (state.inFlight <= 0 && state.now - state.last >= SETTLE_MS && !(await page.evaluate(pageLoading))) {
         return
@@ -488,6 +491,43 @@ const run = async () => {
     await settle()
   } catch (error) {
     check('save switch', false, error.message.split('\n')[0])
+  }
+
+  // Recovery from a locked save: a second connection of the page holds an exclusive lock on the save while the file changes. The app reports the save unreadable (in the status line too) and retries on its own, within bounds; once the lock is gone it reads the save again and says nothing is wrong. The refusals the lock causes are expected for the length of the step.
+  try {
+    expectLocked = true
+    await settle()
+
+    await page.evaluate((file) => {
+      const { Sequelize } = window.__aurora.sequelize
+
+      window.__smokeLock = new Sequelize({ dialect: 'sqlite', storage: file, logging: false })
+
+      return window.__smokeLock.query('begin exclusive')
+    }, save)
+
+    const stamp = new Date(Date.now() + 20000)
+
+    fs.utimesSync(save, stamp, stamp)
+
+    const unreadable = await page.waitForFunction(() => window.$app.$store.state.freshness.recovery.state === 'unreadable', null, { timeout: 60000 }).then(() => true, () => false)
+    const wording = await page.evaluate(() => (document.querySelector('[data-save-status]') || { textContent: '' }).textContent)
+    const refusedAsFresh = await page.evaluate(() => window.$app.$store.state.freshness.refresh.outcome === 'ok')
+
+    await page.evaluate(async () => {
+      await window.__smokeLock.query('rollback')
+      await window.__smokeLock.close()
+      delete window.__smokeLock
+    })
+
+    const recovered = await page.waitForFunction(() => window.$app.$store.state.freshness.recovery.state === 'ok' && window.$app.$store.state.freshness.refresh.outcome === 'ok', null, { timeout: 60000 }).then(() => true, () => false)
+
+    check('save recovery: a locked save is reported unreadable, then read again once the lock is gone', unreadable && !refusedAsFresh && /could not be read/.test(wording) && recovered, `unreadable ${unreadable}, shown as fresh ${refusedAsFresh}, status "${wording.slice(0, 120)}", recovered ${recovered}`)
+    await settle()
+  } catch (error) {
+    check('save recovery', false, error.message.split('\n')[0])
+  } finally {
+    expectLocked = false
   }
 
   const reloadProblems = problems

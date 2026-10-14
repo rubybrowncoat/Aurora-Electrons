@@ -2,7 +2,7 @@
   <div class="save-status" :class="{ 'error--text': tone === 'bad' }" :title="detail" data-save-status>
     <v-icon x-small :color="tone === 'bad' ? 'error' : null" class="save-status__icon">{{ icon }}</v-icon>
     <span class="save-status__text">{{ text }}</span>
-    <v-btn v-if="status === 'failed'" x-small text color="error" class="save-status__retry" @click="reopen">Reopen save</v-btn>
+    <v-btn v-if="status === 'failed' || recovery.state !== 'ok'" x-small text color="error" class="save-status__retry" data-save-reopen @click="reopen">Reopen save</v-btn>
     <v-btn v-if="capabilityStatus === 'failed'" x-small text color="error" class="save-status__retry" data-capability-retry @click="recheck">Check again</v-btn>
   </div>
 </template>
@@ -11,6 +11,7 @@
 import { mapGetters, mapState } from 'vuex'
 
 import { gameTime } from '../../utilities/aurora'
+import { describeRecovery } from '../../store/freshness'
 
 const TICK_MS = 5000
 
@@ -46,6 +47,7 @@ export default {
       refresh: 'refresh',
       file: 'file',
       inputs: 'inputs',
+      recovery: 'recovery',
     }),
     ...mapGetters('freshness', [
       'status',
@@ -60,10 +62,6 @@ export default {
       capabilityStatus: 'status',
       reportOf: 'report',
     }),
-    ...mapGetters([
-      'savePath',
-    ]),
-
     // The selected game's date at the last successful read, from its own StartYear and seconds, or null when no game is picked.
     gameDate () {
       return this.gameClock ? gameTime(this.gameClock.StartYear, this.gameClock.GameTime).format('YYYY-MM-DD HH:mm') : null
@@ -97,11 +95,11 @@ export default {
       return parts.join(', ')
     },
     tone () {
-      if (this.status === 'failed' || this.failedInputs.length || (this.pageReport && this.pageReport.status === 'unsupported') || this.capabilityStatus === 'failed') {
+      if (this.status === 'failed' || this.recovery.state === 'missing' || this.recovery.state === 'unreadable' || this.failedInputs.length || (this.pageReport && this.pageReport.status === 'unsupported') || this.capabilityStatus === 'failed') {
         return 'bad'
       }
 
-      return this.status === 'ok' ? 'ok' : 'wait'
+      return this.status === 'ok' && this.recovery.state === 'ok' ? 'ok' : 'wait'
     },
     icon () {
       if (this.tone === 'bad') {
@@ -122,7 +120,15 @@ export default {
 
       return `Read ${when} (wall clock)${this.gameDate ? ` · game date ${this.gameDate}` : ''}`
     },
+    // What the watcher's recovery says (missing, unreadable, reopening), in place of the plain refresh line.
+    recoveryText () {
+      return describeRecovery(this.recovery, this.now)
+    },
     refreshText () {
+      if (this.recoveryText) {
+        return this.recoveryText
+      }
+
       if (this.status === 'reading') {
         return this.read ? 'refreshing, so this read is the previous one' : 'reading'
       } else if (this.status === 'failed') {
@@ -193,13 +199,13 @@ export default {
     clearInterval(this.timer)
   },
   methods: {
-    // Opens the save again, as a file notification does: the refresh then ends in a probe that succeeds or fails.
     // Runs the capability check again on the copy now open.
     recheck () {
       this.$store.dispatch('capabilities/retry')
     },
+    // Opens the save again now, the automatic retries starting over: the refresh then ends in a probe that succeeds or fails.
     reopen () {
-      this.$store.dispatch('renew', { storagePath: this.savePath })
+      this.$store.commit('freshness/retryRequested')
     },
   },
 }
