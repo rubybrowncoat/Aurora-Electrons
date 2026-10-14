@@ -993,3 +993,78 @@ registerRule({
   note: 'A saved missile design records no tech level. The level it was made with is the one the race holds whose figure reproduces the stored one, the held level that cost the most to develop when several do; a design whose figure no held level gives has an unknown level. The level therefore agrees with the stored figure by construction, and a comparison made from it says that some held level gives the figure, not that the rule gives it independently (scripts/check-design-rules.js reports these as resolved from the stored figure).',
   assumptions: ['The race has not lost or replaced a level it held when the design was made', 'The game picks the level of greatest development cost among those that give the stored figure'],
 })
+
+// The component types of the sensors and fire controls, as the save numbers them: thermal sensor 8, EM sensor 41, active sensor 24, missile fire control 25, beam fire control 19.
+export const SENSOR_COMPONENT_TYPES = Object.freeze({ thermal: 8, em: 41, active: 24, missileFireControl: 25, beamFireControl: 19 })
+
+// The tech types a sensor or a fire control reads, as the save numbers them: thermal sensitivity 19, EM sensitivity 125, active sensor strength 20, hardening 139, ECCM 83, and for a beam fire control the distance rating 4, the speed rating 5 and the single weapon tech 268. A component names its techs in BGTech1 to BGTech7 and the slot of a role is never assumed: the tech types are what DIM_TechType describes (`SENSOR_TECH_DESCRIPTIONS`), and a component's tech of a role is the one of that type among its slots.
+export const SENSOR_TECH = Object.freeze({ thermal: 19, em: 125, strength: 20, hardening: 139, eccm: 83, distance: 4, speed: 5, singleWeapon: 268 })
+
+// The description DIM_TechType gives each tech type of SENSOR_TECH, the evidence that the numbers above are the roles named.
+export const SENSOR_TECH_DESCRIPTIONS = Object.freeze({ 19: 'Thermal Sensor Sensitivity', 125: 'EM Sensor Sensitivity', 20: 'Active Sensor Strength', 139: 'Hardening', 83: 'ECCM', 4: 'Fire Control Distance Rating', 5: 'Fire Control Speed Rating', 268: 'Single Weapon Fire Control' })
+
+export const SENSOR_COLUMNS = Object.freeze(['Name', 'ComponentTypeID', 'Size', 'Cost', 'Crew', 'HTK', 'ComponentValue', 'MaxSensorRange', 'Resolution', 'ECCM', 'ElectronicCTD', 'TrackingSpeed', 'FCRangeModifier', 'FCSpeedModifier', 'SpecialFunction', 'Uridium', 'Corbomite', ...TECH_COLUMNS])
+
+const SENSOR_TYPE_IDS = Object.freeze(Object.values(SENSOR_COMPONENT_TYPES))
+const SENSOR_SELECT = `select FCT_ShipDesignComponents.SDComponentID, ${SENSOR_COLUMNS.map((column) => `FCT_ShipDesignComponents.${column}`).join(', ')}`
+const SENSOR_WHERE = `FCT_ShipDesignComponents.ComponentTypeID in (${SENSOR_TYPE_IDS.join(',')}) and FCT_ShipDesignComponents.GameID in (0, :game)`
+
+// The sensors and fire controls a race has researched (FCT_RaceTech TechID = SDComponentID), as rows; `race` null reads every one that any race of the game holds, each once.
+export const ownedSensors = async (database, game, race = null) => {
+  if (race === null) {
+    const [rows] = await database.query(`${SENSOR_SELECT} from FCT_ShipDesignComponents where ${SENSOR_WHERE} and FCT_ShipDesignComponents.SDComponentID in (select FCT_RaceTech.TechID from FCT_RaceTech where FCT_RaceTech.GameID = :game) order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game } })
+
+    return rows
+  }
+
+  const [rows] = await database.query(`${SENSOR_SELECT} from FCT_ShipDesignComponents inner join FCT_RaceTech on FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID where ${SENSOR_WHERE} and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game, race } })
+
+  return rows
+}
+
+const wholeIds = (ids) => [...new Set(ids)].filter((id) => Number.isInteger(id) && id > 0).sort((a, b) => a - b)
+
+// The fixture the sensor and fire control rules need, as plain data: `{ game, techTypes: { type: description }, techs: { id: { type, info, info2 } }, components: [{ id, race, row }] }` with `row` the SENSOR_COLUMNS of the stored component, `techs` every tech a component names that FCT_TechSystem holds (AdditionalInfo as `info`, AdditionalInfo2 as `info2`) and `techTypes` what DIM_TechType calls the types of SENSOR_TECH. `race` is the race the components were read for, or null for those held by any race of the game.
+export const loadSensorFixture = async (database, game, race = null) => {
+  const rows = await ownedSensors(database, game, race)
+  const components = rows.map((row) => ({ id: row.SDComponentID, race, row: Object.fromEntries(SENSOR_COLUMNS.map((column) => [column, row[column]])) }))
+  const techIds = wholeIds(rows.flatMap((row) => TECH_COLUMNS.map((column) => row[column])))
+  const techs = {}
+
+  if (techIds.length) {
+    const [techRows] = await database.query(`select FCT_TechSystem.TechSystemID, FCT_TechSystem.TechTypeID, FCT_TechSystem.AdditionalInfo, FCT_TechSystem.AdditionalInfo2 from FCT_TechSystem where FCT_TechSystem.TechSystemID in (${techIds.join(',')})`, { replacements: {} })
+
+    for (const row of techRows) {
+      techs[row.TechSystemID] = { type: row.TechTypeID, info: row.AdditionalInfo, info2: row.AdditionalInfo2 }
+    }
+  }
+
+  const types = Object.values(SENSOR_TECH)
+  const [typeRows] = await database.query(`select DIM_TechType.TechTypeID, DIM_TechType.Description from DIM_TechType where DIM_TechType.TechTypeID in (${types.join(',')})`, { replacements: {} })
+
+  return { game, techTypes: Object.fromEntries(typeRows.map((row) => [row.TechTypeID, row.Description])), techs, components }
+}
+
+// The tech of one type (`type` of SENSOR_TECH) a stored component names, found by the type of the tech and never by the slot it sits in: `{ state: 'resolved', id, slot, info, info2 }`; `'missing'` when no slot names a tech of the type and every slot named is known; `'unresolved'` when no known slot has the type and a slot names a tech the fixture does not hold (it could be that one); `'ambiguous'` when two slots name techs of the type. Each carries a `reason` unless resolved.
+export const sensorTechOf = (fixture, row, type) => {
+  const named = TECH_COLUMNS.map((column) => ({ slot: column, id: row[column] })).filter((entry) => Number.isInteger(entry.id) && entry.id > 0)
+  const found = named.filter((entry) => fixture.techs[entry.id] && fixture.techs[entry.id].type === type)
+  const unknown = named.filter((entry) => !fixture.techs[entry.id])
+  const label = fixture.techTypes[type] || `tech type ${type}`
+
+  if (found.length > 1) {
+    return { state: 'ambiguous', reason: `${found.length} of the component's techs are of type ${type} (${label}): ${found.map((entry) => entry.id).join(', ')}` }
+  }
+
+  if (found.length === 1) {
+    const tech = fixture.techs[found[0].id]
+
+    return { state: 'resolved', id: found[0].id, slot: found[0].slot, info: tech.info, info2: tech.info2 }
+  }
+
+  if (unknown.length) {
+    return { state: 'unresolved', reason: `the save holds no tech row for ${unknown.map((entry) => entry.id).join(', ')}, one of which may be the ${label} tech` }
+  }
+
+  return { state: 'missing', reason: `the component names no ${label} tech (type ${type})` }
+}

@@ -1057,6 +1057,272 @@ export const admitMissiles = (evaluations) => {
   return { admitted, rejected }
 }
 
+// ---------- sensors and fire controls ----------
+
+// A sensor or a fire control as the game designs it from the race's techs. Sizes are in HS, ranges in km, a signature and a resolution in HS (a target of that many HS, or 50 t for each). The design functions take the numbers a design uses and return plain figures, like `engineDesign`; the effective range, the inverse sizing and the fire control request give provenance results and are unavailable, never 0, when an input is not known. docs/DATABASE.md § Design rules states each rule in prose.
+export const SENSOR_RANGE_UNIT_KM = 1000000
+export const SENSOR_RESOLUTION_EXPONENT = 2 / 3
+export const MISSILE_FIRE_CONTROL_RANGE_FACTOR = 2
+export const SENSOR_JAMMER_BASE = 0.75
+export const PASSIVE_RANGE_MULTIPLIER = 250000
+export const MISSILE_SIGNATURE_MIN = 0.3
+export const SENSOR_CREW_PER_HS = 2
+export const FIRE_CONTROL_CREW_PER_HS = 4
+export const BEAM_FIRE_CONTROL_MAX_RANGE_KM = 1400000
+export const BEAM_FIRE_CONTROL_MIN_SIZE_HS = 0.01
+export const BEAM_FIRE_CONTROL_KM_PER_COST_UNIT = 20000
+export const BEAM_FIRE_CONTROL_TRACKING_COST_STEP = 1000
+export const BEAM_FIRE_CONTROL_POINT_DEFENCE_TRACKING = 4
+export const FIRE_CONTROL_SPECIAL = Object.freeze({ none: 0, pointDefence: 1, singleWeapon: 6 })
+export const SENSOR_MODES = Object.freeze({ search: 'search', missileFireControl: 'missileFireControl' })
+
+// The rules a sensor or fire control result is reported under.
+export const SENSOR_RULES = Object.freeze({ active: 'design.activeSensorDesign', passive: 'design.passiveSensorDesign', beam: 'design.beamFireControlDesign', limits: 'design.beamFireControlLimits', detection: 'design.sensorDetection', sizing: 'design.sensorInverseSizing' })
+
+// The values 1 to `last` in steps of `step`, each divided by `scale`, so a decimal step is exact (0.1 is 1 over 10, never a sum of floats).
+const ladderOf = (first, last, step, scale) => Array.from({ length: Math.floor((last - first) / step) + 1 }, (_, index) => (first + index * step) / scale)
+
+// The sizes the design window offers for a sensor: 0.1 HS steps below 2 HS, quarter HS steps from 2 to under 5, whole HS from 5 to 50. Read from the window's lists; the sizes of the AI's own sensors in the saves (3.3, 5.625) are off it, so a stored size is not required to lie on it.
+export const SENSOR_SIZES_HS = Object.freeze([...ladderOf(1, 19, 1, 10), ...ladderOf(200, 475, 25, 100), ...ladderOf(5, 50, 1, 1)])
+
+// The resolutions the window offers, in HS: 1 to 20, 25 to 200 in fives, 220 to 500 in twenties.
+export const SENSOR_RESOLUTIONS_HS = Object.freeze([...ladderOf(1, 20, 1, 1), ...ladderOf(25, 200, 5, 1), ...ladderOf(220, 500, 20, 1)])
+
+// The range and tracking multipliers the window offers for a beam fire control: 0.1 to 3.99 in hundredths, and 4.
+export const FIRE_CONTROL_MULTIPLIERS = Object.freeze([...ladderOf(10, 399, 1, 100), 4])
+
+// The fraction of the maximum range a sensor keeps against a target whose signature is under its resolution: the square of the ratio of the two; a target at or above the resolution gives 1.
+export const sensorResolutionFactor = ({ signature, resolution }) => (signature < resolution ? (signature / resolution) ** 2 : 1)
+
+// The fraction of its range a sensor keeps under a target's sensor jammer: 0.75 to the power of the jammer less the sensor's ECCM, when the jammer is the stronger and 1 when it is not. The missile hit chance (missile-hit.js `jammerMultiplier`) is another rule: it takes 0.75 to the whole jammer, not to the excess, and only when the jammer is the stronger.
+export const sensorJammerFactor = ({ jammer, eccm }) => (jammer > eccm ? SENSOR_JAMMER_BASE ** (jammer - eccm) : 1)
+
+// The signature, in HS, an active sensor sees a missile by: its size in MSP over the MSP of a hull space, never below 0.3.
+export const missileSignature = ({ sizeMsp }) => Math.max(sizeMsp / MSP_PER_HS, MISSILE_SIGNATURE_MIN)
+
+// An active sensor, or a missile fire control (`mode` 'missileFireControl'), as the game designs it from the active sensor strength tech (`strengthTech` per HS), the EM sensitivity tech, the resolution, and the hardening and ECCM techs (`hardeningRating` the CTD, `hardeningCost` the cost factor, `eccmRating`, `eccmCost` the cost factor). Returns { strength, rangeKm, searchRangeKm, cost, uridium, corbomite, crew, htk, eccm, ctd, sizeHS, tons }: `searchRangeKm` is the range of the same sensor as a search sensor, `rangeKm` twice that for a fire control. The cost is the size times the strength tech times the hardening factor to 1 decimal (the Uridium) times the ECCM factor; the Corbomite is the rest.
+export const activeSensorDesign = ({ sizeHS, resolution, strengthTech, emTech, hardeningRating, hardeningCost, eccmRating, eccmCost, mode = SENSOR_MODES.search }) => {
+  const strength = strengthTech * sizeHS
+  const searchRangeKm = Math.sqrt(strength * emTech * resolution ** SENSOR_RESOLUTION_EXPONENT / SENSOR_PI) * SENSOR_RANGE_UNIT_KM
+  const uridium = roundHalfEven(sizeHS * strengthTech * hardeningCost, 1)
+  const cost = uridium * eccmCost
+
+  return {
+    strength,
+    rangeKm: mode === SENSOR_MODES.missileFireControl ? searchRangeKm * MISSILE_FIRE_CONTROL_RANGE_FACTOR : searchRangeKm,
+    searchRangeKm,
+    cost,
+    uridium,
+    corbomite: cost - uridium,
+    crew: roundHalfEven(sizeHS * SENSOR_CREW_PER_HS),
+    htk: sizeHS < 1 ? 0 : 1,
+    eccm: Math.trunc(eccmRating),
+    ctd: Math.trunc(hardeningRating),
+    sizeHS,
+    tons: sizeHS * TONS_PER_HS,
+  }
+}
+
+// A thermal or EM sensor as the game designs it from the sensitivity tech and the hardening tech. Returns { sensitivity, cost, uridium, crew, htk, ctd, sizeHS, tons }: the sensitivity is the size times the tech, the cost that times the hardening factor to 1 decimal, all of it Uridium.
+export const passiveSensorDesign = ({ sizeHS, sensitivityTech, hardeningRating, hardeningCost }) => {
+  const sensitivity = sizeHS * sensitivityTech
+  const cost = roundHalfEven(sensitivity * hardeningCost, 1)
+
+  return { sensitivity, cost, uridium: cost, crew: roundHalfEven(sizeHS * SENSOR_CREW_PER_HS), htk: sizeHS < 1 ? 0 : 1, ctd: Math.trunc(hardeningRating), sizeHS, tons: sizeHS * TONS_PER_HS }
+}
+
+// The tracking speed a beam fire control stores: the tracking multiplier times the speed rating, rounded to the nearest km/s (ties to even).
+export const fireControlTracking = (trackingMultiplier, speedRating) => roundHalfEven(trackingMultiplier * speedRating)
+
+// A beam fire control as the game designs it from the distance and speed rating techs, a range and a tracking multiplier, the single weapon tech's number (1, or under 1 for a single weapon control) and the hardening and ECCM techs. Returns { rangeKm, uncappedRangeKm, rangeCapped, trackingKmS, sizeHS, roundedSizeHS, sizeFloored, cost, uridium, corbomite, crew, htk, eccm, ctd, specialFunction }. The range is the multiplier times the distance rating, never above `maxRangeKm` (1,400,000 km unless a save is read that applies another limit); the tracking is the multiplier times the speed rating, rounded; the size is half the product of the multipliers times the weapon number, rounded to 2 decimals and never below 0.01 HS; the crew is four a HS of the rounded size, before the floor. The Uridium is the capped range over 20,000 times the tracking over 1,000 cut to a whole number (not rounded, not kept fractional) times the hardening factor and the weapon number, to 1 decimal; the cost is that times the ECCM factor and the Corbomite the rest.
+export const beamFireControlDesign = ({ rangeMultiplier, trackingMultiplier, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost, maxRangeKm = BEAM_FIRE_CONTROL_MAX_RANGE_KM }) => {
+  const uncappedRangeKm = rangeMultiplier * distanceRating
+  const rangeKm = Math.min(maxRangeKm, uncappedRangeKm)
+  const trackingKmS = fireControlTracking(trackingMultiplier, speedRating)
+  const roundedSizeHS = roundHalfEven(rangeMultiplier * trackingMultiplier / 2 * weaponNumber, 2)
+  const uridium = roundHalfEven(rangeKm / BEAM_FIRE_CONTROL_KM_PER_COST_UNIT * Math.floor(trackingKmS / BEAM_FIRE_CONTROL_TRACKING_COST_STEP) * hardeningCost * weaponNumber, 1)
+  const sizeHS = Math.max(BEAM_FIRE_CONTROL_MIN_SIZE_HS, roundedSizeHS)
+  const cost = uridium * eccmCost
+
+  return {
+    rangeKm,
+    uncappedRangeKm,
+    rangeCapped: uncappedRangeKm > maxRangeKm,
+    trackingKmS,
+    sizeHS,
+    roundedSizeHS,
+    sizeFloored: roundedSizeHS < BEAM_FIRE_CONTROL_MIN_SIZE_HS,
+    cost,
+    uridium,
+    corbomite: cost - uridium,
+    crew: roundHalfEven(roundedSizeHS * FIRE_CONTROL_CREW_PER_HS),
+    htk: sizeHS < 1 ? 0 : 1,
+    eccm: Math.trunc(eccmRating),
+    ctd: Math.trunc(hardeningRating),
+    specialFunction: weaponNumber < 1 ? FIRE_CONTROL_SPECIAL.singleWeapon : trackingMultiplier === BEAM_FIRE_CONTROL_POINT_DEFENCE_TRACKING ? FIRE_CONTROL_SPECIAL.pointDefence : FIRE_CONTROL_SPECIAL.none,
+  }
+}
+
+// The range a passive sensor detects a signature at: the square root of its sensitivity times the signature, times 250,000.
+export const passiveDetectionRange = ({ sensitivity, signature }) => Math.sqrt(sensitivity * signature) * PASSIVE_RANGE_MULTIPLIER
+
+const SENSOR_RANGE_TOLERANCE = 1e-9
+
+// Whether a range reaches a wanted one, to the last binary digits of the float.
+const reaches = (rangeKm, wantedKm) => rangeKm >= wantedKm * (1 - SENSOR_RANGE_TOLERANCE)
+
+const numberOrNull = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null)
+
+// The inputs among `named` ({ label: [value, test, reason] }) that are missing, as their reasons, and those present as their labels.
+const sensorInputs = (checks) => gather(checks.map(([name, value, test, reason]) => [name, numberOrNull(value) !== null && test(value), reason]))
+
+const POSITIVE = (value) => value > 0
+const NON_NEGATIVE = (value) => value >= 0
+
+// The range an active sensor reaches against a target: its maximum range (`rangeKm`, a stored `MaxSensorRange` or `activeSensorDesign`'s) cut by the square of the signature over the resolution when the target is under it, and by 0.75 to the jammer less the ECCM when a jammer stronger than the ECCM is on the target. With no jammer entered the target has none; the ECCM is needed only against one. A signature that is 0 gives no range. Returns { value: km } with the two factors in `figures`.
+export const sensorEffectiveRange = ({ rangeKm, signature, resolution, jammer = 0, eccm = null }) => {
+  const rule = SENSOR_RULES.detection
+  const { present, missing } = sensorInputs([
+    ['maximum range', rangeKm, POSITIVE, 'the sensor\'s maximum range above zero'],
+    ['target signature', signature, NON_NEGATIVE, 'the target\'s signature, 0 or more HS'],
+    ['resolution', resolution, POSITIVE, 'the sensor\'s resolution above zero'],
+    ['target jammer', jammer, NON_NEGATIVE, 'the target\'s sensor jammer strength, 0 or more'],
+  ])
+
+  if (!missing.length && jammer > 0 && !(numberOrNull(eccm) !== null && eccm >= 0)) {
+    missing.push('the sensor\'s ECCM, 0 or more (it decides whether the jammer counts)')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  const resolutionFactor = sensorResolutionFactor({ signature, resolution })
+  const jammerFactor = jammer > 0 ? sensorJammerFactor({ jammer, eccm }) : 1
+
+  return ofRule({ rule, value: rangeKm * resolutionFactor * jammerFactor, inputs: { present }, assumptions: [`a target sensor jammer of ${jammer}`] })
+}
+
+// The smallest entry of an ascending `ladder` that `meets`, found by bisection (what is met at a size is met at every larger one), with the entry below it. `index` is -1 when none meets.
+const smallestMeeting = (ladder, meets) => {
+  let low = 0
+  let high = ladder.length
+
+  while (low < high) {
+    const middle = (low + high) >> 1
+
+    if (meets(ladder[middle])) {
+      high = middle
+    } else {
+      low = middle + 1
+    }
+  }
+
+  return low === ladder.length ? { index: -1, value: null, below: ladder[ladder.length - 1] } : { index: low, value: ladder[low], below: low > 0 ? ladder[low - 1] : null }
+}
+
+// The effective range of an active sensor of a size, against a target: the design's range (the fire control's is twice the search sensor's), the resolution cut and the jammer cut.
+const sizedEffectiveRange = ({ sizeHS, mode, signature, resolution, strengthTech, emTech, jammer, eccm }) => {
+  const { rangeKm } = activeSensorDesign({ sizeHS, resolution, strengthTech, emTech, hardeningRating: 0, hardeningCost: 0, eccmRating: 0, eccmCost: 0, mode })
+
+  return rangeKm * sensorResolutionFactor({ signature, resolution }) * (jammer > 0 ? sensorJammerFactor({ jammer, eccm }) : 1)
+}
+
+const SIZING_ASSUMPTIONS = ['the sizes are those the design window offers (0.1 HS steps below 2 HS, quarter HS steps to 5 HS, whole HS to 50 HS)']
+
+// The smallest legal size of an active sensor (`mode` 'search') or missile fire control ('missileFireControl') whose range against a target of `signature` HS, at `resolution`, under a sensor `jammer` and the sensor's `eccm`, reaches `targetRangeKm`, from the active sensor strength tech and the EM sensitivity tech. The value is { status, sizeHS, exactSizeHS, rangeKm, smallerHS, smallerRangeKm, minimumHS, largestHS }: 'sized' (the size reaches the range and `smallerHS`, the next smaller legal size, falls short of it with `smallerRangeKm`), 'minimum-bound' (the smallest legal size, `minimumHS`, already reaches it: nothing smaller is offered, `smallerHS` null) or 'beyond-largest' (not even `largestHS` reaches it: `sizeHS` null). `exactSizeHS` is the size that reaches it exactly, not rounded to a legal size.
+export const sensorSizeForRange = ({ mode = SENSOR_MODES.search, targetRangeKm, signature, resolution, strengthTech, emTech, jammer = 0, eccm = null }) => {
+  const rule = SENSOR_RULES.sizing
+
+  if (!Object.values(SENSOR_MODES).includes(mode)) {
+    throw new Error(`Unknown sensor mode ${mode}; choose ${Object.values(SENSOR_MODES).join(' or ')}`)
+  }
+
+  const { present, missing } = sensorInputs([
+    ['wanted range', targetRangeKm, POSITIVE, 'the range wanted, above zero'],
+    ['target signature', signature, POSITIVE, 'the target\'s signature above zero (a target of no size is never seen)'],
+    ['resolution', resolution, POSITIVE, 'the sensor\'s resolution above zero'],
+    ['active sensor strength tech', strengthTech, POSITIVE, 'the active sensor strength tech above zero'],
+    ['EM sensitivity tech', emTech, POSITIVE, 'the EM sensitivity tech above zero'],
+    ['target jammer', jammer, NON_NEGATIVE, 'the target\'s sensor jammer strength, 0 or more'],
+  ])
+
+  if (!missing.length && jammer > 0 && !(numberOrNull(eccm) !== null && eccm >= 0)) {
+    missing.push('the sensor\'s ECCM, 0 or more (it decides whether the jammer counts)')
+  }
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  const rangeOf = (sizeHS) => sizedEffectiveRange({ sizeHS, mode, signature, resolution, strengthTech, emTech, jammer, eccm })
+  const factor = (mode === SENSOR_MODES.missileFireControl ? MISSILE_FIRE_CONTROL_RANGE_FACTOR : 1) * sensorResolutionFactor({ signature, resolution }) * (jammer > 0 ? sensorJammerFactor({ jammer, eccm }) : 1)
+  const exactSizeHS = (targetRangeKm / factor / SENSOR_RANGE_UNIT_KM) ** 2 * SENSOR_PI / (strengthTech * emTech * resolution ** SENSOR_RESOLUTION_EXPONENT)
+  const found = smallestMeeting(SENSOR_SIZES_HS, (sizeHS) => reaches(rangeOf(sizeHS), targetRangeKm))
+  const minimumHS = SENSOR_SIZES_HS[0]
+  const largestHS = SENSOR_SIZES_HS[SENSOR_SIZES_HS.length - 1]
+
+  if (found.index < 0) {
+    return ofRule({ rule, value: { status: 'beyond-largest', sizeHS: null, exactSizeHS, rangeKm: rangeOf(largestHS), smallerHS: largestHS, smallerRangeKm: rangeOf(largestHS), minimumHS, largestHS }, inputs: { present }, assumptions: SIZING_ASSUMPTIONS })
+  }
+
+  const status = found.index === 0 ? 'minimum-bound' : 'sized'
+
+  return ofRule({ rule, value: { status, sizeHS: found.value, exactSizeHS, rangeKm: rangeOf(found.value), smallerHS: found.below, smallerRangeKm: found.below === null ? null : rangeOf(found.below), minimumHS, largestHS }, inputs: { present }, assumptions: SIZING_ASSUMPTIONS })
+}
+
+// A search sensor and the missile fire control that goes with it, each sized for one engagement range against one target: { search, fireControl }, each a `sensorSizeForRange` value. The fire control's range is twice the search sensor's at one size, so at one tech and resolution it needs a quarter of the exact size.
+export const engagementSensorPair = ({ engagementRangeKm, signature, resolution, strengthTech, emTech, jammer = 0, eccm = null }) => {
+  const request = { targetRangeKm: engagementRangeKm, signature, resolution, strengthTech, emTech, jammer, eccm }
+
+  return combine({ rule: SENSOR_RULES.sizing, parts: { search: sensorSizeForRange({ ...request, mode: SENSOR_MODES.search }), fireControl: sensorSizeForRange({ ...request, mode: SENSOR_MODES.missileFireControl }) }, compute: (values) => ({ search: values.search, fireControl: values.fireControl }) })
+}
+
+// The legal multiplier that is the smallest one for which `meets(multiplier)` holds, as an axis of a beam fire control request: { status, multiplier, exactMultiplier, smaller }, with the statuses of `sensorSizeForRange`. `exactMultiplier` is the unrounded ratio wanted.
+const multiplierFor = (exactMultiplier, meets) => {
+  const found = smallestMeeting(FIRE_CONTROL_MULTIPLIERS, meets)
+  const last = FIRE_CONTROL_MULTIPLIERS[FIRE_CONTROL_MULTIPLIERS.length - 1]
+
+  if (found.index < 0) {
+    return { status: 'beyond-largest', multiplier: null, exactMultiplier, smaller: last }
+  }
+
+  return { status: found.index === 0 ? 'minimum-bound' : 'sized', multiplier: found.value, exactMultiplier, smaller: found.below }
+}
+
+// The beam fire control that reaches `rangeKm` and tracks `trackingKmS` from the race's distance and speed rating techs, with the smallest legal multipliers that do. The value is { range, tracking, design }: `range` and `tracking` are each { status, multiplier, exactMultiplier, smaller } (statuses as in `sensorSizeForRange`: 'sized' with the next smaller legal multiplier falling short, 'minimum-bound' at 0.1, 'beyond-largest' above 4), and `design` is `beamFireControlDesign` at those multipliers, null when an axis is beyond the largest. A range above 1,400,000 km is beyond what any multiplier gives, since the game caps it there. The tracking axis is searched on the tracking the game stores (the multiplier times the speed rating, rounded), not on the unrounded ratio, so the multiplier chosen gives the tracking asked for. The request is an estimate: it asks the confirmed forward rule for the smallest multipliers, under a range cap no save evidences and a window of legal multipliers taken from the design window; the confirmed forward `design` is carried as its own part.
+export const beamFireControlForRequest = ({ rangeKm, trackingKmS, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost }) => {
+  const rule = SENSOR_RULES.sizing
+  const { present, missing } = sensorInputs([
+    ['wanted range', rangeKm, POSITIVE, 'the range wanted, above zero'],
+    ['wanted tracking speed', trackingKmS, POSITIVE, 'the tracking speed wanted, above zero'],
+    ['distance rating tech', distanceRating, POSITIVE, 'the fire control distance rating tech above zero'],
+    ['speed rating tech', speedRating, POSITIVE, 'the fire control speed rating tech above zero'],
+    ['single weapon number', weaponNumber, POSITIVE, 'the single weapon fire control tech\'s number above zero'],
+    ['hardening', hardeningRating, NON_NEGATIVE, 'the hardening tech\'s rating'],
+    ['hardening cost factor', hardeningCost, NON_NEGATIVE, 'the hardening tech\'s cost factor'],
+    ['ECCM', eccmRating, NON_NEGATIVE, 'the ECCM tech\'s rating'],
+    ['ECCM cost factor', eccmCost, NON_NEGATIVE, 'the ECCM tech\'s cost factor'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing })
+  }
+
+  const range = rangeKm > BEAM_FIRE_CONTROL_MAX_RANGE_KM ? { status: 'beyond-largest', multiplier: null, exactMultiplier: rangeKm / distanceRating, smaller: null } : multiplierFor(rangeKm / distanceRating, (multiplier) => multiplier * distanceRating >= rangeKm * (1 - SENSOR_RANGE_TOLERANCE))
+  const tracking = multiplierFor(trackingKmS / speedRating, (multiplier) => fireControlTracking(multiplier, speedRating) >= trackingKmS * (1 - SENSOR_RANGE_TOLERANCE))
+  const design = range.multiplier === null || tracking.multiplier === null ? null : beamFireControlDesign({ rangeMultiplier: range.multiplier, trackingMultiplier: tracking.multiplier, distanceRating, speedRating, weaponNumber, hardeningRating, hardeningCost, eccmRating, eccmCost })
+  const sizing = ofRule({ rule, value: { range, tracking }, inputs: { present }, assumptions: ['the multipliers are those the design window offers (0.1 to 3.99 in hundredths, and 4)'] })
+  const limits = ofRule({ rule: SENSOR_RULES.limits, value: { maxRangeKm: BEAM_FIRE_CONTROL_MAX_RANGE_KM }, inputs: { present: ['range limit'] } })
+  const parts = { sizing, limits }
+
+  if (design) {
+    parts.forward = ofRule({ rule: SENSOR_RULES.beam, value: design, inputs: { present } })
+  }
+
+  return combine({ rule, parts, compute: (values) => ({ range: values.sizing.range, tracking: values.sizing.tracking, design: values.forward || null }) })
+}
+
 // The rule registry: each rule above registered once, with the game versions it is known for and how far it is checked. `scripts/check-design-rules.js` reads these entries and reports each check under its rule id. The planners' results carry the id (utilities/provenance.js); a rule whose evidence changes is edited here, once.
 const DESIGN_VERSIONS = ['2.7.x']
 const SAVE_CHECK = 'scripts/check-design-rules.js'
@@ -1305,4 +1571,64 @@ registerRule({
   structure: ['design.missileAccounting', 'the missileHit rules'],
   note: `The effects a candidate's options are meant to have, apart from the accounting. Only an effect whose rule is confirmed against saved data counts toward a ranking, and no effect adds a score of its own: the planner's own policy, since the game has no such rule (${SAVE_CHECK}).`,
   assumptions: ['An effect counts only when its rule is confirmed against saved data'],
+})
+
+registerRule({
+  id: SENSOR_RULES.active,
+  versions: DESIGN_VERSIONS,
+  units: 'HS, km, BP, minerals',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, MaxSensorRange, Resolution, ECCM, ElectronicCTD, Uridium, Corbomite of an active sensor or a missile fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the active sensor strength, EM sensitivity, hardening and ECCM techs'],
+  note: `An active sensor or missile fire control from its size, resolution and techs: the strength is the size times the strength tech, the range the square root of strength times the EM sensitivity times the resolution to the power of two thirds over pi (3.1416), in millions of km, doubled for a missile fire control. The Uridium is the strength times the hardening cost factor to 1 decimal, the cost that times the ECCM cost factor. Reproduces the strength, range, cost, minerals, crew, HTK, ECCM and CTD of every owned sensor of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The pi of the range is 3.1416'],
+})
+
+registerRule({
+  id: SENSOR_RULES.passive,
+  versions: DESIGN_VERSIONS,
+  units: 'HS, sensitivity, BP',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, ElectronicCTD, Uridium of a thermal or EM sensor', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the sensitivity and hardening techs'],
+  note: `A thermal or EM sensor from its size and techs: the sensitivity is the size times the sensitivity tech, the cost that times the hardening cost factor to 1 decimal, all of it Uridium. Reproduces every owned passive sensor of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type'],
+})
+
+registerRule({
+  id: SENSOR_RULES.beam,
+  versions: DESIGN_VERSIONS,
+  units: 'km, km/s, HS, BP, minerals',
+  verification: 'confirmed',
+  structure: ['FCT_ShipDesignComponents.Size, Cost, Crew, HTK, ComponentValue, TrackingSpeed, FCRangeModifier, FCSpeedModifier, SpecialFunction, ECCM, ElectronicCTD, Uridium, Corbomite of a beam fire control', 'FCT_TechSystem.AdditionalInfo, AdditionalInfo2 of the fire control distance, speed, single weapon, hardening and ECCM techs'],
+  note: `A beam fire control from its range and tracking multipliers and techs: the range is the range multiplier times the distance rating tech, the tracking the tracking multiplier times the speed rating tech, the size half the product of the multipliers times the single weapon number, to 2 decimals, the crew four a HS. The Uridium is the range over 20,000 times the tracking over 1,000 cut to a whole number times the hardening cost factor and the weapon number, to 1 decimal; the cost is that times the ECCM cost factor. Reproduces range, tracking, size, crew, cost and minerals of every owned fire control of the stock saves, and of the modded save but for the rows listed there (${SAVE_CHECK}).`,
+  assumptions: ['The techs are the ones named by the component\'s tech slots, found by tech type', 'The single weapon tech\'s number is 1 for a full fire control and under 1 for a single weapon one'],
+})
+
+registerRule({
+  id: SENSOR_RULES.limits,
+  versions: DESIGN_VERSIONS,
+  units: 'km, HS',
+  verification: 'estimated',
+  structure: ['design.beamFireControlDesign', 'FCT_ShipDesignComponents.ComponentValue, Size of beam fire controls'],
+  note: `The range of a beam fire control never above ${BEAM_FIRE_CONTROL_MAX_RANGE_KM} km and its size never below ${BEAM_FIRE_CONTROL_MIN_SIZE_HS} HS. No sampled stock-save fire control reaches the range limit (the greatest range observed is 384,000 km, in the 1973 save) and the modded save stores ranges up to 40,000,000 km, so no saved row shows the cap applied and the cap is checked only on a synthetic design; the size floor is seen only on a modded row (${SAVE_CHECK}).`,
+  assumptions: ['The limits hold as stated for a stock design', 'A modded save storing an uncapped range is outside them'],
+})
+
+registerRule({
+  id: SENSOR_RULES.detection,
+  versions: DESIGN_VERSIONS,
+  units: 'km',
+  verification: 'estimated',
+  structure: ['design.activeSensorDesign', 'design.passiveSensorDesign'],
+  note: `The range a sensor detects a target at: the maximum range times the square of the target's signature over the resolution when the signature is below it, times 0.75 to the power of the target's jammer less the sensor's ECCM when the jammer is the stronger; a missile is seen by a signature of its size in MSP over ${MSP_PER_HS}, never below ${MISSILE_SIGNATURE_MIN} HS; a passive sensor sees a signature at the square root of sensitivity times signature times ${PASSIVE_RANGE_MULTIPLIER} km. The saves store no detection result, so these are checked as arithmetic of the stated rules and as the way the stored maximum range is used, not against a saved outcome (${SAVE_CHECK}). The jammer rule is not the missile hit penalty, which takes 0.75 to the whole jammer.`,
+  assumptions: ['The resolution and the signature are in the same unit (HS)', 'No target jammer means a jammer of 0'],
+})
+
+registerRule({
+  id: SENSOR_RULES.sizing,
+  versions: DESIGN_VERSIONS,
+  units: 'HS, km',
+  verification: 'estimated',
+  structure: ['design.activeSensorDesign', 'design.sensorDetection', 'design.beamFireControlDesign'],
+  note: `The smallest legal size of an active sensor or missile fire control, or the smallest legal multipliers of a beam fire control, that reaches a wanted range, by the forward rules; the next smaller legal size falls short of it, or a minimum or a beyond-largest bound is reported. The legal sizes are the design window's lists, which the saves do not store: the AI's own sensors are saved at sizes off them (${SAVE_CHECK}).`,
+  assumptions: ['The legal sizes, resolutions and multipliers are those the design window offers', 'The techs are the levels the race holds'],
 })
