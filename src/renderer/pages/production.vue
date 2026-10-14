@@ -227,6 +227,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import queueForecast from '../mixins/queue-forecast'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
 import { sourcesOf } from '../utilities/component-calc'
@@ -237,9 +238,8 @@ import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
 import { MINERALS, navalAdminChain } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryForecastRun, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
-import { RESPONSIVENESS, RUN_STATUS, TERMINATION, createRun, createRunSlot } from '../utilities/search-run'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -346,14 +346,6 @@ const IDLE_MINIMUM = 0.5
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
-// A new task as soon as the browser has had its turn, which still comes in a hidden window.
-const nextTask = () => new Promise((resolve) => {
-  const channel = new MessageChannel()
-
-  channel.port1.onmessage = () => resolve()
-  channel.port2.postMessage(null)
-})
-
 export default {
   name: 'ProductionPage',
   components: { ChartCanvas, ComponentCalculator, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
@@ -362,6 +354,7 @@ export default {
     deepLink,
     loadState(INPUT_LABELS),
     productionModifiers,
+    queueForecast,
     persistedView({
       shownTypes: { key: 'productionTypes', default: TYPE_IDS, scope: 'race', normalise: (types) => (Array.isArray(types) ? types.filter((type) => TYPE_IDS.includes(type)) : undefined) },
       groupByColony: { key: 'productionGroupByColony', default: false, scope: 'race' },
@@ -379,7 +372,6 @@ export default {
       arrivals: [],
       arrivalCount: 0,
       arrivalForm: { populationId: null, resource: 'Duranium', day: null, quantity: null, source: '' },
-      forecastState: Object.freeze({ key: null, colonies: null, error: null }),
       arrivalResources: ARRIVAL_RESOURCES,
       arrivalHeaders: ARRIVAL_HEADERS,
       linkTo,
@@ -459,21 +451,6 @@ export default {
 
         return { id, name: this.colony(id, '').colonyName, capacities, modifiers: this.populationProductionModifiers[id] }
       }).filter((colony) => !isAvailable(colony.capacities.construction) || colony.capacities.construction.value > 0).sort((a, b) => a.name.localeCompare(b.name))
-    },
-
-    // What the run is given: the plain input of the engine for each colony that has one.
-    forecastRunInput() {
-      return { colonies: Object.entries(this.industryPlans).filter(([, prepared]) => !prepared.gaps).map(([populationId, prepared]) => ({ populationId: Number(populationId), input: prepared.input })) }
-    },
-
-    // The input as text: a forecast is the one of this key, and a different key is a different forecast.
-    forecastKey() {
-      return JSON.stringify(this.forecastRunInput)
-    },
-
-    // The forecast the page shows: the outcome of the run kept, only while it is the forecast of what the page holds now.
-    forecastCurrent() {
-      return this.forecastState.key === this.forecastKey ? this.forecastState : null
     },
 
     facilitiesByColony() {
@@ -951,19 +928,6 @@ export default {
       this.focusId = null
       this.arrivals = []
     },
-
-    // The forecast of the colonies is run again whenever anything it is made from changes (a project, a stock, a capacity, an arrival, the save).
-    forecastKey: {
-      immediate: true,
-      handler() {
-        this.startForecast()
-      },
-    },
-  },
-  beforeDestroy() {
-    if (this.forecastSlot) {
-      this.forecastSlot.invalidate(TERMINATION.CLOSED)
-    }
   },
   methods: {
     applyLink(query) {
@@ -1093,59 +1057,6 @@ export default {
       }
 
       return range.latest === null ? ', or never in another order' : `, up to ${this.duration(range.latest)} in another order`
-    },
-
-    // The slot that keeps the one forecast run whose result the page shows; made on first use, not reactive (it holds live generators).
-    forecastRunSlot() {
-      if (!this.forecastSlot) {
-        this.forecastSlot = createRunSlot()
-      }
-
-      return this.forecastSlot
-    },
-
-    // The search of one run: the colonies' forecasts one after the other.
-    forecastSearch(colonies, pace) {
-      return industryForecastRun(colonies, pace)
-    },
-
-    // Ends the forecast running, if any, and starts the forecast of the colonies as they are now; resolves when that run has ended and its outcome was kept or dropped. A run whose input changed meanwhile is ended and its outcome is never kept.
-    startForecast() {
-      const slot = this.forecastRunSlot()
-      const colonies = Object.entries(this.industryPlans).filter(([, prepared]) => !prepared.gaps).map(([populationId, prepared]) => ({ populationId, prepared }))
-
-      slot.invalidate(TERMINATION.INPUT_CHANGED)
-
-      return this.driveForecast(slot.start(createRun({ kind: 'production-forecast', input: this.forecastRunInput, domain: { signature: 'colony-cycle-forecast', total: colonies.length }, search: (pace) => this.forecastSearch(colonies, pace) })), this.forecastKey)
-    },
-
-    // Runs a forecast a slice at a time with a turn for the browser between slices, then keeps its outcome with the key of the input it was for.
-    async driveForecast(run, key) {
-      const slot = this.forecastRunSlot()
-
-      try {
-        while (run.running) {
-          run.advance(RESPONSIVENESS.sliceMs)
-
-          if (run.running) {
-            await nextTask()
-          }
-
-          if (!slot.isCurrent(run)) {
-            return
-          }
-        }
-
-        const outcome = slot.publish(run)
-
-        if (outcome) {
-          this.forecastState = Object.freeze({ key, colonies: outcome.result && outcome.status === RUN_STATUS.COMPLETE ? outcome.result.forecasts : null, error: outcome.error || (outcome.status === RUN_STATUS.COMPLETE ? null : 'the forecast was stopped before it finished') })
-        }
-      } catch (error) {
-        if (slot.isCurrent(run)) {
-          this.forecastState = Object.freeze({ key, colonies: null, error: error.message })
-        }
-      }
     },
 
     addArrival() {

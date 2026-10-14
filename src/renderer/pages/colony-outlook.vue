@@ -8,6 +8,12 @@
             <v-btn v-for="option in horizonOptions" :key="option" :value="option" small>{{ option }} y</v-btn>
           </v-btn-toggle>
         </v-col>
+        <v-col cols="auto" class="d-flex align-center mr-4">
+          <span class="caption text--secondary mr-2">Workers needed</span>
+          <v-btn-toggle v-model="workerBasis" mandatory dense>
+            <v-btn v-for="option in workerBases" :key="option.value" :value="option.value" small>{{ option.label }}</v-btn>
+          </v-btn-toggle>
+        </v-col>
         <v-col cols="auto" class="mr-4">
           <v-switch v-model="attentionOnly" label="Only colonies that need attention" dense hide-details class="mt-0" />
         </v-col>
@@ -21,7 +27,7 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" class="mt-2" />
 
-        <v-card class="panel" data-summary="Each colony with its population, growth, body capacity, infrastructure and workers, projected forward. Use it to see which will outgrow their bodies or lack workers." elevation="1">
+        <v-card class="panel" data-summary="Each colony with its population, growth, body capacity, infrastructure and workers, projected forward, with the option to count the installations queued and the shipyard upgrades under way in the workers needed. Use it to see which will outgrow their bodies or lack workers." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
               <span>Colonies<provenance-mark rule="colonies.populationProjection" label /></span>
@@ -86,6 +92,8 @@
             </template>
             <template #[`item.futureSort`]="{ item }">
               <span class="caption text-no-wrap" :class="{ 'error--text': item.shortLater }">{{ freeLabel(item.freeLater) }}</span><provenance-mark :result="item.r.workersLater" />
+              <div v-if="item.laterRange" class="caption text-no-wrap" :class="item.mayBeShortLater ? 'error--text' : 'text--secondary'">At worst {{ freeLabel(item.freeLaterWorst) }}<provenance-mark :result="item.r.workersLaterWorst" /></div>
+              <div v-if="item.duringNote" class="caption error--text ml-auto" style="max-width: 18em">{{ item.duringNote }}<provenance-mark :result="item.committedResult" /></div>
             </template>
             <template #[`item.inboundSort`]="{ item }">
               <span v-if="item.inbound" class="caption">{{ inboundLabel(item.inbound) }}</span>
@@ -111,6 +119,7 @@
                           <th />
                           <th class="text-right">Now<provenance-mark :result="item.r.workersNow" /></th>
                           <th class="text-right">In {{ horizon }} y<provenance-mark :result="item.r.workersLater" /></th>
+                          <th v-if="item.laterRange" class="text-right">At worst</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -118,17 +127,45 @@
                           <td>{{ line.label }}</td>
                           <td class="text-right" :class="line.key === 'free' && item.shortNow ? 'error--text' : ''">{{ millions(workerValue(item.workersNow, line.key, item.Population)) }}</td>
                           <td class="text-right" :class="line.key === 'free' && item.shortLater ? 'error--text' : ''">{{ millions(workerValue(item.workersLater, line.key, item.final)) }}</td>
+                          <td v-if="item.laterRange" class="text-right" :class="line.key === 'free' && item.mayBeShortLater ? 'error--text' : ''">{{ millions(workerValue(item.workersLaterWorst, line.key, item.final)) }}</td>
                         </tr>
                       </tbody>
                     </v-simple-table>
                     <div class="caption text--secondary mt-2">{{ workerNote(item) }}</div>
+                    <div v-if="committedView" class="caption text--secondary mt-1">{{ committedNote(item) }}<provenance-mark :result="item.committedResult" /></div>
+                  </v-col>
+                </v-row>
+                <v-row v-if="committedView && item.events.length">
+                  <v-col cols="12">
+                    <div class="chart-title">Queued installations and shipyard upgrades<provenance-mark :result="item.committedResult" /></div>
+                    <v-simple-table dense class="event-table">
+                      <thead>
+                        <tr>
+                          <th>Job</th>
+                          <th>Status</th>
+                          <th>When</th>
+                          <th class="text-right">Workers needed</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="event in item.events" :key="event.id">
+                          <td>
+                            {{ event.name }}
+                            <div v-for="(limit, at) in event.limits" :key="at" class="caption text--secondary">{{ limit }}</div>
+                          </td>
+                          <td>{{ eventStatus(event) }}</td>
+                          <td class="text-no-wrap">{{ eventWhen(event) }}</td>
+                          <td class="text-right text-no-wrap">{{ eventEffect(event) }}</td>
+                        </tr>
+                      </tbody>
+                    </v-simple-table>
                   </v-col>
                 </v-row>
               </td>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards. Population aboard Ark ships is not part of these figures: where the race has Arks it is listed apart, with no growth applied to it. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the
+            Growth is an estimate: 20% a year over the cube root of the population (at most 10%), times the species and governor modifiers, slowing past a third of the body's capacity and stopping at the infrastructure cap. Workers needed are today's installations and shipyards; with the queue counted they also include the installations queued and the shipyard upgrades under way, each from the date the production forecast supports. Then the first free figure counts only completions with a supported date, "At worst" counts every completion that could happen, and a job with no date adds nothing to the first and everything to the second; a paused or stalled job adds nothing certain, a queued job that the forecast may start in an order it did or did not try and a continual upgrade count in "At worst" only. The figures for now and for the horizon are endpoints: a colony short of workers for some months on the way, or only in "At worst" on the way, is not counted in them, but it stays in the attention filter, its row says from which month, and the tile says how many. Population aboard Ark ships is not part of these figures: where the race has Arks it is listed apart, with no growth applied to it. A dash is a figure the save cannot support, and the mark beside it names what is missing. Colonies short of workers today are also on the
             <router-link :to="linkTo.warnings({ check: 'low-efficiency-populations' })">Warnings</router-link> page.
           </div>
         </v-card>
@@ -210,7 +247,7 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapGetters, mapState } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
@@ -223,25 +260,49 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
+import queueForecast from '../mixins/queue-forecast'
 import { activeAppearance } from '../utilities/appearance'
 import { ORBIT_REASONS, arkLayer, loadArks } from '../utilities/arks'
 import { populationName } from '../utilities/aurora'
-import { WORKER_TOLERANCE, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
+import { WORKER_TOLERANCE, attentionResult, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
+import { MINERALS } from '../utilities/minerals'
+import { prepareForecast } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
+import { committedSplitResult, committedWorkforce, workforceNeeds } from '../utilities/workforce-demand'
+
+const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
+
+const EVENT_STATUS = {
+  dated: 'Dated',
+  range: 'Date between',
+  sampled: 'Date from some orders',
+  unknown: 'No date',
+  paused: 'Paused, adds nothing',
+  queued: 'Queued, adds nothing',
+  stalled: 'Stalls, adds nothing certain',
+  later: 'Beyond the forecast',
+  maybe: 'May start, adds nothing certain',
+  approximate: 'Date approximate',
+  short: 'Short of minerals',
+}
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
   inbound: 'cargo on its way',
   populationProductionModifiers: 'production modifiers',
   arks: 'the Ark ships',
+  industry: 'the industrial projects',
+  yardActivities: 'the shipyard activities',
+  installationTypes: 'the installation types',
 }
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 const HORIZONS = [5, 10, 25, 50]
+const WORKER_BASES = [{ value: 'current', label: 'Today\'s installations' }, { value: 'committed', label: 'With the queue' }]
 
 // The commander bonus the growth rate of a colony rests on, Population Growth: left unknown in every colony while the save's lookup row for it is not confirmed (`blockedBonuses`).
 const POPULATION_GROWTH_BONUS = 8
@@ -254,8 +315,10 @@ export default {
     deepLink,
     loadState(INPUT_LABELS),
     productionModifiers,
+    queueForecast,
     persistedView({
       horizon: { key: 'colonyOutlookHorizon', default: 10, valid: oneOf(HORIZONS) },
+      workerBasis: { key: 'colonyOutlookWorkerBasis', default: 'current', valid: oneOf(['current', 'committed']) },
       attentionOnly: { key: 'colonyOutlookAttentionOnly', default: false },
       search: { key: 'colonyOutlookSearch', default: '', scope: 'race' },
       colonyTable: tableView('colonyOutlookTable', { sortBy: ['populationSort'], sortDesc: [true], itemsPerPage: 25, itemsPerPageOptions: COLONY_PAGE_SIZES }),
@@ -265,6 +328,7 @@ export default {
   data() {
     return {
       horizonOptions: HORIZONS,
+      workerBases: WORKER_BASES,
       colonyPageSizes: COLONY_PAGE_SIZES,
       focusId: null,
       linkTo,
@@ -274,6 +338,50 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+    ...mapState(['RaceNPR']),
+
+    // Whether the workers needed count the queue and the shipyard upgrades as well as what stands today.
+    committedView() {
+      return this.workerBasis === 'committed'
+    },
+
+    // The industrial projects of each colony in the order the forecast takes them: { [PopulationID]: [project] }.
+    queueByColony() {
+      const colonies = {}
+
+      this.industry.forEach((project) => (colonies[project.PopulationID] = colonies[project.PopulationID] || []).push(project))
+
+      return colonies
+    },
+
+    // The changes in workers the queue and the yard activities of each colony hold: { [PopulationID]: `workforceNeeds` }. Nothing is read or worked out with the queue not counted.
+    workforceNeedsByColony() {
+      if (!this.committedView) {
+        return {}
+      }
+
+      const yards = {}
+
+      this.yardActivities.forEach((yard) => (yards[yard.PopulationID] = yards[yard.PopulationID] || []).push(yard))
+
+      return Object.fromEntries(this.colonies.map((colony) => [colony.PopulationID, workforceNeeds({ projects: this.queueByColony[colony.PopulationID] || [], installations: this.installationTypes, yards: yards[colony.PopulationID] || [] })]))
+    },
+
+    // The projects of the colonies whose installations change the workers, made ready for the cycle forecast (`queue-forecast`); the other colonies need no forecast.
+    industryPlans() {
+      const plans = {}
+
+      Object.entries(this.workforceNeedsByColony).forEach(([populationId, needs]) => {
+        if (needs.installation.length) {
+          const id = Number(populationId)
+          const capacities = Object.fromEntries(CAPACITY_KINDS.map((kind) => [kind, this.populationCapacityResult(id, kind)]))
+
+          plans[id] = prepareForecast({ projects: this.queueByColony[id], capacities, modifiers: this.populationProductionModifiers[id], arrivals: [], npr: this.RaceNPR })
+        }
+      })
+
+      return plans
+    },
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -312,7 +420,12 @@ export default {
 
     rows() {
       return outlookColonies(this.colonies, this.inbound, this.horizon).map(({ colony, arriving, otherSeries, results }) => {
-        const r = { ...results, construction: this.populationCapacityResult(colony.PopulationID, 'construction') }
+        const committedResult = this.committedView ? this.committedOf(colony, results) : null
+        const committed = valueOrNull(committedResult)
+        const worstLater = committed ? committed.later.worst : null
+        const bestLater = this.committedView ? committedSplitResult(committedResult, 'best') : null
+        const worstResult = this.committedView ? committedSplitResult(committedResult, 'worst') : null
+        const r = { ...results, ...(bestLater ? { workersLater: bestLater, workersLaterWorst: worstResult, committed: committedResult, attention: attentionResult(results.workersNow, bestLater, results.projection) } : {}), construction: this.populationCapacityResult(colony.PopulationID, 'construction') }
         const projection = valueOrNull(r.projection)
         const workersNow = valueOrNull(r.workersNow)
         const workersLater = valueOrNull(r.workersLater)
@@ -346,8 +459,19 @@ export default {
           attention: valueOrNull(r.attention),
           inbound: arriving && (arriving.Colonists || arriving.Infrastructure || arriving.Installations) ? arriving : null,
           ark: this.ark.byPopulation[colony.PopulationID] || null,
+          committedResult,
+          committed,
+          events: committed ? committed.events : [],
+          workersLaterWorst: worstLater,
+          freeLaterWorst: worstLater ? worstLater.free : null,
+          laterRange: worstLater !== null && freeLater !== null && Math.abs(worstLater.free - freeLater) > 1e-9,
+          mayBeShortLater: worstLater !== null && freeLater !== null && freeLater >= -WORKER_TOLERANCE && worstLater.free < -WORKER_TOLERANCE,
+          shortInBetween: committed !== null && committed.firstShort.best !== null && freeNow !== null && freeLater !== null && freeNow >= -WORKER_TOLERANCE && freeLater >= -WORKER_TOLERANCE,
+          recoveryAtBestOnly: committed !== null && committed.firstShort.best !== null && committed.recovery.worstAfterBest !== committed.recovery.best,
+          mayBeShortDuring: committed !== null && committed.firstShort.best === null && committed.firstShort.worst !== null,
         }
 
+        row.duringNote = committed ? this.duringNote(row) : ''
         row.infrastructureStatus = this.infrastructureStatus(row)
 
         return {
@@ -432,7 +556,7 @@ export default {
 
       const search = (this.search || '').toLowerCase()
 
-      return this.rows.filter((row) => (!this.attentionOnly || row.attention === true) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
+      return this.rows.filter((row) => (!this.attentionOnly || row.attention === true || row.shortInBetween === true || row.mayBeShortDuring === true) && (!search || `${row.name} ${row.place}`.toLowerCase().includes(search)))
     },
 
     tiles() {
@@ -455,6 +579,11 @@ export default {
       const shortNow = countOf('workersNow', isShort)
       const shortLater = countOf('workersLater', isShort)
       const free = totalResult({ results: results('workersNow'), pick: (workers) => Math.max(0, workers.free), partial: true, units: 'M workers' })
+      // Colonies short of workers on the way to the horizon (committed view): short for some months and enough again by the horizon on the dates the forecast supports (`recovered`), or short only if every completion that could happen does (`possible`): the figures above count the endpoints only, and neither of these is counted as short there.
+      const recovered = this.committedView ? rows.filter((row) => row.shortInBetween).length : 0
+      const atBest = this.committedView ? rows.filter((row) => row.shortInBetween && row.mayBeShortLater).length : 0
+      const possible = this.committedView ? rows.filter((row) => row.mayBeShortDuring).length : 0
+      const during = this.committedView ? countOf('committed', (value) => value.firstShort.worst !== null) : null
       const capped = countOf('projection', (projection) => projection.infrastructureAt !== null)
       const crowded = countOf('fill', (fill) => fill > 1 / 3)
       const needed = sumOf('needed', 'infrastructure')
@@ -488,11 +617,11 @@ export default {
           label: 'Population',
           note: later.unknown ? `${later.unknown} of ${total} colonies have no projection` : `In ${horizon} years, about ${percent(annual, 2)} a year`,
         }),
-        tile(shortNowValue === null && shortLaterValue === null ? '—' : `${shortNowValue === null ? '—' : shortNowValue} now, ${shortLaterValue === null ? '—' : shortLaterValue} in ${horizon} y`, [shortNow.result, shortLater.result], {
+        tile(shortNowValue === null && shortLaterValue === null ? '—' : `${shortNowValue === null ? '—' : shortNowValue} now, ${shortLaterValue === null ? '—' : shortLaterValue} in ${horizon} y`, [shortNow.result, shortLater.result, ...(during && (recovered || possible) ? [during.result] : [])], {
           label: 'Colonies short of workers',
-          note: `${freeValue === null ? 'Free workers elsewhere unavailable' : `${this.millions(freeValue)} M free workers elsewhere`}${leftOut(unknownWorkers, total)}`,
-          icon: shortNowValue > 0 ? 'mdi-account-alert' : shortNowValue === 0 && !unknownWorkers ? 'mdi-check-circle' : null,
-          iconColor: shortNowValue > 0 ? 'warning' : 'success',
+          note: `${recovered ? `${recovered} short on the way, back by ${horizon} y${atBest ? ` (${atBest} of them only at best)` : ''} · ` : ''}${possible ? `${possible} more may be short at worst · ` : ''}${freeValue === null ? 'Free workers elsewhere unavailable' : `${this.millions(freeValue)} M free workers elsewhere`}${leftOut(unknownWorkers, total)}${this.committedView ? ' · queue and yard upgrades counted' : ''}`,
+          icon: shortNowValue > 0 || shortLaterValue > 0 || recovered > 0 || possible > 0 ? 'mdi-account-alert' : shortNowValue === 0 && !unknownWorkers ? 'mdi-check-circle' : null,
+          iconColor: shortNowValue > 0 || shortLaterValue > 0 || recovered > 0 || possible > 0 ? 'warning' : 'success',
         }),
         tile(cappedValue === null ? '—' : `${cappedValue}`, [capped.result, crowded.result], {
           label: `Growth capped within ${horizon} y`,
@@ -681,12 +810,81 @@ export default {
       } else if (row.freeLater === null) {
         return `${row.shortNow ? `Short of ${this.people(-row.freeNow)} now. ` : ''}The worker split in ${this.horizon} years is unavailable.`
       } else if (row.shortLater) {
-        return `Short of ${this.people(-row.freeLater)} in ${this.horizon} years at today's installations: hold off on new ones, or bring colonists.`
+        return `Short of ${this.people(-row.freeLater)} in ${this.horizon} years at ${this.committedView ? 'the installations counted' : 'today\'s installations'}: hold off on new ones, or bring colonists.`
       } else if (row.shortNow) {
         return `Growth closes the gap within ${this.horizon} years.`
       }
 
       return `Room for about ${this.count(Math.floor(Math.max(0, row.freeLater) / 0.05))} more factories, mines or similar (50,000 workers each) by then.`
+    },
+
+    // What the queue and the shipyard upgrades add to the workers a colony needs: its result of 'colonies.committedWorkers', unavailable while the forecast it rests on is running or lacks a figure.
+    committedOf(colony, results) {
+      const id = colony.PopulationID
+      const needs = this.workforceNeedsByColony[id] || { missing: [], installation: [], yards: [] }
+      const run = this.forecastCurrent
+      let forecast = null
+
+      if (needs.installation.length) {
+        const plan = this.industryPlans[id]
+
+        forecast = !plan ? { gaps: ['the colony\'s industrial projects'] } : plan.gaps ? plan : run ? (run.error ? { gaps: [`the forecast of the colony failed (${run.error})`] } : (run.colonies && run.colonies[id]) || null) : null
+      }
+
+      return committedWorkforce({ colony, workersNow: results.workersNow, cost: results.cost, projection: results.projection, needs, forecast, modifiers: this.populationProductionModifiers[id], npr: this.RaceNPR })
+    },
+    committedNote(row) {
+      if (!row.committed) {
+        return `What the queue and the shipyard upgrades add is unavailable, ${this.missingText(row.committedResult)}.`
+      } else if (!row.events.length) {
+        return 'No queued installation or shipyard upgrade changes the workers needed.'
+      }
+
+      const during = row.duringNote ? ` ${row.duringNote}.` : ''
+
+      if (row.laterRange) {
+        return `The first figure counts only the completions the forecast supports; "At worst" counts every completion that could happen by then${row.mayBeShortLater ? ', and the colony is not certain to be short of workers but may be' : ''}.${during}`
+      }
+
+      return `Every completion the forecast supports is counted at its date.${during}`
+    },
+    duringNote(row) {
+      const { committed } = row
+      const month = (index) => `month ${index}`
+      const back = (index) => (index === null ? '' : `, back by ${month(index)}`)
+
+      if (row.shortInBetween && row.mayBeShortLater) {
+        const { best, worstAfterBest: worst } = committed.recovery
+        const start = `Short of workers from ${month(committed.firstShort.best)}`
+
+        return worst === null ? `${start}, back by ${month(best)} at best; still short at worst at ${this.horizon} y` : `${start}, back by ${month(best)}${worst === best ? '' : ` at best, ${month(worst)} at worst`}; short again at worst by ${this.horizon} y`
+      } else if (row.shortInBetween && row.recoveryAtBestOnly) {
+        return `Short of workers from ${month(committed.firstShort.best)}, back by ${month(committed.recovery.best)} at best, ${month(committed.recovery.worstAfterBest)} at worst`
+      } else if (row.shortInBetween) {
+        return `Short of workers from ${month(committed.firstShort.best)}${back(committed.recovery.best)}`
+      } else if (row.mayBeShortDuring && !row.mayBeShortLater) {
+        return `May be short of workers at worst from ${month(committed.firstShort.worst)}${back(committed.recovery.worst)}`
+      }
+
+      return ''
+    },
+    eventStatus(event) {
+      return EVENT_STATUS[event.status] || event.status
+    },
+    eventWhen(event) {
+      if (event.earliest === null || event.latest === null) {
+        return '—'
+      }
+
+      const earliest = Math.round(event.earliest)
+      const latest = Math.round(event.latest)
+
+      return `${event.approximate ? 'About day' : 'Day'} ${earliest === latest ? earliest : `${earliest} to ${latest}`}`
+    },
+    eventEffect(event) {
+      const workers = event.delta * event.units
+
+      return workers === 0 || !Number.isFinite(workers) ? '—' : `${workers > 0 ? '+' : ''}${this.millions(workers)} M`
     },
 
     projectionChart(row) {
@@ -799,6 +997,54 @@ export default {
         return await loadArks(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: () => ({ ships: [], cargo: [], colonies: [] }),
+    },
+    // The industrial projects with what each is made of, as the queue forecast takes them; read only with the queue counted.
+    industry: {
+      get: tracked('industry', async function () {
+        const committed = this.committedView
+
+        if (!committed || !this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        const needs = MINERALS.map((mineral) => `FCT_IndustrialProjects.${mineral.name}`).join(', ')
+        const stocks = MINERALS.map((mineral) => `FCT_Population.${mineral.name} as Stock${mineral.name}`).join(', ')
+
+        const [rows] = await this.database.query(`select FCT_IndustrialProjects.ProjectID as ID, FCT_IndustrialProjects.ProductionType, FCT_IndustrialProjects.ProductionID, FCT_IndustrialProjects.PopulationID, FCT_IndustrialProjects.Description as Name, FCT_IndustrialProjects.Percentage, FCT_IndustrialProjects.Amount, FCT_IndustrialProjects.PartialCompletion, FCT_IndustrialProjects.ProdPerUnit, FCT_IndustrialProjects.Queue, FCT_IndustrialProjects.Pause as Paused, FCT_IndustrialProjects.FuelRequired, ${needs}, ${stocks}, FCT_Population.FuelStockpile as StockFuel, DIM_PlanetaryInstallation.ConversionFrom as ConversionFrom, case when DIM_PlanetaryInstallation.ConversionFrom is null then null else (select case when sum(FCT_PopulationInstallations.Amount is null) > 0 then null else coalesce(sum(FCT_PopulationInstallations.Amount), 0) end from FCT_PopulationInstallations where FCT_PopulationInstallations.PopID = FCT_IndustrialProjects.PopulationID and FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.ConversionFrom) end as ConversionSource from FCT_IndustrialProjects inner join FCT_Population on FCT_Population.PopulationID = FCT_IndustrialProjects.PopulationID left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_IndustrialProjects.ProductionID and FCT_IndustrialProjects.ProductionType = 0 and DIM_PlanetaryInstallation.ConversionTo > 0 where FCT_IndustrialProjects.GameID = ${this.GameID} and FCT_IndustrialProjects.RaceID = ${this.RaceID}`)
+
+        return rows
+      }),
+      default: [],
+    },
+    // The shipyard activities under way (an upgrade or a retool) with the stock of the two minerals an upgrade takes; read only with the queue counted.
+    yardActivities: {
+      get: tracked('yardActivities', async function () {
+        const committed = this.committedView
+
+        if (!committed || !this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        const [rows] = await this.database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.PopulationID, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.TaskType as UpgradeTaskType, FCT_Shipyard.RequiredBP - FCT_Shipyard.CompletedBP as RemainingProduction, FCT_Shipyard.PauseActivity as Paused, FCT_Shipyard.CapacityTarget, FCT_Population.Duranium as StockDuranium, FCT_Population.Neutronium as StockNeutronium from FCT_Shipyard inner join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID where FCT_Shipyard.TaskType <> 0 and FCT_Shipyard.GameID = ${this.GameID} and FCT_Shipyard.RaceID = ${this.RaceID}`)
+
+        return rows
+      }),
+      default: [],
+    },
+    // The workers one of each installation type needs: { [PlanetaryInstallationID]: { Workers } }; read only with the queue counted.
+    installationTypes: {
+      get: tracked('installationTypes', async function () {
+        const committed = this.committedView
+
+        if (!committed || !this.database) {
+          return {}
+        }
+
+        const [rows] = await this.database.query('select DIM_PlanetaryInstallation.PlanetaryInstallationID, DIM_PlanetaryInstallation.Workers from DIM_PlanetaryInstallation')
+
+        return Object.fromEntries(rows.map((row) => [row.PlanetaryInstallationID, { Workers: row.Workers }]))
+      }),
+      default: {},
     },
   },
 }

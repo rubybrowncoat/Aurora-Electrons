@@ -495,6 +495,26 @@ const onceReplacing = (from, to) => (text) => {
   return parts.join(to)
 }
 
+// The page loaded from a temp copy of the renderer's utilities and mixins in which `from`, which must occur once in the forecast driver (`mixins/queue-forecast.js`), is replaced by `to`: a mutant of the driver the Production page and Colony Outlook share, which must fail the page case named with it.
+const pageWithMutatedMixin = async (from, to) => {
+  const source = path.join(root, 'src', 'renderer')
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-driver-mutant-'))
+
+  try {
+    for (const folder of ['utilities', 'mixins']) {
+      fs.cpSync(path.join(source, folder), path.join(directory, folder), { recursive: true })
+    }
+
+    fs.mkdirSync(path.join(directory, 'pages'))
+    fs.copyFileSync(path.join(source, 'pages', 'production.vue'), path.join(directory, 'pages', 'production.vue'))
+    fs.writeFileSync(path.join(directory, 'mixins', 'queue-forecast.js'), onceReplacing(from, to)(fs.readFileSync(path.join(source, 'mixins', 'queue-forecast.js'), 'utf8')))
+
+    return await loadPage('pages/production', { stubs: STUBS, directory })
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 const enginePoint = (ID, Percentage, Amount, ProdPerUnit, needs = {}, extra = {}) => ({ ID, Percentage, Amount, PartialCompletion: 0, ProdPerUnit, Queue: 0, Paused: 0, category: 'construction', needs, source: null, ...extra })
 
 // ---- the ledger oracle: the game's cycle on exact fractions of BigInts from decimal texts, sharing nothing with the engine's decimal type ----
@@ -1295,7 +1315,9 @@ const pageCases = async (pageOptions) => {
 
   holds('forecastingPage', 'PAGE a colony the forecast can run shows its jobs as Forecasting until the run has ended (no date, a finish that is missing the forecast and not an idle one, no shortage, no caution) and its forecast after, and a colony the forecast cannot run does not wait for the run; an input that changes after the run ended hides what it kept until the run of the new input has ended', waitingJob.status.id === 'forecasting' && waitingJob.days === null && !waitingJob.finishIdle && waitingJob.shortage === null && waitingJob.cautions.length === 0 && waitingJob.finishResult.inputs.missing.some((text) => /forecast/.test(text)) && gappedWaiting.status.id === 'short' && readyJob.status.id === 'short' && ready.forecastKey !== forecastKeyBefore && changedJob.status.id === 'forecasting')
 
-  // A run slow enough to be replaced while it runs: it spins past the slice before its first step, then does the work of the page's own search.
+  const driver = pageOptions.mixins.find((mixin) => mixin.methods && mixin.methods.forecastSearch)
+
+  // A run slow enough to be replaced while it runs: it spins past the slice before its first step, then does the work of the forecast driver's own search.
   const slowSearch = function* (colonies, pace) {
     const start = performance.now()
 
@@ -1307,7 +1329,7 @@ const pageCases = async (pageOptions) => {
 
     yield { progress: 0, counts, snapshot: () => ({ counts, forecasts: {} }) }
 
-    return yield * pageOptions.methods.forecastSearch.call(this, colonies, pace)
+    return yield * driver.methods.forecastSearch.call(this, colonies, pace)
   }
 
   const slow = page(dryRows, [], { forecastSearch: slowSearch })
@@ -1859,9 +1881,9 @@ const main = async () => {
     { name: 'a page that leaves the start range out of the note of a queued project', from: 'planned && planned.startRange ? this.startRangeText(planned.startRange) : \'\'', to: '\'\'', fails: 'startPage' },
     { name: 'a page that gives a queued project behind an unresolved one a start date', from: 'planned && planned.forecast.outcome === \'unresolved\' ?', to: 'false ?', fails: 'unresolvedPage' },
     { name: 'a page that gives a colony still being forecast no Forecasting status', from: 'const forecasting = pending.has(PopulationID)', to: 'const forecasting = false', fails: 'forecastingPage' },
-    { name: 'a page that shows the forecast of an input the run did not have', from: 'return this.forecastState.key === this.forecastKey ? this.forecastState : null', to: 'return this.forecastState', fails: 'forecastingPage' },
-    { name: 'a page that keeps the outcome of a run that was replaced', from: '          if (!slot.isCurrent(run)) {\n            return\n          }\n        }\n\n        const outcome = slot.publish(run)', to: '        }\n\n        const outcome = run.outcome()', fails: 'staleRun' },
-    { name: 'a page that does not state why a run failed', from: 'error: outcome.error || (outcome.status', to: 'error: (outcome.status', fails: 'failedRun' },
+    { name: 'a forecast driver that shows the forecast of an input the run did not have', from: 'return this.forecastState.key === this.forecastKey ? this.forecastState : null', to: 'return this.forecastState', fails: 'forecastingPage', mixin: true },
+    { name: 'a forecast driver that keeps the outcome of a run that was replaced', from: '          if (!slot.isCurrent(run)) {\n            return\n          }\n        }\n\n        const outcome = slot.publish(run)', to: '        }\n\n        const outcome = run.outcome()', fails: 'staleRun', mixin: true },
+    { name: 'a forecast driver that does not state why a run failed', from: 'error: outcome.error || (outcome.status', to: 'error: (outcome.status', fails: 'failedRun', mixin: true },
     { name: 'a page that accepts a quantity the decimal type cannot hold', from: '&& Number(quantity) > 0 && fitsDouble(Number(quantity))', to: '&& Number(quantity) > 0', fails: 'arrivalRange' },
     { name: 'a page that gives no message for a quantity the decimal type cannot hold', from: '!fitsDouble(Number(quantity)) ? \'That quantity', to: 'false ? \'That quantity', fails: 'arrivalRange' },
     { name: 'a page that cautions about a remainder for every project', from: 'if (fineRemainder) {', to: 'if (true) {', fails: 'remainderCautionPage' },
@@ -1874,7 +1896,7 @@ const main = async () => {
   pageResults.forEach(([statement, held]) => check(statement, held))
 
   for (const mutant of PAGE_MUTANTS) {
-    const mutated = await pageCases(await loadPage('pages/production', { stubs: STUBS, mutate: onceReplacing(mutant.from, mutant.to) }))
+    const mutated = await pageCases(mutant.mixin ? await pageWithMutatedMixin(mutant.from, mutant.to) : await loadPage('pages/production', { stubs: STUBS, mutate: onceReplacing(mutant.from, mutant.to) }))
     const named = pageResults.find(([, , key]) => key === mutant.fails)
     const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)
 

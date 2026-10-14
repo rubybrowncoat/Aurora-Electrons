@@ -193,12 +193,11 @@ export const infrastructureCostResult = (colony, needed) => {
 // The colony cost the infrastructure requirement implies (ReqInf = population x CC x 100 / density). From Aurora 2.6 a low-gravity body needs twice the infrastructure at the same colony cost (docs `planetary-installations`), and ReqInf holds that factor; a pre-2.6 save has separate LG infrastructure instead.
 export const colonyCostResult = (colony) => derive({ rule: 'colonies.colonyCost', source: withPopulation(colony), required: ['ReqInf', ...(colony.ReqInf > 0 ? ['Population', 'PopulationDensityModifier', 'LowGravity', 'LegacyLowGravity'] : [])], compute: () => (colony.ReqInf > 0 ? (colony.ReqInf * colony.PopulationDensityModifier) / (colony.Population * 100 * (colony.LowGravity && !colony.LegacyLowGravity ? 2 : 1)) : 0) })
 
-// Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%; agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work. Required: installations and shipyards. Reproduces the save's stored Efficiency on the sample.
-export const workerSplit = (colony, population, cost) => {
+// Workers in millions. Services take (population / 1000 M)^0.25 of the people, at most 70%; agriculture and environment take 5%, plus 5% per point of colony cost; the rest can work. Required: installations and shipyards, today's unless `required` gives the figure of a later day. Reproduces the save's stored Efficiency on the sample.
+export const workerSplit = (colony, population, cost, required = colony.InstallationWorkers + colony.YardWorkers) => {
   const service = population > 0 ? Math.min(0.7, (population / 1000) ** 0.25) : 0
   const agriculture = 0.05 + cost * 0.05
   const available = Math.max(0, 1 - service - agriculture) * population
-  const required = colony.InstallationWorkers + colony.YardWorkers
 
   return {
     population,
