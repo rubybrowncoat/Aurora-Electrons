@@ -115,6 +115,7 @@ const PAGE_HELP = Object.freeze({
   '/technologies': { terms: ['research-project', 'research-points', 'component-design', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-gameplay', ...RESOURCES] },
   '/designed-tech': { terms: ['component-design', 'hull-space', 'build-points', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-survey-ship', ...RESOURCES] },
   '/propulsion': { terms: ['engine-power', 'fuel-litres', 'speed', 'range-endurance', 'hull-space', 'build-points', 'maintenance-supply', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-survey-ship', ...RESOURCES] },
+  '/missile-designer': { terms: ['speed', 'range-endurance', 'engine-power', 'fuel-litres', 'estimated-output'], links: RESOURCES },
   '/shipyards': { terms: ['refit', 'retool', 'slipway', 'build-points', 'hull-space', 'estimated-output'], links: ['tutorial-survey-ship', ...RESOURCES] },
 })
 
