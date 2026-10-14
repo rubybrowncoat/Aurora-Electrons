@@ -132,6 +132,7 @@
                   <td>{{ credit.modifications }}</td>
                   <td class="text-no-wrap">
                     <button v-for="item in credit.notices" :key="item.title" type="button" class="credit-notice" :data-notice="item.title" @click="openNotice(credit, item)">{{ item.title }}</button>
+                    <div v-if="credit.compatibility" class="caption text-wrap mt-2" data-credit-compatibility><span class="font-weight-medium">{{ credit.compatibility.title }}: {{ credit.compatibility.status }}.</span> {{ credit.compatibility.text }}</div>
                   </td>
                 </tr>
               </tbody>

@@ -19,9 +19,14 @@
       <li v-for="item in reference.modifications" :key="item">{{ item }}</li>
     </ul>
 
+    <template v-if="reference.compatibility">
+      <div class="reference__label caption text--secondary">{{ reference.compatibility.title }}</div>
+      <div class="body-2" data-preset-compatibility><span class="font-weight-medium">{{ reference.compatibility.status }}.</span> {{ reference.compatibility.text }}</div>
+    </template>
+
     <div class="reference__label caption text--secondary">Provenance</div>
     <div class="caption">
-      Inspired by the <external-link :href="source.repository">{{ source.name }}</external-link> by {{ source.author }}, revision <code>{{ source.revision.slice(0, 7) }}</code> of {{ source.revisionDate }}, under the {{ source.license }}. {{ source.inspected }} {{ source.copied }} {{ source.note }} The notice is in About, under Credits.
+      Inspired by the <external-link :href="source.repository">{{ source.name }}</external-link> by {{ source.author }}, revision <code>{{ source.revision.slice(0, 7) }}</code> of {{ source.revisionDate }}. License: {{ source.license }}. {{ source.inspected }} {{ source.copied }} {{ source.note }} The notice is in About, under Credits.
     </div>
   </section>
 </template>

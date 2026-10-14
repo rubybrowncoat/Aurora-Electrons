@@ -3,7 +3,7 @@ import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appe
 import { ACCENT_MODES, DEFAULT_ACCENT_MODE } from './appearance-contrast'
 import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 
-// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
+// The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris, T2D and Cristo are adaptations of a community reference (see `reference`), listed after them.
 //
 // A preset holds:
 // - `id`, `name`, `version` (raise it when a preset's colours change), `mode` ('light' or 'dark': what Vuetify's own components and the scrollbars take as the base).
@@ -72,6 +72,19 @@ const T2D_SOURCE = {
   inspected: "The colour numbers in the theme's public source (the legacy navy and pale yellow it replaces, the black and white it puts in their place, the grey it draws map lines in) and the look of its published screenshot (black controls with white outlines). Read in October 2026, at the revision above, and typed into this preset as values.",
   copied: 'No source code, image, icon or font of the theme is copied or bundled; colour values are the only thing taken. The theme\'s custom icon set, made by another author, and its font choice are references only: the preset uses the app\'s own icons and typeface.',
   note: 'The theme lists corner cases that "don\'t quite look good yet" and its published screenshot keeps the default light window chrome on some dialogs, green text on black in a field and overlapping map labels; none of these is reproduced. The source does not say which Aurora version it was drawn for; its last commit is dated 2021-05-12. Nothing here states what any release of the game uses today.',
+}
+
+// The community theme the Cristo inspired preset takes its colours from, at the revision that was inspected: a modification of the Solaris theme (above) that takes two colours from a third theme, DeepBlue (Jorgen_CAB), and adds three of its own. The repository states no license of its own; the notice it carries is the Solaris theme's MIT License, which covers the Solaris part and says nothing about the colours the Cristo author or the DeepBlue author added, so no grant is claimed for those. Its icons, event-colour file, compiled patch, screenshot and font name are not used.
+const CRISTO_SOURCE = {
+  name: 'Cristotheme',
+  author: 'CountCristo, after the Solaris theme of Simas Toleikis and the DeepBlue theme of Jorgen_CAB',
+  repository: 'https://github.com/CountCristo/Cristotheme',
+  revision: '4b30899b984c1dd1bb75d2bd7c17a994a1227bdb',
+  revisionDate: '2026-06-15',
+  license: 'No license of its own; it keeps the Solaris theme\'s MIT License, and no grant covers the colours added by Cristotheme or DeepBlue',
+  inspected: "The colour numbers in the theme's public source (the window, text, map text, planet, orbit and control colours and the border it derives), as of the revision above; the file itself was last changed in August 2022. Read in October 2026 and typed into this preset as values. Nothing was run, and the compiled patch was not opened.",
+  copied: "No source code, image, icon, font, event-colour file or compiled file of the theme is copied or bundled; colour values are the only thing taken. Its icons (the Solaris theme's, by other authors) and its font choice are not used: the preset keeps the app's own icons and typeface.",
+  note: 'The repository states no license for the colours it adds, and the owner of this app accepted that no explicit grant covers them. Two of its colours (the window and the map text) first appear in DeepBlue and three (the text, the planet and the orbit) are its own. It has no screenshot of its own, only a video thumbnail that agrees with the window, planet and control colours; the compiled patch in the repository draws a white orbit where the source says pale green, so the preset takes neither. It does not say which Aurora version it was drawn for. Nothing here states what any release of the game uses today.',
 }
 
 const CLASSIC = {
@@ -193,6 +206,56 @@ const T2D = {
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
 
+const CRISTO = {
+  id: 'cristo',
+  name: 'Cristo inspired',
+  version: 1,
+  mode: 'dark',
+  reference: {
+    title: 'Deep navy with cream text',
+    summary: 'A deep navy page under cream text and sand-coloured sky labels, with the dark blue-grey controls of the Solaris theme, after the community Cristo theme, adapted with full semantic surfaces and state colours.',
+    source: CRISTO_SOURCE,
+    compatibility: {
+      title: 'Event-colour compatibility',
+      status: 'Not included',
+      text: 'The community theme comes with a separate file of alert and text colours for event types. It is not part of this preset and is not read or shipped: the Log shows every event in the colours the save holds for the race, whichever preset is chosen.',
+    },
+    roles: [
+      { role: 'Window and map background', value: '#0D1729', maps: 'The page, the app bar and the system view sky' },
+      { role: 'Text', value: '#F0F0C8', maps: 'Body text and the chart tooltip text' },
+      { role: 'Map text', value: '#EED8A4', maps: 'The system view labels' },
+      { role: 'Button fill', value: '#171A27', maps: 'Cards, tables, chart canvases, the rail and the footer' },
+      { role: 'Active button border (derived)', value: '#41486D', maps: 'The outline of cards, tables and the rail, and the chart axis' },
+      { role: 'Planet fill', value: '#005700', maps: 'Not drawn as it is: it is 2.02:1 on the page. The substitute is #008A00, the same hue lightened until it is 3:1 or more on every surface, and it is the surveyed colour of the Galaxy Map, the nearest role to a planet; the app draws planets in their own colours' },
+      { role: 'Orbit line', value: 'Not taken', maps: 'The source says pale green (#BEFFBE) and the compiled patch white (#FFFFFF), so the orbit lines are a pale blue-grey of the preset\'s own' },
+    ],
+    modifications: [
+      'Cards, tables and chart canvases take the reference button fill, which is almost the page colour, so the derived border colour outlines them: a card is told from the page by its outline as well as its text.',
+      'Secondary text and the status tone are of the reference text hue, kept 4.5:1 or more on every surface; the reference has no such roles, and neither it nor its disabled text, which is derived and was not observed, is used.',
+      'Selection is a periwinkle blue, kept clear of the warning levels: Action is red, Attention orange and Info cyan; the reference has no selection or state colours.',
+      'The planet green is replaced by a lighter one for contrast, and the reference orbit colour is not taken because its two sources disagree.',
+      'The reference toolbar group tints, its Space Master and Auto turns colours and its font are not mapped: the app has no equivalent role, and the typeface is the app\'s own, not Tahoma.',
+      'The categorical chart slots, the section accents and the planner tones are the Dark preset\'s; the reference has no equivalent.',
+    ],
+  },
+  surfaces: { background: '#0d1729', chrome: '#171a27', card: '#171a27', border: '#41486d', track: 'rgba(240, 240, 200, .14)', trackSoft: 'rgba(240, 240, 200, .10)', rule: 'rgba(240, 240, 200, .14)' },
+  inks: { body: '#f0f0c8', muted: '#bdbd9f', text: '#f0f0c8', textMuted: '#bdbd9f', onTooltip: '#f0f0c8', onFill: '#0d1729', onColor: '#0d1729', onSnackbar: '#0d1729' },
+  focus: { primary: '#8fb0ff', hover: 'rgba(143, 176, 255, .10)', secondary: '#2b3558', accent: '#FF4081' },
+  rows: { selected: 'rgba(143, 176, 255, .14)', differs: 'rgba(143, 176, 255, .14)', differsMark: '#8fb0ff', differsDot: 'rgba(143, 176, 255, .55)', stripe: 'rgba(143, 176, 255, .14)', stripeSoft: 'rgba(143, 176, 255, .06)' },
+  severity: { action: '#ff6b6b', attention: '#ffa94d', info: '#4dd0e1', success: '#81c784' },
+  survey: { done: '#008a00' },
+  status: { inactive: '#a0a4b8' },
+  plan: { mining: '#ff8f00', terraformFree: '#c759da', terraformPartial: '#7482cf', terraformCheaper: '#6d8b9a', cheap: '#009688', moderate: '#039be5', costly: '#f57c00', severe: '#ea5527', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#f44336' },
+  charts: {
+    axis: '#41486d',
+    tooltip: 'rgba(37, 46, 78, 0.97)',
+    categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
+  },
+  sections: { neutral: '#a3acc8', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#009c00', '#9085e9', '#e66767', '#2ec4d6'] },
+  space: { background: '#0d1729', label: '#eed8a4', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#b1b9cc', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
+  washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
+}
+
 const DARK = {
   id: 'dark',
   name: 'Dark',
@@ -216,7 +279,7 @@ const DARK = {
 }
 
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
@@ -226,7 +289,7 @@ const BASELINE_BY_MODE = { light: LIGHT.id, dark: DARK.id }
 // The policy each baseline id stands for: what an id of a baseline under `appearance` (the form before the policy, which an older preferences file still holds) means.
 export const BASELINE_POLICIES = Object.fromEntries(Object.entries(BASELINE_BY_MODE).map(([mode, id]) => [id, mode]))
 
-// The settings key of the named appearance that replaces the theme: the id of Aurora Classic, Solaris inspired, T2D inspired or the kept imported appearance (`custom`), or `theme` (NO_OVERRIDE) when none does and the baseline pair under the policy is drawn; a settings file that holds none reads the same. App-wide, written only by `applyPreset`, `applyPolicy` and `removeCustom`. Settings from before the policy hold the id of a baseline there (`light` or `dark`), and settings from before presets only a boolean `darkMode`; `adoptAppearance` turns either into the policy once, and nothing writes `darkMode` any more.
+// The settings key of the named appearance that replaces the theme: the id of Aurora Classic, Solaris inspired, T2D inspired, Cristo inspired or the kept imported appearance (`custom`), or `theme` (NO_OVERRIDE) when none does and the baseline pair under the policy is drawn; a settings file that holds none reads the same. App-wide, written only by `applyPreset`, `applyPolicy` and `removeCustom`. Settings from before the policy hold the id of a baseline there (`light` or `dark`), and settings from before presets only a boolean `darkMode`; `adoptAppearance` turns either into the policy once, and nothing writes `darkMode` any more.
 export const APPEARANCE_KEY = 'appearance'
 
 // What APPEARANCE_KEY holds when no named appearance replaces the theme. It is written, not left out, so that a preferences file can say so and an import ends the replacement it finds.

@@ -1,4 +1,4 @@
-// The third-party material the app credits, one entry per source: what it covers, who made it, where it comes from, its terms, what was changed and the notices those terms ask for, and how it is used (`reuse`: `Bundled files` are shipped as they are, `Visual inspiration` is not copied at all, only learned from). The About page lists them and shows each notice. The notice texts are imported here, so they are bundled into the renderer and every packaged build carries them. Code libraries keep their licenses in their own packages; About lists them under Built with. An asset whose reuse terms aren't established is not shipped and has no entry.
+// The third-party material the app credits, one entry per source: what it covers, who made it, where it comes from, its terms, what was changed and the notices those terms ask for, and how it is used (`reuse`: `Bundled files` are shipped as they are, `Visual inspiration` is not copied at all, only learned from). The About page lists them and shows each notice. The notice texts are imported here, so they are bundled into the renderer and every packaged build carries them. Code libraries keep their licenses in their own packages; About lists them under Built with. An asset whose reuse terms aren't established is not shipped and has no entry. An entry may also carry `compatibility`, what the source offers beside its look and the app leaves out (`title`, `status`, `text`), which About shows apart from the colours.
 
 import mdiLicense from '@mdi/font/LICENSE?raw'
 import { version as mdiVersion } from '@mdi/font/package.json'
@@ -10,9 +10,10 @@ import t2dLicense from './notices/t2d-theme-license.txt?raw'
 
 const APACHE = { title: 'Apache License 2.0', text: apacheLicense }
 
-// The community themes the colour presets take their reference colours from (the Aurora Classic and Solaris inspired presets from the first, the T2D inspired preset from the second); the provenance is each preset's own metadata, so an entry and its preset cannot differ.
+// The community themes the colour presets take their reference colours from (the Aurora Classic and Solaris inspired presets from the first, the T2D inspired preset from the second, the Cristo inspired preset from the third); the provenance is each preset's own metadata, so an entry and its preset cannot differ.
 const { source: SOLARIS } = resolveAppearance('solaris').reference
 const { source: T2D } = resolveAppearance('t2d').reference
+const { source: CRISTO, compatibility: CRISTO_COMPATIBILITY } = resolveAppearance('cristo').reference
 const BUNDLED = { kind: 'Bundled files', detail: 'The files ship inside the app.' }
 
 export const CREDITS = [
@@ -63,5 +64,18 @@ export const CREDITS = [
     license: { label: T2D.license, href: `${T2D.repository}/blob/${T2D.revision}/LICENSE` },
     modifications: 'The preset adapts the reference colours with outlines, states, chart greys and a link underline of its own; Settings lists its changes.',
     notices: [{ title: 'MIT License (T2D theme)', text: t2dLicense }],
+  },
+  {
+    id: 'cristo-theme',
+    name: CRISTO.name,
+    kind: 'Colour reference',
+    covers: 'Its navy window, cream text, sand-coloured map text, planet green and derived border, the reference of the Cristo inspired preset, built on the Solaris theme with two colours of the DeepBlue theme. Its icons, event-colour file, compiled patch, screenshot and font name are not used.',
+    reuse: { kind: 'Visual inspiration', detail: CRISTO.copied },
+    compatibility: CRISTO_COMPATIBILITY,
+    author: CRISTO.author,
+    source: { label: `Cristotheme ${CRISTO.revision.slice(0, 7)}, ${CRISTO.revisionDate}`, href: `${CRISTO.repository}/tree/${CRISTO.revision}` },
+    license: { label: CRISTO.license, href: `${CRISTO.repository}/blob/${CRISTO.revision}/CristoTheme/LICENSE` },
+    modifications: 'The preset adapts the reference colours with surfaces, text, selection and state colours of its own, a lighter green in place of the planet green and an orbit colour of its own; Settings lists its changes. No license covers the colours that Cristotheme and DeepBlue added to the Solaris theme, and none is claimed: the notice is the one the repository keeps.',
+    notices: [{ title: 'MIT License (Solaris theme, kept in Cristotheme)', text: solarisLicense }],
   },
 ]
