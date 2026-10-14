@@ -464,6 +464,7 @@ import { whenFontsReady } from '../utilities/appearance-font'
 import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
+import { registerEconomyNotes } from '../utilities/economy-notes'
 import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { captionLines, drawExport, exportCsv, exportModel } from '../utilities/history-export'
@@ -1837,6 +1838,7 @@ export default {
         tech.registerTechScenarios(records.registerAdapter)
         briefs.registerBriefs(records.registerAdapter)
         registerMilestones(records.registerAdapter)
+        registerEconomyNotes(records.registerAdapter)
 
         return { adapter: annotationsOf(records.openScenarioRecords(), records.scenarioStorage()), error: null }
       } catch (error) {

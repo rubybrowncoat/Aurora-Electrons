@@ -47,7 +47,7 @@ const REQUIRED_TERMS = {
   '/propulsion': ['engine-power', 'range-endurance', 'fuel-litres'],
   '/shipyards': ['refit', 'retool', 'build-points'],
 }
-const WITHOUT_ESTIMATES = ['/log']
+const WITHOUT_ESTIMATES = ['/log', '/notebook']
 
 const MAX_DEFINITION = 560
 const MAX_COVERS = 200

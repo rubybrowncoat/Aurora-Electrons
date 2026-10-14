@@ -148,7 +148,7 @@ export const LINK_TYPES = Object.freeze({
 
 export const LINK_TYPE_KEYS = Object.freeze(Object.keys(LINK_TYPES))
 
-const linkTypeOf = (type) => (Object.prototype.hasOwnProperty.call(LINK_TYPES, type) ? LINK_TYPES[type] : null)
+const linkTypeOf = (type, types = LINK_TYPES) => (Object.prototype.hasOwnProperty.call(types, type) ? types[type] : null)
 
 const EVENT_COLUMNS = 'FCT_GameLog.IncrementID, FCT_GameLog.Time, FCT_GameLog.EventType, FCT_GameLog.MessageText, FCT_GameLog.SystemID, FCT_GameLog.PopulationID, FCT_GameLog.Xcor, FCT_GameLog.Ycor, FCT_GameLog.IDType'
 const EVENT_SCOPE = 'FCT_GameLog.GameID = :GameID and FCT_GameLog.RaceID = :RaceID'
@@ -310,16 +310,16 @@ const UNVERIFIED_TEXT = Object.freeze({
   parted: 'Not checked: the object is not shown to have been made before the link\'s branch and this one parted, and an ID can be given again to another object, so this is not known to be the one that was linked',
 })
 
-// Why a link whose object is in the open save, with the fingerprint it was linked with, is still not known to be that object: null when it is known, else the reason. An ID can be given again, so a colony, which the save stores no date for, is never known, and a ship, a fleet or a system is known by a time it was made or found, which must also lie strictly before the two branches parted when the link was made on another branch.
-const unverifiedOf = (type, fingerprint, context, origin) => {
-  const definition = linkTypeOf(type)
+// Why a link whose object is in the open save, with the fingerprint it was linked with, is still not known to be that object: null when it is known, else the reason. An ID can be given again, so a colony, which the save stores no date for, is never known, and a ship, a fleet or a system is known by a time it was made or found, which must also lie strictly before the two branches parted when the link was made on another branch. `types` is the table of kinds the link is one of (the milestones' own by default); a kind of identity 'static' is a row of the game's own catalogue, which every save of every campaign holds as one and the same, so it is known on any branch.
+const unverifiedOf = (type, fingerprint, context, origin, types = LINK_TYPES) => {
+  const definition = linkTypeOf(type, types)
 
-  if (!definition || definition.identity === 'content') {
+  if (!definition || definition.identity === 'content' || definition.identity === 'static') {
     return null
   }
 
   if (definition.identity === 'unwitnessed') {
-    return UNVERIFIED_TEXT.unwitnessed
+    return definition.unwitnessedNote || UNVERIFIED_TEXT.unwitnessed
   }
 
   const parts = String(fingerprint).split('|').slice(1)
@@ -335,8 +335,8 @@ const unverifiedOf = (type, fingerprint, context, origin) => {
 }
 
 // Whether a link reads as changed only because the save no longer gives the time the object was made (a fleet's creation entry is pruned from its history after a while): nothing else it was linked with differs, so it is not known to be another object.
-const timeLost = (stored, row) => {
-  const definition = linkTypeOf(stored.type)
+const timeLost = (stored, row, types = LINK_TYPES) => {
+  const definition = linkTypeOf(stored.type, types)
 
   if (!row || !definition || definition.identity !== 'created') {
     return false
@@ -441,17 +441,20 @@ const currentRowOf = (context, link) => {
 }
 
 // A link as the list shows it: the repository's status, with `ambiguous` for a log event that is linked but that the log holds more than once, `unknown` for one that is linked by its fingerprint but not known to be the same object (`unverifiedOf`, `unverified` is its reason, and so is one whose time was pruned from the save, `timeLost`), and the name the object has in the open save when it is not the one kept (a renamed object stays linked).
-const linkOf = (stored, named, context) => {
-  const lost = stored.status === 'changed' && timeLost(stored, currentRowOf(context, stored))
+const linkOf = (stored, named, context, types = LINK_TYPES) => {
+  const lost = stored.status === 'changed' && timeLost(stored, currentRowOf(context, stored), types)
   const row = stored.status === 'linked' || lost ? currentRowOf(context, stored) : null
   const ambiguous = Boolean(row) && stored.type === 'event' && row.copies > 1
-  const unverified = lost ? UNVERIFIED_TEXT.untimed : row && !ambiguous ? unverifiedOf(stored.type, stored.fingerprint, context, named ? named.origin : null) : null
+  const unverified = lost ? UNVERIFIED_TEXT.untimed : row && !ambiguous ? unverifiedOf(stored.type, stored.fingerprint, context, named ? named.origin : null, types) : null
   const known = Boolean(row) && !ambiguous && !unverified
   const name = named ? named.name : ''
   const status = ambiguous ? 'ambiguous' : unverified ? 'unknown' : stored.status
 
-  return { type: stored.type, label: linkTypeOf(stored.type) ? linkTypeOf(stored.type).label : stored.type, id: stored.id, name, origin: named && named.origin ? { campaignId: named.origin.campaignId, branchId: named.origin.branchId } : null, status, reason: ambiguous ? LINK_STATUS_TEXT.ambiguous : unverified || stored.reason || LINK_STATUS_TEXT[stored.status] || '', unverified: Boolean(unverified), current: stored.current === undefined ? null : stored.current, nowNamed: known && stored.type !== 'event' && row.name !== name ? row.name : null, copies: row && stored.type === 'event' ? row.copies : null }
+  return { type: stored.type, label: linkTypeOf(stored.type, types) ? linkTypeOf(stored.type, types).label : stored.type, id: stored.id, name, origin: named && named.origin ? { campaignId: named.origin.campaignId, branchId: named.origin.branchId } : null, status, reason: ambiguous ? LINK_STATUS_TEXT.ambiguous : unverified || stored.reason || LINK_STATUS_TEXT[stored.status] || '', unverified: Boolean(unverified), current: stored.current === undefined ? null : stored.current, nowNamed: known && stored.type !== 'event' && row.name !== name ? row.name : null, copies: row && stored.type === 'event' ? row.copies : null }
 }
+
+// The link check the other records of the scenario repository share (utilities/economy-notes.js): a stored link (`{ type, id, fingerprint, status, ... }` as the repository lists it), the link as the payload names it, the context and the table of kinds it is one of.
+export const resolveLink = linkOf
 
 const entryOf = (item, context) => {
   const stored = item.links.length ? item.links[0] : null
@@ -562,19 +565,20 @@ export const readAttachedMilestones = (repository, scope, context = null, branch
   }
 }
 
-const failure = (error) => ({ ok: false, code: (error && error.code) || 'failed', message: error && error.message ? error.message : String(error) })
+export const failure = (error) => ({ ok: false, code: (error && error.code) || 'failed', message: error && error.message ? error.message : String(error) })
 
-const mayWrite = async (repository, scope) => {
+// Whether the scenario records can be written for `scope` from this window, `what` being the record the refusal names ('milestone' by default): `{ ok: true }` or `{ ok: false, code, message }`. The other records of the repository (utilities/economy-notes.js) are guarded the same way.
+export const mayWrite = async (repository, scope, what = 'milestone') => {
   if (!repository) {
-    return { ok: false, code: 'no-repository', message: 'The scenario records are not available in this window, so the milestone is not kept.' }
+    return { ok: false, code: 'no-repository', message: `The scenario records are not available in this window, so the ${what} is not kept.` }
   }
 
   if (!scope) {
-    return { ok: false, code: 'no-scope', message: 'The campaign of this save is not settled yet, so the milestone is not kept.' }
+    return { ok: false, code: 'no-scope', message: `The campaign of this save is not settled yet, so the ${what} is not kept.` }
   }
 
   if (!(await repository.writable(scope.campaignId))) {
-    return { ok: false, code: 'not-owner', message: 'Another tab holds the scenario file, so the milestone is not kept.' }
+    return { ok: false, code: 'not-owner', message: `Another tab holds the scenario file, so the ${what} is not kept.` }
   }
 
   return { ok: true }
@@ -582,10 +586,10 @@ const mayWrite = async (repository, scope) => {
 
 const ASSUMPTIONS = Object.freeze(['The time is the exact game time the player gave: it is not the time of a sample, and no sample moves it'])
 
-// Whether a link the player picked may be made in `scope`: the objects it was picked from (`context`, as `loadObjects` gave them, with the campaign and branch of the open save) must be those of the race, campaign and branch the milestone is kept for, hold the object, and hold it as it was picked. Returns `{ ok: true, row }` with the row the open save has now (a renamed object has its new name), or `{ ok: false, code, message }`.
-const linkChecked = (context, scope, link) => {
+// Whether a link the player picked may be made in `scope`: the objects it was picked from (`context`, as `loadObjects` gave them, with the campaign and branch of the open save) must be those of the race, campaign and branch the milestone is kept for, hold the object, and hold it as it was picked. Returns `{ ok: true, row }` with the row the open save has now (a renamed object has its new name), or `{ ok: false, code, message }`. `types` is the table of kinds the link is one of and `what` the record it is made for, as for `resolveLink` and `mayWrite`.
+export const checkLink = (context, scope, link, types = LINK_TYPES, what = 'milestone') => {
   if (!context || !isObject(context.objects) || context.RaceID !== scope.RaceID || context.campaignId !== scope.campaignId || context.branchId !== scope.branchId) {
-    return { ok: false, code: 'link-out-of-scope', message: 'The object was picked from another race, campaign, branch or save than the one this milestone is kept for, so the link is not made. Pick it again.' }
+    return { ok: false, code: 'link-out-of-scope', message: `The object was picked from another race, campaign, branch or save than the one this ${what} is kept for, so the link is not made. Pick it again.` }
   }
 
   const objects = context.objects[link.type]
@@ -596,7 +600,7 @@ const linkChecked = (context, scope, link) => {
 
   const current = objects.get(link.row.id)
 
-  if (!current || linkTypeOf(link.type).fingerprint(current) !== linkTypeOf(link.type).fingerprint(link.row)) {
+  if (!current || linkTypeOf(link.type, types).fingerprint(current) !== linkTypeOf(link.type, types).fingerprint(link.row)) {
     return { ok: false, code: 'link-stale', message: 'The object picked is not in the save as it was picked, so the link is not made. Pick it again.' }
   }
 
@@ -616,7 +620,7 @@ export const saveMilestone = async (repository, scope, { entry = null, t, type, 
       return { ok: false, code: 'invalid-milestone', message: 'The link is { type, row } of a kind of object a milestone links to' }
     }
 
-    const checked = link ? linkChecked(context, scope, link) : null
+    const checked = link ? checkLink(context, scope, link) : null
 
     if (checked && !checked.ok) {
       return checked

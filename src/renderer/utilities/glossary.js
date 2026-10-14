@@ -74,6 +74,7 @@ export const TERMS = Object.freeze([
   term('slipway', 'Slipway', 'One of a yard\'s build slots. Each holds one ship under construction or refit at a time, so more slipways let more ships proceed together.', 'slipways'),
   term('warning-check', 'Warning check', 'A test run over the save that flags a condition worth a look, such as idle fleets or stock running short. A muted warning, or a muted check, stays out of the lists and tiles until it is unmuted, even if the condition worsens; Show muted warnings brings them back to unmute them one at a time, and Unmute all clears every mute.', ''),
   term('game-log', 'Game log', 'The events the game records as time passes, each with a type, a date and a message. It is a record of what has happened and not a forecast.', ''),
+  term('project-note', 'Project note', 'A note the player keeps on one body, colony, fleet or tech, with a status and the next action to take. It is kept in the app\'s own files for the campaign and race, and it gives the game no order and writes nothing to the save. Its link to the object is checked against the save each time, so a note whose object has gone stays readable as stale.', ''),
   term('estimated-output', 'Estimated figure', 'A value the app computes from saved data rather than reads from the game. A mark beside it states how far it holds: confirmed (observed in the save, or reproduced by a rule checked against saves), estimated (approximate or not checked), assumed (it rests on a number entered or chosen) or unavailable (an input is missing, so the figure is blank and never 0). A help link explains a term and does not stand in for that mark.', ''),
 ])
 
@@ -100,6 +101,7 @@ const PAGE_HELP = Object.freeze({
   '/minerals': { terms: ['deposit', 'accessibility', 'mining-rate', 'mineral-shortage', 'civilian-mining', 'mass-driver', 'ton', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/mineral-outlook': { terms: ['runway', 'mining-rate', 'deposit', 'accessibility', 'ton', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/finances': { terms: ['wealth', 'production-cycle', 'civilian-shipping', 'civilian-mining', 'runway', 'estimated-output'], links: RESOURCES },
+  '/notebook': { terms: ['project-note', 'research-project', 'component-design'], links: RESOURCES },
   '/colony-outlook': { terms: ['population-growth', 'body-capacity', 'infrastructure', 'workers', 'ark', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/habitability': { terms: ['colony-cost', 'infrastructure', 'body-capacity', 'terraforming', 'accessibility', 'jump-point', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/logistics': { terms: ['fuel-litres', 'sorium', 'maintenance-supply', 'maintenance-capacity', 'maintenance-life', 'deployment-time', 'runway', 'estimated-output'], links: ['tutorial-survey-ship', ...RESOURCES] },
