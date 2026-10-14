@@ -153,6 +153,89 @@
         </v-card>
       </template>
 
+      <v-card class="panel history-milestones" data-summary="Notes pinned to an exact game time, each with a type and, if wanted, a link to a colony, system, fleet, ship or log event. A marker sits at the exact time on every chart whatever the samples are, the nearest sample is shown beside it, and a link to an object that has gone stays on the note as unresolved and is never moved to another object by name." elevation="1">
+        <div class="panel-head">
+          <span>Milestones</span>
+          <span class="caption text--secondary" data-milestone-count>{{ milestoneCaption }}</span>
+        </div>
+        <div class="panel-body">
+          <v-alert v-if="milestoneRead.error" type="warning" outlined dense data-milestone-error>The milestones cannot be read here: {{ milestoneRead.error.message }}</v-alert>
+          <v-alert v-else-if="records && records.error" type="info" outlined dense data-milestone-error>The scenario records are not available in this window, so milestones are not kept: {{ records.error }}</v-alert>
+          <div v-else-if="!milestoneScope" class="caption text--secondary" data-milestone-waiting>The campaign of this save is not settled yet, so milestones wait for it.</div>
+          <div v-else-if="!yearKnown" class="caption text--secondary" data-milestone-waiting>The start year of this game is not known, so a date cannot be turned into a game time.</div>
+          <template v-else>
+            <div class="history-milestones__form" data-milestone-form>
+              <v-text-field v-model="milestoneDraft.date" label="Game date and time" :placeholder="gameDateOfOpen" :error-messages="milestoneTime.ok ? [] : [milestoneTime.error]" :hint="milestoneTimeHint" persistent-hint dense outlined class="history-milestones__date" data-milestone-date />
+              <v-select v-model="milestoneDraft.type" :items="milestoneTypes" label="Type" dense outlined hide-details class="history-milestones__type" data-milestone-type />
+              <v-text-field v-model="milestoneDraft.text" label="Note" :counter="textLength" dense outlined class="history-milestones__note" data-milestone-text />
+              <v-select v-model="milestoneDraft.linkKind" :items="milestoneKindItems" label="Link" dense outlined hide-details class="history-milestones__kind" data-milestone-link-kind @change="milestoneDraft.linkPick = null" />
+              <v-autocomplete v-if="milestoneLinkKinds.includes(milestoneDraft.linkKind)" v-model="milestoneDraft.linkPick" :items="milestoneChoices" item-text="text" item-value="id" return-object :label="milestoneLinkLabel" :disabled="!milestoneContext" :hint="milestoneLinkHint" persistent-hint dense outlined clearable class="history-milestones__pick" data-milestone-link-pick @change="pickMilestoneLink" />
+              <v-switch v-model="milestoneDraft.branchOnly" label="This branch only" dense hide-details class="history-milestones__policy mt-1" data-milestone-policy />
+            </div>
+            <div class="history-milestones__actions">
+              <v-btn small depressed color="primary" :disabled="milestoneBusy || !milestoneReady" data-milestone-save @click="saveMilestoneDraft(false)">{{ milestoneDraft.uuid ? 'Save changes' : 'Add milestone' }}</v-btn>
+              <v-btn v-if="milestoneDraft.uuid" small text :disabled="milestoneBusy" data-milestone-cancel @click="cancelMilestone">Cancel</v-btn>
+            </div>
+            <v-alert v-if="milestoneConflict" type="warning" outlined dense class="mt-2" data-milestone-conflict>
+              <div>This milestone was changed elsewhere after it was opened here. It now reads: {{ milestoneConflict.text }} ({{ milestoneConflict.dateText }}).</div>
+              <div class="mt-2">
+                <v-btn small depressed color="warning" :disabled="milestoneBusy" data-milestone-overwrite @click="saveMilestoneDraft(true)">Write over it</v-btn>
+                <v-btn small text class="ml-2" data-milestone-keep @click="cancelMilestone">Keep what is stored</v-btn>
+              </div>
+            </v-alert>
+            <v-alert v-if="milestoneMessage" :type="milestoneMessageType" outlined dense class="mt-2" data-milestone-message>{{ milestoneMessage }}</v-alert>
+          </template>
+
+          <div v-if="milestoneEntries.length" class="mt-3" data-milestone-list>
+            <div v-for="entry in milestoneEntries" :key="entry.uuid" class="history-milestones__row" :data-milestone="entry.uuid" :data-milestone-t="entry.t" :data-milestone-drawn="entry.drawn">
+              <div class="history-milestones__head">
+                <v-chip x-small outlined>{{ entry.typeText }}</v-chip>
+                <span class="history-milestones__text">{{ entry.text }}</span>
+                <v-chip v-if="entry.link" x-small :color="entry.link.color" :text-color="entry.link.color ? 'white' : undefined" :title="entry.link.reason" :data-link-status="entry.link.status">{{ entry.link.label }}: {{ entry.link.name || entry.link.id }}<template v-if="entry.link.nowNamed"> (now {{ entry.link.nowNamed }})</template> · {{ entry.link.word }}</v-chip>
+              </div>
+              <div class="caption text--secondary">
+                <span data-milestone-exact>{{ entry.dateText }}, game time {{ count(entry.t, entry.t % 1 === 0 ? 0 : 3) }} s</span>
+                <span data-milestone-sample> · <template v-if="entry.sample">nearest sample {{ entry.sample.dateText }}, {{ entry.sample.offsetText }}</template><template v-else>no sample recorded yet</template></span>
+              </div>
+              <div class="caption text--secondary">{{ entry.policy === 'branch' ? 'Kept for this branch only' : 'Kept for every branch of the campaign' }}<template v-if="entry.otherBranch">, made on another branch</template> · {{ entry.drawnText }}</div>
+              <div v-if="entry.link && entry.link.status !== 'linked'" class="caption" data-milestone-link-note>{{ entry.link.reason }}<template v-if="entry.link.status === 'changed' || entry.link.status === 'missing'">. Edit the milestone to link it to another object, or leave it as it is.</template></div>
+              <div class="history-milestones__actions">
+                <v-btn x-small text :disabled="milestoneBusy || !yearKnown" data-milestone-edit @click="editMilestone(entry)">Edit</v-btn>
+                <v-btn v-if="entry.ahead" x-small text :disabled="milestoneBusy" title="Keeps its time and moves its place to this save, so it is drawn here" data-milestone-move @click="moveMilestoneHere(entry)">Move to this save</v-btn>
+                <v-btn v-if="milestoneConfirm !== entry.uuid" x-small text color="error" :disabled="milestoneBusy" data-milestone-delete @click="milestoneConfirm = entry.uuid">Delete</v-btn>
+                <template v-else>
+                  <v-btn x-small depressed color="error" :disabled="milestoneBusy" data-milestone-delete-confirm @click="deleteMilestoneEntry(entry)">Delete it</v-btn>
+                  <v-btn x-small text data-milestone-delete-cancel @click="milestoneConfirm = null">Keep</v-btn>
+                </template>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="milestoneScope && yearKnown && !milestoneRead.error" class="caption text--secondary mt-3" data-milestone-empty>No milestones yet for this race{{ milestoneRead.notes.length ? ', apart from ' + milestoneRead.notes.length + ' that this version cannot read' : '' }}.</div>
+          <div v-for="note in milestoneRead.notes" :key="note.uuid" class="caption text--secondary mt-1" data-milestone-note>{{ note.reason }}</div>
+          <div v-if="milestoneAttached.error" class="caption text--secondary mt-3" data-milestone-attached-error>The milestones of attached campaigns cannot be listed here: {{ milestoneAttached.error.message }}</div>
+          <div v-else-if="milestoneAttached.entries.length || milestoneAttached.refused.length" class="mt-4" data-milestone-attached>
+            <div class="subtitle-2">From an attached campaign</div>
+            <div class="caption text--secondary">These were made in a campaign that is attached to this one. They are listed here and are not drawn on the charts, and the attached campaign keeps its own. Adopting one copies it into this campaign, on this branch.</div>
+            <div v-for="entry in milestoneAttached.entries" :key="entry.attachedFrom + entry.uuid" class="history-milestones__row" :data-milestone-attached-uuid="entry.uuid" :data-milestone-t="entry.t">
+              <div class="history-milestones__head">
+                <v-chip x-small outlined>{{ entry.typeText }}</v-chip>
+                <span class="history-milestones__text">{{ entry.text }}</span>
+                <v-chip v-if="entry.link" x-small :color="entry.link.color" :text-color="entry.link.color ? 'white' : undefined" :title="entry.link.reason" :data-link-status="entry.link.status">{{ entry.link.label }}: {{ entry.link.name || entry.link.id }}<template v-if="entry.link.nowNamed"> (now {{ entry.link.nowNamed }})</template> · {{ entry.link.word }}</v-chip>
+              </div>
+              <div class="caption text--secondary">{{ entry.dateText }}, game time {{ count(entry.t, entry.t % 1 === 0 ? 0 : 3) }} s · {{ entry.policy === 'branch' ? 'kept for one branch of its campaign' : 'kept for every branch of its campaign' }}</div>
+              <div v-if="entry.link && entry.link.status !== 'linked'" class="caption" data-milestone-link-note>{{ entry.link.reason }}</div>
+              <div class="history-milestones__actions">
+                <span v-if="entry.adopted" class="caption text--secondary" :data-milestone-adopted-on="entry.adoptedOn.branchId" data-milestone-adopted>Adopted: {{ adoptedText(entry.adoptedOn) }}</span>
+                <v-btn v-else x-small text :disabled="milestoneBusy" data-milestone-adopt @click="adoptMilestoneEntry(entry)">Adopt into this campaign</v-btn>
+              </div>
+            </div>
+            <div v-for="source in milestoneAttached.refused" :key="source.campaignId" class="caption text--secondary mt-1" data-milestone-attached-refused>The scenario file of an attached campaign cannot be read ({{ source.message }}), so its milestones are not listed.</div>
+          </div>
+
+          <div class="caption text--secondary mt-2" data-milestone-limits>A marker is drawn at the exact game time, not at a sample, and only where the charts have samples on both sides of it. A milestone made at a later game time than this save is listed and not drawn until the save reaches it or it is moved here. A link is checked against this save each time and is never moved to another object by its name: renaming a system, a fleet or a ship leaves it linked and shows the new name, and an object that is gone stays unresolved. A log event is named by its increment, what it says and the place it names, never by the row number SQLite gives it, and one the log holds several times over is ambiguous. A rewound save is a branch: a milestone kept for the campaign shows on every branch, one kept for a branch only on that branch. A save continues the IDs it hands out from the highest it holds, so an ID can come back for another object, after a rewind or after the highest one was destroyed. A link reads linked for a ship, a fleet or a system that has the time it was made or found that it was linked with, which on a branch other than the one the link was made on must also be strictly before the two branches parted; an object that does not give that time is not told by its ID alone. A colony has no date in the save and one body can hold several, so the colony that has the ID can be another one: a link to a colony reads not checked, and changed only where its system, body or species differ.</div>
+        </div>
+      </v-card>
+
       <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned." elevation="1">
         <div class="panel-head">
           <span>Retention</span>
@@ -370,6 +453,7 @@ import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { DEFAULT_RETENTION, RETENTION_PROFILES, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
+import { LINK_STATUS_TEXT, LINK_TYPES, LINK_TYPE_KEYS, MILESTONE_TYPES, TEXT_LENGTH, adoptMilestone, branchLineage, deleteMilestone, gameDateText, gameSecondsOf, incrementsOf, linkChoices, loadObjects, markersOf, moveMilestone, nearestSample, readAttachedMilestones, readMilestones, registerMilestones, saveMilestone, scopeOf as milestoneScopeOf, typeText, withinSamples } from '../utilities/history-milestones'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
 import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '../utilities/mineral-compare'
 import { MINERALS } from '../utilities/minerals'
@@ -438,6 +522,13 @@ const MEASURES = [
 
 const RIVAL_METRIC_VALUES = RIVAL_METRICS.map((metric) => metric.value)
 
+const blankMilestone = () => ({ uuid: null, revision: null, date: '', t: null, type: 'other', text: '', linkKind: 'none', linkPick: null, branchOnly: false, scopeKey: null })
+
+const LINK_WORDS = { linked: 'linked', missing: 'unresolved, gone', changed: 'unresolved, changed', unknown: 'not checked', ambiguous: 'ambiguous' }
+
+// A link as the list shows it: the status in words, the colour of its chip and the reason in full.
+const linkView = (link) => ({ ...link, color: link.status === 'linked' ? undefined : link.status === 'unknown' ? 'grey' : 'warning', word: LINK_WORDS[link.status] || link.status, reason: link.reason || LINK_STATUS_TEXT[link.status] || '' })
+
 export default {
   name: 'HistoryPage',
   components: { ChartCanvas, ProvenanceMark, SeriesKey, StatTiles },
@@ -485,10 +576,21 @@ export default {
       backupKept: 0,
       // The retention profile picked and waiting for confirmation (Retention panel); the profile in force is the persisted `retentionProfile`.
       retentionPick: null,
+      // The Milestones panel: the repository's revision of what was read (bumped by each write), the form's draft, the entry whose deletion waits for a second click, the message of the last action and the conflict of a stale edit.
+      milestoneRevision: 0,
+      milestoneDraft: blankMilestone(),
+      milestoneConfirm: null,
+      milestoneMessage: '',
+      milestoneMessageType: 'info',
+      milestoneConflict: null,
+      milestoneBusy: false,
+      milestoneTypes: MILESTONE_TYPES,
+      milestoneLinkKinds: LINK_TYPE_KEYS,
+      textLength: TEXT_LENGTH,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'historyRecorded']),
+    ...mapGetters(['config', 'database', 'GameID', 'GameTime', 'RaceID', 'StartYear', 'historyRecorded']),
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -658,6 +760,191 @@ export default {
     // The snapshots in the chosen span, for the tiles, charts and table.
     snapshots() {
       return this.allSnapshots.filter((snapshot) => snapshot.t >= this.since)
+    },
+
+    // The scenario repository the milestones are kept in, null until it loads or when it cannot be opened here.
+    milestoneRepository() {
+      return this.records ? this.records.repository : null
+    },
+
+    // The scope the milestones are read in: the race, the campaign and the branch shown. The game time is the open save's on its own branch and the last sample's on another, so a milestone made later than that is listed as ahead.
+    milestoneScope() {
+      const open = this.resolved
+
+      if (!open || !this.shownBranchId) {
+        return null
+      }
+
+      const last = this.allSnapshots.length ? this.allSnapshots[this.allSnapshots.length - 1].t : 0
+
+      return milestoneScopeOf({ campaign: open, RaceID: this.RaceID, branchId: this.shownBranchId, gameTime: this.shownBranchId === open.branchId ? this.GameTime : last })
+    },
+
+    // What a draft of the form belongs to: the campaign, the race and the branch it is kept for. A draft is dropped when it changes, and one that is saved after it did not is refused.
+    milestoneScopeKey() {
+      const scope = this.milestoneScope
+
+      return scope ? [scope.campaignId, scope.RaceID, scope.branchId].join('|') : ''
+    },
+
+    // The milestones read without the save's objects: which events they link to, and whether any link needs the objects read.
+    milestoneBase() {
+      // eslint-disable-next-line no-unused-expressions
+      this.milestoneRevision + this.$store.state.history.revision
+
+      return readMilestones(this.milestoneRepository, this.milestoneScope)
+    },
+
+    // The milestones of attached campaigns read without the save's objects, for the events their links name.
+    milestoneAttachedBase() {
+      // eslint-disable-next-line no-unused-expressions
+      this.milestoneRevision + this.$store.state.history.revision
+
+      return readAttachedMilestones(this.milestoneRepository, this.milestoneScope)
+    },
+
+    milestoneIncrements() {
+      return incrementsOf([...this.milestoneBase.entries, ...this.milestoneAttachedBase.entries])
+    },
+
+    // Whether the save's objects are needed: a milestone is linked, or the form picks an object to link to.
+    milestoneWantsObjects() {
+      return [...this.milestoneBase.entries, ...this.milestoneAttachedBase.entries].some((entry) => entry.links.length > 0) || LINK_TYPE_KEYS.includes(this.milestoneDraft.linkKind)
+    },
+
+    // The objects as read for the game and race shown and the save open now: the read that is still running for another save or race leaves the last one in place, and it is not used.
+    milestoneBundle() {
+      const bundle = this.milestoneObjects
+
+      return bundle && bundle.database === this.database && bundle.GameID === this.GameID && bundle.RaceID === this.RaceID ? bundle : null
+    },
+
+    // The branches of the open campaign as the registry holds them (the branch each left and the game time it left it at), for telling whether an object that a link names is the same one on the branch of the open save. Null when the registry cannot be read here.
+    milestoneBranches() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.campaignChanges
+
+      const open = this.resolved
+
+      if (!open) {
+        return null
+      }
+
+      try {
+        return branchLineage(readRegistry(campaignStorage(this.config)).campaigns[open.campaignId])
+      } catch (error) {
+        return null
+      }
+    },
+
+    // What the links are checked against: the open save's objects for the game and race shown, with its campaign, branch and the campaign's branches, and only when the branch shown is the open save's.
+    milestoneContext() {
+      const open = this.resolved
+      const bundle = this.milestoneBundle
+
+      return bundle && this.milestoneScope && open && this.milestoneScope.branchId === open.branchId ? { objects: bundle.objects, GameID: bundle.GameID, RaceID: bundle.RaceID, campaignId: open.campaignId, branchId: open.branchId, branches: this.milestoneBranches } : null
+    },
+
+    milestoneRead() {
+      // eslint-disable-next-line no-unused-expressions
+      this.milestoneRevision + this.$store.state.history.revision
+
+      return readMilestones(this.milestoneRepository, this.milestoneScope, this.milestoneContext)
+    },
+
+    // The milestones of attached campaigns, listed apart from the campaign's own: with their date, link and whether a copy of them was adopted, on any branch of the campaign. They are not drawn.
+    milestoneAttached() {
+      // eslint-disable-next-line no-unused-expressions
+      this.milestoneRevision + this.$store.state.history.revision
+
+      const read = readAttachedMilestones(this.milestoneRepository, this.milestoneScope, this.milestoneContext, Object.keys(this.milestoneBranches || {}))
+
+      return { ...read, entries: read.entries.map((entry) => ({ ...entry, typeText: typeText(entry.type), dateText: this.dateTimeText(entry.t), link: entry.link ? linkView(entry.link) : null })) }
+    },
+
+    milestoneCaption() {
+      const drawn = this.milestoneEntries.filter((entry) => entry.drawn).length
+
+      return this.milestoneEntries.length ? `${this.milestoneEntries.length} kept, ${drawn} drawn on the charts` : 'Pin a note to an exact game time'
+    },
+
+    // Each milestone with its time as a date, its nearest sample beside it, the state of its link in words and whether the charts draw it.
+    milestoneEntries() {
+      return this.milestoneRead.entries.map((entry) => {
+        const sample = nearestSample(this.allSnapshots, entry.t)
+        const drawn = !entry.ahead && withinSamples(this.snapshots, entry.t)
+
+        return {
+          ...entry,
+          typeText: typeText(entry.type),
+          dateText: this.dateTimeText(entry.t),
+          drawn,
+          drawnText: entry.ahead ? 'made at a later game time than this save, listed and not drawn' : drawn ? 'drawn on the charts at its exact time' : 'outside the samples the charts show now',
+          sample: sample ? { dateText: this.dateTimeText(sample.sampleT), offsetText: sample.offset === 0 ? 'exactly at the milestone' : `${this.duration(Math.abs(sample.offset))} ${sample.offset > 0 ? 'before' : 'after'} it` } : null,
+          link: entry.link ? linkView(entry.link) : null,
+        }
+      })
+    },
+
+    // The markers the charts draw: at the exact game time of each milestone, whatever the samples are.
+    milestoneMarkers() {
+      return markersOf(this.milestoneRead.entries, this.snapshots, (seconds) => this.year(seconds))
+    },
+
+    milestoneEdited() {
+      return this.milestoneDraft.uuid ? this.milestoneRead.entries.find((entry) => entry.uuid === this.milestoneDraft.uuid) || null : null
+    },
+
+    // The time the form holds: the typed date, the exact time kept when the date is the one that time gives, the scope's game time when it is empty and a milestone is new.
+    milestoneTime() {
+      const text = this.milestoneDraft.date.trim()
+      const draft = this.milestoneDraft
+
+      if (draft.t !== null && text === gameDateText(this.StartYear, draft.t)) {
+        return { ok: true, seconds: draft.t }
+      }
+
+      if (text === '' && !draft.uuid && this.milestoneScope) {
+        return { ok: true, seconds: this.milestoneScope.gameTime }
+      }
+
+      return gameSecondsOf(this.StartYear, text)
+    },
+
+    milestoneTimeHint() {
+      return this.milestoneTime.ok ? `Exact game time ${this.count(this.milestoneTime.seconds, this.milestoneTime.seconds % 1 === 0 ? 0 : 3)} s${this.milestoneDraft.date.trim() === '' ? ', that of this save' : ''}` : ''
+    },
+
+    gameDateOfOpen() {
+      return this.milestoneScope && this.yearKnown ? gameDateText(this.StartYear, this.milestoneScope.gameTime) : ''
+    },
+
+    milestoneKindItems() {
+      return [{ text: 'No link', value: 'none' }, ...(this.milestoneEdited && this.milestoneEdited.link ? [{ text: `Keep the link to ${this.milestoneEdited.link.label.toLowerCase()} ${this.milestoneEdited.link.name || this.milestoneEdited.link.id}`, value: 'keep' }] : []), ...LINK_TYPE_KEYS.map((key) => ({ text: `Link to a ${LINK_TYPES[key].label.toLowerCase()}`, value: key }))]
+    },
+
+    milestoneLinkLabel() {
+      return LINK_TYPES[this.milestoneDraft.linkKind] ? LINK_TYPES[this.milestoneDraft.linkKind].label : 'Object'
+    },
+
+    milestoneLinkHint() {
+      const kind = this.milestoneDraft.linkKind
+      const failed = this.milestoneBundle && this.milestoneBundle.failed[kind]
+
+      return !this.milestoneContext ? (this.shownBranchId && this.resolved && this.shownBranchId !== this.resolved.branchId ? 'Objects are read from the open save, which is on another branch' : 'Reading the objects of this save') : failed ? `This save cannot give them: ${failed}` : kind === 'event' ? 'The latest events of the log; picking one sets the time to its own' : ''
+    },
+
+    milestoneChoices() {
+      const kind = this.milestoneDraft.linkKind
+
+      return this.milestoneContext && LINK_TYPES[kind] ? linkChoices(this.milestoneContext.objects, kind).map((choice) => ({ ...choice, text: kind === 'event' ? `${this.dateTimeText(choice.row.time)} · ${choice.name}${choice.ambiguous ? ` (${choice.row.copies} identical entries: ambiguous)` : ''}` : choice.name || `${LINK_TYPES[kind].label} ${choice.id}` })) : []
+    },
+
+    // Whether the form can be saved: a time, a note and, if a link is asked for, the object picked.
+    milestoneReady() {
+      const draft = this.milestoneDraft
+
+      return this.milestoneTime.ok && draft.text.trim() !== '' && draft.text.length <= TEXT_LENGTH && !(LINK_TYPE_KEYS.includes(draft.linkKind) && !draft.linkPick)
     },
 
     latest() {
@@ -837,7 +1124,7 @@ export default {
       }
 
       if (percent) {
-        options.plugins.guides = { levels: [{ y: 0 }] }
+        options.plugins.guides.levels = [{ y: 0 }]
       }
 
       const notes = [
@@ -1006,6 +1293,17 @@ export default {
     'resolved.campaignId'() {
       this.branchChoice = null
     },
+    // Another campaign, race or branch: a draft of the form (its object picked, the milestone it edits) belonged to the last one.
+    milestoneScopeKey() {
+      const draft = this.milestoneDraft
+
+      if (draft.uuid || draft.text || draft.date || draft.linkKind !== 'none') {
+        this.resetMilestoneDraft()
+        this.milestoneFailed('The form was emptied: the campaign, race or branch shown changed.', 'info')
+      } else {
+        this.resetMilestoneDraft()
+      }
+    },
   },
   created() {
     this.spyNPR = this.config.get('spyNPR', false)
@@ -1072,6 +1370,7 @@ export default {
               label: (item) => `${item.dataset.label}: ${labelFormat ? labelFormat(item.parsed.y) : this.count(item.parsed.y, item.parsed.y < 100 ? 1 : 0)}`,
             },
           },
+          guides: { markers: this.milestoneMarkers },
         },
       }
     },
@@ -1205,6 +1504,161 @@ export default {
 
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`)
     },
+    // A game time as a date and time to the second; without a start year, the game years elapsed.
+    dateTimeText(seconds) {
+      return this.yearKnown ? gameDateText(this.StartYear, seconds) : `${roundToDecimal(seconds / SECONDS_PER_YEAR, 2)} y elapsed`
+    },
+    // Opens a milestone in the form to edit: its exact time stays the time unless the date is retyped.
+    editMilestone(entry) {
+      this.milestoneDraft = { uuid: entry.uuid, revision: entry.revision, date: gameDateText(this.StartYear, entry.t), t: entry.t, type: entry.type, text: entry.text, linkKind: entry.link ? 'keep' : 'none', linkPick: null, branchOnly: entry.policy === 'branch', scopeKey: this.milestoneScopeKey }
+      this.milestoneMessage = ''
+      this.milestoneConflict = null
+      this.milestoneConfirm = null
+    },
+    // Empties the form and what waits on it, for a draft that no longer belongs to what is shown.
+    resetMilestoneDraft() {
+      this.milestoneDraft = blankMilestone()
+      this.milestoneConflict = null
+      this.milestoneConfirm = null
+      this.milestoneMessage = ''
+    },
+    cancelMilestone() {
+      this.milestoneDraft = blankMilestone()
+      this.milestoneConflict = null
+      this.milestoneMessage = ''
+
+      this.milestoneRevision += 1
+    },
+    // A log event is dated by its own time, so picking one sets the time of the form to it.
+    pickMilestoneLink(pick) {
+      if (pick && this.milestoneDraft.scopeKey === null) {
+        this.milestoneDraft.scopeKey = this.milestoneScopeKey
+      }
+
+      if (pick && pick.row && this.milestoneDraft.linkKind === 'event' && Number.isFinite(pick.row.time)) {
+        this.milestoneDraft.t = pick.row.time
+        this.milestoneDraft.date = gameDateText(this.StartYear, pick.row.time)
+      }
+    },
+    milestoneFailed(text, type = 'warning') {
+      this.milestoneMessage = text
+      this.milestoneMessageType = type
+    },
+    // Keeps the form's milestone: a new one, or an edit over the revision the form was opened at. A stale edit is not written unless `overwrite` says so.
+    async saveMilestoneDraft(overwrite = false) {
+      const draft = this.milestoneDraft
+
+      if (draft.scopeKey !== null && draft.scopeKey !== this.milestoneScopeKey) {
+        this.resetMilestoneDraft()
+        this.milestoneFailed('The campaign, race or branch shown changed after this form was filled in, so nothing is saved. Fill it in again.')
+
+        return
+      }
+
+      const time = this.milestoneTime
+
+      if (!time.ok) {
+        this.milestoneFailed(time.error)
+
+        return
+      }
+
+      const stored = draft.uuid ? this.milestoneRead.entries.find((entry) => entry.uuid === draft.uuid) : null
+
+      if (draft.uuid && !stored) {
+        this.milestoneFailed('This milestone is no longer kept, so the edit is not written. Cancel to start again.')
+
+        return
+      }
+
+      const link = draft.linkKind === 'none' ? null : draft.linkKind === 'keep' ? undefined : draft.linkPick ? { type: draft.linkKind, row: draft.linkPick.row } : false
+
+      if (link === false) {
+        this.milestoneFailed('Pick the object to link to, or choose no link.')
+
+        return
+      }
+
+      this.milestoneBusy = true
+
+      try {
+        const outcome = await saveMilestone(this.milestoneRepository, this.milestoneScope, { entry: stored ? { ...stored, revision: draft.revision } : null, t: time.seconds, type: draft.type, text: draft.text, link, context: this.milestoneContext, policy: draft.branchOnly ? 'branch' : 'campaign', overwrite })
+
+        this.milestoneRevision += 1
+
+        if (outcome.ok) {
+          this.milestoneDraft = blankMilestone()
+          this.milestoneConflict = null
+          this.milestoneFailed(draft.uuid ? 'The milestone is saved.' : 'The milestone is kept at that exact game time.', 'success')
+        } else if (outcome.code === 'revision-conflict') {
+          this.milestoneConflict = { text: outcome.stored.text, dateText: this.dateTimeText(outcome.stored.t) }
+          this.milestoneMessage = ''
+        } else {
+          this.milestoneFailed(outcome.message)
+        }
+      } finally {
+        this.milestoneBusy = false
+      }
+    },
+    async deleteMilestoneEntry(entry) {
+      this.milestoneBusy = true
+
+      try {
+        const outcome = await deleteMilestone(this.milestoneRepository, this.milestoneScope, entry)
+
+        this.milestoneRevision += 1
+        this.milestoneConfirm = null
+
+        if (outcome.ok) {
+          this.milestoneDraft = this.milestoneDraft.uuid === entry.uuid ? blankMilestone() : this.milestoneDraft
+          this.milestoneFailed('The milestone is deleted.', 'success')
+        } else {
+          this.milestoneFailed(outcome.code === 'revision-conflict' ? 'The milestone was changed elsewhere, so it is not deleted. It is listed as it is now.' : outcome.message)
+        }
+      } finally {
+        this.milestoneBusy = false
+      }
+    },
+    // Moves a milestone made at a later game time to this save: its time stays and it is drawn here.
+    async moveMilestoneHere(entry) {
+      this.milestoneBusy = true
+
+      try {
+        const outcome = await moveMilestone(this.milestoneRepository, this.milestoneScope, entry)
+
+        this.milestoneRevision += 1
+
+        if (outcome.ok) {
+          this.milestoneFailed('The milestone now belongs to this save, at the same game time.', 'success')
+        } else {
+          this.milestoneFailed(outcome.code === 'revision-conflict' ? 'The milestone was changed elsewhere, so it is not moved. It is listed as it is now.' : outcome.message)
+        }
+      } finally {
+        this.milestoneBusy = false
+      }
+    },
+    // Where the copy of an attached milestone that this campaign holds is kept, in words: one kept for a branch shows on that branch only.
+    adoptedText(copy) {
+      return copy.policy === 'campaign' ? 'this campaign holds a copy of it, kept for every branch.' : copy.branchId === this.shownBranchId ? 'this campaign holds a copy of it, kept for this branch only.' : `this campaign holds a copy of it, kept for branch ${copy.branchId} only. Pick that branch to see it.`
+    },
+    // Copies a milestone of an attached campaign into this campaign, on the branch shown. Only the player's click does it.
+    async adoptMilestoneEntry(entry) {
+      this.milestoneBusy = true
+
+      try {
+        const outcome = await adoptMilestone(this.milestoneRepository, this.milestoneScope, entry)
+
+        this.milestoneRevision += 1
+
+        if (outcome.ok) {
+          this.milestoneFailed('The milestone is adopted: this campaign holds a copy of it, and the attached campaign keeps its own.', 'success')
+        } else {
+          this.milestoneFailed(outcome.code === 'collision' ? 'This milestone was adopted already.' : outcome.message)
+        }
+      } finally {
+        this.milestoneBusy = false
+      }
+    },
     // Picks a retention profile: the choice waits for confirmation, which states what it does and does not do.
     pickRetention(id) {
       this.retentionPick = id === this.retentionProfile ? null : id
@@ -1223,6 +1677,7 @@ export default {
 
         tech.registerTechScenarios(records.registerAdapter)
         briefs.registerBriefs(records.registerAdapter)
+        registerMilestones(records.registerAdapter)
 
         return { adapter: annotationsOf(records.openScenarioRecords(), records.scenarioStorage()), error: null }
       } catch (error) {
@@ -1453,6 +1908,34 @@ export default {
       },
       default: {},
     },
+    // The repository of scenario records, loaded with the page: its module needs the app's settings store, so a page that is read without it still loads.
+    records: {
+      async get() {
+        try {
+          const records = await import('../utilities/scenario-records')
+
+          registerMilestones(records.registerAdapter)
+
+          return Object.freeze({ repository: records.openScenarioRecords(), error: null })
+        } catch (error) {
+          return Object.freeze({ repository: null, error: error.message })
+        }
+      },
+      default: null,
+    },
+    // The race's objects in the open save that milestones link to, read only while a milestone is linked or the form picks an object to link to. The read carries the save, game and race it was made for (`milestoneBundle` ignores it for another), and the page keeps the last one while the next is read.
+    milestoneObjects: {
+      async get() {
+        const { database, GameID, RaceID } = this
+
+        if (!database || !GameID || !RaceID || !this.milestoneWantsObjects) {
+          return null
+        }
+
+        return Object.freeze({ ...(await loadObjects(database, { GameID, RaceID, increments: this.milestoneIncrements })), database })
+      },
+      default: null,
+    },
   },
 }
 </script>
@@ -1553,6 +2036,70 @@ export default {
 
   .history-retention__active {
     font-weight: 600;
+  }
+
+  .history-milestones__form {
+    align-items: flex-start;
+    column-gap: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+
+  .history-milestones__date {
+    flex: 0 1 230px;
+  }
+
+  .history-milestones__type {
+    flex: 0 1 150px;
+  }
+
+  .history-milestones__note {
+    flex: 1 1 260px;
+  }
+
+  .history-milestones__kind {
+    flex: 0 1 240px;
+  }
+
+  .history-milestones__pick {
+    flex: 1 1 300px;
+    min-width: 0;
+  }
+
+  .history-milestones__policy {
+    flex: 0 0 auto;
+  }
+
+  .history-milestones__actions {
+    align-items: center;
+    column-gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .history-milestones__row {
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+    padding: 8px 0;
+  }
+
+  .history-milestones__row .history-milestones__actions {
+    margin-top: 2px;
+  }
+
+  .history-milestones__head {
+    align-items: center;
+    column-gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .history-milestones__text {
+    flex: 1 1 240px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
 </style>

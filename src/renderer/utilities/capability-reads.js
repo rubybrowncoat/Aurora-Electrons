@@ -190,7 +190,7 @@ export const READS = {
     orders: { label: 'stabilisation orders', reads: 'FCT_Fleet(FleetID FleetName) FCT_MoveOrders(Arrived DestinationID FleetID GameID MoveActionID MoveOrder RaceID TimeRequired)' },
   },
   '/history': {
-    page: { label: 'the page\'s other reads', reads: 'DIM_PlanetaryInstallation(Name PlanetaryInstallationID)' },
+    page: { label: 'the page\'s other reads', reads: 'DIM_PlanetaryInstallation(Name PlanetaryInstallationID) FCT_Fleet(FleetID FleetName GameID RaceID) FCT_FleetHistory(Description FleetID GameID GameTime) FCT_GameLog(EventType GameID IDType IncrementID MessageText PopulationID RaceID SystemID Time Xcor Ycor) FCT_Population(GameID PopName PopulationID RaceID SpeciesID SystemBodyID SystemID) FCT_RaceSysSurvey(DiscoveredTime GameID Name RaceID SystemID) FCT_Ship(Constructed GameID RaceID ShipID ShipName) FCT_System(GameID Stars SystemID SystemNumber)' },
   },
   '/commanders': {
     commanders: { label: 'the commanders', reads: 'DIM_ResearchField(FieldName ResearchFieldID) FCT_Commander(CareerStart CommandID CommandType CommanderID CommanderType GameID HealthRisk Name Prisoner RaceID ResSpecID RetireStatus Seniority StoryCharacter) FCT_CommanderBonuses(BonusID BonusValue CommanderID) FCT_CommanderTraits(CmdrID TraitID) FCT_Game(GameID GameTime) FCT_GroundUnitFormation(FormationID Name) FCT_NavalAdminCommand(AdminCommandName NavalAdminCommandID) FCT_Population(PopName PopulationID) FCT_ResearchProject(ProjectID TechID) FCT_SectorCommand(SectorCommandID SectorName) FCT_Ship(ShipID ShipName) FCT_TechSystem(Name TechSystemID)' },

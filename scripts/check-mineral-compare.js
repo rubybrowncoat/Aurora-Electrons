@@ -986,7 +986,7 @@ const PAGE_MUTATIONS = [
   { name: 'the CSV of every snapshot, not the span', find: 'comparisonCsv({ comparison: this.mineralComparison,', replace: 'comparisonCsv({ comparison: compareMinerals(this.allSnapshots, this.mineralIds),', fails: ['page: the CSV follows the span chosen'] },
   { name: 'the CSV in the colours of another theme', find: 'palette: this.theme.categorical, date: (seconds) => this.date(seconds), retention', replace: 'palette: MINERALS.map(() => \'#000000\'), date: (seconds) => this.date(seconds), retention', fails: ['page: the CSV the page writes follows the scale shown'] },
   { name: 'the axis left without its title', find: 'options.scales.y.title = { display: true, text: scale.axis }', replace: 'options.scales.y.title = { display: false, text: \'\' }', fails: ['page: the axis names its unit on each scale'] },
-  { name: 'the level of the baseline left off the percent chart', find: 'options.plugins.guides = { levels: [{ y: 0 }] }', replace: 'options.plugins.guides = { levels: [] }', fails: ['page: the axis names its unit on each scale'] },
+  { name: 'the level of the baseline left off the percent chart', find: 'options.plugins.guides.levels = [{ y: 0 }]', replace: 'options.plugins.guides.levels = []', fails: ['page: the axis names its unit on each scale'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the tooltip dropping the stock behind a change', find: '`${name}: ${signed(item.parsed.y)} (${this.count(stock, 0)} t)`', replace: '`${name}: ${signed(item.parsed.y)}`', fails: ['page: the tooltip gives the stock in tonnes'] },
   // eslint-disable-next-line no-template-curly-in-string
