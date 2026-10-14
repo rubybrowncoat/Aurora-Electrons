@@ -105,6 +105,12 @@ export default {
   background: var(--sc-soft);
 }
 
+// The kind chip of the player's race is outlined in the focus colour, whose text is under 4.5:1 on the wash of the active race in Light and in Dark (the neutral accent over the surface): its text takes the ink and its outline stays in the focus colour.
+.empire-list__race .v-chip--outlined {
+  color: var(--ae-ink) !important;
+  border-color: var(--ae-primary) !important;
+}
+
 .empire-list__avatar {
   grid-row: span 2;
   align-self: start;

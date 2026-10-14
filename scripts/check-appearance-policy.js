@@ -9,10 +9,10 @@
   Run: node scripts/check-appearance-policy.js
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
+const { plantedCopy } = require('./lib/mutant-source')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -999,22 +999,7 @@ const MUTATIONS = [
   ['the policy not among the settings a reset keeps', { file: APPEARANCE, from: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY, ACCENTS_KEY]', to: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, ACCENTS_KEY]' }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-policy-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const text = fs.readFileSync(target, 'utf8')
-
-  if (text.split(from).length !== 2) {
-    throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
-  }
-
-  fs.writeFileSync(target, text.replace(from, () => to))
-
-  return directory
-}
+const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-policy-mutant-', file, from, to)
 
 const runChecks = async (directory) => {
   const results = []
@@ -1029,6 +1014,35 @@ const runChecks = async (directory) => {
 
   return results
 }
+
+// A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
+const judge = async (fault) => {
+  let directory
+
+  try {
+    try {
+      directory = mutatedCopy(fault)
+      await load(directory)
+    } catch (error) {
+      return { invalid: error.message }
+    }
+
+    return { failed: (await runChecks(directory)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
+  } catch (error) {
+    return { error: error.message }
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+// Faults the runner must report as invalid, and not as caught (the self-test of `judge`): a module that does not parse, a module outside the ones the checks load that does not parse, and an anchor that matches nothing.
+const INVALID = [
+  ['a module that does not parse', { file: APPEARANCE, from: 'export const PRESETS = {', to: 'export const PRESETS = ] {' }],
+  ['a module that the checks do not load and that does not parse', { file: 'map-borders.js', from: 'context.font = type.font(NAME_SIZE)', to: 'context.font = ] type.font(NAME_SIZE)' }],
+  ['an anchor that matches nothing', { file: APPEARANCE, from: 'export const PRESETS = {{{', to: 'export const PRESETS = {' }],
+]
 
 const run = async () => {
   let failures = 0
@@ -1051,23 +1065,25 @@ const run = async () => {
   console.log('\nMutations: each must fail at least one check, and the checks it fails are listed by number')
 
   for (const [label, fault] of MUTATIONS) {
-    let directory
+    const { failed, invalid, error } = await judge(fault)
 
-    try {
-      directory = mutatedCopy(fault)
-
-      const failed = (await runChecks(directory)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index)
-
+    if (invalid !== undefined) {
+      tally(false)
+      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+    } else if (error !== undefined) {
+      tally(false)
+      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+    } else {
       tally(failed.length > 0)
       console.log(`${failed.length ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed.length ? `fails check ${failed.join(', ')}` : 'every check still passes'}]`)
-    } catch (error) {
-      tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error.message}]`)
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
     }
+  }
+
+  for (const [label, fault] of INVALID) {
+    const unparsable = await judge(fault)
+
+    tally(unparsable.invalid !== undefined)
+    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

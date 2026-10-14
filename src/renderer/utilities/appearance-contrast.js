@@ -48,6 +48,50 @@ export const at = (object, path) => path.split('.').reduce((value, key) => (valu
 // What is measured against which surfaces: [label, token path of the foreground, surfaces]. A surface is a token path; the tooltip's is composited over the card. Surfaces that resolve to the same colour in a preset are measured once.
 export const SURFACES = ['surfaces.background', 'surfaces.card', 'surfaces.chrome']
 
+// The opacity of the overlay Vuetify 2.7.2 draws over a list entry in the colour of its text (`.v-list-item::before` in `currentColor`), by theme and state: `hover` under the pointer, `focus` while it holds focus, `activated` while it is the active entry, `pressed` while the active entry holds focus and for the entry a menu's keyboard highlights. They are the `states` of the theme (src/styles/settings/_light.scss and _dark.scss) that `+states` in components/VList/VListItem.sass applies, and the stylesheet of the app holds every state but the hovered one to `LIST_VEIL` (styles/appearance.scss). scripts/check-contrast.js and scripts/check-section-accents.js read those two files and fail when these numbers differ from them.
+export const VUETIFY_LIST_STATES = { light: { hover: 0.04, focus: 0.12, activated: 0.12, pressed: 0.16 }, dark: { hover: 0.08, focus: 0.24, activated: 0.24, pressed: 0.32 } }
+
+// What every list (a menu's, a dropdown's, the history menu's) holds that overlay to in every state: the opacity of a hovered entry. A focused, active or highlighted entry is told by the colour of its text (an active entry's is the focus colour) and, for the keyboard's highlight, by a ring in the focus colour, and not by a heavier wash, because the heavier one takes a section colour (the history menu's icons) under 3:1 and the focus colour (an active entry's text) under 4.5:1 on the dark card (Vuetify's strongest over it is a mid grey). scripts/check-contrast.js reads the compiled stylesheet and fails when it declares another opacity, or none.
+export const LIST_VEIL = { light: VUETIFY_LIST_STATES.light.hover, dark: VUETIFY_LIST_STATES.dark.hover }
+
+// The layer of `SECTION_WASHES` that is that overlay: `inks.text` at `LIST_VEIL` of the appearance's mode (or the opacity a caller reads from the stylesheet).
+export const LIST_VEIL_LAYER = 'veil.list'
+
+// The washes a section accent is drawn over, each `[state, layers, surfaces]`: the layers bottom to top over each surface, a `washes.` path being the accent at that alpha, `veil.list` the overlay of a list entry (`LIST_VEIL`) and any other path a colour of the appearance, and the accent drawn as an icon, a bar or a dot on the result. The active wash is the rail's active pill, the current step of the trail, the flyout's active entry and a picked research row; the hover wash is the rail's hovered pill and the icon plate of a plain row of the flyout or the palette. The icon plate of a row that has a wash of its own is drawn over it: over the active entry of the flyout, which takes the active wash, and over a hovered row of the flyout or a selected row of the palette, which take the hover colour, on the chrome the flyout is drawn on and the card the palette is. A hovered table row is the hover colour over the card (the planner's score meters are drawn in it), and a list entry is the card under the overlay Vuetify draws over it (the history menu's icons).
+export const SECTION_WASHES = [
+  ['active wash', ['washes.sectionSoft'], SURFACES],
+  ['hover wash', ['washes.sectionTint'], SURFACES],
+  ['plate over the active entry', ['washes.sectionSoft', 'washes.sectionTint'], ['surfaces.chrome']],
+  ['plate over a hovered row', ['focus.hover', 'washes.sectionTint'], ['surfaces.chrome', 'surfaces.card']],
+  ['hovered table row', ['focus.hover'], ['surfaces.card']],
+  ['list entry under its overlay', [LIST_VEIL_LAYER], ['surfaces.card']],
+]
+
+// The text colour drawn for the count of the research fields whose technologies can be started (`.rail-now` in components/research/FieldsView.vue), which is not a token but the colour of the available status (a chart slot, `AVAILABLE_STATUS_SLOT`; `statusColors` in components/research/status-style.js) made readable on the washes it sits under (`readableWashText`; the style carries it as `--st-available-text`).
+export const AVAILABLE_STATUS_SLOT = 2
+export const STATUS_TEXT = 'status.availableText'
+
+// The text the same washes sit under, each `[state, layers, surfaces, inks]` with the path of every ink drawn on it, at 4.5:1: a token of the appearance (the rows of `ROW_TEXT` name them), a token at an opacity (`inks.body@0.8`: the flyout's live line is the body ink at 80 %), or `STATUS_TEXT`. The flyout's active entry, whose description is secondary text on the active wash over the chrome and whose live line is the body ink at 80 %; the active race of the Empires list; a picked research field, its abbreviation drawn in a wash of its own over the picked row's wash (and over the hover wash of a row under the pointer) and its count of what can be started drawn on the picked row's wash and on the hover wash of one under the pointer; the count in a panel's header; the chip of a chosen body class; a chosen legend row. Ink that is not an accent, over a wash that is one, so a wash too strong for its text is a finding too.
+export const SECTION_WASH_TEXTS = [
+  ['active wash', ['washes.sectionSoft'], SURFACES, ['inks.body', 'inks.muted', 'inks.text', 'inks.textMuted']],
+  ['hover wash', ['washes.sectionTint'], SURFACES, ['inks.body', 'inks.muted', 'inks.text', 'inks.textMuted']],
+  ['active wash over the active wash', ['washes.sectionSoft', 'washes.sectionSoft'], ['surfaces.card'], ['inks.body', 'inks.text']],
+  ['active wash over the hover wash', ['washes.sectionTint', 'washes.sectionSoft'], ['surfaces.card'], ['inks.body', 'inks.text']],
+  ['active wash', ['washes.sectionSoft'], ['surfaces.chrome'], ['inks.body@0.8']],
+  ['active wash', ['washes.sectionSoft'], ['surfaces.card'], [STATUS_TEXT]],
+  ['hover wash', ['washes.sectionTint'], ['surfaces.card'], [STATUS_TEXT]],
+]
+
+// The text of a list entry under the overlay Vuetify draws over it in the colour of the entry's own text (`.v-list-item::before` in `currentColor`): each `[state, overlay colour, state of the overlay, inks]`, the overlay at `hover` (the opacity of a hovered entry, which the stylesheet leaves as it is) or `held` (what the stylesheet holds every other state to, `LIST_VEIL`, or the strongest of Vuetify's own when it declares none), on the card the list is drawn on (styles/appearance.scss). A plain entry is drawn in `inks.text`, with `inks.textMuted` for a subtitle; an entry that is active (the chosen one of a dropdown) is drawn in the focus colour, under an overlay in that colour, and takes the held overlay hovered, focused and highlighted alike, with a subtitle in `inks.textMuted`.
+export const LIST_TEXTS = [
+  ['entry under the pointer', 'inks.text', 'hover', ['inks.text', 'inks.textMuted']],
+  ['entry focused or highlighted', 'inks.text', 'held', ['inks.text', 'inks.textMuted']],
+  ['active entry', 'focus.primary', 'held', ['focus.primary', 'inks.textMuted']],
+]
+
+// The bar on the leading edge of a chosen list entry (`.v-list-item--active` in styles/appearance.scss), in the focus colour at 3:1 against the entry: the overlay of the entry (held at `LIST_VEIL`) lies over the bar and over the card behind it alike, in the colour of the entry's text, which is the text ink for a plain or hand-written entry and the focus colour for one a dropdown draws as its chosen option.
+export const LIST_BAR_OVERLAYS = [['text ink', 'inks.text'], ['focus colour', 'focus.primary']]
+
 // The planner's tones: each is drawn as text (an outlined chip, a label) and as the fill of a chip, so each is measured on both. `selected` is a button colour only, measured as a graphic.
 export const PLAN_TONES = ['mining', 'terraformFree', 'terraformPartial', 'terraformCheaper', 'cheap', 'moderate', 'costly', 'severe', 'insufficient', 'rich', 'cmc', 'unsurveyed']
 
@@ -67,6 +111,7 @@ export const TEXT_CHECKS = [
   ['Info tone as text', 'severity.info', ['surfaces.background', 'surfaces.card']],
   ['Success tone as text', 'severity.success', ['surfaces.background', 'surfaces.card']],
   ['Inactive tone as text', 'status.inactive', ['surfaces.background', 'surfaces.card']],
+  ['Count of the research fields that can be started (the available status colour made readable)', STATUS_TEXT, ['surfaces.card']],
   ...PLAN_TONES.map((tone) => [`Planner tone ${tone} as text`, `plan.${tone}`, ['surfaces.background', 'surfaces.card']]),
 ]
 
@@ -112,6 +157,17 @@ export const ROW_TEXT = [
   ['success figure', 'severity.success'],
   ['inactive standing', 'status.inactive'],
 ]
+
+// The text of a row of the flyout or of the Empires list, which are drawn on the chrome and take the hover colour under the pointer (the inks and the focus colour of a chip or a link).
+export const HOVERED_ENTRY_TEXT = ['inks.body', 'inks.muted', 'inks.text', 'inks.textMuted', 'focus.primary']
+
+// What an ink path of the tables above is called in a finding: the role of the token (`ROW_TEXT`), with its opacity when it has one, or the count of the available technologies.
+export const washInkLabel = (path) => {
+  const [token, opacity] = path.split('@')
+  const role = token === STATUS_TEXT ? 'count of available technologies' : ROW_TEXT.find(([, tokenPath]) => tokenPath === token)[0]
+
+  return opacity === undefined ? role : `${role} at ${Math.round(opacity * 100)} %`
+}
 
 // Vuetify's fill of a pressed button of a toggle group, which the selected-row wash is drawn over (the bar is drawn on top).
 export const PRESSED_BUTTON = { light: '#f5f5f5', dark: '#272727' }
@@ -182,11 +238,10 @@ export const sectionBackdrops = (appearance, color) => {
 // The mixes tried, from the colour toward the body ink, in this many equal steps.
 const MIX_STEPS = 256
 
-// The colour a section is drawn in when it colours text (a title, a label, an active tab), as a hex colour: the colour itself when it reads at 4.5:1 on every backdrop, else the first mix of it with the body ink, in 1/256 steps from the colour, that reads on every backdrop, so that the hue holds as far as the contrast allows (the ink itself when no mix reads). Whether a mix reads is not monotone in the share of ink, because a backdrop is drawn in the text colour itself, so every step is tried and none is skipped. A mix of two colours that each read need not read itself, so the text colour is worked out from the colour in force (the accent, its restrained mix or the neutral accent) and never from its ends. Graphics (an icon, a bar, a wash) keep the colour of `sectionColor` at 3:1.
-export const readableSectionText = (appearance, color) => {
+// The first colour, from `color` itself and then its mixes toward the body ink in 1/256 steps, that `reads` (a function of a parsed colour), as a hex colour; the ink itself when none does. Whether a mix reads is not monotone in the share of ink when a backdrop depends on the text colour, so every step is tried and none is skipped.
+const readableMix = (appearance, color, reads) => {
   const base = parseColor(color)
   const ink = over(parseColor(appearance.inks.body), solid(appearance, 'surfaces.card'))
-  const reads = (candidate) => sectionBackdrops(appearance, hex(candidate)).every(({ background }) => ratio(candidate, background) >= TEXT)
 
   if (reads(base)) {
     return color
@@ -201,6 +256,36 @@ export const readableSectionText = (appearance, color) => {
   }
 
   return hex(ink)
+}
+
+// The colour a section is drawn in when it colours text (a title, a label, an active tab), as a hex colour: the colour itself when it reads at 4.5:1 on every backdrop, else the first mix of it with the body ink, in 1/256 steps from the colour, that reads on every backdrop, so that the hue holds as far as the contrast allows (the ink itself when no mix reads). Whether a mix reads is not monotone in the share of ink, because a backdrop is drawn in the text colour itself, so every step is tried and none is skipped. A mix of two colours that each read need not read itself, so the text colour is worked out from the colour in force (the accent, its restrained mix or the neutral accent) and never from its ends. Graphics (an icon, a bar, a wash) keep the colour of `sectionColor` at 3:1.
+export const readableSectionText = (appearance, color) => readableMix(appearance, color, (candidate) => sectionBackdrops(appearance, hex(candidate)).every(({ background }) => ratio(candidate, background) >= TEXT))
+
+// What the count of a research field sits on: the card plain, and under the active and the hover wash of every accent of every accent mode (the wash is the accent at `washes.sectionSoft` or `washes.sectionTint` over the card), so the count reads whichever mode and section the page is drawn in.
+const washBackdrops = (appearance) => {
+  const card = solid(appearance, 'surfaces.card')
+  const accents = new Set(ACCENT_MODES.flatMap((mode) => sectionAccents(appearance, mode)))
+
+  return [card, ...[...accents].flatMap((accent) => [appearance.washes.sectionSoft, appearance.washes.sectionTint].map((alpha) => over({ ...parseColor(accent), a: alpha }, card)))]
+}
+
+const washTextKept = new WeakMap()
+
+// The colour a status colour (or any colour) is drawn in when it colours text on the washes of a section (the count of a research field): the colour itself when it reads at 4.5:1 on every backdrop of `washBackdrops`, else the first mix of it with the body ink that reads on all of them, as for `readableSectionText`; the backdrops do not depend on the mix.
+export const readableWashText = (appearance, color) => {
+  if (!washTextKept.has(appearance)) {
+    washTextKept.set(appearance, new Map())
+  }
+
+  const kept = washTextKept.get(appearance)
+
+  if (!kept.has(color)) {
+    const backdrops = washBackdrops(appearance)
+
+    kept.set(color, readableMix(appearance, color, (candidate) => backdrops.every((background) => ratio(candidate, background) >= TEXT)))
+  }
+
+  return kept.get(color)
 }
 
 const sectionTextKept = new WeakMap()
@@ -231,8 +316,8 @@ export const sectionTexts = (appearance, mode = DEFAULT_ACCENT_MODE) => {
 // The text colour of a section in an accent mode, or of the neutral accent for a place without a section: what `--sc-text` carries (components/navigation/section-style.js).
 export const sectionText = (appearance, section, mode = DEFAULT_ACCENT_MODE) => (section ? sectionTexts(appearance, mode)[section.accent] : sectionTexts(appearance, 'off')[0])
 
-// Measures a resolved appearance: `{ text, graphics, rows, disabled, fills, categorical, sections, sectionText, named }`, each a list of `{ label, foreground, surface, ratio, minimum, pass }`. `extraRowStates` are more row states ([label, washes]) the caller found (the gate adds the ones its stylesheet leaves unsettled). `baseline` is the resolved baseline preset of the appearance's mode, for `named`. A colour a measurement cannot read is a row that fails with ratio 0, so a damaged value is a finding and not an exception.
-export const measureAppearance = (appearance, { extraRowStates = [], baseline = null } = {}) => {
+// Measures a resolved appearance: `{ text, graphics, rows, disabled, fills, categorical, sections, sectionWashes, washText, listText, sectionText, named }`, each a list of `{ label, foreground, surface, ratio, minimum, pass }`. `extraRowStates` are more row states ([label, washes]) the caller found (the gate adds the ones its stylesheet leaves unsettled). `baseline` is the resolved baseline preset of the appearance's mode, for `named`. `listVeil` is the opacity the stylesheet holds a list entry's overlay to (`LIST_VEIL` of the mode when absent: the gate reads the stylesheet and gives the strongest of Vuetify's own when it finds none). A colour a measurement cannot read is a row that fails with ratio 0, so a damaged value is a finding and not an exception.
+export const measureAppearance = (appearance, { extraRowStates = [], baseline = null, listVeil = null } = {}) => {
   const card = parseColor(appearance.surfaces.card)
   const resolve = (path) => {
     const color = parseColor(at(appearance, path))
@@ -240,7 +325,21 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
     return color.a < 1 ? over(color, card) : color
   }
   const distinct = (surfaces) => surfaces.filter((surface, index) => surfaces.findIndex((other) => hex(resolve(other)) === hex(resolve(surface))) === index)
-  const measured = { text: [], graphics: [], rows: [], disabled: [], fills: [], categorical: [], sections: [], sectionText: [], named: [] }
+  const measured = { text: [], graphics: [], rows: [], disabled: [], fills: [], categorical: [], sections: [], sectionWashes: [], washText: [], listText: [], sectionText: [], named: [] }
+  const veil = listVeil === null ? LIST_VEIL[appearance.mode] : listVeil
+  const layerOf = (path, accent) => {
+    if (path.startsWith('washes.')) {
+      return { ...parseColor(accent), a: at(appearance, path) }
+    }
+
+    if (path === LIST_VEIL_LAYER) {
+      const ink = parseColor(appearance.inks.text)
+
+      return { ...ink, a: ink.a * veil }
+    }
+
+    return parseColor(at(appearance, path))
+  }
   const guard = (list, row, compute) => {
     try {
       const value = compute()
@@ -251,14 +350,35 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
     }
   }
 
+  const inkOf = (path) => {
+    try {
+      if (path === STATUS_TEXT) {
+        return readableWashText(appearance, at(appearance, `charts.categorical.${AVAILABLE_STATUS_SLOT}`))
+      }
+
+      const [token, opacity] = path.split('@')
+      const ink = at(appearance, token)
+
+      if (opacity === undefined) {
+        return ink
+      }
+
+      const { r, g, b, a } = parseColor(ink)
+
+      return `rgba(${r}, ${g}, ${b}, ${a * opacity})`
+    } catch (error) {
+      return 'unreadable'
+    }
+  }
+
   const contrastOf = (path, surface) => {
     const background = resolve(surface)
 
-    return ratio(over(parseColor(at(appearance, path)), background), background)
+    return ratio(over(parseColor(inkOf(path)), background), background)
   }
 
   TEXT_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
-    guard(measured.text, { label, foreground: at(appearance, path), surface: at(appearance, surface), surfacePath: surface, minimum: TEXT }, () => contrastOf(path, surface))
+    guard(measured.text, { label, foreground: inkOf(path), surface: at(appearance, surface), surfacePath: surface, minimum: TEXT }, () => contrastOf(path, surface))
   }))
 
   GRAPHIC_CHECKS.forEach(([label, path, surfaces]) => distinct(surfaces).forEach((surface) => {
@@ -289,6 +409,14 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
     })
   })
 
+  distinct(['surfaces.chrome']).forEach((surface) => {
+    const background = over(parseColor(appearance.focus.hover), resolve(surface))
+
+    HOVERED_ENTRY_TEXT.forEach((path) => {
+      guard(measured.rows, { label: `${washInkLabel(path)} on a hovered entry over the chrome`, foreground: inkOf(path), surface: hex(background), minimum: TEXT }, () => ratio(over(parseColor(inkOf(path)), background), background))
+    })
+  })
+
   const pressed = over(parseColor(appearance.rows.selected), parseColor(PRESSED_BUTTON[appearance.mode]))
 
   guard(measured.graphics, { label: 'Pressed toggle button bar, focused, hovered or not (the selected-row wash over the button)', foreground: appearance.focus.primary, surface: hex(pressed), surfacePath: 'buttons.pressed', minimum: GRAPHIC }, () => ratio(parseColor(appearance.focus.primary), pressed))
@@ -310,7 +438,64 @@ export const measureAppearance = (appearance, { extraRowStates = [], baseline = 
       distinct(SURFACES).forEach((surface) => {
         guard(measured.sections, { mode, section: mode === 'off' ? null : index, color, surface: at(appearance, surface), surfacePath: surface, minimum: GRAPHIC }, () => ratio(parseColor(color), resolve(surface)))
       })
+
+      const washed = (layers, surface) => {
+        try {
+          return layers.reduce((below, path) => over(layerOf(path, color), below), resolve(surface))
+        } catch (error) {
+          return null
+        }
+      }
+
+      SECTION_WASHES.forEach(([state, layers, surfaces]) => distinct(surfaces).forEach((surface) => {
+        const under = washed(layers, surface)
+
+        guard(measured.sectionWashes, { mode, section: mode === 'off' ? null : index, color, state, surface: under ? hex(under) : 'unreadable', surfacePath: surface, minimum: GRAPHIC }, () => ratio(parseColor(color), under))
+      }))
+
+      SECTION_WASH_TEXTS.forEach(([state, layers, surfaces, inks]) => distinct(surfaces).forEach((surface) => {
+        const under = washed(layers, surface)
+
+        inks.forEach((path) => {
+          guard(measured.washText, { mode, section: mode === 'off' ? null : index, color, state, ink: washInkLabel(path), foreground: inkOf(path), surface: under ? hex(under) : 'unreadable', surfacePath: surface, minimum: TEXT }, () => ratio(over(parseColor(inkOf(path)), under), under))
+        })
+      }))
     })
+  })
+
+  LIST_TEXTS.forEach(([state, overlayPath, overlay, inks]) => {
+    const opacity = overlay === 'hover' ? LIST_VEIL[appearance.mode] : veil
+    let under = null
+
+    try {
+      const color = parseColor(at(appearance, overlayPath))
+
+      under = over({ ...color, a: color.a * opacity }, resolve('surfaces.card'))
+    } catch (error) {
+      under = null
+    }
+
+    inks.forEach((path) => {
+      guard(measured.listText, { state, ink: washInkLabel(path), foreground: inkOf(path), overlay: at(appearance, overlayPath), opacity, surface: under ? hex(under) : 'unreadable', surfacePath: 'surfaces.card', minimum: TEXT }, () => ratio(over(parseColor(inkOf(path)), under), under))
+    })
+  })
+
+  LIST_BAR_OVERLAYS.forEach(([name, overlayPath]) => {
+    let bar = null
+    let under = null
+
+    try {
+      const color = parseColor(at(appearance, overlayPath))
+      const layer = { ...color, a: color.a * veil }
+
+      under = over(layer, resolve('surfaces.card'))
+      bar = over(layer, over(parseColor(appearance.focus.primary), resolve('surfaces.card')))
+    } catch (error) {
+      bar = null
+      under = null
+    }
+
+    guard(measured.graphics, { label: `Chosen list entry bar under the overlay in the ${name}`, foreground: bar ? hex(bar) : 'unreadable', surface: under ? hex(under) : 'unreadable', surfacePath: 'surfaces.card', minimum: GRAPHIC }, () => ratio(bar, under))
   })
 
   ACCENT_MODES.forEach((mode) => {

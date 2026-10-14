@@ -1,4 +1,4 @@
-// Vuetify paints the app, its cards and its tables from constants of its own (#ffffff and #121212, #ffffff and #1e1e1e). These rules take those surfaces from the appearance in force (the custom properties on the root, utilities/appearance.js), with the specificity of Vuetify's own rules and after them, so a preset can change them. The baseline presets hold Vuetify's constants.
+// Vuetify paints the app, its cards, its tables, its lists and its expansion panels from constants of its own (#ffffff and #121212, #ffffff and #1e1e1e). These rules take those surfaces from the appearance in force (the custom properties on the root, utilities/appearance.js), with the specificity of Vuetify's own rules and after them, so a preset can change them. The baseline presets hold Vuetify's constants.
 
 .v-application {
   &.theme--light,
@@ -11,6 +11,14 @@
 .v-data-table {
   &.theme--light,
   &.theme--dark {
+    background-color: var(--ae-card);
+  }
+}
+
+// A list (a menu's, a dropdown's, the About page's) and an expansion panel are Vuetify sheets with a surface of its own, so they took #1e1e1e or #ffffff on a preset whose card is another colour, and the text drawn on them (the inks below, the section colours of the history menu) was measured against the card and not against what was behind it. They take the card, as a card does; scripts/check-contrast.js requires each rule.
+@each $theme in light, dark {
+  .v-list.theme--#{$theme},
+  .v-expansion-panels.theme--#{$theme} .v-expansion-panel {
     background-color: var(--ae-card);
   }
 }
@@ -54,6 +62,33 @@
   .v-data-table-header th.sortable:focus-visible .v-data-table-header__icon {
     opacity: 1;
   }
+}
+
+// Every list (the history menu's, a dropdown's, a menu's): Vuetify's overlay over an entry is the text colour at 4% hovered up to 16% on the light theme and 8% up to 32% on the dark one. The strongest takes a section colour (the history menu's icons) under 3:1 on every preset, and takes the chosen entry of a dropdown, which is drawn in the focus colour under an overlay in that colour, under 4.5:1 on the dark presets (the dark card under it is a mid grey). So every state of an entry but the hovered one is held to the opacity of a hovered entry, the chosen entry is told by the colour of its text and by a bar on its leading edge (below), and the keyboard's highlight takes the ring a focused entry has. scripts/check-contrast.js reads these rules and measures the text and the section colours under that overlay (`LIST_VEIL` in utilities/appearance-contrast.js).
+@each $theme, $opacity in (light: 0.04, dark: 0.08) {
+  .v-application .v-list .v-list-item.theme--#{$theme} {
+    &:focus::before,
+    &.v-list-item--active::before,
+    &.v-list-item--active:hover::before,
+    &.v-list-item--active:focus::before,
+    &.v-list-item--highlighted::before {
+      opacity: $opacity;
+    }
+  }
+}
+
+.v-application .v-list .v-list-item--highlighted {
+  outline: 2px solid var(--ae-primary);
+  outline-offset: -2px;
+}
+
+// The chosen entry of a list (a dropdown's chosen option, the preset of a hand-written menu that is `input-value`) carries a 3px bar on its leading edge in the focus colour, inset so it does not shift the layout: the way a selected table row carries one (styles/page-chrome.scss). The overlay is the same as a hovered entry's and an entry of a hand-written menu is drawn in the text ink, so neither the overlay nor the colour of the text tells the chosen entry from the one under the pointer. The 2px ring of the keyboard's highlight is drawn over the bar and stops short of it: an entry that is both is a 5px bar, 3px of it clear of the ring. scripts/check-contrast.js reads these two rules and measures the bar on the entry's overlay.
+.v-application .v-list .v-list-item--active {
+  box-shadow: inset 3px 0 0 var(--ae-primary);
+}
+
+.v-application .v-list .v-list-item--active.v-list-item--highlighted {
+  box-shadow: inset 5px 0 0 var(--ae-primary);
 }
 
 // A link in running text (an anchor with no Vuetify class: the router links, the external links, the research views' tech links, the map's text actions) is underlined in a preset whose focus colour is too close to its text ink to tell a link by colour (utilities/appearance.js: `focus.linkLine` is emitted as `--ae-link-line` only for such a preset, and the selector matches the root's inline style only then, so the other presets draw their links as before). scripts/check-contrast.js requires the rule whenever the focus colour is under 20 CIEDE2000 from the text.

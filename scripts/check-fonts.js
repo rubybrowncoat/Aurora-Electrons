@@ -9,10 +9,10 @@
   Run: node scripts/check-fonts.js
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
+const { plantedCopy, patched } = require('./lib/mutant-source')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -80,13 +80,7 @@ const source = (relative, { patch = {}, directory } = {}) => {
     return text
   }
 
-  const [from, to] = patch[relative]
-
-  if (text.split(from).length !== 2) {
-    throw new Error(`The mutation of ${relative} does not apply exactly once: ${from}`)
-  }
-
-  return text.replace(from, () => to)
+  return patched(relative, text, ...patch[relative])
 }
 
 const code = (text) => text.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*|<!--)/.test(line)).join('\n')
@@ -497,25 +491,10 @@ const MUTATIONS = [
   ['the research graph\'s own family', { patch: { 'src/renderer/components/research/PathView.vue': ["'font-family': this.typeface.family,", "'font-family': 'Roboto, sans-serif',"] } }],
   ['the typeface left out of the preferences', { file: 'preferences.js', from: "  add('appearance', 'app', font.key, (value) => {\n    const read = font.read(value)\n\n    return read.ok ? { ok: true, value: read.font } : { ok: false, reason: 'is not a typeface and text size this version offers' }\n  })\n", to: '' }],
   ['any typeface record imported', { file: 'preferences.js', from: "return read.ok ? { ok: true, value: read.font } : { ok: false, reason: 'is not a typeface and text size this version offers' }", to: 'return { ok: true, value }' }],
-  ['a fixed pixel text size in the layout', { patch: { 'src/renderer/layouts/default.vue': ['.rail__label {\n  font-size: calc(11px * var(--ae-font-scale));', '.rail__label {\n  font-size: 11px;'] } }],
+  ['a fixed pixel text size in the layout', { patch: { 'src/renderer/layouts/default.vue': ['  font-size: calc(11px * var(--ae-font-scale));\n  line-height: 16.5px;', '  font-size: 11px;\n  line-height: 16.5px;'] } }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-fonts-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const text = fs.readFileSync(target, 'utf8')
-
-  if (text.split(from).length !== 2) {
-    throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
-  }
-
-  fs.writeFileSync(target, text.replace(from, () => to))
-
-  return directory
-}
+const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-fonts-mutant-', file, from, to)
 
 const runChecks = async ({ directory, patch = {} } = {}) => {
   const results = []
@@ -532,6 +511,38 @@ const runChecks = async ({ directory, patch = {} } = {}) => {
 
   return results
 }
+
+// A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
+const judge = async (fault) => {
+  let directory
+
+  try {
+    try {
+      directory = fault.file ? mutatedCopy(fault) : undefined
+      Object.keys(fault.patch ?? {}).forEach((relative) => source(relative, { patch: fault.patch }))
+      await load(directory)
+    } catch (error) {
+      return { invalid: error.message }
+    }
+
+    return { failed: (await runChecks({ directory, patch: fault.patch })).filter(([, result]) => result !== true).length }
+  } catch (error) {
+    return { error: error.message }
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+// Faults the runner must report as invalid, and not as caught (the self-test of `judge`): a module that does not parse, a module outside the ones the checks load that does not parse, a component whose script does not parse, and an anchor that matches nothing in a module or in a component.
+const INVALID = [
+  ['a module that does not parse', { file: 'appearance.js', from: 'export const PRESETS = {', to: 'export const PRESETS = ] {' }],
+  ['a module that the checks do not load and that does not parse', { file: 'preferences.js', from: "add('appearance', 'app', font.key, (value) => {", to: "add('appearance', 'app', font.key, ] (value) => {" }],
+  ['a component whose script does not parse', { patch: { 'src/renderer/pages/map.vue': ["'font-family': this.typeface.family,", "'font-family': ] this.typeface.family,"] } }],
+  ['an anchor that matches nothing in a module', { file: 'appearance.js', from: 'export const PRESETS = {{{', to: 'export const PRESETS = {' }],
+  ['an anchor that matches nothing in a component', { patch: { 'src/renderer/layouts/default.vue': ['.rail__label {{{', '.rail__label {'] } }],
+]
 
 const run = async () => {
   let failures = 0
@@ -554,23 +565,25 @@ const run = async () => {
   console.log('\nMutations: each must fail at least one check')
 
   for (const [label, fault] of MUTATIONS) {
-    let directory
+    const { failed, invalid, error } = await judge(fault)
 
-    try {
-      directory = fault.file ? mutatedCopy(fault) : undefined
-
-      const failed = (await runChecks({ directory, patch: fault.patch })).filter(([, result]) => result !== true)
-
-      tally(failed.length > 0)
-      console.log(`${failed.length ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed.length ? `${failed.length} checks fail` : 'every check still passes'}]`)
-    } catch (error) {
+    if (invalid !== undefined) {
       tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error.message}]`)
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
+      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+    } else if (error !== undefined) {
+      tally(false)
+      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+    } else {
+      tally(failed > 0)
+      console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
     }
+  }
+
+  for (const [label, fault] of INVALID) {
+    const unparsable = await judge(fault)
+
+    tally(unparsable.invalid !== undefined)
+    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

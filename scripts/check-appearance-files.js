@@ -6,9 +6,9 @@
   It proves, without a browser: the table of roles is the roles of the five presets, each with the kind of value the presets use; every preset exports, reads back and exports again with its roles, name, mode, base, font and reference unchanged and no default used and no contrast finding; the three kinds of failure (an unsupported version, a malformed field, an unknown role) are told apart, a version failure comes alone, the unknown names `__proto__` and `constructor` are unknown, and the sizes are bounded (the text, each string, the failures kept); a partial file lists exactly the roles it left out with the base's value and says which base it used; a body ink the colour of the page, an unreadable text ink and an unsupported font are explained before anything is applied; a file that fails changes nothing, a draft writes nothing, Apply writes the document and the choice in one assignment of the store or not at all, and a fresh start reads the kept file back; a stored file that no longer passes is reported and left as it is; and the files the feature is made of name no game format. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing. Exit code 1 when a check fails.
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
+const { plantedCopy } = require('./lib/mutant-source')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -639,22 +639,7 @@ const runChecks = async (directory) => {
 }
 
 // A copy of the utilities folder in the temp folder in which `file` has `from` replaced by `to`.
-const mutatedCopy = (file, from, to) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-appearance-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const source = fs.readFileSync(target, 'utf8')
-
-  if (source.split(from).length !== 2) {
-    throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
-  }
-
-  fs.writeFileSync(target, source.replace(from, () => to))
-
-  return directory
-}
+const mutatedCopy = (file, from, to) => plantedCopy(utilitiesDirectory, 'ae-appearance-mutant-', file, from, to)
 
 const FILE = 'appearance-file.js'
 const APPEARANCE = 'appearance.js'
@@ -693,6 +678,35 @@ const MUTATIONS = [
   ['the kept file not read back at start', APPEARANCE, 'imported.custom = parsed && parsed.ok ? register(CUSTOM_ID, parsed) : null', 'imported.custom = null'],
 ]
 
+// A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
+const judge = async ([, file, from, to]) => {
+  let directory
+
+  try {
+    try {
+      directory = mutatedCopy(file, from, to)
+      await load(directory)
+    } catch (error) {
+      return { invalid: error.message }
+    }
+
+    return { failed: (await runChecks(directory)).filter(([, result]) => result !== true).length }
+  } catch (error) {
+    return { error: error.message }
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+// Faults the runner must report as invalid, and not as caught (the self-test of `judge`): a module that does not parse, a module outside the ones the checks load that does not parse, and an anchor that matches nothing.
+const INVALID = [
+  ['a module that does not parse', APPEARANCE, 'export const PRESETS = {', 'export const PRESETS = ] {'],
+  ['a module that the checks do not load and that does not parse', 'map-borders.js', 'context.font = type.font(NAME_SIZE)', 'context.font = ] type.font(NAME_SIZE)'],
+  ['an anchor that matches nothing', APPEARANCE, 'export const PRESETS = {{{', 'export const PRESETS = {'],
+]
+
 const run = async () => {
   let failures = 0
   let checks = 0
@@ -718,20 +732,28 @@ const run = async () => {
 
   console.log('\nMutations: each must fail at least one check')
 
-  for (const [label, file, from, to] of MUTATIONS) {
-    const directory = mutatedCopy(file, from, to)
+  for (const fault of MUTATIONS) {
+    const { failed, invalid, error } = await judge(fault)
+    const [label] = fault
 
-    try {
-      const failed = (await runChecks(directory)).filter(([, result]) => result !== true)
-
-      tally(failed.length > 0)
-      console.log(`${failed.length ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed.length ? `${failed.length} checks fail` : 'every check still passes'}]`)
-    } catch (error) {
+    if (invalid !== undefined) {
       tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error.message}]`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
+      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+    } else if (error !== undefined) {
+      tally(false)
+      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+    } else {
+      tally(failed > 0)
+      console.log(`${failed ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed ? `${failed} checks fail` : 'every check still passes'}]`)
     }
+  }
+
+  for (const entry of INVALID) {
+    const [label] = entry
+    const unparsable = await judge(entry)
+
+    tally(unparsable.invalid !== undefined)
+    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

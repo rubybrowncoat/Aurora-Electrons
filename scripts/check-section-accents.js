@@ -8,11 +8,12 @@
 
   Run: node scripts/check-section-accents.js
 */
+const { spawnSync } = require('child_process')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
+const { plantedCopy } = require('./lib/mutant-source')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -106,6 +107,9 @@ const vuetifyStates = (mode) => {
 
   return { activated: value('activated'), pressed: value('pressed') }
 }
+
+// The opacity Vuetify's own stylesheet draws over a list entry in the colour of its text, by theme and the selector's tail (`:hover`, `:focus`, `--active`, `--active:focus`, `.v-list-item--highlighted`), read from dist/vuetify.css and not from the code under check.
+const vuetifyListOpacity = (mode, tail) => Number(new RegExp(`\\.theme--${mode}\\.v-list-item${tail.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}::before\\s*\\{[^}]*opacity:\\s*([0-9.]+)`).exec(fs.readFileSync(path.join(root, 'node_modules', 'vuetify', 'dist', 'vuetify.css'), 'utf8'))[1])
 
 // The backgrounds a section's text can sit on, worked out here from the surfaces and Vuetify's own files, and not by the code under check: each of the page, the card and the chrome, plain, under the hover wash, under the overlay of a hovered and of a focused active tab in the text colour itself; the card under each wash of a table row.
 const fixed = new WeakMap()
@@ -560,6 +564,212 @@ const CHECKS = [
     return verdict(problems)
   }],
 
+  ['an accent is measured on the washes it is drawn over: its active and its hover wash over the page, the card and the chrome, the icon plate over the active entry and over a hovered row, a hovered table row and a list entry under the overlay Vuetify draws over it, in every mode of every preset, at 3:1, and one that reads on each wash alone and not on the two layered is a finding of the plate alone; the text of the page is measured on the same washes, one over another, at 4.5:1', async (ctx) => {
+    const problems = []
+    const { measureAppearance } = ctx.contrast
+
+    // Worked out here from the hex digits: the colour at the alpha over the surface, and the ratio of the colour to it.
+    const luminanceOf = (color) => channels(color).reduce((sum, channel, index) => sum + [0.2126, 0.7152, 0.0722][index] * (channel / 255 <= 0.04045 ? channel / 255 / 12.92 : ((channel / 255 + 0.055) / 1.055) ** 2.4), 0)
+    const washed = (color, alpha, surface) => `#${channels(color).map((channel, index) => Math.round(alpha * channel + (1 - alpha) * channels(surface)[index]).toString(16).padStart(2, '0')).join('')}`
+    const ratioOf = (a, b) => (Math.max(luminanceOf(a), luminanceOf(b)) + 0.05) / (Math.min(luminanceOf(a), luminanceOf(b)) + 0.05)
+
+    // The layers a state draws over its surface, bottom to top, as [colour, alpha]: the accent at the alpha of a wash, the hover colour of the appearance, or the text ink at the opacity Vuetify gives a hovered list entry (its stylesheet: the app holds every state of every list to it).
+    const colourLayer = (value) => {
+      const rgba = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(value)
+
+      return rgba ? [`#${rgba.slice(1, 4).map((part) => Number(part).toString(16).padStart(2, '0')).join('')}`, Number(rgba[4])] : [value, 1]
+    }
+    const layersOf = (appearance, color, state) => {
+      const hoverLayer = colourLayer(appearance.focus.hover)
+      const [inkColour, inkAlpha] = colourLayer(appearance.inks.text)
+      const soft = [color, appearance.washes.sectionSoft]
+      const tint = [color, appearance.washes.sectionTint]
+
+      return { 'active wash': [soft], 'hover wash': [tint], 'plate over the active entry': [soft, tint], 'plate over a hovered row': [hoverLayer, tint], 'hovered table row': [hoverLayer], 'list entry under its overlay': [[inkColour, inkAlpha * vuetifyListOpacity(appearance.mode, ':hover')]] }[state]
+    }
+    const distinctCount = (appearance, paths) => new Set(paths.map((path) => appearance.surfaces[path.split('.')[1]])).size
+
+    presets(ctx).forEach((appearance) => {
+      const rows = measureAppearance(appearance).sectionWashes
+      const per = (mode) => rows.filter((row) => row.mode === mode)
+      const perAccent = 2 * distinctCount(appearance, ['surfaces.background', 'surfaces.card', 'surfaces.chrome']) + 1 + distinctCount(appearance, ['surfaces.chrome', 'surfaces.card']) + 2
+
+      expectEqual([per('on').length, per('restrained').length, per('off').length], [9 * perAccent, 9 * perAccent, perAccent], `${appearance.id}: the rows of each mode for the two washes over each surface, the two plates, the hovered table row and the list entry`, problems)
+      expectEqual([...new Set(rows.map((row) => row.state))].sort(), ['active wash', 'hover wash', 'hovered table row', 'list entry under its overlay', 'plate over a hovered row', 'plate over the active entry'], `${appearance.id}: the two washes, the two plates, the hovered table row and the list entry`, problems)
+      expectEqual(rows.every((row) => row.minimum === 3 && Number.isFinite(row.ratio)), true, `${appearance.id}: a ratio and the 3:1 minimum on each row`, problems)
+      expectEqual(rows.filter((row) => !row.pass).map((row) => `${row.mode} ${row.section} ${row.color} ${row.state} ${row.surfacePath} ${row.ratio.toFixed(2)}`), [], `${appearance.id}: the rows under their minimum`, problems)
+      expectEqual(per('off').every((row) => row.section === null), true, `${appearance.id}: the off rows name no section`, problems)
+      expectEqual(rows.filter((row) => row.state === 'plate over the active entry').every((row) => row.surfacePath === 'surfaces.chrome'), true, `${appearance.id}: the plate over the active entry is drawn on the chrome of the flyout`, problems)
+      expectEqual(rows.filter((row) => row.state === 'hovered table row' || row.state === 'list entry under its overlay').every((row) => row.surfacePath === 'surfaces.card'), true, `${appearance.id}: a hovered table row and a list entry are drawn on the card (the stylesheet gives the lists the card)`, problems)
+
+      rows.forEach((row) => {
+        const under = layersOf(appearance, row.color, row.state).reduce((below, [color, alpha]) => washed(color, alpha, below), appearance.surfaces[row.surfacePath.split('.')[1]])
+
+        if (channels(row.surface).some((value, index) => Math.abs(value - channels(under)[index]) > 2) || Math.abs(row.ratio - ratioOf(row.color, under)) > 0.02 * row.ratio) {
+          problems.push(`${appearance.id}: ${row.mode} ${row.section} ${row.color} on its ${row.state} over the ${row.surfacePath}: ${row.surface} at ${row.ratio.toFixed(3)}:1, worked out ${under} at ${ratioOf(row.color, under).toFixed(3)}:1`)
+        }
+      })
+
+      const textRows = measureAppearance(appearance).washText
+      const inkToken = { 'body text': ['body', 1], 'secondary text': ['muted', 1], 'Vuetify text': ['text', 1], 'Vuetify secondary text (.text--secondary)': ['textMuted', 1], 'body text at 80 %': ['body', 0.8], 'count of available technologies': null }
+      const textPerAccent = 2 * distinctCount(appearance, ['surfaces.background', 'surfaces.card', 'surfaces.chrome']) * 4 + 2 * 2 + 1 + 2
+      const textLayers = { 'active wash': (color) => [[color, appearance.washes.sectionSoft]], 'hover wash': (color) => [[color, appearance.washes.sectionTint]], 'active wash over the active wash': (color) => [[color, appearance.washes.sectionSoft], [color, appearance.washes.sectionSoft]], 'active wash over the hover wash': (color) => [[color, appearance.washes.sectionTint], [color, appearance.washes.sectionSoft]] }
+
+      expectEqual([textRows.filter((row) => row.mode === 'on').length, textRows.filter((row) => row.mode === 'restrained').length, textRows.filter((row) => row.mode === 'off').length], [9 * textPerAccent, 9 * textPerAccent, textPerAccent], `${appearance.id}: the rows of each mode for the text on the washes`, problems)
+      expectEqual([...new Set(textRows.map((row) => row.state))].sort(), Object.keys(textLayers).sort(), `${appearance.id}: the states of the text on the washes`, problems)
+      expectEqual([...new Set(textRows.map((row) => row.ink))].sort(), Object.keys(inkToken).sort(), `${appearance.id}: the inks measured on the washes`, problems)
+      expectEqual(textRows.filter((row) => row.state.includes(' over ')).every((row) => row.surfacePath === 'surfaces.card' && (row.ink === 'body text' || row.ink === 'Vuetify text')), true, `${appearance.id}: a wash over a wash is the abbreviation of a research row, drawn in body ink on the card`, problems)
+      expectEqual(textRows.every((row) => row.minimum === 4.5 && Number.isFinite(row.ratio)), true, `${appearance.id}: a ratio and the 4.5:1 minimum on each text row`, problems)
+      expectEqual(textRows.filter((row) => !row.pass).map((row) => `${row.mode} ${row.section} ${row.ink} ${row.state} ${row.surfacePath} ${row.ratio.toFixed(2)}`), [], `${appearance.id}: the text rows under their minimum`, problems)
+
+      textRows.forEach((row) => {
+        const under = textLayers[row.state](row.color).reduce((below, [color, alpha]) => washed(color, alpha, below), appearance.surfaces[row.surfacePath.split('.')[1]])
+        const [inkColour, inkAlpha] = inkToken[row.ink] === null ? [row.foreground, 1] : ((([colour, alpha]) => [colour, alpha * inkToken[row.ink][1]])(colourLayer(appearance.inks[inkToken[row.ink][0]])))
+        const drawn = washed(inkColour, inkAlpha, under)
+
+        if (channels(row.surface).some((value, index) => Math.abs(value - channels(under)[index]) > 2) || Math.abs(row.ratio - ratioOf(drawn, under)) > 0.02 * row.ratio) {
+          problems.push(`${appearance.id}: ${row.mode} ${row.section} ${row.ink} on its ${row.state} over the ${row.surfacePath}: ${row.surface} at ${row.ratio.toFixed(3)}:1, worked out ${under} and ${drawn} at ${ratioOf(drawn, under).toFixed(3)}:1`)
+        }
+      })
+
+      // The live line of the flyout's active entry is the body ink at 80 % on the active wash over the chrome, and nowhere else.
+      expectEqual([...new Set(textRows.filter((row) => row.ink === 'body text at 80 %').map((row) => `${row.state} ${row.surfacePath}`))], ['active wash surfaces.chrome'], `${appearance.id}: where the body ink at 80 % is measured`, problems)
+
+      // The count of the research fields is the available status colour (chart slot 3) made readable: the colour itself when it reads at 4.5:1 on the card and under the active and the hover wash of every accent of every mode, else a mix with the body ink that does, and it is measured on the card's two washes.
+      const rawCount = appearance.charts.categorical[2]
+      const countRows = textRows.filter((row) => row.ink === 'count of available technologies')
+      const countedColour = ctx.contrast.readableWashText(appearance, rawCount)
+      const accentsOf = [...new Set(ctx.contrast.ACCENT_MODES.flatMap((mode) => ctx.contrast.sectionAccents(appearance, mode)))]
+      const countBackdrops = [appearance.surfaces.card, ...accentsOf.flatMap((accent) => [appearance.washes.sectionSoft, appearance.washes.sectionTint].map((alpha) => washed(accent, alpha, appearance.surfaces.card)))]
+
+      expectEqual([...new Set(countRows.map((row) => `${row.state} ${row.surfacePath}`))].sort(), ['active wash surfaces.card', 'hover wash surfaces.card'], `${appearance.id}: where the count of available technologies is measured`, problems)
+      expectEqual([...new Set(countRows.map((row) => row.foreground))], [countedColour], `${appearance.id}: the count is measured in the colour the status style carries`, problems)
+      expectEqual(countBackdrops.every((backdrop) => ratioOf(countedColour, backdrop) >= 4.5 - 0.02), true, `${appearance.id}: the count ${countedColour} reads at 4.5:1 on the card and under every accent's two washes`, problems)
+      expectEqual(countedColour === rawCount ? countBackdrops.every((backdrop) => ratioOf(rawCount, backdrop) >= 4.5 - 0.02) : countBackdrops.some((backdrop) => ratioOf(rawCount, backdrop) < 4.5 + 0.02), true, `${appearance.id}: the status colour ${rawCount} is kept when it reads and changed only when it does not`, problems)
+
+      // The text of the flyout's rows and of the Empires list under the pointer: each ink on the hover colour over the chrome.
+      const hoverOver = colourLayer(appearance.focus.hover)
+      const hovered = washed(hoverOver[0], hoverOver[1], appearance.surfaces.chrome)
+      const hoveredRows = measureAppearance(appearance).rows.filter((row) => / on a hovered entry over the chrome$/.test(row.label))
+      const hoveredInks = { 'body text': 'inks.body', 'secondary text': 'inks.muted', 'Vuetify text': 'inks.text', 'Vuetify secondary text (.text--secondary)': 'inks.textMuted', link: 'focus.primary' }
+
+      expectEqual(hoveredRows.map((row) => row.label.replace(/ on a hovered entry over the chrome$/, '')), Object.keys(hoveredInks), `${appearance.id}: the inks measured on a hovered entry over the chrome`, problems)
+      hoveredRows.forEach((row) => {
+        const [inkColour, inkAlpha] = colourLayer(hoveredInks[row.label.replace(/ on a hovered entry over the chrome$/, '')].split('.').reduce((value, key) => value[key], appearance))
+        const drawn = washed(inkColour, inkAlpha, hovered)
+
+        if (row.minimum !== 4.5 || channels(row.surface).some((value, index) => Math.abs(value - channels(hovered)[index]) > 2) || Math.abs(row.ratio - ratioOf(drawn, hovered)) > 0.02 * row.ratio) {
+          problems.push(`${appearance.id}: ${row.label}: ${row.surface} at ${row.ratio.toFixed(3)}:1 (minimum ${row.minimum}), worked out ${hovered} and ${drawn} at ${ratioOf(drawn, hovered).toFixed(3)}:1`)
+        }
+      })
+
+      // The text of a list entry under the overlay Vuetify draws in the colour of the entry's own text: a plain entry in the text ink (the pointer at Vuetify's hover overlay, focused or highlighted at the opacity the stylesheet holds), an active entry (the chosen one of a dropdown) in the focus colour under an overlay in that colour; at the hovered overlay in every state the app holds, and at Vuetify's strongest for a list the stylesheet leaves alone.
+      const listPaths = { 'Vuetify text': 'inks.text', 'Vuetify secondary text (.text--secondary)': 'inks.textMuted', link: 'focus.primary' }
+      const listStates = { 'entry under the pointer': ['inks.text', false], 'entry focused or highlighted': ['inks.text', true], 'active entry': ['focus.primary', true] }
+      const listTokenOf = (path) => path.split('.').reduce((value, key) => value[key], appearance)
+      const checkListText = (rows, heldOpacity, what) => {
+        expectEqual(rows.map((row) => `${row.state}: ${row.ink}`), ['entry under the pointer: Vuetify text', 'entry under the pointer: Vuetify secondary text (.text--secondary)', 'entry focused or highlighted: Vuetify text', 'entry focused or highlighted: Vuetify secondary text (.text--secondary)', 'active entry: link', 'active entry: Vuetify secondary text (.text--secondary)'], `${appearance.id}: the list entry states and inks measured (${what})`, problems)
+        rows.forEach((row) => {
+          const [overlayPath, held] = listStates[row.state]
+          const opacity = held ? heldOpacity : vuetifyListOpacity(appearance.mode, ':hover')
+          const [overlayColour, overlayAlpha] = colourLayer(listTokenOf(overlayPath))
+          const under = washed(overlayColour, overlayAlpha * opacity, appearance.surfaces.card)
+          const [inkColour, inkAlpha] = colourLayer(listTokenOf(listPaths[row.ink]))
+          const drawn = washed(inkColour, inkAlpha, under)
+
+          if (row.opacity !== opacity || row.minimum !== 4.5 || channels(row.surface).some((value, index) => Math.abs(value - channels(under)[index]) > 2) || Math.abs(row.ratio - ratioOf(drawn, under)) > 0.02 * row.ratio) {
+            problems.push(`${appearance.id}: ${row.state} ${row.ink} (${what}): the overlay ${row.opacity} (wanted ${opacity}) and ${row.surface} at ${row.ratio.toFixed(3)}:1 (minimum ${row.minimum}), worked out ${under} and ${drawn} at ${ratioOf(drawn, under).toFixed(3)}:1`)
+          }
+        })
+      }
+      const hoverOpacity = vuetifyListOpacity(appearance.mode, ':hover')
+
+      checkListText(measureAppearance(appearance).listText, hoverOpacity, 'the app\'s lists')
+      expectEqual(measureAppearance(appearance).listText.filter((row) => !row.pass).map((row) => `${row.state} ${row.ink} ${row.ratio.toFixed(2)}`), [], `${appearance.id}: the list entry text under its minimum`, problems)
+      checkListText(measureAppearance(appearance, { listVeil: ctx.contrast.VUETIFY_LIST_STATES[appearance.mode].pressed }).listText, ctx.contrast.VUETIFY_LIST_STATES[appearance.mode].pressed, 'Vuetify\'s strongest overlay')
+
+      // The bar of a chosen entry: the focus colour at 3:1 against the entry, both under the overlay of the entry (the text ink for a plain or hand-written entry, the focus colour for a dropdown's chosen option) at the held opacity, which lies over the bar and over the card behind it.
+      const checkBar = (rows, heldOpacity, what) => {
+        expectEqual(rows.map((row) => row.label), ['Chosen list entry bar under the overlay in the text ink', 'Chosen list entry bar under the overlay in the focus colour'], `${appearance.id}: the bars measured (${what})`, problems)
+        rows.forEach((row, index) => {
+          const [overlayColour, overlayAlpha] = colourLayer(listTokenOf(['inks.text', 'focus.primary'][index]))
+          const under = washed(overlayColour, overlayAlpha * heldOpacity, appearance.surfaces.card)
+          const bar = washed(overlayColour, overlayAlpha * heldOpacity, appearance.focus.primary)
+
+          if (row.minimum !== 3 || channels(row.surface).some((value, at) => Math.abs(value - channels(under)[at]) > 2) || channels(row.foreground).some((value, at) => Math.abs(value - channels(bar)[at]) > 2) || Math.abs(row.ratio - ratioOf(bar, under)) > 0.02 * row.ratio) {
+            problems.push(`${appearance.id}: ${row.label} (${what}): ${row.foreground} on ${row.surface} at ${row.ratio.toFixed(3)}:1 (minimum ${row.minimum}), worked out ${bar} on ${under} at ${ratioOf(bar, under).toFixed(3)}:1`)
+          }
+        })
+      }
+      const barRows = (options) => measureAppearance(appearance, options).graphics.filter(({ label }) => label.startsWith('Chosen list entry bar'))
+
+      checkBar(barRows(), hoverOpacity, 'the app\'s lists')
+      expectEqual(barRows().filter((row) => !row.pass).map((row) => `${row.label} ${row.ratio.toFixed(2)}`), [], `${appearance.id}: the bars under their minimum`, problems)
+      checkBar(barRows({ listVeil: ctx.contrast.VUETIFY_LIST_STATES[appearance.mode].pressed }), ctx.contrast.VUETIFY_LIST_STATES[appearance.mode].pressed, 'Vuetify\'s strongest overlay')
+    })
+
+    const dark = ctx.appearance.resolveAppearance('dark')
+    const withResearch = (color) => ({ ...dark, sections: { ...dark.sections, accents: dark.sections.accents.map((accent, index) => (index === 5 ? color : accent)) } })
+    const sectionFindings = (appearance, pattern) => ctx.file.contrastReport(appearance).findings.filter(({ label }) => pattern.test(label)).map(({ label, foreground }) => `${label} ${foreground}`)
+    const failing = (appearance) => measureAppearance(appearance).sectionWashes.filter((row) => !row.pass).map((row) => `${row.mode} ${row.section} ${row.state} ${row.surfacePath}`)
+
+    // A green that reads on the bare surfaces and fails its own active wash over the card, and the plates drawn over it.
+    const faint = withResearch('#008300')
+
+    expectEqual(measureAppearance(faint).sections.filter((row) => row.color === '#008300').every((row) => row.pass), true, 'the accent reads at 3:1 on every bare surface', problems)
+    expectEqual(failing(faint).filter((row) => /(active|hover) wash/.test(row)), ['on 5 active wash surfaces.card'], 'the wash that takes it under 3:1', problems)
+    expectEqual(sectionFindings(faint, /active wash/), ['Section 6 accent on its active wash (on) #008300'], 'the finding of the wash, with the accent that fails', problems)
+
+    // A green that reads on the bare surfaces and on each wash alone, and fails the plate drawn over the active entry, which is the hover wash over the active one: the finding is the plate's.
+    const layered = withResearch('#008d00')
+    const own = measureAppearance(layered)
+
+    expectEqual(own.sections.filter((row) => row.color === '#008d00').every((row) => row.pass), true, 'the layered accent reads at 3:1 on every bare surface', problems)
+    expectEqual(own.sectionWashes.filter((row) => /wash$/.test(row.state)).every((row) => row.pass), true, 'the layered accent reads on each wash alone', problems)
+    expectEqual(failing(layered), ['on 5 plate over the active entry surfaces.chrome', 'on 5 plate over a hovered row surfaces.chrome'], 'the plates that take it under 3:1', problems)
+    expectEqual(sectionFindings(layered, /section/i), ['Section 6 accent on its plate over the active entry (on) #008d00', 'Section 6 accent on its plate over a hovered row (on) #008d00'], 'the findings of the plates, with the accent that fails', problems)
+
+    expectEqual(sectionFindings({ ...dark, sections: { ...dark.sections, neutral: '#008300' } }, /^Neutral/).slice(0, 1), ['Neutral section accent on its active wash (accents off) #008300'], 'the finding of a neutral accent that fails on its wash alone', problems)
+
+    const strong = measureAppearance({ ...dark, washes: { ...dark.washes, sectionSoft: 0.6 } }).sectionWashes
+
+    expectEqual(strong.some((row) => !row.pass && row.state === 'active wash'), true, 'a stronger active wash is measured', problems)
+    expectEqual(strong.filter((row) => row.state === 'hover wash').every((row, index) => row.ratio === measureAppearance(dark).sectionWashes.filter((other) => other.state === 'hover wash')[index].ratio), true, 'the hover wash is measured at its own alpha', problems)
+
+    const light = ctx.appearance.resolveAppearance('light')
+    const listRows = (appearance, options) => measureAppearance(appearance, options).sectionWashes.filter((row) => row.state === 'list entry under its overlay')
+
+    expectEqual(listRows(dark).every((row) => row.pass), true, 'every accent reads under the overlay a list entry keeps in the app', problems)
+    expectEqual(listRows(dark, { listVeil: 0.32 }).some((row) => !row.pass && row.mode === 'on' && row.section === 1), true, 'Vuetify\'s strongest overlay over the dark card takes the orange accent under 3:1', problems)
+
+    const muddy = { ...light, inks: { ...light.inks, muted: '#6a6a6a' } }
+
+    expectEqual([...new Set(sectionFindings(muddy, /^secondary text on section 7's active wash \(on\)/))], ['secondary text on section 7\'s active wash (on) #6a6a6a'], 'the finding of the secondary ink that a wash takes under 4.5:1, with the ink that fails', problems)
+    expectEqual(measureAppearance(light).washText.filter((row) => !row.pass), [], 'the Light secondary ink reads on every wash', problems)
+
+    ;['light', 'dark'].forEach((mode) => {
+      const states = ctx.contrast.VUETIFY_LIST_STATES[mode]
+
+      expectEqual(states, { hover: vuetifyListOpacity(mode, ':hover'), focus: vuetifyListOpacity(mode, ':focus'), activated: vuetifyListOpacity(mode, '--active'), pressed: vuetifyListOpacity(mode, '--active:focus') }, `the overlay of a list entry on the ${mode} theme, as Vuetify's stylesheet draws it`, problems)
+      expectEqual(vuetifyListOpacity(mode, '.v-list-item--highlighted'), states.pressed, `the ${mode} theme's highlighted entry takes the pressed overlay`, problems)
+      expectEqual(ctx.contrast.LIST_VEIL[mode], states.hover, `the ${mode} theme's lists hold every state to the hovered overlay`, problems)
+    })
+
+    // At Vuetify's strongest overlay the text of the chosen entry of a dropdown falls under 4.5:1 on the dark theme (the focus colour under an overlay in itself), and at the app's own it does not.
+    const darkStrongest = measureAppearance(dark, { listVeil: ctx.contrast.VUETIFY_LIST_STATES.dark.pressed }).listText
+
+    expectEqual(darkStrongest.some((row) => !row.pass && row.state === 'active entry' && row.ink === 'link'), true, 'dark: the chosen entry\'s text under Vuetify\'s strongest overlay is under 4.5:1', problems)
+    expectEqual(measureAppearance(dark).listText.every((row) => row.pass), true, 'dark: the chosen entry\'s text reads under the app\'s overlay', problems)
+
+    // The text of a list entry is in the report of a file: a chosen entry in a link colour that cannot be read on its overlay is a finding of the list.
+    const dimmed = { ...dark, focus: { ...dark.focus, primary: '#3a4a7a' } }
+
+    expectEqual(ctx.file.contrastReport(dimmed).findings.filter(({ label }) => / of a list$/.test(label)).map(({ label }) => label), ['link on the active entry of a list'], 'the finding of a chosen entry whose text cannot be read', problems)
+    expectEqual(ctx.file.contrastReport(dimmed).findings.filter(({ label }) => label.startsWith('Chosen list entry bar')).map(({ label }) => label), ['Chosen list entry bar under the overlay in the text ink', 'Chosen list entry bar under the overlay in the focus colour'], 'the findings of the bar of a chosen entry in a focus colour too close to the card', problems)
+
+    return verdict(problems)
+  }],
+
   ['the colour of a section as text reads at 4.5:1 on every background text sits on, in every mode of every preset; a colour that already reads is kept, and one that does not keeps its hue', async (ctx) => {
     const problems = []
     const { sectionAccents, sectionTexts, sectionText } = ctx.contrast
@@ -678,7 +888,7 @@ const CHECKS = [
     const tab = (color, share) => ratio(parseColor(color), ctx.contrast.over({ ...parseColor(color), a: share }, card))
 
     expectEqual([tab(soft, states.activated) < 4.5, tab(sectionTexts(bare, 'restrained')[2], states.activated) >= 4.5, tab(sectionTexts(bare, 'restrained')[2], states.pressed) >= 4.5], [true, true, true], 'the raw mix fails over a hovered tab, the text colour reads over a hovered and a focused one', problems)
-    expectEqual(ctx.file.contrastReport(custom).findings.filter(({ label }) => /section/i.test(label)), [], 'the findings of the file', problems)
+    expectEqual(ctx.file.contrastReport(custom).findings.filter(({ label }) => /accent as text/i.test(label)), [], 'the findings of the file about the text of a section', problems)
 
     const exported = ctx.appearance.exportAppearanceFile('dark', 1000)
 
@@ -726,6 +936,29 @@ const MUTATIONS = [
   ['a repeated accent accepted', { file: FILE, from: '} else if (seen.has(color.toLowerCase())) {', to: '} else if (false) {' }],
   ['the accents left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.sections,', to: 'guard([],' }],
   ['the accents left out of the contrast report', { file: FILE, from: '    ...measured.sections.map((row) =>', to: '    ...[].map((row) =>' }],
+  ['the washes of the accents left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.sectionWashes,', to: 'guard([],' }],
+  ['the washes of the accents left out of the contrast report', { file: FILE, from: '    ...measured.sectionWashes.map((row) =>', to: '    ...[].map((row) =>' }],
+  ['the hover wash of an accent measured at the active alpha', { file: CONTRAST, from: "['hover wash', ['washes.sectionTint'], SURFACES]", to: "['hover wash', ['washes.sectionSoft'], SURFACES]" }],
+  ['the washes of the accents measured as no wash', { file: CONTRAST, from: 'a: at(appearance, path) }', to: 'a: 0 }' }],
+  ['the washes of the accents measured over the page only', { file: CONTRAST, from: 'over(layerOf(path, color), below), resolve(surface))', to: 'over(layerOf(path, color), below), resolve(\'surfaces.background\'))' }],
+  ['the icon plates left out of the measurement of the washes', { file: CONTRAST, from: "  ['plate over the active entry', ['washes.sectionSoft', 'washes.sectionTint'], ['surfaces.chrome']],\n  ['plate over a hovered row', ['focus.hover', 'washes.sectionTint'], ['surfaces.chrome', 'surfaces.card']],\n", to: '' }],
+  ['the icon plate over the active entry measured without the active wash it is drawn over', { file: CONTRAST, from: "['washes.sectionSoft', 'washes.sectionTint'], ['surfaces.chrome']]", to: "['washes.sectionTint'], ['surfaces.chrome']]" }],
+  ['the icon plate over a hovered row measured without the hover colour', { file: CONTRAST, from: "['focus.hover', 'washes.sectionTint']", to: "['washes.sectionTint']" }],
+  ['the hovered table row left out of the measurement of the washes', { file: CONTRAST, from: "  ['hovered table row', ['focus.hover'], ['surfaces.card']],\n", to: '' }],
+  ['the hovered table row measured without the hover colour', { file: CONTRAST, from: "['hovered table row', ['focus.hover'], ['surfaces.card']]", to: "['hovered table row', [], ['surfaces.card']]" }],
+  ['the list entry left out of the measurement of the washes', { file: CONTRAST, from: "  ['list entry under its overlay', [LIST_VEIL_LAYER], ['surfaces.card']],\n", to: '' }],
+  ['the list entry measured on the page and not on the card', { file: CONTRAST, from: "['list entry under its overlay', [LIST_VEIL_LAYER], ['surfaces.card']]", to: "['list entry under its overlay', [LIST_VEIL_LAYER], ['surfaces.background']]" }],
+  ['the list overlay measured at Vuetify\'s strongest', { file: CONTRAST, from: 'listVeil === null ? LIST_VEIL[appearance.mode] : listVeil', to: 'VUETIFY_LIST_STATES[appearance.mode].pressed' }],
+  ['the list overlay measured as no overlay', { file: CONTRAST, from: 'return { ...ink, a: ink.a * veil }', to: 'return { ...ink, a: 0 }' }],
+  ['the list overlay of the light theme stated wrongly', { file: CONTRAST, from: 'light: { hover: 0.04, focus: 0.12, activated: 0.12, pressed: 0.16 }', to: 'light: { hover: 0.05, focus: 0.12, activated: 0.12, pressed: 0.16 }' }],
+  ['the text on the washes left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.washText,', to: 'guard([],' }],
+  ['the text on the washes left out of the contrast report', { file: FILE, from: '    ...measured.washText.map((row) =>', to: '    ...[].map((row) =>' }],
+  ['the secondary ink left out of the text measured on the active wash', { file: CONTRAST, from: "['active wash', ['washes.sectionSoft'], SURFACES, ['inks.body', 'inks.muted', 'inks.text', 'inks.textMuted']]", to: "['active wash', ['washes.sectionSoft'], SURFACES, ['inks.body', 'inks.text', 'inks.textMuted']]" }],
+  ['the wash over a wash measured as a single wash', { file: CONTRAST, from: "['active wash over the active wash', ['washes.sectionSoft', 'washes.sectionSoft']", to: "['active wash over the active wash', ['washes.sectionSoft']" }],
+  ['the icon plate over a hovered row measured over the page', { file: CONTRAST, from: "['surfaces.chrome', 'surfaces.card']]", to: "['surfaces.background']]" }],
+  ['the colour that fails left out of a finding', { file: FILE, from: 'foreground: foreground ?? color', to: 'foreground' }],
+  ['a preset accent that reads on the bare surfaces and not on its own active wash', { file: APPEARANCE, from: "sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#009c00',", to: "sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#008300'," }],
+  ['a preset accent that reads on each wash alone and not on the two layered', { file: APPEARANCE, from: "sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#009c00',", to: "sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#008d00'," }],
   ['two sections sharing an accent', { file: 'navigation.js', from: "icon: 'mdi-pencil-ruler', accent: 8 }", to: "icon: 'mdi-pencil-ruler', accent: 0 }" }],
   ['two sections sharing an icon', { file: 'navigation.js', from: "icon: 'mdi-pencil-ruler', accent: 8 }", to: "icon: 'mdi-flask-outline', accent: 8 }" }],
   ['the text colour of a section left as the colour in force', { file: CONTRAST, from: 'read.set(color, readableSectionText(appearance, color))', to: 'read.set(color, color)' }],
@@ -744,37 +977,81 @@ const MUTATIONS = [
   ['the text of the sections left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.sectionText,', to: 'guard([],' }],
   ['the text of the sections left out of the contrast report', { file: FILE, from: '    ...measured.sectionText.map((row) =>', to: '    ...[].map((row) =>' }],
   ['a hover wash as strong as the active one', { file: APPEARANCE, from: 'washes: { ...preset.washes }', to: 'washes: { ...preset.washes, sectionTint: preset.washes.sectionSoft }' }],
+  ['the count of the research fields drawn in the status colour itself', { file: CONTRAST, from: 'kept.set(color, readableMix(appearance, color, (candidate) => backdrops.every((background) => ratio(candidate, background) >= TEXT)))', to: 'kept.set(color, color)' }],
+  ['the count of the research fields made readable on the card alone', { file: CONTRAST, from: 'const backdrops = washBackdrops(appearance)', to: "const backdrops = [solid(appearance, 'surfaces.card')]" }],
+  ['the count of the research fields left out of the text measured on the washes', { file: CONTRAST, from: "  ['active wash', ['washes.sectionSoft'], ['surfaces.card'], [STATUS_TEXT]],\n  ['hover wash', ['washes.sectionTint'], ['surfaces.card'], [STATUS_TEXT]],\n", to: '' }],
+  ['the live line of the flyout left out of the text measured on the washes', { file: CONTRAST, from: "  ['active wash', ['washes.sectionSoft'], ['surfaces.chrome'], ['inks.body@0.8']],\n", to: '' }],
+  ['the text of a hovered entry over the chrome left out of the measurement', { file: CONTRAST, from: 'HOVERED_ENTRY_TEXT.forEach((path) => {', to: ';[].forEach((path) => {' }],
+  ['the text of a list entry left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.listText,', to: 'guard([],' }],
+  ['the text of a list entry left out of the contrast report', { file: FILE, from: '    ...measured.listText.map((row) =>', to: '    ...[].map((row) =>' }],
+  ['the held overlay of a list entry measured as the hovered one', { file: CONTRAST, from: "const opacity = overlay === 'hover' ? LIST_VEIL[appearance.mode] : veil", to: 'const opacity = LIST_VEIL[appearance.mode]' }],
+  ['the bar of a chosen list entry left out of the contrast measurement', { file: CONTRAST, from: 'LIST_BAR_OVERLAYS.forEach(([name, overlayPath]) => {', to: ';[].forEach(([name, overlayPath]) => {' }],
+  ['the bar of a chosen list entry measured under Vuetify\'s strongest overlay', { file: CONTRAST, from: 'const layer = { ...color, a: color.a * veil }', to: 'const layer = { ...color, a: color.a * VUETIFY_LIST_STATES[appearance.mode].pressed }' }],
+  ['the bar of a chosen list entry measured against the page and not the card', { file: CONTRAST, from: "under = over(layer, resolve('surfaces.card'))", to: "under = over(layer, resolve('surfaces.background'))" }],
+  ['the graphics left out of the contrast report', { file: FILE, from: '    ...measured.graphics,\n', to: '' }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-accents-mutant-'))
+const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-accents-mutant-', file, from, to)
 
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const text = fs.readFileSync(target, 'utf8')
-
-  if (text.split(from).length !== 2) {
-    throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
-  }
-
-  fs.writeFileSync(target, text.replace(from, () => to))
-
-  return directory
-}
-
-const runChecks = async (directory) => {
+const runChecks = async (directory, first) => {
   const results = []
+  let modules = first
 
   for (const [name, check] of CHECKS) {
     try {
-      results.push([name, await check(await load(directory))])
+      results.push([name, await check(modules ?? await load(directory))])
     } catch (error) {
       results.push([name, `threw: ${error.message}`])
     }
+
+    modules = undefined
   }
 
   return results
+}
+
+// A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
+const judge = async (fault) => {
+  let directory
+
+  try {
+    let modules
+
+    try {
+      directory = mutatedCopy(fault)
+      modules = await load(directory)
+    } catch (error) {
+      return { invalid: error.message }
+    }
+
+    return { failed: (await runChecks(directory, modules)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
+  } catch (error) {
+    return { error: error.message }
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+// Faults the runner must report as invalid, and not as caught (the self-test of `judge`): a module that does not parse, a module outside the ones the checks load that does not parse, and an anchor that matches nothing.
+const INVALID = [
+  ['a module that does not parse', { file: APPEARANCE, from: 'export const PRESETS = {', to: 'export const PRESETS = ] {' }],
+  ['a module that the checks do not load and that does not parse', { file: 'map-borders.js', from: 'context.font = type.font(NAME_SIZE)', to: 'context.font = ] type.font(NAME_SIZE)' }],
+  ['an anchor that matches nothing', { file: APPEARANCE, from: 'export const PRESETS = {{{', to: 'export const PRESETS = {' }],
+]
+
+// Every fault is judged in a process of its own, because each fresh copy of the modules stays in memory and the many copies of a whole run exhaust the heap of one process.
+const FAULTS = [...MUTATIONS, ...INVALID].map(([, fault]) => fault)
+
+const judgeApart = (index) => {
+  const { stdout, stderr, status } = spawnSync(process.execPath, [__filename, '--fault', String(index)], { encoding: 'utf8', maxBuffer: 1 << 26 })
+
+  try {
+    return JSON.parse(stdout.trim().split('\n').pop())
+  } catch {
+    return { error: `the judging process ended with status ${status}: ${stderr.trim().split('\n').pop()}` }
+  }
 }
 
 const run = async () => {
@@ -797,31 +1074,37 @@ const run = async () => {
 
   console.log('\nMutations: each must fail at least one check, and the checks it fails are listed by number')
 
-  for (const [label, fault] of MUTATIONS) {
-    let directory
+  for (const [index, [label]] of MUTATIONS.entries()) {
+    const { failed, invalid, error } = judgeApart(index)
 
-    try {
-      directory = mutatedCopy(fault)
-
-      const failed = (await runChecks(directory)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index)
-
+    if (invalid !== undefined) {
+      tally(false)
+      console.log(`FAIL  invalid mutant: ${label}  [${invalid}]`)
+    } else if (error !== undefined) {
+      tally(false)
+      console.log(`FAIL  mutation caught: ${label}  [${error}]`)
+    } else {
       tally(failed.length > 0)
       console.log(`${failed.length ? 'PASS' : 'FAIL'}  mutation caught: ${label}  [${failed.length ? `fails check ${failed.join(', ')}` : 'every check still passes'}]`)
-    } catch (error) {
-      tally(false)
-      console.log(`FAIL  mutation caught: ${label}  [${error.message}]`)
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
     }
+  }
+
+  for (const [index, [label]] of INVALID.entries()) {
+    const unparsable = judgeApart(MUTATIONS.length + index)
+
+    tally(unparsable.invalid !== undefined)
+    console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)
 }
 
-run().catch((error) => {
-  console.error(error)
-  process.exit(2)
-})
+if (process.argv[2] === '--fault') {
+  judge(FAULTS[Number(process.argv[3])]).then((verdict) => console.log(JSON.stringify(verdict)))
+} else {
+  run().catch((error) => {
+    console.error(error)
+    process.exit(2)
+  })
+}

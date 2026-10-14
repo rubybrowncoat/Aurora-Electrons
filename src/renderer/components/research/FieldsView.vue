@@ -513,7 +513,7 @@ export default {
   .rail-now {
     font-size: calc(12px * var(--ae-font-scale));
     font-weight: 400;
-    color: var(--st-available);
+    color: var(--st-available-text);
   }
 
   .abbreviation {

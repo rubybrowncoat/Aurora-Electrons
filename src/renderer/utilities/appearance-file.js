@@ -445,9 +445,12 @@ export const contrastReport = (appearance, { baseline = null } = {}) => {
     ...measured.fills.map((row) => ({ ...row, label: `Text on the ${row.label} fill` })),
     ...measured.categorical.map((row) => ({ ...row, label: `Chart slot ${row.slot + 1}` })),
     ...measured.sections.map((row) => ({ ...row, label: row.section === null ? 'Neutral section accent (accents off)' : `Section ${row.section + 1} accent (${row.mode})` })),
+    ...measured.sectionWashes.map((row) => ({ ...row, label: row.section === null ? `Neutral section accent on its ${row.state} (accents off)` : `Section ${row.section + 1} accent on its ${row.state} (${row.mode})` })),
+    ...measured.washText.map((row) => ({ ...row, label: row.section === null ? `${row.ink} on the neutral section accent's ${row.state} (accents off)` : `${row.ink} on section ${row.section + 1}'s ${row.state} (${row.mode})` })),
+    ...measured.listText.map((row) => ({ ...row, label: `${row.ink} on the ${row.state} of a list` })),
     ...measured.sectionText.map((row) => ({ ...row, label: row.section === null ? 'Neutral section accent as text (accents off)' : `Section ${row.section + 1} accent as text (${row.mode})` })),
   ]
-  const findings = labelled.filter((row) => !row.pass).map(({ label, foreground, surface, ratio: value, minimum }) => ({ label, foreground, surface, ratio: value, minimum }))
+  const findings = labelled.filter((row) => !row.pass).map(({ label, foreground, color, surface, ratio: value, minimum }) => ({ label, foreground: foreground ?? color, surface, ratio: value, minimum }))
   const page = parseColor(appearance.surfaces.background)
   const blocking = [['Body text', 'inks.body'], ['Vuetify text', 'inks.text']].flatMap(([label, path]) => {
     const [group, key] = path.split('.')

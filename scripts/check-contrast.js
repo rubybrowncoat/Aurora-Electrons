@@ -25,6 +25,7 @@ const { join } = require('path')
 const vm = require('vm')
 const sass = require('sass')
 const { loadUtilities } = require('./lib/utilities')
+const { assertParses } = require('./lib/mutant-source')
 
 const CVD_NEIGHBOUR_DELTA = 8
 const SELECTION_DELTA = 20
@@ -133,6 +134,15 @@ const MENU_LIBRARY_INK = '#ffffff'
 const MENU_INK_NAMES = { white: '#ffffff', black: '#000000' }
 const MENU_APPEARANCE_IMPORT = /^import \{[^}]*\bMAP_MENU\b[^}]*\} from '\.\.\/utilities\/appearance'$/m
 
+// How the count of a research field gets its colour: the status style carries the available status colour made readable on the washes (`--st-available-text`, `STATUS_TEXT` in utilities/appearance-contrast.js, the colour the gate measures) and the count is drawn in it and not in the status colour itself, which reads under 4.5:1 on the washes of several presets.
+const COMPONENT_FILES = { status: join(__dirname, '..', 'src', 'renderer', 'components', 'research', 'status-style.js'), fields: join(__dirname, '..', 'src', 'renderer', 'components', 'research', 'FieldsView.vue') }
+const readComponents = () => Object.fromEntries(Object.entries(COMPONENT_FILES).map(([name, file]) => [name, fs.readFileSync(file, 'utf8')]))
+const COMPONENT_WIRING = [
+  ['the status style takes the available colour from AVAILABLE_STATUS_SLOT', 'status', /theme\.categorical\[AVAILABLE_STATUS_SLOT\]/],
+  ['the status style carries --st-available-text as readableWashText of the available colour', 'status', /'--st-available-text': readableWashText\(appearance, colors\[AVAILABLE\]\)/],
+  ['the count of a research field (.rail-now) is drawn in --st-available-text', 'fields', /\.rail-now \{[^}]*color: var\(--st-available-text\);/],
+]
+
 const menuOptions = (mapSource, appearance, MAP_MENU) => {
   if (!MENU_APPEARANCE_IMPORT.test(mapSource)) {
     throw new Error('pages/map.vue does not import MAP_MENU from utilities/appearance')
@@ -178,9 +188,12 @@ const parseRules = (css) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(
 // The last rule that lists the selector exactly as written, or null: the colour the stylesheet finally draws for it.
 const declaredColor = (rules, selector) => rules.filter((rule) => rule.selectors.includes(selector)).pop() || null
 
+// The value the compiled stylesheet finally declares for a property of a selector (the selector as the stylesheet lists it, whitespace normalised), or null.
+const declaredProperty = (css, selector, property) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors, body]) => selectors.split(',').some((candidate) => candidate.replace(/\s+/g, ' ').trim() === selector) && new RegExp(`(?:^|[;\\s])${property}\\s*:`).test(body)).map(([, , body]) => new RegExp(`(?:^|[;\\s])${property}\\s*:\\s*([^;]+)`).exec(body)[1].trim()).pop() || null
+
 // The selector of the stylesheet's link rule as the compiled stylesheet writes it, and the `text-decoration-line` the stylesheet finally declares for a selector, or null.
 const LINK_SELECTOR = '.v-application[style*="--ae-link-line"] a:not([class^=v-]):not([class*=" v-"])'
-const declaredLine = (css, selector) => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selectors, body]) => selectors.split(',').some((candidate) => candidate.replace(/\s+/g, ' ').trim() === selector) && /text-decoration-line\s*:/.test(body)).map(([, , body]) => /text-decoration-line\s*:\s*([^;]+)/.exec(body)[1].trim()).pop() || null
+const declaredLine = (css, selector) => declaredProperty(css, selector, 'text-decoration-line')
 
 // A `var(--name)` colour as the root element sets it for the appearance (`appearanceStyle`); any other value as it stands.
 const resolveVariable = (value, style) => {
@@ -189,9 +202,12 @@ const resolveVariable = (value, style) => {
   return variable ? style[variable[1]] : value
 }
 
+// A mutation applies where its pattern matches: a global one everywhere it does, any other exactly once, so that the first of several matches cannot be the wrong one. A pattern that does not apply makes the mutation invalid.
 const replaceOnce = (source, pattern, replacement) => {
-  if (!pattern.test(source)) {
-    throw new Error(`The self-test mutation does not apply: ${pattern} is not in the source it mutates`)
+  const matches = (source.match(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)) || []).length
+
+  if (matches === 0 || (!pattern.global && matches > 1)) {
+    throw new Error(`The self-test mutation does not apply: ${pattern} ${matches === 0 ? 'is not in' : `matches ${matches} times in`} the source it mutates`)
   }
 
   return source.replace(pattern, replacement)
@@ -249,6 +265,17 @@ const INK_RULES = [
   ['.v-application.theme--{theme} .text--secondary', 'muted', true],
 ]
 
+const THEMES = ['light', 'dark']
+
+// The selectors of appearance.scss that draw the surface of a Vuetify sheet in the card (`{theme}`), where the section colours and the text of the lists and panels are measured; one the stylesheet leaves out keeps Vuetify's #1e1e1e or #ffffff.
+const SURFACE_RULES = ['.v-card.theme--{theme}', '.v-data-table.theme--{theme}', '.v-list.theme--{theme}', '.v-expansion-panels.theme--{theme} .v-expansion-panel']
+
+// The selectors of appearance.scss that hold every state of the overlay of a list entry but the hovered one to `LIST_VEIL`, the rule that gives the entry the keyboard highlights the ring a focused one has, and the two rules that give the chosen entry its bar (the wider one for a chosen entry that is also highlighted, whose ring is drawn over the first 2px).
+const LIST_ENTRY = '.v-application .v-list .v-list-item'
+const VEIL_RULES = [':focus::before', '.v-list-item--active::before', '.v-list-item--active:hover::before', '.v-list-item--active:focus::before', '.v-list-item--highlighted::before'].map((tail) => `${LIST_ENTRY}.theme--{theme}${tail}`)
+const RING_RULE = { selector: '.v-application .v-list .v-list-item--highlighted', property: 'outline', expected: '2px solid var(--ae-primary)' }
+const BAR_RULES = [{ selector: '.v-application .v-list .v-list-item--active', property: 'box-shadow', expected: 'inset 3px 0 0 var(--ae-primary)' }, { selector: '.v-application .v-list .v-list-item--active.v-list-item--highlighted', property: 'box-shadow', expected: 'inset 5px 0 0 var(--ae-primary)' }]
+
 // Measured nowhere, and why.
 const EXCEPTIONS = [
   ['surfaces.border', 'Hairlines between regions repeat a boundary the layout already gives; decorative.'],
@@ -270,6 +297,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
   const stylesheet = options.stylesheet === undefined ? compileStylesheet(readSource()) : options.stylesheet
   const rules = parseRules(stylesheet)
   const mapSource = options.mapSource === undefined ? readMapSource() : options.mapSource
+  const components = options.components === undefined ? readComponents() : options.components
 
   appearances.forEach((appearance) => {
     const { TEXT, GRAPHIC, VUETIFY_ON_COLOR, parseColor, over, ratio, hex, at, measureAppearance, measureNamedFills } = contrast
@@ -286,8 +314,21 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       return unsettled.length ? [[`hovered ${state}, washes layered (${unsettled.join(', ')})`, ['focus.hover', wash]]] : []
     })
 
-    const measured = measureAppearance(appearance, { extraRowStates: layered })
-    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: measured.text, graphics: measured.graphics, rows: measured.rows, categorical: measured.categorical, sections: measured.sections, sectionText: measured.sectionText, cvd: [], selection: [], disabled: measured.disabled, inkRules: [], inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
+    const surfaceRules = SURFACE_RULES.flatMap((template) => THEMES.map((theme) => {
+      const selector = template.replace('{theme}', theme)
+      const declared = declaredProperty(stylesheet, selector, 'background-color')
+
+      return { selector, expected: 'var(--ae-card)', declared, pass: declared === 'var(--ae-card)' }
+    }))
+    const veilRules = THEMES.flatMap((theme) => [...VEIL_RULES.map((template) => ({ selector: template.replace('{theme}', theme), property: 'opacity', expected: String(contrast.LIST_VEIL[theme]) })), RING_RULE, ...BAR_RULES]).map((row) => {
+      const declared = declaredProperty(stylesheet, row.selector, row.property)
+
+      return { ...row, declared, pass: declared !== null && (row.property === 'opacity' ? Number(declared) === Number(row.expected) : declared === row.expected) }
+    })
+    const mine = veilRules.filter((row) => row.property === 'opacity' && row.selector.includes(`.theme--${appearance.mode}`))
+    const listVeil = mine.every((row) => row.declared !== null && Number.isFinite(Number(row.declared))) ? Math.max(...mine.map((row) => Number(row.declared))) : contrast.VUETIFY_LIST_STATES[appearance.mode].pressed
+    const measured = measureAppearance(appearance, { extraRowStates: layered, listVeil })
+    const report = { id: appearance.id, name: appearance.name, key: appearance.key, slotCount: appearance.charts.categorical.length, text: measured.text, graphics: measured.graphics, rows: measured.rows, categorical: measured.categorical, sections: measured.sections, sectionWashes: measured.sectionWashes, washText: measured.washText, listText: measured.listText, sectionText: measured.sectionText, cvd: [], selection: [], disabled: measured.disabled, inkRules: [], surfaceRules, veilRules, inkTokens: [], colourSurfaces: [], menu: [], encodings: null }
 
     if (appearance.reference) {
       WARNING_LEVELS.forEach((level) => {
@@ -298,7 +339,7 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
     }
 
     const menuLabel = 'Map right-click menu icon'
-    const menuFailure = (error) => report.menu.push({ label: 'Map right-click menu options', message: error.message, ratio: 0, minimum: GRAPHIC, pass: false })
+    const menuFailure = (error) => report.menu.push({ label: 'Map right-click menu options', message: error.message, syntax: error instanceof SyntaxError, ratio: 0, minimum: GRAPHIC, pass: false })
     let menu = null
 
     try {
@@ -352,7 +393,6 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
     })
 
     const style = appearanceStyle(appearance)
-    const THEMES = ['light', 'dark']
 
     const linkDelta = Math.min(deltaE(resolve('focus.primary'), resolve('inks.body')), deltaE(resolve('focus.primary'), resolve('inks.text')))
     const linkLine = declaredLine(stylesheet, LINK_SELECTOR)
@@ -384,6 +424,10 @@ const analyse = ({ resolveAppearance, listAppearances, SERIES_ENCODINGS, appeara
       if (!appearance.reference) {
         report.inkTokens.push({ message: `inks.${token} ${appearance.inks[token]} is not Vuetify's ${VUETIFY_ON_COLOR[token]}, which the ${appearance.mode} baseline keeps`, pass: appearance.inks[token] === VUETIFY_ON_COLOR[token] })
       }
+    })
+
+    COMPONENT_WIRING.forEach(([what, file, pattern]) => {
+      report.inkTokens.push({ message: `${what} (components/research/${COMPONENT_FILES[file].split(/[\\/]/).pop()}) does not hold`, pass: pattern.test(components[file]) })
     })
 
     if (appearance.reference) {
@@ -447,6 +491,9 @@ const failures = (reports) => reports.flatMap((report) => [
   ...report.rows.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.categorical.filter((row) => !row.pass).map((row) => `${report.id}: slot ${row.slot} ${row.color} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (a marker or pattern does not stand in for the colour)`),
   ...report.sections.filter((row) => !row.pass).map((row) => `${report.id}: ${row.section === null ? 'the neutral section accent (accents off)' : `section ${row.section} accent (${row.mode})`} ${row.color} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (a label and an icon tell the section, but its colour must still be seen)`),
+  ...report.sectionWashes.filter((row) => !row.pass).map((row) => `${report.id}: ${row.section === null ? 'the neutral section accent (accents off)' : `section ${row.section} accent (${row.mode})`} ${row.color} on its ${row.state} over the ${row.surfacePath.split('.')[1]}, ${row.surface}, is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (the icon of a rail pill, the dot of the current step and the icon plate of a flyout or palette row are drawn on it)`),
+  ...report.washText.filter((row) => !row.pass).map((row) => `${report.id}: ${row.ink} ${row.foreground} on ${row.section === null ? 'the neutral section accent' : `section ${row.section}`}'s ${row.state} (${row.mode}) over the ${row.surfacePath.split('.')[1]}, ${row.surface}, is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (the text of the flyout's active entry, the Empires list, a research row, a panel count or a legend row sits on it)`),
+  ...report.listText.filter((row) => !row.pass).map((row) => `${report.id}: ${row.ink} ${row.foreground} on the ${row.state} of a list over the card, ${row.surface} (the overlay ${row.overlay} at ${row.opacity}), is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (the text of a dropdown's or a menu's entry sits on it)`),
   ...report.sectionText.filter((row) => !row.pass).map((row) => `${report.id}: ${row.section === null ? 'the neutral section accent as text (accents off)' : `section ${row.section} accent as text (${row.mode})`} ${row.color} on the ${row.surfacePath.split('.')[1]} (${row.state}) ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1 (the colour of a title, a label or an active tab is the accent made readable, not the accent)`),
   ...report.selection.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} against ${row.surface} differs by only ${row.ratio.toFixed(1)}, under ${row.minimum}`),
   ...report.disabled.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
@@ -455,6 +502,8 @@ const failures = (reports) => reports.flatMap((report) => [
   ...report.colourSurfaces.filter((row) => !row.pass).map((row) => `${report.id}: ${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`),
   ...report.menu.filter((row) => !row.pass).map((row) => `${report.id}: ${row.message || `${row.label} ${row.foreground} on ${row.surface} is ${row.ratio.toFixed(2)}:1, under ${row.minimum}:1`}`),
   ...report.inkTokens.filter((row) => !row.pass).map((row) => `${report.id}: ${row.message}`),
+  ...report.surfaceRules.filter((row) => !row.pass).map((row) => `${report.id}: ${row.selector} draws ${row.declared || 'Vuetify\'s own surface'}, not ${row.expected}`),
+  ...report.veilRules.filter((row) => !row.pass).map((row) => `${report.id}: ${row.selector} declares ${row.property} ${row.declared || 'nothing'}, not ${row.expected} (a list entry keeps the hovered entry's overlay in every state, the keyboard's ring and the chosen entry's bar)`),
   ...(report.encodings.markers && report.encodings.dashes && report.encodings.patterns && report.encodings.slots === report.slotCount ? [] : [`${report.id}: the series encodings do not give each of the ${report.slotCount} slots its own marker, dash and pattern`]),
   ...report.encodings.colours ? [] : [`${report.id}: two categorical slots are the same colour, so a series cannot be told which slot it is, and they would share a marker, a dash and a pattern`],
   ...report.links.pass ? [] : [`${report.id}: links are ${report.links.delta.toFixed(1)} CIEDE2000 from the text ink, under ${SELECTION_DELTA}, and have no other cue: --ae-link-line is ${report.links.variable || 'not set'} and the stylesheet's link rule draws ${report.links.rule || 'nothing'}`],
@@ -477,8 +526,14 @@ const format = (reports, verbose) => {
     report.categorical.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  slot ${row.slot}: ${row.color} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
     lines.push('Section accents (on, restrained, and the neutral accent of the off mode) against the card and the page, minimum 3:1')
     report.sections.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.color} on ${row.surfacePath.split('.')[1]} ${row.surface}`))
+    lines.push('Section accents on their own washes (the active and the hover wash of the accent over the page, the card and the chrome, and the icon plate of a flyout or palette row over the active wash or the hover colour of its row: the rail pill, the current step of the trail, the flyout, the palette), minimum 3:1')
+    report.sectionWashes.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.color} on its ${row.state} over the ${row.surfacePath.split('.')[1]} ${row.surface}`))
     lines.push('Section accents as text (the accent made readable: titles, labels, the active tab) on the page, the card and the chrome, plain, under the hover wash and under a wash of the colour itself, minimum 4.5:1')
     report.sectionText.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.color} on ${row.surfacePath.split('.')[1]} ${row.state} ${row.surface}`))
+    lines.push('Text of the page on the section washes (the active and the hover wash, one over another, on the page, the card and the chrome), minimum 4.5:1')
+    report.washText.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.section === null ? 'neutral' : `section ${row.section}`} (${row.mode}): ${row.ink} ${row.foreground} on its ${row.state} over the ${row.surfacePath.split('.')[1]} ${row.surface}`))
+    lines.push('Text of a list entry (a dropdown, a menu) under the overlay Vuetify draws over it, on the card, minimum 4.5:1')
+    report.listText.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.ink} ${row.foreground} on the ${row.state}: ${row.overlay} at ${row.opacity} over the card, ${row.surface}`))
     lines.push(`Text on filled chips and controls, ink ${report.fills[0].foreground}, minimum 4.5:1`)
     report.fills.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.foreground} on ${row.surface}`))
     if (report.colourSurfaces.length) {
@@ -490,6 +545,7 @@ const format = (reports, verbose) => {
     report.menu.forEach((row) => lines.push(`  ${mark(row.pass)} ${row.ratio.toFixed(2).padStart(5)}  ${row.label}: ${row.message || `${row.foreground} on ${row.surface}`}`))
 
     lines.push(`Vuetify's text inks in appearance.scss (compiled): ${report.inkRules.filter((row) => row.pass).length} of ${report.inkRules.length} selectors draw the preset's text inks, ${report.inkTokens.filter((row) => row.pass).length} of ${report.inkTokens.length} variables and baselines hold`)
+    lines.push(`Surfaces and list overlays in appearance.scss (compiled): ${report.surfaceRules.filter((row) => row.pass).length} of ${report.surfaceRules.length} sheets draw the card, ${report.veilRules.filter((row) => row.pass).length} of ${report.veilRules.length} list rules hold the entry overlay, the keyboard's ring and the chosen entry's bar`)
 
     if (report.selection.length) {
       lines.push(`Selection colour against the warning severities, CIEDE2000 minimum ${SELECTION_DELTA}`)
@@ -523,6 +579,8 @@ const format = (reports, verbose) => {
 const MUTATIONS = [
   ['a categorical slot the colour of the card', 'light', (appearance) => ({ ...appearance, charts: { ...appearance.charts, categorical: appearance.charts.categorical.map((color, slot) => (slot === 5 ? appearance.surfaces.card : color)) } }), /slot 5 .* under 3:1/],
   ['a section accent the colour of the card', 'light', (appearance) => ({ ...appearance, sections: { ...appearance.sections, accents: appearance.sections.accents.map((color, index) => (index === 4 ? appearance.surfaces.card : color)) } }), /section 4 accent \(on\) .* under 3:1/],
+  ['a section accent that reads on the surfaces but not on its own active wash', 'dark', (appearance) => ({ ...appearance, sections: { ...appearance.sections, accents: appearance.sections.accents.map((color, index) => (index === 5 ? '#008300' : color)) } }), /section 5 accent \(on\) .* on its active wash over the card, #183218, is 2\.81:1, under 3:1/],
+  ['a section accent that reads on each wash alone but not on the two layered', 'dark', (appearance) => ({ ...appearance, sections: { ...appearance.sections, accents: appearance.sections.accents.map((color, index) => (index === 5 ? '#008d00' : color)) } }), /section 5 accent \(on\) #008d00 on its plate over the active entry over the chrome, #153f15, is 2\.75:1, under 3:1/],
   ['a neutral accent the colour of the card', 'solaris', (appearance) => ({ ...appearance, sections: { ...appearance.sections, neutral: appearance.surfaces.card } }), /neutral section accent \(accents off\) .* under 3:1/],
   ['a body ink the colour of the card, which leaves no readable section text', 'light', (appearance) => ({ ...appearance, inks: { ...appearance.inks, body: appearance.surfaces.card } }), /section 4 accent as text \(on\) .* under 4.5:1/],
   ['a neutral accent and a body ink the colour of the card, which leave no readable neutral text', 'solaris', (appearance) => ({ ...appearance, sections: { ...appearance.sections, neutral: appearance.surfaces.card }, inks: { ...appearance.inks, body: appearance.surfaces.card } }), /neutral section accent as text \(accents off\) .* under 4.5:1/],
@@ -561,16 +619,64 @@ const MUTATIONS = [
   ['a menu icon ink that is only a block comment', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /^( +)(itemColor: this\.appearance\.inks\.onColor,)$/m, '$1/* $2 */')],
   ['a menu icon ink that is an explicit white beside a stale comment', 't2d', (appearance) => appearance, /Map right-click menu icon on its wedge .* #ffffff on .* under 3:1/, null, (source) => replaceOnce(source, /^( +)(itemColor: this\.appearance\.inks\.onColor,)$/m, "$1itemColor: '#ffffff', // $2")],
   ['a map page that stops importing the menu constants', 't2d', (appearance) => appearance, /pages\/map\.vue does not import MAP_MENU/, null, (source) => replaceOnce(source, /import \{ activeAppearance, MAP_MENU \} from/, 'import { activeAppearance } from')],
+  ['a list that keeps Vuetify\'s own surface', 'solaris', (appearance) => appearance, /\.v-list\.theme--dark draws Vuetify's own surface, not var\(--ae-card\)/, (source) => replaceOnce(source, /\.v-list\.theme--#\{\$theme\},\s*(\.v-expansion-panels\.theme--#\{\$theme\} \.v-expansion-panel \{)/, '$1')],
+  ['an expansion panel that keeps Vuetify\'s own surface', 'dark', (appearance) => appearance, /\.v-expansion-panels\.theme--dark \.v-expansion-panel draws Vuetify's own surface, not var\(--ae-card\)/, (source) => replaceOnce(source, /(\.v-list\.theme--#\{\$theme\}),\s*\.v-expansion-panels\.theme--#\{\$theme\} \.v-expansion-panel \{/, '$1 {')],
+  ['a list overlay left at Vuetify\'s strongest in every state', 'dark', (appearance) => appearance, /section 1 accent \(on\) #d95f26 on its list entry under its overlay over the card, .* under 3:1/, (source) => replaceOnce(source, /opacity: \$opacity;/, 'opacity: 0.32;')],
+  ['a list overlay left at Vuetify\'s strongest, which takes the text of the chosen entry of a dropdown under 4.5:1', 'dark', (appearance) => appearance, /link #2196f3 on the active entry of a list over the card, .* under 4\.5:1/, (source) => replaceOnce(source, /opacity: \$opacity;/, 'opacity: 0.32;')],
+  ['list rules that keep the overlay for the history menu alone', 'dark', (appearance) => appearance, /\.v-application \.v-list \.v-list-item\.theme--dark:focus::before declares opacity nothing, not 0\.08/, (source) => replaceOnce(source, /\.v-application \.v-list \.v-list-item\.theme--#\{\$theme\} \{/, '.v-application .v-list.history-menu .v-list-item.theme--#{$theme} {')],
+  ['a list whose highlighted entry has no ring', 'solaris', (appearance) => appearance, /\.v-list-item--highlighted declares outline none, not 2px solid var\(--ae-primary\)/, (source) => replaceOnce(source, /(\.v-list-item--highlighted \{\s*)outline: 2px solid var\(--ae-primary\)/, '$1outline: none')],
+  ['a hover colour that takes an accent under 3:1 in a hovered table row', 'dark', (appearance) => ({ ...appearance, focus: { ...appearance.focus, hover: 'rgba(255, 255, 255, .35)' } }), /section 1 accent \(on\) #d95f26 on its hovered table row over the card, .* under 3:1/],
+  ['secondary text under 4.5:1 on a section\'s active wash', 'light', (appearance) => ({ ...appearance, inks: { ...appearance.inks, muted: '#6a6a6a' } }), /secondary text #6a6a6a on section 6's active wash \(on\) over the chrome, .* under 4\.5:1/],
+  ['body text under 4.5:1 on a wash over a wash', 'light', (appearance) => ({ ...appearance, washes: { ...appearance.washes, sectionSoft: 0.6 } }), /body text #212121 on section \d+'s active wash over the active wash \(on\) over the card, .* under 4\.5:1/],
+  ['a hover colour that takes the text of a row of the flyout under 4.5:1', 'dark', (appearance) => ({ ...appearance, focus: { ...appearance.focus, hover: 'rgba(255, 255, 255, .5)' } }), /(body|secondary) text on a hovered entry over the chrome .* under 4\.5:1/],
+  ['a body ink that reads at full strength and not at the 80 % of the flyout\'s live line', 'dark', (appearance) => ({ ...appearance, inks: { ...appearance.inks, body: '#8d8d8d' } }), /body text at 80 % rgba\(141, 141, 141, 0\.8\) on section \d+'s active wash \(on\) over the chrome, .* under 4\.5:1/],
+  ['a body ink that leaves no readable count of the available technologies', 'solaris', (appearance) => ({ ...appearance, inks: { ...appearance.inks, body: appearance.surfaces.card } }), /count of available technologies #[0-9a-f]{6} on section \d+'s (active|hover) wash \(on\) over the card, .* under 4\.5:1/],
+  ['a count of the research fields drawn in the status colour itself', 'dark', (appearance) => appearance, /the count of a research field \(\.rail-now\) is drawn in --st-available-text \(components\/research\/FieldsView\.vue\) does not hold/, null, null, (components) => ({ ...components, fields: replaceOnce(components.fields, /color: var\(--st-available-text\);/, 'color: var(--st-available);') })],
+  ['a status style that carries the available colour unmade readable', 'dark', (appearance) => appearance, /the status style carries --st-available-text as readableWashText of the available colour \(components\/research\/status-style\.js\) does not hold/, null, null, (components) => ({ ...components, status: replaceOnce(components.status, /readableWashText\(appearance, colors\[AVAILABLE\]\)/, 'colors[AVAILABLE]') })],
+  ['a list whose chosen entry has no bar', 'dark', (appearance) => appearance, /\.v-application \.v-list \.v-list-item--active declares box-shadow none, not inset 3px 0 0 var\(--ae-primary\)/, (source) => replaceOnce(source, /box-shadow: inset 3px 0 0 var\(--ae-primary\)/, 'box-shadow: none')],
+  ['a chosen entry that is also highlighted whose bar stays under the ring', 'solaris', (appearance) => appearance, /\.v-list-item--active\.v-list-item--highlighted declares box-shadow inset 2px 0 0 var\(--ae-primary\), not inset 5px 0 0 var\(--ae-primary\)/, (source) => replaceOnce(source, /inset 5px 0 0 var\(--ae-primary\)/, 'inset 2px 0 0 var(--ae-primary)')],
+  ['a focus colour too close to the card for the bar of a chosen entry', 'light', (appearance) => ({ ...appearance, focus: { ...appearance.focus, primary: '#c8c8c8' } }), /Chosen list entry bar under the overlay in the text ink #[0-9a-f]{6} on #[0-9a-f]{6} is .* under 3:1/],
 ]
 
-const selfTest = (utilities) => MUTATIONS.map(([label, id, mutate, expected, mutateSource, mutateMap]) => {
-  const mutated = mutate(utilities.resolveAppearance(id))
-  const stylesheet = compileStylesheet(mutateSource ? mutateSource(readSource()) : readSource())
-  const mapSource = mutateMap ? mutateMap(readMapSource()) : readMapSource()
-  const found = failures(analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }, { stylesheet, mapSource }))
+// Mutations the runner must report as invalid and not as caught: an unparsable stylesheet, an unparsable map page, an unparsable module and an unparsable component the gate reads as text, and a pattern that matches nothing in the stylesheet, the map page or a component.
+const INVALID_MUTATIONS = [
+  ['an unparsable stylesheet', 'dark', (appearance) => appearance, /^/, (source) => `${source}\n}`],
+  ['an unparsable map page', 't2d', (appearance) => appearance, /^/, null, (source) => replaceOnce(source, /itemColor: this\.appearance\.inks\.onColor,/, 'itemColor: ,')],
+  ['an unparsable status style', 'dark', (appearance) => appearance, /^/, null, null, (components) => ({ ...components, status: replaceOnce(components.status, /readableWashText\(appearance, colors\[AVAILABLE\]\)/, 'colors[AVAILABLE] ]') })],
+  ['a component whose script does not parse', 'dark', (appearance) => appearance, /^/, null, null, (components) => ({ ...components, fields: replaceOnce(components.fields, /export default \{/, 'export default ] {') })],
+  ['a pattern that matches nothing in the stylesheet', 'dark', (appearance) => appearance, /^/, (source) => replaceOnce(source, /not in the stylesheet/, '')],
+  ['a pattern that matches nothing in the map page', 't2d', (appearance) => appearance, /^/, null, (source) => replaceOnce(source, /not in the map page/, '')],
+  ['a pattern that matches nothing in a component', 'dark', (appearance) => appearance, /^/, null, null, (components) => ({ ...components, fields: replaceOnce(components.fields, /not in the component/, '') })],
+]
 
-  return { label, caught: found.some((problem) => expected.test(problem)) }
-})
+// A fault is judged only when it applies and the sources it leaves parse and compile: one that breaks the syntax of the stylesheet, of the map page or of a component, or whose pattern matches nothing, makes the gate report a failure that has nothing to do with what the fault was meant to plant, which would count as caught, so it is returned as invalid.
+const trial = (utilities, [label, id, mutate, expected, mutateSource, mutateMap, mutateComponents]) => {
+  const mutated = mutate(utilities.resolveAppearance(id))
+  let stylesheet
+  let mapSource
+  let components
+
+  try {
+    stylesheet = compileStylesheet(mutateSource ? mutateSource(readSource()) : readSource())
+    mapSource = mutateMap ? mutateMap(readMapSource()) : readMapSource()
+    components = mutateComponents ? mutateComponents(readComponents()) : readComponents()
+    assertParses(MAP_PAGE, mapSource)
+    Object.entries(components).forEach(([name, text]) => assertParses(COMPONENT_FILES[name], text))
+  } catch (error) {
+    return { label, invalid: error.message }
+  }
+
+  const reports = analyse({ ...utilities, resolveAppearance: () => mutated, listAppearances: () => [mutated] }, { stylesheet, mapSource, components })
+  const syntax = reports.flatMap((report) => report.menu).find((row) => row.syntax)
+
+  if (syntax) {
+    return { label, invalid: syntax.message }
+  }
+
+  return { label, caught: failures(reports).some((problem) => expected.test(problem)) }
+}
+
+const selfTest = (utilities) => MUTATIONS.map((mutation) => trial(utilities, mutation))
 
 // The overlay opacities Vuetify draws over a tab, read from its own theme files, as { activated, pressed } of a mode.
 const vuetifyTabStates = (mode) => {
@@ -579,6 +685,14 @@ const vuetifyTabStates = (mode) => {
   const value = (name) => Number(new RegExp(`'${name}': ([0-9.]+)`).exec(states ? states[1] : '')?.[1])
 
   return { activated: value('activated'), pressed: value('pressed') }
+}
+
+// The overlay opacities Vuetify draws over a list entry, read from its own stylesheet, as { hover, focus, activated, pressed, highlighted } of a mode: under the pointer, focused, active, active and focused, and highlighted by a menu's keyboard.
+const vuetifyListStates = (mode) => {
+  const css = fs.readFileSync(join(__dirname, '..', 'node_modules', 'vuetify', 'dist', 'vuetify.css'), 'utf8')
+  const of = (tail) => Number(declaredProperty(css, `.theme--${mode}.v-list-item${tail}::before`, 'opacity'))
+
+  return { hover: of(':hover'), focus: of(':focus'), activated: of('--active'), pressed: of('--active:focus'), highlighted: of('.v-list-item--highlighted') }
 }
 
 const main = async () => {
@@ -612,12 +726,29 @@ const main = async () => {
     }
   })
 
+  ;['light', 'dark'].forEach((mode) => {
+    const wanted = vuetifyListStates(mode)
+    const have = shared.VUETIFY_LIST_STATES[mode]
+
+    if (have.hover !== wanted.hover || have.focus !== wanted.focus || have.activated !== wanted.activated || have.pressed !== wanted.pressed || wanted.highlighted !== wanted.pressed) {
+      problems.push(`VUETIFY_LIST_STATES.${mode} is ${JSON.stringify(have)}, and Vuetify's own ${mode} theme draws ${JSON.stringify(wanted)} over a list entry hovered, focused, active, active and focused, and highlighted (which takes the pressed opacity)`)
+    }
+  })
+
   console.log(format(reports, options.verbose))
 
-  const missed = selfTest(appearance).filter((mutation) => !mutation.caught)
+  const trials = selfTest(appearance)
+  const invalid = trials.filter((mutation) => mutation.invalid !== undefined)
+  const missed = trials.filter((mutation) => mutation.invalid === undefined && !mutation.caught)
 
-  console.log(`\nSelf-test: ${MUTATIONS.length - missed.length} of ${MUTATIONS.length} mutations are caught`)
+  console.log(`\nSelf-test: ${trials.length - invalid.length - missed.length} of ${MUTATIONS.length} mutations are caught`)
   missed.forEach((mutation) => problems.push(`self-test: the gate does not catch ${mutation.label}`))
+  invalid.forEach((mutation) => problems.push(`self-test: invalid mutation, the sources it leaves do not compile (${mutation.label}): ${mutation.invalid}`))
+
+  const unparsable = INVALID_MUTATIONS.map((mutation) => trial(appearance, mutation))
+
+  console.log(`Self-test of the runner: ${unparsable.filter((mutation) => mutation.invalid !== undefined).length} of ${INVALID_MUTATIONS.length} unparsable mutations are reported as invalid`)
+  unparsable.filter((mutation) => mutation.invalid === undefined).forEach((mutation) => problems.push(`self-test: the runner does not report ${mutation.label} as invalid`))
 
   if (problems.length) {
     console.log(`\n${problems.length} problem${problems.length === 1 ? '' : 's'}:`)

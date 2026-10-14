@@ -18,7 +18,7 @@ import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 // - `sections`: `neutral` (the accent without a section: Settings, About, Empires, and every section while the accents are off) and `accents`, one colour for each of the nine sections of the navigation registry (`accent` of a section indexes it). They start as the colours of the chart categories and are kept apart from them, so that a change of the chart palette never recolours a section; each is 3:1 or more on the page and the card like a category (scripts/check-contrast.js), and none repeats.
 // - `space`: the system view's sky and what is drawn on it: `background`, `label` (names), `labelShadow`, `bodyOrbit`, `jumpUnexplored`, `jumpExplored`. The sky is dark in every preset, so the ink on it does not follow the mode.
 // - `washes`: alphas of a section's colour for an active item (`sectionSoft`), a hovered one (`sectionTint`), and of the available-status colour in the research tree (`statusSoft`).
-// - `reference` (optional, adaptations only): what the preset is an adaptation of and how far. `title` and `summary` (what it looks like), `source` (the inspected community theme: `name`, `author`, `repository`, `revision`, `revisionDate`, `license`, `inspected` (what was read and how it was used: values, not code), `copied` (what was copied: nothing), `note` (what the source does not say)), `roles` (each reference value: `role`, `value`, `maps` (where the preset uses it)) and `modifications` (what the Electrons adaptation changes or adds). Nothing in it claims that a version of the game ships the palette: a reference is a historical or community one, and the preset an adaptation of it. Settings shows it beside the preview and About's credits list the source. scripts/check-contrast.js keeps the selection colour of a preset with a reference apart from every warning severity.
+// - `reference` (optional, adaptations only): what the preset is an adaptation of and how far. `title` and `summary` (what it looks like), `source` (the inspected community theme: `name`, `author`, `repository`, `revision`, `revisionDate`, `license`, `inspected` (what was read and how it was used: values, not code), `copied` (what was copied: nothing), `note` (what the source does not say)), `compatibility` (optional: what the preset leaves out of the reference's compatibility material, shown apart from the look: `title`, `status`, `text`), `roles` (each reference value: `role`, `value`, `maps` (where the preset uses it)) and `modifications` (what the Electrons adaptation changes or adds). Nothing in it claims that a version of the game ships the palette: a reference is a historical or community one, and the preset an adaptation of it. Settings shows it beside the preview and About's credits list the source. scripts/check-contrast.js keeps the selection colour of a preset with a reference apart from every warning severity.
 //
 // Physical colours (stars and the star orbit lines drawn in their colour, planet terrain) depict the world, not a meaning, and stay out of presets.
 //
@@ -29,10 +29,10 @@ import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 const LIGHT = {
   id: 'light',
   name: 'Light',
-  version: 4,
+  version: 5,
   mode: 'light',
   surfaces: { background: '#ffffff', chrome: '#f6f7f9', card: '#ffffff', border: '#e0e3e8', track: 'rgba(0, 0, 0, .08)', trackSoft: 'rgba(0, 0, 0, .06)', rule: 'rgba(0, 0, 0, .12)' },
-  inks: { body: '#212121', muted: '#6a6a6a', text: 'rgba(0, 0, 0, 0.87)', textMuted: 'rgba(0, 0, 0, 0.6)', onTooltip: '#ffffff', onFill: '#ffffff', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
+  inks: { body: '#212121', muted: '#616161', text: 'rgba(0, 0, 0, 0.87)', textMuted: 'rgba(0, 0, 0, 0.6)', onTooltip: '#ffffff', onFill: '#ffffff', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
   focus: { primary: '#1867c0', hover: 'rgba(24, 103, 192, .06)', secondary: '#b0bec5', accent: '#8c9eff' },
   rows: { selected: 'rgba(33, 150, 243, .08)', differs: 'rgba(33, 150, 243, .08)', differsMark: '#1e88e5', differsDot: 'rgba(33, 150, 243, .45)', stripe: 'rgba(33, 150, 243, .08)', stripeSoft: 'rgba(33, 150, 243, .04)' },
   severity: { action: '#b71c1c', attention: '#a75d00', info: '#0b72c5', success: '#367d39' },
@@ -43,7 +43,7 @@ const LIGHT = {
     tooltip: 'rgba(97, 97, 97, 0.95)',
     categorical: ['#2a78d6', '#e95c24', '#189d6e', '#ba7e00', '#e25a8e', '#008300', '#4a3aa7', '#e34948', '#0099a8'],
   },
-  sections: { neutral: '#546e7a', accents: ['#2a78d6', '#e95c24', '#189d6e', '#ba7e00', '#e25a8e', '#008300', '#4a3aa7', '#e34948', '#0099a8'] },
+  sections: { neutral: '#546e7a', accents: ['#2a78d6', '#d44b16', '#168b62', '#a67000', '#db3384', '#008300', '#4a3aa7', '#e03242', '#008694'] },
   space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.14, sectionTint: 0.08, statusSoft: 0.18 },
 }
@@ -77,7 +77,7 @@ const T2D_SOURCE = {
 const CLASSIC = {
   id: 'classic',
   name: 'Aurora Classic',
-  version: 1,
+  version: 2,
   mode: 'dark',
   reference: {
     title: 'Legacy navy and pale yellow',
@@ -108,7 +108,7 @@ const CLASSIC = {
     tooltip: 'rgba(40, 40, 160, 0.97)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#a0a8d8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
+  sections: { neutral: '#a0a8d8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008d00', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#000040', label: '#ffffc0', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -116,7 +116,7 @@ const CLASSIC = {
 const SOLARIS = {
   id: 'solaris',
   name: 'Solaris inspired',
-  version: 1,
+  version: 2,
   mode: 'dark',
   reference: {
     title: 'Near-black with muted blue controls',
@@ -146,7 +146,7 @@ const SOLARIS = {
     tooltip: 'rgba(43, 48, 69, 0.97)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#9aa0b8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
+  sections: { neutral: '#9aa0b8', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#009700', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#0c0c0c', label: '#d2d2d2', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#808080', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
@@ -196,7 +196,7 @@ const T2D = {
 const DARK = {
   id: 'dark',
   name: 'Dark',
-  version: 4,
+  version: 5,
   mode: 'dark',
   surfaces: { background: '#121212', chrome: '#1e1e1e', card: '#1e1e1e', border: '#333333', track: 'rgba(255, 255, 255, .12)', trackSoft: 'rgba(255, 255, 255, .1)', rule: 'rgba(255, 255, 255, .12)' },
   inks: { body: '#f5f5f5', muted: '#b0b0b0', text: '#ffffff', textMuted: 'rgba(255, 255, 255, 0.7)', onTooltip: '#ffffff', onFill: '#121212', onColor: '#ffffff', onSnackbar: 'rgba(255, 255, 255, 0.87)' },
@@ -210,7 +210,7 @@ const DARK = {
     tooltip: 'rgba(97, 97, 97, 0.95)',
     categorical: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'],
   },
-  sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767', '#2ec4d6'] },
+  sections: { neutral: '#90a4ae', accents: ['#3987e5', '#d95f26', '#199e70', '#c98500', '#d75994', '#009c00', '#9085e9', '#e66767', '#2ec4d6'] },
   space: { background: '#000040', label: '#ffffff', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#32cd32', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
