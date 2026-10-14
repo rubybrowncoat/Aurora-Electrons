@@ -51,8 +51,8 @@ export const PARETO_AXES = Object.freeze({
   payload: Object.freeze({ label: 'Payload', noun: 'payload', goal: 'max', read: (set) => (set.hullHS > 0 ? known(set.hullHS) : null) }),
 })
 
-// The axes as a frozen list of `{ key, goal }`, or an error in words for one that cannot be compared: none chosen, an axis that is not offered or chosen twice, a direction that is neither 'min' nor 'max'.
-export const normaliseAxes = (axes) => {
+// The axes as a frozen list of `{ key, goal }`, or an error in words for one that cannot be compared: none chosen, an axis that is not offered or chosen twice, a direction that is neither 'min' nor 'max'. `catalogue` is the axes on offer, the propulsion axes unless another design family brings its own (each `{ label, noun, goal, read }`).
+export const normaliseAxes = (axes, catalogue = PARETO_AXES) => {
   if (!Array.isArray(axes) || axes.length === 0) {
     throw new Error('Choose at least one axis to compare the sets on.')
   }
@@ -60,7 +60,7 @@ export const normaliseAxes = (axes) => {
   const chosen = new Set()
 
   return Object.freeze(axes.map((axis) => {
-    if (axis === null || typeof axis !== 'object' || !Object.prototype.hasOwnProperty.call(PARETO_AXES, axis.key)) {
+    if (axis === null || typeof axis !== 'object' || !Object.prototype.hasOwnProperty.call(catalogue, axis.key)) {
       throw new Error(`"${axis && axis.key}" is not an axis the sets can be compared on.`)
     }
 
@@ -84,9 +84,9 @@ export const normaliseChoice = (stored) => (stored === null || typeof stored !==
 // The axes of a page's choice (`{ key: 'min' | 'max' }`, a key left out or off is not chosen) as the list `normaliseAxes` takes, in the order the axes are offered.
 export const axesOf = (choice) => Object.keys(PARETO_AXES).filter((key) => choice[key] === 'min' || choice[key] === 'max').map((key) => ({ key, goal: choice[key] }))
 
-// The front of the sets offered, as the search keeps it. `name(set)` is the name a set is known by (its candidate id), called for a set that is kept, left out or alike another. `limit` is the most sets the front holds.
-export const createFront = (axes, { limit = FRONT_LIMIT, identityLimit = IDENTITIES_KEPT, name = String } = {}) => {
-  const specs = normaliseAxes(axes).map(({ key, goal }) => ({ key, goal, sign: goal === 'max' ? 1 : -1, read: PARETO_AXES[key].read }))
+// The front of the sets offered, as the search keeps it. `name(set)` is the name a set is known by (its candidate id), called for a set that is kept, left out or alike another. `limit` is the most sets the front holds. `catalogue` is the axes the sets can be compared on (the propulsion axes unless the sets are of another design family); `describeAxes`, `describeFront` and `describeEmpty` take the same catalogue.
+export const createFront = (axes, { limit = FRONT_LIMIT, identityLimit = IDENTITIES_KEPT, name = String, catalogue = PARETO_AXES } = {}) => {
+  const specs = normaliseAxes(axes, catalogue).map(({ key, goal }) => ({ key, goal, sign: goal === 'max' ? 1 : -1, read: catalogue[key].read }))
   const width = specs.length
   const members = []
   const vectors = new Float64Array(limit * width)
@@ -255,15 +255,15 @@ export const createFront = (axes, { limit = FRONT_LIMIT, identityLimit = IDENTIT
 const joined = (words) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`)
 
 // The axes of a front in words: 'least propulsion tonnage and most speed'.
-export const describeAxes = (axes) => joined(axes.map(({ key, goal }) => `${GOAL_WORDS[goal]} ${PARETO_AXES[key].noun}`))
+export const describeAxes = (axes, catalogue = PARETO_AXES) => joined(axes.map(({ key, goal }) => `${GOAL_WORDS[goal]} ${catalogue[key].noun}`))
 
 // What a front says and does not say, for the page: which sets it compared, whether a set beats these only if the search went on, and which sets took no part for want of a figure.
-export const describeFront = (front, format = String) => {
+export const describeFront = (front, format = String, catalogue = PARETO_AXES) => {
   const { source, unknown, overflow } = front
   const sentences = []
 
   if (!front.reasons.includes('stopped') && !front.reasons.includes('limit')) {
-    sentences.push(`Efficient among every set that meets the targets: no other set beats any of the ${format(front.members.length)}, aiming for ${describeAxes(front.axes)}.`)
+    sentences.push(`Efficient among every set that meets the targets: no other set beats any of the ${format(front.members.length)}, aiming for ${describeAxes(front.axes, catalogue)}.`)
   } else {
     sentences.push('Provisional: these are the sets none of the sets compared so far beats, not yet the efficient sets of every set that meets the targets.')
   }
@@ -283,7 +283,7 @@ export const describeFront = (front, format = String) => {
   sentences.push(`${format(source.compared)} of the ${format(source.feasible)} sets that meet the targets were compared.`)
 
   if (unknown.count > 0) {
-    const missing = joined(front.axes.filter(({ key }) => unknown.byAxis[key] > 0).map(({ key }) => PARETO_AXES[key].noun))
+    const missing = joined(front.axes.filter(({ key }) => unknown.byAxis[key] > 0).map(({ key }) => catalogue[key].noun))
 
     sentences.push(`${format(unknown.count)} had no ${missing} to compare and took no part.`)
   }
@@ -292,7 +292,7 @@ export const describeFront = (front, format = String) => {
 }
 
 // Why a front that holds no set holds none, for the empty table: nothing met the targets (or the search stopped before one was found), or every set that met them lacks a figure on an axis.
-export const describeEmpty = (front, format = String) => {
+export const describeEmpty = (front, format = String, catalogue = PARETO_AXES) => {
   const { source, unknown } = front
   const stopped = front.reasons.includes('stopped')
 
@@ -301,7 +301,7 @@ export const describeEmpty = (front, format = String) => {
   }
 
   if (source.compared === 0) {
-    const missing = joined(front.axes.filter(({ key }) => unknown.byAxis[key] > 0).map(({ key }) => PARETO_AXES[key].noun))
+    const missing = joined(front.axes.filter(({ key }) => unknown.byAxis[key] > 0).map(({ key }) => catalogue[key].noun))
 
     return `None of the ${format(source.feasible)} sets that meet the targets has ${missing} to compare.`
   }

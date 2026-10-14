@@ -116,6 +116,56 @@
           </div>
         </v-card>
 
+        <v-card class="panel" data-summary="A bounded search of the engine, fuel, warhead and option sizes of a missile for one goal: the greatest warhead at a hit chance, the fastest, the longest range, the cheapest per warhead or the match of the baseline. Limits on size, cost, range and speed hold for every candidate, the best are listed beside the efficient front, a run that stops early says so, and the best can be set beside the baseline as alternatives." data-designer="optimiser" elevation="1">
+          <div class="panel-head">
+            <span>Missile optimiser<v-chip v-if="optimiserIncomplete" x-small color="warning" outlined class="ml-2" data-search="incomplete-chip">Incomplete</v-chip><v-chip v-if="optimiserHypothetical" x-small color="warning" outlined class="ml-2" data-tech="optimiser-hypothetical">Hypothetical tech</v-chip></span>
+            <span class="d-flex align-center flex-wrap">
+              <v-btn small text :disabled="!optimiserOutcome" aria-label="Copy the optimisation result as text" data-action="optimiser-copy" @click="copyOptimised"><v-icon small left>mdi-content-copy</v-icon>Copy</v-btn>
+              <v-btn small text :disabled="!optimiserOutcome" aria-label="Download the optimisation result as CSV" data-action="optimiser-csv" @click="downloadOptimised"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
+            </span>
+          </div>
+          <div class="panel-body">
+            <missile-optimiser :fields="optimiserFieldsRead" :errors="optimiserErrors" :goals="optimiserGoals" :goal-text="optimiserGoalText" :axes="optimiserAxes" :options="optimiserOptions" @field="setOptimiserField" @axis="setOptimiserAxis" />
+            <div class="toolbar mt-3">
+              <div class="tool tool--actions">
+                <div class="tool__buttons">
+                  <v-btn outlined color="primary" :disabled="!optimiserRequest.ok || optimiserRunning" aria-label="Run the optimisation" data-action="optimiser-run" @click="runOptimiser"><v-icon small left>mdi-magnify</v-icon>Optimise</v-btn>
+                  <v-btn outlined :disabled="!optimiserRunning" aria-label="Stop the optimisation and keep the best so far" data-action="optimiser-cancel" @click="cancelOptimiser"><v-icon small left>mdi-stop</v-icon>Cancel</v-btn>
+                  <v-btn outlined :disabled="!optimiserBaseDraft" aria-label="Match the baseline with a domain around its own figures" data-action="optimiser-around" @click="searchAroundBaseline"><v-icon small left>mdi-target</v-icon>Match the baseline</v-btn>
+                  <v-btn outlined :disabled="!canNominate" aria-label="Set the best candidates beside the baseline as alternatives" data-action="optimiser-nominate" @click="nominateOptimised"><v-icon small left>mdi-plus</v-icon>Nominate the best</v-btn>
+                </div>
+              </div>
+            </div>
+            <v-progress-linear v-if="optimiserRunning" :value="optimiserProgress * 100" height="3" class="mt-3" aria-label="Optimising" data-optimiser="progress" />
+            <v-alert v-if="optimiserProblems" type="error" outlined dense class="mt-3" data-optimiser="errors">The optimisation does not run: {{ optimiserProblems }}</v-alert>
+            <v-alert v-if="optimiserError" type="error" outlined dense class="mt-3" data-optimiser="failed">The optimisation failed: {{ optimiserError }}</v-alert>
+            <div v-if="optimiserMessage" class="caption text--secondary mt-2" data-optimiser="message">{{ optimiserMessage }}</div>
+            <div v-if="optimiserCopyMessage" class="caption text--secondary mt-2" data-optimiser="copy-message">{{ optimiserCopyMessage }}</div>
+            <template v-if="optimiserOutcome">
+              <v-alert v-if="optimiserStale && !optimiserRunning" type="info" outlined dense class="mt-3" data-search="stale">The inputs changed after this result was found. Run the optimisation again to refresh it.</v-alert>
+              <v-alert v-if="optimiserIncomplete" type="warning" outlined dense class="mt-3" data-search="incomplete">Incomplete search. {{ optimiserStatus }}</v-alert>
+              <div v-else class="caption text--secondary mt-2" data-search="outcome">{{ optimiserStatus }}</div>
+              <div v-if="optimiserOutcome.result && optimiserOutcome.result.output.omitted > 0" class="caption text--secondary" data-search="omitted">The best {{ count(optimiserOutcome.result.output.listed) }} are listed; {{ count(optimiserOutcome.result.output.omitted) }} more meet the limits.</div>
+              <missile-optimiser-results :headers="optimiserHeaders" :rows="optimiserRows" :front="optimiserFront" :empty-text="optimiserEmptyText" class="mt-3" />
+            </template>
+          </div>
+          <div class="panel-foot caption text--secondary">
+            Every candidate of the domain is held to the size, cost, range and speed limits; the missile is designed with the tech levels above and an option set to both ways is tried with and without. The hit chance is the combat model's, against the target speed, jammer and tactical modifier of the scenario, capped at its greatest; the point-defence figure feeds the planner figure only, a planner figure and not a game statistic. A missile on a second stage or with a decoy warhead has no hit chance, so a goal that needs one finds none. Cheapest per warhead leaves out a missile with no warhead, as its cost per warhead is undefined. The efficient front holds every candidate within the limits that no other beats on all the compared figures, whatever number of results is kept. A run stops at 200,000 candidates or 30 seconds and then says it is incomplete, never as an answer for the whole domain.
+          </div>
+        </v-card>
+
+        <v-card class="panel" data-summary="The launching ship's missile fire control and search sensor set beside the missile's own sensor and its range. Each sensor is a saved one of the race or typed figures, and the coverage of the target comes from the same detection rule as the sensors' own page; a figure that is missing is unknown and never 0." data-designer="launcher-coverage" elevation="1">
+          <div class="panel-head">
+            <span>Launcher coverage</span>
+          </div>
+          <div class="panel-body">
+            <launcher-coverage :sensors="launcherSensorRows" :selection="launcherSelection" :items="launcherItems" :missiles="launcherMissileRows" :jammer="launcherJammer" :jammer-problem="launcherJammerProblem" @sensor="setLauncherSensor" @jammer="setLauncherJammer" />
+          </div>
+          <div class="panel-foot caption text--secondary">
+            A sensor reaches a target at its maximum range, cut by the square of the target's signature over the sensor's resolution when the target is under it, and by 0.75 for each point the target's sensor jammer is above the sensor's ECCM. The target signature is that of the scenario above. The sensor jammer is its own figure, a blank one meaning none, and is not the missile jammer of the hit chance, which does not cut a sensor's range. A saved sensor that is not in this save has no figures: its coverage is unknown and the typed figures are not used in its place. The missile's own sensor and the launching ship's are never added: a fire control that reaches the whole range of a missile can guide it with no sensor of its own, and a missile whose own sensor reaches less than the shot is guided from the ship.
+          </div>
+        </v-card>
+
         <v-card class="panel" data-summary="Comparisons kept in the scenario records of the race on this branch: the baseline, the alternatives as typed, the scenario and the tech levels chosen, never a figure of the save. A comparison made at a later game time is listed and not applied until moved to this save." data-designer="records" elevation="1">
           <div class="panel-head">
             <span>Saved comparisons<v-chip v-if="recordsRead.entries.length" x-small outlined class="ml-2">{{ recordsRead.entries.length }}</v-chip></span>
@@ -163,8 +213,11 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import LauncherCoverage from '../components/missiles/LauncherCoverage.vue'
 import MissileCompareTable from '../components/missiles/MissileCompareTable.vue'
 import MissileDraftEditor from '../components/missiles/MissileDraftEditor.vue'
+import MissileOptimiser from '../components/missiles/MissileOptimiser.vue'
+import MissileOptimiserResults from '../components/missiles/MissileOptimiserResults.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import countFormat from '../mixins/count-format'
@@ -172,14 +225,19 @@ import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { linkTo } from '../utilities/deep-links'
+import { loadSensorFixture, SENSOR_COMPONENT_TYPES } from '../utilities/design-data'
+import { LAUNCH_ROLES, emptySelection, launcherView, normaliseSelection, sensorOfSelection } from '../utilities/launcher-coverage'
 import { tracked } from '../utilities/load-tracking'
-import { DESIGN_LINES, DESIGN_LINE_TYPES, LINE_LABELS, MAX_ALTERNATIVES, NO_DESIGNS, addAlternative, carryOf, compareDesigns, deleteDesign, designerContext, emptyDraft, loadDesigns, moveDesign, payloadOf, pdProblem, problemsOf, readDesigns, registerDesigner, removeAlternative, saveDesign, savedAlternative, savedChoices, scenarioOf, seedAlternative, summaryText, techChoicesOf, techLinksOf } from '../utilities/missile-designer'
+import { DESIGN_LINES, DESIGN_LINE_TYPES, LINE_LABELS, MAX_ALTERNATIVES, NO_DESIGNS, addAlternative, carryOf, compareDesigns, deleteDesign, designerContext, emptyDraft, loadDesigns, moveDesign, payloadOf, pdProblem, problemsOf, readDesigns, registerDesigner, removeAlternative, saveDesign, savedAlternative, savedChoices, scenarioOf, seedAlternative, summaryText, techChoicesOf, techFigures, techLinksOf } from '../utilities/missile-designer'
 import { entered } from '../utilities/missile-hit'
+import { AXIS_ORDER, COLUMNS, GOALS, GOAL_IDS, OPTION_LABELS, SWEEP_AXES, describeMissileFront, describeStatus, domainAround, exportOutcome, frontTable, missileRun, nominations, normaliseFields, readRequest, referenceOfColumn, stageOfDraft, tableOf, techNotesOf } from '../utilities/missile-optimizer'
+import { RESPONSIVENESS, TERMINATION, createRunSlot } from '../utilities/search-run'
 import { NO_TECH_CHOICES, candidateText, loadTechChoices, readScenario, registerTechScenarios, resolveChoices, saveChoice, scopeOf, selectionOf } from '../utilities/tech-scenarios'
 
 const INPUT_LABELS = {
   tech: 'the race\'s tech lines, researched levels and research graph',
   designs: 'the missile designs the race has researched and owns',
+  sensors: 'the missile fire controls and active sensors the race has researched',
   formulaVersion: 'the save\'s schema',
 }
 
@@ -188,13 +246,31 @@ const TECH_LINES = Object.entries(DESIGN_LINES).map(([name, type]) => ({ type, l
 
 const text = (value) => typeof value === 'string'
 
+const NO_SENSORS = Object.freeze({ components: Object.freeze([]) })
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+// How many decimals each figure of the optimiser's tables is written with.
+const OPTIMISER_DECIMALS = { engineMsp: 3, thrust: 3, fuelMsp: 3, warheadMsp: 3, size: 2, damage: 2, hitChance: 1, cost: 2, costPerWarhead: 2, deviation: 1, planner: 2 }
+
+// How many members of the efficient front the table lists: a front can hold thousands, and the caption states how many there are.
+const FRONT_ROWS = 25
+
+// A new task as soon as the browser has had its turn, which still comes in a hidden window.
+const nextTask = () => new Promise((resolve) => {
+  const channel = new MessageChannel()
+
+  channel.port1.onmessage = () => resolve()
+  channel.port2.postMessage(null)
+})
+
 // The alternatives as the page keeps them: every entry the record adapter accepts, at most three.
 const validAlternatives = (value) => Array.isArray(value) && problemsOf({ name: 'x', baselineId: null, alternatives: value, scenario: scenarioOf({}), tech: { choices: {} } }).length === 0
 
 // A page for the missile designer: the researched missiles of the race and the missiles it could design, side by side under one scenario (utilities/missile-designer.js).
 export default {
   name: 'MissileDesignerPage',
-  components: { LoadState, MissileCompareTable, MissileDraftEditor, PageLink },
+  components: { LauncherCoverage, LoadState, MissileCompareTable, MissileDraftEditor, MissileOptimiser, MissileOptimiserResults, PageLink },
   mixins: [
     countFormat,
     loadState(INPUT_LABELS),
@@ -207,6 +283,9 @@ export default {
       hitModifier: { key: 'missileHitModifier', default: '1', valid: text },
       pd: { key: 'missileDesignerPd', default: '0', valid: text },
       targetSignature: { key: 'missileDesignerTargetSignature', default: '', valid: text },
+      optimiserFields: { key: 'missileOptimiserFields', default: normaliseFields(null), valid: isObject },
+      launcherSensors: { key: 'missileLauncherSensors', default: emptySelection(), scope: 'race', valid: isObject },
+      launcherJammer: { key: 'missileLauncherJammer', default: '0', valid: text },
     }),
   ],
   data() {
@@ -229,6 +308,13 @@ export default {
       recordRevision: 0,
       // The links of the comparison as they were read or last written (`carryOf`), kept through a save so that a saved design or a tech that changed, or that was kept with no link, is not accepted by a save; a choice made on the page leaves it.
       linkCarry: [],
+      // The optimiser: the outcome of the last run that was kept (frozen, with its descriptor), whether a run is going and how far, and what is to be said beside it.
+      optimiserOutcome: null,
+      optimiserRunning: false,
+      optimiserProgress: 0,
+      optimiserError: '',
+      optimiserMessage: '',
+      optimiserCopyMessage: '',
     }
   },
   computed: {
@@ -397,6 +483,210 @@ export default {
 
       return parts.filter(Boolean).join(' ')
     },
+
+    optimiserFieldsRead() {
+      return normaliseFields(this.optimiserFields)
+    },
+
+    optimiserGoals() {
+      return GOAL_IDS.map((id) => ({ id, label: GOALS[id].label }))
+    },
+
+    optimiserGoalText() {
+      const goal = GOALS[this.optimiserFieldsRead.goal]
+
+      return `${goal.objective} ${goal.ties}`
+    },
+
+    optimiserAxes() {
+      return AXIS_ORDER.map((name) => ({ name, label: SWEEP_AXES[name].label, unit: SWEEP_AXES[name].unit }))
+    },
+
+    optimiserOptions() {
+      return Object.entries(OPTION_LABELS).map(([name, label]) => ({ name, label }))
+    },
+
+    // The tech lines the page designs with, as the figures the optimiser reads.
+    optimiserTech() {
+      return techFigures(this.designerContext.levels)
+    },
+
+    // The baseline's column when a saved missile is pinned, whose figures a match is taken from.
+    optimiserBaseline() {
+      const column = this.comparison.columns[0]
+
+      return column && column.role === 'baseline' ? column : null
+    },
+
+    // The draft the baseline is seeded as: its sensors, decoys and what it carries stay as they are in every candidate.
+    optimiserBaseDraft() {
+      if (this.baselineId === null) {
+        return null
+      }
+
+      const seeded = seedAlternative(this.designerContext, this.baselineId)
+
+      return seeded.ok ? seeded.draft : null
+    },
+
+    optimiserRequest() {
+      return readRequest({ fields: this.optimiserFieldsRead, scenario: this.scenarioInput, tech: this.optimiserTech, reference: this.optimiserBaseline ? referenceOfColumn(this.optimiserBaseline) : null, baseDraft: this.optimiserBaseDraft, stage: stageOfDraft(this.designs.fixture, this.optimiserBaseDraft), version: this.formulaVersion, techNotes: techNotesOf(this.techResolution, { fields: this.optimiserFieldsRead, baseDraft: this.optimiserBaseDraft }) })
+    },
+
+    optimiserErrors() {
+      return this.optimiserRequest.errors
+    },
+
+    optimiserProblems() {
+      return Object.values(this.optimiserRequest.errors).join('; ')
+    },
+
+    // What the request stands for, as text: a run that was made for another is out of date.
+    optimiserRequestKey() {
+      return this.optimiserRequest.ok ? JSON.stringify(this.optimiserRequest.input) : ''
+    },
+
+    optimiserStale() {
+      return Boolean(this.optimiserOutcome) && JSON.stringify(this.optimiserOutcome.descriptor.input) !== this.optimiserRequestKey
+    },
+
+    // Whether the result shown is not the whole answer: a run that was cancelled, replaced or stopped at its budget.
+    optimiserIncomplete() {
+      return Boolean(this.optimiserOutcome) && this.optimiserOutcome.incomplete && !this.optimiserRunning
+    },
+
+    optimiserHypothetical() {
+      return this.techLines.some((line) => line.hypothetical)
+    },
+
+    optimiserStatus() {
+      return this.optimiserOutcome ? describeStatus(this.optimiserOutcome, this.figureText) : ''
+    },
+
+    optimiserExport() {
+      return this.optimiserOutcome ? exportOutcome(this.optimiserOutcome, this.figureText) : null
+    },
+
+    optimiserTable() {
+      return this.optimiserOutcome ? tableOf(this.optimiserOutcome) : null
+    },
+
+    optimiserHeaders() {
+      return this.optimiserTable ? this.optimiserTable.header : []
+    },
+
+    optimiserRows() {
+      if (!this.optimiserTable) {
+        return []
+      }
+
+      return this.optimiserTable.rows.map((row) => ({ key: row.entry.id, cells: COLUMNS.map((column) => this.cellOf(column.id, row.cells[column.id], row.results[column.id] || null)) }))
+    },
+
+    optimiserFront() {
+      const result = this.optimiserOutcome ? this.optimiserOutcome.result : null
+
+      if (!result) {
+        return { caption: '', headers: [], rows: [], omitted: 0 }
+      }
+
+      const table = frontTable(result.front, this.optimiserOutcome.descriptor.input)
+
+      return { caption: describeMissileFront(result.front, this.figureText), headers: table.axes.map((axis) => axis.label), rows: table.rows.slice(0, FRONT_ROWS).map((row) => ({ key: row.id, alike: row.alike, cells: row.cells.map((value, at) => this.cellOf(table.axes[at].key, value, row.results[at])) })), omitted: Math.max(0, table.rows.length - FRONT_ROWS) }
+    },
+
+    optimiserEmptyText() {
+      return this.optimiserIncomplete ? 'None found so far.' : 'None meets the limits.'
+    },
+
+    // Whether the result can be set beside the baseline: it was made for the inputs now on the page and lists a candidate.
+    canNominate() {
+      const result = this.optimiserOutcome ? this.optimiserOutcome.result : null
+
+      return Boolean(result) && result.entries.length > 0 && !this.optimiserStale && !this.optimiserRunning && this.alternatives.length < MAX_ALTERNATIVES
+    },
+
+    // The saved sensors of the race that can guide a missile from the ship: its missile fire controls and its active sensors.
+    launcherItems() {
+      const of = (type) => this.sensors.components.filter((component) => component.row.ComponentTypeID === type).map((component) => ({ text: `${component.row.Name} · ${this.count(component.row.MaxSensorRange)} km`, value: component.id }))
+      const items = { [LAUNCH_ROLES.missileFireControl]: of(SENSOR_COMPONENT_TYPES.missileFireControl), [LAUNCH_ROLES.search]: of(SENSOR_COMPONENT_TYPES.active) }
+
+      for (const [role, list] of Object.entries(items)) {
+        const id = this.launcherSelection[role].id
+
+        if (id !== null && !list.some((item) => item.value === id)) {
+          list.push({ text: `Saved sensor ${id} · not in this save`, value: id })
+        }
+      }
+
+      return items
+    },
+
+    // Why the target's sensor jammer is not a figure, or an empty text: a blank one is none, and a text that is not a number of 0 or more leaves the coverage unknown.
+    launcherJammerProblem() {
+      const blank = String(this.launcherJammer).trim() === ''
+      const jammer = blank ? 0 : entered(this.launcherJammer)
+
+      return jammer === null || jammer < 0 ? 'Enter a number of 0 or more, or leave it blank for none' : ''
+    },
+
+    launcherSelection() {
+      return normaliseSelection(this.launcherSensors)
+    },
+
+    // The missiles whose reach and range the launching ship's sensors are set beside: the baseline as saved and the best of the optimisation that is not out of date.
+    launcherMissiles() {
+      const rows = []
+      const baseline = this.optimiserBaseline
+
+      if (baseline) {
+        rows.push({ label: `Baseline: ${baseline.name}`, ownReachKm: baseline.figures.reach.value, ownReachReason: baseline.figures.reach.reason || '', flightRangeKm: baseline.figures.maxRange.value, flightRangeReason: baseline.figures.maxRange.reason || '' })
+      }
+
+      const result = this.optimiserOutcome && !this.optimiserStale ? this.optimiserOutcome.result : null
+
+      if (result && result.best) {
+        rows.push({ label: `Best of the optimisation: ${result.best.id}`, ownReachKm: result.sensor.reachKm, ownReachReason: result.sensor.reachReason, flightRangeKm: result.best.figures.maxRange, flightRangeReason: '' })
+      }
+
+      return rows
+    },
+
+    launcherView() {
+      const selection = this.launcherSelection
+      const components = this.sensors.components
+      const signature = String(this.targetSignature).trim() === '' ? null : entered(this.targetSignature)
+      const jammer = String(this.launcherJammer).trim() === '' ? 0 : entered(this.launcherJammer)
+      const missing = this.launcherJammerProblem ? [`the target's sensor jammer: ${this.launcherJammerProblem.toLowerCase()}`] : []
+
+      return launcherView({ mfc: sensorOfSelection(selection[LAUNCH_ROLES.missileFireControl], components, LAUNCH_ROLES.missileFireControl), search: sensorOfSelection(selection[LAUNCH_ROLES.search], components, LAUNCH_ROLES.search), target: { signature, jammer, missing }, missiles: this.launcherMissiles, format: this.figureText })
+    },
+
+    launcherSensorRows() {
+      return this.launcherView.sensors
+    },
+
+    launcherMissileRows() {
+      return this.launcherView.missiles
+    },
+  },
+  watch: {
+    // An input that changes while a run goes ends it; the result already kept stays and is marked out of date.
+    optimiserRequestKey() {
+      if (this.optimiserRunning) {
+        this.stopOptimiser(TERMINATION.INPUT_CHANGED)
+      }
+    },
+
+    // Another save, or another race of it, has no use for a result made from the last.
+    context() {
+      this.stopOptimiser(TERMINATION.SAVE_CHANGED)
+      this.optimiserOutcome = null
+      this.optimiserMessage = ''
+    },
+  },
+  beforeDestroy() {
+    this.stopOptimiser(TERMINATION.CLOSED)
   },
   methods: {
     setBaseline(id) {
@@ -684,6 +974,163 @@ export default {
         this.recordMessage = outcome.message
       }
     },
+
+    // The text of a figure as a table writes it: a word for one that is not known, never 0.
+    figureText(value) {
+      return this.count(value, 4)
+    },
+
+    // A cell of the optimiser's tables: the figure to its decimals, the word 'unknown' for a figure that is not known, and the provenance result of the figure where it has one.
+    cellOf(id, value, result = null) {
+      if (value === null || value === undefined) {
+        return { text: 'unknown', unknown: true, result }
+      }
+
+      return { text: typeof value === 'number' ? this.count(value, OPTIMISER_DECIMALS[id] === undefined ? 0 : OPTIMISER_DECIMALS[id]) : String(value), unknown: false, result }
+    },
+
+    setOptimiserField(name, value) {
+      this.optimiserFields = { ...this.optimiserFieldsRead, [name]: value }
+    },
+
+    setOptimiserAxis(name, part, value) {
+      const fields = this.optimiserFieldsRead
+
+      this.optimiserFields = { ...fields, [name]: { ...fields[name], [part]: value } }
+    },
+
+    // Sets the domain around the figures of the saved missile pinned as the baseline, with the match of it as the goal.
+    searchAroundBaseline() {
+      if (!this.optimiserBaseDraft) {
+        return
+      }
+
+      this.optimiserFields = { ...this.optimiserFieldsRead, ...domainAround(this.optimiserBaseDraft), maxMsp: '', hitChance: '' }
+      this.optimiserMessage = 'The domain now surrounds the figures of the baseline and the goal is its match. The size limit is left blank, which is the size of the baseline.'
+    },
+
+    // The run slot, made when first wanted: it holds a live generator and is not reactive.
+    optimiserSlotOf() {
+      if (!this.optimiserSlot) {
+        this.optimiserSlot = createRunSlot()
+      }
+
+      return this.optimiserSlot
+    },
+
+    stopOptimiser(why) {
+      if (this.optimiserSlot) {
+        this.optimiserSlot.invalidate(why)
+      }
+
+      this.optimiserRunning = false
+    },
+
+    // Stops the run where it is; its best so far is kept, labelled incomplete.
+    cancelOptimiser() {
+      this.optimiserSlotOf().cancel()
+    },
+
+    // Runs the optimisation of the request a slice at a time and keeps its outcome. A run that is replaced is dropped without a word.
+    async runOptimiser() {
+      const request = this.optimiserRequest
+
+      if (!request.ok) {
+        return
+      }
+
+      const slot = this.optimiserSlotOf()
+
+      try {
+        const run = slot.start(missileRun(request.input))
+
+        this.optimiserProgress = 0
+        this.optimiserRunning = true
+        this.optimiserError = ''
+        this.optimiserMessage = ''
+        this.optimiserCopyMessage = ''
+
+        while (run.running) {
+          run.advance(RESPONSIVENESS.sliceMs)
+          this.optimiserProgress = run.progress
+
+          if (run.running) {
+            await nextTask()
+          }
+
+          if (!slot.isCurrent(run)) {
+            return
+          }
+        }
+
+        const outcome = slot.publish(run)
+
+        if (!outcome) {
+          return
+        }
+
+        this.optimiserRunning = false
+
+        if (outcome.error) {
+          this.optimiserError = outcome.error
+
+          return
+        }
+
+        this.optimiserOutcome = outcome
+      } catch (error) {
+        this.optimiserRunning = false
+        this.optimiserError = error.message
+      }
+    },
+
+    async copyOptimised() {
+      try {
+        await navigator.clipboard.writeText(this.optimiserExport.text)
+        this.optimiserCopyMessage = 'The result is copied as text with the status of the search.'
+      } catch (error) {
+        this.optimiserCopyMessage = `The result could not be copied (${error && error.message ? error.message : 'the clipboard is not available'}).`
+      }
+    },
+
+    // The listed candidates as a CSV file, the status of the search on every row.
+    downloadOptimised() {
+      const link = document.createElement('a')
+
+      link.href = URL.createObjectURL(new Blob([this.optimiserExport.csv], { type: 'text/csv' }))
+      link.download = 'missile-optimisation.csv'
+      link.click()
+      URL.revokeObjectURL(link.href)
+    },
+
+    // Sets the best candidates of the result beside the baseline as alternatives, up to the three the comparison holds. The baseline stays as saved.
+    nominateOptimised() {
+      if (!this.canNominate) {
+        return
+      }
+
+      const drafts = nominations(this.optimiserOutcome, { baseDraft: this.optimiserBaseDraft })
+      const before = this.alternatives.length
+
+      drafts.forEach((draft) => this.pushAlternative(draft))
+
+      const added = this.alternatives.length - before
+
+      const beside = this.baselineId === null ? '' : ' beside the baseline'
+
+      this.optimiserMessage = added === drafts.length ? `The best ${added === 1 ? 'candidate is' : `${added} candidates are`} set${beside} as ${added === 1 ? 'an alternative' : 'alternatives'}.` : `${added} of the ${drafts.length} best could be set${beside}. ${this.alternativeMessage}`
+    },
+
+    // One field of a launch sensor: the saved sensor chosen (its id, or null for typed figures) or a figure typed.
+    setLauncherSensor(role, field, value) {
+      const selection = this.launcherSelection
+
+      this.launcherSensors = { ...selection, [role]: { ...selection[role], [field]: value === undefined ? null : value } }
+    },
+
+    setLauncherJammer(value) {
+      this.launcherJammer = value
+    },
   },
   asyncComputed: {
     tech: {
@@ -717,6 +1164,17 @@ export default {
         return await loadFormulaVersion(this.database)
       }),
       default: null,
+    },
+    // The missile fire controls and active sensors the race has researched, as components of the save with their stored range, resolution and ECCM.
+    sensors: {
+      get: tracked('sensors', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_SENSORS
+        }
+
+        return await loadSensorFixture(this.database, this.GameID, this.RaceID)
+      }),
+      default: NO_SENSORS,
     },
     // The repository of scenario records, loaded when the page is: its module needs the app's settings store, so a page that is read without it still loads.
     records: {
