@@ -204,6 +204,8 @@
             </v-card>
           </v-col>
         </v-row>
+
+        <component-calculator :sources="componentSources" :colonies="componentColonies" :industry="industry" :arrivals="arrivals" :npr="RaceNPR" />
       </template>
     </v-container>
   </div>
@@ -219,6 +221,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import ComponentCalculator from '../components/production/ComponentCalculator.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -226,6 +229,7 @@ import persistedView, { tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
+import { sourcesOf } from '../utilities/component-calc'
 import { crewFractionSql } from '../utilities/crew'
 import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
@@ -247,6 +251,7 @@ const INPUT_LABELS = {
   trainings: 'the ground unit training',
   terraforms: 'the terraforming',
   navalAdmins: 'the naval admin commands',
+  componentSources: 'the ship classes\' components and the colonies\' component stock',
 }
 
 const SECONDS_PER_DAY = 86400
@@ -351,7 +356,7 @@ const nextTask = () => new Promise((resolve) => {
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, ComponentCalculator, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -444,6 +449,16 @@ export default {
 
         return [populationId, prepareForecast({ projects, capacities, modifiers: this.populationProductionModifiers[populationId], arrivals: this.arrivals.filter((arrival) => arrival.PopulationID === Number(populationId)), npr: this.RaceNPR })]
       }))
+    },
+
+    // The colonies that can build components, with the capacity of each: construction capacity that is known and none is left out; one whose capacity is not known stays, to be reported as such.
+    componentColonies() {
+      return Object.keys(this.populationProductionModifiers).map((key) => {
+        const id = Number(key)
+        const capacities = Object.fromEntries(CAPACITY_KINDS.map((kind) => [kind, this.populationCapacityResult(id, kind)]))
+
+        return { id, name: this.colony(id, '').colonyName, capacities, modifiers: this.populationProductionModifiers[id] }
+      }).filter((colony) => !isAvailable(colony.capacities.construction) || colony.capacities.construction.value > 0).sort((a, b) => a.name.localeCompare(b.name))
     },
 
     // What the run is given: the plain input of the engine for each colony that has one.
@@ -1292,6 +1307,26 @@ export default {
         ]
       }),
       default: [],
+    },
+    // The race's ship classes with the components each mounts, and the component stock and mineral stock of each colony: what the component calculator works from.
+    componentSources: {
+      get: tracked('componentSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { classes: [], parts: {}, stock: {}, minerals: {} }
+        }
+
+        const scope = `GameID = ${this.GameID} and RaceID = ${this.RaceID}`
+        const needs = MINERALS.map((mineral) => `FCT_ShipDesignComponents.${mineral.name}`).join(', ')
+        const stocks = MINERALS.map((mineral) => mineral.name).join(', ')
+
+        const [classes] = await this.database.query(`select ShipClassID, ClassName, Obsolete from FCT_ShipClass where ${scope} order by ClassName`)
+        const [parts] = await this.database.query(`select FCT_ClassComponent.ClassID, FCT_ClassComponent.ComponentID, FCT_ClassComponent.NumComponent, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.Cost, FCT_ShipDesignComponents.Prototype, FCT_ShipDesignComponents.ShippingLineSystem, ${needs}, FCT_RaceTech.Obsolete as TechObsolete, FCT_RaceTech.TechID as ResearchedTech from FCT_ClassComponent inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ClassComponent.ClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID left join FCT_RaceTech on FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID and FCT_RaceTech.RaceID = ${this.RaceID} and FCT_RaceTech.GameID = ${this.GameID} where FCT_ClassComponent.GameID = ${this.GameID} and FCT_ShipClass.GameID = ${this.GameID} and FCT_ShipClass.RaceID = ${this.RaceID}`)
+        const [stock] = await this.database.query(`select FCT_PopComponent.PopulationID, FCT_PopComponent.ComponentID, FCT_PopComponent.Amount from FCT_PopComponent inner join FCT_Population on FCT_Population.PopulationID = FCT_PopComponent.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [populations] = await this.database.query(`select PopulationID, ${stocks} from FCT_Population where ${scope}`)
+
+        return sourcesOf({ classes, parts, stock, populations, npr: this.RaceNPR })
+      }),
+      default: { classes: [], parts: {}, stock: {}, minerals: {} },
     },
   },
 }
