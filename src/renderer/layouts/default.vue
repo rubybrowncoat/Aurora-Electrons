@@ -56,10 +56,10 @@
         <kbd class="hidden-xs-only">Ctrl K</kbd>
       </div>
 
-      <v-btn v-if="appearance.mode === 'dark'" icon title="Light theme" data-theme-toggle="light" @click="setDarkMode(false)">
+      <v-btn v-if="appearance.mode === 'dark'" icon :title="lampTitle" :aria-label="lampTitle" data-theme-toggle="light" @click="switchTheme">
         <v-icon>mdi-lightbulb-on-outline</v-icon>
       </v-btn>
-      <v-btn v-else icon title="Dark theme" data-theme-toggle="dark" @click="setDarkMode(true)">
+      <v-btn v-else icon :title="lampTitle" :aria-label="lampTitle" data-theme-toggle="dark" @click="switchTheme">
         <v-icon>mdi-lightbulb-on</v-icon>
       </v-btn>
 
@@ -103,6 +103,7 @@
 </template>
 
 <script>
+import { ipcRenderer } from 'electron'
 import { mapActions, mapGetters, mapMutations, mapState } from 'vuex'
 
 import EmpireAvatar from '../components/navigation/EmpireAvatar.vue'
@@ -116,7 +117,7 @@ import SectionFlyout from '../components/navigation/SectionFlyout.vue'
 import { sectionStyle } from '../components/navigation/section-style'
 import CapabilityState from '../components/page/CapabilityState.vue'
 import SectionNav from '../components/page/SectionNav.vue'
-import { activeAppearance, appearanceStyle, applyMode, loadAppearance } from '../utilities/appearance'
+import { SYSTEM_QUERY, activeAppearance, appearanceStyle, applyPolicy, followSystem, loadAppearance, nativeThemeSource, quickSwitch, requestNativeTheme } from '../utilities/appearance'
 import { PAGES, SECTIONS, needsRace, pageByRoute } from '../utilities/navigation'
 import { peeks } from '../utilities/peeks'
 
@@ -189,6 +190,18 @@ export default {
     },
     rootStyle () {
       return appearanceStyle(this.appearance)
+    },
+
+    // The lamp sets the opposite of the mode drawn now as an explicit Light or Dark theme, which also ends System or a named preset: the title says what it replaces.
+    lampTitle () {
+      const { mode, replaces } = quickSwitch()
+
+      return `${mode === 'dark' ? 'Dark' : 'Light'} theme${replaces ? ` (replaces ${replaces})` : ''}`
+    },
+
+    // What the application's native theme is asked to be (the window frame, the native dialogs): see nativeThemeSource.
+    nativeSource () {
+      return nativeThemeSource()
     },
 
     // The trail replaces the tagline once a page beyond the one the app started on has been opened.
@@ -274,6 +287,10 @@ export default {
         this.spyNPR = config.get('spyNPR', false)
       },
     },
+    nativeSource: {
+      immediate: true,
+      handler: 'syncNativeTheme',
+    },
 
     // The flyout's lines load when it opens, and again when the save, the race or the history file changes under it. The empire list is read again when the save or the NPR setting changes.
     flyoutId: 'loadFlyoutPeeks',
@@ -283,6 +300,8 @@ export default {
     spyNPR: 'loadEmpires',
   },
   created() {
+    // The operating system's colour scheme is observed from the start, before the settings are read, so that the System policy draws the right one at once; the listener is removed with the layout.
+    this.system = window.matchMedia ? followSystem(window.matchMedia(SYSTEM_QUERY)) : null
     loadAppearance(this.config)
     this.loadEmpires()
   },
@@ -306,6 +325,10 @@ export default {
     window.addEventListener('mouseup', this.onMouseup)
   },
   beforeDestroy () {
+    if (this.system) {
+      this.system.stop()
+    }
+
     if (this.unsubscribeSpyNPR) {
       this.unsubscribeSpyNPR()
     }
@@ -323,6 +346,7 @@ export default {
       'configDidChange',
     ]),
 
+    ...mapActions('snackbar', ['activateSnackbar']),
     ...mapActions('navigation', [
       'back',
       'forward',
@@ -343,9 +367,19 @@ export default {
       }
     },
 
-    // The lamp and the Display panel's Dark theme switch both apply the baseline preset of a mode, through the one helper that writes `appearance`.
-    setDarkMode(dark) {
-      applyMode(this.config, dark ? 'dark' : 'light')
+    // The lamp and the Theme control of Settings both apply a policy through the one helper that writes it (`applyPolicy`).
+    switchTheme () {
+      try {
+        applyPolicy(this.config, quickSwitch().mode)
+      } catch (error) {
+        console.error("Couldn't write the theme", error)
+        this.activateSnackbar({ text: "Couldn't write the settings, so the theme was not applied", color: 'error' })
+      }
+    },
+
+    // Tells the main process what the native theme should be. A pinned theme or a named appearance asks for its own mode, which makes the colour scheme query report that mode, so the observer keeps the last scheme it read from the system. When the system is asked for again, the main process answers with its scheme (the web shim with nothing, and the query is then the system's), and the observer reads that.
+    syncNativeTheme () {
+      requestNativeTheme((source) => ipcRenderer.invoke('theme:source', source)).catch((error) => console.error("Couldn't set the native theme", error))
     },
 
     go (path) {

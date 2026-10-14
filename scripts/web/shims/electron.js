@@ -41,6 +41,10 @@ export const ipcRenderer = {
       case 'request-storage-path': {
         return ready()
       }
+      case 'theme:source': {
+        // Web mode has no native dialogs: the page reads the colour scheme query itself.
+        return Promise.resolve(null)
+      }
       case 'saves:state': {
         return ready().then(() => saves('state'))
       }

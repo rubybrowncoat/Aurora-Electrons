@@ -2,7 +2,7 @@
 //
 // A bundle is `{ format, version, exportedAt, source: { gameId, raceId, gameName, raceName }, categories }`. `categories` holds only the categories chosen, each as `{ app?: { <key>: value }, race?: { <key>: value } }`. An `app` key is stored as it is; a `race` key is stored under `campaign.<campaign id>.race.<RaceID>.` of the empire it was exported from (the campaign is the app's own record of a campaign, see `utilities/campaign.js`), and travels without that prefix, so an import joins it to the prefix of the empire it is imported into. The source ids and names are there to tell the person which empire the file came from; they never decide where a key goes, and the campaign id never leaves the installation.
 //
-// The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the colour preset, and the Display panel's two settings. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
+// The allowlist is the settings the app itself writes as preferences: the persisted-view fields (`mixins/persisted-view.js`, which keeps the registry of what every page and component declares, with the `normalise` and `valid` it restores them with), the theme policy and the named colour preset, the typeface and text size, and the Display panel's two settings. Nothing outside it is exported, and a key outside it is rejected on import. Not supported, and so never exported or imported: see EXCLUDED.
 
 import { raceKeyPrefix } from './campaign'
 
@@ -14,7 +14,7 @@ export const BACKUP_FORMAT = 'aurora-electrons-preferences-backup'
 export const MAX_BYTES = 1024 * 1024
 
 export const CATEGORIES = [
-  { id: 'appearance', title: 'Colour preset, typeface and text size', note: 'The preset, the typeface and the text size applied to every page. App-wide.' },
+  { id: 'appearance', title: 'Theme, colour preset, typeface and text size', note: 'The theme (Light, Dark or System), the named colour preset that replaces it, the typeface and the text size applied to every page. App-wide.' },
   { id: 'display', title: 'Number format and Computer-run empires', note: 'The thousands separator and whether Computer-run empires are listed. App-wide.' },
   { id: 'views', title: 'Remembered views', note: "Each page's options, filters, searches, views and each table's sort and rows per page: app-wide, or for the one empire where a value is about its own things." },
   { id: 'mapGroups', title: 'Galaxy Map pins and clusters', note: "The Galaxy Map's pinned systems and clusters of the empire. They name the systems of one campaign." },
@@ -153,14 +153,19 @@ const checkDeclared = (declarations) => (value) => {
 
 // The allowlist: a map of `<category>:<scope>:<key>` to `{ category, scope, key, check(value) }`, where `check` gives `{ ok: true, value }` (the value as it would be kept) or `{ ok: false, reason }`.
 //   declarations: `declaredViews()` of mixins/persisted-view.js, once every page and component module is loaded.
-//   appearance: `{ key, ids }`, the settings key of the colour preset and the ids of the presets this version has.
+//   appearance: `{ key, ids, none, baselines }`, the settings key of the named colour preset and the values it may hold: the ids of the presets this version has, and the value that says none replaces the theme (`none`). `baselines` maps the id of a baseline preset to the policy it stands for: a file from before the policy holds one under `key`, and an import reads it as that policy with `none` under `key` (see `legacy` of a field), so that the import, its plan and its backup name both settings.
+//   policy: `{ key, values }`, the settings key of the theme policy and the policies this version has.
 //   font: `{ key, read }`, the settings key of the typeface and text size and `readFont` of utilities/appearance-font.js, which says whether a value names a typeface and a text size this version offers.
 //   separators: the thousands separators the Display panel offers.
-export const buildSchema = ({ declarations, appearance, font, separators }) => {
+export const buildSchema = ({ declarations, appearance, policy, font, separators }) => {
   const fields = new Map()
   const add = (category, scope, key, check) => fields.set(`${category}:${scope}:${key}`, { category, scope, key, check })
 
   add('appearance', 'app', appearance.key, (value) => (typeof value === 'string' && appearance.ids.includes(value) ? { ok: true, value } : { ok: false, reason: 'is not a preset this version has' }))
+
+  // What a value stands for under the settings of today, when it is the older form: the value to keep and the other settings it sets, which replace the file's own.
+  fields.get(`appearance:app:${appearance.key}`).legacy = (value) => (appearance.baselines && has(appearance.baselines, value) ? { value: appearance.none, also: { [policy.key]: appearance.baselines[value] } } : null)
+  add('appearance', 'app', policy.key, (value) => (typeof value === 'string' && policy.values.includes(value) ? { ok: true, value } : { ok: false, reason: `must be one of ${policy.values.join(', ')}` }))
   add('appearance', 'app', font.key, (value) => {
     const read = font.read(value)
 
@@ -171,7 +176,7 @@ export const buildSchema = ({ declarations, appearance, font, separators }) => {
 
   const byKey = new Map()
 
-  declarations.filter(({ key }) => !EXCLUDED_KEYS.includes(key) && !DISPLAY_KEYS.includes(key) && key !== appearance.key).forEach((declaration) => {
+  declarations.filter(({ key }) => !EXCLUDED_KEYS.includes(key) && !DISPLAY_KEYS.includes(key) && key !== appearance.key && key !== policy.key).forEach((declaration) => {
     const id = `${declaration.scope}:${declaration.key}`
 
     byKey.set(id, [...(byKey.get(id) || []), declaration])
@@ -309,6 +314,7 @@ export const parseBundle = (text, schema) => {
   }
 
   const entries = []
+  const implied = []
 
   if (!isObject(bundle.categories)) {
     fail('categories', 'must be an object')
@@ -352,7 +358,13 @@ export const parseBundle = (text, schema) => {
           const result = field.check(value)
 
           if (result.ok) {
-            entries.push({ category, scope, key, value: result.value })
+            const older = field.legacy ? field.legacy(result.value) : null
+
+            entries.push({ category, scope, key, value: older ? older.value : result.value })
+
+            if (older) {
+              Object.entries(older.also).forEach(([otherKey, otherValue]) => implied.push({ category, scope, key: otherKey, value: otherValue }))
+            }
           } else {
             fail(path, result.reason)
           }
@@ -360,6 +372,17 @@ export const parseBundle = (text, schema) => {
       })
     })
   }
+
+  // The settings an older form implies replace the ones the file holds for them, so a plan and its backup cover every key an import changes.
+  implied.forEach((entry) => {
+    const at = entries.findIndex(({ category, scope, key }) => category === entry.category && scope === entry.scope && key === entry.key)
+
+    if (at >= 0) {
+      entries.splice(at, 1)
+    }
+
+    entries.push(entry)
+  })
 
   return errors.length ? { errors } : { bundle, entries }
 }

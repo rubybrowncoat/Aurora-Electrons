@@ -433,7 +433,7 @@ const CHECKS = [
     const loaded = await loadUtilities(['appearance-font', 'preferences'], { directory: ctx.directory || utilitiesDirectory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
     const { readFont, FONT_KEY } = loaded['appearance-font']
     const { buildSchema, buildExport, parseBundle } = loaded.preferences
-    const schema = buildSchema({ declarations: [], appearance: { key: 'appearance', ids: ['light', 'dark'] }, font: { key: FONT_KEY, read: readFont }, separators: [','] })
+    const schema = buildSchema({ declarations: [], appearance: { key: 'appearance', ids: ['light', 'dark'] }, policy: { key: 'appearancePolicy', values: ['light', 'dark', 'system'] }, font: { key: FONT_KEY, read: readFont }, separators: [','] })
     const record = { family: 'verdana', scale: 1.25 }
     const problems = []
     const exported = buildExport(schema, { appearance: 'dark', [FONT_KEY]: record }, { raceId: null }, ['appearance'])

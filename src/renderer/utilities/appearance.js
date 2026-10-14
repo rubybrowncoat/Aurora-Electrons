@@ -1,6 +1,6 @@
 import Vue from 'vue'
 import { buildAppearanceFile, contrastReport, parseAppearanceFile } from './appearance-file'
-import { appliedFont, familyOf, loadFont } from './appearance-font'
+import { FONT_KEY, appliedFont, familyOf, loadFont } from './appearance-font'
 
 // The appearance contract: one resolved object says what every colour in the app means, and every renderer (Vuetify's theme, the CSS custom properties on the root, Chart.js, Cytoscape, canvas, Pixi) reads its colours from it. A preset is the data for one such object; Light and Dark are the two baseline presets and reproduce the colours the app had before presets existed. Aurora Classic, Solaris and T2D are adaptations of a community reference (see `reference`), listed after them.
 //
@@ -219,11 +219,23 @@ export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASS
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
-// The preset each mode falls back to: the lamp in the app bar and the Dark theme switch move between modes, and land on these.
+// The preset each mode falls back to: the baseline pair the theme policy draws, and where the lamp in the app bar and the Theme control land.
 const BASELINE_BY_MODE = { light: LIGHT.id, dark: DARK.id }
 
-// The settings key the chosen preset's id is kept under: app-wide, written only by `applyPreset`. Settings from before presets hold a boolean `darkMode` instead; `loadAppearance` turns it into this key once and nothing writes `darkMode` any more.
+// The policy each baseline id stands for: what an id of a baseline under `appearance` (the form before the policy, which an older preferences file still holds) means.
+export const BASELINE_POLICIES = Object.fromEntries(Object.entries(BASELINE_BY_MODE).map(([mode, id]) => [id, mode]))
+
+// The settings key of the named appearance that replaces the theme: the id of Aurora Classic, Solaris inspired, T2D inspired or the kept imported appearance (`custom`), or `theme` (NO_OVERRIDE) when none does and the baseline pair under the policy is drawn; a settings file that holds none reads the same. App-wide, written only by `applyPreset`, `applyPolicy` and `removeCustom`. Settings from before the policy hold the id of a baseline there (`light` or `dark`), and settings from before presets only a boolean `darkMode`; `adoptAppearance` turns either into the policy once, and nothing writes `darkMode` any more.
 export const APPEARANCE_KEY = 'appearance'
+
+// What APPEARANCE_KEY holds when no named appearance replaces the theme. It is written, not left out, so that a preferences file can say so and an import ends the replacement it finds.
+export const NO_OVERRIDE = 'theme'
+
+// The theme policy, the settings key it is kept under and its values: how the baseline pair (Light and Dark) is chosen. `light` and `dark` pin one of them; `system` follows the operating system's colour scheme (`followSystem`). It is kept whatever named appearance is chosen, so that removing the appearance returns to it; a settings file with none takes the mode of the named appearance it holds (the baseline it falls back to is then the one of its mode), and one without either the mode `darkMode` said, else the default. Settings keep one writer of the pair, never two competing ones: `applyPolicy`, which also ends a named appearance.
+export const POLICY_KEY = 'appearancePolicy'
+export const POLICIES = ['light', 'dark', 'system']
+const SYSTEM = 'system'
+export const DEFAULT_POLICY = LIGHT.mode
 
 // The ids of an imported appearance: the kept one, and the draft of a file just read.
 export const CUSTOM_ID = 'custom'
@@ -231,6 +243,9 @@ export const DRAFT_ID = 'custom-draft'
 
 // The settings key the kept imported appearance is stored under: the document of the file, as `parseAppearanceFile` accepted it. Written only by `applyPreset` (with the draft) and `removeCustom`.
 export const CUSTOM_KEY = 'appearanceCustom'
+
+// The settings the appearance holds, which a reset of the remembered views keeps: the named appearance, the kept imported one, the typeface and the policy.
+export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY]
 
 // Categorical slots of the colours that carry a meaning, by role; `muted` is the preset's muted ink.
 export const CONTACT_SLOTS = { hostile: 7, unknown: 7, neutral: 3, friendly: 2, allied: 0, civilian: 'muted' }
@@ -330,17 +345,42 @@ export const resolveAppearance = (id) => {
   return resolved.get(preset)
 }
 
-// `id` is the preset in force (what every renderer draws with), `applied` the last one chosen and kept. They differ while a preview is open.
-const state = Vue.observable({ id: DEFAULT_PRESET_ID, applied: DEFAULT_PRESET_ID })
+// `id` is the preset in force (what every renderer draws with), `applied` what the kept choices draw. They differ while a preview is open; `previewing` says one is open, and is kept apart from the two being equal, because `applied` moves with the operating system under the System policy and a preview of the baseline the system has just reached is still a preview, with its Apply and Cancel. `policy` and `override` are the kept choices (`override` is null for none) and `system` is the operating system's colour scheme as last observed, which only the System policy reads.
+const state = Vue.observable({ id: DEFAULT_PRESET_ID, applied: DEFAULT_PRESET_ID, previewing: false, policy: DEFAULT_POLICY, override: null, system: 'light' })
+
+// The preset the kept choices draw: the named appearance, else the baseline of the policy's mode (under System, the mode the operating system is in).
+const keptId = () => state.override || BASELINE_BY_MODE[state.policy === SYSTEM ? state.system : state.policy]
+
+// Brings the applied preset in line with the kept choices once one of them, or the operating system, changed, and the preset in force with it unless a preview is open: a preview stays where it is, whatever the applied preset becomes.
+const settle = () => {
+  state.applied = keptId()
+
+  if (!state.previewing) {
+    state.id = state.applied
+  }
+}
+
+const storedPolicy = (config) => {
+  const policy = config.get(POLICY_KEY)
+
+  return POLICIES.includes(policy) ? policy : null
+}
 
 // The appearance in force. Read inside a computed property, a render or a watcher, it makes that one depend on the chosen preset, so a switch (light to dark, or dark to another dark) redraws what read it.
 export const activeAppearance = () => resolveAppearance(state.id)
 
-// The id of the last preset applied (reactive). It is what a cancelled preview, and leaving Settings with a preview open, go back to.
+// The id of the preset the kept choices draw (reactive). It is what a cancelled preview, and leaving Settings with a preview open, go back to.
 export const appliedPresetId = () => state.applied
 
-// Whether a preview is open: the preset in force is not the applied one (reactive).
-export const isPreviewing = () => state.id !== state.applied
+// The kept theme policy (reactive), the id of the kept named appearance or null (reactive) and the colour scheme of the operating system as last observed (reactive; it matters only while the policy is `system`).
+export const appearancePolicy = () => state.policy
+
+export const appearanceOverride = () => state.override
+
+export const systemMode = () => state.system
+
+// Whether a preview is open: a preset other than the applied one was put in force, and neither a cancel nor a kept choice has ended it since (reactive). A change of the applied preset under the preview, by the operating system, does not end it.
+export const isPreviewing = () => state.previewing
 
 // Every preset, resolved, in the order they are listed.
 export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))
@@ -358,6 +398,7 @@ export const importAppearanceFile = (text) => {
 
   imported.draft = register(DRAFT_ID, parsed)
   state.id = DRAFT_ID
+  state.previewing = true
 
   return { ok: true, entry: imported.draft }
 }
@@ -369,16 +410,18 @@ export const exportAppearanceFile = (id, now = Date.now()) => (isKnown(id) ? bui
 export const previewPreset = (id) => {
   if (isKnown(id)) {
     state.id = id
+    state.previewing = id !== state.applied
   }
 }
 
 // Drops the preview: the applied preset is in force again.
 export const cancelPreview = () => {
+  state.previewing = false
   imported.draft = null
   state.id = state.applied
 }
 
-// Keeps a preset or an imported appearance: puts it in force, makes it the applied one and writes its id to the settings (`config` is the settings store). An unknown id changes nothing and returns false. The settings are written first, so a failed write leaves the selection as it was. The draft of a file is kept as `custom` (replacing the one kept before): its document and the choice are written together, in one assignment of the store, so the settings hold both or neither.
+// Keeps a preset or an imported appearance: puts it in force, makes it the applied one and writes its id to the settings (`config` is the settings store). A baseline (`light`, `dark`) is the policy of that mode and ends any named appearance (`applyPolicy`); any other is the named appearance that replaces the theme, and the policy is kept as it is. An unknown id changes nothing and returns false. The settings are written first, so a failed write leaves the selection as it was. The draft of a file is kept as `custom` (replacing the one kept before): its document and the choice are written together, in one assignment of the store, so the settings hold both or neither.
 export const applyPreset = (config, id) => {
   if (!isKnown(id)) {
     return false
@@ -391,20 +434,43 @@ export const applyPreset = (config, id) => {
     imported.custom = register(CUSTOM_ID, entry.parsed)
     imported.draft = null
     imported.problem = null
-    state.id = CUSTOM_ID
-    state.applied = CUSTOM_ID
+    state.override = CUSTOM_ID
+    state.policy = storedPolicy(config) || imported.custom.appearance.mode
+    state.previewing = false
+    settle()
 
     return true
   }
 
+  if (hasOwn(BASELINE_BY_MODE, id)) {
+    return applyPolicy(config, id)
+  }
+
   config.set(APPEARANCE_KEY, id)
-  state.id = id
-  state.applied = id
+  state.override = id
+  state.policy = storedPolicy(config) || resolveAppearance(id).mode
+  state.previewing = false
+  settle()
 
   return true
 }
 
-// Forgets the kept imported appearance: removes its document from the settings and, when it was the chosen appearance, falls back to the baseline of its mode, in one write over the settings as they are then. Returns false when there is none.
+// Keeps a theme policy (`light`, `dark` or `system`) and ends the named appearance that replaced the theme, in one write, then draws what the policy says: the one path the app bar's lamp and the Theme control of Settings share, and the other half of what `applyPreset` does for a baseline. An unknown policy changes nothing and returns false. The settings are written first, so a failed write leaves the choice as it was.
+export const applyPolicy = (config, policy) => {
+  if (!POLICIES.includes(policy)) {
+    return false
+  }
+
+  config.update((store) => ({ ...store, [POLICY_KEY]: policy, [APPEARANCE_KEY]: NO_OVERRIDE }))
+  state.policy = policy
+  state.override = null
+  state.previewing = false
+  settle()
+
+  return true
+}
+
+// Forgets the kept imported appearance: removes its document from the settings and, when it was the named appearance, ends it and keeps the policy that applies in its place (the policy in force, which is the mode of the file unless one was kept), in one write over the settings as they are then. Returns false when there is none.
 export const removeCustom = (config) => {
   const stored = config.get(CUSTOM_KEY)
 
@@ -412,59 +478,150 @@ export const removeCustom = (config) => {
     return false
   }
 
-  const fallback = state.applied === CUSTOM_ID ? baselinePresetId(imported.custom ? imported.custom.appearance.mode : DEFAULT_PRESET_ID) : state.applied
+  const { policy } = state
 
   config.update((store) => {
     const rest = { ...store }
 
     delete rest[CUSTOM_KEY]
 
-    return store[APPEARANCE_KEY] === CUSTOM_ID ? { ...rest, [APPEARANCE_KEY]: fallback } : rest
+    return store[APPEARANCE_KEY] === CUSTOM_ID ? { ...rest, [APPEARANCE_KEY]: NO_OVERRIDE, [POLICY_KEY]: policy } : rest
   })
   imported.custom = null
   imported.problem = null
 
-  if (state.applied === CUSTOM_ID) {
-    state.applied = fallback
+  if (state.override === CUSTOM_ID) {
+    state.override = null
   }
 
+  // A preview of the appearance being removed ends with it; a preview of another preset, and the draft of a file just read, stay.
   if (state.id === CUSTOM_ID) {
-    state.id = fallback
+    state.previewing = false
   }
+
+  settle()
 
   return true
 }
-
-// The one path the app bar's lamp and the Settings switch share: applies the baseline preset of a mode ('light' or 'dark').
-export const applyMode = (config, mode) => applyPreset(config, baselinePresetId(mode))
 
 // The saved id when it names no preset this version has (a preset from a newer version, or a damaged value), else null.
 export const unsupportedPresetId = (config) => {
   const id = config.get(APPEARANCE_KEY)
 
-  return id === undefined || isKnown(id) ? null : id
+  return id === undefined || id === NO_OVERRIDE || isKnown(id) ? null : id
 }
 
-// Reads the settings at start. A saved preset is applied. A file with only the older `darkMode` gets the baseline preset of that mode written to `appearance` once, then it is applied. A saved id this version doesn't have leaves the last valid applied preset in force (the default when none was applied yet) and is not overwritten: only `applyPreset` writes the key. The kept imported appearance is read back through the parser whenever there is one, so the card is there beside the presets; one that no longer passes (a file from a newer version, a damaged value) is not loaded, is left in the settings as it is and is reported by `importedAppearances().problem`. The typeface and text size are read too (`loadFont`). `config` is the settings store.
+// Reads the kept choices from the settings into the state, ends any preview and does what the settings from before the policy need once (`config` is the settings store). A saved policy is applied, and a named appearance this version has replaces the theme. The id of a baseline under APPEARANCE_KEY is the older form of a policy: it becomes the policy, replacing a stored one, and is written back as the policy with `theme` under APPEARANCE_KEY. A file with neither and only the older boolean `darkMode` gets the policy of that mode written the same way; `darkMode` stays in the file and is not read again once a policy is there. A named appearance without a stored policy takes the mode of that appearance as the policy, with no write: the settings stay as they are until a choice is made. A saved id this version doesn't have (a preset from a newer version, a damaged value) is left in the settings and not overwritten, and the policy draws instead. A failed write of the migration is reported and costs only a repeat at the next start.
+export const adoptAppearance = (config) => {
+  const stored = config.get(APPEARANCE_KEY)
+  const legacy = config.get('darkMode')
+  let policy = storedPolicy(config)
+  let override = null
+  let migrate = false
+
+  if (hasOwn(BASELINE_BY_MODE, stored)) {
+    policy = stored
+    migrate = true
+  } else if (stored === undefined) {
+    if (policy === null && typeof legacy === 'boolean') {
+      policy = legacy ? 'dark' : 'light'
+      migrate = true
+    }
+  } else if (stored !== NO_OVERRIDE && isKnown(stored)) {
+    override = stored
+    policy = policy || resolveAppearance(stored).mode
+  }
+
+  state.policy = policy || DEFAULT_POLICY
+  state.override = override
+  settle()
+  cancelPreview()
+
+  if (migrate) {
+    try {
+      config.update((store) => ({ ...store, [POLICY_KEY]: state.policy, [APPEARANCE_KEY]: NO_OVERRIDE }))
+    } catch (error) {
+      console.error("Couldn't write the theme policy to the settings", error)
+    }
+  }
+}
+
+// Reads the settings at start: the typeface and text size (`loadFont`), the kept imported appearance and the choices (`adoptAppearance`). The kept imported appearance is read back through the parser whenever there is one, so the card is there beside the presets; one that no longer passes (a file from a newer version, a damaged value) is not loaded, is left in the settings as it is and is reported by `importedAppearances().problem`.
 export const loadAppearance = (config) => {
   loadFont(config)
 
-  const stored = config.get(APPEARANCE_KEY)
-  const legacy = config.get('darkMode')
   const document = config.get(CUSTOM_KEY)
   const parsed = document === undefined ? null : parseAppearanceFile(JSON.stringify(document), { builtIn: (id) => (hasOwn(PRESETS, id) ? resolveAppearance(id) : null), baselines: BASELINE_BY_MODE })
 
   imported.custom = parsed && parsed.ok ? register(CUSTOM_ID, parsed) : null
   imported.problem = parsed && !parsed.ok ? { errors: parsed.errors, omitted: parsed.omitted } : null
 
-  if (stored === undefined && typeof legacy === 'boolean') {
-    applyMode(config, legacy ? 'dark' : 'light')
-  } else if (isKnown(stored)) {
-    state.id = stored
-    state.applied = stored
-  } else {
-    cancelPreview()
+  adoptAppearance(config)
+}
+
+// The colour scheme query of the operating system: `prefers-color-scheme`, which Electron's `nativeTheme` drives and a browser takes from the system.
+export const SYSTEM_QUERY = '(prefers-color-scheme: dark)'
+
+let following = null
+
+// How many times the system's scheme was read (`followSystem`), and how many requests of the native theme were made (`requestNativeTheme`): a reply of the main process is used only when nothing newer has happened since its request.
+let observations = 0
+let nativeRequests = 0
+
+// Starts following the operating system's colour scheme: `media` is the `MediaQueryList` of SYSTEM_QUERY. The scheme is read now and on every change, and only the System policy draws with it: a pinned policy and a named appearance stay as they are, and nothing is written to the settings. One observer at a time (a second start ends the first). Returns `{ refresh(dark?), stop() }`: `refresh` re-reads the scheme (from `dark` when the caller knows it better than the query does) and `stop` removes the listener.
+export const followSystem = (media) => {
+  if (following) {
+    following.stop()
   }
+
+  const read = (dark = media.matches) => {
+    observations++
+    state.system = dark ? 'dark' : 'light'
+    settle()
+  }
+  // A change is read only while the native theme is left to the system. Otherwise the scheme the query reports is the one the app asked for (`nativeThemeSource`), not the system's, and the last scheme read from the system is kept.
+  const onChange = (event) => {
+    if (nativeThemeSource() === SYSTEM) {
+      read(event.matches)
+    }
+  }
+  const handle = {
+    refresh: read,
+    stop: () => {
+      media.removeEventListener('change', onChange)
+
+      if (following === handle) {
+        following = null
+      }
+    },
+  }
+
+  read()
+  media.addEventListener('change', onChange)
+  following = handle
+
+  return handle
+}
+
+// What the application's native theme (the window frame, the native dialogs, and the `prefers-color-scheme` the renderer sees) is asked to be: the mode of the named appearance in force, else the pinned policy, else `system`. The native parts then match the colours drawn, and the query reports the system's scheme only while the System policy is drawing with it. A named appearance does not read the system, so asking for its mode costs nothing; once it ends, `system` is asked for again and the scheme is read anew (the main process answers with the system's own, and the layout refreshes `followSystem` from it). A preview does not change it. Reactive.
+export const nativeThemeSource = () => (state.override ? resolveAppearance(state.override).mode : state.policy)
+
+// What the app bar's lamp does now: it applies the opposite of the mode drawn now as an explicit `light` or `dark` policy, which also ends System or a named appearance. `mode` is that opposite and `replaces` what ends with it (the name of the named appearance, `System`, or null for a pinned policy). Reactive.
+export const quickSwitch = () => ({ mode: activeAppearance().mode === 'dark' ? 'light' : 'dark', replaces: state.override ? resolveAppearance(state.override).name : state.policy === SYSTEM ? 'System' : null })
+
+// Asks for the native theme the kept choices call for (`nativeThemeSource`) through `invoke(source)`, which gives the main process's answer (`{ dark }`, whether the system is dark now) or null, and, once the system is asked for, reads the scheme anew from the answer. A reply is used only while it is the latest request, the source it asked for is still the one wanted and the observer has read nothing since the request; otherwise a newer reading or request holds the truth and the reply is dropped. With no usable answer the scheme is read from the query. Gives the source asked for.
+export const requestNativeTheme = (invoke) => {
+  const source = nativeThemeSource()
+  const request = ++nativeRequests
+  const seen = observations
+
+  return Promise.resolve(invoke(source)).then((answer) => {
+    if (source === SYSTEM && following && request === nativeRequests && nativeThemeSource() === SYSTEM && observations === seen) {
+      following.refresh(answer && typeof answer.dark === 'boolean' ? answer.dark : undefined)
+    }
+
+    return source
+  })
 }
 
 // The baseline preset of a mode.

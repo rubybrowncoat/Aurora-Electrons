@@ -1,7 +1,7 @@
 import path from 'path'
 import fs, { promises as fsPromises } from 'fs'
 
-import { app, dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain, nativeTheme } from 'electron'
 import Store from 'electron-store'
 import envPaths from 'env-paths'
 
@@ -54,6 +54,17 @@ ipcMain.handle('request-storage-path', async (event) => {
   saves.opened(database)
 
   return database
+})
+
+// The application's native theme (the colour scheme the native dialogs and the colour scheme query report) follows the renderer: the mode it draws with, or the system. The answer says whether the system is dark now, which the System policy reads once it asks for `system` again.
+ipcMain.handle('theme:source', (_event, source) => {
+  if (!['light', 'dark', 'system'].includes(source)) {
+    throw new Error(`Unknown theme source: ${source}`)
+  }
+
+  nativeTheme.themeSource = source
+
+  return { dark: nativeTheme.shouldUseDarkColors }
 })
 
 // The active save and the recent ones with the state of each file; the open dialog and switching (`saves:choose` and `saves:select` answer { ok, action, path, active, reason }, see src/main/saves.js); and taking a save off the recent list.

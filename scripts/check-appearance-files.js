@@ -591,8 +591,8 @@ const CHECKS = [
 
     removed.appearance.loadAppearance(kept)
 
-    if (!removed.appearance.removeCustom(kept) || kept.writes.length !== 1 || kept.data.appearanceCustom !== undefined || kept.data.appearance !== 'light' || removed.appearance.appliedPresetId() !== 'light' || removed.appearance.importedAppearances().custom !== null || removed.appearance.activeAppearance().id !== 'light') {
-      return `removing the kept file: ${short(kept.data.appearance)}, ${kept.writes.length} writes`
+    if (!removed.appearance.removeCustom(kept) || kept.writes.length !== 1 || kept.data.appearanceCustom !== undefined || kept.data.appearance !== 'theme' || kept.data.appearancePolicy !== 'light' || removed.appearance.appliedPresetId() !== 'light' || removed.appearance.importedAppearances().custom !== null || removed.appearance.activeAppearance().id !== 'light') {
+      return `removing the kept file: ${short(kept.data.appearance)} ${short(kept.data.appearancePolicy)}, ${kept.writes.length} writes`
     }
 
     return true

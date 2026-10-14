@@ -3,9 +3,18 @@
     <v-container fluid class="settings-page">
       <v-row>
         <v-col cols="12" md="6" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the colour preset, the typeface and the text size. Use it to set the app up, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Choices that change how every page looks and reads, such as number format, the theme, the colour preset, the typeface and the text size. Use it to set the app up, to have the theme follow the operating system, to preview a preset or a typeface on every page before keeping it, and to save an appearance to a file or bring one in." elevation="1">
             <div class="panel-head"><span>Display</span></div>
             <div class="panel-body">
+              <div class="setting" data-theme-policy>
+                <div class="setting__text">
+                  <div class="body-2">Theme</div>
+                  <div class="caption text--secondary">{{ themeNote }}</div>
+                </div>
+                <div class="setting__buttons" role="group" aria-label="Theme">
+                  <v-btn v-for="option in policies" :key="option.id" small :depressed="option.id === shownPolicy" :outlined="option.id !== shownPolicy" :color="option.id === shownPolicy ? 'primary' : undefined" :aria-pressed="String(option.id === shownPolicy)" :data-policy="option.id" @click="setPolicy(option.id)">{{ option.label }}</v-btn>
+                </div>
+              </div>
               <div class="setting setting--block">
                 <div class="setting__text">
                   <div class="body-2">Colour preset</div>
@@ -61,20 +70,13 @@
               </div>
               <div class="setting">
                 <div class="setting__text">
-                  <div class="body-2">Dark theme</div>
-                  <div class="caption text--secondary">Applies the Light or Dark preset at once, as the lamp in the app bar does.</div>
-                </div>
-                <v-switch :input-value="dark" aria-label="Dark theme" class="setting__switch" inset dense hide-details @change="setDark" />
-              </div>
-              <div class="setting">
-                <div class="setting__text">
                   <div class="body-2">Computer-run empires</div>
                   <div class="caption text--secondary">Lists the NPR empires on the Empires page beside the players' ones, so their data can be opened, and adds the Rivals chart to Empire History.</div>
                 </div>
                 <v-switch :input-value="spyNPR" aria-label="Computer-run empires" class="setting__switch" inset dense hide-details @change="setSpyNPR" />
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
+            <div class="panel-foot caption text--secondary">The theme (Light, Dark or System) applies at once. System follows the operating system and changes with it; a named preset replaces the theme until a theme is chosen again, and the theme is kept meanwhile. The lamp in the app bar sets the opposite of the mode drawn now as Light or Dark, so it ends System or a named preset too. A preset's sample uses example data. Choosing one previews it on every page; Apply keeps it, and Cancel, or leaving Settings, returns to the kept one. Resetting a preset changes no other setting. A typeface and a text size are chosen from a bounded list, preview the same way and are kept with their own Apply; a typeface that is not installed is shown as such and the bundled one is drawn in its place. An appearance file is the app's own JSON format for the colours of an appearance; it is not an Aurora game file, and no game reads or writes it. A file is read whole and shown as a draft with the roles it left out and the contrast it measures; one that fails changes nothing, and Apply keeps a draft with the choice in one write. Number format and Computer-run empires apply at once; every setting is kept in the settings file, and About shows where it is.</div>
           </v-card>
         </v-col>
 
@@ -107,7 +109,7 @@
 
       <v-row>
         <v-col cols="12" class="d-flex flex-column">
-          <v-card class="panel flex-grow-1" data-summary="Moves the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
+          <v-card class="panel flex-grow-1" data-summary="Moves the theme, the colour preset, the number format, the remembered views and the Galaxy Map's pins and clusters to a file and back. Use it to carry one empire's set-up to another, with a preview of every change and an Undo." elevation="1">
             <div class="panel-head">
               <span>Export and import preferences</span>
               <v-chip v-if="backup" small>Undo kept</v-chip>
@@ -242,7 +244,7 @@ import FontChoice from '../components/settings/FontChoice.vue'
 import PresetCard from '../components/settings/PresetCard.vue'
 import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
-import { APPEARANCE_KEY, CUSTOM_ID, CUSTOM_KEY, DEFAULT_PRESET_ID, DRAFT_ID, activeAppearance, appliedPresetId, applyMode, applyPreset, baselinePresetId, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, unsupportedPresetId } from '../utilities/appearance'
+import { APPEARANCE_KEY, APPEARANCE_SETTINGS, BASELINE_POLICIES, CUSTOM_ID, DEFAULT_PRESET_ID, DRAFT_ID, NO_OVERRIDE, POLICIES, POLICY_KEY, activeAppearance, adoptAppearance, appearanceOverride, appearancePolicy, appliedPresetId, applyPolicy, applyPreset, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, systemMode, unsupportedPresetId } from '../utilities/appearance'
 import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
 import { FONT_KEY, loadFont, previewFont, readFont } from '../utilities/appearance-font'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
@@ -255,7 +257,10 @@ import { CATEGORIES, MAX_BYTES, adoptBackup, buildExport, buildSchema, commitImp
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
 // The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
-const APP_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, 'darkMode', 'spyNPR', 'selectedSeparator']
+const APP_SETTINGS = [...APPEARANCE_SETTINGS, 'darkMode', 'spyNPR', 'selectedSeparator']
+
+// The theme policies as the Theme control offers them.
+const THEMES = POLICIES.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }))
 const appViews = (store) => appViewsOf(store, APP_SETTINGS)
 const withoutViews = (store, only) => withoutViewsOf(store, APP_SETTINGS, only)
 
@@ -326,8 +331,28 @@ export default {
       return SEPARATORS.map((name) => ({ value: name, text: `${name} · ${separatedNumber(1234567, thousandsSeparator(name))}` }))
     },
 
-    dark() {
-      return activeAppearance().mode === 'dark'
+    policies() {
+      return THEMES
+    },
+
+    // The kept theme policy, and the one the control shows as pressed: none while a named appearance replaces the theme.
+    policy() {
+      return appearancePolicy()
+    },
+
+    shownPolicy() {
+      return appearanceOverride() ? null : appearancePolicy()
+    },
+
+    themeNote() {
+      const policy = THEMES.find(({ id }) => id === this.policy).label
+      const replacing = appearanceOverride()
+
+      if (replacing) {
+        return `${resolveAppearance(replacing).name} replaces the theme. A choice here ends it. The theme kept under it is ${policy}.`
+      }
+
+      return this.policy === 'system' ? `System follows the operating system, which is ${systemMode() === 'dark' ? 'dark' : 'light'} now, and changes with it.` : `${policy} stays as it is when the operating system changes.`
     },
 
     // The imported appearances (the kept one, the draft of a file just read, what kept the stored one from loading), reactive.
@@ -587,8 +612,18 @@ export default {
       this.save('selectedSeparator', name)
     },
 
-    setDark(value) {
-      applyMode(this.config, value ? 'dark' : 'light')
+    // A theme at once, ending the named appearance that replaced the previous one.
+    setPolicy(policy) {
+      try {
+        applyPolicy(this.config, policy)
+      } catch (error) {
+        console.error("Couldn't write the theme", error)
+        this.activateSnackbar({ text: "Couldn't write the settings, so the theme was not applied", color: 'error' })
+
+        return
+      }
+
+      this.acknowledged = false
       this.reinstantiateConfig()
     },
 
@@ -730,7 +765,7 @@ export default {
       this.busy = true
 
       try {
-        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: listAppearances().map(({ id }) => id) }, font: { key: FONT_KEY, read: readFont }, separators: SEPARATORS })
+        return buildSchema({ declarations: await loadDeclarations(), appearance: { key: APPEARANCE_KEY, ids: [...listAppearances().map(({ id }) => id), NO_OVERRIDE], none: NO_OVERRIDE, baselines: BASELINE_POLICIES }, policy: { key: POLICY_KEY, values: POLICIES }, font: { key: FONT_KEY, read: readFont }, separators: SEPARATORS })
       } catch (error) {
         console.error("Couldn't load the pages' declared preferences", error)
         this.activateSnackbar({ text: "Couldn't load the list of preferences that can be exported", color: 'error' })
@@ -873,25 +908,14 @@ export default {
       this.activateSnackbar({ text: `${this.count(result.restored)} ${values(result.restored)} put back`, color: 'success' })
     },
 
-    // The colour preset and the typeface in force follow the settings once they changed under them, and every reader takes a new settings instance.
+    // The theme, the colour preset and the typeface in force follow the settings once they changed under them, and every reader takes a new settings instance.
     afterWrite(keys) {
       if (keys.includes(FONT_KEY)) {
         loadFont(this.config)
       }
 
-      if (keys.includes(APPEARANCE_KEY)) {
-        const id = this.config.get(APPEARANCE_KEY)
-
-        if (listAppearances().some((preset) => preset.id === id) || (id === CUSTOM_ID && this.imported.custom)) {
-          applyPreset(this.config, id)
-        } else if (id === undefined) {
-          const legacy = this.config.get('darkMode')
-
-          applyPreset(this.config, typeof legacy === 'boolean' ? baselinePresetId(legacy ? 'dark' : 'light') : DEFAULT_PRESET_ID)
-          this.config.delete(APPEARANCE_KEY)
-        } else {
-          cancelPreview()
-        }
+      if (keys.includes(APPEARANCE_KEY) || keys.includes(POLICY_KEY)) {
+        adoptAppearance(this.config)
       }
 
       this.reinstantiateConfig()
@@ -943,6 +967,13 @@ export default {
   flex: none;
   margin-top: 0;
   padding-top: 0;
+}
+
+.setting__buttons {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .transfer__choices {

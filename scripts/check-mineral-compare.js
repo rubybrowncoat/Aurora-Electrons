@@ -544,7 +544,7 @@ const pageStatements = async (mutate, context) => {
     }],
     ['page: a preferences bundle that holds the minerals picked among the app-wide views imports, and exports back', () => {
       const { buildSchema, buildExport, parseBundle, FORMAT, VERSION } = settings.preferences
-      const schema = buildSchema({ declarations: declared, appearance: { key: 'appearance', ids: ['light', 'dark'] }, font: { key: 'appearanceFont', read: () => ({ ok: false, reason: 'none' }) }, separators: ['Comma'] })
+      const schema = buildSchema({ declarations: declared, appearance: { key: 'appearance', ids: ['light', 'dark'] }, policy: { key: 'appearancePolicy', values: ['light', 'dark', 'system'] }, font: { key: 'appearanceFont', read: () => ({ ok: false, reason: 'none' }) }, separators: ['Comma'] })
       const bundle = { format: FORMAT, version: VERSION, categories: { views: { app: { historyMinerals: [3, 8], historyMineralScale: 'percent' } } } }
       const parsed = parseBundle(JSON.stringify(bundle), schema)
       const entries = parsed.entries || []
