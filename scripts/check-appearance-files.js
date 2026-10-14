@@ -13,7 +13,7 @@ const { plantedCopy } = require('./lib/mutant-source')
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const NOW = Date.UTC(2026, 9, 13, 12, 0, 0)
-const IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo']
+const IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue']
 
 let instance = 0
 

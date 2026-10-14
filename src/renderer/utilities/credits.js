@@ -10,8 +10,9 @@ import t2dLicense from './notices/t2d-theme-license.txt?raw'
 
 const APACHE = { title: 'Apache License 2.0', text: apacheLicense }
 
-// The community themes the colour presets take their reference colours from (the Aurora Classic and Solaris inspired presets from the first, the T2D inspired preset from the second, the Cristo inspired preset from the third); the provenance is each preset's own metadata, so an entry and its preset cannot differ.
+// The community themes the colour presets take their reference colours from (the Aurora Classic and Solaris inspired presets from the first, the DeepBlue inspired preset from the second, the T2D inspired preset from the third, the Cristo inspired preset from the fourth); the provenance is each preset's own metadata, so an entry and its preset cannot differ.
 const { source: SOLARIS } = resolveAppearance('solaris').reference
+const { source: DEEPBLUE } = resolveAppearance('deepblue').reference
 const { source: T2D } = resolveAppearance('t2d').reference
 const { source: CRISTO, compatibility: CRISTO_COMPATIBILITY } = resolveAppearance('cristo').reference
 const BUNDLED = { kind: 'Bundled files', detail: 'The files ship inside the app.' }
@@ -54,6 +55,18 @@ export const CREDITS = [
     notices: [{ title: 'MIT License (Solaris theme)', text: solarisLicense }],
   },
   {
+    id: 'deepblue-theme',
+    name: DEEPBLUE.name,
+    kind: 'Colour reference',
+    covers: 'Its navy window, pale-yellow text, violet-grey button fill, sand-coloured map text, grey orbit lines, planet green and derived border, the reference of the DeepBlue inspired preset, built on the Solaris theme above. Its icons, compiled patch, screenshot and font name are not used.',
+    reuse: { kind: 'Visual inspiration', detail: DEEPBLUE.copied },
+    author: DEEPBLUE.author,
+    source: { label: `DeepBlue theme archive ${DEEPBLUE.revision.slice(0, 7)}, ${DEEPBLUE.revisionDate}`, href: 'https://web.archive.org/web/20240106201103/http://aurora2.pentarch.org/index.php?topic=12593.0' },
+    license: { label: DEEPBLUE.license, href: 'https://github.com/CountCristo/Cristotheme/blob/4b30899b984c1dd1bb75d2bd7c17a994a1227bdb/Unaltered%20base%20files/Deepblue/Resource/LICENSE' },
+    modifications: 'The preset adapts the reference colours with surfaces, text, selection and state colours of its own, a lighter green in place of the planet green and lighter chart colours; Settings lists its changes. No license covers the colours that DeepBlue added to the Solaris theme, and none is claimed: the notice is the one the archive keeps.',
+    notices: [{ title: 'MIT License (Solaris theme, kept in the DeepBlue theme)', text: solarisLicense }],
+  },
+  {
     id: 't2d-theme',
     name: T2D.name,
     kind: 'Colour reference',
@@ -69,7 +82,7 @@ export const CREDITS = [
     id: 'cristo-theme',
     name: CRISTO.name,
     kind: 'Colour reference',
-    covers: 'Its navy window, cream text, sand-coloured map text, planet green and derived border, the reference of the Cristo inspired preset, built on the Solaris theme with two colours of the DeepBlue theme. Its icons, event-colour file, compiled patch, screenshot and font name are not used.',
+    covers: 'Its navy window, cream text, sand-coloured map text, planet green and derived border, the reference of the Cristo inspired preset, built on the Solaris theme with two colours of the DeepBlue theme, both listed above. Its icons, event-colour file, compiled patch, screenshot and font name are not used.',
     reuse: { kind: 'Visual inspiration', detail: CRISTO.copied },
     compatibility: CRISTO_COMPATIBILITY,
     author: CRISTO.author,

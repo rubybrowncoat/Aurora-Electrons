@@ -172,7 +172,7 @@ const CHECKS = [
     const ids = ctx.appearance.listAppearances().map(({ id }) => id)
     const appearance = cristo(ctx)
 
-    expectEqual(ids, ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo'], 'the presets in order', problems)
+    expectEqual(ids, ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue'], 'the presets in order', problems)
     expectEqual([appearance.id, appearance.name, appearance.mode, appearance.key], ['cristo', 'Cristo inspired', 'dark', 'cristo@1'], 'the identity', problems)
     expectEqual(Number.isInteger(appearance.version) && appearance.version >= 1, true, 'the version is a positive integer', problems)
 
@@ -516,7 +516,7 @@ const MUTATIONS = [
   ['the first person in the preset text', { file: APPEARANCE, from: 'the owner of this app accepted that no explicit grant covers them', to: 'we accepted that no explicit grant covers them' }],
   ['the version of the preset lowered', { file: APPEARANCE, from: "id: 'cristo',\n  name: 'Cristo inspired',\n  version: 1,", to: "id: 'cristo',\n  name: 'Cristo inspired',\n  version: 0," }],
   ['the preset left out of the list', { file: APPEARANCE, from: 'export const listAppearances = () => Object.keys(PRESETS).map((id) => resolveAppearance(id))', to: "export const listAppearances = () => Object.keys(PRESETS).filter((id) => id !== 'cristo').map((id) => resolveAppearance(id))" }],
-  ['the preset listed before the others', { file: APPEARANCE, from: 'export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO }', to: 'export const PRESETS = { [CRISTO.id]: CRISTO, [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D }' }],
+  ['the preset listed before the others', { file: APPEARANCE, from: 'export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE }', to: 'export const PRESETS = { [CRISTO.id]: CRISTO, [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [DEEPBLUE.id]: DEEPBLUE }' }],
   ['a preset that carries a function', { file: APPEARANCE, from: "  id: 'cristo',\n  name: 'Cristo inspired',", to: "  id: 'cristo',\n  load: () => 0,\n  name: 'Cristo inspired'," }],
   ['the credits notice dropped', { file: CREDITS, from: "notices: [{ title: 'MIT License (Solaris theme, kept in Cristotheme)', text: solarisLicense }],", to: 'notices: [],' }],
   ['the credits entry that ships files', { file: CREDITS, from: "reuse: { kind: 'Visual inspiration', detail: CRISTO.copied },\n    compatibility", to: "reuse: { kind: 'Bundled files', detail: CRISTO.copied },\n    compatibility" }],

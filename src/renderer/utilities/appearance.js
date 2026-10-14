@@ -87,6 +87,19 @@ const CRISTO_SOURCE = {
   note: 'The repository states no license for the colours it adds, and the owner of this app accepted that no explicit grant covers them. Two of its colours (the window and the map text) first appear in DeepBlue and three (the text, the planet and the orbit) are its own. It has no screenshot of its own, only a video thumbnail that agrees with the window, planet and control colours; the compiled patch in the repository draws a white orbit where the source says pale green, so the preset takes neither. It does not say which Aurora version it was drawn for. Nothing here states what any release of the game uses today.',
 }
 
+// The community theme the DeepBlue inspired preset takes its colours from, as shipped in the author's own archive: a modification of the Solaris theme (above) with a different set of colours, whose window and map-text colours the Cristotheme modification (above) reuses. The archive is the only version statement (the source reads 1.3.0.0), so it is identified by its SHA-256, which `revision` holds, and the author's thread is its home. The archive keeps the Solaris theme's MIT notice and states no license of its own, so no grant is claimed for the colours the author chose. Its icons, compiled patch, screenshot and font name are not used.
+const DEEPBLUE_SOURCE = {
+  name: 'DeepBlue theme',
+  author: 'Jorgen_CAB, after the Solaris theme of Simas Toleikis',
+  repository: 'https://aurora2.pentarch.org/index.php?topic=12593.0',
+  revision: '6e2ad38bf75a2b4b17cd9af57ba031b44ee30a5f222465befad693175c7a6614',
+  revisionDate: '2021-06-02',
+  license: 'No license of its own; it keeps the Solaris theme\'s MIT License, and no grant covers the colours added by DeepBlue',
+  inspected: "The colour numbers in the theme's source, from the archive the author linked in the thread (the SHA-256 above, whose source reads version 1.3.0.0 and whose files date from June 2021), and the author's own screenshot, a lossless capture of the theme in the game, which shows every colour used here. Read in October 2026 and typed into this preset as values. Nothing was run, and the compiled files were read as bytes only.",
+  copied: "No source code, image, icon, font, event-colour file or compiled file of the theme is copied or bundled; colour values are the only thing taken. Its icons (the Solaris theme's, by other authors) and its font choice are not used: the preset keeps the app's own icons and typeface.",
+  note: "The author states no license for the colours chosen and credits the rest to the Solaris author, the app's owner accepted that no explicit grant covers them, and the preset claims none. The thread no longer answers at its own address and was read from a web-archive capture of January 2024, so the revision shown is the archive's hash, not a repository revision. The author's two distributions disagree on the map text colour (#EED8A4 in the archive and in the screenshot, #E7C77C in the older full bundle); the preset takes the first. Cristotheme reuses the window and map-text colours, which the Cristo inspired preset records. It does not say which Aurora version it was drawn for. Nothing here states what any release of the game uses today.",
+}
+
 const CLASSIC = {
   id: 'classic',
   name: 'Aurora Classic',
@@ -256,6 +269,52 @@ const CRISTO = {
   washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
 }
 
+const DEEPBLUE = {
+  id: 'deepblue',
+  name: 'DeepBlue inspired',
+  version: 1,
+  mode: 'dark',
+  reference: {
+    title: 'Deep navy with violet-grey plates',
+    summary: 'A deep navy page under pale-yellow text and sand-coloured sky labels, with raised violet-grey controls and cards, after the community DeepBlue theme, adapted with full semantic surfaces and state colours.',
+    source: DEEPBLUE_SOURCE,
+    roles: [
+      { role: 'Window and map background', value: '#0D1729', maps: 'The page, the app bar and the system view sky' },
+      { role: 'Text', value: '#E8E4A8', maps: 'Body text and the chart tooltip text' },
+      { role: 'Button fill', value: '#46435A', maps: 'The empty part of a meter, the Vuetify secondary colour and, a shade darker, the fill of a chip' },
+      { role: 'Toolbar tint', value: '#2B2937', maps: 'The rail and the footer (#282632) and the cards, tables and chart canvases (#262431), the same hue a little darker so the text stays 4.5:1 under the section tabs\' hover and focus states' },
+      { role: 'Map text', value: '#EED8A4', maps: 'The system view labels' },
+      { role: 'Orbit line', value: '#969696', maps: 'Orbit lines in the system view' },
+      { role: 'Active button border (derived)', value: '#6C688C', maps: 'The outline of cards, tables and the rail, and the chart axis' },
+      { role: 'Planet fill', value: '#005A00', maps: 'Not drawn as it is: it is 2.10:1 on the page. The substitute is #008F00, the same hue lightened until it is 3:1 or more on the page, the rail and the cards, and it is the surveyed colour of the Galaxy Map, the nearest role to a planet; the app draws planets in their own colours' },
+    ],
+    modifications: [
+      'The reference\'s violet-grey plate colour cannot be the rail or the cards: under the section tabs\' hover and focus states the text falls under 4.5:1 on it. The plate colour is the meter track and the secondary colour instead, and the surfaces take the darker toolbar tint, with the derived border outlining them.',
+      'Secondary text and the status tone are of the reference text hue, kept 4.5:1 or more on every surface; the reference has no such roles, and neither it nor its disabled text, which is derived and was not observed, is used.',
+      'Selection is a lavender, kept clear of the warning levels: Action is red, Attention orange and Info cyan; the reference has no selection or state colours, and the row washes are fainter than the other presets\' so the red stays 4.5:1 under them.',
+      'The categorical chart slots, the section accents and the planner tones are lighter than the Dark preset\'s, which fall under 3:1 or 4.5:1 on the violet-grey surfaces; the reference has no equivalent of any of them.',
+      'The planet green is replaced by a lighter one for contrast.',
+      'The reference\'s other toolbar tint, its enabled-button ink and its font are not mapped: the app has no equivalent role, and the typeface is the app\'s own, not Tahoma.',
+    ],
+  },
+  surfaces: { background: '#0d1729', chrome: '#282632', card: '#262431', border: '#6c688c', track: '#46435a', trackSoft: '#3a3849', rule: 'rgba(232, 228, 168, .18)' },
+  inks: { body: '#e8e4a8', muted: '#cfcb9a', text: '#e8e4a8', textMuted: '#cfcb9a', onTooltip: '#e8e4a8', onFill: '#0d1729', onColor: '#0d1729', onSnackbar: '#0d1729' },
+  focus: { primary: '#b8a9ff', hover: 'rgba(184, 169, 255, .08)', secondary: '#46435a', accent: '#FF4081' },
+  rows: { selected: 'rgba(184, 169, 255, .10)', differs: 'rgba(184, 169, 255, .10)', differsMark: '#b8a9ff', differsDot: 'rgba(184, 169, 255, .55)', stripe: 'rgba(184, 169, 255, .10)', stripeSoft: 'rgba(184, 169, 255, .05)' },
+  severity: { action: '#ff7a7a', attention: '#ffa94d', info: '#4dd0e1', success: '#81c784' },
+  survey: { done: '#008f00' },
+  status: { inactive: '#b3b1c8' },
+  plan: { mining: '#ff8f00', terraformFree: '#d57ae6', terraformPartial: '#8b98dd', terraformCheaper: '#8aa5b3', cheap: '#1ab5a5', moderate: '#039be5', costly: '#f57c00', severe: '#f2704a', insufficient: '#ff5722', rich: '#ff8f00', cmc: '#2fb5a6', unsurveyed: '#ff9800', selected: '#ff6659' },
+  charts: {
+    axis: '#6c688c',
+    tooltip: 'rgba(43, 41, 55, 0.97)',
+    categorical: ['#6fa8ff', '#ff9a66', '#3fd0a0', '#e6b422', '#ff8fb8', '#7fd13b', '#b6a6ff', '#ff8585', '#4fd8e8'],
+  },
+  sections: { neutral: '#b4b2cf', accents: ['#6fa8ff', '#ff9a66', '#3fd0a0', '#e6b422', '#ff8fb8', '#7fd13b', '#b6a6ff', '#ff8585', '#4fd8e8'] },
+  space: { background: '#0d1729', label: '#eed8a4', labelShadow: 'rgba(0, 0, 0, .7)', bodyOrbit: '#969696', jumpUnexplored: '#ff3b30', jumpExplored: '#ffa500' },
+  washes: { sectionSoft: 0.2, sectionTint: 0.12, statusSoft: 0.28 },
+}
+
 const DARK = {
   id: 'dark',
   name: 'Dark',
@@ -279,7 +338,7 @@ const DARK = {
 }
 
 // Every preset by id. A preset joins the app by being listed here.
-export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO }
+export const PRESETS = { [LIGHT.id]: LIGHT, [DARK.id]: DARK, [CLASSIC.id]: CLASSIC, [SOLARIS.id]: SOLARIS, [T2D.id]: T2D, [CRISTO.id]: CRISTO, [DEEPBLUE.id]: DEEPBLUE }
 
 export const DEFAULT_PRESET_ID = LIGHT.id
 
