@@ -2018,6 +2018,37 @@ const defineCases = (modules) => {
 
     db.close()
   })
+
+  invariant('warnings', 'a colony, naval administration or sector counts as commanded only by a commander of its own command type in its game: a ground formation\'s commander, an academy commandant or a governor of another game whose command id is the same leaves it listed', async () => {
+    const sqlite3 = require('sqlite3')
+    const db = new sqlite3.Database(':memory:')
+    const run = (sql) => new Promise((resolve, reject) => db.exec(sql, (error) => (error ? reject(error) : resolve())))
+    const all = (sql) => new Promise((resolve, reject) => db.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))
+
+    await run(`
+      create table FCT_Population (PopulationID integer, GameID integer, RaceID integer, PopName text, Population real, SystemBodyID integer, SystemID integer);
+      create table FCT_Commander (CommanderID integer, GameID integer, CommandID integer, CommandType integer);
+      create table FCT_NavalAdminCommand (NavalAdminCommandID integer, GameID integer, RaceID integer, AdminCommandName text, PopulationID integer);
+      create table FCT_SectorCommand (SectorCommandID integer, GameID integer, RaceID integer, SectorName text, PopulationID integer);
+      create table FCT_SystemBody (SystemBodyID integer, PlanetNumber integer, OrbitNumber integer, BodyClass integer, StarID integer);
+      create table FCT_SystemBodyName (SystemBodyID integer, RaceID integer, Name text);
+      create table FCT_RaceSysSurvey (SystemID integer, RaceID integer, Name text);
+      create table FCT_Star (StarID integer, Component integer);
+      insert into FCT_Population values (1, 1, 1, 'Governed', 5, 1, 1), (2, 1, 1, 'Academy', 4, 1, 1), (3, 1, 1, 'Garrison', 3, 1, 1), (4, 1, 1, 'Elsewhere', 2, 1, 1), (5, 1, 1, 'Empty', 0, 1, 1);
+      insert into FCT_NavalAdminCommand values (10, 1, 1, 'Commanded', 1), (11, 1, 1, 'Shared', 1), (12, 1, 1, 'Vacant', 1);
+      insert into FCT_SectorCommand values (20, 1, 1, 'Commanded', 1), (21, 1, 1, 'Shared', 1), (22, 1, 1, 'Admiralty', 1);
+      insert into FCT_Commander values (101, 1, 1, 3), (102, 1, 2, 17), (103, 1, 3, 5), (104, 2, 4, 3), (110, 1, 10, 12), (111, 1, 11, 5), (120, 1, 20, 4), (121, 1, 21, 5), (122, 1, 22, 12);
+    `)
+
+    const database = { query: async (sql) => [await all(sql)] }
+    const listed = async (key) => (await readCheck(key, [], { database })).map((row) => row.id)
+
+    assert.deepEqual(await listed('governorless-populations'), ['colony:2', 'colony:3', 'colony:4'])
+    assert.deepEqual(await listed('commanderless-naval-administrations'), ['admin:11', 'admin:12'])
+    assert.deepEqual(await listed('commanderless-sectors'), ['sector:21', 'sector:22'])
+
+    db.close()
+  })
 }
 
 const main = async () => {
