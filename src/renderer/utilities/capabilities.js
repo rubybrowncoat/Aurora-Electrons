@@ -87,7 +87,10 @@ export const MARKER_USES = Object.freeze({
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
-  '/production': Object.freeze({ colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)' }),
+  '/production': Object.freeze({
+    colonyFacilities: 'DIM_PlanetaryInstallation(ResearchValue GroundTrainingValue)',
+    procurementSources: 'FCT_ShipDesignComponents(Size Cost)',
+  }),
   '/warnings': Object.freeze({
     page: `DIM_PlanetaryInstallation(ConstructionValue OrdnanceProductionValue FighterProductionValue) ${STOCKPILES}`,
     'check:dangerous-rifts': STOCKPILES,
@@ -109,6 +112,13 @@ const EXTRA_READS = Object.freeze({
 
 // Reads of an input that guard themselves, so the preflight does not check their columns: { [route]: { [input]: { [table]: why } } }. The table still has to exist.
 const TOLERATED = Object.freeze({
+  '/production': Object.freeze({
+    procurementSources: Object.freeze({
+      FCT_Game: 'the component read here skips the save revision (identify: false), and the read that checks it names its columns first (utilities/design-data.js)',
+      FCT_Increments: 'the component read here skips the save revision (identify: false), and the read that checks it names its columns first (utilities/design-data.js)',
+      FCT_System: 'the component read here skips the system fingerprint (identify: false), and the read that checks it names its columns first (utilities/design-data.js)',
+    }),
+  }),
   '/warnings': Object.freeze({
     'check:mining-redeployment': Object.freeze({
       FCT_Fleet: 'the fleet speed is read only when the save has the column (warnings/common.js readRedeploymentSites) and is listed as an unknown travel input otherwise; the other columns of the table are read, and so checked, by the mining checks beside it',

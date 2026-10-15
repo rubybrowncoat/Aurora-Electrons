@@ -212,6 +212,7 @@
         </v-row>
 
         <component-calculator :sources="componentSources" :colonies="componentColonies" :industry="industry" :arrivals="arrivals" :npr="RaceNPR" />
+        <procurement-manifest :sources="componentSources" :procurement="procurementSources" />
       </template>
     </v-container>
   </div>
@@ -228,6 +229,7 @@ import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import ComponentCalculator from '../components/production/ComponentCalculator.vue'
+import ProcurementManifest from '../components/production/ProcurementManifest.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -246,6 +248,7 @@ import { loadNavalAdmins } from '../utilities/naval-admins'
 import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
+import { NO_PROCUREMENT_SOURCES, loadProcurementSources } from '../utilities/procurement-data'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -259,6 +262,7 @@ const INPUT_LABELS = {
   terraformSources: 'the terraforming capacity',
   navalAdmins: 'the naval admin commands',
   componentSources: 'the ship classes\' components and the colonies\' component stock',
+  procurementSources: 'the shipyard tasks, the queued component projects and the colonies',
 }
 
 const SECONDS_PER_DAY = 86400
@@ -354,7 +358,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'ProductionPage',
-  components: { ChartCanvas, ComponentCalculator, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, ComponentCalculator, LoadState, PageLink, ProcurementManifest, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -1230,6 +1234,17 @@ export default {
         return sourcesOf({ classes, parts, stock, populations, npr: this.RaceNPR })
       }),
       default: { classes: [], parts: {}, stock: {}, minerals: {} },
+    },
+    // The colonies with their shipyards, the shipyard tasks, the queued component projects and the tons each component weighs: what the procurement manifest reads besides the component calculator's sources.
+    procurementSources: {
+      get: tracked('procurementSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_PROCUREMENT_SOURCES
+        }
+
+        return await loadProcurementSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_PROCUREMENT_SOURCES,
     },
   },
 }
