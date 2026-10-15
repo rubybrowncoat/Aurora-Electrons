@@ -1,6 +1,6 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber } from '../math'
-import { amount, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, unknownCell, verdictRows } from './common'
+import { QUARTER, amount, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'research', title: 'Research', summary: 'Idle labs, dead or forgotten projects and scientists working outside their field, so the race\'s research makes full use of what it has.' }
 
@@ -16,7 +16,7 @@ const STALLED = `(FCT_ResearchProject.Pause <> 0 or (${HAS_LABS} and FCT_Researc
 // One row per research project of the race, from `FCT_ResearchProject` (its own `ProjectID` is the row id), with the lab total of its colony: the Amount of the colony's installations that carry a `ResearchValue`, 0 where it has none, and `Gaps` the installations whose type or amount is not stored. `condition` is the check's condition over `Pause`, `Facilities` and the labs; each row carries it as `Verdict`, null while a stored value it needs is missing. The colony and the technology are left joins, so a project whose colony or technology the save lacks still shows.
 const researchProjectQuery = ({ GameID, RaceID }, condition) => `select FCT_ResearchProject.ProjectID, FCT_ResearchProject.PopulationID, FCT_ResearchProject.TechID, FCT_ResearchProject.Facilities, FCT_ResearchProject.Pause, ${condition} as Verdict, FCT_TechSystem.Name as ResearchName, FCT_Population.PopulationID as ColonyID, FCT_Population.PopName, ${COLONY_COLUMNS}, coalesce(VIR_Labs.Labs, 0) as Labs, coalesce(VIR_Labs.Gaps, 0) as LabGaps from FCT_ResearchProject left join FCT_Population on FCT_Population.PopulationID = FCT_ResearchProject.PopulationID and FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} ${COLONY_JOINS} left join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_ResearchProject.TechID left join (select FCT_PopulationInstallations.PopID, SUM(case when DIM_PlanetaryInstallation.ResearchValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Labs, sum(case when DIM_PlanetaryInstallation.ResearchValue is null or (DIM_PlanetaryInstallation.ResearchValue > 0 and FCT_PopulationInstallations.Amount is null) then 1 else 0 end) as Gaps from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${GameID} and (DIM_PlanetaryInstallation.ResearchValue > 0 or DIM_PlanetaryInstallation.ResearchValue is null) group by FCT_PopulationInstallations.PopID) as VIR_Labs on VIR_Labs.PopID = FCT_ResearchProject.PopulationID where FCT_ResearchProject.GameID = ${GameID} and FCT_ResearchProject.RaceID = ${RaceID} and ${condition} is not 0 order by FCT_Population.PopName, FCT_ResearchProject.ProjectID`
 
-const projectRow = (project, cells) => ({
+const projectRow = (project, cells, signature = undefined) => ({
   id: `project:${project.ProjectID}`,
   cells: {
     colony: project.ColonyID ? colonyText(project) : `Colony ${project.PopulationID} (missing from the save)`,
@@ -24,6 +24,7 @@ const projectRow = (project, cells) => ({
     ...cells,
   },
   link: linkTo.techTree(),
+  ...(signature === undefined ? {} : { signature }),
 })
 
 // The labs of the colony: a dash while an installation's type or amount is not stored.
@@ -34,6 +35,8 @@ export const checks = checksOf([
     key: 'idle-research-labs',
     group: group.key,
     severity: 'attention',
+    material: 'the idle share crossing 25% of the labs',
+    captured: [bandWords('idle share under 25% of the labs', 'idle share at 25% or more of the labs')],
     title: (count) => amount(count, 'colony with idle research labs', 'colonies with idle research labs'),
     rule: 'A colony has more research facilities than its projects use, so some labs sit idle.',
     evidence: {
@@ -65,6 +68,7 @@ export const checks = checksOf([
             used: figure(ctx, population.OccupiedFacilities, 'the labs assigned to a research project of the colony'),
           },
           link: linkTo.techTree(),
+          signature: signatureOf(bandOf(isKnownNumber(population.AvailableFacilities) && isKnownNumber(population.OccupiedFacilities) && population.AvailableFacilities > 0 ? (population.AvailableFacilities - population.OccupiedFacilities) / population.AvailableFacilities : null, [QUARTER])),
         }),
       })
     },
@@ -99,6 +103,8 @@ export const checks = checksOf([
     key: 'stalled-research-projects',
     group: group.key,
     severity: 'info',
+    material: 'the project going from paused to unassigned, or back',
+    captured: [tokenWords({ paused: 'paused', unassigned: 'unassigned' })],
     title: (count) => amount(count, 'paused or unassigned research project'),
     rule: 'A research project is paused, or sits at a colony with labs while none of them are assigned to it, so it makes no progress until the player acts. A project at a colony with no labs at all is a dead project instead.',
     evidence: {
@@ -120,7 +126,7 @@ export const checks = checksOf([
         build: (project) => projectRow(project, {
           status: project.Pause === null ? unknownCell(ctx, [PAUSED]) : project.Pause ? 'Paused' : 'No labs assigned',
           assigned: figure(ctx, project.Facilities, ASSIGNED_LABS),
-        }),
+        }, signatureOf(isKnownNumber(project.Pause) ? (project.Pause ? 'paused' : 'unassigned') : null)),
       })
     },
   },
@@ -161,6 +167,8 @@ export const checks = checksOf([
     key: 'mismatched-research-fields',
     group: group.key,
     severity: 'attention',
+    material: 'the project field or the scientist\'s specialty changing',
+    captured: [(token) => `research field ${token}`, (token) => `specialty ${token}`],
     title: (count) => amount(count, 'researcher') + ' with mismatched projects',
     rule: 'A scientist leads a project outside their own research field.',
     evidence: {
@@ -197,6 +205,7 @@ export const checks = checksOf([
           },
           caption: colonyText(scientist),
           link: linkTo.commanders({ commander: scientist.CommanderID }),
+          signature: signatureOf(scientist.FieldID, scientist.SpecialtyID),
         }),
       })
     },

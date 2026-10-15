@@ -6,13 +6,15 @@ import { loadFormulaVersion } from '../capabilities'
 
 // Shared by the check modules of the Warnings page. A check is
 //
-//   { key, group, severity, title(count, options), rule, provenance, columns, options?, clock?, read(ctx) }
+//   { key, group, severity, title(count, options), rule, provenance, columns, options?, clock?, material?, read(ctx) }
 //
 // `key` is stable and kebab-case; `severity` one of SEVERITIES (index.js); `title` the heading over the check's rows; `rule` one sentence saying when the check fires; `provenance` the id of the registered rule behind it (`warnings.<camelCased key>`, put there by `checksOf`); `columns` the table's `{ key, text, align? }`, the first holding the row's name; `options` the page options `read` depends on (so only those re-read the check when they change); `clock` that it depends on the game time. `read(ctx)` returns rows
 //
-//   { id, cells, caption?, link?, unevaluated? }
+//   { id, cells, caption?, link?, unevaluated?, signature? }
 //
 // `id` is stable and unique within the check, `cells` hold a column's text or `{ text, tone?, result? }` (`tone` being 'success', 'warning' or 'error'; `result` an unavailable provenance result naming the input a dash stands for), `caption` the line under the first cell and `link` a `linkTo` location. A row with `unevaluated` (an unavailable result naming the missing inputs) is one whose condition could not be decided because a stored value is missing: it is no warning, and the page lists it apart.
+//
+// `material` (on the 24 checks of the classes B, C and K of the snooze evidence, none on the 20 of class P) says in a few words what a material change of a row is, and is what lets a snooze be set "until it changes materially"; each row of such a check carries `signature`, the declared banded or categorical fields of its condition as text (`signatureOf`), or null while one of them is not known. A signature is never built from a shown figure that grows by itself, a name, a sort position or a stored float compared exactly: a band is the interval between the threshold the check applies and one quarter-step beyond it (`QUARTER`), a category is the reason the row is listed.
 //
 // `ctx` is { database, GameID, RaceID, RaceNPR, separator, count(value, decimals), options, GameTime?, unknown(missing) }; `unknown` is put there by `checksOf`.
 
@@ -36,8 +38,8 @@ registerRule({
   versions: WARNING_VERSIONS,
   units: 'rows, checks',
   verification: 'confirmed',
-  structure: ['the rows each check returns', 'the muted rows and checks of the race'],
-  note: 'Counts of the rows the checks return, by severity, less the muted rows and checks. A row whose condition could not be decided because a stored value is missing, and a check that could not be read, are counted apart and are in none of the warning counts.',
+  structure: ['the rows each check returns', 'the muted rows and checks of the race', 'the snoozes of the race on the open branch'],
+  note: 'Counts of the rows the checks return, by severity, less the muted and the snoozed rows and the muted checks. A snoozed row is counted apart, and a permanent mute outranks a snooze. A row whose condition could not be decided because a stored value is missing, and a check that could not be read, are counted apart and are in none of the warning counts.',
 })
 
 // A dash for a value that is not known (null, undefined, NaN), never 0.
@@ -96,6 +98,42 @@ export const rowsOf = async (ctx, sql) => {
   return rows
 }
 
+// One quarter of a 0 to 1 level: how far beyond a check's threshold a band runs.
+export const QUARTER = 0.25
+
+// The band of a figure: how many of the ascending `edges` it has reached, or null while the figure is not known (never band 0).
+export const bandOf = (value, edges) => (isKnownNumber(value) ? edges.filter((edge) => Number(value) >= edge).length : null)
+
+// The categories a row falls in as text, in a fixed order, or null while the list itself is not known.
+export const categoriesOf = (list) => (Array.isArray(list) ? [...new Set(list.map(String))].sort().join(',') : null)
+
+// A row's signature: its tokens joined, or null as soon as one is not known (a null, an undefined or an empty token), so an unknown input is never read as a band or a category.
+export const signatureOf = (...tokens) => (tokens.some((token) => token === null || token === undefined || token === '') ? null : tokens.map(String).join('|'))
+
+// How a signature is told in words on the Snoozed group, so the captured condition can be read: a check declares `captured`, one reader per token of its signature (`bandWords` for a band, `listWords` or `countWords` for a category list, `tokenWords` for a fixed word, `needWords` for the prerequisites of a mining site). A reader gives text only for a token it knows; anything else shows as the token itself, never as a guess.
+export const bandWords = (...words) => (token) => words[Number(token)]
+
+export const listWords = (token) => token.split(',').join(', ')
+
+export const countWords = (one, many) => (token) => `${token.split(',').length} ${token.split(',').length === 1 ? one : many}`
+
+export const tokenWords = (words) => (token) => words[token]
+
+const NEED_WORDS = { deposit: 'no mineral deposit on the body', mineProduction: 'no mine production', drivers: 'no mass driver at the colony', destination: 'no mass driver destination', receiver: 'no mass driver at the destination colony', radiation: 'radiation stopping all mine output', staffing: 'no workforce for the manned mines', colony: 'no colony of the race on the body', assignment: 'assigned to another colony', diameter: 'body wider than the orbital mining limit', modules: 'every mining module damaged', crew: 'no crew aboard' }
+
+export const needWords = (token) => token.split(',').map((need) => NEED_WORDS[need.slice(need.indexOf(':') + 1)] || need).join(', ')
+
+// The words for a signature of a check: its tokens read by the readers of `captured`, or the signature itself where the check declares none or a reader knows no such token.
+export const describeSignature = (check, signature) => {
+  if (typeof signature !== 'string' || signature === '') {
+    return null
+  }
+
+  const readers = check.captured || []
+
+  return signature.split('|').map((token, index) => (readers[index] && readers[index](token)) || token).join(', ')
+}
+
 // `1 damaged ship`, `3 damaged ships`.
 export const amount = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
@@ -117,9 +155,10 @@ export const COLONY_COLUMNS = 'FCT_RaceSysSurvey.Name as SystemName, FCT_SystemB
 
 export const COLONY_JOINS = 'left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID'
 
-// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with an id made unique where a query returned one twice. A cell of a column the check shows that is missing (null or undefined) becomes a dash with an unavailable result naming the column, so no blank cell passes for a known empty one.
+// Rows as the page keeps them: frozen, so Vue doesn't observe each cell, with the text a search looks in, and with an id made unique where a query returned one twice. `raw` is the id the query gave, and `ambiguous` is true for every row of an id that came back more than once: such a row cannot be told apart from its twin across reads, so a snooze never holds it per item. A cell of a column the check shows that is missing (null or undefined) becomes a dash with an unavailable result naming the column, so no blank cell passes for a known empty one.
 export const normalizeRows = (rows, check) => {
   const seen = new Map()
+  const totals = rows.reduce((counts, row) => counts.set(row.id, (counts.get(row.id) || 0) + 1), new Map())
 
   return rows.map((row) => {
     const times = seen.get(row.id) || 0
@@ -131,6 +170,8 @@ export const normalizeRows = (rows, check) => {
     return Object.freeze({
       ...row,
       cells,
+      raw: row.id,
+      ambiguous: totals.get(row.id) > 1,
       id: times ? `${row.id}#${times + 1}` : row.id,
       text: [...texts, row.caption].filter((text) => text !== undefined && text !== null).join(' ').toLowerCase(),
     })
@@ -174,3 +215,6 @@ export const needsCell = (ctx, site, options) => {
 
   return { text: [...absent, ...undecided].map((need) => need.text).join('; '), tone: 'warning', ...(undecided.length ? { result: ctx.unknown(needInputs(site, options)) } : {}) }
 }
+
+// The signature of a mining site: the prerequisites it lacks, each by its owner and key, or null while one is undecided (a prerequisite not known is neither lacking nor met, so it is never read as either).
+export const needsSignature = (site, options) => (unknownNeeds(site, options).length ? null : signatureOf(categoriesOf(missingNeeds(site, options).map((need) => `${need.owner}:${need.key}`))))

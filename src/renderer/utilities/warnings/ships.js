@@ -3,7 +3,7 @@ import { linkTo, place } from '../deep-links'
 import { roundHalfEven } from '../design-rules'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { loadFormulaVersion } from '../capabilities'
-import { allOf, amount, anyOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, rowsOf, unknownCell, verdictRows } from './common'
+import { QUARTER, allOf, amount, anyOf, bandOf, bandWords, categoriesOf, checksOf, classText, colonyText, COLONY_COLUMNS, COLONY_JOINS, countWords, figure, lacking, levelTone, rowsOf, signatureOf, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'ships', title: 'Ships', summary: 'Ships and ship classes with crew, damage, maintenance, training or design problems, so they can be repaired or refit before they matter.' }
 
@@ -98,6 +98,8 @@ export const checks = checksOf([
     key: 'undermanned-ships',
     group: group.key,
     severity: 'needs-action',
+    material: 'the crew aboard crossing 75% of what the class needs',
+    captured: [bandWords('crew under 75% of what the class needs', 'crew at 75% or more of what the class needs')],
     title: (count) => `${amount(count, 'ship')} short of crew`,
     rule: 'A ship has fewer crew aboard than its class needs, so its holds and its survey, harvester, orbital mining, maintenance, salvage, terraforming and stabilisation modules work at the share aboard (estimates read from the game\'s rules; over-crewing adds nothing). Morale and crew grade are separate, and a class with no morale check still loses this throughput; replacement crew joins at a colony of over a million people.',
     evidence: {
@@ -145,7 +147,7 @@ export const checks = checksOf([
             slowed: effects.length ? { text: effects.map((effect) => effect.text).join(' · '), tone: stopped ? 'error' : 'warning' } : 'No hold or module the crew share scales',
             morale: moraleText(ship),
             replace: replacementText(ship, colonies),
-          }, { caption: `${ship.FleetName || 'An unnamed fleet'} · ${classText(ship)}` })
+          }, { caption: `${ship.FleetName || 'An unnamed fleet'} · ${classText(ship)}`, signature: signatureOf(bandOf(level, [1 - QUARTER])) })
         },
       })
     },
@@ -154,6 +156,8 @@ export const checks = checksOf([
     key: 'damaged-ships',
     group: group.key,
     severity: 'needs-action',
+    material: 'another kind of component being damaged',
+    captured: [countWords('damaged component kind', 'damaged component kinds')],
     title: (count) => amount(count, 'damaged ship'),
     rule: 'A ship has one or more damaged components; the cost is the maintenance supplies a repair takes.',
     evidence: {
@@ -170,15 +174,16 @@ export const checks = checksOf([
       const { GameID, RaceID } = ctx
       const COST = 'the cost of a damaged component'
 
-      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
+      const items = await rowsOf(ctx, `select FCT_Ship.ShipID, FCT_Ship.FleetID, FCT_Ship.ShipName, FCT_Ship.ShippingLineID, ${SHIP_LINE} as Verdict, FCT_Fleet.FleetName, FCT_DamagedComponent.ComponentID as ComponentID, FCT_ShipDesignComponents.Name as ComponentName, FCT_ShipDesignComponents.Cost as ComponentCost from FCT_Ship left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID join FCT_DamagedComponent on FCT_Ship.ShipID = FCT_DamagedComponent.ShipID left join FCT_ShipDesignComponents on FCT_DamagedComponent.ComponentID = FCT_ShipDesignComponents.SDComponentID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and ${SHIP_LINE} is not 0`)
 
       const ships = Object.values(items.reduce((aggregate, item) => {
         if (!aggregate[item.ShipID]) {
-          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], TotalCost: 0, CostGaps: 0 }
+          aggregate[item.ShipID] = { ShipID: item.ShipID, FleetID: item.FleetID, ShipName: item.ShipName, FleetName: item.FleetName, ShippingLineID: item.ShippingLineID, Verdict: item.Verdict, Components: [], ComponentIDs: [], TotalCost: 0, CostGaps: 0 }
         }
 
         const ship = aggregate[item.ShipID]
 
+        ship.ComponentIDs.push(item.ComponentID)
         ship.Components.push(`${item.ComponentName || 'An unknown component'} (${ctx.count(isKnownNumber(item.ComponentCost) ? item.ComponentCost * 2 : null)} MSP)`)
 
         if (isKnownNumber(item.ComponentCost)) {
@@ -192,7 +197,7 @@ export const checks = checksOf([
 
       return verdictRows(ctx, ships.sort((alpha, beta) => (alpha.CostGaps > 0) - (beta.CostGaps > 0) || beta.TotalCost - alpha.TotalCost), {
         missing: (ship) => lacking(ship, LINE_INPUTS),
-        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps > 0 ? null : ship.TotalCost, COST, (known) => `${ctx.count(known * 2)} MSP`) }),
+        build: (ship) => shipRow(ship, { components: ship.Components.join(', '), cost: figure(ctx, ship.CostGaps > 0 ? null : ship.TotalCost, COST, (known) => `${ctx.count(known * 2)} MSP`) }, { signature: ship.ComponentIDs.some((id) => id === null || id === undefined) ? null : signatureOf(categoriesOf(ship.ComponentIDs)) }),
       })
     },
   },
@@ -200,6 +205,8 @@ export const checks = checksOf([
     key: 'armor-damaged-ships',
     group: group.key,
     severity: 'needs-action',
+    material: 'the thinnest armour layer being breached, or the layer left crossing 75% of the class thickness',
+    captured: [bandWords('armour layer breached', 'thinnest layer under 75% of the class thickness', 'thinnest layer at 75% or more of the class thickness')],
     title: (count) => amount(count, 'armor-damaged ship'),
     rule: 'A ship has lost armour: damage on any layer of its armour belt, with the thinnest layer left shown.',
     evidence: {
@@ -221,10 +228,14 @@ export const checks = checksOf([
 
       return verdictRows(ctx, ships, {
         missing: (ship) => [...lacking(ship, LINE_INPUTS), ...(ship.ArmorDamage > 0 || !(ship.DamageGaps > 0) ? [] : [DAMAGE])],
-        build: (ship) => shipRow(ship, {
-          damage: figure(ctx, ship.DamageGaps > 0 ? null : ship.ArmorDamage, DAMAGE),
-          thinnest: figure(ctx, ship.DamageGaps > 0 ? null : ship.ThinnestLayer, ship.DamageGaps > 0 ? DAMAGE : THICKNESS, (known) => ctx.count(known), (known) => levelTone(known / ship.ArmourThickness)),
-        }),
+        build: (ship) => {
+          const thinnest = ship.DamageGaps > 0 ? null : ship.ThinnestLayer
+
+          return shipRow(ship, {
+            damage: figure(ctx, ship.DamageGaps > 0 ? null : ship.ArmorDamage, DAMAGE),
+            thinnest: figure(ctx, thinnest, ship.DamageGaps > 0 ? DAMAGE : THICKNESS, (known) => ctx.count(known), (known) => levelTone(known / ship.ArmourThickness)),
+          }, { signature: signatureOf(bandOf(isKnownNumber(thinnest) && ship.ArmourThickness > 0 ? thinnest / ship.ArmourThickness : null, [Number.EPSILON, 1 - QUARTER])) })
+        },
       })
     },
   },
@@ -232,6 +243,8 @@ export const checks = checksOf([
     key: 'low-morale-crews',
     group: group.key,
     severity: 'attention',
+    material: 'the crew morale crossing 75%',
+    captured: [bandWords('morale under 75%', 'morale at 75% or more')],
     title: (count) => amount(count, 'low morale crew'),
     rule: 'A ship\'s crew morale is under 100%.',
     evidence: {
@@ -252,7 +265,7 @@ export const checks = checksOf([
 
       return verdictRows(ctx, ships, {
         missing: (ship) => lacking(ship, { ...LINE_INPUTS, CrewMorale: 'the ship\'s crew morale' }),
-        build: (ship) => shipRow(ship, { morale: figure(ctx, ship.CrewMorale, 'the ship\'s crew morale', percent, levelTone) }),
+        build: (ship) => shipRow(ship, { morale: figure(ctx, ship.CrewMorale, 'the ship\'s crew morale', percent, levelTone) }, { signature: signatureOf(bandOf(ship.CrewMorale, [1 - QUARTER])) }),
       })
     },
   },
@@ -260,6 +273,8 @@ export const checks = checksOf([
     key: 'low-maintenance-ships',
     group: group.key,
     severity: 'attention',
+    material: 'the supplies crossing three quarters of the threshold set under Options',
+    captured: [bandWords('supplies under three quarters of the threshold', 'supplies at three quarters of the threshold or more')],
     title: (count) => amount(count, 'low maintenance ship'),
     rule: 'A ship holds less than the maintenance threshold of the supplies its class carries (a supply ship measures against its class minimum), and its class isn\'t excluded; both are set under Options.',
     evidence: {
@@ -317,7 +332,7 @@ export const checks = checksOf([
         build: (ship) => shipRow(ship, {
           level: figure(ctx, ship.SupplyLevel, supplyGaps(ship), percent, levelTone),
           msp: pairCell(ctx, { left: ship.CurrentMaintSupplies, right: ship.MaintSupplies, join: ' / ', leftName: 'the maintenance supplies the ship holds', rightName: 'the maintenance supplies the ship class carries', leftDecimals: 1 }),
-        }, { link: linkTo.logistics('maintenance') }),
+        }, { link: linkTo.logistics('maintenance'), signature: signatureOf(bandOf(ship.SupplyLevel, [(maintenanceThreshold / 100) * (1 - QUARTER)])) }),
       })
     },
   },
@@ -422,6 +437,8 @@ export const checks = checksOf([
     key: 'misconfigured-supply-classes',
     group: group.key,
     severity: 'attention',
+    material: 'another problem with the class',
+    captured: [tokenWords({ 'no-minimum-supply': 'no minimum supply level set' })],
     title: (count) => amount(count, 'misconfigured supply ship class', 'misconfigured supply ship classes'),
     rule: 'A supply ship class carries maintenance supplies but has no minimum supply level set, and isn\'t excluded under Options.',
     evidence: {
@@ -460,6 +477,7 @@ export const checks = checksOf([
           id: `class:${shipClass.ShipClassID}`,
           cells: { class: classText(shipClass), problem: 'No minimum supply level set' },
           link: linkTo.logistics('maintenance'),
+          signature: signatureOf('no-minimum-supply'),
         }),
       })
     },
@@ -468,6 +486,8 @@ export const checks = checksOf([
     key: 'misconfigured-tanker-classes',
     group: group.key,
     severity: 'attention',
+    material: 'another problem with the class',
+    captured: [tokenWords({ 'no-minimum-fuel': 'no minimum fuel level set' })],
     title: (count) => amount(count, 'misconfigured tanker ship class', 'misconfigured tanker ship classes'),
     rule: 'A tanker class with engines carries fuel but has no minimum fuel level set.',
     evidence: {
@@ -506,6 +526,7 @@ export const checks = checksOf([
           id: `class:${shipClass.ShipClassID}`,
           cells: { class: classText(shipClass), problem: 'No minimum fuel level set' },
           link: linkTo.logistics('fuel'),
+          signature: signatureOf('no-minimum-fuel'),
         }),
       })
     },

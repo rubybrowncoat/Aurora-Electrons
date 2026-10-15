@@ -3,7 +3,7 @@ import _partition from 'lodash/partition'
 import { systemBodyName } from '../aurora'
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
-import { amount, anyOf, bodyText, checksOf, figure, lacking, rowsOf, systemText, unknownCell, verdictRows } from './common'
+import { amount, anyOf, bodyText, categoriesOf, checksOf, figure, lacking, listWords, rowsOf, signatureOf, systemText, tokenWords, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'space', title: 'Contacts and space', summary: 'Intruders, hazards and finds in surveyed space, such as rifts, lifepods, wrecks and ancient constructs, that may need a response.' }
 
@@ -94,11 +94,15 @@ const RIFT_COLONY_INPUT = 'the population or stockpiles of a colony in the rift\
 
 const OCCUPANTS = ['CivilianFleets', 'MilitaryFleets', 'UnknownFleets', 'InhabitedColonies', 'UsedColonies', 'StockedColonies', 'GroundUnitBases']
 
+const OCCUPANT_WORDS = { CivilianFleets: 'civilian fleets', MilitaryFleets: 'military fleets', UnknownFleets: 'unidentified fleets', InhabitedColonies: 'inhabited colonies', UsedColonies: 'colonies in use', StockedColonies: 'stocked colonies', GroundUnitBases: 'ground unit bases' }
+
 export const checks = checksOf([
   {
     key: 'intruders',
     group: group.key,
     severity: 'needs-action',
+    material: 'another kind of contact being there',
+    captured: [listWords],
     title: (count) => `${amount(count, 'system')} with intruders`,
     rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system the race has surveyed, unless the race is allied with it or it is marked friendly.',
     evidence: {
@@ -164,6 +168,7 @@ export const checks = checksOf([
           },
           caption: intruderRaces(system.Races),
           link: linkTo.map(system.SystemID),
+          signature: system.Unknown.length ? null : signatureOf(categoriesOf(Object.entries(system.Totals).flatMap(([type, contacts]) => [...(contacts.some((contact) => contact.ContactStatus === HOSTILE) ? [`hostile ${type}`] : []), ...(contacts.some((contact) => contact.ContactStatus !== HOSTILE) ? [`neutral ${type}`] : [])]))),
         }),
       })
     },
@@ -172,6 +177,8 @@ export const checks = checksOf([
     key: 'dangerous-rifts',
     group: group.key,
     severity: 'needs-action',
+    material: 'another kind of occupant being in the rift\'s system',
+    captured: [(token) => token.split(',').map((occupant) => OCCUPANT_WORDS[occupant] || occupant).join(', ')],
     title: (count) => amount(count, 'dangerous rift') + ' in occupied systems',
     rule: 'An aether rift sits in a system where the race has fleets, colonies or ground unit bases.',
     evidence: {
@@ -219,6 +226,7 @@ export const checks = checksOf([
             })(),
           },
           link: linkTo.map(rift.SystemID),
+          signature: rift.OpenColonies > 0 ? null : signatureOf(categoriesOf(OCCUPANTS.filter((occupant) => rift[occupant] > 0))),
         }),
       })
     },
@@ -227,6 +235,8 @@ export const checks = checksOf([
     key: 'active-lifepods',
     group: group.key,
     severity: 'attention',
+    material: 'the lifepod expiring',
+    captured: [tokenWords({ adrift: 'adrift', expired: 'expired' })],
     clock: true,
     title: (count) => amount(count, 'active lifepod'),
     rule: 'Detected lifepods are still adrift; their crews last two weeks from the ship\'s loss.',
@@ -258,6 +268,7 @@ export const checks = checksOf([
           },
           caption: lifepod.SystemName || undefined,
           link: lifepod.SystemID ? linkTo.map(lifepod.SystemID) : undefined,
+          signature: signatureOf(remaining === null ? null : remaining === 'Expired' ? 'expired' : 'adrift'),
         }
       })
     },
@@ -299,6 +310,8 @@ export const checks = checksOf([
     key: 'known-unexploited-constructs',
     group: group.key,
     severity: 'info',
+    material: 'the blocker changing',
+    captured: [tokenWords({ active: 'active', dormant: 'dormant' }), tokenWords({ unpopulated: 'no colony of the race there', populated: 'a colony with over 10 million people', lacking: 'colonies there with 10 million people or fewer' })],
     title: (count) => amount(count, 'unexploited ancient construct'),
     rule: 'An ancient construct on a surveyed body is dormant, or has no colony of the race with 10 million people on it, so its research bonus goes unused.',
     evidence: {
@@ -377,6 +390,7 @@ export const checks = checksOf([
 
           return {
             id: `construct:${construct.AncientConstructID}`,
+            signature: signatureOf(isKnownNumber(construct.Active) ? (construct.Active ? 'active' : 'dormant') : null, unknown ? null : !known.length ? 'unpopulated' : known.some((population) => population > 10) ? 'populated' : 'lacking'),
             cells: {
               construct: `${systemText(construct)} — ${systemBodyName(construct)}`,
               bonus: !isKnownNumber(construct.Active) ? unknownCell(ctx, ['whether the ancient construct is active']) : construct.Active ? figure(ctx, construct.ResearchBonus, 'the research bonus of the ancient construct', (bonus) => `${roundToDecimal((bonus - 1) * 100)}% ${construct.FieldName || 'of an unknown field'}`) : 'Dormant',

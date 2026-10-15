@@ -1,7 +1,7 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { MINERALS, projectShortages } from '../minerals'
-import { amount, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, rowsOf, unknownCell, verdictRows } from './common'
+import { QUARTER, amount, bandOf, bandWords, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, listWords, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'industry', title: 'Industry', summary: 'Idle factory capacity, stalled projects and unused shipyards, so it is clear where industry is not producing what it could.' }
 
@@ -41,6 +41,7 @@ const freeCapacityRows = (ctx, populations, alias) => verdictRows(ctx, populatio
       free: figure(ctx, population.FreePercentage, PROJECT_SHARE, (known) => `${roundToDecimal(known, 4)}%`),
     },
     link: linkTo.production(population.PopulationID),
+    signature: signatureOf(bandOf(isKnownNumber(population.FreePercentage) ? population.FreePercentage / 100 : null, [QUARTER])),
   }),
 })
 
@@ -96,6 +97,8 @@ export const checks = checksOf([
     key: 'free-construction-capacity',
     group: group.key,
     severity: 'attention',
+    material: 'the free share crossing 25% of the capacity',
+    captured: [bandWords('free share under 25% of the capacity', 'free share at 25% or more of the capacity')],
     title: (count) => `${amount(count, 'population')} with free construction capacity`,
     rule: 'A colony has construction factories while the industrial projects it is building (not queued) take under 100% of its construction capacity.',
     evidence: {
@@ -115,6 +118,8 @@ export const checks = checksOf([
     key: 'free-ordnance-capacity',
     group: group.key,
     severity: 'attention',
+    material: 'the free share crossing 25% of the capacity',
+    captured: [bandWords('free share under 25% of the capacity', 'free share at 25% or more of the capacity')],
     title: (count) => `${amount(count, 'population')} with free ordnance production capacity`,
     rule: 'A colony has ordnance factories while the ordnance projects it is building (not queued) take under 100% of its ordnance capacity.',
     evidence: {
@@ -133,6 +138,8 @@ export const checks = checksOf([
     key: 'free-fighter-capacity',
     group: group.key,
     severity: 'attention',
+    material: 'the free share crossing 25% of the capacity',
+    captured: [bandWords('free share under 25% of the capacity', 'free share at 25% or more of the capacity')],
     title: (count) => `${amount(count, 'population')} with free fighter production capacity`,
     rule: 'A colony has fighter factories while the fighter projects it is building (not queued) take under 100% of its fighter capacity.',
     evidence: {
@@ -151,6 +158,8 @@ export const checks = checksOf([
     key: 'idle-ground-training',
     group: group.key,
     severity: 'info',
+    material: 'the unallocated share crossing 25% of the capacity',
+    captured: [bandWords('unallocated share under 25% of the capacity', 'unallocated share at 25% or more of the capacity')],
     title: (count) => `${amount(count, 'population')} with idle ground training capacity`,
     rule: 'A colony with people on it has ground force construction complexes staffed at its efficiency while the ground unit training tasks under way (not queued) take under 100% of that capacity, so the rest trains nothing; a colony with no training task at all counts as fully idle.',
     evidence: {
@@ -197,6 +206,7 @@ export const checks = checksOf([
             },
             caption: [population.Tasks ? amount(population.Tasks, 'training task') : 'No training task', population.Queued ? `${amount(population.Queued, 'formation')} queued` : ''].filter(Boolean).join(' · '),
             link: linkTo.production(population.PopulationID),
+            signature: signatureOf(bandOf(isKnownNumber(population.Allocated) ? (100 - Math.min(100, population.Allocated)) / 100 : null, [QUARTER])),
           }
         },
       })
@@ -246,6 +256,8 @@ export const checks = checksOf([
     key: 'projects-short-of-minerals',
     group: group.key,
     severity: 'attention',
+    material: 'another mineral being short',
+    captured: [listWords],
     title: (count) => `${amount(count, 'industrial project')} short of minerals`,
     rule: 'A project that is building (not paused or queued) needs more of a mineral or of fuel than its colony holds for the units it has left; each project is checked against the colony\'s whole stock, and a spied empire is skipped because it builds from its capital\'s stock.',
     evidence: {
@@ -298,6 +310,7 @@ export const checks = checksOf([
             },
             caption: colonyText(project),
             link: project.Short.length === 1 && project.Short[0].mineralId ? linkTo.mineralOutlook(project.Short[0].mineralId) : linkTo.production(project.PopulationID),
+            signature: project.Missing.length ? null : signatureOf(categoriesOf(project.Short.map((item) => item.name))),
           }
         },
       })
@@ -307,6 +320,8 @@ export const checks = checksOf([
     key: 'idle-slipways',
     group: group.key,
     severity: 'info',
+    material: 'the idle share crossing 25% of the slipways',
+    captured: [bandWords('idle share under 25% of the slipways', 'idle share at 25% or more of the slipways')],
     title: (count) => `${amount(count, 'shipyard')} with idle slipways`,
     rule: 'A shipyard has more slipways than shipyard tasks, so the slipways without a task build nothing.',
     evidence: {
@@ -337,6 +352,7 @@ export const checks = checksOf([
           },
           caption: [colonyText(shipyard), SHIPYARD_ACTIVITIES[shipyard.TaskType]].filter(Boolean).join(' · '),
           link: linkTo.production(shipyard.PopulationID),
+          signature: signatureOf(bandOf(isKnownNumber(shipyard.Slipways) && shipyard.Slipways > 0 ? (shipyard.Slipways - shipyard.Tasks) / shipyard.Slipways : null, [QUARTER])),
         }),
       })
     },

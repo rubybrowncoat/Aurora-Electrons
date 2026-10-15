@@ -1,5 +1,5 @@
 import { linkTo, place } from '../deep-links'
-import { amount, bodyText, checksOf, figure, lacking, needInputs, needsCell, readMiningSites, rowsOf, systemText, verdictRows } from './common'
+import { amount, bodyText, checksOf, figure, lacking, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, systemText, verdictRows } from './common'
 
 export const group = { key: 'fleets', title: 'Fleets', summary: 'Fleets that sit idle, carry cargo with no orders or hold orders they cannot carry out, so they can be given something to do.' }
 
@@ -139,6 +139,8 @@ export const checks = checksOf([
     key: 'stranded-miners',
     group: group.key,
     severity: 'needs-action',
+    material: 'another prerequisite of mining being missing',
+    captured: [needWords],
     title: (count) => `${amount(count, 'orbital mining fleet')} that can't mine where they are`,
     rule: 'A fleet with mining modules and no orders orbits a body where it can\'t mine: no colony of the race there to take the output, a body wider than the orbital mining limit, no mineral deposit, no mine production, no working module or no crew. Each missing prerequisite is named; a body the race has not surveyed is listed apart, as its deposits are not known.',
     evidence: {
@@ -164,6 +166,7 @@ export const checks = checksOf([
           cells: { fleet: site.row.FleetName, reason: needsCell(ctx, site), modules: figure(ctx, site.modules, 'the mining modules of a ship class') },
           caption: bodyText(site.row),
           link: linkTo.routes({ from: place.fleet(site.id) }),
+          signature: needsSignature(site),
         }),
       })
     },

@@ -1,7 +1,7 @@
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { deliveryVerdict } from '../mining-sites'
-import { amount, anyOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, readMiningSites, rowsOf, unknownCell, verdictRows } from './common'
+import { QUARTER, amount, anyOf, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so what holds them back can be fixed.' }
 
@@ -51,13 +51,14 @@ const installationRows = (ctx, items, valueKey, link, missing) => {
   })
 }
 
-// One row per colony of a query that selects `Verdict`; `cell(population)` gives the cells after the colony's name.
-const populationRows = (ctx, populations, { missing, cell, link = (population) => linkTo.colonyOutlook(population.PopulationID) }) => verdictRows(ctx, populations, {
+// One row per colony of a query that selects `Verdict`; `cell(population)` gives the cells after the colony's name and `signature(population)` the row's signature where the check declares one.
+const populationRows = (ctx, populations, { missing, cell, signature = null, link = (population) => linkTo.colonyOutlook(population.PopulationID) }) => verdictRows(ctx, populations, {
   missing,
   build: (population) => ({
     id: `colony:${population.PopulationID}`,
     cells: { colony: colonyText(population), ...cell(population) },
     link: link(population),
+    ...(signature ? { signature: signature(population) } : {}),
   }),
 })
 
@@ -72,6 +73,8 @@ export const checks = checksOf([
     key: 'low-efficiency-populations',
     group: group.key,
     severity: 'attention',
+    material: 'the efficiency crossing 75%',
+    captured: [bandWords('efficiency under 75%', 'efficiency at 75% or more')],
     title: (count) => amount(count, 'low efficiency population'),
     rule: 'A colony with people on it runs at under 100% efficiency, which scales what its factories, mines and labs produce.',
     evidence: {
@@ -92,6 +95,7 @@ export const checks = checksOf([
 
       return populationRows(ctx, populations, {
         missing: (population) => lacking(population, { Efficiency: 'the colony\'s efficiency', Population: POPULATION }),
+        signature: (population) => signatureOf(bandOf(population.Efficiency, [1 - QUARTER])),
         cell: (population) => ({
           efficiency: figure(ctx, population.Efficiency, 'the colony\'s efficiency', (known) => `${roundToDecimal(known * 100, 1)}%`, levelTone),
           population: figure(ctx, population.Population, POPULATION, (known) => ctx.count(known * 1000000)),
@@ -156,6 +160,8 @@ export const checks = checksOf([
     key: 'wasted-mining-capacity',
     group: group.key,
     severity: 'attention',
+    material: 'another prerequisite of mining being missing',
+    captured: [needWords],
     title: (count) => amount(count, 'colony with wasted mining capacity', 'colonies with wasted mining capacity'),
     rule: 'A colony has mines that can\'t work: its body holds no mineral deposit, radiation stops mine output, the race has no mine production, or its manned mines have no workforce. Each missing prerequisite is named; a body the race has not surveyed is listed apart, as its deposits are not known.',
     evidence: {
@@ -186,6 +192,7 @@ export const checks = checksOf([
             output: figure(ctx, site.capacity, 'the amount or the type of an installation of the colony', (known) => ctx.count(known, 1)),
           },
           link: linkTo.minerals({ bodies: [site.row] }),
+          signature: needsSignature(site),
         }),
       })
     },
@@ -227,6 +234,8 @@ export const checks = checksOf([
     key: 'mass-driver-orphans',
     group: group.key,
     severity: 'attention',
+    material: 'another prerequisite of the export being missing',
+    captured: [needWords],
     title: (count) => amount(count, 'mining colony', 'mining colonies') + ' with no mineral export set up',
     rule: 'A colony, or orbital miners at it, mine but the save holds no way to deliver the minerals: no mass driver pointing at a colony of the race in the same system that has drivers too, no such colony pointing its drivers at it and no fleet order loading minerals at it. Colonies that receive packets, the capital and colonies with factories use their minerals where they lie and are left out; so are mines that don\'t produce, which the mining checks above list. A freighter can still collect minerals without a stored order, so this lists the setup the save shows, not minerals that never leave.',
     evidence: {
@@ -258,6 +267,7 @@ export const checks = checksOf([
           },
           ...(deliveryVerdict(site) === 1 ? { caption: 'The save shows no export set up here, so minerals leave only if a freighter collects them without a stored order' } : {}),
           link: linkTo.minerals({ bodies: [site.row] }),
+          signature: needsSignature(site, { delivery: true }),
         }),
       })
     },
