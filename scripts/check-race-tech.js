@@ -417,6 +417,47 @@ const syntheticChecks = (m) => {
     return marked.tanks === null && ts.isHypothetical(marked.speed) && ts.isHypothetical(marked.cost) ? true : short(marked)
   })
 
+  // ---- the loader on a save without the optional flag
+
+  const TECH_ROWS = ["insert into FCT_TechSystem values (10, 0, 40, 'Engine A', 'Engine A', 5, null, 100)", "insert into FCT_TechSystem values (9, 0, 40, 'Engine 0', 'Engine 0', 3, null, 40)"]
+  const TECH_TABLE = 'create table FCT_TechSystem (TechSystemID integer, GameID integer, TechTypeID integer, Name text, ComponentName text, AdditionalInfo real, AdditionalInfo2 real, DevelopCost real)'
+
+  const loaded = (race, rows) => new Promise((resolve, reject) => {
+    const sqlite3 = require('sqlite3')
+    const raw = new sqlite3.Database(':memory:', (openError) => {
+      if (openError) {
+        reject(openError)
+
+        return
+      }
+
+      const database = { query: (sql, { replacements = {} } = {}) => new Promise((resolve, reject) => raw.all(sql, Object.fromEntries([...new Set([...sql.matchAll(/:(\w+)/g)].map((match) => match[1]))].map((name) => [`:${name}`, replacements[name]])), (error, found) => (error ? reject(error) : resolve([found])))) }
+
+      raw.exec([TECH_TABLE, ...TECH_ROWS, ...rows].join(';\n'), (execError) => {
+        if (execError) {
+          reject(execError)
+
+          return
+        }
+
+        rt.loadRaceTech(database, { GameID: 1, RaceID: race }).then(resolve, reject).finally(() => raw.close())
+      })
+    })
+  })
+
+  add('loader: a save without FCT_RaceTech.Obsolete gives the levels, the pick and an unknown flag, never an error or false', async () => {
+    const tech = await loaded(2, ['create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer)', 'insert into FCT_RaceTech values (1, 2, 9), (1, 2, 10), (1, 3, 10)'])
+    const engines = tech.lines[ENGINE]
+
+    return same([engines.levels.map((item) => [item.id, item.obsolete]), engines.pick.id], [[[9, null], [10, null]], 10])
+  })
+
+  add('loader: a save with FCT_RaceTech.Obsolete gives the flag of each level', async () => {
+    const tech = await loaded(2, ['create table FCT_RaceTech (GameID integer, RaceID integer, TechID integer, Obsolete integer)', 'insert into FCT_RaceTech values (1, 2, 9, 1), (1, 2, 10, 0)'])
+
+    return same(tech.lines[ENGINE].levels.map((item) => [item.id, item.obsolete]), [[9, true], [10, false]])
+  })
+
   return checks
 }
 
@@ -756,6 +797,9 @@ const PAGE_MUTATIONS = [
 
 const MUTATIONS = [
   { name: 'the hypothetical assumptions of a result taken with the others', file: 'tech-scenarios.js', find: 'result.assumptions.filter((assumption) => assumption.startsWith(HYPOTHETICAL_PREFIX))))]', replace: 'result.assumptions))]', fails: ['marking: the hypothetical assumptions of some results are listed once'] },
+  // eslint-disable-next-line no-template-curly-in-string
+  { name: 'the obsolete flag read by its table column', file: 'race-tech.js', find: '(columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)', replace: '`${RACE_TECH_TABLE}.${name} as ${name}`', fails: ['loader: a save without'] },
+  { name: 'an absent obsolete flag read as false', file: 'race-tech.js', find: 'obsolete: row.Obsolete === null ? null : Boolean(row.Obsolete),', replace: 'obsolete: Boolean(row.Obsolete),', fails: ['loader: a save without'] },
   { name: 'the game\'s pick taken by the highest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info > best.info ? item : best', fails: ['pick: where development order and figure disagree'] },
   { name: 'the game\'s pick taken by the lowest figure', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.info < best.info ? item : best', fails: ['pick: the game designs with the researched level of the highest development cost', 'pick: where development order and figure disagree'] },
   { name: 'the game\'s pick taken by the lowest development cost', file: 'race-tech.js', find: '!best || item.cost > best.cost ? item : best', replace: '!best || item.cost < best.cost ? item : best', fails: ['pick: the game designs with the researched level', 'pick: where development order and figure disagree', 'pick: fuel and thermal reduction researched in order'] },

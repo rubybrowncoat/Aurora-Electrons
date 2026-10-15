@@ -1071,6 +1071,8 @@ export const MISSILE_FIRE_CONTROL_RANGE_FACTOR = 2
 export const SENSOR_JAMMER_BASE = 0.75
 export const PASSIVE_RANGE_MULTIPLIER = 250000
 export const MISSILE_SIGNATURE_MIN = 0.3
+// The least size, in missile points (MSP), a missile shows a missile fire control: the fire control reads the missile's size itself, not a size over the MSP of a hull space.
+export const MISSILE_FIRE_CONTROL_SIGNATURE_MIN = 0.33
 // The least cross-section a class shows an active sensor, in HS: the same game constant as the missile signature floor.
 export const CROSS_SECTION_MIN = MISSILE_SIGNATURE_MIN
 // The EM signature of shields that are up, per point of shield strength.
@@ -1108,6 +1110,9 @@ export const sensorJammerFactor = ({ jammer, eccm }) => (jammer > eccm ? SENSOR_
 
 // The signature, in HS, an active sensor sees a missile by: its size in MSP over the MSP of a hull space, never below 0.3.
 export const missileSignature = ({ sizeMsp }) => Math.max(sizeMsp / MSP_PER_HS, MISSILE_SIGNATURE_MIN)
+
+// The size a missile fire control sees a missile target by, set against the fire control's resolution: the missile's size in MSP, never below 0.33. It is not the search signature, and no jammer term applies to it (docs/plans/planners/mechanics-sensors.md).
+export const missileFireControlSignature = ({ sizeMsp }) => Math.max(sizeMsp, MISSILE_FIRE_CONTROL_SIGNATURE_MIN)
 
 // An active sensor, or a missile fire control (`mode` 'missileFireControl'), as the game designs it from the active sensor strength tech (`strengthTech` per HS), the EM sensitivity tech, the resolution, and the hardening and ECCM techs (`hardeningRating` the CTD, `hardeningCost` the cost factor, `eccmRating`, `eccmCost` the cost factor). Returns { strength, rangeKm, searchRangeKm, cost, uridium, corbomite, crew, htk, eccm, ctd, sizeHS, tons }: `searchRangeKm` is the range of the same sensor as a search sensor, `rangeKm` twice that for a fire control. The cost is the size times the strength tech times the hardening factor to 1 decimal (the Uridium) times the ECCM factor; the Corbomite is the rest.
 export const activeSensorDesign = ({ sizeHS, resolution, strengthTech, emTech, hardeningRating, hardeningCost, eccmRating, eccmCost, mode = SENSOR_MODES.search }) => {
@@ -1178,7 +1183,7 @@ export const passiveDetectionRange = ({ sensitivity, signature }) => Math.sqrt(s
 const SENSOR_RANGE_TOLERANCE = 1e-9
 
 // Whether a range reaches a wanted one, to the last binary digits of the float.
-const reaches = (rangeKm, wantedKm) => rangeKm >= wantedKm * (1 - SENSOR_RANGE_TOLERANCE)
+export const reaches = (rangeKm, wantedKm) => rangeKm >= wantedKm * (1 - SENSOR_RANGE_TOLERANCE)
 
 const numberOrNull = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null)
 

@@ -56,7 +56,7 @@ const moduleUrl = (name, context) => {
       return urls.get(name)
     }
 
-    const isPage = name.startsWith('pages/')
+    const isPage = name.startsWith('pages/') || name.startsWith('components/')
     const file = path.join(directory, `${name}${isPage ? '.vue' : '.js'}`)
 
     if (sources[name] === undefined && !texts.has(file)) {
@@ -67,7 +67,7 @@ const moduleUrl = (name, context) => {
     const source = isPage ? pageScript(text) : text
     const mutated = isPage && mutate ? mutate(source) : source
     const components = mutated.replace(/from '([^']+\.vue)'/g, () => `from '${urlOfSource(VUE_STUB)}'`)
-    const relative = components.replace(/from '(\.\.?\/[\w\-/]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), context)}'`)
+    const relative = components.replace(/from '(\.\.?\/[\w\-/.]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), context)}'`)
     const stubbed = Object.entries({ ...PACKAGE_STUBS, ...stubs }).reduce((result, [specifier, stub]) => result.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), `from '${urlOfSource(stub)}'`), relative)
 
     urls.set(name, urlOfSource(stubbed))
@@ -153,6 +153,7 @@ const instantiate = (options, { $store, database = null, GameID = null, RaceID =
   })
 
   Object.entries(asyncComputed).forEach(([name, read]) => { state[name] = typeof read.default === 'function' ? read.default.call(vm) : read.default })
+  parts.forEach((part) => part.beforeCreate && part.beforeCreate.call(vm))
   parts.forEach((part) => part.data && Object.assign(state, part.data.call(vm)))
   Object.assign(state, data)
 

@@ -189,10 +189,10 @@ export const activeReach = ({ rangeKm, resolution, crossSection }) => reachOf(RU
 
 const sortedSignatures = (signatures) => [...new Set(signatures.filter((signature) => isNumber(signature) && signature >= 0))].sort((a, b) => a - b)
 
-// The range of each sensor (`sensitivities` of { key, name, sensitivity }) against each target signature, from smallest to largest, with duplicates and signatures that are not numbers of 0 or more left out.
+// The range of each sensor (`sensitivities` of { key, name, sensitivity, source }, `source` the result a proposed sensor's sensitivity comes from, whose provenance each of its ranges carries) against each target signature, from smallest to largest, with duplicates and signatures that are not numbers of 0 or more left out.
 export const rangeCurve = ({ sensitivities, signatures }) => {
   const targets = sortedSignatures(signatures)
-  const rows = targets.map((signature) => ({ signature, ranges: sensitivities.map(({ key, name, sensitivity }) => ({ key, name, result: passiveReach({ sensitivity, signature }) })) }))
+  const rows = targets.map((signature) => ({ signature, ranges: sensitivities.map(({ key, name, sensitivity, source = null }) => ({ key, name, result: passiveReach({ sensitivity: source || sensitivity, signature }) })) }))
   const series = sensitivities.map(({ key, name, sensitivity }, index) => ({ key, name, sensitivity, points: rows.filter((row) => isAvailable(row.ranges[index].result)).map((row) => ({ x: row.signature, y: row.ranges[index].result.value })) }))
 
   return { series, rows }

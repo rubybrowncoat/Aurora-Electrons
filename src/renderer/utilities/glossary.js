@@ -76,6 +76,10 @@ export const TERMS = Object.freeze([
   term('game-log', 'Game log', 'The events the game records as time passes, each with a type, a date and a message. It is a record of what has happened and not a forecast.', ''),
   term('project-note', 'Project note', 'A note the player keeps on one body, colony, fleet or tech, with a status and the next action to take. It is kept in the app\'s own files for the campaign and race, and it gives the game no order and writes nothing to the save. Its link to the object is checked against the save each time, so a note whose object has gone stays readable as stale.', ''),
   term('estimated-output', 'Estimated figure', 'A value the app computes from saved data rather than reads from the game. A mark beside it states how far it holds: confirmed (observed in the save, or reproduced by a rule checked against saves), estimated (approximate or not checked), assumed (it rests on a number entered or chosen) or unavailable (an input is missing, so the figure is blank and never 0). A help link explains a term and does not stand in for that mark.', ''),
+  term('sensor-resolution', 'Sensor resolution', 'The size of target an active sensor is built to see. A target with a cross-section under the resolution is seen at its range cut by the square of the cross-section over the resolution, so a target half the resolution is seen at a quarter of the range. A larger resolution suits larger targets and needs a larger sensor to reach the same range against a small one.', 'HS'),
+  term('sensor-jammer', 'Sensor jammer', 'A target\'s defence against active sensors. Each level of jammer above the sensor\'s ECCM cuts the sensor\'s range to 0.75 of it; ECCM at or above the jammer cuts nothing. It is a different figure from the jammer of a missile in the hit chance, which does not change a sensor\'s range.', ''),
+  term('fire-control', 'Fire control', 'The sensor that guides weapons onto a target. A missile fire control reaches twice the range of a search sensor of the same size. A beam fire control has a range, capped at 1,400,000 km, and a tracking speed, each set by its own multiplier and sized apart; a single weapon control is restricted to one weapon.', 'km, km/s'),
+  term('electronic-hardening', 'Hardening and ECCM', 'Protection a sensor or fire control is built with. Hardening sets its Uridium and ECCM adds Corbomite on top, each from the level of its tech and each changing the BP. ECCM lowers the jammer a sensor meets, so a higher level keeps more of its range against a jamming target.', 'BP'),
 ])
 
 const link = (fields) => Object.freeze({ reviewed: REVIEWED, reached: REVIEWED, written: null, ...fields })
@@ -117,8 +121,8 @@ const PAGE_HELP = Object.freeze({
   '/technologies': { terms: ['research-project', 'research-points', 'component-design', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-gameplay', ...RESOURCES] },
   '/designed-tech': { terms: ['component-design', 'hull-space', 'build-points', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-survey-ship', ...RESOURCES] },
   '/propulsion': { terms: ['engine-power', 'fuel-litres', 'speed', 'range-endurance', 'hull-space', 'build-points', 'maintenance-supply', 'estimated-output'], links: ['tutorial-research-engines', 'tutorial-survey-ship', ...RESOURCES] },
-  '/missile-designer': { terms: ['speed', 'range-endurance', 'engine-power', 'fuel-litres', 'estimated-output'], links: RESOURCES },
-  '/sensors': { terms: ['hull-space', 'engine-power', 'speed', 'observed-intel', 'estimated-output'], links: RESOURCES },
+  '/missile-designer': { terms: ['speed', 'range-endurance', 'engine-power', 'fuel-litres', 'sensor-resolution', 'sensor-jammer', 'estimated-output'], links: RESOURCES },
+  '/sensors': { terms: ['hull-space', 'sensor-resolution', 'sensor-jammer', 'fire-control', 'electronic-hardening', 'engine-power', 'speed', 'observed-intel', 'estimated-output'], links: RESOURCES },
   '/shipyards': { terms: ['refit', 'retool', 'slipway', 'build-points', 'hull-space', 'estimated-output'], links: ['tutorial-survey-ship', ...RESOURCES] },
 })
 

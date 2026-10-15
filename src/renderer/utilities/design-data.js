@@ -1037,6 +1037,72 @@ export const ownedPassiveSensors = async (database, game, race) => {
 
 const wholeIds = (ids) => [...new Set(ids)].filter((id) => Number.isInteger(id) && id > 0).sort((a, b) => a - b)
 
+const ACTIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.active, SENSOR_COMPONENT_TYPES.missileFireControl])
+const ACTIVE_SENSOR_REQUIRED = Object.freeze(['SDComponentID', 'GameID', 'Name', 'ComponentTypeID', 'Size', 'MaxSensorRange', 'Resolution'])
+const ACTIVE_SENSOR_OPTIONAL = Object.freeze(['Cost', 'Crew', 'Uridium', 'Corbomite', 'ComponentValue', 'ECCM', 'ElectronicCTD'])
+const BEAM_FIRE_CONTROL_REQUIRED = Object.freeze(['SDComponentID', 'GameID', 'Name', 'ComponentTypeID', 'Size', 'ComponentValue', 'TrackingSpeed'])
+const BEAM_FIRE_CONTROL_OPTIONAL = Object.freeze(['Cost', 'Crew', 'Uridium', 'Corbomite', 'FCRangeModifier', 'FCSpeedModifier', 'SpecialFunction', 'ECCM', 'ElectronicCTD'])
+const SENSOR_RACE_TECH_OPTIONAL = Object.freeze(['Obsolete'])
+
+const storedFlag = (value) => (value === null || value === undefined ? null : Boolean(value))
+
+// The active sensors and missile fire controls a race has researched, as `{ id, name, type (24 search sensor, 25 missile fire control), kind ('search' or 'fireControl'), sizeHS, cost, crew, uridium, corbomite, rangeKm (the stored maximum range, a fire control's already twice a search sensor's), resolution, eccm, ctd, strength, obsolete }`, ordered by id. The stored size, maximum range and resolution are what the read cannot do without, and a save that lacks one of those columns is refused; any other figure the save does not hold is null, never 0, and so is the obsolete flag of a save without one.
+export const ownedActiveSensors = async (database, game, race) => {
+  const [componentColumns, raceTechColumns] = await Promise.all([columnsOf(database, COMPONENT_TABLE), columnsOf(database, RACE_TECH_TABLE)])
+
+  requireColumns(componentColumns, COMPONENT_TABLE, ACTIVE_SENSOR_REQUIRED, 'active sensor read')
+  requireColumns(raceTechColumns, RACE_TECH_TABLE, REQUIRED_RACE_TECH_COLUMNS, 'active sensor read')
+
+  const [rows] = await database.query(`select c.SDComponentID as SDComponentID, c.Name as Name, c.ComponentTypeID as ComponentTypeID, c.Size as Size, c.MaxSensorRange as MaxSensorRange, c.Resolution as Resolution, ${selectedColumns('c', componentColumns, ACTIVE_SENSOR_OPTIONAL)}, ${selectedColumns('r', raceTechColumns, SENSOR_RACE_TECH_OPTIONAL)} from FCT_ShipDesignComponents c inner join FCT_RaceTech r on r.TechID = c.SDComponentID where c.ComponentTypeID in (${ACTIVE_SENSOR_TYPE_IDS.join(',')}) and c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })
+
+  return rows.map((row) => Object.freeze({
+    id: row.SDComponentID,
+    name: row.Name,
+    type: row.ComponentTypeID,
+    kind: row.ComponentTypeID === SENSOR_COMPONENT_TYPES.missileFireControl ? 'fireControl' : 'search',
+    sizeHS: row.Size,
+    cost: row.Cost,
+    crew: row.Crew,
+    uridium: row.Uridium,
+    corbomite: row.Corbomite,
+    rangeKm: row.MaxSensorRange,
+    resolution: row.Resolution,
+    eccm: row.ECCM,
+    ctd: row.ElectronicCTD,
+    strength: row.ComponentValue,
+    obsolete: storedFlag(row.Obsolete),
+  }))
+}
+
+// The beam fire controls a race has researched, as `{ id, name, type (19), sizeHS, cost, crew, uridium, corbomite, rangeKm (the stored range, ComponentValue), trackingKmS (the stored tracking speed), rangeMultiplier, trackingMultiplier, specialFunction, eccm, ctd, obsolete }`, ordered by id. The stored size, range and tracking speed are what the read cannot do without; any other figure the save does not hold is null, never 0.
+export const ownedBeamFireControls = async (database, game, race) => {
+  const [componentColumns, raceTechColumns] = await Promise.all([columnsOf(database, COMPONENT_TABLE), columnsOf(database, RACE_TECH_TABLE)])
+
+  requireColumns(componentColumns, COMPONENT_TABLE, BEAM_FIRE_CONTROL_REQUIRED, 'beam fire control read')
+  requireColumns(raceTechColumns, RACE_TECH_TABLE, REQUIRED_RACE_TECH_COLUMNS, 'beam fire control read')
+
+  const [rows] = await database.query(`select c.SDComponentID as SDComponentID, c.Name as Name, c.ComponentTypeID as ComponentTypeID, c.Size as Size, c.ComponentValue as ComponentValue, c.TrackingSpeed as TrackingSpeed, ${selectedColumns('c', componentColumns, BEAM_FIRE_CONTROL_OPTIONAL)}, ${selectedColumns('r', raceTechColumns, SENSOR_RACE_TECH_OPTIONAL)} from FCT_ShipDesignComponents c inner join FCT_RaceTech r on r.TechID = c.SDComponentID where c.ComponentTypeID = ${SENSOR_COMPONENT_TYPES.beamFireControl} and c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })
+
+  return rows.map((row) => Object.freeze({
+    id: row.SDComponentID,
+    name: row.Name,
+    type: row.ComponentTypeID,
+    sizeHS: row.Size,
+    cost: row.Cost,
+    crew: row.Crew,
+    uridium: row.Uridium,
+    corbomite: row.Corbomite,
+    rangeKm: row.ComponentValue,
+    trackingKmS: row.TrackingSpeed,
+    rangeMultiplier: row.FCRangeModifier,
+    trackingMultiplier: row.FCSpeedModifier,
+    specialFunction: row.SpecialFunction,
+    eccm: row.ECCM,
+    ctd: row.ElectronicCTD,
+    obsolete: storedFlag(row.Obsolete),
+  }))
+}
+
 // The fixture the sensor and fire control rules need, as plain data: `{ game, techTypes: { type: description }, techs: { id: { type, info, info2 } }, components: [{ id, race, row }] }` with `row` the SENSOR_COLUMNS of the stored component, `techs` every tech a component names that FCT_TechSystem holds (AdditionalInfo as `info`, AdditionalInfo2 as `info2`) and `techTypes` what DIM_TechType calls the types of SENSOR_TECH. `race` is the race the components were read for, or null for those held by any race of the game.
 export const loadSensorFixture = async (database, game, race = null) => {
   const rows = await ownedSensors(database, game, race)
@@ -1093,11 +1159,11 @@ const SIGNATURE_TECH_COLUMNS = Object.freeze(['Name', 'AdditionalInfo', 'Additio
 // The select list of `names` from a table aliased `alias`: a column the save lacks is read as null, which means unknown, never 0.
 const selectedColumns = (alias, columns, names) => names.map((name) => (columns.has(name) ? `${alias}.${name} as ${name}` : `null as ${name}`)).join(', ')
 
-const requireColumns = (columns, table, names) => {
+const requireColumns = (columns, table, names, read = 'signature read') => {
   const missing = names.filter((name) => !columns.has(name))
 
   if (missing.length) {
-    throw new Error(`The save lacks ${missing.map((name) => `${table}.${name}`).join(', ')}, which the signature read needs`)
+    throw new Error(`The save lacks ${missing.map((name) => `${table}.${name}`).join(', ')}, which the ${read} needs`)
   }
 }
 

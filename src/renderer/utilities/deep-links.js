@@ -19,6 +19,8 @@
 // | `/log`             | `system=<SystemID>` or `colony=<PopulationID>`                           |
 // | `/warnings`        | `check=<check key>`, or `severity=<severity key>` and `group=<group key>` |
 // | `/propulsion`      | `class=<ShipClassID>` (the hull of a saved class) or `engine=<SDComponentID>` (an existing engine) |
+// | `/sensors`         | `mode=active`, `passive` or `beam`, and `sensor=<SDComponentID>` (an existing sensor or fire control design) |
+// | `/designed-tech`   | `design=<SDComponentID>` (a component design: its category opens with the design picked) |
 // | `/shipyards`       | `from=<ShipClassID>` and `to=<ShipClassID>` (the refit from one saved class to another) |
 //
 // A mineral id is the `id` in utilities/minerals.js `MINERALS`. `<bodies>` is a JSON array of `bodyReference`s, which carry the names a page shows before its own reads are in. A `<place>` is `<kind>:<id>`, Route Finder's place key: `colony:<PopulationID>`, `fleet:<FleetID>`, `system:<SystemID>`, `body:<SystemBodyID>`, `jump:<WarpPointID>`, `lagrange:<LagrangePointID>`, `waypoint:<WaypointID>`, `wreck:<WreckID>`, `lifepod:<LifepodID>`, `survey:<SurveyLocationID>`, `contact:<UniqueID of the FCT_Contacts row>` or `aether:<AetherGateID>`. A route is `from`, the `via` places in order, then `to`; `cycle=1` closes it back to `from`, and `fleet` names the fleet whose speed and movement settings apply (a `from` that is a fleet brings its own).
@@ -115,5 +117,7 @@ export const linkTo = Object.freeze({
   log: ({ system, colony } = {}) => link('/log', { system, colony }),
   warnings: ({ check, severity, group } = {}) => link('/warnings', { check, severity, group }),
   propulsion: ({ class: classId, engine } = {}) => link('/propulsion', { class: classId, engine }),
+  designedTech: ({ design } = {}) => link('/designed-tech', { design }),
+  sensors: ({ mode, sensor } = {}) => link('/sensors', { mode, sensor }),
   shipyards: ({ from, to } = {}) => link('/shipyards', { from, to }),
 })

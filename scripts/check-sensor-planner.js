@@ -31,7 +31,7 @@ const STUBS = {
   'electron-store': 'export default class {}',
 }
 
-const FIELDS_STUB = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults }); export default (fields) => { globalThis.__sensorsFields = fields; return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
+const FIELDS_STUB = 'export const oneOf = (values) => (value) => values.includes(value); export const tableView = (key, defaults) => ({ key, default: defaults }); export default (fields) => { globalThis.__sensorsFields = Object.assign(globalThis.__sensorsFields || {}, fields); return { data: () => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, field.default])) } }'
 
 let failures = 0
 let checks = 0
@@ -193,6 +193,9 @@ const cellCount = (template) => template.split('\n').reduce((total, line) => tot
 
 const unmarked = (template) => template.split('\n').filter((line) => (line.match(FIGURE) || []).length > (line.match(/<provenance-mark/g) || []).length)
 
+// The names of the page's reads the load state tracks: the async computeds of the page and of its mixins, but the scenario records, which are no input of the page.
+const asyncNamesOf = (options) => [...new Set([...(options.mixins || []).flatMap(asyncNamesOf), ...Object.keys(options.asyncComputed || {})])].filter((name) => name !== 'records')
+
 // ---------- the page ----------
 
 const PAGE = 'pages/sensors'
@@ -206,6 +209,8 @@ const utilities = () => {
 }
 
 const pageStatements = async (mutate, stock) => {
+  globalThis.__sensorsFields = {}
+
   const options = await loadPage(PAGE, { stubs: STUBS, mutate, modules: { 'mixins/persisted-view': FIELDS_STUB, 'mixins/load-state': null } })
   const fields = globalThis.__sensorsFields
   const libraries = await utilities()
@@ -216,7 +221,7 @@ const pageStatements = async (mutate, stock) => {
   // A read that fails, then Retry with the real load-state mixin (an instance has no $asyncComputed, so its update re-runs the read as the plugin would): which read failed, which `update` ran, and, once `good` (the stock save) answers, whether the failure is gone.
   const retried = async (name, good) => {
     const state = { database: { query: () => Promise.reject(new Error('the read failed')) } }
-    const names = Object.keys(options.asyncComputed)
+    const names = asyncNamesOf(options)
     const database = { query: (...args) => state.database.query(...args) }
     const vm = instantiate(options, { $store: { getters: {}, state: {} }, database, GameID: good ? good.GameID : 138, RaceID: good ? good.RaceID : 785 })
     const updated = []
@@ -432,7 +437,7 @@ const pageStatements = async (mutate, stock) => {
     ['template: a panel without its data-summary is found', () => {
       const problems = panelProblems(TEMPLATE((text) => text.replace(/(<v-card class="panel") data-summary="[^"]*"/, '$1')))
 
-      return problems.length === 1 && problems[0].includes('1 of 4') ? true : short(problems)
+      return problems.length === 1 && /^1 of \d+ panels have no data-summary$/.test(problems[0]) && Number(problems[0].match(/of (\d+)/)[1]) === (TEMPLATE().match(/<v-card\b[^>]*class="panel"/g) || []).length ? true : short(problems)
     }],
     ['template: the words keep to the impersonal voice', () => {
       const found = wordsOf(TEMPLATE()).match(new RegExp(PRONOUNS.source, 'g'))
@@ -502,17 +507,17 @@ const pageStatements = async (mutate, stock) => {
 
     // ---------- load ----------
     ['load: a failed read is marked under its own name and Retry runs the async computed of that name, and no other', async () => {
-      const names = Object.keys(options.asyncComputed)
+      const names = asyncNamesOf(options)
       const outcomes = await Promise.all(names.map(async (name) => retried(name, null)))
 
-      return names.length === 3 && outcomes.every((outcome) => outcome.failed && outcome.updated === outcome.name) ? true : short(outcomes)
+      return names.join() === 'tech,classRead,ownedRows,reduction,activeRows,beamRows' && outcomes.every((outcome) => outcome.failed && outcome.updated === outcome.name) ? true : short(outcomes)
     }],
     ['load: a successful reload after Retry clears the failure of each read, on the stock save', async () => {
       if (!stock) {
         return skipped('the stock save is not there')
       }
 
-      const names = Object.keys(options.asyncComputed)
+      const names = asyncNamesOf(options)
       const outcomes = await Promise.all(names.map(async (name) => retried(name, stock)))
 
       return outcomes.every((outcome) => outcome.failed && outcome.updated === outcome.name && outcome.cleared) ? true : short(outcomes)
@@ -584,7 +589,7 @@ const MUTATIONS = [
   { name: 'the chosen class is ignored', find: 'this.classes.find((cls) => cls.id === this.classId) || ', replace: '', fails: ['signatures: the chosen class'] },
   { name: 'the speed chart plots the share as a fraction', find: 'x: roundToDecimal(point.fraction * 100, 2), y: roundToDecimal(point.thermal, 2)', replace: 'x: point.fraction, y: roundToDecimal(point.thermal, 2)', fails: ['speed: the chart and the table'] },
   { name: 'the speed chart plots the reach in km against the million-km axis', find: 'y: roundToDecimal(point.reach / MILLION, 3)', replace: 'y: roundToDecimal(point.reach, 3)', fails: ['speed: with the enemy thermal'] },
-  { name: 'the passive chart keeps a signature of 0', find: 'point.x > 0 && point.y > 0', replace: 'point.x >= 0', fails: ['passive: the chart and the table'] },
+  { name: 'the passive chart keeps a signature of 0', find: 'const shownPoints = (series) => series.points.filter((point) => point.x > 0 && point.y > 0)', replace: 'const shownPoints = (series) => series.points.filter((point) => point.x >= 0)', fails: ['passive: the chart and the table'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'the enemy sensor is left out of the curves', find: '...(enemy ? [{ key: `${kind}-enemy`, name: \'Enemy sensor\', sensitivity: enemy }] : [])', replace: '', fails: ['passive: every researched sensor, fitted', 'passive: four times'] },
   { name: 'the cost factor is shown as applied at any multiplier', find: 'costApplied: option.multiplier < 1', replace: 'costApplied: true', fails: ['reduction: the cost factor shows'] },
@@ -594,7 +599,7 @@ const MUTATIONS = [
   { name: 'the weakest sensors are charted before the strongest', find: 'strength(b) - strength(a)', replace: 'strength(a) - strength(b)', fails: ['passive: every researched sensor, fitted', 'passive: every researched sensor is in the table'] },
   { name: 'a class with no size is given tons from 0', find: 'Number.isFinite(cls.sizeHS) ? cls.sizeHS * TONS_PER_HS : null', replace: 'cls.sizeHS * TONS_PER_HS', fails: ['signatures: a class with no stored size'] },
   { name: 'the class size marked under the rule of a component row', find: "const CLASS_SIZE_RULE = 'design.classSize'", replace: "const CLASS_SIZE_RULE = 'component.imported'", fails: ['signatures: a class with a stored size', 'signatures: a class with no stored size'] },
-  { name: 'the passive chart rounds a range to 3 decimals of a million km', find: 'y: point.y / MILLION', replace: 'y: roundToDecimal(point.y / MILLION, 3)', fails: ['passive: every positive range'] },
+  { name: 'the passive chart rounds a range to 3 decimals of a million km', find: 'shownPoints(series).map((point) => ({ x: point.x, y: point.y / MILLION }))', replace: 'shownPoints(series).map((point) => ({ x: point.x, y: roundToDecimal(point.y / MILLION, 3) }))', fails: ['passive: every positive range'] },
   { name: 'a read tracked under a key its async computed does not have', find: "tracked('ownedRows'", replace: "tracked('ownedSensors'", fails: ['load: a failed read'] },
 ]
 

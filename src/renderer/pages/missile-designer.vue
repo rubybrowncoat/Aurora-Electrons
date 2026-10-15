@@ -166,6 +166,36 @@
           </div>
         </v-card>
 
+        <v-card class="panel" data-summary="The smallest search sensor and missile fire control that see the target of the scenario at the missile's range, sized from the race's tech at each legal resolution. The range and the jammer start from the baseline and the launcher card and can be changed here without changing them there; the tech levels in effect are those chosen above." data-designer="sensor-sizing" elevation="1">
+          <div class="panel-head">
+            <span>Sensor sizing for the target<page-link :to="linkTo.sensors({ mode: 'active' })" name="Active mode" class="ml-1" /></span>
+          </div>
+          <div class="panel-body">
+            <div class="toolbar">
+              <div class="tool tool--number">
+                <div class="tool__label caption text--secondary">Wanted range</div>
+                <v-text-field v-model="embedRange" suffix="km" :placeholder="embedBaselineRange === null ? 'Unknown' : count(embedBaselineRange)" aria-label="Range the sensor must reach in km, the baseline missile's range when blank" dense outlined hide-details data-field="sensor-range" />
+              </div>
+              <div class="tool tool--number">
+                <div class="tool__label caption text--secondary">Target sensor jammer</div>
+                <v-text-field v-model="embedJammer" :placeholder="String(launcherJammer)" aria-label="Sensor jammer of the target, the launcher card's figure when blank" dense outlined hide-details data-field="sensor-jammer" />
+              </div>
+              <div class="tool tool--number">
+                <div class="tool__label caption text--secondary">Resolution</div>
+                <v-select v-model="embedResolution" :items="embedResolutionItems" item-text="text" item-value="value" aria-label="Resolution of the sensor, or the best" dense outlined hide-details data-field="sensor-resolution" />
+              </div>
+            </div>
+            <div class="caption text--secondary mt-2" data-designer="sensor-tech">Tech in effect: {{ embedTechText }}.</div>
+            <div v-if="embedTech.assumptions.length" class="caption warning--text" data-designer="sensor-hypothetical">Hypothetical tech is in use: {{ embedTech.assumptions.join('; ') }}.</div>
+            <div class="mt-3">
+              <active-sizing-panel :scenarios="embedScenarios" />
+            </div>
+          </div>
+          <div class="panel-foot caption text--secondary">
+            The target is the signature typed in the scenario above, and the wanted range starts at the range of the pinned baseline missile; a blank range or signature leaves the sizing unknown, never 0. Each row sizes the search sensor and the missile fire control at one resolution, from the sensor tech levels the Tech menu above holds. The jammer is the target's sensor jammer, not the missile jammer of the hit chance. The Sensor Planner shows the same sizing with the target by size or class, the saved pair and the hardening and ECCM levels.
+          </div>
+        </v-card>
+
         <v-card class="panel" data-summary="Comparisons kept in the scenario records of the race on this branch: the baseline, the alternatives as typed, the scenario and the tech levels chosen, never a figure of the save. A comparison made at a later game time is listed and not applied until moved to this save." data-designer="records" elevation="1">
           <div class="panel-head">
             <span>Saved comparisons<v-chip v-if="recordsRead.entries.length" x-small outlined class="ml-2">{{ recordsRead.entries.length }}</v-chip></span>
@@ -220,18 +250,22 @@ import MissileOptimiser from '../components/missiles/MissileOptimiser.vue'
 import MissileOptimiserResults from '../components/missiles/MissileOptimiserResults.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
+import ActiveSizingPanel from '../components/sensors/ActiveSizingPanel.vue'
 import countFormat from '../mixins/count-format'
 import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { linkTo } from '../utilities/deep-links'
 import { loadSensorFixture, SENSOR_COMPONENT_TYPES } from '../utilities/design-data'
+import { SENSOR_RESOLUTIONS_HS, SENSOR_RULES } from '../utilities/design-rules'
 import { LAUNCH_ROLES, emptySelection, launcherView, normaliseSelection, sensorOfSelection } from '../utilities/launcher-coverage'
 import { tracked } from '../utilities/load-tracking'
 import { DESIGN_LINES, DESIGN_LINE_TYPES, LINE_LABELS, MAX_ALTERNATIVES, NO_DESIGNS, addAlternative, carryOf, compareDesigns, deleteDesign, designerContext, emptyDraft, loadDesigns, moveDesign, payloadOf, pdProblem, problemsOf, readDesigns, registerDesigner, removeAlternative, saveDesign, savedAlternative, savedChoices, scenarioOf, seedAlternative, summaryText, techChoicesOf, techFigures, techLinksOf } from '../utilities/missile-designer'
 import { entered } from '../utilities/missile-hit'
 import { AXIS_ORDER, COLUMNS, GOALS, GOAL_IDS, OPTION_LABELS, SWEEP_AXES, describeMissileFront, describeStatus, domainAround, exportOutcome, frontTable, missileRun, nominations, normaliseFields, readRequest, referenceOfColumn, stageOfDraft, tableOf, techNotesOf } from '../utilities/missile-optimizer'
+import { STATUS, envelope, unavailable } from '../utilities/provenance'
 import { RESPONSIVENESS, TERMINATION, createRunSlot } from '../utilities/search-run'
+import { activeSizing, sensorTechOf } from '../utilities/sensor-planner'
 import { NO_TECH_CHOICES, candidateText, loadTechChoices, readScenario, registerTechScenarios, resolveChoices, saveChoice, scopeOf, selectionOf } from '../utilities/tech-scenarios'
 
 const INPUT_LABELS = {
@@ -270,7 +304,7 @@ const validAlternatives = (value) => Array.isArray(value) && problemsOf({ name: 
 // A page for the missile designer: the researched missiles of the race and the missiles it could design, side by side under one scenario (utilities/missile-designer.js).
 export default {
   name: 'MissileDesignerPage',
-  components: { LauncherCoverage, LoadState, MissileCompareTable, MissileDraftEditor, MissileOptimiser, MissileOptimiserResults, PageLink },
+  components: { ActiveSizingPanel, LauncherCoverage, LoadState, MissileCompareTable, MissileDraftEditor, MissileOptimiser, MissileOptimiserResults, PageLink },
   mixins: [
     countFormat,
     loadState(INPUT_LABELS),
@@ -292,6 +326,11 @@ export default {
     return {
       maxAlternatives: MAX_ALTERNATIVES,
       linkTo,
+      embedResolutionItems: Object.freeze([{ text: 'Best', value: 'best' }, ...SENSOR_RESOLUTIONS_HS.map((value) => ({ text: `${value} HS`, value: String(value) }))]),
+      // The sensor sizing panel's own figures: blank means the prefill from the scenario, the baseline and the launcher card.
+      embedRange: '',
+      embedJammer: '',
+      embedResolution: 'best',
       // The hypothetical choices that could not be written to the scenario record, by tech type: they hold for this page only.
       heldChoices: {},
       scenarioMessage: '',
@@ -347,6 +386,43 @@ export default {
       })
 
       return selection
+    },
+
+    // ---------- the sensor sizing for the target ----------
+
+    embedTech() {
+      return sensorTechOf(this.tech, this.techResolution)
+    },
+
+    // The tech lines the sizing reads, with the level each is at.
+    embedTechText() {
+      return ['strength', 'em', 'eccm', 'hardening'].map((role) => `${this.embedTech[role].label} ${this.embedTech[role].level ? this.embedTech[role].level.name : 'not researched'}`).join('; ')
+    },
+
+    // The range the pinned baseline missile flies, which the sizing wants to reach until a range is typed in the panel.
+    embedBaselineRange() {
+      const baseline = this.optimiserBaseline
+
+      return baseline && Number.isFinite(baseline.figures.maxRange.value) ? baseline.figures.maxRange.value : null
+    },
+
+    // The target of the scenario: its typed signature, taken as given and assumed; unavailable while blank or not above 0.
+    embedTarget() {
+      const typed = entered(this.targetSignature)
+      const signature = typed !== null && typed > 0 ? envelope({ value: typed, status: STATUS.ASSUMED, rule: SENSOR_RULES.detection, units: 'HS', inputs: { present: ['the target signature'] }, assumptions: ['the target signature is typed in the scenario above, not read from the save'] }) : unavailable({ rule: SENSOR_RULES.detection, missing: ['the target signature in HS, typed in the scenario above'], units: 'HS' })
+
+      return { signature }
+    },
+
+    embedSizing() {
+      const wanted = String(this.embedRange).trim() === '' ? this.embedBaselineRange : this.embedRange
+      const jammer = String(this.embedJammer).trim() === '' ? this.launcherJammer : this.embedJammer
+
+      return activeSizing({ target: this.embedTarget, wantedRangeKm: wanted, resolution: this.embedResolution, jammer, tech: this.embedTech })
+    },
+
+    embedScenarios() {
+      return [{ key: 'effective', label: 'Target signature', sizing: this.embedSizing }]
     },
 
     // The choices of the lines as the page holds them: the researched levels it remembers and the hypothetical ones.

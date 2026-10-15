@@ -72,7 +72,7 @@
               <div class="py-2 d-flex align-center">
                 <v-icon small class="mr-2">{{ iconOf(item) }}</v-icon>
                 <div class="name-cell">
-                  <div class="font-weight-medium text-no-wrap">{{ item.Name }}</div>
+                  <div class="font-weight-medium text-no-wrap">{{ item.Name }}<page-link v-if="sensorLink(item)" :to="sensorLink(item)" :name="item.Name" class="ml-1" /></div>
                   <div class="caption text--secondary text-no-wrap">{{ typeLine(item) }}<span v-if="item.Obsolete" class="warning--text font-weight-medium"> · Obsolete</span></div>
                 </div>
               </div>
@@ -179,17 +179,21 @@ import { mapGetters } from 'vuex'
 
 import LoadState from '../components/page/LoadState.vue'
 import MissileHitScenarios from '../components/missiles/MissileHitScenarios.vue'
+import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { loadFormulaVersion } from '../utilities/capabilities'
+import { linkTo, queryId } from '../utilities/deep-links'
 import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, USAGE_COLUMNS, augmentComponent, augmentMissile, augmentSpecies, categoryNote, cellOf as designCell, classUsageByComponent, columnRule, columnsFor, compareMarks, designTiles, isUnused, obsoleteResult, sortRows, tagsOf, withUsage } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
 import { describeResult, isAvailable } from '../utilities/provenance'
+import { sensorModeOf } from '../utilities/sensor-view'
 
 const INPUT_LABELS = {
   categories: 'the research categories',
@@ -228,9 +232,10 @@ const RULE_NOTE = 'Lists the designs the race knows: researched ones and the bas
 
 export default {
   name: 'DesignedTechPage',
-  components: { LoadState, MissileHitScenarios, ProvenanceMark, StatTiles },
+  components: { LoadState, MissileHitScenarios, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
+    deepLink,
     loadState(INPUT_LABELS),
     persistedView({
       selectedCategoryId: { key: 'designedTechCategoryId', default: null },
@@ -247,6 +252,7 @@ export default {
   data() {
     return {
       expanded: [],
+      focusDesignId: null,
       pageSizes: PAGE_SIZES,
       maxCompare: MAX_COMPARE,
       sortRows,
@@ -439,8 +445,36 @@ export default {
 
       return this.ready && ![].concat(this.componentsTable.sortBy).every((value) => values.has(value))
     },
+
+    // The design a link names, once the designs are read.
+    focusRow() {
+      return this.focusDesignId === null ? null : this.allItems.find((item) => item.SDComponentID === this.focusDesignId) || null
+    },
+
+    // A link names the component design the page is on.
+    linkQuery() {
+      return this.ready ? linkTo.designedTech({ design: this.focusRow ? this.focusRow.SDComponentID : null }).query : null
+    },
+
+    linkLabel() {
+      return this.focusRow ? this.focusRow.Name : ''
+    },
   },
   watch: {
+    // A design a link names opens its category with the design picked and found by its name, the obsolete ones shown when it is one.
+    focusRow(row) {
+      if (row) {
+        this.selectedCategoryId = row.CategoryID
+
+        if (row.Obsolete) {
+          this.hideObsolete = false
+        }
+
+        this.search = row.Name
+        this.setCompare([row])
+      }
+    },
+
     activeCategoryId() {
       this.expanded = []
     },
@@ -459,6 +493,17 @@ export default {
     },
   },
   methods: {
+    // The Sensor Planner mode that shows a component design, as a link to the design; null for a design it does not show.
+    sensorLink(item) {
+      const mode = sensorModeOf(item.ComponentTypeID)
+
+      return mode ? linkTo.sensors({ mode, sensor: item.SDComponentID }) : null
+    },
+
+    applyLink(query) {
+      this.focusDesignId = queryId(query.design)
+    },
+
     cellOf(column, item) {
       return designCell(column, item, this.fmt)
     },

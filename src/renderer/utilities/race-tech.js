@@ -34,6 +34,7 @@ export const HARDENING_TECH_TYPE = 139
 export const TRACKING_TIME_TECH_TYPE = 165
 export const FIRE_CONTROL_RANGE_TECH_TYPE = 4
 export const FIRE_CONTROL_SPEED_TECH_TYPE = 5
+export const SINGLE_WEAPON_TECH_TYPE = 268
 export const FIRE_CONTROL_SIZE_RANGE_TECH_TYPE = 17
 export const FIRE_CONTROL_SIZE_TRACKING_TECH_TYPE = 18
 export const ARMOUR_TECH_TYPE = 84
@@ -78,6 +79,7 @@ const FAMILY_LIST = [
   family(TRACKING_TIME_TECH_TYPE, 'Max Tracking Time Bonus', 'sensor', 'higher', 'the longest tracking time that earns the bonus against missiles (s)'),
   family(FIRE_CONTROL_RANGE_TECH_TYPE, 'Fire Control Distance Rating', 'sensor', 'higher', 'the range rating of a beam fire control (km)'),
   family(FIRE_CONTROL_SPEED_TECH_TYPE, 'Fire Control Speed Rating', 'sensor', 'higher', 'the tracking speed rating of a beam fire control (km/s)'),
+  family(SINGLE_WEAPON_TECH_TYPE, 'Single Weapon Fire Control', 'sensor', 'none', 'the weapon number of a beam fire control: 1 for a multi-weapon control, 0.5 for a single-weapon control, which halves the size and cost'),
   family(FIRE_CONTROL_SIZE_RANGE_TECH_TYPE, 'Fire Control Size vs Range', 'sensor', 'none', 'the size and range factor of a beam fire control the level\'s name gives (0.9x, 1x, 2x; it does not rise with development cost in every step)'),
   family(FIRE_CONTROL_SIZE_TRACKING_TECH_TYPE, 'Fire Control Size vs Tracking Speed', 'sensor', 'none', 'the size and tracking speed factor of a beam fire control the level\'s name gives (it does not rise with development cost in every step)'),
   family(ARMOUR_TECH_TYPE, 'Armour', 'armour', 'higher', 'armour strength per HS of plate (the stored strength of a 1 HS plate)'),
@@ -105,13 +107,23 @@ export const REACTOR_TECH_TYPES = typesOf('reactor')
 export const CLOAK_TECH_TYPES = typesOf('cloak')
 export const RACE_TECH_TYPES = Object.freeze(FAMILY_LIST.map((item) => item.typeId))
 
+// The tech line each figure of the sensor and fire control planner reads, by the role of the figure (design-data.js SENSOR_TECH numbers the same types for the saved components).
+export const SENSOR_PLANNER_LINES = Object.freeze({ strength: ACTIVE_SENSOR_TECH_TYPE, em: EM_SENSOR_TECH_TYPE, thermal: THERMAL_SENSOR_TECH_TYPE, hardening: HARDENING_TECH_TYPE, eccm: ECCM_TECH_TYPE, distance: FIRE_CONTROL_RANGE_TECH_TYPE, speed: FIRE_CONTROL_SPEED_TECH_TYPE, singleWeapon: SINGLE_WEAPON_TECH_TYPE })
+
 // The fixed techs the game's automatic design uses whatever the race has researched: the default squadron size and radius, and the two drive types.
 const FIXED_TECHS = [819, 827, 33302, 33303]
 
 const LEVEL_COLUMNS = 'FCT_TechSystem.TechSystemID, FCT_TechSystem.GameID, FCT_TechSystem.TechTypeID, FCT_TechSystem.Name, FCT_TechSystem.ComponentName, FCT_TechSystem.AdditionalInfo, FCT_TechSystem.AdditionalInfo2, FCT_TechSystem.DevelopCost'
 
+const RACE_TECH_TABLE = 'FCT_RaceTech'
+
+// The columns a save may lack and the planners go on without: the obsolete flag of a researched level. It decides neither ownership nor the game's pick, so a save without it gives a level whose flag is null (unknown), and no query names the column by its table.
+const RACE_TECH_OPTIONAL = ['Obsolete']
+
+const optionalColumns = (columns) => RACE_TECH_OPTIONAL.map((name) => (columns.has(name) ? `${RACE_TECH_TABLE}.${name} as ${name}` : `null as ${name}`)).join(', ')
+
 // The levels the race has researched, whichever game they belong to: the baseline rows (game 0) and the rows a game adds.
-const RESEARCHED_SQL = `select ${LEVEL_COLUMNS}, FCT_RaceTech.Obsolete from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID and FCT_TechSystem.TechTypeID in (${RACE_TECH_TYPES.join(', ')}) order by FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_TechSystem.TechSystemID`
+const researchedSql = (columns) => `select ${LEVEL_COLUMNS}, ${optionalColumns(columns)} from FCT_RaceTech inner join FCT_TechSystem on FCT_TechSystem.TechSystemID = FCT_RaceTech.TechID where FCT_RaceTech.GameID = :GameID and FCT_RaceTech.RaceID = :RaceID and FCT_TechSystem.TechTypeID in (${RACE_TECH_TYPES.join(', ')}) order by FCT_TechSystem.TechTypeID, FCT_TechSystem.DevelopCost, FCT_TechSystem.TechSystemID`
 
 const FIXED_SQL = `select ${LEVEL_COLUMNS} from FCT_TechSystem where FCT_TechSystem.TechSystemID in (${FIXED_TECHS.join(', ')})`
 
@@ -125,7 +137,7 @@ export const level = (row) => ({
   info2: row.AdditionalInfo2,
   cost: row.DevelopCost,
   baseline: row.GameID === 0,
-  obsolete: Boolean(row.Obsolete),
+  obsolete: row.Obsolete === null ? null : Boolean(row.Obsolete),
 })
 
 // The level the game designs with: the researched one that cost the most to develop, which is the best one for engines and drives and the lowest figure for fuel and thermal reduction. It is never the one with the highest or the lowest figure. A tie goes to the first level listed. Null for a line with no level researched.
@@ -154,10 +166,8 @@ export const buildRaceTech = (researched, fixed = []) => {
 
 // Per tech type of RACE_TECH_TYPES, its line; `fixed` has the fixed techs by id. A race that has researched nothing on a line has an empty `levels` and a null `pick`.
 export const loadRaceTech = async (database, { GameID, RaceID }) => {
-  const [[researched], [fixed]] = await Promise.all([
-    database.query(RESEARCHED_SQL, { replacements: { GameID, RaceID } }),
-    database.query(FIXED_SQL),
-  ])
+  const [[columnRows], [fixed]] = await Promise.all([database.query(`select name from pragma_table_info('${RACE_TECH_TABLE}')`), database.query(FIXED_SQL)])
+  const [researched] = await database.query(researchedSql(new Set(columnRows.map((row) => row.name))), { replacements: { GameID, RaceID } })
 
   return buildRaceTech(researched, fixed)
 }
