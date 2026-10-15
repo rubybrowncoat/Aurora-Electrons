@@ -248,6 +248,11 @@ export const READS = {
     designs: { label: 'the missile designs the race has researched and owns', reads: 'FCT_MissileType(* GameID MissileID) FCT_Race(GameID RaceID RaceName) FCT_RaceTech(GameID Obsolete RaceID TechID) FCT_ShipDesignComponents(BGTech1 BGTech2 ComponentValue Cost FuelEfficiency GameID Name SDComponentID Size) FCT_TechSystem(AdditionalInfo DevelopCost RaceID TechSystemID TechTypeID)' },
     sensors: { label: 'the missile fire controls and active sensors the race has researched', reads: 'DIM_TechType(Description TechTypeID) FCT_RaceTech(GameID RaceID TechID) FCT_ShipDesignComponents(* ComponentTypeID GameID SDComponentID) FCT_TechSystem(AdditionalInfo AdditionalInfo2 TechSystemID TechTypeID)' },
   },
+  '/sensors': {
+    classRead: { label: 'the ship classes with their engines, cloaks and sensors', reads: 'FCT_ClassComponent(ClassID ComponentID GameID NumComponent) FCT_ShipClass(ClassName GameID RaceID ShipClassID) FCT_ShipDesignComponents(ComponentTypeID SDComponentID) FCT_TechSystem(TechSystemID TechTypeID)' },
+    ownedRows: { label: 'the thermal and EM sensors the race has researched', reads: 'FCT_RaceTech(GameID RaceID TechID) FCT_ShipDesignComponents(ComponentTypeID ComponentValue GameID Name SDComponentID)' },
+    reduction: { label: 'the thermal reduction levels the race has researched', reads: 'FCT_ClassComponent(ClassID ComponentID GameID) FCT_RaceTech(GameID RaceID TechID) FCT_ShipClass(GameID RaceID ShipClassID) FCT_ShipDesignComponents(ComponentTypeID SDComponentID) FCT_TechSystem(TechSystemID TechTypeID)' },
+  },
   '/shipyards': {
     refitData: { label: 'the ship classes and their components', reads: 'FCT_ClassComponent(ClassID ComponentID NumComponent) FCT_ShipClass(ClassName ClassShippingLineID Commercial Cost GameID Obsolete OtherRaceClassID RaceID ShipClassID Size) FCT_ShipDesignComponents(* ComponentTypeID Cost Name Prototype SDComponentID)' },
     shipCounts: { label: 'the ships', reads: 'FCT_Ship(Destroyed GameID RaceID ShipClassID)' },

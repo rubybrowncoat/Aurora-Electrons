@@ -88,6 +88,11 @@ export const thermalSignature = ({ enginePower, stealthRating, fraction = 1, siz
   return Math.max(sizeHS / 20, enginePower * stealthRating * fraction)
 }
 
+// A class's stored thermal signature: the sum over its engines (`engines` of { power, thermalRating, count }) of the count times the power times the thermal rating, so the engines weigh by their power and never as an unweighted mean of their ratings.
+export const classThermal = ({ engines }) => {
+  return engines.reduce((total, { power, thermalRating, count }) => total + count * power * thermalRating, 0)
+}
+
 // The package of fuel tanks that holds `litres` from `tanks` ({ id, name, sizeHS, litres, cost, crew }) in the fewest HS, then the fewest BP, then the fewest tanks (`objective: 'lightest'`, the default), or in the fewest BP first (`'cheapest'`). The game has no packing rule; the objective is the planner's own, and the package is its exact optimum, worked out by the table solver of tank-packing.js, which also names the request tolerance. Returns { status ('optimal', 'bound-exhausted' or 'infeasible'), reason, complete (the answer is proved), feasible (the picks hold the litres), objective, requestedLitres, litres (delivered), excessLitres, count, sizeHS, cost, crew (null when a tank's crew is unknown), picks: [{ ...tank, count }] }, largest tank first. A caller that packs many requests from one list gets the packer once with `packerFor(tanks)`, which keeps its tables.
 export const packTanks = ({ litres, tanks, objective = 'lightest' }) => packerFor(tanks).pack(litres, objective)
 
@@ -1066,6 +1071,10 @@ export const MISSILE_FIRE_CONTROL_RANGE_FACTOR = 2
 export const SENSOR_JAMMER_BASE = 0.75
 export const PASSIVE_RANGE_MULTIPLIER = 250000
 export const MISSILE_SIGNATURE_MIN = 0.3
+// The least cross-section a class shows an active sensor, in HS: the same game constant as the missile signature floor.
+export const CROSS_SECTION_MIN = MISSILE_SIGNATURE_MIN
+// The EM signature of shields that are up, per point of shield strength.
+export const SHIELD_EM_MULTIPLIER = 30
 export const SENSOR_CREW_PER_HS = 2
 export const FIRE_CONTROL_CREW_PER_HS = 4
 export const BEAM_FIRE_CONTROL_MAX_RANGE_KM = 1400000
@@ -1202,6 +1211,43 @@ export const sensorEffectiveRange = ({ rangeKm, signature, resolution, jammer = 
 
   return ofRule({ rule, value: rangeKm * resolutionFactor * jammerFactor, inputs: { present }, assumptions: [`a target sensor jammer of ${jammer}`] })
 }
+
+// The range a passive sensor detects a signature at, as a result of design.sensorDetection (km): the sensor's sensitivity (its design's value, which its component count does not add to) and the signature of the target, both needed. Unavailable, naming the missing one, when the sensitivity is not a finite number above zero or the signature is not a finite number of 0 or more; a signature of 0 gives a range of 0.
+export const passiveRange = ({ sensitivity, signature }) => {
+  const rule = SENSOR_RULES.detection
+  const { present, missing } = sensorInputs([
+    ['sensor sensitivity', sensitivity, POSITIVE, 'the sensor\'s sensitivity above zero'],
+    ['target signature', signature, NON_NEGATIVE, 'the target\'s signature, 0 or more'],
+  ])
+
+  if (missing.length) {
+    return unavailable({ rule, present, missing, units: 'km' })
+  }
+
+  return ofRule({ rule, value: passiveDetectionRange({ sensitivity, signature }), units: 'km', inputs: { present }, assumptions: ['the sensor\'s sensitivity is that of its design, whatever the number of sensors', 'a target sensor jammer and a cloak do not change a passive range'] })
+}
+
+// A class's cross-section as an active sensor sees it: the size times the sensor reduction of its cloak (1 without one), never under the floor of 0.3 HS.
+export const classCrossSection = ({ sizeHS, sensorReduction = 1 }) => Math.max(sizeHS * sensorReduction, CROSS_SECTION_MIN)
+
+// The sensor reduction a class takes from its cloaks (`cloaks` of { maxShipHS, rating }, in the order the class mounts them): the rating of the last cloak whose largest ship, in HS, is at least the class's size, and 1 without one.
+export const cloakReduction = ({ sizeHS, cloaks }) => {
+  let reduction = 1
+
+  for (const { maxShipHS, rating } of cloaks) {
+    if (maxShipHS >= sizeHS) {
+      reduction = rating
+    }
+  }
+
+  return reduction
+}
+
+// The EM signature a class's shields give while they are up: the shield strength times 30.
+export const shieldEmission = ({ shieldStrength }) => shieldStrength * SHIELD_EM_MULTIPLIER
+
+// The EM signature an active sensor that is switched on gives: its strength times its resolution, each cut to a whole number, never under 1. Each active sensor design is seen on its own, so the emissions of a ship's sensors are never summed.
+export const activeSensorEmission = ({ strength, resolution }) => Math.max(1, Math.trunc(strength) * Math.trunc(resolution))
 
 // The smallest entry of an ascending `ladder` that `meets`, found by bisection (what is met at a size is met at every larger one), with the entry below it. `index` is -1 when none meets.
 const smallestMeeting = (ladder, meets) => {
@@ -1377,9 +1423,49 @@ registerRule({
   versions: DESIGN_VERSIONS,
   units: 'thermal signature',
   verification: 'estimated',
-  structure: ['FCT_ShipDesignComponents.StealthRating', 'FCT_ShipClass.ClassThermal'],
-  note: 'The rule is read from the game and settled in docs/plans/planners/mechanics-sensors.md, but no stored signature is compared with it yet.',
-  assumptions: ['The share of top speed the ship moves at is chosen by the player'],
+  structure: ['FCT_ShipDesignComponents.StealthRating, ComponentValue', 'FCT_ClassComponent.NumComponent', 'FCT_ShipClass.ClassThermal, EnginePower, Size'],
+  note: 'The signature of a ship under way is the engines\' power times their thermal rating times the share of top speed it moves at, never under a twentieth of its size, and a ship with no move orders shows that floor (docs/plans/planners/mechanics-operations.md, docs/plans/planners/mechanics-sensors.md). The saves store the sum at full power (design.classThermal) and no live signature, so the speed-share rule is not compared with a saved outcome.',
+  assumptions: ['The share of top speed the ship moves at is chosen by the player', 'The engines are all at their nominal count: damage is ignored', 'No ship is under tow, which would raise the mass that sets the speed', 'The ship is one of a fleet with move orders: with none the signature is the floor of a twentieth of the size'],
+})
+
+registerRule({
+  id: 'design.classThermal',
+  versions: DESIGN_VERSIONS,
+  units: 'thermal signature',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.ClassThermal', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, StealthRating of the engines'],
+  note: 'The sum over the class\'s engines of the count times the engine power times its thermal rating reproduces the stored thermal signature of every class of the saves, but for two classes of one modded save, which store 12.5 times the sum and are pinned in the check (scripts/check-signatures.js). The game allows one engine design to a class, so a class of several designs is only hypothetical or modded: the sum is then power-weighted and estimated, never the mean of the ratings (docs/plans/planners/mechanics-ships.md).',
+  assumptions: ['The class mounts one engine design, as the game\'s class designer requires'],
+})
+
+registerRule({
+  id: 'design.classCrossSection',
+  versions: DESIGN_VERSIONS,
+  units: 'HS',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.ClassCrossSection, SensorReduction, Size', 'FCT_ClassComponent.NumComponent', 'FCT_ShipDesignComponents.ComponentValue, CloakRating of the cloaks'],
+  note: 'The size times the sensor reduction, never under 0.3 HS, reproduces the stored cross-section of every class of the saves; the stored reduction is the rating of the last fitted cloak whose largest ship is at least the class\'s size, else 1 (scripts/check-signatures.js, docs/plans/planners/mechanics-ships.md). An active sensor sees the cross-section while the cloak is undamaged and the size once it is damaged (docs/plans/planners/mechanics-operations.md).',
+  assumptions: ['The cloak is undamaged for the cross-section; the size is the cross-section of a class whose cloak is damaged'],
+})
+
+registerRule({
+  id: 'design.classSize',
+  versions: DESIGN_VERSIONS,
+  units: 'HS',
+  verification: 'confirmed',
+  structure: ['FCT_ShipClass.Size'],
+  note: 'The size the save stores for the class, in HS; the tons are the size times 50 (docs/plans/planners/mechanics-ships.md). The size is read as stored, never rebuilt from the components, and is the base of the cross-section and of the idle thermal signature (design.classCrossSection, design.thermalSignature).',
+  assumptions: ['A class whose save stores no size has an unknown size and no tons, never 0'],
+})
+
+registerRule({
+  id: 'design.emEmission',
+  versions: DESIGN_VERSIONS,
+  units: 'EM signature',
+  verification: 'estimated',
+  structure: ['FCT_ShipClass.ShieldStrength', 'FCT_ShipDesignComponents.ComponentValue, Resolution of the active sensors'],
+  note: 'The EM signature is the shield strength times 30 while the shields are up, or the active sensor\'s strength times its resolution (each cut to a whole number, never under 1) while it is switched on, each active sensor design seen on its own and never summed (docs/plans/planners/mechanics-sensors.md). The saves store no emission, so the rule is arithmetic on stored strengths and is not compared with a saved outcome (scripts/check-signatures.js).',
+  assumptions: ['Shields are up at their full strength: live shields may be lower', 'An active sensor is switched on'],
 })
 
 registerRule({

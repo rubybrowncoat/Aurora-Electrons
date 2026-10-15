@@ -5,7 +5,7 @@
 </template>
 
 <script>
-import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip } from 'chart.js'
+import { BarController, BarElement, CategoryScale, Chart, Filler, LinearScale, LineController, LineElement, LogarithmicScale, PointElement, Tooltip } from 'chart.js'
 
 import { activeAppearance } from '../../utilities/appearance'
 import { whenFontsReady } from '../../utilities/appearance-font'
@@ -13,7 +13,7 @@ import { chartGridColor, hierarchyView } from '../../utilities/map-hierarchy'
 import persistedView from '../../mixins/persisted-view'
 import { barPattern, chartFont, chartTheme, seriesIdentity } from './theme'
 
-Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, PointElement, Tooltip)
+Chart.register(BarController, BarElement, CategoryScale, Filler, LinearScale, LineController, LineElement, LogarithmicScale, PointElement, Tooltip)
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 

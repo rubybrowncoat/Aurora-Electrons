@@ -4,6 +4,10 @@ import { MIN_SENSOR_MSP, MISSILE_STORED_MINERALS, MSP_PER_HS, TONS_PER_HS, agree
 import { STATUS, combine, envelope, getRule, registerRule, ruleSupports, satisfies, unavailable } from './provenance'
 import { loadFormulaVersion } from './capabilities'
 
+const ENGINE_TECH_TYPE = 40
+const FUEL_TECH_TYPE = 65
+const THERMAL_TECH_TYPE = 127
+
 const COMPONENT_ENGINE = 1
 const COMPONENT_FUEL_TANK = 3
 const COMPONENT_JUMP_DRIVE = 16
@@ -1022,6 +1026,15 @@ export const ownedSensors = async (database, game, race = null) => {
   return rows
 }
 
+const PASSIVE_SENSOR_TYPE_IDS = Object.freeze([SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em])
+
+// The thermal and EM sensors a race has researched, as rows of { SDComponentID, Name, ComponentTypeID, ComponentValue } (the sensitivity): the four columns a passive sensor is read by and no other, so a save without the fire control or active sensor columns of `ownedSensors` reads them as well.
+export const ownedPassiveSensors = async (database, game, race) => {
+  const [rows] = await database.query(`select FCT_ShipDesignComponents.SDComponentID, FCT_ShipDesignComponents.Name, FCT_ShipDesignComponents.ComponentTypeID, FCT_ShipDesignComponents.ComponentValue from FCT_ShipDesignComponents inner join FCT_RaceTech on FCT_RaceTech.TechID = FCT_ShipDesignComponents.SDComponentID where FCT_ShipDesignComponents.ComponentTypeID in (${PASSIVE_SENSOR_TYPE_IDS.join(',')}) and FCT_ShipDesignComponents.GameID in (0, :game) and FCT_RaceTech.GameID = :game and FCT_RaceTech.RaceID = :race order by FCT_ShipDesignComponents.SDComponentID`, { replacements: { game, race } })
+
+  return rows
+}
+
 const wholeIds = (ids) => [...new Set(ids)].filter((id) => Number.isInteger(id) && id > 0).sort((a, b) => a - b)
 
 // The fixture the sensor and fire control rules need, as plain data: `{ game, techTypes: { type: description }, techs: { id: { type, info, info2 } }, components: [{ id, race, row }] }` with `row` the SENSOR_COLUMNS of the stored component, `techs` every tech a component names that FCT_TechSystem holds (AdditionalInfo as `info`, AdditionalInfo2 as `info2`) and `techTypes` what DIM_TechType calls the types of SENSOR_TECH. `race` is the race the components were read for, or null for those held by any race of the game.
@@ -1067,4 +1080,108 @@ export const sensorTechOf = (fixture, row, type) => {
   }
 
   return { state: 'missing', reason: `the component names no ${label} tech (type ${type})` }
+}
+
+// ---------- class signatures ----------
+
+const COMPONENT_CLOAK = 46
+const SIGNATURE_PART_TYPES = Object.freeze([COMPONENT_ENGINE, SENSOR_COMPONENT_TYPES.thermal, SENSOR_COMPONENT_TYPES.em, SENSOR_COMPONENT_TYPES.active, COMPONENT_CLOAK])
+const SIGNATURE_CLASS_COLUMNS = Object.freeze(['Size', 'Obsolete', 'Commercial', 'ClassCrossSection', 'SensorReduction', 'ClassThermal', 'EnginePower', 'MaxSpeed', 'ShieldStrength'])
+const SIGNATURE_PART_COLUMNS = Object.freeze(['Name', 'Size', 'ComponentValue', 'StealthRating', 'CloakRating', 'Resolution', 'EnginePowerMod'])
+const SIGNATURE_TECH_COLUMNS = Object.freeze(['Name', 'AdditionalInfo', 'AdditionalInfo2'])
+
+// The select list of `names` from a table aliased `alias`: a column the save lacks is read as null, which means unknown, never 0.
+const selectedColumns = (alias, columns, names) => names.map((name) => (columns.has(name) ? `${alias}.${name} as ${name}` : `null as ${name}`)).join(', ')
+
+const requireColumns = (columns, table, names) => {
+  const missing = names.filter((name) => !columns.has(name))
+
+  if (missing.length) {
+    throw new Error(`The save lacks ${missing.map((name) => `${table}.${name}`).join(', ')}, which the signature read needs`)
+  }
+}
+
+const ENGINE_TECH_TYPES = Object.freeze([ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE])
+
+// The tech rows (engine 40, fuel 65, thermal reduction 127) the engines mounted by the race's classes name in their tech slots.
+const engineTechRows = async (database, { GameID, RaceID }) => {
+  const [techColumns, componentColumns] = await Promise.all([columnsOf(database, 'FCT_TechSystem'), columnsOf(database, COMPONENT_TABLE)])
+  const slots = TECH_COLUMNS.filter((column) => componentColumns.has(column))
+
+  if (!slots.length || !hasAll(techColumns, ['TechSystemID', 'TechTypeID'])) {
+    return []
+  }
+
+  const [rows] = await database.query(`select distinct t.TechSystemID as TechSystemID, t.TechTypeID as TechTypeID, ${selectedColumns('t', techColumns, SIGNATURE_TECH_COLUMNS)} from FCT_TechSystem t inner join FCT_ShipDesignComponents c on t.TechSystemID in (${slots.map((slot) => `c.${slot}`).join(', ')}) inner join FCT_ClassComponent cc on cc.ComponentID = c.SDComponentID inner join FCT_ShipClass sc on sc.ShipClassID = cc.ClassID where cc.GameID = :GameID and sc.GameID = :GameID and sc.RaceID = :RaceID and c.ComponentTypeID = ${COMPONENT_ENGINE} and t.TechTypeID in (${ENGINE_TECH_TYPES.join(', ')}) order by t.TechSystemID`, { replacements: { GameID, RaceID } })
+
+  return rows
+}
+
+// What a page holds before the signatures are read.
+export const NO_SIGNATURE_CLASSES = Object.freeze([])
+
+// The tech of one type an engine names in its slots, by the type of the tech and never by the slot it sits in: its id, or null when no slot or more than one names one.
+const techIdOfType = (row, techTypes, type) => {
+  const ids = [...new Set(TECH_COLUMNS.map((column) => row[column]).filter((id) => Number.isInteger(id) && techTypes[id] === type))]
+
+  return ids.length === 1 ? ids[0] : null
+}
+
+const partOf = (row) => ({ id: row.SDComponentID, name: row.Name, count: row.NumComponent })
+
+// The race's classes with what their signatures are made of: `{ id, name, sizeHS, obsolete, commercial, stored: { crossSection, sensorReduction, thermal, enginePower, speed, shieldStrength }, engines: [{ id, name, power, thermalRating, thrust, sizeHS, count, techIds: { engine, fuel, thermal } }], cloaks: [{ id, name, maxShipHS, rating, count }] (in the order the class mounts them), activeSensors: [{ id, name, strength, resolution, count }], thermalSensors: [{ id, name, sensitivity, count }], emSensors: [{ id, name, sensitivity, count }] }`, ordered by name. The `stored` figures are the class's own, to compare with the rules; a figure the save lacks is null, never 0. An engine's `techIds` are the techs of its engine, fuel and thermal reduction lines its tech slots name, null where none or several do.
+export const loadSignatureClasses = async (database, { GameID, RaceID }) => {
+  const [classColumns, mountColumns, componentColumns] = await Promise.all([columnsOf(database, 'FCT_ShipClass'), columnsOf(database, 'FCT_ClassComponent'), columnsOf(database, COMPONENT_TABLE)])
+
+  requireColumns(classColumns, 'FCT_ShipClass', ['ShipClassID', 'ClassName', 'GameID', 'RaceID'])
+  requireColumns(mountColumns, 'FCT_ClassComponent', ['GameID', 'ClassID', 'ComponentID', 'NumComponent'])
+  requireColumns(componentColumns, COMPONENT_TABLE, ['SDComponentID', 'ComponentTypeID'])
+
+  const partSelect = selectedColumns('c', componentColumns, [...SIGNATURE_PART_COLUMNS, ...TECH_COLUMNS])
+  const [[classRows], [partRows], techRows] = await Promise.all([
+    database.query(`select sc.ShipClassID as ShipClassID, sc.ClassName as ClassName, ${selectedColumns('sc', classColumns, SIGNATURE_CLASS_COLUMNS)} from FCT_ShipClass sc where sc.GameID = :GameID and sc.RaceID = :RaceID order by sc.ClassName, sc.ShipClassID`, { replacements: { GameID, RaceID } }),
+    database.query(`select cc.ClassID as ClassID, cc.NumComponent as NumComponent, c.SDComponentID as SDComponentID, c.ComponentTypeID as ComponentTypeID, ${partSelect} from FCT_ClassComponent cc inner join FCT_ShipClass sc on sc.ShipClassID = cc.ClassID inner join FCT_ShipDesignComponents c on c.SDComponentID = cc.ComponentID where cc.GameID = :GameID and sc.GameID = :GameID and sc.RaceID = :RaceID and c.ComponentTypeID in (${SIGNATURE_PART_TYPES.join(', ')}) order by cc.ClassID, cc.rowid`, { replacements: { GameID, RaceID } }),
+    engineTechRows(database, { GameID, RaceID }),
+  ])
+  const techTypes = Object.fromEntries(techRows.map((row) => [row.TechSystemID, row.TechTypeID]))
+  const partsByClass = {}
+
+  partRows.forEach((row) => (partsByClass[row.ClassID] = partsByClass[row.ClassID] || []).push(row))
+
+  return Object.freeze(classRows.map((row) => {
+    const parts = (type) => (partsByClass[row.ShipClassID] || []).filter((part) => part.ComponentTypeID === type)
+    const engines = parts(COMPONENT_ENGINE).map((part) => Object.freeze({ ...partOf(part), power: part.ComponentValue, thermalRating: part.StealthRating, thrust: part.EnginePowerMod, sizeHS: part.Size, techIds: Object.freeze({ engine: techIdOfType(part, techTypes, ENGINE_TECH_TYPE), fuel: techIdOfType(part, techTypes, FUEL_TECH_TYPE), thermal: techIdOfType(part, techTypes, THERMAL_TECH_TYPE) }) }))
+    const sensitive = (type) => Object.freeze(parts(type).map((part) => Object.freeze({ ...partOf(part), sensitivity: part.ComponentValue })))
+
+    return Object.freeze({
+      id: row.ShipClassID,
+      name: row.ClassName,
+      sizeHS: row.Size,
+      obsolete: row.Obsolete === null ? null : Boolean(row.Obsolete),
+      commercial: row.Commercial === null ? null : Boolean(row.Commercial),
+      stored: Object.freeze({ crossSection: row.ClassCrossSection, sensorReduction: row.SensorReduction, thermal: row.ClassThermal, enginePower: row.EnginePower, speed: row.MaxSpeed, shieldStrength: row.ShieldStrength }),
+      engines: Object.freeze(engines),
+      cloaks: Object.freeze(parts(COMPONENT_CLOAK).map((part) => Object.freeze({ ...partOf(part), maxShipHS: part.ComponentValue, rating: part.CloakRating }))),
+      activeSensors: Object.freeze(parts(SENSOR_COMPONENT_TYPES.active).map((part) => Object.freeze({ ...partOf(part), strength: part.ComponentValue, resolution: part.Resolution }))),
+      thermalSensors: sensitive(SENSOR_COMPONENT_TYPES.thermal),
+      emSensors: sensitive(SENSOR_COMPONENT_TYPES.em),
+    })
+  }))
+}
+
+// What a page holds before the thermal reduction levels are read.
+export const NO_THERMAL_REDUCTION = Object.freeze({ levels: Object.freeze([]), techs: Object.freeze({}) })
+
+// The thermal reduction the race can design engines with: `levels` its researched thermal reduction levels, cheapest to develop first, as `{ id, name, multiplier (the share of the power that shows as heat), costFactor (what the reduction multiplies the engine cost by), cost (to develop), obsolete }`, and `techs` the engine, fuel and thermal reduction tech rows the engines of its classes name, as `{ [id]: { type, name, info, info2 } }`.
+export const loadThermalReduction = async (database, context) => {
+  const [levelColumns, raceTechColumns, techRows] = await Promise.all([columnsOf(database, 'FCT_TechSystem'), columnsOf(database, 'FCT_RaceTech'), engineTechRows(database, context)])
+
+  requireColumns(levelColumns, 'FCT_TechSystem', ['TechSystemID', 'TechTypeID'])
+  requireColumns(raceTechColumns, 'FCT_RaceTech', ['GameID', 'RaceID', 'TechID'])
+
+  const [researched] = await database.query(`select t.TechSystemID as TechSystemID, ${selectedColumns('t', levelColumns, ['Name', 'AdditionalInfo', 'AdditionalInfo2', 'DevelopCost'])}, ${selectedColumns('r', raceTechColumns, ['Obsolete'])} from FCT_RaceTech r inner join FCT_TechSystem t on t.TechSystemID = r.TechID where r.GameID = :GameID and r.RaceID = :RaceID and t.TechTypeID = ${THERMAL_TECH_TYPE} order by DevelopCost, t.TechSystemID`, { replacements: { GameID: context.GameID, RaceID: context.RaceID } })
+  const levels = researched.map((row) => Object.freeze({ id: row.TechSystemID, name: row.Name, multiplier: row.AdditionalInfo, costFactor: row.AdditionalInfo2, cost: row.DevelopCost, obsolete: Boolean(row.Obsolete) }))
+  const techs = Object.fromEntries(techRows.map((row) => [row.TechSystemID, Object.freeze({ type: row.TechTypeID, name: row.Name, info: row.AdditionalInfo, info2: row.AdditionalInfo2 })]))
+
+  return Object.freeze({ levels: Object.freeze(levels), techs: Object.freeze(techs) })
 }
