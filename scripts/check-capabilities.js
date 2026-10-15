@@ -250,6 +250,7 @@ const alteredChecks = async (capabilities, source) => {
     const rankTable = await alteredCopy(source, 'ranks', ['drop table FCT_Ranks'])
     const ageless = await alteredCopy(source, 'age', ['alter table FCT_Species drop column GraduationAge'])
     const renamed = await alteredCopy(source, 'renamed', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"])
+    const terraformRenamed = await alteredCopy(source, 'terraforming', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 9"])
     const flipped = await alteredCopy(source, 'flipped', ['update DIM_CommanderBonusType set Percentage = 1 where BonusID = 27'])
     const retyped = await alteredCopy(source, 'component', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"])
     const noBonusTable = await alteredCopy(source, 'nobonus', ['drop table DIM_CommanderBonusType'])
@@ -269,6 +270,7 @@ const alteredChecks = async (capabilities, source) => {
     const table = (await preflightOf(capabilities, rankTable)).result
     const age = (await preflightOf(capabilities, ageless)).result
     const rename = (await preflightOf(capabilities, renamed)).result
+    const terraform = (await preflightOf(capabilities, terraformRenamed)).result
     const flip = (await preflightOf(capabilities, flipped)).result
     const retype = (await preflightOf(capabilities, retyped)).result
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
@@ -295,6 +297,8 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a renamed bonus (6) fails its lookup instead of mapping silently', failedGates(rename).join() === 'bonus 6' && /Mineral Extraction/.test(rename.gates.bonuses[6].inputs.missing.join()), failedGates(rename).join())
     check('altered: a renamed bonus (6) degrades exactly the reports that read it', Object.values(rename.reports).filter((report) => report.status !== 'supported').map((report) => report.route).sort().join() === [...capabilities.BONUS_NAMES[6].routes].sort().join(), notSupported(rename).map((report) => report.route).join(', '))
     check('altered: a renamed bonus (6) blocks that ID only', [...capabilities.blockedBonuses(rename.gates)].join() === '6')
+    check('altered: a renamed Terraforming bonus (9) fails its lookup and degrades exactly /production, /habitability and /commanders', failedGates(terraform).join() === 'bonus 9' && [...capabilities.blockedBonuses(terraform.gates)].join() === '9' && Object.values(terraform.reports).filter((report) => report.status !== 'supported').map((report) => report.route).sort().join() === ['/commanders', '/habitability', '/production'].join(), notSupported(terraform).map((report) => report.route).join(', '))
+    check('altered: a renamed Terraforming bonus (9) is named by /habitability with what it leaves out', terraform.reports['/habitability'].degraded.some((entry) => entry.gate && /terraforming/.test(entry.affects)), JSON.stringify(terraform.reports['/habitability'].degraded))
     check('altered: a renamed bonus does not disable /finances', rename.reports['/finances'].status === 'supported')
     check('altered: a rating (27) turned into a multiplier fails its lookup', failedGates(flip).join() === 'bonus 27' && /rating/.test(flip.gates.bonuses[27].inputs.missing.join()), failedGates(flip).join())
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
@@ -415,10 +419,10 @@ const consumerResults = async (mods, source) => {
   holds('the governor review ranks an officer on a confirmed bonus', review(new Set()).rows.length === 1)
   holds('the governor review does not rank an officer on a blocked bonus', review(new Set([6])).rows.length === 0)
 
-  const modifiers = { OrdnanceProduction: 2, OverallProductionModifier: 1.5, OrdnanceProductionPower: 3, ShipyardBuildRate: 4, PopulationTerraformingRate: 5, OverallGroundUnitModifier: 6 }
-  const gated = mixin.gateModifier(modifiers, new Set([5, 9]))
+  const modifiers = { OrdnanceProduction: 2, OverallProductionModifier: 1.5, OrdnanceProductionPower: 3, ShipyardBuildRate: 4, OverallGroundUnitModifier: 6 }
+  const gated = mixin.gateModifier(modifiers, new Set([5, 11]))
 
-  holds('a modifier row of a blocked bonus loses that column only', gated.OverallProductionModifier === null && gated.PopulationTerraformingRate === null && gated.ShipyardBuildRate === 4 && gated.OverallGroundUnitModifier === 6)
+  holds('a modifier row of a blocked bonus loses that column only', gated.OverallProductionModifier === null && gated.OverallGroundUnitModifier === null && gated.ShipyardBuildRate === 4)
   holds('a modifier row is as read while no bonus is blocked', mixin.gateModifier(modifiers, new Set()).OverallProductionModifier === 1.5)
   holds('a colony capacity with the Production bonus blocked is unavailable and names the lookup', !isAvailableResult(mixin.capacityResult(gated, 'ordnance', new Set([5]))) && mixin.capacityResult(gated, 'ordnance', new Set([5])).inputs.missing.join().includes('bonus 5'))
   holds('a colony capacity is the product while no bonus is blocked', mixin.capacityResult(modifiers, 'ordnance', new Set()).value === 9)

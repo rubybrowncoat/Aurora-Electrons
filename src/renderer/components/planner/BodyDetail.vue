@@ -115,6 +115,10 @@
             <span v-for="option in installationOptions" :key="option.years" class="mr-6 text-no-wrap"><b>{{ option.count }}</b> in {{ option.years }} y</span>
             <span class="text--secondary">{{ rates }}</span>
           </div>
+          <div v-for="colony in ownColonies" :key="colony.id" class="mt-2">
+            <div class="font-weight-medium">{{ colony.name }}<provenance-mark :result="colony.result" /> <span class="text--secondary">{{ colony.yearsText }}</span></div>
+            <div v-for="line in colony.lines" :key="line.key" class="d-flex justify-space-between caption"><span class="mr-4">{{ line.label }}</span><span>{{ line.text }}</span></div>
+          </div>
         </template>
         <div v-else class="text--secondary">
           <h3 class="text--primary">Terraforming</h3>
@@ -151,7 +155,8 @@ import { people } from '../../utilities/colonies'
 import { cmcNote, rowProvenance } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
 import { compact } from '../../utilities/minerals'
-import { isAvailable, unavailable } from '../../utilities/provenance'
+import { isAvailable, unavailable, valueOrNull } from '../../utilities/provenance'
+import { NO_TERRAFORM_SOURCES, hasTerraformers, terraformBreakdown } from '../../utilities/terraform-capacity'
 import { OUTCOMES, planYears } from '../../utilities/terraforming'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
@@ -165,6 +170,8 @@ export default {
     shown: { type: Object, required: true },
     speciesOptions: { type: Array, required: true },
     terraformCapacity: { type: Number, required: true },
+    terraformSources: { type: Object, default: () => NO_TERRAFORM_SOURCES },
+    navalAdmins: { type: Object, default: () => ({}) },
     rules: { type: Object, required: true },
     separator: { type: String, default: "'" },
   },
@@ -249,8 +256,22 @@ export default {
     },
     rates() {
       const { TerraformingRate, TerraformingSpeed } = this.rules
+      const base = `Each moves ${TerraformingRate} atm a year${TerraformingSpeed === 100 ? '' : ` at ${TerraformingSpeed}% game speed`}, before commander and colony modifiers.`
 
-      return `Each moves ${TerraformingRate} atm a year${TerraformingSpeed === 100 ? '' : ` at ${TerraformingSpeed}% game speed`}, before commander and colony modifiers.`
+      return this.ownColonies.length ? `${base} The race's colonies on this body are broken down below.` : base
+    },
+    // The race's own colonies on the body that terraform, each with what its capacity is made of and the years this plan takes at it (the figures of the Production recap).
+    ownColonies() {
+      const { raceRate, speed, colonies } = this.terraformSources
+      const has = (population) => colonies[population.PopulationID] && hasTerraformers(colonies[population.PopulationID])
+
+      return this.item.body.OwnPopulations.filter(has).map((population) => {
+        const source = colonies[population.PopulationID]
+        const breakdown = terraformBreakdown({ raceRate, speed, source, admins: this.navalAdmins })
+        const capacity = valueOrNull(breakdown.capacity)
+
+        return { id: population.PopulationID, name: source.PopName, lines: breakdown.lines, result: breakdown.capacity, yearsText: capacity === null ? 'time not known' : `${this.years(planYears(this.assessment.work, capacity))} for this plan` }
+      })
     },
 
     noPlanText() {

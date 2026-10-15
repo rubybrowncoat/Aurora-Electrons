@@ -56,8 +56,8 @@ registerRule({
   units: 'atm of an Earth-sized body a year',
   verification: 'estimated',
   structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed'],
-  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered. The save stores no capacity to compare with. The governor, efficiency, radiation and stability modifiers, orbital modules and the installation\'s own output are not modelled (the modifier counts as 1), so a colony with a modifier works at another rate.',
-  assumptions: ['no output modifier on the terraformers'],
+  note: 'The race\'s terraforming rate times the game\'s terraforming speed (a percentage) times the terraformers entered: the capacity of colonies with no modifier on their output. The save stores no capacity to compare with. A colony of the race on a body is broken down apart (terraform.capacity: governor, sector commander, efficiency, radiation, stability, political status, orbital modules with their crews, captains and naval admin chain), and the ranking and the years of a plan use the terraformers entered.',
+  assumptions: ['no output modifier on the terraformers entered'],
 })
 
 registerRule({

@@ -285,7 +285,7 @@
           <template #expanded-item="{ item }">
             <td :colspan="headers.length + 1" class="px-4 py-3 planner-detail">
               <v-alert v-if="terraformResult.status === 'unavailable'" type="warning" outlined dense class="mb-3">Terraforming time cannot be worked out: {{ terraformResult.inputs.missing.join(', ') }} missing. The years and installation counts below do not apply.</v-alert>
-              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :rules="detailRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
+              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :terraform-sources="terraformSources" :naval-admins="navalAdmins" :rules="detailRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
             </td>
           </template>
         </v-data-table>
@@ -319,8 +319,10 @@ import { tracked } from '../utilities/load-tracking'
 import { derive } from '../utilities/query-cache'
 import { roundToDecimal, separatedNumber, thousandsSeparator } from '../utilities/math'
 import { MINERALS, compact as compactTons } from '../utilities/minerals'
+import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sectionById } from '../utilities/navigation'
 import { combine, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
+import { NO_TERRAFORM_SOURCES, loadTerraformSources } from '../utilities/terraform-capacity'
 
 const INPUT_LABELS = {
   bodies: 'the bodies of known systems',
@@ -330,6 +332,8 @@ const INPUT_LABELS = {
   gases: 'the gases',
   routes: 'the jump routes',
   outlook: 'the mineral outlook',
+  terraformSources: 'the terraforming capacity',
+  navalAdmins: 'the naval admin commands',
 }
 
 const BODY_CLASS_NAMES = { 1: 'Planet', 2: 'Moon', 3: 'Asteroid', 5: 'Comet' }
@@ -999,6 +1003,30 @@ export default {
         return kept(this, 'outlook', [this.GameID, this.RaceID, ranks, [...blocked].sort().join()], () => loadMineralOutlook(this.database, { GameID: this.GameID, RaceID: this.RaceID, ranks, blocked }).then(Object.freeze))
       }),
       default: NO_OUTLOOK,
+    },
+    terraformSources: {
+      get: tracked('terraformSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_TERRAFORM_SOURCES
+        }
+
+        const { blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'terraformSources', [this.GameID, this.RaceID, [...blocked].sort().join()], () => loadTerraformSources(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked }))
+      }),
+      default: NO_TERRAFORM_SOURCES,
+    },
+    navalAdmins: {
+      get: tracked('navalAdmins', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        const { ranks, blocked } = await this.capabilityGates('/habitability')
+
+        return kept(this, 'navalAdmins', [this.GameID, this.RaceID, ranks, [...blocked].sort().join()], () => loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 9, share: 'Industrial', ranks, blocked }))
+      }),
+      default: {},
     },
   },
 }

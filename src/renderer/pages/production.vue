@@ -98,7 +98,13 @@
             </template>
             <template #[`item.rate`]="{ item }">
               <div class="py-2 text-no-wrap">
-                <div>{{ item.rateText }}<provenance-mark :result="item.rateResult" /></div>
+                <v-tooltip v-if="item.breakdown && item.breakdown.length" bottom max-width="420">
+                  <template #activator="{ on, attrs }">
+                    <div v-bind="attrs" v-on="on">{{ item.rateText }}<provenance-mark :result="item.rateResult" /></div>
+                  </template>
+                  <div v-for="line in item.breakdown" :key="line.key" class="d-flex justify-space-between"><span class="mr-4">{{ line.label }}</span><span>{{ line.text }}</span></div>
+                </v-tooltip>
+                <div v-else>{{ item.rateText }}<provenance-mark :result="item.rateResult" /></div>
                 <div class="caption text--secondary">{{ item.rateNote }}</div>
               </div>
             </template>
@@ -231,15 +237,15 @@ import queueForecast from '../mixins/queue-forecast'
 import { activeAppearance } from '../utilities/appearance'
 import { gameTime, populationName } from '../utilities/aurora'
 import { sourcesOf } from '../utilities/component-calc'
-import { crewFractionSql } from '../utilities/crew'
 import { fitsDouble } from '../utilities/decimal'
 import { bodyReference, linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, isKnownNumber } from '../utilities/math'
-import { MINERALS, navalAdminChain } from '../utilities/minerals'
+import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
-import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, terraformRate, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
+import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
+import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
 
 const INPUT_LABELS = {
   populationProductionModifiers: 'the colonies\' production rates',
@@ -250,15 +256,15 @@ const INPUT_LABELS = {
   shipyards: 'the shipyard activities',
   trainings: 'the ground unit training',
   terraforms: 'the terraforming',
+  terraformSources: 'the terraforming capacity',
   navalAdmins: 'the naval admin commands',
   componentSources: 'the ship classes\' components and the colonies\' component stock',
 }
 
 const SECONDS_PER_DAY = 86400
 
-// The commander bonus IDs of the research and terraforming rates: a figure that rests on one is not given when the save's lookup row for it is not confirmed (`blockedBonuses`).
+// The commander bonus ID of the research rate: a figure that rests on it is not given when the save's lookup row for it is not confirmed (`blockedBonuses`). The terraforming bonus is gated inside `loadTerraformSources`.
 const RESEARCH_BONUS = 3
-const TERRAFORMING_BONUS = 9
 
 // Kinds of work, each with a fixed slot of the chart palette; short of minerals has the last.
 const TYPES = [
@@ -682,31 +688,12 @@ export default {
     },
 
     terraformingJobs() {
-      return Object.values(this.terraforms.reduce((map, terraform) => {
-        if (terraform.TerraformStatus && terraform.MaxAtm === 0) {
-          return map
-        }
+      const { raceRate, speed, colonies } = this.terraformSources
 
-        if (!map[terraform.PopulationID]) {
-          map[terraform.PopulationID] = { ...terraform, planetary: null, orbital: [] }
-        }
-
-        const colony = map[terraform.PopulationID]
-        const terraformers = isKnownNumber(terraform.Terraformers) ? terraform.Terraformers : null
-
-        // Orbital terraformers get their admin command chain's Terraforming bonus at the Industrial share.
-        if (terraform.ParentCommandID) {
-          const chain = navalAdminChain(this.navalAdmins, terraform.SystemID, terraform.ParentCommandID)
-
-          colony.orbital.push({ terraformers, adminBonus: chain.bonus, adminGap: chain.unknown })
-        } else {
-          colony.planetary = { terraformers: colony.planetary === null ? terraformers : colony.planetary.terraformers === null || terraformers === null ? null : colony.planetary.terraformers + terraformers }
-        }
-
-        return map
-      }, {})).map((terraform) => {
+      return this.terraforms.filter((terraform) => !(terraform.TerraformStatus && terraform.MaxAtm === 0) && colonies[terraform.PopulationID] && hasTerraformers(colonies[terraform.PopulationID])).map((terraform) => {
         const modifiers = this.populationProductionModifiers[terraform.PopulationID]
-        const rate = this.blockedBonuses.has(TERRAFORMING_BONUS) && terraform.orbital.length ? unavailable({ rule: 'production.terraformRate', missing: ['commander bonus 9, Terraforming (the save\'s lookup row is not confirmed)'] }) : terraformRate(modifiers, { planetary: terraform.planetary, orbital: terraform.orbital, radius: terraform.Radius })
+        const breakdown = terraformBreakdown({ raceRate, speed, source: colonies[terraform.PopulationID], admins: this.navalAdmins })
+        const rate = breakdown.rate
         const finish = terraformFinish(modifiers, terraform, rate)
         const waterOnSurface = terraform.GasName === 'Water Vapour' && terraform.HydroID === 3
         const adding = flagOf(terraform.TerraformStatus)
@@ -723,6 +710,7 @@ export default {
           rateText: this.rateText(rate, (value) => this.count(value, 4), 'atm/yr'),
           rateNote: adding === null ? 'Adding or removing not known' : adding ? 'Adding' : 'Removing',
           approx: true,
+          breakdown: breakdown.lines,
           status: status.id === 'running' && finish.note ? { ...status, note: finish.note } : status,
         })
       })
@@ -1199,25 +1187,29 @@ export default {
       }),
       default: {},
     },
+    // The colonies with a gas to add or remove, with their body and the gas: the terraforming jobs. What a colony's capacity is made of is read apart (`terraformSources`).
     terraforms: {
       get: tracked('terraforms', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
           return []
         }
 
-        // A commander without the terraforming bonus counts as 1. An orbital terraformer works at the share of its class crew aboard, and a colony with a ship whose crew or class crew is not in the save has no orbital figure; likewise a planetary installation without its amount.
-        const crew = crewFractionSql()
+        const [terraforms] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Population left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.TerraformingGasID != 0`)
 
-        const [orbitalTerraformers] = await this.database.query(`select case when count(*) = count(FCT_ShipClass.Terraformers * ${crew}) then sum(FCT_ShipClass.Terraformers * coalesce(FCT_CommanderBonuses.BonusValue, 1) * ${crew}) end as Terraformers, FCT_Fleet.ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_Ship left join FCT_ShipClass on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID left join FCT_Fleet on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_Population on FCT_Fleet.OrbitBodyID = FCT_Population.SystemBodyID and FCT_Ship.RaceID = FCT_Population.RaceID left join FCT_Commander on FCT_Ship.ShipID = FCT_Commander.CommandID and FCT_Commander.CommandType = 1 left join FCT_CommanderBonuses on FCT_CommanderBonuses.BonusID = 9 and FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.Terraformers > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID, FCT_Fleet.ParentCommandID`)
-
-        const [planetaryTerraformers] = await this.database.query(`select case when count(*) = count(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) then sum(DIM_PlanetaryInstallation.TerraformValue * FCT_PopulationInstallations.Amount) end as Terraformers, NULL as ParentCommandID, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_SystemBody.HydroID, FCT_SystemBody.HydroExt, FCT_SystemBody.AtmosPress, FCT_SystemBody.Radius, FCT_Population.TerraformStatus, DIM_Gases.Name as GasName, FCT_Population.MaxAtm, FCT_AtmosphericGas.GasAtm, case when FCT_AtmosphericGas.GasAtm is null and FCT_AtmosphericGas.AtmosGasID is not null then 1 else 0 end as GasAtmUnknown from FCT_PopulationInstallations left join DIM_PlanetaryInstallation on FCT_PopulationInstallations.PlanetaryInstallationID = DIM_PlanetaryInstallation.PlanetaryInstallationID left join FCT_Population on FCT_PopulationInstallations.PopID = FCT_Population.PopulationID left join FCT_SystemBody on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBody.SystemBodyID = FCT_SystemBodyName.SystemBodyID and FCT_Population.RaceID = FCT_SystemBodyName.RaceID left join FCT_RaceSysSurvey on FCT_Population.SystemID = FCT_RaceSysSurvey.SystemID and FCT_Population.RaceID = FCT_RaceSysSurvey.RaceID left join FCT_Star on FCT_SystemBody.StarID = FCT_Star.StarID left join FCT_Race on FCT_Population.RaceID = FCT_Race.RaceID left join DIM_Gases on FCT_Population.TerraformingGasID = DIM_Gases.GasID left join FCT_AtmosphericGas on FCT_Population.SystemBodyID = FCT_AtmosphericGas.SystemBodyID and FCT_Population.TerraformingGasID = FCT_AtmosphericGas.AtmosGasID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID} and DIM_PlanetaryInstallation.TerraformValue > 0 and FCT_Population.TerraformingGasID != 0 group by FCT_Population.PopulationID`)
-
-        return [
-          ...orbitalTerraformers,
-          ...planetaryTerraformers,
-        ]
+        return terraforms
       }),
       default: [],
+    },
+    // What the capacity of the race's colonies is made of: installations, orbital modules with their crews and captains, and the colony's modifiers. A job's rate and its breakdown come from the same figures as the Colonization Planner's.
+    terraformSources: {
+      get: tracked('terraformSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_TERRAFORM_SOURCES
+        }
+
+        return await loadTerraformSources(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked: this.blockedBonuses })
+      }),
+      default: NO_TERRAFORM_SOURCES,
     },
     // The race's ship classes with the components each mounts, and the component stock and mineral stock of each colony: what the component calculator works from.
     componentSources: {

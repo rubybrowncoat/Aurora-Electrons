@@ -14,6 +14,7 @@
 const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
+const { Database } = require('bun:sqlite')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
@@ -104,6 +105,7 @@ const pairOf = async (before, after, game, populationId, clockOfTime = 'LastGrow
 
 // Pairs whose order stood and whose target was not reached inside the interval: the observed change is the predicted one to four places. [label, earlier save, later save, game, colony]
 const RIN = ['AuroraDB_260_Reisen.db', 'saves/AuroraDB_26Simple.db', 139]
+const AURELIAN = 'saves/AuroraDB_270_unknown.db'
 const EXACT = [
   ['Rin Venus carbon dioxide', ...RIN, 48989],
   ['Falryx 2713949950 to 2740177930 Verun III carbon dioxide', falryx(2713949950), falryx(2740177930), 141, 49103],
@@ -220,6 +222,417 @@ const printLedger = (ledger) => {
   }
 }
 
+// The shared breakdown (utilities/terraform-capacity.js) against the rule oracle above. Each entry is a check of its own, `needs` the saves it reads (missing: SKIP), and `run(modules)` throws when the breakdown disagrees; the planted faults below are loaded from a patched source and must fail the checks they name.
+const adminOf = (overrides) => ({ NavalAdminCommandID: 1, SystemID: 5, ParentCommandID: 0, BonusValue: 1.2, Share: 0.05, Eligible: true, Unknown: null, Systems: new Set([5]), ...overrides })
+
+const sourcesOf = (modules, file, game, race, blocked) => modules['terraform-capacity'].loadTerraformSources(databaseOf(file), { GameID: game, RaceID: race, blocked })
+const adminsOf = (modules, file, game, race) => modules['naval-admins'].loadNavalAdmins(databaseOf(file), { GameID: game, RaceID: race, bonusId: 9, share: 'Industrial' })
+const missingOf = (result) => (result.inputs ? result.inputs.missing.join('; ') : '')
+
+// A colony and its race worked by hand: 10.5 installations (10 count) at I = 1.2 x 1.1 x 0.9 x 0.99 x 0.9 x 1 (the sector bonus 1.4 counts a quarter of its excess), 8 modules at half the crew, a captain's 1.1 and the admin chain 1 + (1.2 - 1) x 0.05, rate 0.001, speed 500 %, radius 6000 km.
+const handSource = () => ({ installations: 10.5, radius: 6000, modifier: { governor: 1.2, sector: 1.4, efficiency: 0.9, radiation: 100, unrest: 10, status: 1 }, ships: [{ ShipID: 1, PopulationID: 1, ParentCommandID: 1, FleetSystemID: 5, crew: 0.5, captain: 1.1, captained: true, modules: 8 }] })
+
+const handExpected = () => {
+  const installations = 0.001 * 10 * (1.2 * 1.1 * 0.9 * 0.99 * 0.9 * 1)
+  const orbital = 0.001 * (8 * 0.5 * 1.1) * 1.01
+  const capacity = (installations + orbital) * 500 / 100
+
+  return { installations, orbital, capacity, rate: capacity * EARTH_ATMOSPHERE_UNITS / (4 * PI * 6000 ** 2) }
+}
+
+const near = (value, expected, tolerance, what) => assert.ok(Number.isFinite(value) && Math.abs(value / expected - 1) < tolerance, `${what}: ${value}, rule ${expected}`)
+
+// The breakdown's rate on every colony of one save that terraforms, against the oracle's capacity spread over the body.
+const rateOnSave = async (modules, file, game, race) => {
+  const { terraformBreakdown, hasTerraformers } = modules['terraform-capacity']
+  const sources = await sourcesOf(modules, file, game, race)
+  const admins = await adminsOf(modules, file, game, race)
+  let compared = 0
+
+  for (const source of Object.values(sources.colonies).filter(hasTerraformers)) {
+    const population = await firstOf(file, 'select * from FCT_Population where GameID = ? and PopulationID = ?', game, source.PopulationID)
+    const oracle = (await capacityOf(file, game, population)).total * EARTH_ATMOSPHERE_UNITS / (4 * PI * source.radius ** 2)
+    const { rate } = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source, admins })
+
+    assert.equal(rate.status, 'estimated', `${source.PopName}: ${missingOf(rate)}`)
+
+    if (oracle === 0) {
+      assert.equal(rate.value, 0, source.PopName)
+    } else {
+      near(rate.value, oracle, 1e-9, source.PopName)
+    }
+
+    compared += 1
+  }
+
+  assert.ok(compared > 0, 'no colony with terraformers')
+}
+
+// The change of the ordered gas of each exact pair that starts at `before`, the breakdown's rate at the earlier save times the elapsed years against the observed change.
+const pairsFrom = async (modules, before) => {
+  const { terraformBreakdown } = modules['terraform-capacity']
+
+  for (const [label, from, after, game, populationId] of EXACT.filter(([, file]) => file === before)) {
+    const pair = await pairOf(from, after, game, populationId)
+    const population = await firstOf(from, 'select RaceID, TerraformStatus from FCT_Population where GameID = ? and PopulationID = ?', game, populationId)
+    const sources = await sourcesOf(modules, from, game, population.RaceID)
+    const { rate } = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: sources.colonies[populationId], admins: await adminsOf(modules, from, game, population.RaceID) })
+
+    assert.equal(rate.status, 'estimated', `${label}: ${missingOf(rate)}`)
+    assert.ok(Math.abs((population.TerraformStatus ? 1 : -1) * rate.value * pair.years / pair.observed - 1) < 0.0005, `${label}: breakdown ${rate.value * pair.years}, observed ${pair.observed}`)
+  }
+}
+
+// A copy of a save in memory with `statements` run on it: the loaders read it as they read a save, and the file is never opened for writing.
+const mutatedOf = (file, statements) => {
+  const database = Database.deserialize(fs.readFileSync(path.join(root, file)))
+
+  statements.forEach((statement) => database.exec(statement))
+
+  return { query: async (sql) => [database.query(sql).all()], close: () => database.close() }
+}
+
+const BREAKDOWN_CHECKS = {
+  arith: {
+    needs: [],
+    run: async (modules) => {
+      const { terraformBreakdown } = modules['terraform-capacity']
+      const expected = handExpected()
+      const breakdown = terraformBreakdown({ raceRate: 0.001, speed: 500, source: handSource(), admins: { 1: adminOf() } })
+
+      assert.equal(breakdown.rate.status, 'estimated')
+      near(breakdown.installations.value, expected.installations, 1e-12, 'installations')
+      near(breakdown.orbital.value, expected.orbital, 1e-12, 'orbital')
+      near(breakdown.capacity.value, expected.capacity, 1e-12, 'capacity')
+      near(breakdown.rate.value, expected.rate, 1e-12, 'rate')
+      assert.deepEqual([breakdown.installations, breakdown.orbital, breakdown.capacity, breakdown.rate].map((result) => result.rule.id), ['terraform.installationOutput', 'terraform.orbitalOutput', 'terraform.capacity', 'production.terraformRate'])
+      assert.ok(breakdown.lines.some((line) => line.key === 'admin0' && Math.abs(line.value - 1.01) < 1e-12))
+    },
+  },
+  unknown: {
+    needs: [],
+    run: async (modules) => {
+      const { terraformBreakdown } = modules['terraform-capacity']
+      const at = (changes, { raceRate = 0.001, speed = 500, admins = { 1: adminOf() } } = {}) => terraformBreakdown({ raceRate, speed, source: { ...handSource(), ...changes }, admins })
+      const ship = (changes) => ({ ...handSource().ships[0], ...changes })
+      const unavailable = (breakdown, term, pattern, what) => {
+        assert.equal(breakdown[term].status, 'unavailable', what)
+        assert.ok(pattern.test(missingOf(breakdown[term])), `${what}: ${missingOf(breakdown[term])}`)
+      }
+
+      unavailable(at({ ships: [ship({ crew: null })] }), 'orbital', /crew/, 'unknown crew')
+      unavailable(at({ ships: [ship({ modules: null })] }), 'orbital', /modules/, 'unknown modules')
+      unavailable(at({ ships: [ship({ captain: null, captained: false })] }), 'orbital', /captain/, 'unknown captain bonus')
+      unavailable(at({}, { admins: { 1: adminOf({ BonusValue: null, Unknown: 'FCT_Commander.RankID' }) } }), 'orbital', /RankID/, 'unknown admin chain')
+      unavailable(at({ shipsKnown: false, ships: [] }), 'orbital', /AssignedPopulationID/, 'unknown fleet assignment')
+      unavailable(at({ installations: null }), 'installations', /installations/, 'unknown installations')
+      unavailable(at({ modifier: { ...handSource().modifier, governor: null } }), 'installations', /governor/, 'unknown governor')
+      unavailable(at({ modifier: { ...handSource().modifier, efficiency: null } }), 'installations', /efficiency/, 'unknown efficiency')
+      unavailable(at({ modifier: { ...handSource().modifier, unrest: null } }), 'installations', /stability/, 'unknown unrest')
+      unavailable(at({ radius: null }), 'rate', /radius/, 'unknown radius')
+      unavailable(at({}, { speed: null }), 'capacity', /speed/, 'unknown speed')
+      unavailable(at({}, { raceRate: null }), 'installations', /rate/, 'unknown race rate')
+
+      const none = at({ installations: 0, ships: [], modifier: { governor: null, sector: null, efficiency: null, radiation: null, unrest: null, status: null } })
+
+      assert.equal(none.installations.status, 'estimated')
+      assert.equal(none.installations.value, 0)
+      assert.equal(none.orbital.value, 0)
+    },
+  },
+  'rate Falryx': { needs: [falryx(2904201340)], run: (modules) => rateOnSave(modules, falryx(2904201340), 141, 791) },
+  'rate Rin Venus': { needs: [RIN[0]], run: (modules) => rateOnSave(modules, RIN[0], 139, 779) },
+  'rate passive moon': { needs: [passive(2)], run: (modules) => rateOnSave(modules, passive(2), 139, 2) },
+  'pairs Falryx A': { needs: [falryx(2713949950), falryx(2740177930)], run: (modules) => pairsFrom(modules, falryx(2713949950)) },
+  'pairs Falryx B': { needs: [falryx(2794985390), falryx(2810693885)], run: (modules) => pairsFrom(modules, falryx(2794985390)) },
+  'pairs Falryx C': { needs: [falryx(2904201340), falryx(2930673230)], run: (modules) => pairsFrom(modules, falryx(2904201340)) },
+  'pairs Rin': { needs: [RIN[0], RIN[1]], run: (modules) => pairsFrom(modules, RIN[0]) },
+  truncation: {
+    needs: [falryx(2904201340)],
+    run: async (modules) => {
+      const { colonyModifier, terraformBreakdown } = modules['terraform-capacity']
+      const sources = await sourcesOf(modules, falryx(2904201340), 141, 791)
+
+      for (const [id, whole] of [[49045, 6], [49326, 12]]) {
+        const source = sources.colonies[id]
+
+        assert.ok(source.installations > whole && source.installations < whole + 1, `${source.PopName}: ${source.installations}`)
+        near(terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source }).installations.value, sources.raceRate * whole * colonyModifier(source.modifier).value, 1e-12, source.PopName)
+      }
+    },
+  },
+  blocked: {
+    needs: [passive(2)],
+    run: async (modules) => {
+      const { terraformBreakdown } = modules['terraform-capacity']
+      const sources = await sourcesOf(modules, passive(2), 139, 2, new Set([9]))
+      const breakdown = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: sources.colonies[4] })
+
+      assert.equal(breakdown.orbital.status, 'unavailable')
+      assert.ok(/captain/.test(missingOf(breakdown.orbital)), missingOf(breakdown.orbital))
+      assert.equal(breakdown.rate.status, 'unavailable')
+    },
+  },
+  damaged: {
+    needs: [passive(2)],
+    run: async (modules) => {
+      const base = await sourcesOf(modules, passive(2), 139, 2)
+      const [ship] = base.colonies[4].ships
+      const copy = mutatedOf(passive(2), [`insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) select ${ship.ShipID}, FCT_ClassComponent.ComponentID, 139, 1 from FCT_Ship inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = 33 where FCT_Ship.ShipID = ${ship.ShipID} limit 1`])
+
+      try {
+        const hurt = await modules['terraform-capacity'].loadTerraformSources(copy, { GameID: 139, RaceID: 2 })
+        const modulesOf = (sources, id) => sources.colonies[4].ships.find((item) => item.ShipID === id).modules
+
+        assert.equal(modulesOf(base, ship.ShipID) - modulesOf(hurt, ship.ShipID), 1)
+
+        for (const other of base.colonies[4].ships.filter((item) => item.ShipID !== ship.ShipID)) {
+          assert.equal(modulesOf(hurt, other.ShipID), other.modules, `ship ${other.ShipID}`)
+        }
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'damage count missing': {
+    needs: [passive(2)],
+    run: async (modules) => {
+      const base = await sourcesOf(modules, passive(2), 139, 2)
+      const [ship] = base.colonies[4].ships
+      const copy = mutatedOf(passive(2), [`insert into FCT_DamagedComponent (ShipID, ComponentID, GameID, Number) select ${ship.ShipID}, FCT_ClassComponent.ComponentID, 139, null from FCT_Ship inner join FCT_ClassComponent on FCT_ClassComponent.ClassID = FCT_Ship.ShipClassID inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID and FCT_ShipDesignComponents.ComponentTypeID = 33 where FCT_Ship.ShipID = ${ship.ShipID} limit 1`])
+
+      try {
+        const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+        const sources = await loadTerraformSources(copy, { GameID: 139, RaceID: 2 })
+        const hurt = sources.colonies[4].ships.find((item) => item.ShipID === ship.ShipID)
+        const breakdown = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: sources.colonies[4], admins: {} })
+
+        assert.equal(hurt.modules, null)
+        assert.equal(breakdown.orbital.status, 'unavailable')
+        assert.ok(/modules/.test(missingOf(breakdown.orbital)), missingOf(breakdown.orbital))
+        assert.equal(base.colonies[4].ships.filter((item) => item.ShipID !== ship.ShipID).every((item) => typeof item.modules === 'number'), true)
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'bonus value missing: captain': {
+    needs: [passive(2)],
+    run: async (modules) => {
+      const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+      const base = await sourcesOf(modules, passive(2), 139, 2)
+      const copy = mutatedOf(passive(2), ['update FCT_CommanderBonuses set BonusValue = null where BonusID = 9'])
+
+      try {
+        const sources = await loadTerraformSources(copy, { GameID: 139, RaceID: 2 })
+        const shipsOf = (loaded) => Object.values(loaded.colonies).flatMap((colony) => colony.ships)
+        const captained = shipsOf(base).filter((ship) => ship.captained)
+
+        assert.ok(captained.length > 0 && captained.length < shipsOf(base).length, 'the save needs captained and captainless ships')
+
+        for (const ship of shipsOf(sources)) {
+          const before = shipsOf(base).find((item) => item.ShipID === ship.ShipID)
+
+          assert.equal(ship.captain, before.captained ? null : 1, `ship ${ship.ShipID}`)
+          assert.equal(ship.captained, before.captained, `ship ${ship.ShipID}`)
+        }
+
+        const colony = Object.values(sources.colonies).find((item) => item.ships.some((ship) => ship.captain === null))
+        const breakdown = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: colony, admins: {} })
+
+        assert.equal(breakdown.orbital.status, 'unavailable')
+        assert.ok(/captain/.test(missingOf(breakdown.orbital)), missingOf(breakdown.orbital))
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'bonus value missing: governor and sector': {
+    needs: [falryx(2904201340)],
+    run: async (modules) => {
+      const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+      const copy = mutatedOf(falryx(2904201340), ['update FCT_CommanderBonuses set BonusValue = null where BonusID = 9'])
+      const commands = (type) => `select FCT_Commander.CommandID from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 9 where FCT_Commander.GameID = 141 and FCT_Commander.RaceID = 791 and FCT_Commander.CommandType = ${type}`
+
+      try {
+        const governors = new Set((await copy.query(commands(3)))[0].map((row) => row.CommandID))
+        const sectored = new Set((await copy.query(`select FCT_Population.PopulationID from FCT_Population inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID where FCT_Population.GameID = 141 and FCT_Population.RaceID = 791 and FCT_RaceSysSurvey.SectorID in (${commands(4)})`))[0].map((row) => row.PopulationID))
+        const sources = await loadTerraformSources(copy, { GameID: 141, RaceID: 791 })
+        const colonies = Object.values(sources.colonies)
+
+        assert.ok(governors.size > 0 && sectored.size > 0, 'the save needs governors and a sector commander with a Terraforming bonus')
+
+        for (const colony of colonies) {
+          assert.equal(colony.modifier.governor, governors.has(colony.PopulationID) ? null : 1, `${colony.PopName} governor`)
+          assert.equal(colony.modifier.sector, sectored.has(colony.PopulationID) ? null : 1, `${colony.PopName} sector`)
+        }
+
+        for (const [what, found] of [['governor', colonies.find((colony) => colony.installations > 0 && governors.has(colony.PopulationID))], ['sector', colonies.find((colony) => colony.installations > 0 && sectored.has(colony.PopulationID))]]) {
+          assert.ok(found, `a colony with installations and a ${what} row`)
+
+          const breakdown = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: found })
+
+          assert.equal(breakdown.installations.status, 'unavailable', what)
+          assert.ok(new RegExp(what).test(missingOf(breakdown.installations)), `${what}: ${missingOf(breakdown.installations)}`)
+        }
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'sector association missing': {
+    needs: [falryx(2904201340)],
+    run: async (modules) => {
+      const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+      const base = await sourcesOf(modules, falryx(2904201340), 141, 791)
+      const target = Object.values(base.colonies).find((colony) => colony.installations > 0 && colony.modifier.sector > 1)
+      const other = Object.values(base.colonies).find((colony) => colony.SystemID !== target.SystemID && colony.modifier.sector !== null)
+      const run = async (statements) => {
+        const copy = mutatedOf(falryx(2904201340), statements)
+
+        try {
+          return await loadTerraformSources(copy, { GameID: 141, RaceID: 791 })
+        } finally {
+          copy.close()
+        }
+      }
+      const rateOf = (sources, colony) => terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: sources.colonies[colony.PopulationID] }).installations
+
+      assert.ok(target && other, 'the save needs a colony with a sector bonus above 1 and one elsewhere')
+
+      const lost = await run([`update FCT_RaceSysSurvey set SectorID = null where RaceID = 791 and SystemID = ${target.SystemID}`])
+
+      assert.equal(lost.colonies[target.PopulationID].modifier.sector, null)
+      assert.equal(rateOf(lost, target).status, 'unavailable')
+      assert.ok(/sector/.test(missingOf(rateOf(lost, target))), missingOf(rateOf(lost, target)))
+      assert.equal(lost.colonies[other.PopulationID].modifier.sector, other.modifier.sector)
+
+      const none = await run([`update FCT_RaceSysSurvey set SectorID = 0 where RaceID = 791 and SystemID = ${target.SystemID}`])
+
+      assert.equal(none.colonies[target.PopulationID].modifier.sector, 1)
+      assert.equal(rateOf(none, target).status, 'estimated', missingOf(rateOf(none, target)))
+
+      const dropped = await run(['alter table FCT_RaceSysSurvey drop column SectorID'])
+
+      assert.ok(Object.values(dropped.colonies).every((colony) => colony.modifier.sector === null), 'every colony has an unknown sector without the column')
+      assert.equal(rateOf(dropped, target).status, 'unavailable')
+    },
+  },
+  'admin bonus missing: terraforming': {
+    needs: [AURELIAN],
+    run: async (modules) => {
+      const { terraformBreakdown } = modules['terraform-capacity']
+      const sources = await sourcesOf(modules, AURELIAN, 140, 784)
+      const base = await adminsOf(modules, AURELIAN, 140, 784)
+      const copy = mutatedOf(AURELIAN, ['update FCT_CommanderBonuses set BonusValue = null where BonusID = 9 and CommanderID in (select CommanderID from FCT_Commander where CommandType = 12)'])
+
+      try {
+        const admins = await modules['naval-admins'].loadNavalAdmins(copy, { GameID: 140, RaceID: 784, bonusId: 9, share: 'Industrial' })
+        const chained = Object.values(sources.colonies).filter((colony) => terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: colony, admins: base }).lines.some((line) => /^admin/.test(line.key) && line.value !== null && line.value !== 1))
+
+        assert.ok(chained.length > 0, 'the save needs a colony whose orbital output rests on an admin bonus')
+        assert.ok(Object.keys(admins).length > 0, 'a map of valueless bonuses is not empty')
+
+        for (const colony of chained) {
+          const orbital = terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: colony, admins }).orbital
+
+          assert.equal(orbital.status, 'unavailable', colony.PopName)
+          assert.ok(/BonusValue/.test(missingOf(orbital)), `${colony.PopName}: ${missingOf(orbital)}`)
+        }
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'admin bonus missing: another consumer': {
+    needs: [AURELIAN],
+    run: async (modules) => {
+      const { loadNavalAdmins } = modules['naval-admins']
+      const { navalAdminChain, orbitalChainGap, orbitalMinerRate } = modules.minerals
+      const base = await loadNavalAdmins(databaseOf(AURELIAN), { GameID: 140, RaceID: 784, bonusId: 6, share: 'Industrial' })
+      const copy = mutatedOf(AURELIAN, ['update FCT_CommanderBonuses set BonusValue = null where BonusID = 6 and CommanderID in (select CommanderID from FCT_Commander where CommandType = 12)'])
+
+      try {
+        const admins = await loadNavalAdmins(copy, { GameID: 140, RaceID: 784, bonusId: 6, share: 'Industrial' })
+        const found = Object.values(base).flatMap((admin) => [...admin.Systems].map((system) => ({ system, command: admin.NavalAdminCommandID }))).find(({ system, command }) => {
+          const chain = navalAdminChain(base, system, command)
+
+          return chain.unknown === null && chain.bonus !== 1
+        })
+
+        assert.ok(found, 'the save needs a miner position whose chain rests on a Mining bonus')
+
+        const row = { Diameter: 1, MaximumOrbitalMiningDiameter: 2, SystemID: found.system, NavalAdminCommandID: found.command }
+
+        assert.equal(navalAdminChain(admins, found.system, found.command).bonus, null)
+        assert.ok(/BonusValue/.test(orbitalChainGap(row, admins)), String(orbitalChainGap(row, admins)))
+        assert.equal(orbitalMinerRate(row, admins), null)
+      } finally {
+        copy.close()
+      }
+    },
+  },
+  'fleet command missing': {
+    needs: [passive(2)],
+    run: async (modules) => {
+      const { loadTerraformSources, terraformBreakdown } = modules['terraform-capacity']
+      const unknown = mutatedOf(passive(2), ['update FCT_Fleet set ParentCommandID = null where AssignedPopulationID > 0'])
+      const commandless = mutatedOf(passive(2), ['update FCT_Fleet set ParentCommandID = 0 where AssignedPopulationID > 0'])
+
+      try {
+        const lost = await loadTerraformSources(unknown, { GameID: 139, RaceID: 2 })
+        const none = await loadTerraformSources(commandless, { GameID: 139, RaceID: 2 })
+        const orbitalOf = (sources) => terraformBreakdown({ raceRate: sources.raceRate, speed: sources.speed, source: sources.colonies[4], admins: {} }).orbital
+
+        assert.ok(lost.colonies[4].ships.length > 0 && lost.colonies[4].ships.every((ship) => ship.ParentCommandID === null))
+        assert.equal(orbitalOf(lost).status, 'unavailable')
+        assert.ok(/ParentCommandID/.test(missingOf(orbitalOf(lost))), missingOf(orbitalOf(lost)))
+        assert.ok(none.colonies[4].ships.every((ship) => ship.ParentCommandID === 0))
+        assert.equal(orbitalOf(none).status, 'estimated', missingOf(orbitalOf(none)))
+      } finally {
+        unknown.close()
+        commandless.close()
+      }
+    },
+  },
+  captainless: {
+    needs: [RIN[0]],
+    run: async (modules) => {
+      const sources = await sourcesOf(modules, RIN[0], 139, 779)
+      const venus = sources.colonies[48989]
+
+      assert.ok(venus.ships.length > 0 && venus.ships.every((ship) => ship.captain === 1 && ship.captained === false))
+    },
+  },
+}
+
+// Faults planted in the shared helper. `fails` names the BREAKDOWN_CHECKS each must break; a fault whose named checks all lack their saves is skipped.
+const BREAKDOWN_FAULTS = [
+  { label: 'installation sum not rounded down', from: 'raceRate * Math.trunc(source.installations) * modifier.value', to: 'raceRate * source.installations * modifier.value', fails: ['arith', 'truncation', 'rate Falryx'] },
+  { label: 'Math.PI for the body area', from: 'export const SURFACE_PI = 3.1416', to: 'export const SURFACE_PI = Math.PI', fails: ['arith', 'rate Falryx'] },
+  { label: 'game speed ignored', from: '(values.installations + values.orbital) * speed / 100', to: '(values.installations + values.orbital)', fails: ['arith', 'rate Rin Venus', 'pairs Rin'] },
+  { label: 'naval admin chain ignored', from: 'group.admin * group.effective', to: 'group.effective', fails: ['arith'] },
+  { label: 'crew share ignored', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules', fails: ['arith', 'unknown'] },
+  { label: 'unknown crew read as 1', from: 'modules === null || known(ship.crew) === null ? null : modules * ship.crew', to: 'modules === null ? null : modules * (known(ship.crew) ?? 1)', fails: ['unknown'] },
+  { label: 'unknown captain bonus read as 1', from: 'staffed === null || known(ship.captain) === null ? null : staffed * ship.captain', to: 'staffed === null ? null : staffed * (known(ship.captain) ?? 1)', fails: ['unknown'] },
+  { label: 'unknown fleet assignment read as no ships', from: "source.shipsKnown === false ? ['the fleets assigned to the colony (FCT_Fleet.AssignedPopulationID)'] : []", to: '[]', fails: ['unknown'] },
+  { label: 'the sector bonus counted in full', from: '1 + (modifier.sector - 1) / 4', to: 'modifier.sector', fails: ['arith', 'rate Falryx'] },
+  { label: 'a missing captain read as 0', from: ': null) : 1)', to: ': null) : 0)', fails: ['rate Rin Venus', 'captainless'] },
+  { label: 'an unconfirmed commander bonus read as 1', from: 'captain: row.BonusUnknown ? null : bonusOf(', to: 'captain: bonusOf(', fails: ['blocked'] },
+  { label: 'damaged modules counted', from: 'Math.max(0, row.Designed - (row.DamageRows > 0 ? row.Damaged : 0))', to: 'row.Designed', fails: ['damaged'] },
+  { label: 'a present bonus row without a value read as 1 (captain)', from: 'captain: row.BonusUnknown ? null : bonusOf(row.CaptainBonus, row.CaptainRows, row.CaptainKnown)', to: 'captain: row.BonusUnknown ? null : row.CaptainBonus ?? 1', fails: ['bonus value missing: captain'] },
+  { label: 'a present bonus row without a value read as 1 (governor)', from: 'governor: row.BonusUnknown ? null : bonusOf(row.GovernorBonus, row.GovernorRows, row.GovernorKnown)', to: 'governor: row.BonusUnknown ? null : row.GovernorBonus ?? 1', fails: ['bonus value missing: governor and sector'] },
+  { label: 'a present bonus row without a value read as 1 (sector)', from: 'sector: row.BonusUnknown || !isNumber(row.SectorID) ? null : row.SectorID === 0 ? 1 : bonusOf(row.SectorBonus, row.SectorRows, row.SectorKnown)', to: 'sector: row.BonusUnknown ? null : row.SectorBonus ?? 1', fails: ['bonus value missing: governor and sector'] },
+  { label: 'a damage row without a count read as no damage', from: '|| (row.DamageRows > 0 && !isNumber(row.Damaged))', to: '', fails: ['damage count missing'] },
+  { label: 'an unknown fleet command read as commandless', from: 'const key = isNumber(ship.ParentCommandID) ? ship.ParentCommandID : null', to: 'const key = ship.ParentCommandID || 0', fails: ['fleet command missing'] },
+  { label: 'an explicit commandless fleet read as unknown', from: 'const key = isNumber(ship.ParentCommandID) ? ship.ParentCommandID : null', to: 'const key = ship.ParentCommandID || null', fails: ['fleet command missing'] },
+  { label: 'an unknown sector association read as no sector', from: 'row.BonusUnknown || !isNumber(row.SectorID) ? null : row.SectorID === 0 ? 1 : bonusOf(', to: 'row.BonusUnknown ? null : bonusOf(', fails: ['sector association missing'] },
+  { label: 'an explicit no-sector read as unknown', from: 'row.SectorID === 0 ? 1 : bonusOf(', to: 'row.SectorID === 0 ? null : bonusOf(', fails: ['sector association missing'] },
+  { module: 'naval-admins', label: 'a naval admin bonus row without a value read as neutral', from: 'admin.BonusRow && !(Number.isFinite(admin.BonusValue) && Number.isFinite(admin.Share)) ? BONUS_UNKNOWN : null', to: 'null', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
+  { module: 'naval-admins', label: 'a naval admin map of valueless bonuses returned empty', from: '(admin.BonusValue && admin.Share) || admin.BonusRow', to: 'admin.BonusValue && admin.Share', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
+  { module: 'minerals', label: 'the chain ignores an unknown command bonus', from: 'if (current.BonusUnknown) {', to: 'if (false) {', fails: ['admin bonus missing: terraforming', 'admin bonus missing: another consumer'] },
+]
+
 const climateOf = async (modules, file, game, race) => {
   const bodies = await modules['colonization-data'].loadBodies(databaseOf(file), { GameID: game, RaceID: race })
   const residuals = []
@@ -283,7 +696,7 @@ const main = async () => {
     console.log(`SKIP ${group}: missing ${files.filter((file) => !present(file)).join(', ')}`)
   }
 
-  const modules = await loadUtilities(['habitability', 'terraforming', 'colonization-data', 'colonization'], { stubs: { 'lodash/groupBy': GROUP_BY } })
+  const modules = await loadUtilities(['habitability', 'terraforming', 'colonization-data', 'colonization', 'terraform-capacity', 'naval-admins', 'minerals'], { stubs: { 'lodash/groupBy': GROUP_BY } })
 
   const fixtures = []
 
@@ -443,6 +856,37 @@ const main = async () => {
       const caught = await appOutputs(planted, appFixtures, plans).then(() => false, () => true)
 
       assert.ok(caught, 'the app-output assertions still pass')
+    })
+  }
+
+  const breakdownModules = ['habitability', 'terraforming', 'colonization-data', 'terraform-capacity', 'naval-admins', 'minerals']
+
+  for (const [name, { needs, run }] of Object.entries(BREAKDOWN_CHECKS)) {
+    if (!present(...needs)) {
+      skip(`breakdown ${name}`, needs)
+      continue
+    }
+
+    await check(`breakdown ${name}`, async () => run(modules))
+  }
+
+  for (const { module = 'terraform-capacity', label, from, to, fails } of BREAKDOWN_FAULTS) {
+    const required = fails.filter((name) => present(...BREAKDOWN_CHECKS[name].needs))
+
+    if (!required.length) {
+      skip(`breakdown planted fault ${label}`, fails.flatMap((name) => BREAKDOWN_CHECKS[name].needs))
+      continue
+    }
+
+    await check(`breakdown planted fault ${label} fails ${required.join(', ')}`, async () => {
+      const text = fs.readFileSync(path.join(root, 'src', 'renderer', 'utilities', `${module}.js`), 'utf8')
+      const planted = await loadUtilities(breakdownModules, { stubs: { 'lodash/groupBy': GROUP_BY }, sources: { [module]: patched(`${module}.js`, text, from, to) } })
+
+      for (const name of required) {
+        const caught = await BREAKDOWN_CHECKS[name].run(planted).then(() => false, () => true)
+
+        assert.ok(caught, `${name} still passes`)
+      }
     })
   }
 

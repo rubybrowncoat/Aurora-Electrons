@@ -700,7 +700,7 @@ export const navalAdminRequiredRanks = (admins, captainRanks) => {
 }
 
 // Naval admin bonuses chain up the command tree: the ship must be within its own command's range, and each command's HQ within its parent's range for the parent to apply too. A command without a commander of the required rank breaks the chain (docs/DATABASE.md § Commander bonus rules). Each one passes on its commander's bonus scaled by the command type's share.
-// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Unknown, Systems: Set } }. A command in range whose rank or bonus the save does not settle (`Unknown`, the reason as text, with `Eligible` null) makes the chain unknown: `{ bonus: null, unknown: reason }`, never a multiplier of 1.
+// `admins`: { [NavalAdminCommandID]: { SystemID, ParentCommandID, BonusValue, Share, Eligible, Unknown, BonusUnknown, Systems: Set } }. A command in range whose rank or bonus the save does not settle (`Unknown`, the reason as text, with `Eligible` null), or an eligible one whose commander holds the bonus row without a value (`BonusUnknown`, the reason as text), makes the chain unknown: `{ bonus: null, unknown: reason }`, never a multiplier of 1.
 export const navalAdminChain = (admins, systemId, commandId) => {
   let bonus = 1
   let location = systemId
@@ -712,6 +712,10 @@ export const navalAdminChain = (admins, systemId, commandId) => {
       return { bonus: null, unknown: current.Unknown }
     } else if (!current.Eligible) {
       break
+    }
+
+    if (current.BonusUnknown) {
+      return { bonus: null, unknown: current.BonusUnknown }
     }
 
     visited.add(current.NavalAdminCommandID)

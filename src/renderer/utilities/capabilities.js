@@ -79,7 +79,7 @@ export const MARKER_COLUMNS = Object.freeze({
 export const MARKER_USES = Object.freeze({
   '/production': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/mineral-outlook': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
-  '/habitability': Object.freeze({ outlook: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/habitability': Object.freeze({ outlook: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/logistics': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/survey-progress': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Survey']) }) }),
 })
@@ -132,7 +132,7 @@ export const BONUS_NAMES = Object.freeze({
   5: Object.freeze({ name: 'Production', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/lagrange']), effect: Object.freeze({ default: 'the construction, ordnance and fighter capacity of the colonies', '/lagrange': 'the stabilisation ships and the stabilisation times' }) }),
   6: Object.freeze({ name: 'Mining', percentage: true, routes: Object.freeze(['/commanders', '/mineral-outlook', '/habitability', '/logistics', '/minerals']), effect: Object.freeze({ '/commanders': OFFICERS, '/mineral-outlook': 'the mining rates of the colonies and the orbital miners', '/habitability': 'the mineral runway that sets the plan\'s mineral weights', '/logistics': 'the fuel output of the Sorium harvesters', '/minerals': 'the output of the civilian mining policy' }) }),
   8: Object.freeze({ name: 'Population Growth', percentage: true, routes: Object.freeze(['/colony-outlook', '/commanders']), effect: Object.freeze({ default: 'the growth rates of the colonies', '/commanders': OFFICERS }) }),
-  9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/commanders']), effect: Object.freeze({ default: 'the terraforming rates of the colonies', '/commanders': OFFICERS }) }),
+  9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze(['/production', '/habitability', '/commanders']), effect: Object.freeze({ default: 'the terraforming capacity and rates of the colonies, with the commanders and naval admin chain behind them', '/commanders': OFFICERS }) }),
   11: Object.freeze({ name: 'Ground Construction', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the ground unit construction rates of the colonies' }),
   25: Object.freeze({ name: 'Colony Administration', percentage: false, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
   27: Object.freeze({ name: 'Research Admin', percentage: false, routes: Object.freeze(['/technologies', '/commanders']), effect: Object.freeze({ '/technologies': 'the labs the scientists may run', '/commanders': OFFICERS }) }),

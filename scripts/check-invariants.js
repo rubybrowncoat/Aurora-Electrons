@@ -1277,7 +1277,11 @@ const defineCases = (modules) => {
   // ---- Production and logistics ----
   const production = modules.production
   const logistics = modules.logistics
-  const colonyModifiers = { OverallResearchModifier: 2, ShipyardBuildRate: 1000, OverallGroundUnitModifier: 50, TerraformingRate: 0.001, PopulationTerraformingRate: 0.002, TerraformingSpeed: 1, MinConstructionPeriod: 5 * 86400, ShipyardOperations: 1 }
+  const colonyModifiers = { OverallResearchModifier: 2, ShipyardBuildRate: 1000, OverallGroundUnitModifier: 50, MinConstructionPeriod: 5 * 86400, ShipyardOperations: 1 }
+  const terraform = modules['terraform-capacity']
+  const colonyOf = (extra = {}) => ({ installations: 0, radius: 6000, modifier: { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }, ships: [], ...extra })
+  const shipOf = (extra = {}) => ({ ShipID: 1, PopulationID: 1, ParentCommandID: 0, FleetSystemID: 1, crew: 1, captain: 1, captained: true, modules: 100, ...extra })
+  const rateOf = (source, { raceRate = 0.001, speed = 100 } = {}) => terraform.terraformBreakdown({ raceRate, speed, source, admins: {} }).rate
   const researchRow = (extra = {}) => ({ Facilities: 4, ActualCommanderResearchBonus: 1.5, ActualAnomalyBonus: 1, CommanderField: 3, ...extra })
   const industryRow = (id, extra = {}) => ({ ID: id, ProductionType: 0, Percentage: 50, Amount: 10, ProdPerUnit: 100, Queue: 0, Paused: 0, ...extra })
   const capacityResult = (value) => (value === null ? provenance.unavailable({ rule: 'production.industryRate', missing: ['the colony\'s production modifiers'] }) : provenance.ofRule({ rule: 'production.industryRate', value, inputs: { present: ['capacity'] } }))
@@ -1608,36 +1612,47 @@ const defineCases = (modules) => {
     assert.equal(production.trainingRate(capacity, { TaskPercentage: null }).status, 'unavailable')
   })
 
-  invariant('production', 'a terraforming rate is unavailable while a ship\'s crew share, its admin bonus or the body\'s radius is unknown, and the crew share of the orbital terraformers scales it', () => {
-    const body = { radius: 6000 }
-    const full = production.terraformRate(colonyModifiers, { ...body, orbital: [{ terraformers: 100, adminBonus: 1 }] })
-    const half = production.terraformRate(colonyModifiers, { ...body, orbital: [{ terraformers: 50, adminBonus: 1 }] })
+  invariant('production', 'a terraforming rate is unavailable while a ship\'s modules, crew share or captain bonus, the colony\'s modifier, the race rate, the game speed or the body\'s radius is unknown, and the crew share and the module count scale it', () => {
+    const full = rateOf(colonyOf({ ships: [shipOf()] }))
+    const half = rateOf(colonyOf({ ships: [shipOf({ modules: 50 })] }))
+    const crewed = rateOf(colonyOf({ ships: [shipOf({ crew: 0.5 })] }))
 
     assert.ok(full.value > 0)
     assert.ok(Math.abs(half.value * 2 - full.value) < 1e-12)
-    assert.equal(production.terraformRate(colonyModifiers, { ...body, orbital: [{ terraformers: null, adminBonus: 1 }] }).status, 'unavailable')
-    assert.equal(production.terraformRate(colonyModifiers, { ...body, orbital: [{ terraformers: 5, adminBonus: null }] }).status, 'unavailable')
-    assert.equal(production.terraformRate(colonyModifiers, { ...body, planetary: { terraformers: null } }).status, 'unavailable')
-    assert.equal(production.terraformRate(colonyModifiers, { orbital: [{ terraformers: 5, adminBonus: 1 }] }).status, 'unavailable')
-    assert.equal(production.terraformRate(undefined, { ...body, planetary: { terraformers: 5 } }).status, 'unavailable')
-    assert.equal(production.terraformRate(colonyModifiers, { ...body, planetary: { terraformers: 0 } }).value, 0)
+    assert.ok(Math.abs(crewed.value * 2 - full.value) < 1e-12)
+
+    for (const [name, source] of [['modules', colonyOf({ ships: [shipOf({ modules: null })] })], ['crew', colonyOf({ ships: [shipOf({ crew: null })] })], ['captain', colonyOf({ ships: [shipOf({ captain: null })] })], ['installations', colonyOf({ installations: null })], ['governor', colonyOf({ installations: 5, modifier: { ...colonyOf().modifier, governor: null } })], ['radius', colonyOf({ installations: 5, radius: null })]]) {
+      assert.equal(rateOf(source).status, 'unavailable', name)
+    }
+
+    assert.equal(rateOf(colonyOf({ installations: 5 }), { raceRate: null }).status, 'unavailable')
+    assert.equal(rateOf(colonyOf({ installations: 5 }), { speed: null }).status, 'unavailable')
+    assert.equal(rateOf(colonyOf({ installations: 0 })).value, 0)
     assert.ok(provenance.getRule('production.terraformRate').structure.includes('crew.terraforming'))
   })
 
+  invariant('production', 'the installations\' output is the whole installations, a fraction of an installation is not counted, and a colony without a modifier component has no installations\' output', () => {
+    const whole = rateOf(colonyOf({ installations: 6 }))
+
+    assert.equal(rateOf(colonyOf({ installations: 6.5 })).value, whole.value)
+    assert.ok(Math.abs(rateOf(colonyOf({ installations: 12, modifier: { ...colonyOf().modifier, efficiency: 0.5 } })).value - whole.value) < 1e-12)
+    assert.equal(rateOf(colonyOf({ installations: 6, modifier: { ...colonyOf().modifier, unrest: null } })).status, 'unavailable')
+  })
+
   invariant('production', 'a terraforming finish with no rate says why, and one with a rate of 0 is idle', () => {
-    const rate = production.terraformRate(colonyModifiers, { radius: 6000, planetary: { terraformers: 10 } })
+    const rate = rateOf(colonyOf({ installations: 10 }))
     const job = { TerraformStatus: 1, MaxAtm: 1, GasAtm: 0.5, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const finish = production.terraformFinish(colonyModifiers, job, rate)
 
     assert.equal(finish.result.status, 'estimated')
     assert.ok(Math.abs(finish.result.value - (0.5 / (rate.value / 365))) < 1e-9)
-    assert.equal(production.terraformFinish(colonyModifiers, job, production.terraformRate(undefined, { radius: 6000 })).result.status, 'unavailable')
-    assert.equal(production.terraformFinish(colonyModifiers, job, production.terraformRate(colonyModifiers, { radius: 6000, planetary: { terraformers: 0 } })).idle, true)
+    assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf(), { speed: null })).result.status, 'unavailable')
+    assert.equal(production.terraformFinish(colonyModifiers, job, rateOf(colonyOf({ installations: 0 }))).idle, true)
     assert.equal(production.terraformFinish(colonyModifiers, { ...job, TerraformStatus: null }, rate).result.status, 'unavailable')
   })
 
   invariant('production', 'a gas with no row in the body\'s atmosphere is 0 atm and a row with a null pressure is unavailable, naming the pressure, never a finish of 0 days', () => {
-    const rate = production.terraformRate(colonyModifiers, { radius: 6000, planetary: { terraformers: 10 } })
+    const rate = rateOf(colonyOf({ installations: 10 }))
     const removing = { TerraformStatus: 0, MaxAtm: 0, GasAtm: null, GasAtmUnknown: 0, GasName: 'Oxygen', HydroID: 1, HydroExt: 0, AtmosPress: 1 }
     const absent = production.terraformFinish(colonyModifiers, removing, rate)
 
@@ -2069,6 +2084,7 @@ const main = async () => {
     'research',
     'designed-tech',
     'production',
+    'terraform-capacity',
     'logistics',
     'warnings/common',
     'warnings/index',

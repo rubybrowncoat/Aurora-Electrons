@@ -14,7 +14,7 @@ const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./utilities')
 
 const NAVAL_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress']
-const MODULES = ['capabilities', 'minerals', 'mining-data', 'mineral-outlook', 'logistics', 'naval-admins', 'survey', 'production', 'cmc-policy']
+const MODULES = ['capabilities', 'minerals', 'mining-data', 'mineral-outlook', 'logistics', 'naval-admins', 'survey', 'terraform-capacity', 'cmc-policy']
 const OPEN_EXISTING = 0x2
 
 const MUTATIONS = [
@@ -23,7 +23,7 @@ const MUTATIONS = [
   ['a blocked Mining bonus leaves the surface rows alone', 'utilities/mining-data.js', 'blocked.has(MINING_BONUS)', 'false'],
   ['a blocked Mining bonus leaves the harvester rows alone', 'utilities/logistics.js', 'blocked.has(MINING_BONUS) ? rows.map', 'false ? rows.map'],
   ['the survey rate ignores an unknown chain', 'utilities/survey.js', 'if (adminGap || !Number.isFinite(admin)) {', 'if (false) {'],
-  ['the terraforming rate ignores an unknown chain', 'utilities/production.js', 'if (group.adminGap) {', 'if (false) {'],
+  ['the terraforming rate ignores an unknown chain', 'utilities/terraform-capacity.js', '...(group.admin === null ? [group.adminGap || \'the naval admin chain\\\'s Terraforming bonus\'] : [])', '...[]'],
 ]
 
 const adminOf = (overrides) => ({ NavalAdminCommandID: 1, SystemID: 5, ParentCommandID: 0, BonusValue: 1.2, Share: 0.05, Eligible: true, Unknown: null, Systems: new Set([5]), ...overrides })
@@ -41,7 +41,7 @@ const text = (result) => (result && result.inputs ? result.inputs.missing.join('
 
 // The statements of the checks on `mods`, as [statement, held] pairs, so that the real modules and the mutants answer the same ones.
 const results = async (mods, { database, race }) => {
-  const { minerals, 'mining-data': miningData, 'mineral-outlook': outlook, logistics, 'naval-admins': naval, survey, production, capabilities } = mods
+  const { minerals, 'mining-data': miningData, 'mineral-outlook': outlook, logistics, 'naval-admins': naval, survey, 'terraform-capacity': terraform, capabilities } = mods
   const { isAvailable } = (await loadUtilities(['provenance'])).provenance
   const ranksless = Object.values(await naval.loadNavalAdmins(database, { ...race, bonusId: 6, share: 'Industrial', ranks: false }))
   const lone = Object.values(await naval.loadNavalAdmins(oneCommand, { ...race, bonusId: 6, share: 'Industrial', ranks: false }))
@@ -79,14 +79,14 @@ const results = async (mods, { database, race }) => {
 
     return !isAvailable(unavailableRate) && /RankID/.test(text(unavailableRate)) && (isAvailable(sound) || !/RankID|naval admin/.test(text(sound)))
   })())
-  holds('a colony\'s terraforming rate under unknown ranks is unavailable naming the ranks, and its planetary share does not hide the gap', (() => {
-    const modifiers = { TerraformingSpeed: 1, TerraformingRate: 2, PopulationTerraformingRate: 3 }
-    const chain = minerals.navalAdminChain(unknown, 5, 1)
-    const orbital = { terraformers: 4, adminBonus: chain.bonus, adminGap: chain.unknown }
-    const rate = production.terraformRate(modifiers, { planetary: { terraformers: 2 }, orbital: [orbital], radius: 6000 })
-    const planetary = production.terraformRate(modifiers, { planetary: { terraformers: 2 }, orbital: [], radius: 6000 })
+  holds('a colony\'s terraforming rate under unknown ranks is unavailable naming the ranks, and its installations\' share does not hide the gap', (() => {
+    const modifier = { governor: 1, sector: 1, efficiency: 1, radiation: 0, unrest: 0, status: 1 }
+    const ship = { ShipID: 1, PopulationID: 1, ParentCommandID: 1, FleetSystemID: 5, crew: 1, captain: 1, captained: true, modules: 4 }
+    const colony = { installations: 2, radius: 6000, modifier, ships: [ship] }
+    const rate = terraform.terraformBreakdown({ raceRate: 2, speed: 100, source: colony, admins: unknown })
+    const installations = terraform.terraformBreakdown({ raceRate: 2, speed: 100, source: { ...colony, ships: [] }, admins: unknown })
 
-    return !isAvailable(rate) && /RankID/.test(text(rate)) && isAvailable(planetary)
+    return !isAvailable(rate.rate) && /RankID/.test(text(rate.rate)) && !isAvailable(rate.orbital) && /RankID/.test(text(rate.orbital)) && isAvailable(installations.installations) && isAvailable(installations.rate)
   })())
   holds('a blocked Mining bonus nulls the bonus of the surface and orbital rows and names the lookup, leaving everything else', (() => {
     const [surface] = miningData.gateMiningRows([surfaceRow], blocked)

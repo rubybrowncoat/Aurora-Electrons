@@ -9,7 +9,6 @@ const PRODUCTION_VERSIONS = ['2.7.x']
 const SECONDS_PER_YEAR = 31536000
 const SECONDS_PER_DAY = 86400
 const DAYS_PER_YEAR = 365
-const EARTH_SURFACE_AREA = 511187128
 
 // Water vapour, as the game has it: condensation a year, hydrographic extent per atm, relative humidity factor.
 const CONDENSATION_PER_YEAR = 0.1
@@ -112,16 +111,6 @@ registerRule({
 })
 
 registerRule({
-  id: 'production.terraformRate',
-  versions: PRODUCTION_VERSIONS,
-  units: 'atm/yr',
-  verification: 'estimated',
-  structure: ['FCT_Race.TerraformingRate', 'FCT_Game.TerraformingSpeed', 'FCT_Commander, FCT_CommanderBonuses (Terraforming)', 'DIM_PlanetaryInstallation.TerraformValue', 'FCT_ShipClass.Terraformers, Crew', 'FCT_Ship.CurrentCrew', 'crew.terraforming', 'FCT_SystemBody.Radius'],
-  note: `The terraformers' rate (planetary installations at the colony's rate, orbital terraformers at the race's rate times the naval admin chain's Terraforming bonus, each ship at the share of its class crew aboard) times the game's terraforming speed, spread over the body's surface against the Earth's. ${ESTIMATE}`,
-  assumptions: ['A terraformer ship whose commander has no Terraforming bonus counts it as ×1', 'An orbital terraformer works at the share of its class crew aboard; its damaged modules are not excluded'],
-})
-
-registerRule({
   id: 'production.shipyardContinual',
   versions: PRODUCTION_VERSIONS,
   units: 'days',
@@ -178,9 +167,6 @@ const MODIFIER_TEXT = {
   ShipyardBuildRate: 'the colony\'s shipyard build rate',
   OverallResearchModifier: 'the colony\'s research modifier',
   OverallGroundUnitModifier: 'the colony\'s ground formation construction rate',
-  TerraformingRate: 'the race\'s terraforming rate',
-  PopulationTerraformingRate: 'the colony\'s terraforming rate',
-  TerraformingSpeed: 'the game\'s terraforming speed',
   MinConstructionPeriod: 'the game\'s construction period',
   ShipyardOperations: 'the race\'s shipyard operations',
 }
@@ -903,39 +889,6 @@ export const waterVapourCycles = (terraform, step, years) => {
   }
 
   return null
-}
-
-// A colony's terraforming rate in atm a year on its own body, as a 'production.terraformRate' result: the planetary terraformers at the colony's rate plus each orbital group at the race's rate times its naval admin bonus, times the game's terraforming speed, spread over the body's surface against the Earth's. `planetary`: { terraformers } or null where the colony has none; `orbital`: [{ terraformers, adminBonus }], `terraformers` null where a ship's crew or class crew is not in the save; `radius`: the body's radius in km.
-export const terraformRate = (modifiers, { planetary = null, orbital = [], radius }) => {
-  const rule = 'production.terraformRate'
-  const missing = modifierGaps(modifiers, ['TerraformingSpeed', ...(planetary ? ['PopulationTerraformingRate'] : []), ...(orbital.length ? ['TerraformingRate'] : [])])
-
-  if (planetary && !isNumber(planetary.terraformers)) {
-    missing.push('the colony\'s terraforming installations')
-  }
-
-  if (orbital.some((group) => !isNumber(group.terraformers) || (!isNumber(group.adminBonus) && !group.adminGap))) {
-    missing.push('a terraformer ship\'s crew or its class crew')
-  }
-
-  for (const group of orbital) {
-    if (group.adminGap) {
-      missing.push(group.adminGap)
-    }
-  }
-
-  if (!isNumber(radius) || !(radius > 0)) {
-    missing.push('the body\'s radius')
-  }
-
-  if (missing.length) {
-    return unavailable({ rule, missing: [...new Set(missing)] })
-  }
-
-  const capacity = (planetary ? modifiers.PopulationTerraformingRate * planetary.terraformers : 0) + orbital.reduce((total, group) => total + modifiers.TerraformingRate * group.adminBonus * group.terraformers, 0)
-  const localSurfaceArea = 4 * Math.PI * Math.pow(radius, 2)
-
-  return ofRule({ rule, value: capacity * modifiers.TerraformingSpeed * (EARTH_SURFACE_AREA / localSurfaceArea), inputs: { present: [MODIFIER_TEXT.TerraformingSpeed, 'the terraformers and their crews', 'the body\'s radius'] } })
 }
 
 // A terraforming job's finish as { result, idle, note }: the pressure still to move over the local rate, or the construction cycles water vapour takes over liquid water. `note` says why a water vapour job has no date (not within WATER_VAPOUR_HORIZON years). `terraform`: the colony's row (TerraformStatus, MaxAtm, GasAtm, GasAtmUnknown, GasName, HydroID, HydroExt, AtmosPress); `GasAtmUnknown` is 1 where the body's atmosphere has a row for the gas whose pressure is null, 0 where the row is absent (the gas is not there: 0 atm).

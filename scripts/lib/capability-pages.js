@@ -14,7 +14,7 @@ const { loadPage, replacing, instantiate } = require('./page-loader')
 
 const FLEET = { ShipID: 1, ShipName: 'Surveyor', FleetID: 1, Damaged: 0, CurrentCrew: 100, ClassCrew: 100, ProductionBonus: 1.2, CaptainName: 'Captain' }
 
-const MODIFIERS = { PopulationID: 1, OrdnanceProduction: 2, OverallProductionModifier: 1.5, OrdnanceProductionPower: 3, ShipyardBuildRate: 4, PopulationTerraformingRate: 5, OverallGroundUnitModifier: 6 }
+const MODIFIERS = { PopulationID: 1, OrdnanceProduction: 2, OverallProductionModifier: 1.5, OrdnanceProductionPower: 3, ShipyardBuildRate: 4, OverallGroundUnitModifier: 6 }
 
 const MUTATIONS = [
   ['lagrange', 'its unverified list is disconnected from the capability check', "return gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] })", "return false ? gateGaps(this.$store.getters['capabilities/gates'], { bonuses: [PRODUCTION_BONUS], components: [STABILISATION_COMPONENT] }) : []"],
