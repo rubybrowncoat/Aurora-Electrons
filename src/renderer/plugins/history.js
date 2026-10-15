@@ -60,4 +60,11 @@ export default ({ store, ownerGrace }) => {
       record(database)
     }
   })
+
+  // A colony was chosen on the History page: the open save is read once more, so the colony's first point is the save the player was looking at.
+  store.watch((state) => state.history.captures, () => {
+    if (store.state.database) {
+      record(store.state.database)
+    }
+  })
 }

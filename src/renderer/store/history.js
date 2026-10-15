@@ -6,6 +6,7 @@ export const state = () => {
     revision: 0,
     failures: [],
     campaigns: {},
+    captures: 0,
   }
 }
 
@@ -54,6 +55,10 @@ export const mutations = {
   },
   recorded (state) {
     state.revision++
+  },
+  // The Colony series panel asks the recorder for one pass on the open save (a colony was just chosen, so its first observation is this save's).
+  capture (state) {
+    state.captures++
   },
   failures (state, failures) {
     state.failures = failures

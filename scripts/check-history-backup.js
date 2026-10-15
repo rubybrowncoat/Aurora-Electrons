@@ -38,10 +38,10 @@ const STUBS = {
 }
 
 const loadModules = async (base) => {
-  const names = ['history-backup', 'campaign', 'history', 'scenario-records', 'recording-owner'].map((name) => `renderer/utilities/${name}`)
+  const names = ['history-backup', 'campaign', 'history', 'scenario-records', 'recording-owner', 'colony-series'].map((name) => `renderer/utilities/${name}`)
   const loaded = await loadUtilities(names, { stubs: STUBS, directory: base })
 
-  return { backup: loaded[names[0]], campaign: loaded[names[1]], history: loaded[names[2]], records: loaded[names[3]], owner: loaded[names[4]] }
+  return { backup: loaded[names[0]], campaign: loaded[names[1]], history: loaded[names[2]], records: loaded[names[3]], owner: loaded[names[4]], colony: loaded[names[5]] }
 }
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
@@ -118,7 +118,7 @@ const installation = ({ dir = null, first = 1 } = {}) => {
 const defineSuite = (m) => {
   const checks = []
   const check = (group, name, run) => checks.push({ group, name, run })
-  const { backup, campaign, records, history } = m
+  const { backup, campaign, records, history, colony } = m
 
   const anchorRows = (key, count = 10) => Array.from({ length: count }, (_, index) => [100 + index, index + 1, Number((1 + key / 100 + index / 1000).toFixed(4)), 1, 1, 1, 1])
   const ledger = (n, salt = 0) => Array.from({ length: n }, (_, index) => ({ IncrementID: index + 1, GameTime: (index + 1) * 5 + salt }))
@@ -463,7 +463,7 @@ const defineSuite = (m) => {
   })
 
   check('rejection', 'a file of a future schema is refused whole, whichever of the envelope, the campaign records or the annotations is newer', async () => {
-    refused(edited((doc) => { doc.version = 2 }), /version 2, written by a newer version/)
+    refused(edited((doc) => { doc.version = 3 }), /version 3, written by a newer version/)
     refused(edited((doc) => { doc.schemas.registry = 2 }), /campaign records of the backup are of version 2/)
     refused(edited((doc) => { doc.schemas.annotations = 2 }), /annotations of the backup are of version 2/)
     refused(edited((doc) => { doc.campaigns[0].annotations[0].version = 2 }), /annotations are of version 2/)
@@ -589,7 +589,7 @@ const defineSuite = (m) => {
 
       const bytes = live.bytes()
       const memory = live.snapshot()
-      const attempts = [edited((doc) => { doc.version = 2 }), edited((doc) => { doc.campaigns[0].branches.b1.races[1].snapshots.reverse() }), '{', 'x'.repeat(backup.MAX_BYTES + 1)]
+      const attempts = [edited((doc) => { doc.version = 3 }), edited((doc) => { doc.campaigns[0].branches.b1.races[1].snapshots.reverse() }), '{', 'x'.repeat(backup.MAX_BYTES + 1)]
 
       attempts.forEach((body) => {
         const out = backup.parseBackup(body)
@@ -2009,6 +2009,394 @@ const defineSuite = (m) => {
     assert.deepEqual(timesOf(second.fileOf('c1'), 3), [5], 'neither was race 3')
   })
 
+  // ---- colony series ----
+
+  const colonySnapshot = (t, base = 1) => colony.colonySnapshot({ t, n: t, colonies: [[7, 0, ...Array(14).fill(base)], [9, 1]] })
+
+  // A colony file: `races` is { [RaceID]: times }, a time being a number or [t, base] for a snapshot whose figures differ.
+  const colonyFile = (races) => ({ columns: [...colony.COLONY_COLUMNS], races: Object.fromEntries(Object.entries(races).map(([RaceID, times]) => [RaceID, { snapshots: times.map((time) => (Array.isArray(time) ? colonySnapshot(time[0], time[1]) : colonySnapshot(time))) }])) })
+
+  const colonyOf = (inst, branchId = 'b1') => clone(inst.files.get(`file:campaign-c1-${branchId}-colonies`))
+
+  const colonyTimes = (file, RaceID = 1) => (file && file.races[RaceID] ? file.races[RaceID].snapshots.map((item) => item.t) : [])
+
+  const colonyWrites = (inst) => inst.writes.filter((name) => name.endsWith('-colonies'))
+
+  // A backup as one made before colony coverage was recorded (version 1): no `colonyCoverage`, the digest sealed again.
+  const uncovered = (envelope) => {
+    const doc = JSON.parse(textOf(envelope))
+
+    doc.version = 1
+    doc.campaigns.forEach((item) => { delete item.colonyCoverage })
+    doc.digest = campaign.hashValue(doc.campaigns)
+
+    return parsed(doc)
+  }
+
+  const withColonies = (stored, other) => {
+    stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100, 200, 300], 2: [100] }))
+    stored.put('file:campaign-c1-b2-colonies', colonyFile({ 1: [100] }))
+    other.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [[200, 5], 400] }))
+    other.put('file:campaign-c1-b2-colonies', colonyFile({ 1: [500] }))
+  }
+
+  check('colonies', 'the colony series of each branch go into the backup beside its history and come back exactly in an empty installation, each branch apart from the others; an installation without colony series gives a backup with none', async () => {
+    const { stored, other } = pair()
+
+    stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100, 200, 300], 2: [100] }))
+    stored.put('file:campaign-c1-b2-colonies', colonyFile({ 1: [100, 200] }))
+
+    assert.equal(Object.keys(parsed(exportOf(other)).campaigns[0]).includes('colonies'), false)
+    assert.equal(parsed(exportOf(other)).campaigns[0].colonyCoverage, true, 'a backup says it records the colony files, so that none is a known state')
+
+    const envelope = parsed(exportOf(stored))
+
+    assert.deepEqual(Object.keys(envelope.campaigns[0].colonies).sort(), ['b1', 'b2'])
+    assert.deepEqual(envelope.campaigns[0].colonies.b1, colonyOf(stored, 'b1'))
+
+    const empty = installation({ first: 3 })
+    const planned = plan(empty, envelope)
+
+    assert.equal(planned.preview.campaigns[0].files[0].colonies.status, 'new')
+    assert.equal(planned.preview.campaigns[0].files[0].colonies.totals.added, 4)
+
+    await restore(empty, envelope)
+
+    assert.deepEqual(colonyOf(empty, 'b1'), colonyOf(stored, 'b1'))
+    assert.deepEqual(colonyOf(empty, 'b2'), colonyOf(stored, 'b2'))
+    assert.deepEqual(colonyTimes(colonyOf(empty, 'b2')), [100, 200], 'the second branch has its own series, not the first\'s')
+    assert.equal(plan(empty, envelope).preview.nothingToDo, true)
+
+    // every state of a colony, an observed one with its figures, a failed read and a colony another race holds, comes back as it was
+    const states = installation({ first: 4 })
+    const rich = installation({ first: 5 })
+
+    seed(rich, { entries: [entryOf({ id: 'c1', branches: { b1: tipOf(100) } })], files: { 'c1-b1': fileOf({ races: { 1: { times: [100] } } }), 'c1-b1-colonies': { columns: [...colony.COLONY_COLUMNS], races: { 1: { snapshots: [colony.colonySnapshot({ t: 100, n: 100, colonies: [[7, 0, ...Array(14).fill(null).map((_, index) => (index % 2 ? index : null))], [8, 1], [9, 2, 12], [10, 3], [11, 4]], revised: true })] } } } } })
+
+    await restore(states, parsed(exportOf(rich)))
+
+    assert.deepEqual(colonyOf(states), colonyOf(rich))
+  })
+
+  check('colonies', 'a backup made before colony coverage was recorded restores over stored colony series without touching them, under every policy, and its preview shows no colony row', async () => {
+    const { stored, other } = pair()
+
+    withColonies(stored, installation({ first: 6 }))
+
+    const before = [colonyOf(stored, 'b1'), colonyOf(stored, 'b2')]
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'merge' } } } } }
+    const planned = plan(stored, uncovered(exportOf(other)), choices)
+
+    assert.ok(planned.preview.campaigns[0].files.every((row) => row.colonies === undefined))
+
+    const { result } = await restore(stored, uncovered(exportOf(other)), choices)
+
+    assert.equal(result.applied, true)
+    assert.deepEqual(timesOf(stored.fileOf('c1', 'b1')), [200, 300, 400, 500], 'the history was restored')
+    assert.deepEqual([colonyOf(stored, 'b1'), colonyOf(stored, 'b2')], before)
+    assert.deepEqual(colonyWrites(stored), [])
+  })
+
+  check('colonies', 'the colony series of a branch are merged, replaced or kept by the policy of its history file and the races chosen: a merge keeps the stored snapshot at a shared time and counts the conflict, a replace of a backup with coverage takes its state and one without keeps the series it lacks', async () => {
+    const { stored, other } = pair()
+
+    withColonies(stored, other)
+
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'merge' }, b2: { policy: 'replace' } } } } }
+    const planned = plan(stored, parsed(exportOf(other)), choices)
+    const [b1, b2] = planned.preview.campaigns[0].files
+
+    assert.equal(b1.colonies.policy, 'merge')
+    assert.equal(b1.colonies.totals.conflicts, 1)
+    assert.equal(b1.colonies.totals.added, 1)
+    assert.equal(b1.colonies.totals.identical, 0)
+    assert.equal(b1.colonies.status, 'changes')
+    assert.ok(b1.colonies.series.every((row) => row.label.startsWith('colonies of race')))
+    assert.equal(b2.colonies.policy, 'replace')
+    assert.equal(b2.colonies.totals.removed, 1)
+    assert.ok(planned.preview.needsConfirmation.length > 0)
+
+    const before = stored.snapshot()
+
+    plan(stored, parsed(exportOf(other)), choices)
+
+    assert.equal(stored.snapshot(), before, 'a preview writes nothing')
+
+    const kept = colonyOf(stored, 'b1').races[1].snapshots[1]
+
+    await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.deepEqual(colonyTimes(colonyOf(stored, 'b1')), [100, 200, 300, 400])
+    assert.deepEqual(colonyOf(stored, 'b1').races[1].snapshots[1], kept, 'the stored snapshot at the shared time stays')
+    assert.deepEqual(colonyTimes(colonyOf(stored, 'b1'), 2), [100], 'a race the backup lacks keeps its series under a merge')
+    assert.deepEqual(colonyTimes(colonyOf(stored, 'b2')), [500], 'a replace takes the backup\'s series')
+
+    // a replace of a backup that records its colony files drops a stored series it lacks, and a keep leaves the file as it is
+    const second = pair()
+
+    withColonies(second.stored, second.other)
+    second.stored.put('file:campaign-c1-b2-colonies', colonyFile({ 1: [100], 2: [100, 150] }))
+
+    const replaced = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'keep' } } } } }
+    const b2Before = colonyOf(second.stored, 'b2')
+
+    await restore(second.stored, parsed(exportOf(second.other)), replaced)
+
+    assert.deepEqual(colonyTimes(colonyOf(second.stored, 'b1')), [200, 400])
+    assert.deepEqual(colonyTimes(colonyOf(second.stored, 'b1'), 2), [], 'a replace takes the state a covered backup records: it has no series of race 2')
+    assert.deepEqual(colonyOf(second.stored, 'b2'), b2Before)
+    assert.deepEqual(colonyWrites(second.stored), ['file:campaign-c1-b1-colonies'])
+
+    // one made before coverage says nothing about a series it lacks, so a replace keeps it
+    const legacy = pair()
+
+    withColonies(legacy.stored, legacy.other)
+    await restore(legacy.stored, uncovered(exportOf(legacy.other)), replaced)
+
+    assert.deepEqual(colonyTimes(colonyOf(legacy.stored, 'b1')), [200, 400])
+    assert.deepEqual(colonyTimes(colonyOf(legacy.stored, 'b1'), 2), [100], 'a replace never drops a colony series a backup without coverage lacks')
+
+    const third = pair()
+
+    withColonies(third.stored, third.other)
+
+    const chosen = { campaigns: { c1: { files: { b1: { policy: 'merge', races: ['2'] }, b2: { policy: 'keep' } } } } }
+    const b1Before = colonyOf(third.stored, 'b1')
+
+    await restore(third.stored, parsed(exportOf(third.other)), chosen)
+
+    assert.deepEqual(colonyOf(third.stored, 'b1'), b1Before, 'race 1 was not chosen')
+  })
+
+  check('colonies', 'a branch whose timeline is not the stored one keeps its colony series, shown as kept with the reason', async () => {
+    const stored = installation()
+    const other = installation({ first: 2 })
+
+    seed(stored, { entries: [entryOf({ id: 'c1', branches: { b1: tipOf(150) } })], files: { 'c1-b1': fileOf({ races: { 1: { times: [100] } } }), 'c1-b1-colonies': colonyFile({ 1: [100, 200] }) } })
+    seed(other, { entries: [entryOf({ id: 'c1', branches: { b1: tipOf(150, 7) } })], files: { 'c1-b1': fileOf({ races: { 1: { times: [200] } } }), 'c1-b1-colonies': colonyFile({ 1: [300] }) } })
+
+    const before = stored.snapshot()
+    const planned = plan(stored, parsed(exportOf(other)), { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } })
+    const [row] = planned.preview.campaigns[0].files
+
+    assert.match(row.colonies.locked, /different timeline/)
+    assert.equal(row.colonies.policy, 'keep')
+    assert.equal(row.colonies.status, 'kept')
+
+    await restore(stored, parsed(exportOf(other)))
+
+    assert.equal(stored.snapshot(), before)
+
+    // a stored colony file this version cannot read is shown as kept with the reason, and the restore is refused whole, because a safety copy that covers the colony files cannot be made of it
+    const damaged = pair()
+
+    withColonies(damaged.stored, damaged.other)
+    damaged.stored.put('file:campaign-c1-b1-colonies', { races: 5 })
+
+    const [shown] = plan(damaged.stored, parsed(exportOf(damaged.other))).preview.campaigns[0].files
+
+    assert.match(shown.colonies.locked, /not one this version reads/)
+    assert.equal(shown.colonies.status, 'kept')
+
+    const damagedBefore = damaged.stored.snapshot()
+    const stopped = await rejects(() => restore(damaged.stored, parsed(exportOf(damaged.other))), 'Rejected')
+
+    assert.match(stopped.message, /colony series of branch b1 of campaign c1 cannot be read/)
+    assert.equal(damaged.stored.snapshot(), damagedBefore, 'nothing was written, and the damaged file is as it was')
+  })
+
+  check('colonies', 'a backup whose colony series are malformed is refused whatever its digest: a branch the campaign lacks, other columns, a key not read, a bad race id, times or colonies out of order, a state without its values, a bad thinning record', async () => {
+    const colonied = (change) => {
+      const { stored } = pair()
+
+      stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100, 200], 2: [100] }))
+
+      const doc = JSON.parse(textOf(exportOf(stored)))
+
+      change(doc.campaigns[0].colonies, doc)
+
+      return sealed(JSON.stringify(doc))
+    }
+
+    refused(colonied((colonies) => { colonies.b9 = colonies.b1 }), /not a map of the branches/)
+    refused(colonied((_colonies, doc) => { doc.campaigns[0].colonies = {} }), /not a map of the branches/)
+    refused(colonied((colonies) => { colonies.b1.columns.reverse() }), /columns are not the figures/)
+    refused(colonied((colonies) => { colonies.b1.extra = 1 }), /holds extra, which this version does not read/)
+    refused(colonied((colonies) => { colonies.b1.races.x = colonies.b1.races[1] }), /not a series under a race id/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[1].t = colonies.b1.races[1].snapshots[0].t }), /not later than the one before it/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].colonies.reverse() }), /not after the one before it/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].colonies[0][1] = 9 }), /is not a colony/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].colonies[0] = [7, 0, 1] }), /is not a colony/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].colonies[1] = [9, 1, 5] }), /is not a colony/)
+    refused(colonied((colonies) => { colonies.b1.races[1].thinning = { bad: true } }), /thinning record is not valid/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].extra = 1 }), /holds extra/)
+    refused(colonied((colonies) => { colonies.b1.races[1].snapshots[0].revised = false }), /marks a revision that is not true/)
+    refused(colonied((_colonies, doc) => { doc.campaigns[0].colonyCoverage = false }), /colony coverage is not true/)
+    refused(colonied((_colonies, doc) => { delete doc.campaigns[0].colonyCoverage }), /colony coverage is not true/)
+    refused(colonied((_colonies, doc) => { doc.version = 1 }), /holds colonyCoverage, which a version 1 backup does not state/)
+    assert.equal(backup.parseBackup(colonied(() => {})).errors, undefined)
+  })
+
+  check('colonies', 'a backup is of version 2 and says it covers the colony files; a version 1 backup is read as before and never says so, and a version 2 backup without the statement is refused', async () => {
+    const { stored } = pair()
+
+    stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100] }))
+
+    const envelope = parsed(exportOf(stored))
+
+    assert.equal(backup.VERSION, 2)
+    assert.equal(envelope.version, 2)
+    assert.ok(envelope.campaigns.every((item) => item.colonyCoverage === true))
+
+    const old = uncovered(envelope)
+
+    assert.equal(old.version, 1)
+    assert.equal(old.campaigns[0].colonyCoverage, undefined)
+    assert.deepEqual(Object.keys(old.campaigns[0].colonies), ['b1'])
+
+    const doc = JSON.parse(textOf(envelope))
+
+    delete doc.campaigns[0].colonyCoverage
+    refused(sealed(JSON.stringify(doc)), /colony coverage is not true/)
+  })
+
+  check('colonies', 'a stored colony file this version cannot read is never left out of a backup that says it covers the colony files: the export and the safety copy are refused naming the branch and nothing is written, while a store that is not there is covered as none', async () => {
+    const readable = colonyFile({ 1: [100, 200] })
+    const broken = [{ ...readable, races: 5 }, { ...readable, columns: ['population'] }, { ...readable, extra: 1 }, { columns: readable.columns }, { ...readable, races: { x: readable.races[1] } }, 'text', 7]
+
+    for (const file of broken) {
+      const { stored, other } = pair()
+
+      stored.put('file:campaign-c1-b1-colonies', readable)
+      stored.put('file:campaign-c1-b2-colonies', file)
+
+      const refusal = await rejects(async () => exportOf(stored), 'Rejected')
+
+      assert.match(refusal.message, /colony series of branch b2 of campaign c1 cannot be read/, JSON.stringify(file))
+
+      const before = stored.snapshot()
+      const stopped = await rejects(() => restore(stored, parsed(exportOf(other))), 'Rejected')
+
+      assert.match(stopped.message, /backup of the current history could not be made.*colony series of branch b2 of campaign c1 cannot be read/, JSON.stringify(file))
+      assert.equal(stored.snapshot(), before, 'nothing was written')
+    }
+
+    const empty = pair().stored
+
+    empty.put('file:campaign-c1-b1-colonies', {})
+
+    const exported = parsed(exportOf(empty))
+
+    assert.equal(exported.campaigns[0].colonyCoverage, true)
+    assert.equal(exported.campaigns[0].colonies, undefined, 'a store with nothing in it is no colony file')
+  })
+
+  check('colonies', 'a preview of colony series writes nothing, counts them as files with the history\'s, and a restore writes exactly the files the preview counted', async () => {
+    const { stored, other } = pair()
+
+    withColonies(stored, other)
+
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'merge' }, b2: { policy: 'merge' } } } } }
+    const before = stored.snapshot()
+    const planned = plan(stored, parsed(exportOf(other)), choices)
+
+    assert.equal(stored.snapshot(), before)
+    assert.equal(planned.preview.totals.files, 4, 'two history files and two colony files change')
+    assert.ok(planned.preview.totals.conflicts >= 1)
+    assert.equal(planned.preview.totals.conflicts, planned.preview.campaigns[0].files.reduce((sum, row) => sum + row.totals.conflicts + row.colonies.totals.conflicts, 0), 'the conflicts of the history files and of the colony series')
+
+    const { result } = await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.equal(result.files, 4)
+    assert.equal(colonyWrites(stored).length, 2)
+  })
+
+  check('colonies', 'a restore of colony series is undone from its safety copy: the copy holds the colony series as they were, and restoring it with Replace brings them back', async () => {
+    const { stored, other } = pair()
+
+    withColonies(stored, other)
+
+    const original = colonyOf(stored, 'b1')
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } }
+
+    await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.deepEqual(colonyTimes(colonyOf(stored, 'b1')), [200, 400])
+
+    const [held] = backup.keptBackups(stored.io)
+
+    assert.deepEqual(held.envelope.campaigns[0].colonies.b1, original)
+
+    await restore(stored, parsed(held.envelope), choices)
+
+    assert.deepEqual(colonyOf(stored, 'b1'), original)
+  })
+
+  check('colonies', 'a safety copy taken before a restore that adds colony series restores them away again with Replace: from a branch with no colony file the file is emptied, from one with a file that lacked a newly imported race the race is removed, and nothing is shown or written where neither side holds colony series', async () => {
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } }
+
+    // no colony series on either side: nothing to restore
+    const bare = pair()
+    const quiet = plan(bare.stored, parsed(exportOf(bare.other)), choices)
+
+    assert.ok(quiet.preview.campaigns[0].files.every((row) => row.colonies === undefined))
+    assert.equal(colonyWrites(bare.stored).length, 0)
+
+    // a branch with no colony file takes a restore that adds one
+    const { stored, other } = pair()
+
+    other.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [200, 400] }))
+    await restore(stored, parsed(exportOf(other)))
+
+    assert.deepEqual(colonyTimes(colonyOf(stored, 'b1')), [200, 400])
+
+    const [held] = backup.keptBackups(stored.io)
+
+    assert.equal(held.envelope.campaigns[0].colonyCoverage, true)
+    assert.equal(held.envelope.campaigns[0].colonies, undefined, 'the copy has no colony file to hold')
+
+    const planned = plan(stored, parsed(held.envelope), choices)
+
+    assert.equal(planned.preview.nothingToDo, false)
+    assert.equal(planned.preview.campaigns[0].files[0].colonies.totals.removed, 2)
+
+    await restore(stored, parsed(held.envelope), choices)
+
+    assert.deepEqual(colonyOf(stored, 'b1'), {}, 'the colony file is as it was: none')
+    assert.equal(plan(stored, parsed(held.envelope), choices).preview.nothingToDo, true)
+
+    // a branch with a colony file that lacked a race the restore imported
+    const second = pair()
+
+    second.stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100] }))
+    second.other.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100], 2: [300] }))
+
+    const original = colonyOf(second.stored, 'b1')
+
+    await restore(second.stored, parsed(exportOf(second.other)))
+
+    assert.deepEqual(colonyTimes(colonyOf(second.stored, 'b1'), 2), [300])
+
+    const [again] = backup.keptBackups(second.stored.io)
+
+    await restore(second.stored, parsed(again.envelope), choices)
+
+    assert.deepEqual(colonyOf(second.stored, 'b1'), original)
+
+    // a Merge of the copy changes nothing: it adds, it never removes
+    const third = pair()
+
+    third.other.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [200] }))
+    await restore(third.stored, parsed(exportOf(third.other)))
+
+    const [copy] = backup.keptBackups(third.stored.io)
+    const kept = colonyOf(third.stored, 'b1')
+
+    await restore(third.stored, parsed(copy.envelope))
+
+    assert.deepEqual(colonyOf(third.stored, 'b1'), kept)
+  })
+
   return checks
 }
 
@@ -2158,6 +2546,29 @@ const MUTANTS = [
   { name: 'a deleted record is brought back as a copy', file: 'src/renderer/utilities/scenario-records.js', find: 'restore && (collides || tombstoned) ? \'skipped\' : \'import\'', replace: 'restore && collides ? \'skipped\' : \'import\'', fails: ['a record is restored once'] },
   { name: 'a stored record is imported again as a copy', file: 'src/renderer/utilities/scenario-records.js', find: 'restore && (collides || tombstoned) ? \'skipped\' : \'import\'', replace: 'restore && tombstoned ? \'skipped\' : \'import\'', fails: ['a record is restored once'] },
   { name: 'what a record needs to be skipped is decided before the import', file: 'src/renderer/utilities/scenario-records.js', find: 'const plan = planImport(file, b, t, keepUuids, restore)\n        const stamp', replace: 'const plan = planImport({ records: {}, tombstones: {} }, b, t, keepUuids, restore)\n        const stamp', fails: ['a backup that holds an annotation twice'] },
+  { name: 'the colony series of a backup are not checked', find: 'Object.entries(campaign.colonies).forEach(([branchId, file]) => checkColonyFile(', replace: 'Object.entries({}).forEach(([branchId, file]) => checkColonyFile(', fails: ['a backup whose colony series are malformed'] },
+  { name: 'the columns of a colony file are not compared', find: 'if (canonical(file.columns) !== canonical(COLONY_COLUMNS)) {', replace: 'if (false) {', fails: ['a backup whose colony series are malformed'] },
+  { name: 'colony snapshots may be out of time order', find: 'if (index > 0 && !(snapshot.t > colonyBefore(series, index))) {', replace: 'if (false) {', fails: ['a backup whose colony series are malformed'] },
+  { name: 'a campaign may not hold colony series', find: '\'annotations\', \'colonies\', \'colonyCoverage\'], where)', replace: '\'annotations\', \'colonyCoverage\'], where)', fails: ['the colony series of each branch go into'] },
+  { name: 'a backup leaves the colony series out', find: '...(Object.keys(colonies).length ? { colonies } : {})', replace: '...({})', fails: ['the colony series of each branch go into', 'the colony series of a branch are merged', 'a restore of colony series is undone'] },
+  { name: 'the colony files of a restore are not written', find: 'writes.files.push(colonies.write)', replace: 'void colonies.write', fails: ['the colony series of each branch go into', 'a preview of colony series writes nothing', 'the colony series of a branch are merged'] },
+  { name: 'a replace of a backup without coverage drops the colony series it lacks', find: '{ ...(isObject(stored.races) ? stored.races : {}), ...present }', replace: 'present', fails: ['the colony series of a branch are merged'] },
+  { name: 'the colony series of a branch whose history is kept are restored anyway', find: 'policy: row.policy, locked: row.locked, status: \'kept\', stored: Object.keys(stored)', replace: 'policy: \'replace\', locked: null, status: \'kept\', stored: Object.keys(stored)', fails: ['a branch whose timeline is not the stored one keeps its colony'] },
+  { name: 'a stored colony file that cannot be read is replaced', find: 'if (!view.locked && !usableFile(stored)) {', replace: 'if (false) {', fails: ['a branch whose timeline is not the stored one keeps its colony'] },
+  { name: 'a backup with no colony file for a branch shows a colony row for it', find: 'isObject(given.colonies[branchId]) ? given.colonies[branchId] : null', replace: 'isObject(given.colonies[branchId]) ? given.colonies[branchId] : { races: {} }', fails: ['a backup made before colony coverage', 'a safety copy taken'] },
+  { name: 'a backup does not say it records the colony files', find: 'branches, colonyCoverage: true, ...(', replace: 'branches, ...(', fails: ['the colony series of each branch go into', 'a safety copy taken'] },
+  { name: 'a replace of a backup with coverage keeps the stored series it lacks', find: 'view.policy === \'replace\' && !covered ?', replace: 'view.policy === \'replace\' ?', fails: ['the colony series of a branch are merged', 'a safety copy taken'] },
+  { name: 'a stored colony file is not considered when the backup holds none for the branch', find: 'if (offered || (covered && isObject(heldColonies)', replace: 'if (offered || (false && isObject(heldColonies)', fails: ['a safety copy taken'] },
+  { name: 'a colony file a restore empties is left as an empty file', find: 'const emptied = !offered && !Object.keys(result).length', replace: 'const emptied = false', fails: ['a safety copy taken'] },
+  { name: 'a backup is taken to cover the colony files whether or not it says so', find: 'const covered = given.colonyCoverage === true', replace: 'const covered = true', fails: ['a backup made before colony coverage', 'the colony series of a branch are merged'] },
+  { name: 'a colony coverage that is not true is accepted', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'false', fails: ['a backup whose colony series are malformed'] },
+  { name: 'a colony file that cannot be read is left out of a backup that covers the colony files', find: 'if (series !== undefined && series !== null && !(isObject(series) && Object.keys(series).length === 0)) {', replace: 'if (isObject(series) && isObject(series.races)) {', fails: ['a stored colony file this version cannot read'] },
+  { name: 'the colony file of a backup is not checked as it is built', find: 'checkColonyFile(series, `Campaign $' + '{id} branch $' + '{branchId} colony series`)', replace: 'void series', fails: ['a stored colony file this version cannot read'] },
+  { name: 'a colony file with nothing in it is refused as unreadable', find: '!(isObject(series) && Object.keys(series).length === 0)) {', replace: 'true) {', fails: ['a stored colony file this version cannot read'] },
+  { name: 'a backup of version 2 may leave out its colony coverage', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'envelope.version >= COLONY_COVERAGE_VERSION ? (campaign.colonyCoverage !== undefined && campaign.colonyCoverage !== true) : campaign.colonyCoverage !== undefined', fails: ['a backup is of version 2', 'a backup whose colony series are malformed'] },
+  { name: 'a backup of version 1 may state colony coverage', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : false', fails: ['a backup whose colony series are malformed'] },
+  { name: 'a backup is written as version 1', find: 'export const VERSION = 2', replace: 'export const VERSION = 1', fails: ['a backup is of version 2'] },
+  { name: 'the colony files are not counted with the history files', find: 'const filed = (campaign) => campaign.files.flatMap((file) => (file.colonies ? [file, file.colonies] : [file]))', replace: 'const filed = (campaign) => campaign.files', fails: ['a preview of colony series writes nothing'] },
 ]
 
 // The utilities copied, with one mutant applied, to the layout the loader reads: `<root>/src/renderer/utilities`. The mutant's `file` is relative to the root.

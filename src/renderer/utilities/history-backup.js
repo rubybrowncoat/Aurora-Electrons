@@ -4,6 +4,8 @@
 //
 // A series the recorder wrote may also carry `thinning` (utilities/history.js `readThinning`: how many times its older half was thinned, how many snapshots that dropped and when last, with a digest of the game times it held). It is optional, so a backup made before it reads as before and carries no claim about thinning; a build from before it refuses a backup that has it. A restore keeps the record the series had or the backup's; where the restored game times no longer match its digest, the record reads as a lower bound, never as complete.
 //
+// A campaign may also carry `colonies`: `{ [branchId]: { columns, races: { [RaceID]: { snapshots, thinning? } } } }`, the colony series of the branches that have a file (utilities/colony-series.js), each kept apart by branch and never merged with another branch's. A backup of version 2 (`VERSION`) also says `colonyCoverage: true` of every campaign: it records the colony files of every branch it holds, so a branch with none in `colonies` had none, and a colony file the app cannot read stops the backup from being made instead of being left out. A backup of version 1 never says so; a build that reads only version 1 refuses a version 2 backup as a newer one. Which colonies are followed is a setting of the race and is not in the backup. A restore treats a branch's colony file by that branch's policy and races: a merge adds the backup's snapshots at game times the stored series lacks, a replace of a covered backup takes the backup's state (so a safety copy taken before colony series were added removes them again), a replace of a version 1 backup keeps a stored series it lacks (it says nothing of them, and must not erase them), and a kept, locked or unreadable branch keeps its colony file.
+//
 // Association rules (the decision of CP-DATA-01, explicit association). Campaign ids are the app's own random ids and are never renamed. A restore only ever adds to what is stored: names, game ids, attached saves, branches and a branch tip that is further along the same timeline. It never changes an answer the player gave, a merge, a legacy mark or a tip that is not on the same timeline, never merges two campaigns and never rebinds a branch; a campaign of another id that shares a game id is restored as a campaign of its own. Whatever is not applied is reported with its reason.
 //
 // Each history file is restored by its own policy: `merge` keeps what is stored and adds the backup's snapshots at other game times (at one game time the stored snapshot stays, as when a history is attached to a campaign), `replace` makes the selected series the backup's, `keep` leaves the file as it is. A policy applies to the series of the races selected, all of them by default. Metadata (a race's name, an alien race's name) comes from the side whose series reaches the later game time, the stored one on a tie.
@@ -11,12 +13,15 @@
 // Annotations are the scenario records of the planners. A record is restored with its uuid when the campaign's file holds no record of that uuid and has not held one before (a deleted record stays deleted); the repository's import creates the record afresh, so its revision and times are the restore's and the original ones are kept in its provenance.
 
 import { EARLY_COUNTS, REGISTRY_VERSION, STEP, anchorRelation, branchFileName, commonPrefix, hashValue, mergeAnchors, readRegistry, readThinning, writeRegistry } from './campaign'
+import { COLONY_COLUMNS, COLONY_STATES, colonyFileName } from './colony-series'
 import { MAX_SNAPSHOTS, isChain, recordedSpan, thinCounted, thinningOfMerge } from './history'
 import { requireRecording } from './recording-owner'
 import { BUNDLE_FORMAT, BUNDLE_VERSION } from './scenario-records'
 
 export const FORMAT = 'aurora-electrons-history'
-export const VERSION = 1
+export const VERSION = 2
+// The first version whose campaigns say they record the colony files of every branch (`colonyCoverage`). A version 1 backup never says so, and a restore of it never removes colony series.
+export const COLONY_COVERAGE_VERSION = 2
 export const POLICIES = ['merge', 'replace', 'keep']
 export const ANNOTATION_POLICIES = ['merge', 'keep']
 export const ASSOCIATION_POLICIES = ['merge', 'keep']
@@ -25,7 +30,7 @@ export const MAX_BYTES = 50 * 1024 * 1024
 // The pre-restore backups kept, newest first.
 export const KEPT_BACKUPS = 3
 
-export const LIMITS = Object.freeze({ campaigns: 200, branches: 200, races: 64, views: 64, aliens: 512, names: 1000, gameIds: 100, attachments: 50, pending: 50, checkpoints: 100000, installations: 500, bundles: 1000, records: 100000, text: 2000 })
+export const LIMITS = Object.freeze({ campaigns: 200, branches: 200, races: 64, views: 64, aliens: 512, names: 1000, gameIds: 100, attachments: 50, pending: 50, checkpoints: 100000, installations: 500, bundles: 1000, records: 100000, text: 2000, colonies: 1000 })
 
 // What each figure of a race's snapshot is measured in, and of a snapshot of what a race knows of another.
 export const UNITS = Object.freeze({
@@ -305,6 +310,83 @@ const checkFile = (file, where, units) => {
   }
 }
 
+// One colony of a colony snapshot: [PopulationID, state, ...values], the values being the figures of COLONY_COLUMNS for an observed colony (a stored value or null), the owner for one another race holds, and none for the other states.
+const checkColonyEntry = (entry, where) => {
+  const state = Array.isArray(entry) ? entry[1] : null
+  const known = Array.isArray(entry) && Number.isSafeInteger(entry[0]) && entry[0] > 0
+  const holds = state === COLONY_STATES.OBSERVED ? known && entry.length === 2 + COLONY_COLUMNS.length && entry.slice(2).every(nullableNumber) : state === COLONY_STATES.OTHER_RACE ? known && entry.length === 3 && isCount(entry[2]) : [COLONY_STATES.GONE, COLONY_STATES.DIFFERENT, COLONY_STATES.UNAVAILABLE].includes(state) && known && entry.length === 2
+
+  if (!holds) {
+    bad(where, 'is not a colony: its ID, a state from 0 to 4 and the values that state holds')
+  }
+}
+
+const colonyBefore = (series, index) => series.snapshots[index - 1].t
+
+const checkColonyFile = (file, where) => {
+  if (!isObject(file)) {
+    bad(where, 'is not an object')
+  }
+
+  allowed(file, ['columns', 'races'], where)
+
+  if (canonical(file.columns) !== canonical(COLONY_COLUMNS)) {
+    bad(where, 'its columns are not the figures this version records, in this order')
+  }
+
+  if (!isObject(file.races) || Object.keys(file.races).length > LIMITS.races) {
+    bad(where, 'races is not a map of at most 64 races')
+  }
+
+  Object.entries(file.races).forEach(([RaceID, series]) => {
+    const here = `${where} race ${RaceID}`
+
+    if (!NUMERIC.test(RaceID) || !isObject(series)) {
+      bad(here, 'is not a series under a race id')
+    }
+
+    allowed(series, ['snapshots', 'thinning'], here)
+
+    if (series.thinning !== undefined && readThinning(series.thinning) === null) {
+      bad(here, 'its thinning record is not valid')
+    }
+
+    if (!Array.isArray(series.snapshots) || series.snapshots.length > MAX_SNAPSHOTS) {
+      bad(here, `snapshots is not a list of at most ${MAX_SNAPSHOTS}`)
+    }
+
+    series.snapshots.forEach((snapshot, index) => {
+      const at = `${here} snapshot ${index}`
+
+      if (!isObject(snapshot)) {
+        bad(at, 'is not an object')
+      }
+
+      allowed(snapshot, ['t', 'n', 'd', 'revised', 'colonies'], at)
+
+      if (!isNumber(snapshot.t) || snapshot.t < 0 || !isCount(snapshot.n) || typeof snapshot.d !== 'string' || snapshot.d.length > 64 || (snapshot.revised !== undefined && snapshot.revised !== true)) {
+        bad(at, 'has no game time, increment count and digest, or marks a revision that is not true')
+      }
+
+      if (index > 0 && !(snapshot.t > colonyBefore(series, index))) {
+        bad(here, `snapshot ${index} is not later than the one before it`)
+      }
+
+      if (!Array.isArray(snapshot.colonies) || snapshot.colonies.length > LIMITS.colonies) {
+        bad(at, `colonies is not a list of at most ${LIMITS.colonies}`)
+      }
+
+      snapshot.colonies.forEach((entry, position) => {
+        checkColonyEntry(entry, `${at} colony ${position}`)
+
+        if (position > 0 && !(entry[0] > snapshot.colonies[position - 1][0])) {
+          bad(at, `colony ${position} is not after the one before it`)
+        }
+      })
+    })
+  })
+}
+
 const checkTip = (tip, where) => {
   if (!isObject(tip) || !isCount(tip.n) || typeof tip.digest !== 'string' || !Array.isArray(tip.checkpoints) || tip.checkpoints.length > LIMITS.checkpoints || !tip.checkpoints.every((digest) => typeof digest === 'string') || (tip.t !== undefined && !nullableNumber(tip.t)) || !plainJson(tip)) {
     bad(where, 'is not a ledger tip')
@@ -470,7 +552,7 @@ const checkEnvelope = (envelope) => {
     }
 
     ids.add(campaign.id)
-    allowed(campaign, ['id', 'entry', 'branches', 'annotations'], where)
+    allowed(campaign, ['id', 'entry', 'branches', 'annotations', 'colonies', 'colonyCoverage'], where)
     checkEntry(campaign.entry, campaign.id, `Campaign ${campaign.id}`)
     entries[campaign.id] = campaign.entry
 
@@ -480,7 +562,19 @@ const checkEnvelope = (envelope) => {
       bad(`Campaign ${campaign.id}`, 'does not hold a history file for each of its branches, and no other')
     }
 
+    if (envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined) {
+      bad(`Campaign ${campaign.id}`, envelope.version >= COLONY_COVERAGE_VERSION ? 'its colony coverage is not true' : `holds colonyCoverage, which a version ${envelope.version} backup does not state`)
+    }
+
     branchIds.forEach((branchId) => checkFile(campaign.branches[branchId], `Campaign ${campaign.id} branch ${branchId}`, envelope.units))
+
+    if (campaign.colonies !== undefined) {
+      if (!isObject(campaign.colonies) || !Object.keys(campaign.colonies).length || !Object.keys(campaign.colonies).every((branchId) => branchIds.includes(branchId))) {
+        bad(`Campaign ${campaign.id}`, 'its colony series are not a map of the branches it has')
+      }
+
+      Object.entries(campaign.colonies).forEach(([branchId, file]) => checkColonyFile(file, `Campaign ${campaign.id} branch ${branchId} colony series`))
+    }
 
     if (!Array.isArray(campaign.annotations) || campaign.annotations.length > LIMITS.bundles) {
       bad(`Campaign ${campaign.id}`, 'its annotations are not a list of bundles')
@@ -601,11 +695,25 @@ export const buildBackup = (io, { campaignIds = null, at, annotations = null } =
     }
 
     const branches = {}
+    const colonies = {}
 
     Object.keys(entry.branches).sort(branchOrder).forEach((branchId) => {
       const file = io.file(branchFileName(id, branchId)).store
 
       branches[branchId] = withCoverage(isObject(file) ? clone(file) : {})
+
+      const series = io.file(colonyFileName(id, branchId)).store
+
+      // Only a store that is not there counts as no colony series. A colony file this version cannot read is never left out of a backup that says it covers the colony files: such a backup would remove the stored series of a restore it should not.
+      if (series !== undefined && series !== null && !(isObject(series) && Object.keys(series).length === 0)) {
+        try {
+          checkColonyFile(series, `Campaign ${id} branch ${branchId} colony series`)
+        } catch (error) {
+          throw error instanceof Rejected ? new Rejected(`The stored colony series of branch ${branchId} of campaign ${id} cannot be read (${error.message}), so a backup that covers them cannot be made`) : error
+        }
+
+        colonies[branchId] = { columns: [...COLONY_COLUMNS], races: clone(series.races) }
+      }
     })
 
     const bundles = annotations ? annotations.groups(id).map((group) => {
@@ -614,7 +722,7 @@ export const buildBackup = (io, { campaignIds = null, at, annotations = null } =
       return { ...bundle, records: bundle.records.filter((record) => record.association && record.association.branchId === group.branchId) }
     }).filter((bundle) => bundle.records.length) : []
 
-    return { id, entry: clone(entry), branches, annotations: bundles }
+    return { id, entry: clone(entry), branches, colonyCoverage: true, ...(Object.keys(colonies).length ? { colonies } : {}), annotations: bundles }
   })
   const plain = clone(campaigns)
   const envelope = {
@@ -1006,6 +1114,46 @@ const planGroup = (annotations, campaignId, bundle, locked) => {
   }
 }
 
+// The colony series of one branch restored by the policy and the races its history file has: `{ view, write }`. `view` is what the preview shows ({ name, policy, requested, locked, status, stored, series, totals }, counted as the history file's own row) and `write` the file to write, or null when nothing changes. A branch whose history file is kept, locked or not readable keeps its colony file. `offered` is the branch's colony file in the backup, or null when it has none; `covered` is whether the backup records the colony files of its branches (`colonyCoverage`), so that none is a known state and not an omission. A covered backup is restored as it says, a Replace removing the stored series it lacks and a file it has none of (left empty, as a branch with no file is); a backup that is not covered says nothing about a series it lacks, so a Replace keeps those.
+const planColonies = (io, { campaignId, branchId, offered, covered, row }) => {
+  const name = colonyFileName(campaignId, branchId)
+  const current = io.file(name).store
+  const stored = isObject(current) ? current : {}
+  const view = { name, requested: row.requested, policy: row.policy, locked: row.locked, status: 'kept', stored: Object.keys(stored).length > 0, series: [], totals: { stored: 0, backup: 0, added: 0, identical: 0, conflicts: 0, removed: 0, thinned: 0, result: 0 } }
+
+  if (!view.locked && !usableFile(stored)) {
+    view.policy = 'keep'
+    view.locked = 'the stored colony file is not one this version reads'
+  }
+
+  if (view.locked) {
+    return { view, write: null }
+  }
+
+  const present = offered ? offered.races : {}
+  const given = { races: view.policy === 'replace' && !covered ? { ...(isObject(stored.races) ? stored.races : {}), ...present } : present }
+  const planned = planFile(stored, given, { policy: view.policy, races: row.races })
+  const result = isObject(planned.file.races) ? planned.file.races : {}
+  const emptied = !offered && !Object.keys(result).length
+  const file = emptied ? (isObject(stored.races) && Object.keys(stored.races).length ? {} : stored) : { columns: [...COLONY_COLUMNS], races: result }
+
+  view.series = planned.rows.map((item) => ({ ...item, label: `colonies of ${item.label}` }))
+  view.totals = planned.totals
+
+  if (view.policy !== 'keep' && canonical(file) !== canonical(stored)) {
+    view.status = view.stored ? 'changes' : 'new'
+
+    return { view, write: { name, value: file, from: hashValue(stored) } }
+  }
+
+  view.status = view.policy === 'keep' ? 'kept' : 'unchanged'
+
+  return { view, write: null }
+}
+
+// A branch's history file and its colony series, as the files a restore counts and asks a confirmation for.
+const filed = (campaign) => campaign.files.flatMap((file) => (file.colonies ? [file, file.colonies] : [file]))
+
 const NO_CHANGE = Object.freeze({ names: 0, gameIds: 0, attachments: 0, branches: 0, tips: 0, anchor: 0 })
 
 const planCampaign = ({ io, registry, given, choice, annotations }) => {
@@ -1092,6 +1240,21 @@ const planCampaign = ({ io, registry, given, choice, annotations }) => {
       }
     }
 
+    const offered = isObject(given.colonies) && isObject(given.colonies[branchId]) ? given.colonies[branchId] : null
+
+    const covered = given.colonyCoverage === true
+    const heldColonies = io.file(colonyFileName(given.id, branchId)).store
+
+    if (offered || (covered && isObject(heldColonies) && isObject(heldColonies.races) && Object.keys(heldColonies.races).length > 0)) {
+      const colonies = planColonies(io, { campaignId: given.id, branchId, offered, covered, row })
+
+      row.colonies = colonies.view
+
+      if (colonies.write) {
+        writes.files.push(colonies.write)
+      }
+    }
+
     files.push(row)
   })
 
@@ -1145,7 +1308,7 @@ export const planRestore = ({ io, envelope, choices = {}, annotations = null }) 
   const confirmations = []
 
   campaigns.forEach((campaign) => {
-    const removed = campaign.files.filter((file) => file.policy === 'replace').reduce((sum, file) => sum + file.totals.removed + file.totals.conflicts, 0)
+    const removed = filed(campaign).filter((file) => file.policy === 'replace').reduce((sum, file) => sum + file.totals.removed + file.totals.conflicts, 0)
 
     if (removed) {
       confirmations.push(`Replacing the history of "${campaign.name}" drops or overwrites ${removed} stored snapshot${removed === 1 ? '' : 's'}`)
@@ -1159,10 +1322,10 @@ export const planRestore = ({ io, envelope, choices = {}, annotations = null }) 
   const affected = planned.filter((campaign) => campaign.stored && (campaign.entry || campaign.writes.files.length || campaign.writes.imports.length)).map((campaign) => campaign.view.id)
   const totals = campaigns.reduce((sum, campaign) => ({
     campaigns: sum.campaigns + (campaign.skipped ? 0 : 1),
-    files: sum.files + campaign.files.filter((file) => file.status === 'changes' || file.status === 'new').length,
-    added: sum.added + campaign.files.reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.added), 0),
-    conflicts: sum.conflicts + campaign.files.reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.conflicts), 0),
-    removed: sum.removed + campaign.files.reduce((total, file) => total + (file.policy === 'replace' ? file.totals.removed : 0), 0),
+    files: sum.files + filed(campaign).filter((file) => file.status === 'changes' || file.status === 'new').length,
+    added: sum.added + filed(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.added), 0),
+    conflicts: sum.conflicts + filed(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.conflicts), 0),
+    removed: sum.removed + filed(campaign).reduce((total, file) => total + (file.policy === 'replace' ? file.totals.removed : 0), 0),
     annotations: sum.annotations + campaign.annotations.groups.reduce((total, group) => total + group.add, 0),
     registry: sum.registry + (campaign.association.changed ? 1 : 0),
   }), { campaigns: 0, files: 0, added: 0, conflicts: 0, removed: 0, annotations: 0, registry: 0 })

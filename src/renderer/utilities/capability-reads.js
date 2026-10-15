@@ -199,6 +199,7 @@ export const READS = {
     orders: { label: 'stabilisation orders', reads: 'FCT_Fleet(FleetID FleetName) FCT_MoveOrders(Arrived DestinationID FleetID GameID MoveActionID MoveOrder RaceID TimeRequired)' },
   },
   '/history': {
+    ColonySeries: { label: 'the colony series', reads: 'FCT_Population(GameID PopName Population PopulationID RaceID SystemBodyID)' },
     page: { label: 'the page\'s other reads', reads: 'DIM_PlanetaryInstallation(Name PlanetaryInstallationID) DIM_TechType(Description TechTypeID) FCT_Fleet(FleetID FleetName GameID RaceID SystemID) FCT_FleetHistory(Description FleetID GameID GameTime) FCT_GameLog(EventType GameID IDType IncrementID MessageText PopulationID RaceID SystemID Time Xcor Ycor) FCT_Population(GameID PopName PopulationID RaceID SpeciesID SystemBodyID SystemID) FCT_RaceSysSurvey(DiscoveredTime GameID Name RaceID SystemID) FCT_RaceTech(GameID RaceID TechID) FCT_Ship(Constructed GameID RaceID ShipID ShipName) FCT_System(GameID Stars SystemID SystemNumber) FCT_TechSystem(AdditionalInfo AdditionalInfo2 DevelopCost GameID Name RaceID TechSystemID TechTypeID)' },
   },
   '/commanders': {

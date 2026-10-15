@@ -1,7 +1,7 @@
 // What Settings resets: the views the pages remember, in the settings store. A campaign's empire keeps its values under `campaign.<campaign id>.race.<RaceID>` (see utilities/campaign.js); the `game` subtree is a history of the app before campaigns, kept as the original of the migration, and no reset reads or changes it.
 
-// What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, and the Galaxy Map's pinned systems and clusters. A reset keeps them too.
-export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups']
+// What an empire's pages keep that isn't a view: the Warnings mutes and what each check listed at the last visit, the Game Log's last event seen, the Galaxy Map's pinned systems and clusters, and the colonies the History page follows. A reset keeps them too.
+export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups', 'historyColonies']
 
 // The top-level keys that are not app-wide views: the campaigns' and the pre-campaign records of empires.
 const EMPIRE_ROOTS = ['campaign', 'game']

@@ -247,6 +247,8 @@
         </div>
       </v-card>
 
+      <colony-series :database="database" :config="config" :game-id="GameID" :race-id="RaceID" :game-time="GameTime" :resolved="resolved" :view="colonyBudget" :cap="retentionView.profile.cap" :date="date" :separator="separator" @changed="colonyChanges++" />
+
       <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned." elevation="1">
         <div class="panel-head">
           <span>Retention</span>
@@ -259,6 +261,7 @@
           <div class="history-retention__row"><span class="history-retention__label">Thinning</span><span class="history-retention__value" data-retention-thinning :data-status="retentionView.status">{{ retentionView.thinning }}.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Size, measured</span><span class="history-retention__value" data-retention-measured>{{ size(retentionView.measured) }} for this race's series, {{ size(retentionView.file) }} for the whole branch file. Measured as compact JSON; the file on disk is larger by its indentation.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Size, predicted</span><span class="history-retention__value" data-retention-predicted>About {{ size(retentionView.current.bytesAtCap) }} for this series once it holds {{ count(retentionView.profile.cap, 0) }} samples, predicted from the average size of its samples.</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Colony series</span><span class="history-retention__value" data-retention-colonies>{{ colonyBudgetText }}</span></div>
 
           <div class="history-retention__profiles mt-3">
             <table>
@@ -322,7 +325,7 @@
 
           <div v-if="backupPlan" class="history-backup__preview mt-3">
             <div class="font-weight-medium">{{ backupFile }}<span class="caption text--secondary ml-2">made {{ stamp(backupPlan.preview.exportedAt) }}</span></div>
-            <div class="caption text--secondary">Nothing is written until the restore is applied. Merge keeps what is stored where both have a snapshot at the same game time; Replace takes the backup's and drops stored snapshots it lacks; Keep leaves the target as it is.</div>
+            <div class="caption text--secondary">Nothing is written until the restore is applied. Merge keeps what is stored where both have a snapshot at the same game time; Replace takes the backup's and drops stored snapshots it lacks; Keep leaves the target as it is. A branch's colony series are restored under the same policy and races, branch by branch and never merged with another branch's; Replace drops the colony series the backup lacks, except for a backup made before colony series were recorded in it, which says nothing about them. Which colonies are followed is a setting of the race and is not in the backup.</div>
 
             <div v-for="item in backupPlan.preview.campaigns" :key="item.id" class="history-backup__campaign mt-3">
               <div class="history-backup__title">
@@ -381,12 +384,17 @@
                       <td class="text-right">{{ count(file.totals.thinned) }}</td>
                       <td class="text-right">{{ count(file.totals.result) }}</td>
                     </tr>
-                    <tr v-if="file.locked || file.series.length" :key="`${file.branchId}-detail`" class="history-backup__detail">
+                    <tr v-if="file.locked || file.series.length || file.colonies" :key="`${file.branchId}-detail`" class="history-backup__detail">
                       <td colspan="11">
                         <div v-if="file.locked" class="caption text--secondary">Kept as stored: {{ file.locked }}.</div>
                         <details v-if="file.series.length">
                           <summary class="caption text--secondary">Every series in branch {{ file.branchId }}, one by one</summary>
                           <div v-for="row in file.series" :key="row.key" class="caption">{{ row.label }}: {{ count(row.stored) }} stored, {{ count(row.backup) }} in the backup, {{ count(row.added) }} added, {{ count(row.identical) }} the same, {{ count(row.conflicts) }} in conflict<template v-if="file.policy === 'replace'">, {{ count(row.removed) }} removed</template><template v-if="row.thinned">, {{ count(row.thinned) }} thinned</template></div>
+                        </details>
+                        <div v-if="file.colonies" class="caption" data-backup-colonies>Colony series of branch {{ file.branchId }}: {{ file.colonies.status === 'new' ? 'new here' : file.colonies.status === 'changes' ? 'changed' : file.colonies.status === 'unchanged' ? 'stored already' : 'kept as stored' }}; {{ count(file.colonies.totals.stored) }} snapshots stored, {{ count(file.colonies.totals.backup) }} in the backup, {{ count(file.colonies.policy === 'keep' ? 0 : file.colonies.totals.added) }} added, {{ count(file.colonies.totals.identical) }} the same, {{ count(file.colonies.totals.conflicts) }} in conflict<template v-if="file.colonies.policy === 'replace'">, {{ count(file.colonies.totals.removed) }} removed</template><template v-if="file.colonies.totals.thinned">, {{ count(file.colonies.totals.thinned) }} thinned</template><template v-if="file.colonies.locked"> ({{ file.colonies.locked }})</template></div>
+                        <details v-if="file.colonies && file.colonies.series.length">
+                          <summary class="caption text--secondary">Every colony series in branch {{ file.branchId }}, one by one</summary>
+                          <div v-for="row in file.colonies.series" :key="row.key" class="caption">{{ row.label }}: {{ count(row.stored) }} stored, {{ count(row.backup) }} in the backup, {{ count(row.added) }} added, {{ count(row.identical) }} the same, {{ count(row.conflicts) }} in conflict<template v-if="file.colonies.policy === 'replace'">, {{ count(row.removed) }} removed</template><template v-if="row.thinned">, {{ count(row.thinned) }} thinned</template></div>
                         </details>
                       </td>
                     </tr>
@@ -437,7 +445,7 @@
       <v-dialog v-model="confirmClear" max-width="440">
         <v-card>
           <v-card-title>Clear this race's history?</v-card-title>
-          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>. The save isn't touched, and recording starts again at the next save.</v-card-text>
+          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>, and the colony series kept with them. The colonies chosen to follow stay chosen. The save isn't touched, and recording starts again at the next save.</v-card-text>
           <v-card-actions>
             <v-spacer />
             <v-btn text @click="confirmClear = false">Cancel</v-btn>
@@ -456,6 +464,7 @@ import { mapActions, mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartFont, chartTheme, seriesIdentity, withAlpha } from '../components/charts/theme'
+import ColonySeries from '../components/history/ColonySeries.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -464,8 +473,9 @@ import { whenFontsReady } from '../utilities/appearance-font'
 import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
+import { COLONY_BYTES, chosenNow, colonyEstimate, colonyWish } from '../utilities/colony-series'
 import { registerEconomyNotes } from '../utilities/economy-notes'
-import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
+import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, colonyStore, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { captionLines, drawExport, exportCsv, exportModel } from '../utilities/history-export'
 import { LINK_STATUS_TEXT, LINK_TYPES, LINK_TYPE_KEYS, MILESTONE_TYPES, TEXT_LENGTH, adoptMilestone, branchLineage, deleteMilestone, gameDateText, gameSecondsOf, incrementsOf, linkChoices, loadObjects, markersOf, moveMilestone, nearestSample, readAttachedMilestones, readMilestones, registerMilestones, saveMilestone, scopeOf as milestoneScopeOf, typeText, withinSamples } from '../utilities/history-milestones'
@@ -549,7 +559,7 @@ const linkText = (link) => (link ? `${link.label}: ${link.name || link.id}${link
 
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, ColonySeries, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     persistedView({
       view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
@@ -573,6 +583,8 @@ export default {
       spyNPR: false,
       // Bumped when this page clears the history, so `gameHistory` re-reads it.
       cleared: 0,
+      // Bumped when the Colony series panel changes what is followed, so the settings are read again.
+      colonyChanges: 0,
       // The branch picked on this page; the settled branch until one is.
       branchChoice: null,
       // Bumped when this page changes the campaign registry, so the Campaign panel re-reads it.
@@ -1016,6 +1028,72 @@ export default {
       }
     },
 
+    // The shown branch's colony file as stored, or why it could not be read: { file, error }. The file is null when the branch has none; the error is '' when the read worked.
+    colonyRecord() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.cleared + this.campaignChanges + this.colonyChanges
+
+      if (!this.GameID || !this.RaceID || !this.historyRecorded || !this.resolved) {
+        return { file: null, error: '' }
+      }
+
+      try {
+        const file = colonyStore(this.resolved.campaignId, this.shownBranchId).store
+
+        return { file: file && file.races ? file : null, error: '' }
+      } catch (error) {
+        return { file: null, error: error.message }
+      }
+    },
+
+    // The colonies this race follows (Colony series panel): the entries kept in the settings for the settled campaign, the measured size of the shown branch's colony file and the predicted size at the retention cap. `error` is why the settings or the file could not be read, else ''; a figure not known is null, never 0.
+    colonyBudget() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.cleared + this.campaignChanges + this.colonyChanges
+
+      if (!this.GameID || !this.RaceID || !this.historyRecorded || !this.resolved) {
+        return null
+      }
+
+      const cap = this.retentionView.profile.cap
+
+      try {
+        const io = campaignStorage(this.config)
+        const wish = colonyWish(io.settings.store, readRegistry(io).campaigns)
+        const entries = wish[this.resolved.campaignId] ? wish[this.resolved.campaignId].races[this.RaceID] || [] : []
+        const followed = chosenNow(entries).length
+
+        if (this.colonyRecord.error) {
+          throw new Error(this.colonyRecord.error)
+        }
+
+        const file = this.colonyRecord.file
+        const series = file ? file.races[this.RaceID] : null
+
+        return { entries, followed, dropped: new Set(entries.filter((entry) => entry.until !== undefined).map((entry) => entry.id)).size, measured: series ? measuredBytes(series) : null, snapshots: series ? series.snapshots.length : 0, predicted: colonyEstimate({ snapshots: cap, colonies: followed }), error: '' }
+      } catch (error) {
+        return { entries: [], followed: 0, dropped: 0, measured: null, snapshots: 0, predicted: null, error: error.message }
+      }
+    },
+
+    // The Retention panel's line on the colony series: measured and predicted at the cap, or why neither is known.
+    colonyBudgetText() {
+      const budget = this.colonyBudget
+
+      if (!budget) {
+        return 'Unavailable: the campaign of the open save is not settled.'
+      }
+
+      if (budget.error) {
+        return `Unavailable: ${budget.error}.`
+      }
+
+      const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured in ${this.count(budget.snapshots, 0)} snapshots`
+      const predicted = budget.followed ? `about ${this.size(budget.predicted)} predicted for ${this.count(budget.followed, 0)} ${budget.followed === 1 ? 'colony' : 'colonies'} at ${this.count(this.retentionView.profile.cap, 0)} snapshots` : 'none followed, so none predicted'
+
+      return `${measured}; ${predicted}. Counted with the history in the retention budget; each colony takes about ${COLONY_BYTES} bytes a snapshot.`
+    },
+
     // The profile picked and not yet confirmed: what the recorder's next save would do to the shown branch under it (the new sample goes in, then every thinning pass runs, so that is more than thinning the stored samples alone when the count sits at a pass boundary), the figure for the stored samples as they are now labelled as such, and what it cannot undo. Null when none is waiting.
     retentionChange() {
       const picked = this.retentionPick ? retentionProfile(this.retentionPick) : null
@@ -1026,12 +1104,17 @@ export default {
 
       const current = retentionProfile(this.retentionProfile)
       const held = seriesOverCap(this.gameHistory, picked.cap)
+      const colonyHeld = this.colonyRecord.file ? seriesOverCap(this.colonyRecord.file, picked.cap) : null
       const cap = this.count(picked.cap, 0)
       const stored = held.over ? ` (${held.over} ${held.over === 1 ? 'holds' : 'hold'} more than ${cap} now, and thinning only the samples stored now would drop ${this.count(held.dropped, 0)})` : ''
       const replaced = held.next.replaced ? ` The figure also allows for an observation that matches the intelligence sample before it, which removes the sample stored at its time before the thinning runs; that adds up to ${this.count(held.next.replaced, 0)} to what thinning alone would discard.` : ''
-      const consequence = held.next.thins ? `The next save thins ${held.next.thins} of the ${held.series} series in this branch to at most ${cap} samples and discards up to ${this.count(held.next.dropped, 0)} stored samples in all${stored}. A series is thinned by dropping every other sample of its older half, repeated until it fits, once the new sample is in; the newest samples stay.${replaced}` : `No series in this branch holds as many as ${cap} samples, so the next save thins nothing. A series is thinned when the recorder saves a sample that takes it past ${cap}.`
+      const none = colonyHeld && colonyHeld.next.thins ? `No series of the empire history in this branch holds as many as ${cap} samples, so the next save thins none of them.` : `No series in this branch holds as many as ${cap} samples, so the next save thins nothing.`
+      const consequence = held.next.thins ? `The next save thins ${held.next.thins} of the ${held.series} series in this branch to at most ${cap} samples and discards up to ${this.count(held.next.dropped, 0)} stored samples in all${stored}. A series is thinned by dropping every other sample of its older half, repeated until it fits, once the new sample is in; the newest samples stay.${replaced}` : `${none} A series is thinned when the recorder saves a sample that takes it past ${cap}.`
+      const unthinned = ` No colony series of this branch holds as many as ${cap} samples, so none of them is thinned.`
+      const thinned = colonyHeld ? ` The next save thins ${colonyHeld.next.thins} of the ${colonyHeld.series} colony series of this branch to at most ${cap} samples and discards up to ${this.count(colonyHeld.next.dropped, 0)} stored samples in all.` : ''
+      const colonies = this.colonyRecord.error ? ` The colony series of this branch could not be read (${this.colonyRecord.error}), so whether they are thinned is not shown.` : colonyHeld && colonyHeld.next.thins ? thinned : colonyHeld ? unthinned : ''
 
-      return { picked, current, text: `${consequence} Samples that are already thinned are gone for good: a larger cap keeps the samples observed from now on and never brings them back.` }
+      return { picked, current, text: `${consequence}${colonies} Samples that are already thinned are gone for good: a larger cap keeps the samples observed from now on and never brings them back.` }
     },
 
     // Whether the game's start year is known, which the calendar year of a snapshot needs.

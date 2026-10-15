@@ -3,7 +3,8 @@
 import Config from 'electron-store'
 
 import { toBoolean, toNumber } from './aurora'
-import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readThinning, settle, witnessOf } from './campaign'
+import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readRegistry, readThinning, settle, witnessOf, writeRegistry } from './campaign'
+import { COLONY_COLUMNS, colonyBase, colonyChosen, colonyFileName, colonyForkFile, colonyRows, colonySnapshot, colonyWish, entriesAt, idsToRead, joinColonies, readColonies } from './colony-series'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
@@ -235,22 +236,33 @@ export const registryStore = () => openStore(HISTORY_FOLDER, 'campaigns')
 // The history of one branch of a campaign, a store with `.store`, `.get(path, default)` and `.path`.
 export const branchStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, branchFileName(campaignId, branchId))
 
+// The colony series of one branch (utilities/colony-series.js), beside its branch file: a store with `.store`, `.get(path, default)` and `.path`, empty until a colony is chosen and captured.
+export const colonyStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, colonyFileName(campaignId, branchId))
+
 // The branch a page of one campaign shows and an answer attaches to: the one the player picked when the campaign has it, else the branch the open save settled to (which stays where the recorder put it).
 export const shownBranch = (branchIds, picked, settled) => (picked && branchIds.includes(picked) ? picked : settled)
 
-// Removes one race's history from one branch file, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
+// Removes one race's history from one branch file, and its colony series in the branch's colony file, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
 export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegistry(() => {
   const store = branchStore(campaignId, branchId)
   const history = store.store
+  const series = colonyStore(campaignId, branchId)
+  const colonies = series.store
+  let removed = false
 
-  if (!history.races || !history.races[RaceID]) {
-    return false
+  if (history.races && history.races[RaceID]) {
+    delete history.races[RaceID]
+    store.store = history
+    removed = true
   }
 
-  delete history.races[RaceID]
-  store.store = history
+  if (colonies.races && colonies.races[RaceID]) {
+    delete colonies.races[RaceID]
+    series.store = colonies
+    removed = true
+  }
 
-  return true
+  return removed
 })
 
 let appSettings = null
@@ -528,7 +540,7 @@ export const sparseColumns = (snapshots, note) => ({
 // The snapshots with `snapshot` in time order, thinned to `limit` (see `thinCounted`): it takes the place of one at the same game time, and none at another time is touched, so a save older than what is recorded lands in the past of the record and the later snapshots stay.
 const withSnapshot = (snapshots, snapshot, limit) => thinCounted([...snapshots.filter((existing) => existing.t !== snapshot.t), snapshot].sort((a, b) => a.t - b.t), limit)
 
-// How a branch's history file stands against a cap: { series, over, dropped, next: { thins, dropped, replaced } }. `series` counts what it holds (every race and every alien race a race knows), `over` how many hold more snapshots than `cap` and `dropped` how many snapshots thinning the rows stored now would drop. `next` is what the recorder's next save would do, a later snapshot being added before the thinning (that is what the recorder does, so it can thin a series that holds no more than `cap` now, or more passes than thinning the stored rows alone): `thins` how many series it thins and `dropped` how many stored snapshots it discards in all, for an alien series at most, each series taking the way that discards most. An alien series whose new observation matches the snapshot before it gains no snapshot and loses the one stored at that time, which goes before the thinning runs, so the most it discards can be one more than any thinning: `replaced` is the allowance that adds to `dropped` over what thinning alone would give, not a count of the samples that can be removed (a save can remove one from each alien series that holds two or more, and a series whose thinning already discards more than that adds nothing to the allowance). A series is not counted in `thins` for that alone.
+// How a branch's history file stands against a cap: { series, over, dropped, next: { thins, dropped, replaced } }. `series` counts what it holds (every race and every alien race a race knows), `over` how many hold more snapshots than `cap` and `dropped` how many snapshots thinning the rows stored now would drop. `next` is what the recorder's next save would do, a later snapshot being added before the thinning (that is what the recorder does, so it can thin a series that holds no more than `cap` now, or more passes than thinning the stored rows alone): `thins` how many series it thins and `dropped` how many stored snapshots it discards in all, for an alien series at most, each series taking the way that discards most. An alien series whose new observation matches the snapshot before it gains no snapshot and loses the one stored at that time, which goes before the thinning runs, so the most it discards can be one more than any thinning: `replaced` is the allowance that adds to `dropped` over what thinning alone would give, not a count of the samples that can be removed (a save can remove one from each alien series that holds two or more, and a series whose thinning already discards more than that adds nothing to the allowance). A series is not counted in `thins` for that alone. A colony file has the same `races` shape, so it is measured the same way when it is passed as `history`.
 export const seriesOverCap = (history, cap) => {
   const races = Object.values(history && history.races ? history.races : {})
   const aliens = Object.values(history && history.intel ? history.intel : {}).flatMap((views) => Object.values(views))
@@ -580,6 +592,43 @@ export const mergeGame = (history, { gameName, races, intel = {} }, { limit = MA
   })
 
   return { gameName, races: merged, intel: mergedIntel }
+}
+
+// Add one save's colony snapshots to a branch's colony series (utilities/colony-series.js). `file` is the series' contents (or the seed of a forked branch, or empty); `races` is [{ RaceID, snapshot }] with each snapshot as `colonySnapshot` makes it. Returns { file, changed }: `changed` is false when nothing needs to be written. Rules:
+// - A save at a recorded game time with the same ledger (`n`) joins that snapshot (`joinColonies`): the same colonies as before change nothing and are not written again, a colony not in the stored snapshot is added, a colony that was observed and now differs replaces it and marks the snapshot `revised`, and a failed read never replaces an observation. A save at a recorded time with another `n` is another timeline, which the branch rules settle before this, so it is left out.
+// - A save older than the latest one is inserted in time order and the later snapshots stay; the snapshots are thinned to `limit` as the empire series are, and each race's record carries its thinning.
+// - A race missing from this save keeps its past.
+export const mergeColonies = (file, { races }, { limit = MAX_SNAPSHOTS, now = Date.now } = {}) => {
+  const merged = Object.fromEntries(Object.entries(file && file.races ? file.races : {}).map(([RaceID, record]) => [RaceID, { ...record, snapshots: record.snapshots || [] }]))
+  let changed = false
+
+  races.forEach(({ RaceID, snapshot }) => {
+    const previous = merged[RaceID]
+    const stored = previous ? previous.snapshots : []
+    const same = stored.find((existing) => existing.t === snapshot.t)
+    let next = snapshot
+
+    if (same) {
+      if (same.n !== snapshot.n) {
+        return
+      }
+
+      const joined = joinColonies(same.colonies, snapshot.colonies)
+
+      next = colonySnapshot({ t: same.t, n: same.n, colonies: joined.colonies, revised: Boolean(same.revised) || joined.revised })
+
+      if (next.d === same.d) {
+        return
+      }
+    }
+
+    const outcome = thinCounted([...stored.filter((existing) => existing.t !== snapshot.t), next].sort((a, b) => a.t - b.t), limit)
+
+    merged[RaceID] = withThinning({ snapshots: outcome.snapshots }, previous, outcome, now)
+    changed = true
+  })
+
+  return { file: { columns: COLONY_COLUMNS, races: merged }, changed }
 }
 
 // The sum of a column over rows, or null when any row has no stored value: a total with a missing term is unknown, not the sum of the rest. No rows is a known 0.
@@ -645,8 +694,15 @@ const withChain = (snapshot, observation) => {
   return isChain(chain) ? { ...snapshot, chain } : snapshot
 }
 
+// The colony read of one race of the pass, or null: `wish` is what the campaigns chose of colonies (colony-series.js `colonyWish`). A race with a colony chosen at the game time of the save gets one statement ({ ids, rows } or, when it failed, { ids, failed }); a race with none gets none, so a pass with no colony chosen reads and adds nothing.
+const colonyReadOf = async (database, wish, { GameID, RaceID, t }, options) => {
+  const ids = idsToRead(wish, GameID, RaceID, t)
+
+  return ids.length ? readColonies(database, { GameID, ids }, options) : null
+}
+
 // Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, observation, taken, intel }] per game of the save, `observation` being what identifies its campaign (utilities/campaign.js `observeGame`), `taken` [{ RaceID, raceName, npr, gameName, snapshot }] for each recorded race and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. `marks` is { [GameID]: [increment counts] }, the stored tips the ledger is compared at exactly. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries and one scan of the game's increments, and the history files are written after it ends.
-const readSave = (database, marks = {}) => database.transaction(async (transaction) => {
+const readSave = (database, marks = {}, wish = {}) => database.transaction(async (transaction) => {
   const options = { transaction }
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
   const [games] = await database.query(GAMES_SQL, options)
@@ -670,7 +726,9 @@ const readSave = (database, marks = {}) => database.transaction(async (transacti
         const result = await takeSnapshot(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
 
         if (result) {
-          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: withChain(result.snapshot, observation) })
+          const colonyRead = await colonyReadOf(database, wish, { GameID, RaceID: race.RaceID, t: result.snapshot.t }, options)
+
+          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: withChain(result.snapshot, observation), ...(colonyRead ? { colonyRead } : {}) })
           intel[race.RaceID] = await takeIntel(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
         }
       }
@@ -715,7 +773,9 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
 
   const tipsOf = () => {
     try {
-      return { marks: marksOf(storage) }
+      const settings = storage.settings ? storage.settings.store : null
+
+      return { marks: marksOf(storage), wish: colonyChosen(settings) ? colonyWish(settings, readRegistry(storage).campaigns) : {} }
     } catch (error) {
       return { failure: { recorded: 0, failed: [{ GameID: null, stage: 'registry', error }], superseded: false } }
     }
@@ -728,7 +788,8 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
   }
 
   // The save is read outside the registry lock, so a read that hangs cannot hold every window's recording up.
-  let { read, failed } = await readSave(database, first.marks)
+  let { read, failed } = await readSave(database, first.marks, first.wish)
+  let wish = first.wish
   let recorded = 0
 
   // The step of this pass that reads and changes the registry is taken alone under the registry lock shared by every database. A window of another database may have recorded since the tips were read: the save is then read again, here, against the tips now stored (a save read against older tips is settled on a coarser comparison than the tips need).
@@ -744,7 +805,8 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
     }
 
     if (JSON.stringify(current.marks) !== JSON.stringify(first.marks)) {
-      ;({ read, failed } = await readSave(database, current.marks))
+      ;({ read, failed } = await readSave(database, current.marks, current.wish))
+      wish = current.wish
     }
 
     for (const { GameID, observation, taken, intel } of read) {
@@ -759,6 +821,24 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
 
         onResolved(GameID, resolution)
 
+        // A branch this pass created takes the colony series of its parent up to the fork now, so what the parent does with them later (a clear, a revision, a colony followed on an earlier save) never reaches the child. Nothing is written when the parent holds none, but the branch is marked seeded either way, so an empty seed stays empty. The mark is written after the seed file: a pass that stops between the two leaves the branch unmarked, which is seeded from its parent at its first colony write.
+        if (resolution.forked) {
+          const registry = readRegistry(storage)
+          const campaign = registry.campaigns[resolution.campaignId]
+          const given = colonyForkFile(storage, campaign, resolution.branchId)
+
+          if (given) {
+            guard()
+            storage.file(colonyFileName(resolution.campaignId, resolution.branchId)).store = given
+          }
+
+          if (campaign.branches[resolution.branchId] && campaign.branches[resolution.branchId].coloniesSeeded !== true) {
+            campaign.branches[resolution.branchId].coloniesSeeded = true
+            guard()
+            writeRegistry(storage, registry)
+          }
+        }
+
         if (taken.length) {
           guard()
 
@@ -767,6 +847,25 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
           store.store = mergeGame(store.store, { gameName: observation.gameName, races: taken, intel }, { limit: retentionOfSettings(storage.settings).cap, now })
           recorded += taken.length
           onSaved(GameID)
+
+          // The colony series is written after the empire's file, behind the same guard, and only for a race with a colony chosen at this save's time in the campaign it settled to: a failed colony read is in it as not read, and never fails the empire's snapshot.
+          const captured = taken.filter(({ colonyRead }) => colonyRead).flatMap(({ RaceID, snapshot, colonyRead }) => {
+            const entries = entriesAt(wish, resolution.campaignId, RaceID, snapshot.t)
+
+            return entries.length ? [{ RaceID, snapshot: colonySnapshot({ t: snapshot.t, n: observation.count, colonies: colonyRows(entries, colonyRead) }) }] : []
+          })
+
+          if (captured.length) {
+            const series = storage.file(colonyFileName(resolution.campaignId, resolution.branchId))
+            const limit = retentionOfSettings(storage.settings).cap
+            const { file, changed } = mergeColonies(colonyBase(storage, readRegistry(storage).campaigns[resolution.campaignId], resolution.branchId), { races: captured }, { limit, now })
+
+            if (changed) {
+              guard()
+              series.store = file
+              onSaved(GameID)
+            }
+          }
         }
       } catch (error) {
         if (error.superseded) {
