@@ -8,7 +8,7 @@
   Groups, each check numbered and keyed (a mutation names the keys it must break):
   - unit: when a snooze ends and when it holds (a game date at and after its expiry and the guards before it, a declared change, an episode that is seen to end and a return that is a new one), what a failed read, a row that could not be evaluated, an id listed twice, a signature or an identity that cannot be read, an unknown clock, changed options and a save earlier than the snooze leave alone, a snooze of the whole check, what a record is made of and refused for, the stored form and the ended records kept apart, a restart, the isolation of races and campaigns, the seeding of a branch at a fork whatever the parent did since, the dates of the game, the bands and the signatures, the 24 checks that declare a material change, the signature of a damaged ship made of ids, the condition told in words, a Settings reset keeping the snoozes, the wording;
   - page: the real options of pages/warnings.vue run in Vue 2.7 without a template, over the real checks on AuroraDB.db and a store that is a plain object (a permanent mute outranks a snooze, the clock of the save, the guards of an evaluation, the store that cannot be read or written, a retry, the words of a snooze);
-  - reads: the real checks on the saves AuroraDB.db (game 140, race 784), ../AuroraDB_271_skoormit_saved.db (game 138, race 785) and the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
+  - reads: the real checks on the saves AuroraDB.db (game 140, race 784), saves/AuroraDB_271_skoormit_saved.db (game 138, race 785) and the eight saves of artifacts/falryx-sequential-and-rollback (game 141, race 791): the signatures of every row, every row snoozed and held, the identity stamps against SQL written here, a failed read, a save earlier than the snooze;
   - forks: the same eight saves through the real recorder into in-memory stores, so the registry gives the branches (a rollback and three forks); the snoozes of one branch seeded to the next and judged on the real rows of the child, against the identity of each object read independently.
   A save that is not there skips its group and says so (a skip is never agreement); only SELECTs are issued to a save, which is opened read only.
 
@@ -35,7 +35,7 @@ const FALRYX_TIMES = ['2398452450', '2590429565', '2713949950', '2740177930', '2
 
 const SAVES = {
   modded: { file: path.join(root, 'AuroraDB.db'), game: 140, race: 784 },
-  stock: { file: path.join(root, '..', 'AuroraDB_271_skoormit_saved.db'), game: 138, race: 785 },
+  stock: { file: path.join(root, 'saves', 'AuroraDB_271_skoormit_saved.db'), game: 138, race: 785 },
   ...Object.fromEntries(FALRYX_TIMES.map((time) => [`f${time}`, { file: path.join(FALRYX, `AuroraDB-${time}.db`), game: 141, race: 791 }])),
 }
 const SAVE_KEYS = Object.keys(SAVES).filter((key) => fs.existsSync(SAVES[key].file))

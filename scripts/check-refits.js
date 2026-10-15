@@ -3,7 +3,7 @@
 
   node scripts/check-refits.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785) and the other saves that are known to hold a refit task or a retool activity (../AuroraDB.db, game 138, race 785; ../AuroraDB_270_Falryx_date_issue.db, game 141, race 791; AuroraDB_Pepega.db and AuroraDB_TerranFederation.db, whose game and race are read from the save); a save that is not there is reported as not run.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and the other saves that are known to hold a refit task or a retool activity (saves/AuroraDB.db, game 138, race 785; saves/AuroraDB_270_Falryx_date_issue.db, game 141, race 791; AuroraDB_Pepega.db and AuroraDB_TerranFederation.db, whose game and race are read from the save); a save that is not there is reported as not run.
 
   It proves: the worked examples (an added component, a removal that earns no credit, a size change, A to B against B to A, the one-decimal rounding of a refit's minerals, the retool cost with and without a tooled class, the no-retool test, a yard's eligibility, an unknown figure staying unknown); and, on every save, that each stored refit task's TotalBP and minerals and each stored retool activity's RequiredBP are what the rules give for its two classes, that a stored construction task sits in a yard that takes its class, and that the retool and refit rules agree on the yards' own tooling. A save with no refit task or retool activity is reported as having nothing to compare: the designated stock and modded saves hold none. Any failed check sets exit code 1.
 */
@@ -16,9 +16,9 @@ const root = path.resolve(__dirname, '..')
 const MINERALS = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { file: '../AuroraDB.db', game: 138, race: 785 },
-  { file: '../AuroraDB_270_Falryx_date_issue.db', game: 141, race: 791 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_270_Falryx_date_issue.db', game: 141, race: 791 },
   { file: 'AuroraDB_Pepega.db', game: null, race: null },
   { file: 'AuroraDB_TerranFederation.db', game: null, race: null },
 ]

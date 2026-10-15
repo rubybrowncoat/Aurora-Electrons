@@ -75,7 +75,7 @@ let failures = 0
 let checks = 0
 
 const options = (() => {
-  const parsed = { quick: false, skipSearch: false, budgetMs: 20000, stock: { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 }, modded: { file: 'AuroraDB.db', game: 140, race: 784 } }
+  const parsed = { quick: false, skipSearch: false, budgetMs: 20000, stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 }, modded: { file: 'AuroraDB.db', game: 140, race: 784 } }
   const argv = process.argv.slice(2)
 
   for (let index = 0; index < argv.length; index++) {

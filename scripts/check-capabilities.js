@@ -6,7 +6,7 @@
   --write regenerates utilities/capability-reads.js from the renderer's sources (scripts/lib/capability-scan.js). Without it the file is compared with a fresh scan and any difference fails: a page that reads a column the file does not list would otherwise pass the preflight unchecked. Regenerate after changing a page's queries.
 
   The registry is checked against the page registry (every page that reads the save has an entry, the optional inputs are the ones a page really goes on without, every read built by name or listed without its table has columns in the registry or a stated reason, the lists those columns come from match the pages' own, soft groups exist, every gated route is a report). The preflight runs on the saves named below, opened as the app opens one (read-write mode without creating, through Sequelize), and a fixture that is not there is skipped and said so:
-  - the two real saves (AuroraDB.db, ../AuroraDB_271_skoormit_saved.db): every report supported, the formula version 2.7.x, every lookup row as expected, no diagnostic;
+  - the two real saves (AuroraDB.db, saves/AuroraDB_271_skoormit_saved.db): every report supported, the formula version 2.7.x, every lookup row as expected, no diagnostic;
   - older fixtures (2.6-shaped, the pre-2.6 ones): the reports and gates that differ are named, and what stays supported;
   - copies of a 2.7 save in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
@@ -34,7 +34,7 @@ const PLANNED_ROUTES = new Set(['/settings', '/about'])
 
 const REAL = [
   { label: 'modded 2.7 save', file: 'AuroraDB.db' },
-  { label: 'stock 2.7.1 save', file: '../AuroraDB_271_skoormit_saved.db' },
+  { label: 'stock 2.7.1 save', file: 'saves/AuroraDB_271_skoormit_saved.db' },
 ]
 
 const OLDER = [

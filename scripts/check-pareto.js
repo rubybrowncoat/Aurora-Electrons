@@ -969,7 +969,7 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {

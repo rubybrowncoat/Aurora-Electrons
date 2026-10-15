@@ -3,7 +3,7 @@
 
   node scripts/check-workforce-demand.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
 
   Worked cases on synthetic rows (labelled so) run the real functions: a factory or a yard upgrade that finishes raises the demand from the month its date falls in (a date on a month's last day counts in that month, the day after in the next), a paused, queued or stalled job adds nothing that is certain and a stalled one at most what its stock builds, a job with no date adds nothing to the lower demand and everything to the higher, a conversion adds the difference of the two installations (and lowers the demand where the new one needs fewer), a retool adds nothing, a shipyard activity the model does not know and a colony of a spied empire are unavailable and name what is missing, population orbiting aboard Arks never reaches the workers, and a colony with nothing queued gives the Outlook's own figure.
 
@@ -21,7 +21,7 @@ const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {

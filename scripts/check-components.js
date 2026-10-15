@@ -3,7 +3,7 @@
 
   node scripts/check-components.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--pair <a.db> <b.db> <GameID> <RaceID>]
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785) and the pair of 2.6 saves in the repository root that share game 138 and race 779 but are different campaigns (AuroraDB_260_1.db, AuroraDB_260_3.db); a save that is not there is reported as not run.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and the pair of 2.6 saves in the repository root that share game 138 and race 779 but are different campaigns (AuroraDB_260_1.db, AuroraDB_260_3.db); a save that is not there is reported as not run.
 
   It proves, on real rows and on synthetic manual components: the fixed-part and own-component loaders return the rows an independent query gives (the race's research through FCT_RaceTech TechID = SDComponentID, stock rows of game 0 included, fixed parts not researched left out) with every stored figure carried over, and loadStockTanks still returns what the old tank query returned; imported and manual additive components give equal basic totals and keep different provenance; a figure the save lacks stays unknown and cannot satisfy a constraint; components of other races, saves or revisions are not combined silently; and a size converts between HS and MSP only for the family the component declares. Any failed check sets exit code 1.
 */
@@ -41,7 +41,7 @@ const check = (name, ok, detail = '') => {
 
 const parseArguments = (argv) => {
   const defaults = {
-    stock: { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+    stock: { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
     modded: { file: 'AuroraDB.db', game: 140, race: 784 },
     pair: { files: ['AuroraDB_260_1.db', 'AuroraDB_260_3.db'], game: 138, race: 779 },
   }

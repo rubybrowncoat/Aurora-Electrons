@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove: steps of 0.1 and 0.05 and singleton domains give exactly the decimals of the grid, each once, with the preview's count equal to the iterator's; a bound between two steps is left out or tried once under the stated endpoint policy; negative or zero steps, NaN, infinity, text, reversed bounds, fractional counts, figures finer than the resolution and bounds outside the researched limits are refused with a message on the field that is wrong and no values; switching the display between HS and tons leaves the canonical domain as it was; and the engine grid equals the grid the search stepped before the domains existed (a copy of the old functions below is the reference), on a matrix of techs and on random limits, and equals a brute-force enumeration of the integer grid. Then every mutation of the modules (a tolerance removed, a check dropped, an endpoint left out, a unit factor changed) must fail at least one check.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save one folder up, game 138 race 785; one that is not there is reported as not run) it also builds the engine grid from the race's researched techs as the page does, compares it with the old grid, and runs the page's default search twice, once on the domain grid and once on the old grid, to prove the two searches give the same result; the digests of the default searches of the repository's saves were taken from the search before the domains existed. Exit code 1 when a check fails.
+  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also builds the engine grid from the race's researched techs as the page does, compares it with the old grid, and runs the page's default search twice, once on the domain grid and once on the old grid, to prove the two searches give the same result; the digests of the default searches of the repository's saves were taken from the search before the domains existed. Exit code 1 when a check fails.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -643,7 +643,7 @@ const ANCHORS = {
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {

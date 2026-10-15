@@ -9,4 +9,5 @@ AuroraDB*.db
 docs/
 CLAUDE.md
 artifacts/
+saves/
 __pycache__/

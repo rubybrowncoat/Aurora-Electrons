@@ -3,7 +3,7 @@
 
   node scripts/check-component-calc.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785), read-only.
 
   Worked cases on synthetic rows (labelled so) run the real functions: the stock of a component is taken once and never per hull, whole units are built, the components built with the hull stay out of the share, a project out of the queue holds its share whether running or paused, a batch is split by build points, an infeasible deadline reports the shortfall and the share needed against the share free and never allocates more than is free, a shortage of minerals is reported apart from a shortage of components, the batch's own forecast is the engine's (the share found is the least that finishes by the deadline, checked against the engine's own run of the same rows), and a change of hulls, deadline or stock gives a new answer from the same input with nothing read.
 
@@ -23,7 +23,7 @@ const { endSection, runSections, printSection } = require('./lib/check-sections'
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {

@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove: a 50,000 km/s missile with terminal guidance 1.4 and a tactical modifier of 1 against a 10,000 km/s target has 70% without jamming; a target jammer of 4 against an ECCM of 3 multiplies it by 0.75 to the whole jammer strength of 4 (not to the surplus of 1), an ECCM of 4 or more leaves it at 70, and a jammer of 0 needs no ECCM; a stationary target is hit at a capped 100 whatever the other factors; moving cases above 100 stay raw above 100 and cap at 100; the raw, capped and whole-number roll chances are separate figures; a zero, missing or invalid missile speed, a missing or negative target speed and a missing or non-positive modifier leave no value (never 0); terminal guidance under 1 counts as 1; the expected hits of a missile are its warheads times the chance of one warhead, with no survival probability, and are unavailable for a warhead count that is not a whole number of 1 or more; the curves, the scenario table and the target speed for a chance agree with the rule; every result names its registered rule, is never confirmed, and carries its assumptions. A table of random inputs is compared with a plain re-statement of the formula. Then every mutation of the module (a changed exponent, threshold, cap, factor, clamp, rounding or survival term) must fail at least one check.
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save one folder up, game 138 race 785; one that is not there is reported as not run) it also reads the race's missile designs as the Designed Tech page does and compares the scenario table of each, at a grid of target speeds, jammers and modifiers, with the plain formula; a design with no speed, a ship decoy or a second stage must have no chance (the synthetic checks cover a staged design, which neither save has). Exit code 1 when a check fails.
+  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also reads the race's missile designs as the Designed Tech page does and compares the scenario table of each, at a grid of target speeds, jammers and modifiers, with the plain formula; a design with no speed, a ship decoy or a second stage must have no chance (the synthetic checks cover a staged design, which neither save has). Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const os = require('os')
@@ -410,7 +410,7 @@ const MUTATIONS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {

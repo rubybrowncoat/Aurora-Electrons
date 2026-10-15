@@ -7,7 +7,7 @@
   - A constructed race of 24 formations, fed as deep-frozen rows to the pure builder: orphan and foreign parents, loops, templates, locations, unknown figures, totals and the tree, with the figures worked out by hand.
   - The SELECT statements, and the loader on an in-memory SQLite database that holds rows of another race, another game and another race's survey names (never a save).
   - The named saves, opened read-only: every figure of the model is compared with SQL written separately here, and a reader with one table hidden must make that comparison fail.
-  - Every other AuroraDB*.db that can be found (the repository, its folder above, and the artifacts folders), one check per game and race. A save without the tables is reported UNSUPPORTED and a save without formation rows EMPTY: neither counts as agreement.
+  - Every other AuroraDB*.db that can be found (the repository, its saves folder, and the artifacts folders), one check per game and race. A save without the tables is reported UNSUPPORTED and a save without formation rows EMPTY: neither counts as agreement.
   - Mutations of the utility in a temporary copy, each of which must make a named check fail.
 */
 const fs = require('fs')
@@ -677,7 +677,7 @@ const infoLine = (label, model) => {
 
 const OWNER_SAVES = [
   ['AuroraDB.db', 140, 784, true],
-  ['../AuroraDB_271_skoormit_saved.db', 138, 785, true],
+  ['saves/AuroraDB_271_skoormit_saved.db', 138, 785, true],
   ...['2398452450', '2590429565', '2713949950', '2740177930', '2794985390', '2810693885', '2904201340', '2930673230'].map((time) => [`artifacts/falryx-sequential-and-rollback/AuroraDB-${time}.db`, 141, 791, false]),
   ...['5.03.1940', '20.07.1956', '8.05.1961', '24.12.1962', '21.06.1973'].map((date) => [`artifacts/boscodiogigia-sequential-saves/AuroraDB ${date}.db`, 140, 784, false]),
 ]
@@ -746,7 +746,7 @@ const breadthFiles = () => {
   const artifacts = path.join(root, 'artifacts')
   const folders = fs.existsSync(artifacts) ? fs.readdirSync(artifacts, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(artifacts, entry.name)).sort() : []
 
-  return [root, path.resolve(root, '..'), ...folders].flatMap(listing)
+  return [root, path.join(root, 'saves'), ...folders].flatMap(listing)
 }
 
 const breadthSave = async (mod, file, covered) => {

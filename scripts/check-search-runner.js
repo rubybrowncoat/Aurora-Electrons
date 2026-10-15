@@ -5,7 +5,7 @@
 
   The synthetic checks need no save. They prove, on small domains that an unpruned enumeration can walk (an independent reference below: every engine of the sweep at every count, no bound, no early exit): the search's feasible candidates, by their deterministic names, are exactly the enumeration's, with its lightest, fastest and cheapest set, its ranked list, and frontiers that no feasible candidate beats or escapes, for custom count limits, the endpoint policy at the limits, each kind of engine, one of the race's own engines, range and endurance targets, no target, a speed no engine reaches and a share nothing fits in; the counts add up (`evaluated + pruned = total`, nothing left unexplored when the domain is exhausted); a search of more than the 50 sets it lists is complete for its domain, and says how many it left out of the list; a candidate budget stops after exactly that many candidates with the run truncated, one the domain just fits is complete, and a time budget (a clock the check supplies, never the wall clock) does the same; a run cancelled or invalidated at any step holds exactly the best of the candidates before the step, labelled incomplete, under the input it was given; a run that was superseded, whose save changed or that was never the current one is not published; and every step of the search is bounded by the work of its slice (the candidates, the tank packages and the engine designs it covers) whether it rejects at once or packs, so the caller regains control within the declared responsiveness budget (milliseconds are never asserted: scripts/bench-tank-packing.js measures them).
 
-  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save one folder up, game 138 race 785; one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one taken before runs existed. Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails.
+  With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it repeats the exhaustive comparison with the race's tanks, engines and tech, runs the page's default search as a run, and compares its digest with the one taken before runs existed. Each mutation of the utilities must fail at least one synthetic check. Exit code 1 when a check fails.
 */
 const crypto = require('crypto')
 const fs = require('fs')
@@ -1130,7 +1130,7 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {

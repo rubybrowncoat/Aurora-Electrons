@@ -3,7 +3,7 @@
 
   node scripts/check-production-cycle.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785).
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
 
   The reference model is the game's rule for one colony's construction cycle, written out here from the rule and not from the app: each project that is out of the queue and not paused, in some order, is allocated its share of the colony's capacity times the years since the last cycle, builds that many units (the allocation over the build points a unit takes, at most the units it has left), cuts the build to what the colony's stock of each mineral covers (the stock the projects ahead of it left, in tonnes and fractions of a unit, the build rounded to 4 decimals), takes the minerals of what it built out of that stock, and adds the build to its partial completion, whole units delivered at once. A project that finishes lets the queued ones start in the next cycle.
 
@@ -39,7 +39,7 @@ const { chunksOf, spread } = require('./lib/mutant-chunks')
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
 ]
 const MINERAL_NAMES = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
 const STUBS = {

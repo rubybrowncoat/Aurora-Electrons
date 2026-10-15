@@ -3,7 +3,7 @@
 
   node scripts/check-mining-sites.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785).
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785).
 
   It proves: every verdict of the model on fixtures (a deposit never surveyed against one empty or exhausted, the orbital diameter limit, crew, the colony at the body and the assignment, the workforce of manned mines, radiation and mine production, each way minerals leave a colony, a productive isolated site being delivery-blocked and never idle, a save with no version making the rules read from the game unknown), then on each save that the sites join the same colonies and fleets as a direct query, that each warning lists only the sites its verdict names and that every row names what it lacks and links the colony or fleet to fix.
 */
@@ -15,7 +15,7 @@ const { loadUtilities } = require('./lib/utilities')
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
 ]
 const STUBS = {
   'electron-store': 'export default class Config { constructor() {} get store() { return {} } set store(value) {} }',

@@ -3,7 +3,7 @@
 
   node scripts/check-orbital-mining.js [--save <save.db> <GameID> <RaceID>]... [--increments <n>]
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785). --increments sets how many production increments of the ledger the window of a flat deposit covers (default 5).
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784) and the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785). --increments sets how many production increments of the ledger the window of a flat deposit covers (default 5).
 
   What is compared. The game's ledger logs, once per production increment, the tonnes each colony mined of each mineral (MineralDataType 1), and that amount is the colony's whole mining output that increment (mines and orbital miners together, civilian complexes apart) times the deposit's accessibility times the years the increment covers. So for each colony with orbital miners the check works out, from the save's rows and with the app's own functions, the t/yr the page would show (the sum over the colony's ships, with the naval admin chain, plus the colony's own mines), multiplies it by the years between two production increments of the race's ledger (365-day years, as the page annualises) and sets it against the ledger amount of that increment: expected, observed, residual and the window it covers, per colony and mineral.
 
@@ -21,7 +21,7 @@ const { loadUtilities } = require('./lib/utilities')
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
-  { file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
 ]
 const DEFAULT_INCREMENTS = 5
 const WINDOW_DAYS = 40

@@ -3,7 +3,7 @@
 
   node scripts/check-legacy-consumption.js [--save <save.db> <GameID> <RaceID>]...
 
-  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save one folder up (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy of the stock save (../AuroraDB.db, game 138, race 785). A save that is not there is skipped and said so. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
+  With no options it runs on the repository's modded save (AuroraDB.db, game 140, race 784), the stock 2.7.1 save in saves/ (AuroraDB_271_skoormit_saved.db, game 138, race 785) and a later copy of the stock save (saves/AuroraDB.db, game 138, race 785). A save that is not there is skipped and said so. A save is never written: the fallback is run on a copy of the stock save in the temp folder whose mineral ledger is emptied, deleted afterwards.
 
   What is compared. The ledger logs, once per production tick and colony, the tonnes each purpose used: fuel refining (MineralDataType 14, Sorium), maintenance supplies (16, Duranium, Uridium and Gallicite), shipbuilding (5) and shipyard activities (9). For the last production tick (the years between the last two ticks of the ledger's construction rows) the check sets what the model gives a colony, worked out from the save's installations, tasks and race rates alone, against what the ledger logged for it: the fuel and maintenance rules as the page applies them, and the shipbuilding and activity rules at one tick (a task's build points rounded to 4 decimals each tick, as the game does; the utility's year is a forecast and is compared with the tick within the rounding bound). A task with no build points done may have been added after the tick and is left out of the comparison, said so. The ledger's continual-upgrade rows are compared as estimates (the saved capacity is the one after the tick's growth).
 
@@ -32,8 +32,8 @@ const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
 const DEFAULT_SAVES = [
   { key: 'modded', file: 'AuroraDB.db', game: 140, race: 784 },
-  { key: 'stock', file: '../AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
-  { key: 'later', file: '../AuroraDB.db', game: 138, race: 785 },
+  { key: 'stock', file: 'saves/AuroraDB_271_skoormit_saved.db', game: 138, race: 785 },
+  { key: 'later', file: 'saves/AuroraDB.db', game: 138, race: 785 },
 ]
 const SECONDS_PER_YEAR = 365 * 86400
 const FUEL_LEDGER_TYPE = 14
