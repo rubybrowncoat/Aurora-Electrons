@@ -8,14 +8,14 @@ const os = require('os')
 const path = require('path')
 
 const acorn = require('acorn')
-const { parse: parseComponent } = require('vue/compiler-sfc')
 
+// vue/compiler-sfc takes tens of milliseconds to load and only a component needs it, so it loads on the first `.vue` file.
 const scriptOf = (file, text) => {
   if (!file.endsWith('.vue')) {
     return text
   }
 
-  const parsed = parseComponent({ source: text })
+  const parsed = require('vue/compiler-sfc').parse({ source: text })
   const descriptor = parsed.descriptor || parsed
 
   return [descriptor.script, descriptor.scriptSetup].map((block) => (block && block.content) || '').join('\n')

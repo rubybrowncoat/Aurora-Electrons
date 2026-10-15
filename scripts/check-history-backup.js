@@ -14,7 +14,7 @@
   - apply: a backup of the current files comes first, a stale plan, a tab that does not record and a backup that cannot be kept all stop it with nothing written, and it can be run again;
   - annotations: a record is restored once, never over a stored one and never when it was deleted.
 
-  Mutants: each of a list of deliberate faults in a copy of the module is run, with the checks it names, in a Node process of its own on a copied tree; it is caught when each named check fails there. A control run of the unchanged copy must pass every check the mutants name. Prints `N of N checks passed`; any failed check sets exit code 1.
+  Mutants: each of a list of deliberate faults in one module is run, with the checks it names, in a Node process of its own that loads that module from the faulted text and every other from the sources; it is caught when each named check fails there. A control run of the unchanged sources must pass every check the mutants name. The checks of the sources, the control run and the mutants run side by side. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
 const os = require('os')
@@ -38,9 +38,9 @@ const STUBS = {
   'lodash/partition': 'export default (list, test) => list.reduce((parts, item) => { parts[test(item) ? 0 : 1].push(item); return parts }, [[], []])',
 }
 
-const loadModules = async (base) => {
+const loadModules = async (base, sources = {}) => {
   const names = ['history-backup', 'campaign', 'history', 'scenario-records', 'recording-owner', 'colony-series', 'event-archive'].map((name) => `renderer/utilities/${name}`)
-  const loaded = await loadUtilities(names, { stubs: STUBS, directory: base })
+  const loaded = await loadUtilities(names, { stubs: STUBS, directory: base, sources })
 
   return { backup: loaded[names[0]], campaign: loaded[names[1]], history: loaded[names[2]], records: loaded[names[3]], owner: loaded[names[4]], colony: loaded[names[5]], events: loaded[names[6]] }
 }
@@ -51,21 +51,25 @@ const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
 // ---- Installations ----------------------------------------------------------------------------------------------------
 
-// The stores of one installation: each a JSON value read and written whole, as electron-store's `.store` is, with the store client's whole-file `update`. `dir` mirrors every write as a file, so a check can compare the bytes of the installation before and after. `hooks.beforeWrite(name, index)` can throw to stand for a full disk.
+// The stores of one installation: each a JSON value read and written whole, as electron-store's `.store` is, with the store client's whole-file `update`. Each is kept as its JSON text and parsed on every read, which gives the copy a read must be (one pass over the value, not the two of a clone) and lets `snapshot` join the texts without stringifying the values again. `dir` mirrors every write as a file, so a check can compare the bytes of the installation before and after. `hooks.beforeWrite(name, index)` can throw to stand for a full disk.
 const installation = ({ dir = null, first = 1 } = {}) => {
-  const files = new Map()
+  const texts = new Map()
+  const read = (name) => (texts.get(name) === undefined ? undefined : JSON.parse(texts.get(name)))
+  const files = { get: read, has: (name) => texts.has(name), forEach: (visit) => texts.forEach((_text, name) => visit(read(name), name)) }
   const writes = []
   const hooks = { beforeWrite: null }
   const put = (name, value) => {
-    files.set(name, clone(value))
+    const text = JSON.stringify(value)
+
+    texts.set(name, text)
 
     if (dir) {
-      fs.writeFileSync(path.join(dir, `${encodeURIComponent(name)}.json`), JSON.stringify(value))
+      fs.writeFileSync(path.join(dir, `${encodeURIComponent(name)}.json`), text)
     }
   }
   const store = (name) => ({
     get store () {
-      return clone(files.get(name)) || {}
+      return read(name) || {}
     },
     set store (value) {
       if (hooks.beforeWrite) {
@@ -99,7 +103,7 @@ const installation = ({ dir = null, first = 1 } = {}) => {
     newId: () => `c${++counter}`,
     now: () => ++clock,
     io: { registry: store('registry'), migration: store('migration'), settings: store('settings'), backup: store('backup'), file: (name) => store(`file:${name}`) },
-    snapshot: () => JSON.stringify([...files].sort(([a], [b]) => (a < b ? -1 : 1))),
+    snapshot: () => `[${[...texts].sort(([a], [b]) => (a < b ? -1 : 1)).map(([name, text]) => `[${JSON.stringify(name)},${text === undefined ? 'null' : text}]`).join(',')}]`,
     bytes: () => {
       const hash = crypto.createHash('sha256')
 
@@ -107,8 +111,8 @@ const installation = ({ dir = null, first = 1 } = {}) => {
 
       return hash.digest('hex')
     },
-    registry: () => ({ campaigns: {}, pool: {}, ...(clone(files.get('registry')) || {}) }),
-    fileOf: (campaignId, branchId = 'b1') => clone(files.get(`file:campaign-${campaignId}-${branchId}`)) || {},
+    registry: () => ({ campaigns: {}, pool: {}, ...(read('registry') || {}) }),
+    fileOf: (campaignId, branchId = 'b1') => read(`file:campaign-${campaignId}-${branchId}`) || {},
   }
 
   return inst
@@ -3202,30 +3206,34 @@ const MUTANTS = [
   { name: 'the event archive of a branch is not remembered for the branches planned after it', find: 'plannedEvents.set(archive.write.name, archive.write.value)', replace: 'void archive.write.value', fails: ['a Replace of a parent and its unmarked fork'] },
 ]
 
-// The utilities copied, with one mutant applied, to the layout the loader reads: `<root>/src/renderer/utilities`. The mutant's `file` is relative to the root.
-const mutatedTree = (mutant) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-history-backup-mutant-'))
+// The source of the utilities as it stands, by file name, read once: what a mutant is planted in. The mutated text is made in the child that runs it, from this text.
+const unmutated = new Map()
 
-  fs.cpSync(path.join(src, 'renderer', 'utilities'), path.join(directory, 'src', 'renderer', 'utilities'), { recursive: true })
-
-  if (mutant) {
-    const target = path.join(directory, mutant.file || MODULE_FILE)
-    const source = fs.readFileSync(target, 'utf8').replace(/\r\n/g, '\n')
-
-    if (source.split(mutant.find).length !== 2) {
-      fs.rmSync(directory, { recursive: true, force: true })
-      throw new Error(`The mutant "${mutant.name}" does not apply exactly once`)
-    }
-
-    fs.writeFileSync(target, source.replace(mutant.find, () => mutant.replace))
+const sourceOf = (file) => {
+  if (!unmutated.has(file)) {
+    unmutated.set(file, fs.readFileSync(path.join(repo, file), 'utf8').replace(/\r\n/g, '\n'))
   }
 
-  return directory
+  return unmutated.get(file)
 }
 
-// The checks `only` names of one tree, run in a Node process of its own (the modules hold state, and a mutant must not leak into the next tree).
-const checksInChild = (tree, only) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename], { env: { ...process.env, HISTORY_BACKUP_TREE: tree, HISTORY_BACKUP_ONLY: JSON.stringify(only) }, stdio: ['ignore', 'pipe', 'pipe'] })
+// The text of the module a mutant changes, with the change made, or an error when the text to replace is not there exactly once. The loader is given it in place of the module's own file, so no copy of the utilities is made and every other module is read from where it is.
+const plantedSource = (mutant) => {
+  const source = sourceOf(mutant.file || MODULE_FILE)
+
+  if (source.split(mutant.find).length !== 2) {
+    throw new Error(`The mutant "${mutant.name}" does not apply exactly once`)
+  }
+
+  return source.replace(mutant.find, () => mutant.replace)
+}
+
+// The module name the loader knows a file by: 'src/renderer/utilities/history-backup.js' is 'renderer/utilities/history-backup'.
+const moduleNameOf = (file) => file.replace(/^src\//, '').replace(/\.js$/, '')
+
+// The checks `only` names (all of them for null) of the sources with the mutant at `index` of MUTANTS planted, or as they stand for no mutant, run in a Node process of its own (the modules hold state, and a mutant must not leak into the next one): { results, lines } where `lines` is what the process printed besides its results.
+const checksInChild = (only, index = null) => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [__filename], { env: { ...process.env, HISTORY_BACKUP_ONLY: JSON.stringify(only), HISTORY_BACKUP_MUTANT: index === null ? '' : String(index) }, stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
   let errors = ''
 
@@ -3233,45 +3241,51 @@ const checksInChild = (tree, only) => new Promise((resolve, reject) => {
   child.stderr.on('data', (chunk) => { errors += chunk })
   child.on('error', reject)
   child.on('close', (code) => {
-    const line = out.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
+    const rows = out.split('\n')
+    const line = rows.find((row) => row.startsWith(RESULT_PREFIX))
 
     if (code !== 0 || !line) {
-      reject(new Error(`The checks of ${tree} ended with ${code}: ${errors.trim().slice(0, 400)}`))
+      reject(new Error(`The checks ${index === null ? 'of the sources' : `of the mutant ${index}`} ended with ${code}: ${errors.trim().slice(0, 400)}`))
     } else {
-      resolve(JSON.parse(line.slice(RESULT_PREFIX.length)))
+      resolve({ results: JSON.parse(line.slice(RESULT_PREFIX.length)), lines: rows.filter((row) => row !== line && row !== '') })
     }
   })
 })
 
-const tryMutant = async (mutant) => {
-  let directory
-
+const tryMutant = async (mutant, index) => {
   try {
-    directory = mutatedTree(mutant)
+    plantedSource(mutant)
 
-    const results = await checksInChild(path.join(directory, 'src'), mutant.fails)
+    const { results } = await checksInChild(mutant.fails, index)
     const survived = mutant.fails.filter((start) => !results.some(([, name, result]) => name.startsWith(start) && result !== true))
     const missing = mutant.fails.filter((start) => !results.some(([, name]) => name.startsWith(start)))
 
     return [`mutant caught: ${mutant.name} (fails: ${mutant.fails.join('; ')})`, survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`]
   } catch (error) {
     return [`mutant caught: ${mutant.name}`, error.message]
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 
 const main = async () => {
-  if (process.env.HISTORY_BACKUP_TREE) {
-    const results = await runSuite(await loadModules(process.env.HISTORY_BACKUP_TREE), JSON.parse(process.env.HISTORY_BACKUP_ONLY))
+  if (process.env.HISTORY_BACKUP_ONLY) {
+    const mutant = process.env.HISTORY_BACKUP_MUTANT === '' ? null : MUTANTS[Number(process.env.HISTORY_BACKUP_MUTANT)]
+    const sources = mutant ? { [moduleNameOf(mutant.file || MODULE_FILE)]: plantedSource(mutant) } : {}
+    const results = await runSuite(await loadModules(src, sources), JSON.parse(process.env.HISTORY_BACKUP_ONLY))
 
     console.log(RESULT_PREFIX + JSON.stringify(results))
     process.exit(0)
   }
 
-  const results = await runSuite(await loadModules(src))
+  const mutating = !process.argv.includes('--no-mutations')
+  const names = [...new Set(MUTANTS.flatMap((mutant) => mutant.fails))]
+  // The checks of the sources, the control run of the unchanged sources and the mutants all run side by side, the long ones first, so the slowest check does not run alone at either end.
+  const outcomes = await inParallel([null, ...(mutating ? [names, ...MUTANTS] : [])], (item, at) => (at === 0 ? checksInChild(null) : at === 1 ? checksInChild(item).catch((error) => error) : tryMutant(item, at - 2)))
+
+  if (outcomes[0] instanceof Error) {
+    throw outcomes[0]
+  }
+
+  const { results, lines } = outcomes[0]
   let group = null
   let failed = 0
   let total = 0
@@ -3286,6 +3300,8 @@ const main = async () => {
     }
   }
 
+  lines.forEach((line) => console.log(line))
+
   results.forEach(([next, name, result]) => {
     if (next !== group) {
       group = next
@@ -3295,29 +3311,12 @@ const main = async () => {
     show(name, result)
   })
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mutating) {
     console.log('\nmutants')
 
-    const names = [...new Set(MUTANTS.flatMap((mutant) => mutant.fails))]
+    outcomes.slice(2).forEach((outcome, at) => (outcome instanceof Error ? show(`mutant caught: ${MUTANTS[at].name}`, outcome.message) : show(...outcome)))
 
-    for (const [name, result] of await inParallel(MUTANTS, tryMutant)) {
-      show(name, result)
-    }
-
-    let control = null
-    let directory = null
-
-    try {
-      directory = mutatedTree(null)
-      control = await checksInChild(path.join(directory, 'src'), names)
-    } catch (error) {
-      control = error
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
-    }
-
+    const control = outcomes[1] instanceof Error ? outcomes[1] : outcomes[1].results
     const wrong = control instanceof Error ? [control.message] : control.filter(([, , result]) => result !== true).map(([, name]) => name)
 
     show('a control run of the unchanged copy passes every check the mutants name', wrong.length === 0 && !(control instanceof Error) ? true : `fails ${wrong.join('; ')}`)

@@ -12,7 +12,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy, patched } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -20,8 +20,11 @@ const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 
 let instance = 0
 
-const load = async (directory = utilitiesDirectory) => {
-  const loaded = await loadUtilities(['appearance-font', 'appearance', 'appearance-file'], { directory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+// The files of the utilities folder do not change during a run, so each is read once; `sources` is the text of the module a planted fault changes, by name.
+const texts = new Map()
+
+const load = async (sources = {}) => {
+  const loaded = await loadUtilities(['appearance-font', 'appearance', 'appearance-file'], { sources, texts, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
 
   return { font: loaded['appearance-font'], appearance: loaded.appearance, file: loaded['appearance-file'] }
 }
@@ -72,10 +75,10 @@ const short = (value) => {
   return text === undefined ? 'undefined' : text.length > 200 ? `${text.slice(0, 200)}…` : text
 }
 
-// What a source file says, with a planted fault applied when the run is of a mutant: `patch` is { [relative path]: [from, to] }, and `directory` the copy of the utilities folder a fault in a utility was planted in.
-const source = (relative, { patch = {}, directory } = {}) => {
-  const inUtilities = directory && relative.startsWith('src/renderer/utilities/')
-  const text = fs.readFileSync(inUtilities ? path.join(directory, path.basename(relative)) : path.join(root, relative), 'utf8')
+// What a source file says, with a planted fault applied when the run is of a mutant: `patch` is { [relative path]: [from, to] }, and `sources` the text of the utility a fault in a utility changed, by name.
+const source = (relative, { patch = {}, sources } = {}) => {
+  const planted = sources && relative.startsWith('src/renderer/utilities/') ? sources[path.basename(relative).replace(/\.js$/, '')] : undefined
+  const text = planted !== undefined ? planted : fs.readFileSync(path.join(root, relative), 'utf8')
 
   if (!patch[relative]) {
     return text
@@ -284,7 +287,7 @@ const CHECKS = [
       return `the kept choice: ${short(config.data)}, ${config.writes.length} writes`
     }
 
-    const restart = await load(ctx.directory)
+    const restart = await load(ctx.sources)
 
     restart.font.loadFont(config)
 
@@ -425,7 +428,7 @@ const CHECKS = [
   }],
 
   ['the preferences carry the typeface and text size: exported, checked by the same read as the saved record and imported', async (ctx) => {
-    const loaded = await loadUtilities(['appearance-font', 'preferences'], { directory: ctx.directory || utilitiesDirectory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+    const loaded = await loadUtilities(['appearance-font', 'preferences'], { sources: ctx.sources, texts, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
     const { readFont, FONT_KEY } = loaded['appearance-font']
     const { buildSchema, buildExport, parseBundle } = loaded.preferences
     const schema = buildSchema({ declarations: [], appearance: { key: 'appearance', ids: ['light', 'dark'] }, policy: { key: 'appearancePolicy', values: ['light', 'dark', 'system'] }, font: { key: FONT_KEY, read: readFont }, separators: [','] })
@@ -495,13 +498,17 @@ const MUTATIONS = [
   ['a fixed pixel text size in the layout', { patch: { 'src/renderer/layouts/default.vue': ['  font-size: calc(11px * var(--ae-font-scale));\n  line-height: 16.5px;', '  font-size: 11px;\n  line-height: 16.5px;'] } }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-fonts-mutant-', file, from, to)
+// The utilities as the checks load them with the fault planted: the text of the one module that changes, by name, and the others read from the folder.
+const plantedSources = ({ file, from, to }) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
-const runChecks = async ({ directory, patch = {} } = {}) => {
+const runChecks = async ({ sources, patch = {}, first } = {}) => {
   const results = []
+  let modules = first
 
   for (const [name, check] of CHECKS) {
-    const ctx = { ...(await load(directory)), patch, directory }
+    const ctx = { ...(modules ?? await load(sources)), patch, sources }
+
+    modules = undefined
 
     try {
       results.push([name, await check(ctx)])
@@ -515,24 +522,21 @@ const runChecks = async ({ directory, patch = {} } = {}) => {
 
 // A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
 const judge = async (fault) => {
-  let directory
-
   try {
+    let sources
+    let modules
+
     try {
-      directory = fault.file ? mutatedCopy(fault) : undefined
+      sources = fault.file ? plantedSources(fault) : undefined
       Object.keys(fault.patch ?? {}).forEach((relative) => source(relative, { patch: fault.patch }))
-      await load(directory)
+      modules = await load(sources)
     } catch (error) {
       return { invalid: error.message }
     }
 
-    return { failed: (await runChecks({ directory, patch: fault.patch })).filter(([, result]) => result !== true).length }
+    return { failed: (await runChecks({ sources, patch: fault.patch, first: modules })).filter(([, result]) => result !== true).length }
   } catch (error) {
     return { error: error.message }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 

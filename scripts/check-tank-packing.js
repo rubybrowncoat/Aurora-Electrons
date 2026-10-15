@@ -103,16 +103,6 @@ const rowsOf = (tanks) => tanks.map((tank) => ({ id: tank.id, litres: tank.litre
 
 const KEYS = { lightest: ['hs', 'cost', 'count'], cheapest: ['cost', 'hs', 'count'] }
 
-const beats = (a, b, keys) => {
-  for (const key of keys) {
-    if (a[key] !== b[key]) {
-      return a[key] < b[key]
-    }
-  }
-
-  return false
-}
-
 // Calls `visit(totals)` for every package that holds `request` litres, over every count vector with at most ceil(request / litres) of each row (a package with more of one row holds the request in that row alone, and dropping a tank keeps it feasible at fewer HS). Null when the domain is past `limit`.
 const enumerate = (rows, request, visit, limit = ORACLE_LIMIT) => {
   const caps = rows.map((row) => Math.ceil(request / row.litres))
@@ -122,14 +112,35 @@ const enumerate = (rows, request, visit, limit = ORACLE_LIMIT) => {
   }
 
   const totals = { litres: 0, hs: 0, cost: 0, count: 0 }
+  const last = rows.length - 1
+
+  if (last < 0) {
+    if (request <= 0) {
+      visit(totals)
+    }
+
+    return true
+  }
 
   const walk = (index, litres, hs, cost, count) => {
-    if (index === rows.length) {
-      if (litres >= request) {
-        totals.litres = litres
-        totals.hs = hs
-        totals.cost = cost
-        totals.count = count
+    const row = rows[index]
+
+    if (index === last) {
+      let each = Math.max(0, Math.ceil((request - litres) / row.litres))
+
+      while (each > 0 && litres + (each - 1) * row.litres >= request) {
+        each--
+      }
+
+      while (litres + each * row.litres < request) {
+        each++
+      }
+
+      for (; each <= caps[index]; each++) {
+        totals.litres = litres + each * row.litres
+        totals.hs = hs + each * row.hs
+        totals.cost = cost + each * row.cost
+        totals.count = count + each
         visit(totals)
       }
 
@@ -137,7 +148,7 @@ const enumerate = (rows, request, visit, limit = ORACLE_LIMIT) => {
     }
 
     for (let each = 0; each <= caps[index]; each++) {
-      walk(index + 1, litres + each * rows[index].litres, hs + each * rows[index].hs, cost + each * rows[index].cost, count + each)
+      walk(index + 1, litres + each * row.litres, hs + each * row.hs, cost + each * row.cost, count + each)
     }
   }
 
@@ -146,15 +157,38 @@ const enumerate = (rows, request, visit, limit = ORACLE_LIMIT) => {
   return true
 }
 
-const oracleBest = (rows, request, objective) => {
-  let best = null
+const lighter = (a, b) => (a.hs !== b.hs ? a.hs < b.hs : a.cost !== b.cost ? a.cost < b.cost : a.count < b.count)
+
+const cheaper = (a, b) => (a.cost !== b.cost ? a.cost < b.cost : a.hs !== b.hs ? a.hs < b.hs : a.count < b.count)
+
+// The best packages of both objectives from one enumeration: { lightest, cheapest }, null when the domain is past the limit.
+const oracleBests = (rows, request) => {
+  let lightest = null
+  let cheapest = null
   const complete = enumerate(rows, request, (totals) => {
-    if (!best || beats(totals, best, KEYS[objective])) {
-      best = { ...totals }
+    if (!lightest || lighter(totals, lightest)) {
+      lightest = { ...totals }
+    }
+
+    if (!cheapest || cheaper(totals, cheapest)) {
+      cheapest = { ...totals }
     }
   })
 
-  return complete ? best : null
+  return complete ? { lightest, cheapest } : null
+}
+
+// `oracleBests` of one catalogue by request, each request enumerated once.
+const memoBests = (rows) => {
+  const known = new Map()
+
+  return (request) => {
+    if (!known.has(request)) {
+      known.set(request, oracleBests(rows, request))
+    }
+
+    return known.get(request)
+  }
 }
 
 // The (HS, BP, litres over the request) vectors no package beats on all three, one each, as sorted text.
@@ -262,6 +296,7 @@ const checkCounterexample = (packTanks) => {
 
 const sweep = (label, tanks, requests, packTanks, { high }) => {
   const rows = rowsOf(tanks)
+  const bests = memoBests(rows)
   let compared = 0
   let skipped = 0
   let wrong = 0
@@ -273,7 +308,7 @@ const sweep = (label, tanks, requests, packTanks, { high }) => {
 
   for (const objective of ['lightest', 'cheapest']) {
     for (const request of requests) {
-      const best = oracleBest(rows, request, objective)
+      const best = (bests(request) || {})[objective] || null
 
       if (!best) {
         skipped++
@@ -325,10 +360,11 @@ const syntheticSweeps = (packTanks) => {
       const triples = make(rand)
       const tanks = tanksOf(triples)
       const rows = rowsOf(tanks)
+      const bests = memoBests(rows)
 
       for (const objective of ['lightest', 'cheapest']) {
         for (const request of [...requestList(rand, 14, 60), 1, 2, 7]) {
-          const best = oracleBest(rows, request, objective)
+          const best = bests(request)[objective]
           const pack = packTanks({ litres: request, tanks, objective })
           const got = totalsOf(rows, pack)
 

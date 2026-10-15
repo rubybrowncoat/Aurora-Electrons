@@ -9,7 +9,6 @@
 */
 const crypto = require('crypto')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
@@ -639,6 +638,16 @@ const synthetic = (m) => {
   // The result of a run cancelled after `steps` steps must be the result of a search that stopped before the candidate it had reached: a candidate budget of the candidates it counts.
   const prefix = (input, stepsOf) => {
     const probe = runOf(m, input)
+    const countedRuns = new Map()
+
+    const countedAt = (evaluated) => {
+      if (!countedRuns.has(evaluated)) {
+        countedRuns.set(evaluated, finish(runOf(m, input, { budget: { candidates: evaluated, ms: null } })))
+      }
+
+      return countedRuns.get(evaluated)
+    }
+
     let steps = 0
 
     while (probe.running) {
@@ -656,7 +665,7 @@ const synthetic = (m) => {
       stopped.cancel()
 
       const outcome = stopped.outcome()
-      const counted = finish(runOf(m, input, { budget: { candidates: outcome.counts.evaluated, ms: null } }))
+      const counted = countedAt(outcome.counts.evaluated)
       const figures = (result) => ({ sets: result.sets.map((set) => m.search.candidateId(set)), lightest: result.lightest && m.search.candidateId(result.lightest), fastest: result.fastest && m.search.candidateId(result.fastest), cheapest: result.cheapest && m.search.candidateId(result.cheapest), speed: result.pareto.speed.map((set) => m.search.candidateId(set)), range: result.pareto.range.map((set) => m.search.candidateId(set)), packages: result.packages })
 
       if (outcome.status !== 'cancelled' || (outcome.result === null && outcome.counts.evaluated !== 0)) {
@@ -991,22 +1000,15 @@ const synthetic = (m) => {
   return all
 }
 
-// A copy of the utilities folder in the temp folder in which `file` has `from` replaced by `to`.
-const mutatedCopy = (file, from, to) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-runner-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const source = fs.readFileSync(target, 'utf8')
+// The source of the utility `file` (a name with its .js) with `from` replaced by `to`, for loadUtilities' `sources`: the others load from the folder as they are.
+const mutatedSources = (file, from, to) => {
+  const source = fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8')
 
   if (!source.includes(from)) {
     throw new Error(`The mutation of ${file} does not apply: ${from}`)
   }
 
-  fs.writeFileSync(target, source.replace(from, () => to))
-
-  return directory
+  return { [file.replace(/\.js$/, '')]: source.replace(from, () => to) }
 }
 
 const modulesOf = (utilities) => ({ run: utilities['search-run'], search: utilities['design-search'], rules: utilities['design-rules'], packing: utilities['tank-packing'] })
@@ -1042,7 +1044,7 @@ const MUTATIONS = [
   ['a failed run reported as complete', 'search-run.js', '[TERMINATION.ERROR]: RUN_STATUS.FAILED', '[TERMINATION.ERROR]: RUN_STATUS.COMPLETE', (m) => { const made = runOf(m, { hullHS: 50, speed: 100, tech: TECH, minCount: 5, maxCount: 2 }); made.advance(0); return made.status === 'complete' }],
   ['the snapshot of a running run not a copy of what is held (the sets it lists alias the live list)', 'design-search.js', 'sets: sets.slice(), lightest', 'sets, lightest', (m) => { const made = runOf(m, { ...CASES[0][1](m), slice: 30 }); for (let step = 0; step < 5; step++) made.advance(0); const early = made.outcome().result.sets; const held = early.length; made.advance(Infinity); return early.length !== held }],
   ['a package request that does not yield while its table is built', 'tank-packing.js', 'if (built < units && pace.expired()) {', 'if (false) {', (m) => buildYields(m).yields < 10],
-  ['a package request that does not yield while its package is walked back', 'tank-packing.js', 'if (++walked % SCAN_CELLS === 0 && cell > 0 && pace.expired()) {', 'if (false) {', (m) => walkYields(m).yields === 0],
+  ['a package request that does not yield while its package is walked back', 'tank-packing.js', 'if (cell > 0 && pace.expired()) {', 'if (false) {', (m) => walkYields(m).yields === 0],
   ['the check of the window of a repeating pattern that does not yield', 'tank-packing.js', 'if (++scanned % SCAN_CELLS === 0) {', 'if (false) {', (m) => windowYields(m) === 0],
   ['the search that does not look at the pace between candidates', 'design-search.js', 'return pace.expired()', 'return false', (m) => clockedStep(m).status !== 'running'],
   ['the search that does not hand its pace to the packer', 'design-search.js', "packer.packing(litres, 'lightest', pace)", "packer.packing(litres, 'lightest')", (m) => !pacesPassed(m)],
@@ -1193,40 +1195,35 @@ const checkSynthetic = (mods) => {
 }
 
 const checkMutation = async ([label, file, from, to, probe]) => {
-  const directory = mutatedCopy(file, from, to)
+  const sources = mutatedSources(file, from, to)
+  let failed = []
+  let mutant = null
 
   try {
-    let failed = []
-    let mutant = null
+    mutant = modulesOf(await loadUtilities(NAMES, { sources }))
 
-    try {
-      mutant = modulesOf(await loadUtilities(NAMES, { directory }))
-
-      failed = synthetic(mutant).filter(([, test]) => {
-        try {
-          return test() !== true
-        } catch (error) {
-          return true
-        }
-      })
-    } catch (error) {
-      failed = [[`does not load: ${error.message}`]]
-    }
-
-    let probed = true
-
-    if (probe && mutant) {
+    failed = synthetic(mutant).filter(([, test]) => {
       try {
-        probed = probe(mutant)
+        return test() !== true
       } catch (error) {
-        probed = false
+        return true
       }
-    }
-
-    check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
+    })
+  } catch (error) {
+    failed = [[`does not load: ${error.message}`]]
   }
+
+  let probed = true
+
+  if (probe && mutant) {
+    try {
+      probed = probe(mutant)
+    } catch (error) {
+      probed = false
+    }
+  }
+
+  check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
 }
 
 const checkPage = async () => {

@@ -17,9 +17,11 @@
 
   The passive campaign (artifacts/passive-campaign-20261013, git-ignored, read-only: 150 saves of a stock game, 5 days apart, snapshots.csv lists them): an NPR without a ledger (race 2), over every interval, the model's use of Sorium, Duranium, Uridium and Gallicite (from the first save of the interval) is set against the deposits its bodies lost less the stock it gained (within 0.05%); with the efficiency of the interval's end and everything else of its start, the same comparison is within a relative 1e-7 (a reconstruction of the state the production step ran on, not an observed execution order); the player (race 1, with a ledger) in eight saves has its uses observed, nothing modelled on top, and the model's fuel and maintenance equal the ledger's at the save's own tick. When the folder is absent these checks print SKIP and are not counted, and the mutations that name them are not run. Cases the campaign does not hold (shipbuilding, construction, ground units, an NPR colony away from its capital with refineries) are printed as UNSUPPORTED.
 */
+const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const v8 = require('v8')
 const { spawn } = require('child_process')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
@@ -91,11 +93,15 @@ const measured = []
 const storeStub = () => ({ getters: { 'capabilities/blockedBonuses': new Set(), 'capabilities/result': {}, 'capabilities/report': () => null }, state: {}, dispatch: async () => {} })
 
 // The ledger's own use of each mineral a year, worked out from the page's ledger rows (transfers aside), leaving out the flow groups named in `disabled`.
-const spentBy = (vm, minerals, disabled = []) => minerals.MINERALS.map((mineral) => vm.ledger.filter((row) => row.MaterialID === mineral.id && !minerals.TRANSFER_TYPES.has(row.MineralDataType)).reduce((total, row) => {
-  const group = minerals.flowGroupOf(row.MineralDataType)
+const spentBy = (vm, minerals, disabled = []) => {
+  const { perYear } = vm
 
-  return group && !group.income && !disabled.includes(group.key) ? total + row.Amount * vm.perYear : total
-}, 0))
+  return minerals.MINERALS.map((mineral) => vm.ledger.filter((row) => row.MaterialID === mineral.id && !minerals.TRANSFER_TYPES.has(row.MineralDataType)).reduce((total, row) => {
+    const group = minerals.flowGroupOf(row.MineralDataType)
+
+    return group && !group.income && !disabled.includes(group.key) ? total + row.Amount * perYear : total
+  }, 0))
+}
 
 // The snapshots of the passive campaign as [{ index, seconds, file }], or null when its list or a save of the list is not there.
 const campaignSnapshots = () => {
@@ -129,6 +135,39 @@ const parseArguments = (argv) => {
   return saves.length ? saves : DEFAULT_SAVES
 }
 
+// The rows of the saves' queries are kept for the length of one run, in a folder the first process makes (LEGACY_CACHE, which the processes it starts inherit) and removes at its end: a mutation re-reads the same save with the same statements, and a save does not change under a run. An entry is named by the save (path, size and time of last change) and the exact statement, so a statement a mutation changes never meets another's rows; a process without the folder queries the save every time.
+const cacheDirectory = () => process.env.LEGACY_CACHE || null
+
+const entryOf = (identity, sql) => path.join(cacheDirectory(), `${crypto.createHash('sha1').update(`${identity}\n${sql}`).digest('hex')}.rows`)
+
+const keptRows = (identity, sql) => {
+  try {
+    return v8.deserialize(fs.readFileSync(entryOf(identity, sql)))
+  } catch (error) {
+    return null
+  }
+}
+
+let entries = 0
+
+const keepRows = (identity, sql, rows) => {
+  const target = entryOf(identity, sql)
+  const scratch = `${target}.${process.pid}.${entries++}.tmp`
+
+  try {
+    fs.writeFileSync(scratch, v8.serialize(rows))
+    fs.renameSync(scratch, target)
+  } catch (error) {
+    fs.rmSync(scratch, { force: true })
+  }
+}
+
+const identityOf = (file) => {
+  const { size, mtimeMs } = fs.statSync(file)
+
+  return `${path.resolve(file)}|${size}|${mtimeMs}`
+}
+
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does. `queries` keeps every statement run.
 const openSave = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => {
@@ -138,12 +177,34 @@ const openSave = (file) => new Promise((resolve, reject) => {
     }
 
     const queries = []
+    const identity = cacheDirectory() ? identityOf(file) : null
 
     resolve({
       queries,
       query: (sql) => new Promise((resolve, reject) => {
         queries.push(sql)
-        raw.all(sql, (queryError, rows) => (queryError ? reject(queryError) : resolve([rows])))
+
+        const kept = identity === null ? null : keptRows(identity, sql)
+
+        if (kept !== null) {
+          resolve([kept])
+
+          return
+        }
+
+        raw.all(sql, (queryError, rows) => {
+          if (queryError) {
+            reject(queryError)
+
+            return
+          }
+
+          if (identity !== null) {
+            keepRows(identity, sql, rows)
+          }
+
+          resolve([rows])
+        })
       }),
       close: () => new Promise((resolve) => raw.close(resolve)),
     })
@@ -198,6 +259,27 @@ const ledgerlessCopy = async (file, directory) => {
   return target
 }
 
+// The emptied copy of a save: made once for the run in its cache folder when there is one (the first process to need it makes it, the others open that), else made in `directory`.
+const ledgerlessOf = async (file, directory) => {
+  if (!cacheDirectory()) {
+    return await ledgerlessCopy(file, directory)
+  }
+
+  const shared = path.join(cacheDirectory(), `ledgerless-${crypto.createHash('sha1').update(identityOf(file)).digest('hex')}.db`)
+
+  if (!fs.existsSync(shared)) {
+    const made = await ledgerlessCopy(file, directory)
+
+    try {
+      fs.renameSync(made, shared)
+    } catch (error) {
+      return made
+    }
+  }
+
+  return shared
+}
+
 // The checks of one tree of the renderer's sources (the real one, or a mutated copy): [{ id, name, run }] where run resolves to true or what is wrong. `unsupported` collects the cases a save cannot show.
 const suite = (tree, saves, unsupported) => {
   const memo = (build) => {
@@ -233,7 +315,7 @@ const suite = (tree, saves, unsupported) => {
     opened.push(database)
 
     const [{ valueOrNull }, options] = [(await utilities()).provenance, await pageOptions()]
-    const vm = instantiate(options, { $store: storeStub(), database, GameID: save.game, RaceID: save.race })
+    const vm = instantiate(options, { $store: storeStub(), database, GameID: save.game, RaceID: save.race, nested: true })
 
     vm.loadErrors = {}
 
@@ -276,7 +358,7 @@ const suite = (tree, saves, unsupported) => {
 
     cleanup.push(() => fs.rmSync(directory, { recursive: true, force: true }))
 
-    return await environment(fallbackSource, await ledgerlessCopy(present(fallbackSource), directory), { ledger: false })()
+    return await environment(fallbackSource, await ledgerlessOf(present(fallbackSource), directory), { ledger: false })()
   })
 
   const list = []
@@ -1250,7 +1332,7 @@ const suite = (tree, saves, unsupported) => {
   const campaignAbsent = () => skip('the passive campaign (artifacts/passive-campaign-20261013) is not there')
 
   const pageOn = async (database, race, reads) => {
-    const vm = instantiate(await pageOptions(), { $store: storeStub(), database, GameID: CAMPAIGN_GAME, RaceID: race })
+    const vm = instantiate(await pageOptions(), { $store: storeStub(), database, GameID: CAMPAIGN_GAME, RaceID: race, nested: true })
 
     vm.loadErrors = {}
 
@@ -1722,6 +1804,11 @@ const run = async () => {
 
     process.exit(0)
   }
+
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-legacy-cache-'))
+
+  process.env.LEGACY_CACHE = cache
+  process.on('exit', () => fs.rmSync(cache, { recursive: true, force: true }))
 
   const { list, cleanup } = suite(rendererDirectory, saves, unsupported)
 

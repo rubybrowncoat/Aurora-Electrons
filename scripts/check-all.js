@@ -1,20 +1,19 @@
 /*
   Runs every check script (scripts/check-*.js) and prints one line per script with its time and its last summary line, the slowest first, then exits 1 when any failed.
 
-  node scripts/check-all.js [--scripts=N] [--browser] [--only=name,name] [--quick]
+  node scripts/check-all.js [--jobs=N] [--scripts=N] [--browser] [--only=name,name] [--quick]
 
-  --scripts=N runs N scripts side by side (default 3); the cores are divided between them through CHECK_JOBS, which each script's mutant pool reads (scripts/lib/check-pool.js), so the machine is used without starting more processes than it has cores. --quick passes --no-mutations to the scripts that take it. --browser also runs check-typography.js and check-appearance-late-read.js, which need the web mode running (`bun run web`; BASE_URL says where when it is not http://localhost:9080). --only runs the named scripts (without the check- prefix or .js).
+  --jobs=N is the budget of workers for the whole run (default: the physical cores, half the logical processors, scripts/lib/check-pool.js); --scripts=N runs N scripts side by side (default 3, never more than the budget) and gives each an equal share of the budget through CHECK_JOBS, which its mutant pool reads, so the run never starts more workers than the budget. Both take a positive whole number. --quick passes --no-mutations to the scripts that take it. --browser also runs check-typography.js and check-appearance-late-read.js, which need the web mode running (`bun run web`; BASE_URL says where when it is not http://localhost:9080). --only runs the named scripts (without the check- prefix or .js).
 
-  Left out: check-engines.js (the install hook that refuses a package manager other than bun), check-harvesters.js (a report on one save, given on its command line). check-design-rules.js runs its --fixtures mode, which needs no save. check-save-switching.js runs after the others, alone and with every core (its cases wait on watchers and timers within fixed limits).
+  Left out: check-engines.js (the install hook that refuses a package manager other than bun), check-harvesters.js (a report on one save, given on its command line). check-design-rules.js runs its --fixtures mode, which needs no save. check-save-switching.js runs after the others, alone and with the whole budget (its cases wait on watchers and timers within fixed limits).
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
-const { inParallel, runChild } = require('./lib/check-pool')
+const { cores, inParallel, runChild } = require('./lib/check-pool')
 
 const SKIPPED = new Set(['check-engines.js', 'check-harvesters.js'])
 const BROWSER = new Set(['check-typography.js', 'check-appearance-late-read.js'])
-// Scripts whose cases wait on watchers and timers within fixed limits: they run after the others, one at a time with every core, because a machine saturated by the other scripts' mutants can starve those waits past their limits.
+// Scripts whose cases wait on watchers and timers within fixed limits: they run after the others, one at a time with the whole budget, because a machine saturated by the other scripts' mutants can starve those waits past their limits.
 const ALONE = new Set(['check-save-switching.js'])
 // The slowest scripts start first, so the longest one does not begin last and run on alone.
 const FIRST = ['check-event-archive.js', 'check-section-accents.js', 'check-history-backup.js', 'check-map-hierarchy.js', 'check-warning-snoozes.js', 'check-legacy-consumption.js']
@@ -26,14 +25,29 @@ const option = (name) => {
   return found ? found.slice(name.length + 3) : null
 }
 
+const count = (name, fallback) => {
+  const text = option(name)
+  const value = Number(text)
+
+  if (text === null) {
+    return fallback
+  }
+
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`--${name} takes a positive whole number, not ${text}`)
+  }
+
+  return value
+}
+
 const main = async () => {
   const only = option('only') ? new Set(option('only').split(',').map((name) => `check-${name.trim()}.js`)) : null
   const quick = process.argv.includes('--quick')
   const browser = process.argv.includes('--browser')
-  const side = Math.max(1, Number(option('scripts')) || 3)
-  const cores = os.availableParallelism ? os.availableParallelism() : os.cpus().length
+  const budget = count('jobs', cores())
+  const side = Math.min(count('scripts', 3), budget)
   const scripts = fs.readdirSync(__dirname).filter((name) => /^check-.+\.js$/.test(name) && name !== 'check-all.js' && !SKIPPED.has(name) && (browser || !BROWSER.has(name)) && (!only || only.has(name))).sort((a, b) => (FIRST.includes(a) ? FIRST.indexOf(a) : FIRST.length) - (FIRST.includes(b) ? FIRST.indexOf(b) : FIRST.length) || a.localeCompare(b))
-  const jobs = String(Math.max(1, Math.floor(cores / side)))
+  const jobs = String(Math.floor(budget / side))
   const started = Date.now()
 
   const run = async (name, cap) => {
@@ -57,7 +71,7 @@ const main = async () => {
   const results = await inParallel(scripts.filter((name) => !ALONE.has(name)), (name) => run(name, jobs), side)
 
   for (const name of scripts.filter((name) => ALONE.has(name))) {
-    results.push(await run(name, String(cores)))
+    results.push(await run(name, String(budget)))
   }
 
   const done = results.filter((result) => !(result instanceof Error))

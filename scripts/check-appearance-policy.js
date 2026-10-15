@@ -12,7 +12,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -22,11 +22,13 @@ let instance = 0
 
 const NAMES = ['appearance-font', 'appearance', 'appearance-file', 'preferences', 'remembered-views']
 
-// A fresh copy of the modules, so the state of one check never reaches another; `directory` is a copy of the utilities folder with a planted fault.
-const load = async (directory = utilitiesDirectory) => {
-  const loaded = await loadUtilities(NAMES, { directory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+// A fresh copy of the modules, so the state of one check never reaches another; `sources` is the text of the module a planted fault changes, by name. The files of the folder do not change during a run, so each is read once.
+const texts = new Map()
 
-  return { font: loaded['appearance-font'], appearance: loaded.appearance, preferences: loaded.preferences, views: loaded['remembered-views'], reload: () => load(directory) }
+const load = async (sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { sources, texts, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+
+  return { font: loaded['appearance-font'], appearance: loaded.appearance, preferences: loaded.preferences, views: loaded['remembered-views'], reload: () => load(sources) }
 }
 
 const fakeConfig = (initial = {}) => ({
@@ -1000,17 +1002,21 @@ const MUTATIONS = [
   ['the policy not among the settings a reset keeps', { file: APPEARANCE, from: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, POLICY_KEY, ACCENTS_KEY]', to: 'export const APPEARANCE_SETTINGS = [APPEARANCE_KEY, CUSTOM_KEY, FONT_KEY, ACCENTS_KEY]' }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-policy-mutant-', file, from, to)
+// The utilities as the checks load them with the fault planted: the text of the one module that changes, by name, and the others read from the folder.
+const plantedSources = ({ file, from, to }) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
-const runChecks = async (directory) => {
+const runChecks = async (sources, first) => {
   const results = []
+  let modules = first
 
   for (const [name, check] of CHECKS) {
     try {
-      results.push([name, await check(await load(directory))])
+      results.push([name, await check(modules ?? await load(sources))])
     } catch (error) {
       results.push([name, `threw: ${error.message}`])
     }
+
+    modules = undefined
   }
 
   return results
@@ -1018,23 +1024,20 @@ const runChecks = async (directory) => {
 
 // A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
 const judge = async (fault) => {
-  let directory
-
   try {
+    let sources
+    let modules
+
     try {
-      directory = mutatedCopy(fault)
-      await load(directory)
+      sources = plantedSources(fault)
+      modules = await load(sources)
     } catch (error) {
       return { invalid: error.message }
     }
 
-    return { failed: (await runChecks(directory)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
+    return { failed: (await runChecks(sources, modules)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
   } catch (error) {
     return { error: error.message }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 

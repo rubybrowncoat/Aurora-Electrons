@@ -262,7 +262,39 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
   const packages = { optimal: 0, boundExhausted: 0, infeasible: 0 }
 
   // The results the search holds: the ranked list, both frontiers, the efficient front and the fastest and cheapest sets, each once.
-  const retained = () => new Set([...sets, ...frontiers.speed, ...frontiers.rangeKm, ...(front ? front.sets() : []), best.fastest, best.cheapest].filter(Boolean)).size
+  let heldCount = -1
+
+  const retained = () => {
+    if (heldCount >= 0) {
+      return heldCount
+    }
+
+    const held = new Set(sets)
+
+    for (const set of frontiers.speed) {
+      held.add(set)
+    }
+
+    for (const set of frontiers.rangeKm) {
+      held.add(set)
+    }
+
+    if (front) {
+      for (const set of front.sets()) {
+        held.add(set)
+      }
+    }
+
+    for (const set of [best.fastest, best.cheapest]) {
+      if (set) {
+        held.add(set)
+      }
+    }
+
+    heldCount = held.size
+
+    return heldCount
+  }
 
   // `pending` is 1 for a step that ends inside the tank passes of a candidate: that candidate is not yet evaluated, and a snapshot of the step leaves it out.
   const countsNow = (pending) => {
@@ -499,6 +531,8 @@ export function* searchPropulsion({ hullHS, speed, fraction = 1, goal = null, ki
             commercial: design.commercial,
             thermal: thermalSignature({ enginePower: power, stealthRating: design.thermalRating, fraction, sizeHS: totalHS }),
           }
+
+          heldCount = -1
 
           if (front) {
             front.offer(set)

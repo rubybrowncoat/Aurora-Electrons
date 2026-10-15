@@ -81,6 +81,13 @@ const catalogueOf = (tanks) => {
 const createTable = (entries, keys, maxUnits) => {
   const values = entries.map((entry) => keys.map((key) => (key === 'count' ? 1 : entry[key])))
   const widest = entries.reduce((most, entry) => Math.max(most, entry.units), 0)
+  const unitsOf = Float64Array.from(entries, (entry) => entry.units)
+  const firstValues = Float64Array.from(values, (value) => value[0])
+  const secondValues = Float64Array.from(values, (value) => value[1])
+  const thirdValues = Float64Array.from(values, (value) => value[2])
+
+  // The cells 1 .. `uniform` all pick the one row the first cell does, so a walk back that reaches them counts its remaining tanks at once.
+  let uniform = 0
   let capacity = 0
   let built = 0
   let first = new Float64Array(0)
@@ -138,10 +145,11 @@ const createTable = (entries, keys, maxUnits) => {
       let bestPick = -1
 
       for (let candidate = 0; candidate < entries.length; candidate++) {
-        const previous = cell > entries[candidate].units ? cell - entries[candidate].units : 0
-        const a = first[previous] + values[candidate][0]
-        const b = second[previous] + values[candidate][1]
-        const c = third[previous] + values[candidate][2]
+        const width = unitsOf[candidate]
+        const previous = cell > width ? cell - width : 0
+        const a = first[previous] + firstValues[candidate]
+        const b = second[previous] + secondValues[candidate]
+        const c = third[previous] + thirdValues[candidate]
 
         if (a < bestFirst || (a === bestFirst && (b < bestSecond || (b === bestSecond && c < bestThird)))) {
           bestFirst = a
@@ -155,6 +163,10 @@ const createTable = (entries, keys, maxUnits) => {
       second[cell] = bestSecond
       third[cell] = bestThird
       pick[cell] = bestPick
+
+      if (uniform === cell - 1 && (cell === 1 || bestPick === pick[1])) {
+        uniform = cell
+      }
     }
 
     built = units
@@ -178,15 +190,30 @@ const createTable = (entries, keys, maxUnits) => {
   // Walks the picks back from `units` into `counts`, looking at the pace every SCAN_CELLS tanks and yielding once it has expired: a package of a hundred thousand tanks is a long walk.
   function* tracing(units, counts, pace) {
     let cell = units
-    let walked = 0
 
     while (cell > 0) {
-      const chosen = pick[cell]
+      let left = SCAN_CELLS
 
-      counts[chosen]++
-      cell = cell > entries[chosen].units ? cell - entries[chosen].units : 0
+      while (cell > 0 && left > 0) {
+        const chosen = pick[cell]
+        const width = unitsOf[chosen]
+        let taken = 0
 
-      if (++walked % SCAN_CELLS === 0 && cell > 0 && pace.expired()) {
+        if (cell <= uniform) {
+          taken = Math.min(Math.ceil(cell / width), left)
+          cell = Math.max(0, cell - taken * width)
+        } else {
+          do {
+            cell = cell > width ? cell - width : 0
+            taken++
+          } while (cell > uniform && taken < left && pick[cell] === chosen)
+        }
+
+        counts[chosen] += taken
+        left -= taken
+      }
+
+      if (cell > 0 && pace.expired()) {
         yield
       }
     }

@@ -22,7 +22,7 @@ const Vue = require('vue')
 const { parse: parseComponent } = require('vue/compiler-sfc')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { patched, plantedCopy } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { loadPage } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
@@ -69,10 +69,13 @@ const NAMES_WITH_HISTORY = [...NAMES, 'history', 'recording-owner']
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
-const loadModules = async (utilities, pages, names = NAMES, pageEdits = []) => {
-  const loaded = await loadUtilities(names, { stubs: STUBS, directory: utilities })
+// The text of each file of the utilities, read once for all the loads of the process: the folder does not change while the checks run, and a mutation's own text is given as `sources`.
+const texts = new Map()
 
-  return { common: loaded['warnings/common'], index: loaded['warnings/index'], snoozes: loaded['warnings/snoozes'], milestones: loaded['history-milestones'], campaign: loaded.campaign, remembered: loaded['remembered-views'], history: loaded.history, utilities, pages, pageEdits }
+const loadModules = async (sources, names = NAMES, pageEdits = []) => {
+  const loaded = await loadUtilities(names, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
+
+  return { common: loaded['warnings/common'], index: loaded['warnings/index'], snoozes: loaded['warnings/snoozes'], milestones: loaded['history-milestones'], campaign: loaded.campaign, remembered: loaded['remembered-views'], history: loaded.history, pages: pagesDirectory, pageEdits }
 }
 
 // ---------- the saves, read only ----------
@@ -2044,9 +2047,9 @@ const outcomeOf = async (m, context, entry) => {
   }
 }
 
+// What a mutation plants: `sources` is the text of each module it changes by the name the loader knows it by, with every edit made (the others are read from the folder, so no copy of it is made), and `pageEdits` the edits of the page's script.
 const planted = (mutation) => {
-  const directories = { utilities: utilitiesDirectory, pages: pagesDirectory }
-  const copies = []
+  const sources = {}
   const pageEdits = []
 
   for (const [name, one, two] of mutation.edits) {
@@ -2058,18 +2061,12 @@ const planted = (mutation) => {
     }
 
     const relative = name === '@settings' ? 'remembered-views.js' : name
+    const module = relative.replace(/\.js$/, '')
 
-    if (copies.length) {
-      const full = path.join(directories.utilities, relative)
-
-      fs.writeFileSync(full, patched(relative, fs.readFileSync(full, 'utf8'), one, two))
-    } else {
-      directories.utilities = plantedCopy(utilitiesDirectory, 'ae-warning-snooze-mutant-', relative, one, two)
-      copies.push(directories.utilities)
-    }
+    sources[module] = patched(relative, sources[module] !== undefined ? sources[module] : fs.readFileSync(path.join(utilitiesDirectory, relative), 'utf8'), one, two)
   }
 
-  return { directories, copies, pageEdits }
+  return { sources, pageEdits }
 }
 
 const ARGS = process.argv.slice(2)
@@ -2081,7 +2078,7 @@ const selectedChecks = checks.filter((item) => !ONLY.length || ONLY.includes(ite
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs, and a skip), or the arguments of `show`. The entries of a check carry its number, `at`, which is its place among the checks run.
 const baselineEntries = async (entries, keys) => {
-  const real = await loadModules(utilitiesDirectory, pagesDirectory, NAMES_WITH_HISTORY)
+  const real = await loadModules({}, NAMES_WITH_HISTORY)
   const context = contextOf(real)
   let at = 0
 
@@ -2114,7 +2111,7 @@ const baselineGroups = () => {
 const baselineOf = () => {
   let held = null
   const context = () => {
-    held = held || loadModules(utilitiesDirectory, pagesDirectory, NAMES_WITH_HISTORY).then((real) => contextOf(real))
+    held = held || loadModules({}, NAMES_WITH_HISTORY).then((real) => contextOf(real))
 
     return held
   }
@@ -2134,7 +2131,7 @@ const mutationEntries = async (entries, mutation) => {
   try {
     planting = planted(mutation)
 
-    const mutant = await loadModules(planting.directories.utilities, planting.directories.pages, NAMES, planting.pageEdits)
+    const mutant = await loadModules(planting.sources, NAMES, planting.pageEdits)
     const reread = contextOf(mutant, { keys: FAST_SAVES })
     const mutantContext = mutation.rereads ? { ...reread, minSigned: 0, minObjects: 0, minHeld: 0 } : contextOf(mutant, { shared: baseline, keys: SAVE_KEYS })
     const named = checks.filter((entry) => mutation.fails.includes(entry.key))
@@ -2160,10 +2157,6 @@ const mutationEntries = async (entries, mutation) => {
     entries.push({ show: [`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${ALL ? `breaks ${broke.join(', ')}` : mutation.fails.join(', ')}${skipped.length ? `; not run: ${skipped.join(', ')}` : ''}; ${((Date.now() - began) / 1000).toFixed(1)} s`] })
   } catch (error) {
     entries.push({ show: [`mutation caught: ${mutation.name}`, `does not apply or load: ${error.message}`] })
-  } finally {
-    if (planting) {
-      planting.copies.forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
-    }
   }
 }
 

@@ -17,7 +17,7 @@ const path = require('path')
 const sqlite3 = require('sqlite3')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { loadPage, replacing, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
@@ -52,10 +52,13 @@ const STUBS = {
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
-const loadModules = async (directory) => {
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory })
+// The text of each file of the utilities, read once for all the loads of the process: the folder does not change while the checks run, and a mutant's own text is given as `sources`.
+const texts = new Map()
 
-  return { history: loaded.history, colony: loaded['colony-series'], campaign: loaded.campaign, directory, reload: () => loadModules(directory) }
+const loadModules = async (sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
+
+  return { history: loaded.history, colony: loaded['colony-series'], campaign: loaded.campaign, reload: () => loadModules(sources) }
 }
 
 // ---------- the saves, read only ----------
@@ -1070,27 +1073,21 @@ const outcomeOf = async (context, entry) => {
   }
 }
 
+// The text of the module a mutation changes, by the name the loader knows it by, with the change made (and the prelude put in place of the random id): the others are read from the folder, so no copy of it is made.
 const planted = (mutation) => {
-  const copy = plantedCopy(utilitiesDirectory, 'ae-colony-series-mutant-', mutation.file, mutation.find, mutation.replace)
+  const text = patched(mutation.file, fs.readFileSync(path.join(utilitiesDirectory, mutation.file), 'utf8'), mutation.find, mutation.replace)
+  const from = 'const randomId = () => globalThis.crypto.randomUUID()'
 
-  if (mutation.prelude) {
-    const target = path.join(copy, mutation.file)
-    const text = fs.readFileSync(target, 'utf8')
-    const from = 'const randomId = () => globalThis.crypto.randomUUID()'
-
-    if (text.split(from).length !== 2) {
-      throw new Error(`The prelude of ${mutation.name} does not apply exactly once`)
-    }
-
-    fs.writeFileSync(target, text.replace(from, () => mutation.prelude))
+  if (mutation.prelude && text.split(from).length !== 2) {
+    throw new Error(`The prelude of ${mutation.name} does not apply exactly once`)
   }
 
-  return copy
+  return { [mutation.file.replace(/\.js$/, '')]: mutation.prelude ? text.replace(from, () => mutation.prelude) : text }
 }
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
 const baselineEntries = async () => {
-  const real = await loadModules(utilitiesDirectory)
+  const real = await loadModules()
   const context = contextOf(real)
   const entries = []
 
@@ -1123,12 +1120,9 @@ const baselineEntries = async () => {
 
 const mutationEntries = async (mutation) => {
   const began = Date.now()
-  let directory = null
 
   try {
-    directory = mutation.page ? null : planted(mutation)
-
-    const mutant = contextOf(await loadModules(mutation.page ? utilitiesDirectory : directory), { mutate: mutation.page || null })
+    const mutant = contextOf(await loadModules(mutation.page ? {} : planted(mutation)), { mutate: mutation.page || null })
     const named = checks.filter((entry) => mutation.fails.includes(entry.key))
     const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
     const missed = []
@@ -1154,10 +1148,6 @@ const mutationEntries = async (mutation) => {
     return [{ show: [`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${mutation.fails.join(', ')}; ${((Date.now() - began) / 1000).toFixed(1)} s`] }]
   } catch (error) {
     return [{ show: [`mutation caught: ${mutation.name}`, `does not load: ${error.message}`] }]
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 

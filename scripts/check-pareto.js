@@ -11,7 +11,6 @@
 */
 const crypto = require('crypto')
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
@@ -121,25 +120,19 @@ const cell = (value) => {
   return Math.sign(value) * Math.round(size * 2 ** (30 - exponent)) * 2 ** (exponent - 30)
 }
 
-const edge = (a, b) => {
-  const first = cell(a)
-  const second = cell(b)
+// The cells of a set's figures on `axes` ([{ key, goal }]), each in the direction of its goal, made once for the set and not at every comparison.
+const cellsOf = (set, axes) => axes.map(({ key, goal }) => cell(FIGURES[key](set) * SIGN[goal]))
 
-  return first > second ? 1 : first < second ? -1 : 0
-}
-
-// Whether `a` beats `b` on `axes` ([{ key, goal }]): as good on every axis and better on one.
-const beats = (a, b, axes) => {
+// Whether the set of the cells `a` beats the set of the cells `b`: as good on every axis and better on one.
+const beats = (a, b) => {
   let better = false
 
-  for (const { key, goal } of axes) {
-    const side = edge(FIGURES[key](a) * SIGN[goal], FIGURES[key](b) * SIGN[goal])
-
-    if (side < 0) {
+  for (let at = 0; at < a.length; at++) {
+    if (a[at] < b[at]) {
       return false
     }
 
-    better = better || side > 0
+    better = better || a[at] > b[at]
   }
 
   return better
@@ -148,8 +141,9 @@ const beats = (a, b, axes) => {
 // The sets no other set beats on `axes`, among the sets with a figure on every axis, and how many had none.
 const oracle = (sets, axes) => {
   const known = sets.filter((set) => axes.every(({ key }) => FIGURES[key](set) !== null))
+  const cells = known.map((set) => cellsOf(set, axes))
 
-  return { front: known.filter((set) => !known.some((other) => other !== set && beats(other, set, axes))), unknown: sets.length - known.length }
+  return { front: known.filter((_set, at) => !cells.some((other, to) => to !== at && beats(other, cells[at]))), unknown: sets.length - known.length }
 }
 
 const axesOf = (pairs) => pairs.map(([key, goal]) => ({ key, goal }))
@@ -945,27 +939,20 @@ const MUTATIONS = [
   { name: 'a set that is not wanted by the ranking or the frontiers not offered to the front', file: 'design-search.js', find: 'wantsRangeFrontier || front) {', replace: 'wantsRangeFrontier) {', fails: ['the front of min cost, max speed equals the oracle'] },
   { name: 'a front of a search that stopped taken for a whole domain', file: 'design-search.js', find: 'explored: termination === TERMINATION.EXHAUSTED', replace: 'explored: true', fails: ['a search that stopped at its candidate budget', 'the front of a step is provisional'] },
   { name: 'the work of the front not counted against a step', file: 'design-search.js', find: 'const FRONT_WORK = 0.01', replace: 'const FRONT_WORK = 0', fails: ['the front of a step counts against the step'] },
-  { name: 'the sets of the front not retained', file: 'design-search.js', find: '...(front ? front.sets() : []), ', replace: '', fails: ['the sets the front holds count as retained results'] },
+  { name: 'the sets of the front not retained', file: 'design-search.js', find: '      for (const set of front.sets()) {\n        held.add(set)\n      }\n', replace: '', fails: ['the sets the front holds count as retained results'] },
   { name: 'the front limit not given to the front', file: 'design-search.js', find: 'createFront(axes, { limit: frontLimit, name: candidateId })', replace: 'createFront(axes, { name: candidateId })', fails: ['a front cut at its limit is provisional for that reason'] },
   { name: 'the front named by something else than the candidate', file: 'design-search.js', find: 'name: candidateId })', replace: 'name: () => \'x\' })', fails: ['the front of min cost, max speed equals the oracle'] },
 ]
 
-const mutatedCopy = (file, from, to) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-pareto-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const source = fs.readFileSync(target, 'utf8')
+// The source of the utility `file` (a name with its .js) with `from` replaced by `to`, for loadUtilities' `sources`: the others load from the folder as they are.
+const mutatedSources = (file, from, to) => {
+  const source = fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8')
 
   if (!source.includes(from)) {
-    fs.rmSync(directory, { recursive: true, force: true })
     throw new Error(`The mutation does not apply to ${file}: ${from}`)
   }
 
-  fs.writeFileSync(target, source.replace(from, () => to))
-
-  return directory
+  return { [file.replace(/\.js$/, '')]: source.replace(from, () => to) }
 }
 
 // ---------- the saves ----------
@@ -1055,40 +1042,35 @@ const checkHead = async (mods) => {
 }
 
 const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
-  const directory = mutatedCopy(file, find, replace)
+  const sources = mutatedSources(file, find, replace)
   const began = Date.now()
+  let failed = null
+  let absent = []
 
   try {
-    let failed = null
-    let absent = []
+    const mutant = modulesOf(await loadUtilities(NAMES, { sources }))
 
-    try {
-      const mutant = modulesOf(await loadUtilities(NAMES, { directory }))
+    // Only the checks the mutation names are run: the others cannot change what it must break.
+    const named = synthetic(mutant).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
 
-      // Only the checks the mutation names are run: the others cannot change what it must break.
-      const named = synthetic(mutant).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
+    absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
 
-      absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+    failed = named.filter(([, test]) => {
+      try {
+        return test() !== true
+      } catch (error) {
+        return true
+      }
+    }).map(([checkName]) => checkName)
+  } catch (error) {
+    check(`mutation caught: ${name}`, `does not load: ${error.message}`)
 
-      failed = named.filter(([, test]) => {
-        try {
-          return test() !== true
-        } catch (error) {
-          return true
-        }
-      }).map(([checkName]) => checkName)
-    } catch (error) {
-      check(`mutation caught: ${name}`, `does not load: ${error.message}`)
-
-      return
-    }
-
-    const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
-
-    check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
+    return
   }
+
+  const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
+
+  check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
 const checkPageMutation = async ({ name, find, replace, fails }, mods) => {

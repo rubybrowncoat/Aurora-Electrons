@@ -34,6 +34,7 @@ const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -655,6 +656,19 @@ const ledger = ({ years, capacity, stock, projects, arrivals = [], cycles }) => 
   return { states, held }
 }
 
+// The oracle's answers by their input: a chunk of mutants runs the engine's cases over again in one process, and the oracle shares nothing with the engine, so what it gave for an input is what it gives again (its answers are only read).
+const ledgerAnswers = new Map()
+
+const ledgerOf = (input) => {
+  const key = JSON.stringify(input)
+
+  if (!ledgerAnswers.has(key)) {
+    ledgerAnswers.set(key, ledger(input))
+  }
+
+  return ledgerAnswers.get(key)
+}
+
 // The engine's cases on synthetic colonies, each a { key, statement, held }. `engine` is the module under test (a mutant passes another). A cycle is a day and 3650 build points a year are 10 points a cycle, so a finish in days is a cycle count.
 const engineCases = (engine, decimal) => {
   const results = []
@@ -811,7 +825,7 @@ const engineCases = (engine, decimal) => {
 
   const against = ({ projects: specs, stock = {}, arrivals = [], capacity, years = DAY_YEARS, cycleDays = 1, cycles, stepwise = false }) => ({
     figures: engine.forecastColony({ capacities: { construction: Number(capacity) }, cycleDays, horizonDays: cycles * cycleDays, stepwise, stock: numbers(stock), arrivals: arrivals.map((arrival) => ({ resource: arrival.resource, day: arrival.cycle * cycleDays, quantity: Number(arrival.quantity) })), projects: specs.map((spec) => enginePoint(spec.id, Number(spec.share), Number(spec.amount), Number(spec.perUnit), numbers(spec.needs), { Queue: spec.queue })) }),
-    model: ledger({ years, capacity, stock, arrivals, cycles, projects: specs }),
+    model: ledgerOf({ years, capacity, stock, arrivals, cycles, projects: specs }),
     cycleDays,
   })
 
@@ -1410,6 +1424,22 @@ const readCycle = async (database, game, race) => {
   return { time: last.Time, years: before && before.Time !== null ? (last.Time - before.Time) / SECONDS_PER_YEAR : null, populations, flows, projects }
 }
 
+// What the save gave for a game and race, read once: the replay of the mutant (a day for every cycle) takes the same read as the replay it is set against, from a save that does not change, and only reads it.
+const cycleReads = new WeakMap()
+
+const readCycleOnce = (database, game, race) => {
+  const reads = cycleReads.get(database) || new Map()
+  const key = `${game}:${race}`
+
+  if (!reads.has(key)) {
+    reads.set(key, readCycle(database, game, race))
+  }
+
+  cycleReads.set(database, reads)
+
+  return reads.get(key)
+}
+
 const usesOf = (flows, population, mineralId, types) => types.reduce((sum, type) => sum + ((flows.get(`${population}:${mineralId}`) || { uses: {} }).uses[type] || 0), 0)
 
 // The builds of the projects that are alone in their use type at their colony, from the ledger: { project, built } over every mineral the project needs, null where the ledger does not show it.
@@ -1514,7 +1544,7 @@ const pageChecks = async (page, production, label) => {
 
 const replay = async (database, game, race, label, options) => {
   const { page, years: yearsOverride = null } = options
-  const cycleData = await readCycle(database, game, race)
+  const cycleData = await readCycleOnce(database, game, race)
 
   console.log(`\n== ${label}: game ${game}, race ${race} ==`)
 
@@ -1846,7 +1876,7 @@ const mutantLists = () => {
   return { engine: ENGINE_MUTANTS, wrapper: WRAPPER_MUTANTS, page: PAGE_MUTANTS }
 }
 
-// A mutant run in a process of its own: `--mutant=<engine, wrapper or page>:<index in its list>` prints the keys of the cases it breaks on its last line. The mutants load their own copies of the modules, so each can run beside the others.
+// Mutants run in children, each child several in turn (scripts/lib/mutant-chunks.js): `--mutants=<indexes into the list of [kind, index] pairs of every list in order>` prints, on its last line, the keys of the cases each breaks, or the message of what stopped it. The mutants load their own copies of the modules, so each can run beside the others and after the others.
 const MUTANT_PREFIX = 'MUTANT_RESULT '
 
 const brokenBy = async (kind, index) => {
@@ -1867,10 +1897,13 @@ const brokenBy = async (kind, index) => {
   return mutated.filter(([, held]) => !held).map(([, , key]) => key)
 }
 
+const mutantPairs = (lists) => Object.entries(lists).flatMap(([kind, list]) => [...list.keys()].map((index) => [kind, index]))
+
 // Starts every mutant in a child, `jobs()` at a time, and answers with the function that gives the keys a mutant broke (or throws what stopped it) once they are in.
 const startMutants = (lists) => {
-  const all = Object.entries(lists).flatMap(([kind, list]) => [...list.keys()].map((index) => [kind, index]))
-  const done = inParallel(all, ([kind, index]) => runChild(__filename, [`--mutant=${kind}:${index}`]).then((result) => lastJson(result, MUTANT_PREFIX)))
+  const all = mutantPairs(lists)
+  const chunks = chunksOf(all.length)
+  const done = inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANT_PREFIX)).then((outcomes) => spread(chunks, outcomes))
 
   return async (kind, index) => {
     const outcome = (await done)[all.findIndex(([one, at]) => one === kind && at === index)]
@@ -1879,18 +1912,30 @@ const startMutants = (lists) => {
       throw outcome
     }
 
-    return outcome
+    if (outcome.error !== undefined) {
+      throw new Error(outcome.error)
+    }
+
+    return outcome.broken
   }
 }
 
 const main = async () => {
-  const child = process.argv.slice(2).find((argument) => argument.startsWith('--mutant='))
+  const child = process.argv.slice(2).find((argument) => argument.startsWith('--mutants='))
 
   if (child) {
-    const [kind, index] = child.slice('--mutant='.length).split(':')
-    const broken = await brokenBy(kind, Number(index))
+    const all = mutantPairs(mutantLists())
+    const results = []
 
-    process.stdout.write(`${MUTANT_PREFIX}${JSON.stringify(broken)}\n`, () => process.exit(0))
+    for (const index of child.slice('--mutants='.length).split(',').map(Number)) {
+      try {
+        results.push({ broken: await brokenBy(...all[index]) })
+      } catch (error) {
+        results.push({ error: error && error.stack ? error.stack : String(error) })
+      }
+    }
+
+    process.stdout.write(`${MUTANT_PREFIX}${JSON.stringify(results)}\n`, () => process.exit(0))
 
     return
   }

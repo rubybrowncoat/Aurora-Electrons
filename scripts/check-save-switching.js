@@ -3,7 +3,7 @@
 
   Each case builds a fresh app over two saves that share a game and race number (GameID 140, race 784) but are different campaigns: a copy of AuroraDB.db, and a copy whose systems and names were changed. Cases that need a file system or a database of their own work on copies in the temp folder; the saves are never changed.
 
-  Each mutation breaks one rule in a copy of the sources; the named cases must fail, or the case that is meant to guard the rule does not. The suite runs first, alone; the mutations then run side by side (CHECK_JOBS at a time), each in a process of its own with its own fixtures. Run: node scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs ./AuroraDB.db.
+  Each mutation breaks one rule in the text of one source; the named cases must fail, or the case that is meant to guard the rule does not. The suite is cut into parts, and the parts and the mutations all run side by side (CHECK_JOBS at a time), each in a process of its own with its own fixtures. Run: node scripts/check-save-switching.js [--no-mutations] [--only=<start of a case name>] [--mutant=<start of a mutation name>]. Needs ./AuroraDB.db.
 */
 const fs = require('fs')
 const os = require('os')
@@ -2027,12 +2027,12 @@ const defineSuite = (m, fixtures, base) => {
 
 // ---- Running -----------------------------------------------------------------------------------------------------------
 
-// The cases of `only` (the starts of their names) or all of them.
-const runSuite = async (modules, fixtures, only = null, base = repo) => {
+// The cases of `only` (the starts of their names) or all of them, and of those only the ones at `positions` (their indexes in the suite) when given.
+const runSuite = async (modules, fixtures, only = null, base = repo, positions = null) => {
   const results = []
 
-  for (const { name, run } of defineSuite(modules, fixtures, base)) {
-    if (only && !only.some((start) => name.startsWith(start))) {
+  for (const [position, { name, run }] of defineSuite(modules, fixtures, base).entries()) {
+    if ((only && !only.some((start) => name.startsWith(start))) || (positions && !positions.includes(position))) {
       continue
     }
 
@@ -2054,13 +2054,13 @@ const runSuite = async (modules, fixtures, only = null, base = repo) => {
   return results
 }
 
-const loadModules = (base) => loadUtilities(MODULES, { stubs: STUBS, directory: base })
+// The text of each file of the sources, read once for all the loads of the process: the folder does not change while the checks run, and a mutation's own text is given as `sources`.
+const texts = new Map()
 
-const copySources = (copy) => {
-  fs.cpSync(path.join(src, 'main'), path.join(copy, 'main'), { recursive: true })
-  fs.cpSync(path.join(src, 'renderer', 'utilities'), path.join(copy, 'renderer', 'utilities'), { recursive: true })
-  fs.cpSync(path.join(src, 'renderer', 'store'), path.join(copy, 'renderer', 'store'), { recursive: true })
-  fs.cpSync(path.join(src, 'renderer', 'plugins'), path.join(copy, 'renderer', 'plugins'), { recursive: true })
+const loadModules = (sources = {}) => loadUtilities(MODULES, { stubs: STUBS, directory: src, sources, texts })
+
+// What a mutation of a script of the dev server is run against: the two files of it that a case reads from `base`, copied so that the mutation breaks the copy.
+const copyWeb = (copy) => {
   fs.mkdirSync(path.join(copy, 'scripts', 'web'), { recursive: true })
   fs.copyFileSync(path.join(repo, 'scripts', 'web', 'database-middleware.js'), path.join(copy, 'scripts', 'web', 'database-middleware.js'))
   fs.mkdirSync(path.join(copy, 'scripts', 'web', 'shims'), { recursive: true })
@@ -2139,10 +2139,10 @@ const MUTATIONS = [
 // `--mutant=<start of a name>` (repeatable) runs only those mutants, and not the suite itself.
 const MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutant=')).map((argument) => argument.slice(9))
 
-// The mutation at `index` of MUTATIONS, broken in `copy`, with the cases it names run against it; one result, as the report prints it.
-const applyMutation = async (copy, fixtures, mutation) => {
-  const target = path.join(copy, mutation.file)
-  const original = fs.readFileSync(target, 'utf8')
+// The mutation at `index` of MUTATIONS, broken, with the cases it names run against it; one result, as the report prints it. The sources of the app are loaded from their folder with the broken text of the one mutated given in its place, so nothing is copied; the scripts of the dev server are read by the cases from `base`, so a mutation of one breaks a copy of them.
+const applyMutation = async (fixtures, mutation) => {
+  const script = mutation.file.startsWith('scripts/')
+  const original = fs.readFileSync(path.join(script ? repo : src, mutation.file), 'utf8')
   // `find` and `replace` are each one text, or lists of texts of the same length that are applied in turn.
   const finds = [].concat(mutation.find)
   const replaces = [].concat(mutation.replace)
@@ -2163,11 +2163,16 @@ const applyMutation = async (copy, fixtures, mutation) => {
     return { name: `mutation: ${mutation.name}`, error: new Error(missing) }
   }
 
-  fs.writeFileSync(target, broken)
+  const copy = script ? fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-switching-src-')) : null
 
   try {
-    const modules = await loadModules(copy)
-    const outcome = await runSuite(modules, fixtures, mutation.fails, copy)
+    if (script) {
+      copyWeb(copy)
+      fs.writeFileSync(path.join(copy, mutation.file), broken)
+    }
+
+    const modules = await loadModules(script ? {} : { [mutation.file.replace(/\.js$/, '')]: broken })
+    const outcome = await runSuite(modules, fixtures, mutation.fails, script ? copy : repo)
     const failed = outcome.filter((entry) => entry.error)
     const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
 
@@ -2175,26 +2180,39 @@ const applyMutation = async (copy, fixtures, mutation) => {
   } catch (error) {
     return { name: `mutation: ${mutation.name}`, error }
   } finally {
-    fs.writeFileSync(target, original)
+    if (copy) {
+      fs.rmSync(copy, { recursive: true, force: true })
+    }
   }
 }
 
-// `--mutation=<index>` is how the check runs one mutation in a process of its own: fixtures, copy of the sources, ports and globals are the child's, so mutations run side by side without sharing anything. The last line it prints is the result.
+// `--mutation=<index>` and `--cases=<positions>` are how the check runs one mutation, or some cases of the suite, in a process of its own: fixtures, ports and globals are the child's, so they run side by side without sharing anything. The last line a child prints is its result.
 const MUTATION_PREFIX = 'MUTATION_RESULT '
+const CASES_PREFIX = 'CASES_RESULT '
 const CHILD_MUTATION = process.argv.filter((argument) => argument.startsWith('--mutation=')).map((argument) => Number(argument.slice(11)))[0]
+const CHILD_CASES = process.argv.filter((argument) => argument.startsWith('--cases=')).map((argument) => argument.slice(8).split(',').map(Number))[0]
+const CHILD = CHILD_MUTATION !== undefined || CHILD_CASES !== undefined
+
+const failureOf = (error) => (error === null ? null : Object.assign(new Error(error.split('\n')[0]), { stack: error }))
 
 const mutationInChild = async (index) => {
   const { name, error } = lastJson(await runChild(__filename, [`--mutation=${index}`]), MUTATION_PREFIX)
 
-  return { name, error: error === null ? null : Object.assign(new Error(error.split('\n')[0]), { stack: error }) }
+  return { name, error: failureOf(error) }
 }
+
+// The suite is cut into this many parts, the cases at every this-many-th position of it, each run in a child of its own: its cases wait on timers and watchers for most of their time, so the parts overlap, and the heavy waits are spread over them.
+const SUITE_PARTS = 6
+
+// The results of the cases at `positions` of the suite, in the order of the positions.
+const casesInChild = async (positions) => (lastJson(await runChild(__filename, [`--cases=${positions.join(',')}`]), CASES_PREFIX)).map(({ name, error }) => ({ name, error: failureOf(error) }))
 
 // A child's verdict is made by the time its temporary folder goes: a folder that Windows still holds open (a watcher closing late on a busy machine) is reported and left, not taken for the mutation's result. The run itself still fails on it.
 const removeTemporary = (folder) => {
   try {
     fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   } catch (cleanup) {
-    if (CHILD_MUTATION === undefined) {
+    if (!CHILD) {
       throw cleanup
     }
 
@@ -2232,41 +2250,46 @@ const main = async () => {
 
   let results = []
 
+  const only = process.argv.filter((argument) => argument.startsWith('--only=')).map((argument) => argument.slice(7))
+
   try {
-    const fixtures = await makeSaves(root)
+    // The parent of a run that cuts the suite into parts (and runs the mutations) needs no fixtures of its own: only the names of the cases.
+    const fixtures = CHILD || only.length ? await makeSaves(root) : null
 
     quiet()
 
     if (CHILD_MUTATION !== undefined) {
-      const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-switching-src-'))
-
-      try {
-        copySources(copy)
-        results = [await applyMutation(copy, fixtures, MUTATIONS[CHILD_MUTATION])]
-      } finally {
-        fs.rmSync(copy, { recursive: true, force: true })
-      }
+      results = [await applyMutation(fixtures, MUTATIONS[CHILD_MUTATION])]
+    } else if (CHILD_CASES !== undefined) {
+      results = await runSuite(await loadModules(), fixtures, null, repo, CHILD_CASES)
+    } else if (only.length) {
+      results = await runSuite(await loadModules(), fixtures, only)
     } else {
-      const modules = await loadModules(src)
-
-      const only = process.argv.filter((argument) => argument.startsWith('--only=')).map((argument) => argument.slice(7))
-      const withMutations = !process.argv.includes('--no-mutations') && !process.argv.some((argument) => argument.startsWith('--only='))
+      const names = defineSuite(await loadModules(), { a: '', b: '' }, repo).map(({ name }) => name)
+      const withMutations = !process.argv.includes('--no-mutations')
       const chosen = withMutations ? [...MUTATIONS.keys()].filter((index) => !MUTANTS.length || MUTANTS.some((start) => MUTATIONS[index].name.startsWith(start))) : []
-      // The suite runs first and alone, as it did before the mutations ran side by side: some of its cases wait on watchers and timers, and would compete for the cores with the children. Each mutation then runs in a child of its own, side by side; the results keep the order of the report: the suite, then the mutations as listed.
-      const suite = MUTANTS.length ? [] : await runSuite(modules, fixtures, only.length ? only : null)
-      const mutants = await inParallel(chosen, mutationInChild)
+      const parts = MUTANTS.length ? [] : Array.from({ length: SUITE_PARTS }, (_, part) => names.map((_name, position) => position).filter((position) => position % SUITE_PARTS === part)).filter((positions) => positions.length)
+      // The parts of the suite and the mutations are all children, run side by side with the parts first (they are the longest); the results keep the order of the report: the suite, then the mutations as listed.
+      const done = await inParallel([...parts, ...chosen], (item) => (Array.isArray(item) ? casesInChild(item) : mutationInChild(item)))
+      const suite = names.map((name) => ({ name, error: null }))
 
-      results = [...suite, ...mutants.map((part, position) => (part instanceof Error ? { name: `mutation: ${MUTATIONS[chosen[position]].name}`, error: part } : part))]
+      parts.forEach((positions, part) => positions.forEach((position, index) => {
+        suite[position] = done[part] instanceof Error ? { name: names[position], error: done[part] } : done[part][index]
+      }))
+
+      const mutants = done.slice(parts.length)
+
+      results = [...(MUTANTS.length ? [] : suite), ...mutants.map((part, position) => (part instanceof Error ? { name: `mutation: ${MUTATIONS[chosen[position]].name}`, error: part } : part))]
     }
   } finally {
     loud()
     removeTemporary(root)
   }
 
-  if (CHILD_MUTATION !== undefined) {
-    const [{ name, error: failure }] = results
+  if (CHILD) {
+    const print = ({ name, error: failure }) => ({ name, error: failure ? String(failure.stack || failure) : null })
 
-    process.stdout.write(`${MUTATION_PREFIX}${JSON.stringify({ name, error: failure ? String(failure.stack || failure) : null })}\n`, () => process.exit(0))
+    process.stdout.write(CHILD_CASES !== undefined ? `${CASES_PREFIX}${JSON.stringify(results.map(print))}\n` : `${MUTATION_PREFIX}${JSON.stringify(print(results[0]))}\n`, () => process.exit(0))
 
     return
   }

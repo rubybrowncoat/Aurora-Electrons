@@ -36,12 +36,19 @@ export const linear = (channel) => {
 export const luminance = ({ r, g, b }) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
 
 export const ratio = (foreground, background) => {
-  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
+  const first = luminance(foreground)
+  const second = luminance(background)
+  const light = first >= second ? first : second
+  const dark = first >= second ? second : first
 
   return (light + 0.05) / (dark + 0.05)
 }
 
-export const hex = ({ r, g, b }) => `#${[r, g, b].map((channel) => Math.round(Math.max(0, Math.min(255, channel))).toString(16).padStart(2, '0')).join('')}`
+const CHANNEL_HEX = Array.from({ length: 256 }, (_unused, value) => value.toString(16).padStart(2, '0'))
+
+const channelHex = (channel) => CHANNEL_HEX[Math.round(Math.max(0, Math.min(255, channel)))] ?? 'NaN'
+
+export const hex = ({ r, g, b }) => `#${channelHex(r)}${channelHex(g)}${channelHex(b)}`
 
 export const at = (object, path) => path.split('.').reduce((value, key) => (value === undefined ? undefined : value[key]), object)
 
@@ -215,24 +222,54 @@ const solid = (appearance, path) => {
 // The opacity of the overlay Vuetify 2.7.2 draws over a tab in the colour of its text (`.v-tab::before` in `currentColor`), by theme: `activated` while an active tab is hovered, `pressed` while it holds focus. They are the `states` of the theme (src/styles/settings/_light.scss and _dark.scss) that `+states` in components/VTabs/VTabs.sass applies to a tab; the stylesheet of the app does not change them, and they do not depend on the appearance's washes. scripts/check-contrast.js and scripts/check-section-accents.js read those two files and fail when these numbers differ from them.
 export const VUETIFY_TAB_STATES = { light: { activated: 0.12, pressed: 0.16 }, dark: { activated: 0.24, pressed: 0.32 } }
 
-// What a section colour drawn as text sits on, each as { state, surfacePath, background } composited into one opaque colour: the page, the card and the chrome (the tab strip and the breadcrumb, the flyout, the palette, the planner), each plain, under the hover wash (the palette's selected row), under Vuetify's overlay of an active tab in the text colour itself at the opacity of a hovered tab and of a focused one (`VUETIFY_TAB_STATES` of the appearance's mode), and the card under each wash of a table row (the planner's figures sit in tables). Backgrounds that come out the same are listed once.
-export const sectionBackdrops = (appearance, color) => {
-  const states = VUETIFY_TAB_STATES[appearance.mode]
-  const text = parseColor(color)
-  const seen = new Set()
+// The backdrops of a section's text that do not depend on the text colour: the card under each wash of a table row, and each surface plain and under the hover wash, with the opacities of the tab overlays (`states`, VUETIFY_TAB_STATES of the mode) read at each surface as the full list of backdrops always read them, so a malformed appearance fails at the same place. Worked out once for the many text colours `readableSectionText` tries.
+const backdropBase = (appearance, states) => {
   const card = solid(appearance, 'surfaces.card')
   const rows = ROW_STATES.map(([state, washes]) => ({ state, surfacePath: 'surfaces.card', background: washes.reduce((below, path) => over(parseColor(at(appearance, path)), below), card) }))
-  const surfaces = SURFACES.flatMap((surfacePath) => {
+  const surfaces = SURFACES.map((surfacePath) => {
     const surface = solid(appearance, surfacePath)
+    const hovered = over(parseColor(appearance.focus.hover), surface)
 
-    return [['plain', surface], ['hovered', over(parseColor(appearance.focus.hover), surface)], ['active tab hovered', over({ ...text, a: states.activated }, surface)], ['active tab focused', over({ ...text, a: states.pressed }, surface)]].map(([state, background]) => ({ state, surfacePath, background }))
+    return { surfacePath, surface, hovered, activated: states.activated, pressed: states.pressed }
   })
 
-  return [...surfaces, ...rows].filter(({ surfacePath, background }) => {
-    const key = `${surfacePath === 'surfaces.card' ? '' : surfacePath}:${hex(background)}`
+  const hexes = new Map([...rows.map(({ background }) => background), ...surfaces.flatMap(({ surface, hovered }) => [surface, hovered])].map((background) => [background, hex(background)]))
 
-    return seen.has(key) ? false : Boolean(seen.add(key))
+  return { rows, surfaces, hexes }
+}
+
+// The text colour `color` parsed, and the backdrops that do not depend on it (`base` when one was worked out before for the same appearance), read in this order: the overlays of the mode, the text colour, then the appearance's colours.
+const backdropsOf = (appearance, color, base) => {
+  const states = VUETIFY_TAB_STATES[appearance.mode]
+  const text = parseColor(color)
+
+  return { text, base: base || backdropBase(appearance, states) }
+}
+
+// Calls `visit` with each backdrop of the text colour `text` ({ state, surfacePath, background }, the ones that come out the same listed once, the first of them) in order, and stops at the first for which it returns false; true when it ran through them all. The backdrops that depend on the text colour are worked out only as far as the walk goes.
+const eachBackdrop = ({ rows, surfaces, hexes }, text, visit) => {
+  const seen = new Set()
+  const take = (state, surfacePath, background) => {
+    const key = `${surfacePath === 'surfaces.card' ? '' : surfacePath}:${hexes.get(background) ?? hex(background)}`
+
+    return seen.has(key) || (seen.add(key), visit({ state, surfacePath, background }))
+  }
+
+  return surfaces.every(({ surfacePath, surface, hovered, activated, pressed }) => take('plain', surfacePath, surface) && take('hovered', surfacePath, hovered) && take('active tab hovered', surfacePath, over({ ...text, a: activated }, surface)) && take('active tab focused', surfacePath, over({ ...text, a: pressed }, surface))) && rows.every(({ state, surfacePath, background }) => take(state, surfacePath, background))
+}
+
+// What a section colour drawn as text sits on, each as { state, surfacePath, background } composited into one opaque colour: the page, the card and the chrome (the tab strip and the breadcrumb, the flyout, the palette, the planner), each plain, under the hover wash (the palette's selected row), under Vuetify's overlay of an active tab in the text colour itself at the opacity of a hovered tab and of a focused one (`VUETIFY_TAB_STATES` of the appearance's mode), and the card under each wash of a table row (the planner's figures sit in tables). Backgrounds that come out the same are listed once.
+export const sectionBackdrops = (appearance, color) => {
+  const { text, base } = backdropsOf(appearance, color)
+  const listed = []
+
+  eachBackdrop(base, text, (backdrop) => {
+    listed.push(backdrop)
+
+    return true
   })
+
+  return listed
 }
 
 // The mixes tried, from the colour toward the body ink, in this many equal steps.
@@ -259,7 +296,17 @@ const readableMix = (appearance, color, reads) => {
 }
 
 // The colour a section is drawn in when it colours text (a title, a label, an active tab), as a hex colour: the colour itself when it reads at 4.5:1 on every backdrop, else the first mix of it with the body ink, in 1/256 steps from the colour, that reads on every backdrop, so that the hue holds as far as the contrast allows (the ink itself when no mix reads). Whether a mix reads is not monotone in the share of ink, because a backdrop is drawn in the text colour itself, so every step is tried and none is skipped. A mix of two colours that each read need not read itself, so the text colour is worked out from the colour in force (the accent, its restrained mix or the neutral accent) and never from its ends. Graphics (an icon, a bar, a wash) keep the colour of `sectionColor` at 3:1.
-export const readableSectionText = (appearance, color) => readableMix(appearance, color, (candidate) => sectionBackdrops(appearance, hex(candidate)).every(({ background }) => ratio(candidate, background) >= TEXT))
+export const readableSectionText = (appearance, color) => {
+  let base
+
+  return readableMix(appearance, color, (candidate) => {
+    const found = backdropsOf(appearance, hex(candidate), base)
+
+    base = found.base
+
+    return eachBackdrop(base, found.text, ({ background }) => ratio(candidate, background) >= TEXT)
+  })
+}
 
 // What the count of a research field sits on: the card plain, and under the active and the hover wash of every accent of every accent mode (the wash is the accent at `washes.sectionSoft` or `washes.sectionTint` over the card), so the count reads whichever mode and section the page is drawn in.
 const washBackdrops = (appearance) => {

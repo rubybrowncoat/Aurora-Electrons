@@ -225,8 +225,24 @@ const saveOf = async (file, GameID, RaceID) => {
 
 // ---------- an installation: each store a JSON value read and written whole ----------
 
+// The stores keep their JSON text, as a file on disk would: a value is serialised on write and parsed on read, so the code under test never shares an object with a store, and each copy costs one pass instead of a clone's two. `files` reads as a Map of values, each read a fresh copy.
 const installation = ({ seed = {}, counter: start = 1000, clock = 1000000 } = {}) => {
-  const files = new Map(Object.entries(seed).map(([name, value]) => [name, clone(value)]))
+  const texts = new Map(Object.entries(seed).map(([name, value]) => [name, JSON.stringify(value)]))
+  const read = (name) => {
+    const text = texts.get(name)
+
+    return text === undefined ? undefined : JSON.parse(text)
+  }
+  const files = {
+    get: read,
+    has: (name) => texts.has(name),
+    keys: () => texts.keys(),
+    * [Symbol.iterator] () {
+      for (const name of texts.keys()) {
+        yield [name, read(name)]
+      }
+    },
+  }
   const writes = []
   let cut = () => false
   let ids = start
@@ -245,11 +261,11 @@ const installation = ({ seed = {}, counter: start = 1000, clock = 1000000 } = {}
         }
       }
 
-      return clone(files.get(name)) || {}
+      return read(name) || {}
     },
     set store (value) {
-      files.set(name, clone(value))
-      writes.push({ name, cut: cut(), value: name.endsWith('-events') ? files.get(name) : undefined })
+      texts.set(name, JSON.stringify(value))
+      writes.push({ name, cut: cut(), text: name.endsWith('-events') ? texts.get(name) : undefined })
     },
     update (change) {
       this.store = change(this.store)
@@ -261,7 +277,7 @@ const installation = ({ seed = {}, counter: start = 1000, clock = 1000000 } = {}
   return {
     files,
     writes,
-    put: (name, value) => files.set(name, clone(value)),
+    put: (name, value) => texts.set(name, JSON.stringify(value)),
     setCut: (test) => { cut = test },
     // The store throws from its read number `after` + 1 on: 0 for always, 1 for a store that reads once and then fails, as one that goes bad between the check of an archive and its use.
     breakStore: (name, after = 0) => broken.set(name, { after, reads: 0 }),
@@ -269,12 +285,12 @@ const installation = ({ seed = {}, counter: start = 1000, clock = 1000000 } = {}
     newId: () => `c${++ids}`,
     now: () => ++time,
     io: { registry: store('registry'), migration: store('migration'), settings: store('settings'), backup: store('backup'), file: (name) => store(`file:${name}`) },
-    registry: () => ({ campaigns: {}, pool: {}, ...(clone(files.get('registry')) || {}) }),
-    campaignId: (GameID) => Object.entries((clone(files.get('registry')) || { campaigns: {} }).campaigns).filter(([, campaign]) => GameID === undefined || (campaign.gameIds || []).includes(GameID)).map(([id]) => id)[0],
-    branch: (campaignId, branchId = 'b1') => clone(files.get(`file:campaign-${campaignId}-${branchId}`)) || {},
-    events: (campaignId, branchId = 'b1') => clone(files.get(`file:campaign-${campaignId}-${branchId}-events`)),
+    registry: () => ({ campaigns: {}, pool: {}, ...(read('registry') || {}) }),
+    campaignId: (GameID) => Object.entries((read('registry') || { campaigns: {} }).campaigns).filter(([, campaign]) => GameID === undefined || (campaign.gameIds || []).includes(GameID)).map(([id]) => id)[0],
+    branch: (campaignId, branchId = 'b1') => read(`file:campaign-${campaignId}-${branchId}`) || {},
+    events: (campaignId, branchId = 'b1') => read(`file:campaign-${campaignId}-${branchId}-events`),
     eventWrites: () => writes.filter(({ name }) => name.endsWith('-events')).length,
-    eventValues: (name, from = 0) => writes.slice(from).filter((write) => write.name === name).map((write) => write.value),
+    eventValues: (name, from = 0) => writes.slice(from).filter((write) => write.name === name).map((write) => (write.text === undefined ? undefined : JSON.parse(write.text))),
     copy: () => installation({ seed: Object.fromEntries(files), counter: ids, clock: time }),
   }
 }

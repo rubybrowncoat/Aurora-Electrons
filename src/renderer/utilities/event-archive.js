@@ -129,12 +129,8 @@ const sameIdentity = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
 
 const endOf = (increment) => increment[1] + increment[2]
 
-const compareGroups = (a, b) => {
-  const left = JSON.stringify(a.slice(0, EVENT_FIELDS.length))
-  const right = JSON.stringify(b.slice(0, EVENT_FIELDS.length))
-
-  return left < right ? -1 : left > right ? 1 : 0
-}
+// The groups of an increment in their stored order: by their fields as JSON text. The text is made once per group, not twice per comparison (an increment of a large save holds thousands of groups).
+const sortGroups = (groups) => groups.map((group) => [JSON.stringify(group.slice(0, EVENT_FIELDS.length)), group]).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)).map(([, group]) => group)
 
 // ---- Reading a save ------------------------------------------------------------------------------------------------
 
@@ -184,7 +180,7 @@ export const captureOf = (rows, window, t) => {
     byIncrement.set(id, groups)
   })
 
-  const increments = [...byIncrement].sort((a, b) => a[0] - b[0]).map(([id, groups]) => [...window.ledger.get(id), [...groups.values()].map(([fields, count]) => [...fields, count]).sort(compareGroups)])
+  const increments = [...byIncrement].sort((a, b) => a[0] - b[0]).map(([id, groups]) => [...window.ledger.get(id), [...groups].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)).map(([, [fields, count]]) => [...fields, count])])
 
   return { t: Number(t), from, to, increments, ledger: window.ledger, orphans, rows: rows.length - orphans }
 }
@@ -314,7 +310,7 @@ export const mergeCapture = (stored, capture, { now = Date.now } = {}) => {
       groups.push(group)
     })
 
-    record.increments[index] = [...increment.slice(0, 3), groups.sort(compareGroups)]
+    record.increments[index] = [...increment.slice(0, 3), sortGroups(groups)]
   })
 
   // The read's increments the archive does not hold: added. An ID the archive holds with another identity is a conflict (another timeline's increment) and its rows are left out.

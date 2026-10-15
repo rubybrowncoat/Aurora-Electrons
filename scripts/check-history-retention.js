@@ -14,7 +14,6 @@
   Everything runs on in-memory stores. Each mutation of the utilities or of the page must fail the checks it names. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const nodeVm = require('vm')
 const crypto = require('crypto')
@@ -1777,28 +1776,24 @@ const PAGE_MUTATIONS = [
 // A mutant's text is written with `#{` where the module has a template placeholder, so no quoted string here holds one.
 const unhashed = (text) => text.replace(/#\{/g, '$' + '{')
 
-const mutatedCopy = (file, change, replacement) => {
+// The text of the module a mutation changes, by the name the loader knows it by, with the change made: the others are read from the folder, so no copy of it is made.
+const mutatedSources = (file, change, replacement) => {
   const from = unhashed(change)
   const to = unhashed(replacement)
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-history-retention-mutant-'))
-
-  fs.cpSync(utilitiesDirectory, directory, { recursive: true })
-
-  const target = path.join(directory, file)
-  const source = fs.readFileSync(target, 'utf8').replace(/\r\n/g, '\n')
+  const source = fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8').replace(/\r\n/g, '\n')
 
   if (source.split(from).length !== 2) {
-    fs.rmSync(directory, { recursive: true, force: true })
     throw new Error(`The mutation must apply exactly once to ${file}: ${from}`)
   }
 
-  fs.writeFileSync(target, source.replace(from, () => to))
-
-  return directory
+  return { [file.replace(/\.js$/, '')]: source.replace(from, () => to) }
 }
 
-const loadModules = async (directory) => {
-  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory })
+// The text of each file of the utilities, read once for all the loads of the process: the folder does not change while the checks run, and a mutant's own text is given as `sources`.
+const texts = new Map()
+
+const loadModules = async (sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { stubs: STUBS, directory: utilitiesDirectory, sources, texts })
 
   return { history: loaded.history, backup: loaded['history-backup'], campaign: loaded.campaign, attach: loaded['campaign-attach'], owner: loaded['recording-owner'] }
 }
@@ -1838,7 +1833,7 @@ const MUTANTS = [...UTILITY_MUTATIONS.map((mutation) => ({ ...mutation, page: fa
 
 // What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs), or the arguments of `show`.
 const baselineEntries = async (entries) => {
-  const real = await loadModules(utilitiesDirectory)
+  const real = await loadModules()
 
   entries.push({ log: 'The utilities: thinning, status and figures' })
 
@@ -1857,10 +1852,10 @@ const baselineEntries = async (entries) => {
 
 const utilityEntries = async (entries, { name, file, find, replace, fails }) => {
   const began = Date.now()
-  const directory = mutatedCopy(file, find, replace)
+  const sources = mutatedSources(file, find, replace)
 
   try {
-    const mutant = await loadModules(directory)
+    const mutant = await loadModules(sources)
     const named = [...suite(mutant), ...recorderSuite(mutant), ...backupSuite(mutant)].filter(({ group, name: checkName }) => fails.some((start) => `${group}: ${checkName}`.startsWith(start)))
     const absent = fails.filter((start) => !named.some(({ group, name: checkName }) => `${group}: ${checkName}`.startsWith(start)))
     const results = await runChecks(named)
@@ -1869,8 +1864,6 @@ const utilityEntries = async (entries, { name, file, find, replace, fails }) => 
     entries.push({ show: [`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${((Date.now() - began) / 1000).toFixed(1)} s`] })
   } catch (error) {
     entries.push({ show: [`mutation caught: ${name}`, `does not load: ${error.message}`] })
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
   }
 }
 
@@ -1878,7 +1871,7 @@ const pageEntries = async (entries, { name, mutate, change, fails }) => {
   const began = Date.now()
 
   try {
-    const real = await loadModules(utilitiesDirectory)
+    const real = await loadModules()
     const warned = warnings.length
     const statements = await pageSuite(real, { mutate, change })
     const named = statements.filter(([statement]) => fails.some((start) => statement.startsWith(start)))

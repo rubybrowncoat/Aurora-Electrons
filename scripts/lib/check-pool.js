@@ -1,12 +1,16 @@
 // Runs the independent work of a check script (its mutants, mostly) several at a time. Each mutant already runs in a fresh copy of the modules, and the slow scripts spend most of their time on mutants one after another, so running them side by side cuts the wall time by about the number of cores without changing what any check or mutant proves.
-// `CHECK_JOBS` sets how many run at once (scripts/check-all.js divides the machine between the scripts it runs); without it, one less than the cores, at least one.
+// `CHECK_JOBS` sets how many run at once (scripts/check-all.js divides its budget between the scripts it runs); without it, half the logical processors, at least one. The checks are JavaScript: a second hardware thread on a core adds little to one that is busy, and every worker holds a copy of the modules and often a copied source tree, so more workers than physical cores only adds memory and disk traffic and leaves nothing for the rest of the machine.
 const os = require('os')
 const { spawn } = require('child_process')
+
+const threads = () => (os.availableParallelism ? os.availableParallelism() : os.cpus().length)
+
+const cores = () => Math.max(1, Math.floor(threads() / 2))
 
 const jobs = () => {
   const set = Number(process.env.CHECK_JOBS)
 
-  return Number.isInteger(set) && set > 0 ? set : Math.max(1, (os.availableParallelism ? os.availableParallelism() : os.cpus().length) - 1)
+  return Number.isInteger(set) && set > 0 ? set : cores()
 }
 
 // `items` through `work`, no more than `limit` at a time; the results in the order of the items. A work that throws gives its error as its result, so one failure never hides the others.
@@ -58,4 +62,4 @@ const lastJson = ({ code, stdout, stderr }, prefix = '') => {
   return JSON.parse(line.slice(prefix.length))
 }
 
-module.exports = { jobs, inParallel, runChild, lastJson }
+module.exports = { cores, jobs, inParallel, runChild, lastJson }

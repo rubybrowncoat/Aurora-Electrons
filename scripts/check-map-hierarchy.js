@@ -13,7 +13,6 @@
   Each mutation of the utilities, of the page, of the system view or of the chart canvas must fail the checks it names (UNSUPPORTED and a thrown check do not count as agreement), and a mutation that does not parse or whose text is not there exactly once is refused. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
 const fs = require('fs')
-const os = require('os')
 const path = require('path')
 const vmModule = require('vm')
 const { execFileSync } = require('child_process')
@@ -137,36 +136,21 @@ const methodSource = (text, name, isComponent = true) => {
 
 const atBase = (file) => execFileSync('git', ['show', `${BASE}:${file}`], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 
-// ---------- the world: the changed sources over a copy of the renderer's utilities ----------
+// ---------- the world: the changed sources over the renderer's own files ----------
 
-const worldOf = (texts) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-hierarchy-'))
-
-  fs.cpSync(path.join(renderer, 'utilities'), path.join(directory, 'utilities'), { recursive: true })
-  fs.cpSync(path.join(renderer, 'mixins'), path.join(directory, 'mixins'), { recursive: true })
-  fs.mkdirSync(path.join(directory, 'pages'))
-  fs.writeFileSync(path.join(directory, 'utilities', 'map-hierarchy.js'), texts.hierarchy)
-  fs.writeFileSync(path.join(directory, 'utilities', 'map-export.js'), texts.exporter)
-  fs.writeFileSync(path.join(directory, 'pages', 'map.vue'), texts.map)
-
-  return directory
-}
+// The files of the renderer do not change during a run, so each is read once.
+const fileTexts = new Map()
 
 const contextOf = async (texts) => {
-  const directory = worldOf(texts)
+  const m = await loadUtilities(['appearance', 'appearance-contrast', 'map-hierarchy', 'map-export', 'preferences'], { sources: { 'map-hierarchy': texts.hierarchy, 'map-export': texts.exporter }, texts: fileTexts, stubs: UTILITY_STUBS })
+  const sources = { 'pages/map': texts.map, 'utilities/map-hierarchy': texts.hierarchy, 'utilities/map-export': texts.exporter }
+  const options = await loadPage('pages/map', { sources, texts: fileTexts, stubs: PAGE_STUBS, modules: PAGE_MODULES })
+  const persisted = await loadPage('pages/map', { sources, texts: fileTexts, stubs: PAGE_STUBS, modules: { ...PAGE_MODULES, 'mixins/persisted-view': `${unique(PERSISTED_VIEW)}\nglobalThis.__declaredViews = declaredViews\n` } })
+  const declared = globalThis.__declaredViews()
+  const view = await import(dataUrl(unique(PERSISTED_VIEW)))
+  const appearances = Object.fromEntries(PRESET_IDS.map((id) => [id, m.appearance.resolveAppearance(id)]))
 
-  try {
-    const m = await loadUtilities(['appearance', 'appearance-contrast', 'map-hierarchy', 'map-export', 'preferences'], { directory: path.join(directory, 'utilities'), stubs: UTILITY_STUBS })
-    const options = await loadPage('pages/map', { directory, stubs: PAGE_STUBS, modules: PAGE_MODULES })
-    const persisted = await loadPage('pages/map', { directory, stubs: PAGE_STUBS, modules: { ...PAGE_MODULES, 'mixins/persisted-view': `${unique(PERSISTED_VIEW)}\nglobalThis.__declaredViews = declaredViews\n` } })
-    const declared = globalThis.__declaredViews()
-    const view = await import(dataUrl(unique(PERSISTED_VIEW)))
-    const appearances = Object.fromEntries(PRESET_IDS.map((id) => [id, m.appearance.resolveAppearance(id)]))
-
-    return { m, options, persisted, declared, view, appearances, texts, cache: new Map() }
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true })
-  }
+  return { m, options, persisted, declared, view, appearances, texts, cache: new Map() }
 }
 
 // ---------- the dense scene ----------

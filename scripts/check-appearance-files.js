@@ -8,7 +8,7 @@
 const fs = require('fs')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -18,11 +18,14 @@ const IDS = ['light', 'dark', 'classic', 'solaris', 't2d', 'cristo', 'deepblue']
 
 let instance = 0
 
-// The three modules in a copy of their own (`fresh` loads another from the same folder, for a start of the app after this one), so that each check starts with no draft, no kept file and the default preset applied. The stub of Vue differs by a comment, which gives appearance.js another source and so another module.
-const load = async (directory = utilitiesDirectory) => {
-  const loaded = await loadUtilities(['appearance', 'appearance-file', 'appearance-contrast'], { directory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value }, delete: (target, key) => { delete target[key] } }\n// instance ${instance++}` } })
+// The files of the utilities folder do not change during a run, so each is read once.
+const texts = new Map()
 
-  return { appearance: loaded.appearance, file: loaded['appearance-file'], contrast: loaded['appearance-contrast'], fresh: () => load(directory) }
+// The three modules in a copy of their own (`fresh` loads another from the same folder, for a start of the app after this one), so that each check starts with no draft, no kept file and the default preset applied. The stub of Vue differs by a comment, which gives appearance.js another source and so another module. `sources` is the text of the module a planted fault changes, by name.
+const load = async (sources = {}) => {
+  const loaded = await loadUtilities(['appearance', 'appearance-file', 'appearance-contrast'], { sources, texts, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value }, delete: (target, key) => { delete target[key] } }\n// instance ${instance++}` } })
+
+  return { appearance: loaded.appearance, file: loaded['appearance-file'], contrast: loaded['appearance-contrast'], fresh: () => load(sources) }
 }
 
 const short = (value) => {
@@ -621,26 +624,28 @@ const scanSources = () => {
   return found.length ? found.join('; ') : true
 }
 
-const runChecks = async (directory) => {
+const runChecks = async (sources, first) => {
   const results = []
+  let modules = first
 
   for (const [name, test] of CHECKS) {
     let result
 
     try {
-      result = await test(await load(directory))
+      result = await test(modules ?? await load(sources))
     } catch (error) {
       result = `threw ${error.message}`
     }
 
+    modules = undefined
     results.push([name, result])
   }
 
   return results
 }
 
-// A copy of the utilities folder in the temp folder in which `file` has `from` replaced by `to`.
-const mutatedCopy = (file, from, to) => plantedCopy(utilitiesDirectory, 'ae-appearance-mutant-', file, from, to)
+// The utilities as the checks load them with the fault planted: the text of the one module in which `file` has `from` replaced by `to`, by name, and the others read from the folder.
+const plantedSources = (file, from, to) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
 const FILE = 'appearance-file.js'
 const APPEARANCE = 'appearance.js'
@@ -681,23 +686,20 @@ const MUTATIONS = [
 
 // A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
 const judge = async ([, file, from, to]) => {
-  let directory
-
   try {
+    let sources
+    let modules
+
     try {
-      directory = mutatedCopy(file, from, to)
-      await load(directory)
+      sources = plantedSources(file, from, to)
+      modules = await load(sources)
     } catch (error) {
       return { invalid: error.message }
     }
 
-    return { failed: (await runChecks(directory)).filter(([, result]) => result !== true).length }
+    return { failed: (await runChecks(sources, modules)).filter(([, result]) => result !== true).length }
   } catch (error) {
     return { error: error.message }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 

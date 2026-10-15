@@ -12,7 +12,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
-const { plantedCopy } = require('./lib/mutant-source')
+const { patched } = require('./lib/mutant-source')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -22,11 +22,13 @@ let instance = 0
 
 const NAMES = ['appearance-font', 'appearance', 'appearance-file', 'appearance-contrast', 'preferences', 'remembered-views', 'navigation']
 
-// A fresh copy of the modules, so the state of one check never reaches another; `directory` is a copy of the utilities folder with a planted fault.
-const load = async (directory = utilitiesDirectory) => {
-  const loaded = await loadUtilities(NAMES, { directory, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+// A fresh copy of the modules, so the state of one check never reaches another; `sources` is the text of the module a planted fault changes, by name. The files of the folder do not change during a run, so each is read once.
+const texts = new Map()
 
-  return { font: loaded['appearance-font'], appearance: loaded.appearance, file: loaded['appearance-file'], contrast: loaded['appearance-contrast'], preferences: loaded.preferences, views: loaded['remembered-views'], navigation: loaded.navigation, reload: () => load(directory) }
+const load = async (sources = {}) => {
+  const loaded = await loadUtilities(NAMES, { sources, texts, stubs: { vue: `export default { observable: (value) => value, set: (target, key, value) => { target[key] = value } }\n// instance ${instance++}` } })
+
+  return { font: loaded['appearance-font'], appearance: loaded.appearance, file: loaded['appearance-file'], contrast: loaded['appearance-contrast'], preferences: loaded.preferences, views: loaded['remembered-views'], navigation: loaded.navigation, reload: () => load(sources) }
 }
 
 const fakeConfig = (initial = {}) => ({
@@ -99,17 +101,28 @@ const TARGET = { gameId: null, raceId: null }
 
 const presets = (ctx) => ctx.appearance.listAppearances()
 
+// What Vuetify's own files say never changes during a run, so each reading of them is made once.
+const remembered = new Map()
+
+const once = (key, read) => {
+  if (!remembered.has(key)) {
+    remembered.set(key, read())
+  }
+
+  return remembered.get(key)
+}
+
 // The overlay of a tab over its surface as Vuetify draws it, read from its own theme files: a hovered active tab takes `activated` and a focused one `pressed`.
-const vuetifyStates = (mode) => {
+const vuetifyStates = (mode) => once(`states ${mode}`, () => {
   const text = fs.readFileSync(path.join(root, 'node_modules', 'vuetify', 'src', 'styles', 'settings', `_${mode}.scss`), 'utf8')
   const block = /'states': \(([^)]*)\)/.exec(text)[1]
   const value = (name) => Number(new RegExp(`'${name}': ([0-9.]+)`).exec(block)[1])
 
   return { activated: value('activated'), pressed: value('pressed') }
-}
+})
 
 // The opacity Vuetify's own stylesheet draws over a list entry in the colour of its text, by theme and the selector's tail (`:hover`, `:focus`, `--active`, `--active:focus`, `.v-list-item--highlighted`), read from dist/vuetify.css and not from the code under check.
-const vuetifyListOpacity = (mode, tail) => Number(new RegExp(`\\.theme--${mode}\\.v-list-item${tail.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}::before\\s*\\{[^}]*opacity:\\s*([0-9.]+)`).exec(fs.readFileSync(path.join(root, 'node_modules', 'vuetify', 'dist', 'vuetify.css'), 'utf8'))[1])
+const vuetifyListOpacity = (mode, tail) => once(`opacity ${mode} ${tail}`, () => Number(new RegExp(`\\.theme--${mode}\\.v-list-item${tail.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}::before\\s*\\{[^}]*opacity:\\s*([0-9.]+)`).exec(once('vuetify.css', () => fs.readFileSync(path.join(root, 'node_modules', 'vuetify', 'dist', 'vuetify.css'), 'utf8')))[1]))
 
 // The backgrounds a section's text can sit on, worked out here from the surfaces and Vuetify's own files, and not by the code under check: each of the page, the card and the chrome, plain, under the hover wash, under the overlay of a hovered and of a focused active tab in the text colour itself; the card under each wash of a table row.
 const fixed = new WeakMap()
@@ -963,16 +976,16 @@ const MUTATIONS = [
   ['two sections sharing an icon', { file: 'navigation.js', from: "icon: 'mdi-pencil-ruler', accent: 8 }", to: "icon: 'mdi-flask-outline', accent: 8 }" }],
   ['the text colour of a section left as the colour in force', { file: CONTRAST, from: 'read.set(color, readableSectionText(appearance, color))', to: 'read.set(color, color)' }],
   ['the text colour of every mode worked out from the on accents', { file: CONTRAST, from: 'kept[mode] = sectionAccents(appearance, mode).map((color) => {', to: "kept[mode] = sectionAccents(appearance, 'on').map((color) => {" }],
-  ['the text colour worked out against plain surfaces only', { file: CONTRAST, from: "return [['plain', surface], ['hovered', over(parseColor(appearance.focus.hover), surface)], ['active tab hovered', over({ ...text, a: states.activated }, surface)], ['active tab focused', over({ ...text, a: states.pressed }, surface)]].map(", to: "return [['plain', surface]].map(" }],
-  ['the text colour worked out against a plain card only', { file: CONTRAST, from: 'const surfaces = SURFACES.flatMap((surfacePath) => {', to: "const surfaces = ['surfaces.card'].flatMap((surfacePath) => {" }],
+  ['the text colour worked out against plain surfaces only', { file: CONTRAST, from: "({ surfacePath, surface, hovered, activated, pressed }) => take('plain', surfacePath, surface) && take('hovered', surfacePath, hovered) && take('active tab hovered', surfacePath, over({ ...text, a: activated }, surface)) && take('active tab focused', surfacePath, over({ ...text, a: pressed }, surface))", to: "({ surfacePath, surface }) => take('plain', surfacePath, surface)" }],
+  ['the text colour worked out against a plain card only', { file: CONTRAST, from: 'const surfaces = SURFACES.map((surfacePath) => {', to: "const surfaces = ['surfaces.card'].map((surfacePath) => {" }],
   ['the text colour nudged toward the card instead of the body ink', { file: CONTRAST, from: "const ink = over(parseColor(appearance.inks.body), solid(appearance, 'surfaces.card'))", to: "const ink = solid(appearance, 'surfaces.card')" }],
   ['the text colour of a section that is the body ink and no nearer mix', { file: CONTRAST, from: 'return hex(candidate)\n    }\n  }\n\n  return hex(ink)', to: 'return hex(ink)\n    }\n  }\n\n  return hex(ink)' }],
   ['the text colour of a section that skips the first mixes', { file: CONTRAST, from: 'for (let step = 1; step <= MIX_STEPS; step++) {', to: 'for (let step = 8; step <= MIX_STEPS; step += 8) {' }],
   ['the overlay measured lower than the drawn one', { file: CONTRAST, from: 'dark: { activated: 0.24, pressed: 0.32 } }', to: 'dark: { activated: 0.12, pressed: 0.32 } }' }],
   ['the overlay of a hovered tab measured at the light theme in the dark one', { file: CONTRAST, from: 'const states = VUETIFY_TAB_STATES[appearance.mode]', to: 'const states = VUETIFY_TAB_STATES.light' }],
-  ['the focused state of a tab left out', { file: CONTRAST, from: ", ['active tab focused', over({ ...text, a: states.pressed }, surface)]", to: '' }],
-  ['the overlay of a focused tab taken from the wash of a section', { file: CONTRAST, from: 'over({ ...text, a: states.pressed }, surface)', to: 'over({ ...text, a: appearance.washes.sectionSoft }, surface)' }],
-  ['the rows of a table left out of the backdrops', { file: CONTRAST, from: 'return [...surfaces, ...rows].filter(', to: 'return [...surfaces].filter(' }],
+  ['the focused state of a tab left out', { file: CONTRAST, from: " && take('active tab focused', surfacePath, over({ ...text, a: pressed }, surface))", to: '' }],
+  ['the overlay of a focused tab taken from the wash of a section', { file: CONTRAST, from: 'pressed: states.pressed', to: 'pressed: appearance.washes.sectionSoft' }],
+  ['the rows of a table left out of the backdrops', { file: CONTRAST, from: ' && rows.every(({ state, surfacePath, background }) => take(state, surfacePath, background))', to: '' }],
   ['the text measured at the graphic minimum', { file: CONTRAST, from: 'surface: hex(background), surfacePath, minimum: TEXT }, () => ratio(parseColor(color), background))', to: 'surface: hex(background), surfacePath, minimum: GRAPHIC }, () => ratio(parseColor(color), background))' }],
   ['the text of the sections left out of the contrast measurement', { file: CONTRAST, from: 'guard(measured.sectionText,', to: 'guard([],' }],
   ['the text of the sections left out of the contrast report', { file: FILE, from: '    ...measured.sectionText.map((row) =>', to: '    ...[].map((row) =>' }],
@@ -991,15 +1004,16 @@ const MUTATIONS = [
   ['the graphics left out of the contrast report', { file: FILE, from: '    ...measured.graphics,\n', to: '' }],
 ]
 
-const mutatedCopy = ({ file, from, to }) => plantedCopy(utilitiesDirectory, 'ae-accents-mutant-', file, from, to)
+// The utilities as the checks load them with the fault planted: the text of the one module that changes, by name, and the others read from the folder.
+const plantedSources = ({ file, from, to }) => ({ [file.replace(/\.js$/, '')]: patched(file, fs.readFileSync(path.join(utilitiesDirectory, file), 'utf8'), from, to) })
 
-const runChecks = async (directory, first) => {
+const runChecks = async (sources, first) => {
   const results = []
   let modules = first
 
   for (const [name, check] of CHECKS) {
     try {
-      results.push([name, await check(modules ?? await load(directory))])
+      results.push([name, await check(modules ?? await load(sources))])
     } catch (error) {
       results.push([name, `threw: ${error.message}`])
     }
@@ -1012,25 +1026,20 @@ const runChecks = async (directory, first) => {
 
 // A planted fault is judged only when it applies exactly once, the source it leaves parses and the modules it leaves still load: a fault that breaks the syntax of a module (one the checks load or not) or whose anchor matches nothing makes the checks throw, and a thrown check counts as failed, so such a fault would be reported as caught without any check having looked at what it was meant to plant. It is reported as invalid instead, and fails the run.
 const judge = async (fault) => {
-  let directory
-
   try {
+    let sources
     let modules
 
     try {
-      directory = mutatedCopy(fault)
-      modules = await load(directory)
+      sources = plantedSources(fault)
+      modules = await load(sources)
     } catch (error) {
       return { invalid: error.message }
     }
 
-    return { failed: (await runChecks(directory, modules)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
+    return { failed: (await runChecks(sources, modules)).map(([, result], index) => [index + 1, result]).filter(([, result]) => result !== true).map(([index]) => index) }
   } catch (error) {
     return { error: error.message }
-  } finally {
-    if (directory) {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
   }
 }
 
