@@ -54,23 +54,23 @@ export const HAUL_ORDER_ACTIONS = [62, 165, 178, 180, 223]
 export const ORBITAL_MINING_MODULE = 38
 
 // Radiation at which the colony's mine output modifier reaches 0.
-const RADIATION_LIMIT = 10000
+export const RADIATION_LIMIT = 10000
 
-const VERSION_INPUT = 'the game version the mining rules are verified for (a 2.7-shaped save)'
+export const VERSION_INPUT = 'the game version the mining rules are verified for (a 2.7-shaped save)'
 
-const known = (value) => typeof value === 'number' && Number.isFinite(value)
+export const known = (value) => typeof value === 'number' && Number.isFinite(value)
 
 // Three-valued verdicts: 1, 0 or null while an input is not known.
-const all = (...verdicts) => (verdicts.includes(0) ? 0 : verdicts.includes(null) ? null : 1)
+export const all = (...verdicts) => (verdicts.includes(0) ? 0 : verdicts.includes(null) ? null : 1)
 
-const any = (...verdicts) => (verdicts.includes(1) ? 1 : verdicts.includes(null) ? null : 0)
+export const any = (...verdicts) => (verdicts.includes(1) ? 1 : verdicts.includes(null) ? null : 0)
 
 const not = (verdict) => (verdict === null ? null : 1 - verdict)
 
 const flag = (value) => (value === 1 || value === true ? 1 : value === 0 || value === false ? 0 : null)
 
 // Whether a sum over installations is above 0: known when it is, or when no installation is unreadable.
-const positive = (sum, gaps) => (known(sum) && sum > 0 ? 1 : known(sum) && !(gaps > 0) ? 0 : null)
+export const positive = (sum, gaps) => (known(sum) && sum > 0 ? 1 : known(sum) && !(gaps > 0) ? 0 : null)
 
 // A prerequisite: `verdict` 1 (met), 0 (missing) or null (not known). One that rests on a 2.7 rule is `supported` only on a 2.7-shaped save, and unknown on any other; `missing` is the text when it is lacking, `unknown` the text when not known and `inputs` the stored values that decide it.
 const prerequisite = (key, owner, verdict, { missing, unknown, inputs, supported = true }) => {
@@ -253,6 +253,7 @@ const fleetSites = (rows, { supported, count }) => {
     })
     const operating = working.map((modules, index) => all(modules, crewAboard[index]))
     const crewed = crewAboard.filter((_crew, index) => working[index] !== 0)
+    const shipInputs = [...new Set(ships.flatMap((_ship, index) => [...(working[index] === null ? [SHIP_MODULES_INPUT, 'the class components of a ship', 'the damaged components of a ship'] : []), ...(working[index] !== 0 && crewAboard[index] === null ? CREW_INPUTS : [])]))]
     const needs = [
       prerequisite('colony', 'fleet', colonyId === null ? 0 : 1, { missing: 'No colony of the race on this body to take the output', unknown: 'The colony on the body is not known', inputs: ['the colonies of the race'], supported: supported.orbital }),
       prerequisite('assignment', 'fleet', assignment === 'unknown' ? null : assignment !== 'colony' || colonyId === null || assigned === colonyId ? 1 : 0, { missing: `Assigned to ${row.AssignedName || 'another colony'}, not to the colony on this body`, unknown: 'The colony the fleet is assigned to is not stored', inputs: ['the colony the fleet is assigned to'], supported: supported.orbital }),
@@ -267,6 +268,7 @@ const fleetSites = (rows, { supported, count }) => {
       prerequisite('crew', 'fleet', crewed.length ? any(...crewed) : 1, { missing: 'No crew aboard the ships that carry the modules', unknown: 'The crew of a ship is not known', inputs: CREW_INPUTS }),
     ]
     const designed = ships.reduce((total, ship) => (total === null || !known(ship.Modules) ? null : total + ship.Modules), 0)
+    const operable = ships.reduce((total, ship) => (total === null || !known(ship.WorkingModules) ? null : total + ship.WorkingModules), 0)
 
     return {
       kind: 'fleet',
@@ -274,18 +276,21 @@ const fleetSites = (rows, { supported, count }) => {
       row,
       colonyId: assignment === 'colony' && assigned !== colonyId ? null : colonyId,
       modules: designed,
+      workingModules: operable,
+      shipInputs,
+      ships: ships.length,
       prerequisites: needs,
       producing: all(...needs.map(verdictOf), any(...operating)),
     }
   })
 }
 
-// The sites of a race's mining from the rows `readMiningSites` (warnings/common.js) loads. `RaceID` the race; `version` the save's formula version (capabilities.js `loadFormulaVersion`), without which the rules read from the 2.7 game are not applied and their prerequisites are unknown; `count` formats a figure in a text.
+// The sites of a race's mining from the rows `readMiningSites` (warnings/common.js) loads. `RaceID` the race; `version` the save's formula version (capabilities.js `loadFormulaVersion`), without which the rules read from the 2.7 game are not applied and their prerequisites are unknown; `count` formats a figure in a text. `supported` says which of the rules read from the game apply to the save (`surface`, `orbital`, `delivery`).
 export const assessMiningSites = ({ colonies, fleets }, { RaceID, version = null, count = (value) => countText(value) } = {}) => {
   const supported = { surface: ruleSupports('miningSites.surface', version) === true, orbital: ruleSupports('miningSites.orbital', version) === true, delivery: ruleSupports('miningSites.delivery', version) === true }
   const fleetList = fleetSites(fleets, { supported, count })
 
-  return { fleets: fleetList, colonies: colonySites(colonies, fleetList, { RaceID, supported, count }) }
+  return { fleets: fleetList, colonies: colonySites(colonies, fleetList, { RaceID, supported, count }), supported }
 }
 
 // The prerequisites of a site that are lacking (`missingNeeds`) and those not known (`unknownNeeds`), with the delivery prerequisites of a colony site when `delivery` is true.

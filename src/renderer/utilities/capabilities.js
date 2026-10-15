@@ -109,6 +109,11 @@ const EXTRA_READS = Object.freeze({
 
 // Reads of an input that guard themselves, so the preflight does not check their columns: { [route]: { [input]: { [table]: why } } }. The table still has to exist.
 const TOLERATED = Object.freeze({
+  '/warnings': Object.freeze({
+    'check:mining-redeployment': Object.freeze({
+      FCT_Fleet: 'the fleet speed is read only when the save has the column (warnings/common.js readRedeploymentSites) and is listed as an unknown travel input otherwise; the other columns of the table are read, and so checked, by the mining checks beside it',
+    }),
+  }),
   '/propulsion': Object.freeze({
     tanks: Object.freeze({
       FCT_Game: 'the save revision read checks the columns it needs first (utilities/design-data.js)',

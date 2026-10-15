@@ -42,7 +42,7 @@ const SAVE_KEYS = Object.keys(SAVES).filter((key) => fs.existsSync(SAVES[key].fi
 const FAST_SAVES = ['modded', 'f2904201340'].filter((key) => SAVE_KEYS.includes(key))
 const DEFAULT_OPTIONS = { idleFleetsAtColonies: false, maintenanceThreshold: 100, maintenanceExclusions: [] }
 
-const MATERIAL_KEYS = ['undermanned-ships', 'damaged-ships', 'armor-damaged-ships', 'low-morale-crews', 'low-maintenance-ships', 'misconfigured-supply-classes', 'misconfigured-tanker-classes', 'free-construction-capacity', 'free-ordnance-capacity', 'free-fighter-capacity', 'idle-ground-training', 'projects-short-of-minerals', 'idle-slipways', 'low-efficiency-populations', 'wasted-mining-capacity', 'mass-driver-orphans', 'idle-research-labs', 'stalled-research-projects', 'mismatched-research-fields', 'stranded-miners', 'intruders', 'dangerous-rifts', 'active-lifepods', 'known-unexploited-constructs']
+const MATERIAL_KEYS = ['undermanned-ships', 'damaged-ships', 'armor-damaged-ships', 'low-morale-crews', 'low-maintenance-ships', 'misconfigured-supply-classes', 'misconfigured-tanker-classes', 'free-construction-capacity', 'free-ordnance-capacity', 'free-fighter-capacity', 'idle-ground-training', 'projects-short-of-minerals', 'idle-slipways', 'low-efficiency-populations', 'wasted-mining-capacity', 'mining-redeployment', 'mass-driver-orphans', 'idle-research-labs', 'stalled-research-projects', 'mismatched-research-fields', 'stranded-miners', 'intruders', 'dangerous-rifts', 'active-lifepods', 'known-unexploited-constructs']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -907,7 +907,7 @@ check('material-set', 'exactly the 24 checks of the classes B, C and K declare w
   const declared = m.index.CHECKS.filter((entry) => entry.material).map((entry) => entry.key).sort()
 
   assert.deepEqual(declared, [...MATERIAL_KEYS].sort())
-  assert.equal(m.index.CHECKS.length, 44)
+  assert.equal(m.index.CHECKS.length, 45)
   assert.ok(m.index.CHECKS.filter((entry) => entry.material).every((entry) => typeof entry.material === 'string' && entry.material.length > 10))
   assert.ok(m.index.CHECKS.filter((entry) => !entry.material).every((entry) => entry.material === undefined))
 })

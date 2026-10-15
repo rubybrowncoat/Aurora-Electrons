@@ -1,7 +1,8 @@
-import { linkTo } from '../deep-links'
+import { linkTo, place } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { deliveryVerdict } from '../mining-sites'
-import { QUARTER, amount, anyOf, bandOf, bandWords, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, needsSignature, needWords, readMiningSites, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
+import { assessRedeployment, assetText, unknownInputs } from '../mining-redeployment'
+import { QUARTER, amount, anyOf, bandOf, bandWords, bodyText, categoriesOf, checksOf, colonyText, COLONY_COLUMNS, COLONY_JOINS, figure, lacking, levelTone, needInputs, needsCell, needsSignature, needWords, readMiningSites, readRedeploymentSites, rowsOf, signatureOf, unknownCell, verdictRows } from './common'
 
 export const group = { key: 'colonies', title: 'Colonies', summary: 'Colonies that are inefficient, stockpiling minerals or wasting their mines and terraformers, so what holds them back can be fixed.' }
 
@@ -194,6 +195,62 @@ export const checks = checksOf([
           link: linkTo.minerals({ bodies: [site.row] }),
           signature: needsSignature(site),
         }),
+      })
+    },
+  },
+  {
+    key: 'mining-redeployment',
+    group: group.key,
+    severity: 'attention',
+    material: 'another reason for moving the asset being added or cleared',
+    captured: [needWords],
+    title: (count) => amount(count, 'mining asset to redeploy', 'mining assets to redeploy'),
+    rule: 'Mines at a body whose deposits are exhausted or gone, and orbital miners at a body that is exhausted, empty, wider than the race\'s orbital mining limit or with no colony of the race, can\'t produce where they are. Each row names why, how many mines or ships and modules there are, what a destination must satisfy and the inputs that stay unknown (the destination, the route and travel time, what would be dug there). A body the race has not surveyed, or a diameter limit not stored, is listed apart, as it is not known.',
+    evidence: {
+      verification: 'estimated',
+      structure: ['FCT_PopulationInstallations.Amount', 'DIM_PlanetaryInstallation.MiningProductionValue, Workers, CivilianInstallation', 'FCT_MineralDeposit.Amount', 'FCT_SystemBodySurveys', 'FCT_Fleet.OrbitBodyID, AssignedPopulationID, MothershipID, Speed', 'FCT_Population.SystemBodyID', 'FCT_ShipClass.MiningModules', 'FCT_ClassComponent.NumComponent', 'FCT_DamagedComponent.Number', 'FCT_SystemBody.Radius', 'FCT_Race.MaximumOrbitalMiningDiameter, MineProduction'],
+      note: 'The mines, the deposits and their survey, the body\'s diameter against the race\'s orbital mining limit and the fleet\'s modules are stored facts: a body with deposit rows at 0 t only is exhausted, and one the race has surveyed with no deposit row is empty (mined out or never deposited: the save does not tell them apart). That the output of an orbital miner needs the race\'s colony on the body, and the workforce, radiation and export a destination needs for mines, are read from the game\'s rules for 2.7 and apply to 2.7-shaped saves only. A fleet that fails only another prerequisite (damaged modules, no crew, assigned to another colony) is not queued. No destination is chosen, so the route, the travel time and the output at a destination are always unknown; the fleet\'s stored speed is shown. An asset on a body the race has not surveyed, or whose diameter limit, deposit amount or mine count is not stored, is listed apart, as not evaluated.',
+      assumptions: ['A deposit row at 0 t or less is exhausted; a surveyed body with no row is empty.', 'Civilian complexes are not mines to move.', 'A fleet not assigned to a colony, or assigned to one that is gone, is assigned to the colony on its body.'],
+    },
+    columns: [
+      { key: 'asset', text: 'Asset' },
+      { key: 'reason', text: 'Why it is stuck' },
+      { key: 'assets', text: 'Assets' },
+      { key: 'destination', text: 'A destination needs' },
+      { key: 'unknown', text: 'Not known' },
+    ],
+    async read(ctx) {
+      const { ground, orbital } = assessRedeployment(await readRedeploymentSites(ctx), { count: ctx.count })
+
+      const bySize = (size) => (alpha, beta) => (size(alpha) === null) - (size(beta) === null) || size(beta) - size(alpha)
+
+      const queue = [...[...ground].sort(bySize((item) => item.assets.total)), ...[...orbital].sort(bySize((item) => item.assets.modules))]
+
+      return verdictRows(ctx, queue, {
+        verdict: (item) => item.verdict,
+        missing: (item) => item.unknown.stored,
+        build: (item) => {
+          const assets = assetText(item.assets, ctx.count)
+          const stated = item.constraints.filter((need) => need.state === 'known')
+          const unstated = item.constraints.filter((need) => need.state === 'unknown')
+          const current = item.current.length ? `Other current blockers, which a suitable destination cures: ${item.current.map((need) => need.text).join('; ')}` : ''
+          const carried = item.carried.length ? `Also missing, which moving does not fix: ${item.carried.map((need) => need.text).join('; ')}` : ''
+          const why = [item.reasons.map((reason) => reason.need.text).join('; '), current, carried].filter(Boolean).join('. ')
+
+          return {
+            id: `${item.kind}:${item.id}`,
+            cells: {
+              asset: item.kind === 'colony' ? colonyText(item.row) : item.row.FleetName,
+              reason: why ? { text: why, tone: 'warning', ...(item.undecided.length ? { result: ctx.unknown(item.unknown.stored) } : {}) } : unknownCell(ctx, item.unknown.stored),
+              assets: assets.lacking.length ? { text: assets.text, result: ctx.unknown(assets.lacking) } : assets.text,
+              destination: { text: `Needs ${stated.map((need) => need.text).join('; ')}${unstated.length ? `. Not stated: ${unstated.map((need) => need.text).join('; ')}` : ''}`, ...(unstated.length ? { result: ctx.unknown([...new Set(unstated.flatMap((need) => need.inputs))]) } : {}) },
+              unknown: { text: `Travel: ${item.unknown.travel.join('; ')}. Production: ${item.unknown.production.join('; ')}.${item.unknown.stored.length ? ` Stored: ${item.unknown.stored.join('; ')}.` : ''}`, result: ctx.unknown(unknownInputs(item)) },
+            },
+            ...(item.kind === 'fleet' ? { caption: bodyText(item.row) } : {}),
+            link: item.kind === 'colony' ? linkTo.minerals({ bodies: [item.row] }) : linkTo.routes({ from: place.fleet(item.id) }),
+            signature: item.unknown.stored.length ? null : signatureOf(categoriesOf(item.reasons.map((reason) => `${item.kind}:${reason.need.key}`))),
+          }
+        },
       })
     },
   },
