@@ -5,6 +5,7 @@ import Config from 'electron-store'
 import { toBoolean, toNumber } from './aurora'
 import { GAMES_SQL, MIGRATION_NAME, Superseded, branchFileName, marksOf, observeGame, readRegistry, readThinning, settle, witnessOf, writeRegistry } from './campaign'
 import { COLONY_COLUMNS, colonyBase, colonyChosen, colonyFileName, colonyForkFile, colonyRows, colonySnapshot, colonyWish, entriesAt, idsToRead, joinColonies, readColonies } from './colony-series'
+import { archiveChosen, archiveKept, archiveWanted, archiveWish, eventBase, eventCapOfSettings, eventFileName, eventFileProblem, eventForkFile, mergeEvents, readLogWindow, readRaceEvents, withFailure } from './event-archive'
 import { SERVING_COMMANDER } from './commanders'
 import { intelChanged, takeIntel } from './intelligence'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal } from './math'
@@ -239,15 +240,20 @@ export const branchStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, b
 // The colony series of one branch (utilities/colony-series.js), beside its branch file: a store with `.store`, `.get(path, default)` and `.path`, empty until a colony is chosen and captured.
 export const colonyStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, colonyFileName(campaignId, branchId))
 
+// The event archive of one branch (utilities/event-archive.js), beside its branch file: a store with `.store`, `.get(path, default)` and `.path`, empty until a race with the archive on is captured.
+export const eventStore = (campaignId, branchId) => openStore(HISTORY_FOLDER, eventFileName(campaignId, branchId))
+
 // The branch a page of one campaign shows and an answer attaches to: the one the player picked when the campaign has it, else the branch the open save settled to (which stays where the recorder put it).
 export const shownBranch = (branchIds, picked, settled) => (picked && branchIds.includes(picked) ? picked : settled)
 
-// Removes one race's history from one branch file, and its colony series in the branch's colony file, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
+// Removes one race's history from one branch file, and its colony series and its event archive in the branch's own files, for the person who confirmed it: the target is read when this is called, before the wait for the registry lock (another window may hold it for a while), never from what the page shows when the lock is granted. Other races keep theirs. Returns whether anything was removed.
 export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegistry(() => {
   const store = branchStore(campaignId, branchId)
   const history = store.store
   const series = colonyStore(campaignId, branchId)
   const colonies = series.store
+  const archive = eventStore(campaignId, branchId)
+  const events = archive.store
   let removed = false
 
   if (history.races && history.races[RaceID]) {
@@ -259,6 +265,12 @@ export const clearRaceHistory = ({ campaignId, branchId, RaceID }) => withRegist
   if (colonies.races && colonies.races[RaceID]) {
     delete colonies.races[RaceID]
     series.store = colonies
+    removed = true
+  }
+
+  if (events.races && events.races[RaceID]) {
+    delete events.races[RaceID]
+    archive.store = events
     removed = true
   }
 
@@ -701,8 +713,28 @@ const colonyReadOf = async (database, wish, { GameID, RaceID, t }, options) => {
   return ids.length ? readColonies(database, { GameID, ids }, options) : null
 }
 
+// The event reads of one game of the pass: a function giving the read of a race, or null for a race that keeps no archive. `archive` is what the campaigns chose (event-archive.js `archiveWish`). Only player races (NPR = 0) are read, and the log window is read once for the game, when some recorded race of it is wanted, in the same transaction; a failure of that read is each wanted race's own `{ failed }`, so a pass with no archive chosen issues no statement and an archive that cannot be read never fails the empire's snapshot.
+const eventReadsOf = async (database, archive, { GameID, races }, options) => {
+  const wanted = races.filter((race) => !toBoolean(race.NPR) && archiveWanted(archive, GameID, race.RaceID))
+
+  if (!wanted.length) {
+    return () => null
+  }
+
+  let window = null
+  let failure = null
+
+  try {
+    window = await readLogWindow(database, GameID, options)
+  } catch (error) {
+    failure = error
+  }
+
+  return (race, t) => (wanted.includes(race) ? (failure ? Promise.resolve({ failed: failure }) : readRaceEvents(database, { GameID, RaceID: race.RaceID, t, window }, options)) : null)
+}
+
 // Everything one pass takes from the save: { read, failed }. `read` is [{ GameID, observation, taken, intel }] per game of the save, `observation` being what identifies its campaign (utilities/campaign.js `observeGame`), `taken` [{ RaceID, raceName, npr, gameName, snapshot }] for each recorded race and `intel` { [ViewRaceID]: takeIntel() }; `failed` is the games that couldn't be read, [{ GameID, stage: 'read', error }]. `marks` is { [GameID]: [increment counts] }, the stored tips the ledger is compared at exactly. It all happens in one read transaction, so a save written meanwhile can't give one race's snapshot the old save and the next one's the new. In SQLite a read transaction holds a shared lock from its first SELECT, which in rollback-journal mode (Aurora's) makes the game wait to commit: the reads are a few dozen small queries and one scan of the game's increments, and the history files are written after it ends.
-const readSave = (database, marks = {}, wish = {}) => database.transaction(async (transaction) => {
+const readSave = (database, marks = {}, wish = {}, archive = {}) => database.transaction(async (transaction) => {
   const options = { transaction }
   const [races] = await database.query('select FCT_Race.GameID, FCT_Race.RaceID, FCT_Race.NPR, FCT_Race.SpecialNPRID from FCT_Race', options)
   const [games] = await database.query(GAMES_SQL, options)
@@ -721,14 +753,16 @@ const readSave = (database, marks = {}, wish = {}) => database.transaction(async
 
     try {
       const observation = await observeGame(database, game, { options, marks: marks[GameID] })
+      const eventReadFor = await eventReadsOf(database, archive, { GameID, races: recorded[game.GameID] || [] }, options)
 
       for (const race of recorded[game.GameID] || []) {
         const result = await takeSnapshot(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
 
         if (result) {
           const colonyRead = await colonyReadOf(database, wish, { GameID, RaceID: race.RaceID, t: result.snapshot.t }, options)
+          const eventRead = await eventReadFor(race, result.snapshot.t)
 
-          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: withChain(result.snapshot, observation), ...(colonyRead ? { colonyRead } : {}) })
+          taken.push({ RaceID: race.RaceID, raceName: result.raceName, npr: toBoolean(race.NPR), gameName: result.gameName, snapshot: withChain(result.snapshot, observation), ...(colonyRead ? { colonyRead } : {}), ...(eventRead ? { eventRead } : {}) })
           intel[race.RaceID] = await takeIntel(database, { GameID: game.GameID, RaceID: race.RaceID }, options)
         }
       }
@@ -758,7 +792,44 @@ const settleAgain = (storage, options) => {
   }
 }
 
-// Snapshot every recorded race in the save, and what each knows of the other races, writing each game's history file once, in the history of the campaign and branch the game was settled to (utilities/campaign.js `settle`: the same campaign across a rename, a move or a copy of the file, a branch for a replayed past, a new campaign for a game no recorded one claims). A game that can't be read or written doesn't stop the others (electron-store throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are lost. `onResolved(GameID, resolution)` is called once a game is settled and `onSaved(GameID)` as soon as its history file is written, so views refresh even if a later game fails. `isCurrent()` is the store's freshness generation guard, asked before every write of the migration, the registry and the history files: a pass that was superseded (a newer save was loaded while it read) stops there, whatever it had done so far being either complete or rolled back by the next pass. A window or tab that is not the recording owner of its database (utilities/recording-owner.js, `ownerGrace` the ms it waits for the lock) records nothing and reports stage 'readonly'; the pass runs under the registry lock shared by every database. `path` is the save's path, kept as an attachment of the campaign and never as its identity. Returns { recorded, failed, superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage: 'read' | 'write' | 'registry' | 'readonly', error }] (GameID null and stage 'registry' when the campaign registry is damaged and nothing was recorded), and whether the pass was abandoned.
+// Why the event archive a branch would merge into or be seeded from cannot be read by this version, or null when it can: its own file, and while it has none and was never given its seed, the file of the branch it forks from, and so on up (the files `eventBase` and `eventForkFile` read). A store that throws when read (damaged JSON, an I/O error) is a file that cannot be read like any other. The recorder leaves such a branch alone, so an archive a later version wrote, or a damaged one, is never replaced by a version-1 file, and a read that throws never reaches the pass's outer catch, which would skip the empire's snapshot.
+const eventProblem = (storage, campaign, branchId) => {
+  let id = branchId
+
+  try {
+    while (id) {
+      const stored = storage.file(eventFileName(campaign.id, id)).store
+      const problem = eventFileProblem(stored)
+
+      if (problem) {
+        return `the event archive of branch ${id} cannot be read (${problem})`
+      }
+
+      const branch = campaign.branches[id]
+
+      if ((stored && stored.races) || !branch || branch.eventsSeeded === true || !branch.parent || !branch.fork || !Number.isFinite(branch.fork.t)) {
+        return null
+      }
+
+      id = branch.parent
+    }
+  } catch (error) {
+    return `the event archive of branch ${id} cannot be read (${error && error.message ? error.message : String(error)})`
+  }
+
+  return null
+}
+
+// What a read of the event archive gives, { value } or { problem }: the reads `eventProblem` already passed are made again by `eventBase` and `eventForkFile`, and a store that throws on the second one is the same refusal.
+const eventTry = (read) => {
+  try {
+    return { value: read() }
+  } catch (error) {
+    return { problem: `the event archive cannot be read (${error && error.message ? error.message : String(error)})` }
+  }
+}
+
+// Snapshot every recorded race in the save, and what each knows of the other races, writing each game's history file once, in the history of the campaign and branch the game was settled to (utilities/campaign.js `settle`: the same campaign across a rename, a move or a copy of the file, a branch for a replayed past, a new campaign for a game no recorded one claims). A game that can't be read or written doesn't stop the others (electron-store throws when it can't write, as does web mode's localStorage when the quota is full); its snapshots are lost. `onResolved(GameID, resolution)` is called once a game is settled and `onSaved(GameID)` as soon as its history file is written, so views refresh even if a later game fails. `isCurrent()` is the store's freshness generation guard, asked before every write of the migration, the registry and the history files: a pass that was superseded (a newer save was loaded while it read) stops there, whatever it had done so far being either complete or rolled back by the next pass. A window or tab that is not the recording owner of its database (utilities/recording-owner.js, `ownerGrace` the ms it waits for the lock) records nothing and reports stage 'readonly'; the pass runs under the registry lock shared by every database. `path` is the save's path, kept as an attachment of the campaign and never as its identity. Returns { recorded, failed, superseded }: how many races were saved, the games that couldn't be read or written, [{ GameID, stage: 'read' | 'write' | 'registry' | 'readonly' | 'events', error }] (GameID null and stage 'registry' when the campaign registry is damaged and nothing was recorded; stage 'events' when the branch's event archive cannot be read by this version and was left untouched, the empire's snapshot being recorded all the same), and whether the pass was abandoned.
 export const recordHistory = async (database, { onSaved = () => {}, onResolved = () => {}, isCurrent = () => true, storage = campaignStorage(), path = null, now = Date.now, newId = randomId, ownerGrace = undefined } = {}) => {
   const guard = () => {
     if (!isCurrent()) {
@@ -774,8 +845,11 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
   const tipsOf = () => {
     try {
       const settings = storage.settings ? storage.settings.store : null
+      const coloniesChosen = colonyChosen(settings)
+      const eventsChosen = archiveChosen(settings)
+      const campaigns = coloniesChosen || eventsChosen ? readRegistry(storage).campaigns : null
 
-      return { marks: marksOf(storage), wish: colonyChosen(settings) ? colonyWish(settings, readRegistry(storage).campaigns) : {} }
+      return { marks: marksOf(storage), wish: coloniesChosen ? colonyWish(settings, campaigns) : {}, archive: eventsChosen ? archiveWish(settings, campaigns) : {} }
     } catch (error) {
       return { failure: { recorded: 0, failed: [{ GameID: null, stage: 'registry', error }], superseded: false } }
     }
@@ -788,8 +862,9 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
   }
 
   // The save is read outside the registry lock, so a read that hangs cannot hold every window's recording up.
-  let { read, failed } = await readSave(database, first.marks, first.wish)
+  let { read, failed } = await readSave(database, first.marks, first.wish, first.archive)
   let wish = first.wish
+  let archive = first.archive
   let recorded = 0
 
   // The step of this pass that reads and changes the registry is taken alone under the registry lock shared by every database. A window of another database may have recorded since the tips were read: the save is then read again, here, against the tips now stored (a save read against older tips is settled on a coarser comparison than the tips need).
@@ -805,8 +880,9 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
     }
 
     if (JSON.stringify(current.marks) !== JSON.stringify(first.marks)) {
-      ;({ read, failed } = await readSave(database, current.marks, current.wish))
+      ;({ read, failed } = await readSave(database, current.marks, current.wish, current.archive))
       wish = current.wish
+      archive = current.archive
     }
 
     for (const { GameID, observation, taken, intel } of read) {
@@ -821,19 +897,39 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
 
         onResolved(GameID, resolution)
 
-        // A branch this pass created takes the colony series of its parent up to the fork now, so what the parent does with them later (a clear, a revision, a colony followed on an earlier save) never reaches the child. Nothing is written when the parent holds none, but the branch is marked seeded either way, so an empty seed stays empty. The mark is written after the seed file: a pass that stops between the two leaves the branch unmarked, which is seeded from its parent at its first colony write.
+        // A branch this pass created takes the colony series and the event archive of its parent up to the fork now, so what the parent does with them later (a clear, a revision, a colony followed on an earlier save, a capture) never reaches the child. Nothing is written when the parent holds none, but the branch is marked seeded either way, so an empty seed stays empty. Both marks are written in one registry write after the seed files: a pass that stops between the two leaves the branch unmarked, which is seeded from its parent at its first colony or event write.
         if (resolution.forked) {
           const registry = readRegistry(storage)
           const campaign = registry.campaigns[resolution.campaignId]
           const given = colonyForkFile(storage, campaign, resolution.branchId)
+          const eventsProblem = eventProblem(storage, campaign, resolution.branchId)
+          const seed = eventsProblem ? { problem: eventsProblem } : eventTry(() => eventForkFile(storage, campaign, resolution.branchId))
+          const eventsFine = !seed.problem
+          const givenEvents = eventsFine ? seed.value : null
+
+          if (seed.problem) {
+            failed.push({ GameID, stage: 'events', error: new Error(seed.problem) })
+          }
 
           if (given) {
             guard()
             storage.file(colonyFileName(resolution.campaignId, resolution.branchId)).store = given
           }
 
-          if (campaign.branches[resolution.branchId] && campaign.branches[resolution.branchId].coloniesSeeded !== true) {
+          if (givenEvents) {
+            guard()
+            storage.file(eventFileName(resolution.campaignId, resolution.branchId)).store = givenEvents
+          }
+
+          const branch = campaign.branches[resolution.branchId]
+
+          if (branch && (branch.coloniesSeeded !== true || (eventsFine && branch.eventsSeeded !== true))) {
             campaign.branches[resolution.branchId].coloniesSeeded = true
+
+            if (eventsFine) {
+              campaign.branches[resolution.branchId].eventsSeeded = true
+            }
+
             guard()
             writeRegistry(storage, registry)
           }
@@ -864,6 +960,37 @@ export const recordHistory = async (database, { onSaved = () => {}, onResolved =
               guard()
               series.store = file
               onSaved(GameID)
+            }
+          }
+
+          // The event archive is written after the colony series, behind the same guard, and only for a player race with the archive on in the campaign the save settled to. A read that failed or found no log writes no rows and never fails the empire's snapshot; a pass that adds nothing to the archive does not write it. A branch whose own file, or a parent file it would be seeded from, cannot be read by this version is left untouched (no merge, no write, no seed) and reported as a failure of stage `events`, because writing over it would destroy evidence the page promises to keep. A failed read of a race that keeps an archive is kept in the race's record, so a missed observation is never mistaken for one that was not tried.
+          const kept = taken.filter(({ RaceID, eventRead }) => eventRead && archiveKept(archive, resolution.campaignId, RaceID))
+
+          if (kept.length) {
+            const campaign = readRegistry(storage).campaigns[resolution.campaignId]
+            const checked = eventProblem(storage, campaign, resolution.branchId)
+            const base = checked ? { problem: checked } : eventTry(() => eventBase(storage, campaign, resolution.branchId))
+            const observed = kept.filter(({ eventRead }) => eventRead.capture)
+            const lost = kept.filter(({ eventRead }) => eventRead.failed)
+
+            if (base.problem) {
+              failed.push({ GameID, stage: 'events', error: new Error(base.problem) })
+            } else if (observed.length || lost.length) {
+              const events = storage.file(eventFileName(resolution.campaignId, resolution.branchId))
+              const merged = mergeEvents(base.value, { races: observed.map(({ RaceID, eventRead }) => ({ RaceID, capture: eventRead.capture })) }, { cap: eventCapOfSettings(storage.settings), now })
+              const file = merged.file
+              let changed = merged.changed
+
+              lost.forEach(({ RaceID, snapshot, eventRead }) => {
+                file.races[RaceID] = withFailure(file.races[RaceID] || null, { at: now(), t: snapshot.t, reason: eventRead.failed && eventRead.failed.message ? eventRead.failed.message : String(eventRead.failed) })
+                changed = true
+              })
+
+              if (changed) {
+                guard()
+                events.store = file
+                onSaved(GameID)
+              }
             }
           }
         }

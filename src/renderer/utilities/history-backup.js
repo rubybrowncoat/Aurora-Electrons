@@ -6,6 +6,8 @@
 //
 // A campaign may also carry `colonies`: `{ [branchId]: { columns, races: { [RaceID]: { snapshots, thinning? } } } }`, the colony series of the branches that have a file (utilities/colony-series.js), each kept apart by branch and never merged with another branch's. A backup of version 2 (`VERSION`) also says `colonyCoverage: true` of every campaign: it records the colony files of every branch it holds, so a branch with none in `colonies` had none, and a colony file the app cannot read stops the backup from being made instead of being left out. A backup of version 1 never says so; a build that reads only version 1 refuses a version 2 backup as a newer one. Which colonies are followed is a setting of the race and is not in the backup. A restore treats a branch's colony file by that branch's policy and races: a merge adds the backup's snapshots at game times the stored series lacks, a replace of a covered backup takes the backup's state (so a safety copy taken before colony series were added removes them again), a replace of a version 1 backup keeps a stored series it lacks (it says nothing of them, and must not erase them), and a kept, locked or unreadable branch keeps its colony file.
 //
+// A campaign may also carry `events`: `{ [branchId]: { version, races: { [RaceID]: record } } }`, the observed-event archives of the branches that have a file (utilities/event-archive.js), each kept apart by branch and never merged with another branch's. A backup of version 3 (`VERSION`) also says `eventCoverage: true` of every campaign: it records the event archive of every branch it holds, so a branch with none in `events` had none, and an archive file the app cannot read stops the backup from being made instead of being left out. A backup of version 1 or 2 never says so and never holds `events`; it is read as before and its Replace never removes an event archive. Which races keep an archive is a setting of the race and is not in the backup. A restore treats a branch's archive like its colony series: it follows the policy and races of the branch's history file, a covered Replace gives the branch exactly the archive the backup holds (an archive of a race it lacks is removed), a Merge adds the races the destination lacks and never removes or changes one it has, and a branch whose history is kept, locked or unreadable keeps its archive.
+//
 // Association rules (the decision of CP-DATA-01, explicit association). Campaign ids are the app's own random ids and are never renamed. A restore only ever adds to what is stored: names, game ids, attached saves, branches and a branch tip that is further along the same timeline. It never changes an answer the player gave, a merge, a legacy mark or a tip that is not on the same timeline, never merges two campaigns and never rebinds a branch; a campaign of another id that shares a game id is restored as a campaign of its own. Whatever is not applied is reported with its reason.
 //
 // Each history file is restored by its own policy: `merge` keeps what is stored and adds the backup's snapshots at other game times (at one game time the stored snapshot stays, as when a history is attached to a campaign), `replace` makes the selected series the backup's, `keep` leaves the file as it is. A policy applies to the series of the races selected, all of them by default. Metadata (a race's name, an alien race's name) comes from the side whose series reaches the later game time, the stored one on a tie.
@@ -14,14 +16,17 @@
 
 import { EARLY_COUNTS, REGISTRY_VERSION, STEP, anchorRelation, branchFileName, commonPrefix, hashValue, mergeAnchors, readRegistry, readThinning, writeRegistry } from './campaign'
 import { COLONY_COLUMNS, COLONY_STATES, colonyFileName } from './colony-series'
+import { EVENT_ARCHIVE_VERSION, eventBase, eventFileName, eventFileProblem, recordEvents } from './event-archive'
 import { MAX_SNAPSHOTS, isChain, recordedSpan, thinCounted, thinningOfMerge } from './history'
 import { requireRecording } from './recording-owner'
 import { BUNDLE_FORMAT, BUNDLE_VERSION } from './scenario-records'
 
 export const FORMAT = 'aurora-electrons-history'
-export const VERSION = 2
+export const VERSION = 3
 // The first version whose campaigns say they record the colony files of every branch (`colonyCoverage`). A version 1 backup never says so, and a restore of it never removes colony series.
 export const COLONY_COVERAGE_VERSION = 2
+// The first version whose campaigns say they record the event archive of every branch (`eventCoverage`) and may hold `events`. A backup of an earlier version never does, and a restore of it never removes an event archive.
+export const EVENT_COVERAGE_VERSION = 3
 export const POLICIES = ['merge', 'replace', 'keep']
 export const ANNOTATION_POLICIES = ['merge', 'keep']
 export const ASSOCIATION_POLICIES = ['merge', 'keep']
@@ -487,6 +492,19 @@ const checkBundle = (bundle, campaignId, where, branchIds) => {
   })
 }
 
+// An event archive of a backup: a file this version reads (utilities/event-archive.js `eventFileProblem`), with something in it; a branch with no archive has no entry.
+const checkEventFile = (file, where) => {
+  if (!isObject(file) || !Object.keys(file).length) {
+    bad(where, 'is not an event archive')
+  }
+
+  const problem = eventFileProblem(file)
+
+  if (problem) {
+    bad(where, `is not an event archive this version reads (${problem})`)
+  }
+}
+
 const checkEnvelope = (envelope) => {
   if (!isObject(envelope) || envelope.format !== FORMAT) {
     throw new Rejected('This file is not a history backup of Aurora Electrons')
@@ -552,7 +570,7 @@ const checkEnvelope = (envelope) => {
     }
 
     ids.add(campaign.id)
-    allowed(campaign, ['id', 'entry', 'branches', 'annotations', 'colonies', 'colonyCoverage'], where)
+    allowed(campaign, ['id', 'entry', 'branches', 'annotations', 'colonies', 'colonyCoverage', 'events', 'eventCoverage'], where)
     checkEntry(campaign.entry, campaign.id, `Campaign ${campaign.id}`)
     entries[campaign.id] = campaign.entry
 
@@ -566,6 +584,10 @@ const checkEnvelope = (envelope) => {
       bad(`Campaign ${campaign.id}`, envelope.version >= COLONY_COVERAGE_VERSION ? 'its colony coverage is not true' : `holds colonyCoverage, which a version ${envelope.version} backup does not state`)
     }
 
+    if (envelope.version >= EVENT_COVERAGE_VERSION ? campaign.eventCoverage !== true : campaign.eventCoverage !== undefined || campaign.events !== undefined) {
+      bad(`Campaign ${campaign.id}`, envelope.version >= EVENT_COVERAGE_VERSION ? 'its event coverage is not true' : `holds eventCoverage or events, which a version ${envelope.version} backup does not state`)
+    }
+
     branchIds.forEach((branchId) => checkFile(campaign.branches[branchId], `Campaign ${campaign.id} branch ${branchId}`, envelope.units))
 
     if (campaign.colonies !== undefined) {
@@ -574,6 +596,14 @@ const checkEnvelope = (envelope) => {
       }
 
       Object.entries(campaign.colonies).forEach(([branchId, file]) => checkColonyFile(file, `Campaign ${campaign.id} branch ${branchId} colony series`))
+    }
+
+    if (campaign.events !== undefined) {
+      if (!isObject(campaign.events) || !Object.keys(campaign.events).length || !Object.keys(campaign.events).every((branchId) => branchIds.includes(branchId))) {
+        bad(`Campaign ${campaign.id}`, 'its event archives are not a map of the branches it has')
+      }
+
+      Object.entries(campaign.events).forEach(([branchId, file]) => checkEventFile(file, `Campaign ${campaign.id} branch ${branchId} event archive`))
     }
 
     if (!Array.isArray(campaign.annotations) || campaign.annotations.length > LIMITS.bundles) {
@@ -696,6 +726,7 @@ export const buildBackup = (io, { campaignIds = null, at, annotations = null } =
 
     const branches = {}
     const colonies = {}
+    const events = {}
 
     Object.keys(entry.branches).sort(branchOrder).forEach((branchId) => {
       const file = io.file(branchFileName(id, branchId)).store
@@ -714,6 +745,18 @@ export const buildBackup = (io, { campaignIds = null, at, annotations = null } =
 
         colonies[branchId] = { columns: [...COLONY_COLUMNS], races: clone(series.races) }
       }
+
+      const archive = io.file(eventFileName(id, branchId)).store
+      const unreadable = eventFileProblem(archive)
+
+      // Only a store that is not there counts as no archive. An archive file this version cannot read is never left out of a backup that says it covers the event archives: such a backup would remove the stored archive of a restore it should not.
+      if (unreadable) {
+        throw new Rejected(`The stored event archive of branch ${branchId} of campaign ${id} cannot be read (${unreadable}), so a backup that covers them cannot be made`)
+      }
+
+      if (isObject(archive) && Object.keys(archive).length) {
+        events[branchId] = clone(archive)
+      }
     })
 
     const bundles = annotations ? annotations.groups(id).map((group) => {
@@ -722,7 +765,7 @@ export const buildBackup = (io, { campaignIds = null, at, annotations = null } =
       return { ...bundle, records: bundle.records.filter((record) => record.association && record.association.branchId === group.branchId) }
     }).filter((bundle) => bundle.records.length) : []
 
-    return { id, entry: clone(entry), branches, colonyCoverage: true, ...(Object.keys(colonies).length ? { colonies } : {}), annotations: bundles }
+    return { id, entry: clone(entry), branches, colonyCoverage: true, ...(Object.keys(colonies).length ? { colonies } : {}), eventCoverage: true, ...(Object.keys(events).length ? { events } : {}), annotations: bundles }
   })
   const plain = clone(campaigns)
   const envelope = {
@@ -1151,8 +1194,91 @@ const planColonies = (io, { campaignId, branchId, offered, covered, row }) => {
   return { view, write: null }
 }
 
-// A branch's history file and its colony series, as the files a restore counts and asks a confirmation for.
-const filed = (campaign) => campaign.files.flatMap((file) => (file.colonies ? [file, file.colonies] : [file]))
+// The event archive of one branch restored by the policy and the races its history file has: `{ view, write }`, as `planColonies` for the colony series, with `kind: 'events'` and every count in events (an event of a group of identical rows counted once for each row). The archive of a race is never merged with another's: a Merge adds the races the stored archive lacks and keeps a race it has whatever the backup holds of it (a differing record of the backup counts as a conflict and is not taken), and a Replace of the races chosen gives the branch the backup's record of each, so a stored race the backup lacks is removed when `covered` (the backup records the archives of its branches, so none is a known state) and kept when it is not. A branch whose history file is kept, locked or not readable keeps its archive, and so does one whose stored archive this version cannot read. `offered` is the branch's archive in the backup, or null when it has none.
+const planEvents = (io, { campaignId, branchId, offered, covered, row, inherited = null }) => {
+  const name = eventFileName(campaignId, branchId)
+  const current = io.file(name).store
+  const unreadable = eventFileProblem(current)
+  const stored = unreadable || !isObject(current) ? {} : current
+  const view = { kind: 'events', name, requested: row.requested, policy: row.policy, locked: row.locked, status: 'kept', stored: Object.keys(stored).length > 0, series: [], totals: { stored: 0, backup: 0, added: 0, identical: 0, conflicts: 0, removed: 0, thinned: 0, result: 0 } }
+
+  if (!view.locked && unreadable) {
+    view.policy = 'keep'
+    view.locked = `the stored event archive is not one this version reads (${unreadable})`
+  }
+
+  if (view.locked) {
+    return { view, write: null }
+  }
+
+  // A branch with no file of its own reads the archive of its parent up to the fork as its base (`eventBase`), so a covered Replace of it starts from that base: what the backup lacks is removed from it, and the file written then is the branch's own, which is never seeded again.
+  const own = isObject(stored.races) ? stored.races : inherited && view.policy === 'replace' && covered ? inherited : {}
+  const given = offered ? offered.races : {}
+  const result = { ...own }
+  const chosen = (RaceID) => !row.races || row.races.includes(RaceID)
+  const labelOf = (RaceID) => {
+    const choice = row.raceChoices.find((item) => item.RaceID === RaceID)
+
+    return choice ? choice.label.replace(/^Race/, 'race') : `race ${RaceID}`
+  }
+
+  ;[...new Set([...Object.keys(given), ...Object.keys(own)])].sort((a, b) => Number(a) - Number(b)).filter(chosen).forEach((RaceID) => {
+    const mine = own[RaceID]
+    const theirs = given[RaceID]
+    const had = mine ? recordEvents(mine) : 0
+    const offer = theirs ? recordEvents(theirs) : 0
+    const stat = { stored: had, backup: offer, added: 0, identical: 0, conflicts: 0, removed: 0, thinned: 0, result: had }
+
+    if (mine && theirs && canonical(mine) === canonical(theirs)) {
+      stat.identical = had
+    } else if (view.policy === 'replace' && theirs) {
+      result[RaceID] = clone(theirs)
+      stat.result = offer
+
+      if (mine) {
+        stat.conflicts = had
+      } else {
+        stat.added = offer
+      }
+    } else if (view.policy === 'replace' && covered) {
+      delete result[RaceID]
+      stat.removed = had
+      stat.result = 0
+    } else if (view.policy === 'merge' && theirs) {
+      if (mine) {
+        stat.conflicts = offer
+      } else {
+        result[RaceID] = clone(theirs)
+        stat.added = offer
+        stat.result = offer
+      }
+    }
+
+    view.series.push({ key: `events:${RaceID}`, kind: 'events', label: `events of ${labelOf(RaceID)}`, scope: { race: RaceID }, ...stat })
+  })
+
+  view.totals = view.series.reduce((sum, item) => Object.fromEntries(Object.keys(sum).map((key) => [key, sum[key] + item[key]])), view.totals)
+
+  // A restored absence is a readable archive with no race, never `{}`: a file that is written counts as the branch's own and is never seeded from the parent again, so the next capture does not take the parent's archive back. A branch the plan reaches holds an archive or is offered one, so nothing here writes a file where there is none to restore.
+  const file = { version: EVENT_ARCHIVE_VERSION, races: result }
+
+  if (view.policy !== 'keep' && canonical(file) !== canonical(stored)) {
+    view.status = view.stored ? 'changes' : 'new'
+
+    return { view, write: { name, value: file, from: hashValue(stored) } }
+  }
+
+  view.status = view.policy === 'keep' ? 'kept' : 'unchanged'
+
+  return { view, write: null }
+}
+
+// A branch's history file, its colony series and its event archive, as the files a restore counts and asks a confirmation for. The event archive is counted in events, so it joins the files but not the snapshot figures (`snapshotFiled`).
+const filed = (campaign) => campaign.files.flatMap((file) => [file, ...(file.colonies ? [file.colonies] : []), ...(file.events ? [file.events] : [])])
+
+const snapshotFiled = (campaign) => filed(campaign).filter((file) => file.kind !== 'events')
+
+const eventFiled = (campaign) => filed(campaign).filter((file) => file.kind === 'events')
 
 const NO_CHANGE = Object.freeze({ names: 0, gameIds: 0, attachments: 0, branches: 0, tips: 0, anchor: 0 })
 
@@ -1206,6 +1332,9 @@ const planCampaign = ({ io, registry, given, choice, annotations }) => {
   const resulting = skipped ? {} : (entry || stored || { branches: {} }).branches
   const files = []
   const writes = { files: [], imports: [] }
+  // The event archives this plan writes so far, by file name. They are planned after every branch's history, in ancestry order (see below), and what a branch would inherit is read through this overlay, that is its ancestors as the restore leaves them and not as they stand now.
+  const plannedEvents = new Map()
+  const afterRestore = { file: (name) => (plannedEvents.has(name) ? { store: plannedEvents.get(name) } : io.file(name)) }
 
   branchIds.forEach((branchId) => {
     const name = branchFileName(given.id, branchId)
@@ -1258,6 +1387,35 @@ const planCampaign = ({ io, registry, given, choice, annotations }) => {
     files.push(row)
   })
 
+  // A branch comes after its ancestors, the shallowest first and the lower number first among equals, whatever the numbers say: a lineage numbered in reverse (b1 forked from b2) is valid, and the archive a branch inherits is the one its parent's plan leaves. The rows and the writes of the other files stay in numeric order.
+  const depthOf = (branchId, seen = new Set()) => {
+    const parent = resulting[branchId] && resulting[branchId].parent
+
+    return parent && resulting[parent] && !seen.has(parent) ? 1 + depthOf(parent, new Set([...seen, branchId])) : 0
+  }
+
+  ;[...branchIds].sort((a, b) => depthOf(a) - depthOf(b) || branchOrder(a, b)).forEach((branchId) => {
+    const row = files.find((candidate) => candidate.branchId === branchId)
+    const offeredEvents = isObject(given.events) && isObject(given.events[branchId]) ? given.events[branchId] : null
+    const eventsCovered = given.eventCoverage === true
+    const heldEvents = io.file(eventFileName(given.id, branchId)).store
+
+    // A covered Replace of a branch with no archive file of its own and a fork that could still inherit one is planned too: a restored absence must not leave the parent's events, as the restore leaves them, to be taken at the next capture.
+    const base = eventsCovered && row.policy === 'replace' && !(isObject(heldEvents) && isObject(heldEvents.races)) ? eventBase(afterRestore, { id: given.id, branches: resulting }, branchId) : {}
+    const inherited = isObject(base.races) && Object.keys(base.races).length ? base.races : null
+
+    if (offeredEvents || inherited || (eventsCovered && isObject(heldEvents) && isObject(heldEvents.races) && Object.keys(heldEvents.races).length > 0)) {
+      const archive = planEvents(io, { campaignId: given.id, branchId, offered: offeredEvents, covered: eventsCovered, row, inherited })
+
+      row.events = archive.view
+
+      if (archive.write) {
+        writes.files.push(archive.write)
+        plannedEvents.set(archive.write.name, archive.write.value)
+      }
+    }
+  })
+
   const bundles = Array.isArray(given.annotations) ? given.annotations : []
   const groups = bundles.map((bundle) => {
     const file = files.find((candidate) => candidate.branchId === bundle.source.branchId)
@@ -1308,10 +1466,15 @@ export const planRestore = ({ io, envelope, choices = {}, annotations = null }) 
   const confirmations = []
 
   campaigns.forEach((campaign) => {
-    const removed = filed(campaign).filter((file) => file.policy === 'replace').reduce((sum, file) => sum + file.totals.removed + file.totals.conflicts, 0)
+    const removed = snapshotFiled(campaign).filter((file) => file.policy === 'replace').reduce((sum, file) => sum + file.totals.removed + file.totals.conflicts, 0)
+    const droppedEvents = eventFiled(campaign).filter((file) => file.policy === 'replace').reduce((sum, file) => sum + file.totals.removed + file.totals.conflicts, 0)
 
     if (removed) {
       confirmations.push(`Replacing the history of "${campaign.name}" drops or overwrites ${removed} stored snapshot${removed === 1 ? '' : 's'}`)
+    }
+
+    if (droppedEvents) {
+      confirmations.push(`Replacing the event archive of "${campaign.name}" drops or overwrites ${droppedEvents} stored event${droppedEvents === 1 ? '' : 's'}`)
     }
 
     if (campaign.status === 'ambiguous' && !campaign.skipped) {
@@ -1323,12 +1486,14 @@ export const planRestore = ({ io, envelope, choices = {}, annotations = null }) 
   const totals = campaigns.reduce((sum, campaign) => ({
     campaigns: sum.campaigns + (campaign.skipped ? 0 : 1),
     files: sum.files + filed(campaign).filter((file) => file.status === 'changes' || file.status === 'new').length,
-    added: sum.added + filed(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.added), 0),
-    conflicts: sum.conflicts + filed(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.conflicts), 0),
-    removed: sum.removed + filed(campaign).reduce((total, file) => total + (file.policy === 'replace' ? file.totals.removed : 0), 0),
+    added: sum.added + snapshotFiled(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.added), 0),
+    conflicts: sum.conflicts + snapshotFiled(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.conflicts), 0),
+    removed: sum.removed + snapshotFiled(campaign).reduce((total, file) => total + (file.policy === 'replace' ? file.totals.removed : 0), 0),
+    events: sum.events + eventFiled(campaign).reduce((total, file) => total + (file.policy === 'keep' ? 0 : file.totals.added), 0),
+    eventsRemoved: sum.eventsRemoved + eventFiled(campaign).reduce((total, file) => total + (file.policy === 'replace' ? file.totals.removed + file.totals.conflicts : 0), 0),
     annotations: sum.annotations + campaign.annotations.groups.reduce((total, group) => total + group.add, 0),
     registry: sum.registry + (campaign.association.changed ? 1 : 0),
-  }), { campaigns: 0, files: 0, added: 0, conflicts: 0, removed: 0, annotations: 0, registry: 0 })
+  }), { campaigns: 0, files: 0, added: 0, conflicts: 0, removed: 0, events: 0, eventsRemoved: 0, annotations: 0, registry: 0 })
   const writes = { files, registry: Object.keys(registryChanges).length ? registry : null, imports, affected }
   const digest = hashValue({ files, registry: registryChanges, imports: imports.map((work) => [work.campaignId, work.target, work.preview.digest]), preview: campaigns, confirmations })
 

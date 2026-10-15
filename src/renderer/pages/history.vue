@@ -249,7 +249,7 @@
 
       <colony-series :database="database" :config="config" :game-id="GameID" :race-id="RaceID" :game-time="GameTime" :resolved="resolved" :view="colonyBudget" :cap="retentionView.profile.cap" :date="date" :separator="separator" @changed="colonyChanges++" />
 
-      <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned." elevation="1">
+      <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is, with the colony series and the game log's event archive kept beside it. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned. A cap on the events the archive keeps cuts the oldest ones when the race is next captured." elevation="1">
         <div class="panel-head">
           <span>Retention</span>
           <span class="caption text--secondary">{{ retentionView.sampling }}</span>
@@ -262,6 +262,7 @@
           <div class="history-retention__row"><span class="history-retention__label">Size, measured</span><span class="history-retention__value" data-retention-measured>{{ size(retentionView.measured) }} for this race's series, {{ size(retentionView.file) }} for the whole branch file. Measured as compact JSON; the file on disk is larger by its indentation.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Size, predicted</span><span class="history-retention__value" data-retention-predicted>About {{ size(retentionView.current.bytesAtCap) }} for this series once it holds {{ count(retentionView.profile.cap, 0) }} samples, predicted from the average size of its samples.</span></div>
           <div class="history-retention__row"><span class="history-retention__label">Colony series</span><span class="history-retention__value" data-retention-colonies>{{ colonyBudgetText }}</span></div>
+          <div class="history-retention__row"><span class="history-retention__label">Event archive</span><span class="history-retention__value" data-retention-events>{{ eventBudgetText }} Turning it on or off is on the <router-link to="/log">Game Log</router-link> page.</span></div>
 
           <div class="history-retention__profiles mt-3">
             <table>
@@ -292,6 +293,20 @@
               <v-btn small text class="ml-2" data-retention-cancel @click="retentionPick = null">Cancel</v-btn>
             </div>
           </v-alert>
+
+          <div class="mt-3" data-event-cap-choice>
+            <span class="caption text--secondary mr-2">Cap on the event archive, per race and branch, in every campaign</span>
+            <v-btn v-for="cap in eventCaps" :key="cap" x-small outlined class="mr-1" :disabled="cap === eventCap" :data-event-cap="cap" @click="pickEventCap(cap)">{{ count(cap, 0) }}</v-btn>
+          </div>
+
+          <v-alert v-if="eventCapChange" type="warning" outlined dense class="mt-3" data-event-cap-confirm>
+            <div>Change the cap on the event archive from {{ count(eventCap, 0) }} to {{ count(eventCapChange.cap, 0) }} events?</div>
+            <div>{{ eventCapChange.text }}</div>
+            <div class="mt-2">
+              <v-btn small depressed color="warning" data-event-cap-apply @click="applyEventCap">Apply {{ count(eventCapChange.cap, 0) }}</v-btn>
+              <v-btn small text class="ml-2" data-event-cap-cancel @click="eventCapPick = null">Cancel</v-btn>
+            </div>
+          </v-alert>
         </div>
       </v-card>
 
@@ -306,7 +321,7 @@
             <v-btn small outlined :disabled="backupBusy || !resolved" title="Only the campaign this save belongs to" @click="exportBackup(false)"><v-icon small left>mdi-download</v-icon>Export this campaign</v-btn>
             <v-file-input :key="backupInput" accept="application/json,.json" label="Restore from a backup file" prepend-icon="" prepend-inner-icon="mdi-upload" dense outlined hide-details class="history-backup__file" :disabled="backupBusy" @change="readBackup" />
           </div>
-          <div class="caption text--secondary mt-2">A backup holds the campaign records, the history of every race, what each race knows of the others and the annotations. The unattached history from before campaigns were recorded, the migration record and the settings of each race are not in it. A restore only adds to a campaign record; it never changes an answer already given and never merges two campaigns.</div>
+          <div class="caption text--secondary mt-2">A backup holds the campaign records, the history of every race, what each race knows of the others, the observed-event archive of each branch that keeps one, and the annotations. The unattached history from before campaigns were recorded, the migration record and the settings of each race are not in it. A restore only adds to a campaign record; it never changes an answer already given and never merges two campaigns.</div>
 
           <v-alert v-if="backupErrors.length" type="error" outlined dense class="mt-3">
             <div>{{ backupFile }} was not read, and nothing was changed:</div>
@@ -325,7 +340,7 @@
 
           <div v-if="backupPlan" class="history-backup__preview mt-3">
             <div class="font-weight-medium">{{ backupFile }}<span class="caption text--secondary ml-2">made {{ stamp(backupPlan.preview.exportedAt) }}</span></div>
-            <div class="caption text--secondary">Nothing is written until the restore is applied. Merge keeps what is stored where both have a snapshot at the same game time; Replace takes the backup's and drops stored snapshots it lacks; Keep leaves the target as it is. A branch's colony series are restored under the same policy and races, branch by branch and never merged with another branch's; Replace drops the colony series the backup lacks, except for a backup made before colony series were recorded in it, which says nothing about them. Which colonies are followed is a setting of the race and is not in the backup.</div>
+            <div class="caption text--secondary">Nothing is written until the restore is applied. Merge keeps what is stored where both have a snapshot at the same game time; Replace takes the backup's and drops stored snapshots it lacks; Keep leaves the target as it is. A branch's colony series are restored under the same policy and races, branch by branch and never merged with another branch's; Replace drops the colony series the backup lacks, except for a backup made before colony series were recorded in it, which says nothing about them. Which colonies are followed is a setting of the race and is not in the backup. A branch's event archive follows the same policy and races: Merge adds the races whose archive is not stored and keeps the stored archive of any other; Replace gives the branch exactly the backup's archive, so the archive of a race the backup lacks is removed, except for a backup made before event archives were recorded in it, which says nothing about them. Which races keep an archive is a setting of the race and is not in the backup.</div>
 
             <div v-for="item in backupPlan.preview.campaigns" :key="item.id" class="history-backup__campaign mt-3">
               <div class="history-backup__title">
@@ -384,7 +399,7 @@
                       <td class="text-right">{{ count(file.totals.thinned) }}</td>
                       <td class="text-right">{{ count(file.totals.result) }}</td>
                     </tr>
-                    <tr v-if="file.locked || file.series.length || file.colonies" :key="`${file.branchId}-detail`" class="history-backup__detail">
+                    <tr v-if="file.locked || file.series.length || file.colonies || file.events" :key="`${file.branchId}-detail`" class="history-backup__detail">
                       <td colspan="11">
                         <div v-if="file.locked" class="caption text--secondary">Kept as stored: {{ file.locked }}.</div>
                         <details v-if="file.series.length">
@@ -395,6 +410,11 @@
                         <details v-if="file.colonies && file.colonies.series.length">
                           <summary class="caption text--secondary">Every colony series in branch {{ file.branchId }}, one by one</summary>
                           <div v-for="row in file.colonies.series" :key="row.key" class="caption">{{ row.label }}: {{ count(row.stored) }} stored, {{ count(row.backup) }} in the backup, {{ count(row.added) }} added, {{ count(row.identical) }} the same, {{ count(row.conflicts) }} in conflict<template v-if="file.colonies.policy === 'replace'">, {{ count(row.removed) }} removed</template><template v-if="row.thinned">, {{ count(row.thinned) }} thinned</template></div>
+                        </details>
+                        <div v-if="file.events" class="caption" data-backup-events>Event archive of branch {{ file.branchId }}: {{ file.events.status === 'new' ? 'new here' : file.events.status === 'changes' ? 'changed' : file.events.status === 'unchanged' ? 'stored already' : 'kept as stored' }}; {{ count(file.events.totals.stored) }} events stored, {{ count(file.events.totals.backup) }} in the backup, {{ count(file.events.policy === 'keep' ? 0 : file.events.totals.added) }} added, {{ count(file.events.totals.identical) }} the same, {{ count(file.events.totals.conflicts) }} in conflict<template v-if="file.events.policy === 'replace'">, {{ count(file.events.totals.removed) }} removed</template><template v-if="file.events.locked"> ({{ file.events.locked }})</template></div>
+                        <details v-if="file.events && file.events.series.length">
+                          <summary class="caption text--secondary">Every event archive in branch {{ file.branchId }}, one by one</summary>
+                          <div v-for="row in file.events.series" :key="row.key" class="caption">{{ row.label }}: {{ count(row.stored) }} stored, {{ count(row.backup) }} in the backup, {{ count(row.added) }} added, {{ count(row.identical) }} the same, {{ count(row.conflicts) }} in conflict<template v-if="file.events.policy === 'replace'">, {{ count(row.removed) }} removed</template></div>
                         </details>
                       </td>
                     </tr>
@@ -445,7 +465,7 @@
       <v-dialog v-model="confirmClear" max-width="440">
         <v-card>
           <v-card-title>Clear this race's history?</v-card-title>
-          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>, and the colony series kept with them. The colonies chosen to follow stay chosen. The save isn't touched, and recording starts again at the next save.</v-card-text>
+          <v-card-text>This deletes the {{ allSnapshots.length }} snapshots the app has recorded for this race<template v-if="campaignView && campaignView.branches.length > 1"> in branch {{ shownBranchId }}</template>, and the colony series and the event archive kept with them. The colonies chosen to follow and the event archive choice stay chosen. The save isn't touched, and recording starts again at the next save.</v-card-text>
           <v-card-actions>
             <v-spacer />
             <v-btn text @click="confirmClear = false">Cancel</v-btn>
@@ -475,7 +495,8 @@ import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { COLONY_BYTES, chosenNow, colonyEstimate, colonyWish } from '../utilities/colony-series'
 import { registerEconomyNotes } from '../utilities/economy-notes'
-import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, colonyStore, durationText, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
+import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordEvents } from '../utilities/event-archive'
+import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
 import { Changed, MAX_BYTES, Rejected, abandonRestore, annotationsOf, applyRestore, backupFileName, buildBackup, defaultChoices, keptBackups, parseBackup, planRestore, recoveryFileName, unfinishedProblem, unfinishedRestore } from '../utilities/history-backup'
 import { captionLines, drawExport, exportCsv, exportModel } from '../utilities/history-export'
 import { LINK_STATUS_TEXT, LINK_TYPES, LINK_TYPE_KEYS, MILESTONE_TYPES, TEXT_LENGTH, adoptMilestone, branchLineage, deleteMilestone, gameDateText, gameSecondsOf, incrementsOf, linkChoices, loadObjects, markersOf, moveMilestone, nearestSample, readAttachedMilestones, readMilestones, registerMilestones, saveMilestone, scopeOf as milestoneScopeOf, typeText, withinSamples } from '../utilities/history-milestones'
@@ -570,6 +591,7 @@ export default {
       rivalMetric: { key: 'historyRivalsMetric', default: 'population', valid: oneOf(RIVAL_METRIC_VALUES) },
       span: { key: 'historySpan', default: 0, valid: oneOf(SPAN_OPTIONS.map((option) => option.value)) },
       retentionProfile: { key: 'historyRetention', default: DEFAULT_RETENTION, valid: oneOf(RETENTION_PROFILES.map((profile) => profile.id)) },
+      eventCap: { key: 'historyEventCap', default: EVENT_CAP, valid: oneOf(EVENT_CAPS) },
     }),
   ],
   data() {
@@ -579,12 +601,15 @@ export default {
       measureColumns: MEASURES,
       rivalMetrics: RIVAL_METRICS,
       spanOptions: SPAN_OPTIONS,
+      eventCaps: EVENT_CAPS,
       // Spy mode shows the other races' history (Rivals). Read on creation: it's set on Settings.
       spyNPR: false,
       // Bumped when this page clears the history, so `gameHistory` re-reads it.
       cleared: 0,
       // Bumped when the Colony series panel changes what is followed, so the settings are read again.
       colonyChanges: 0,
+      // The cap picked on the Retention panel and waiting for confirmation; the cap in force is the persisted `eventCap`.
+      eventCapPick: null,
       // The branch picked on this page; the settled branch until one is.
       branchChoice: null,
       // Bumped when this page changes the campaign registry, so the Campaign panel re-reads it.
@@ -1092,6 +1117,104 @@ export default {
       const predicted = budget.followed ? `about ${this.size(budget.predicted)} predicted for ${this.count(budget.followed, 0)} ${budget.followed === 1 ? 'colony' : 'colonies'} at ${this.count(this.retentionView.profile.cap, 0)} snapshots` : 'none followed, so none predicted'
 
       return `${measured}; ${predicted}. Counted with the history in the retention budget; each colony takes about ${COLONY_BYTES} bytes a snapshot.`
+    },
+
+    // The shown branch's event archive as stored, or why it could not be read: { file, error }. The file is null when the branch has none; the error is '' when the read worked and names the problem of a file this version cannot read, never a count of 0.
+    eventRecord() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.cleared + this.campaignChanges
+
+      if (!this.GameID || !this.RaceID || !this.historyRecorded || !this.resolved) {
+        return { file: null, error: '' }
+      }
+
+      try {
+        const file = eventStore(this.resolved.campaignId, this.shownBranchId).store
+        const problem = eventFileProblem(file)
+
+        return problem ? { file: null, error: `the event archive of this branch is unreadable (${problem})` } : { file: file && file.races ? file : null, error: '' }
+      } catch (error) {
+        return { file: null, error: error.message }
+      }
+    },
+
+    // What the Retention panel states of the shown race's event archive: the choice in the settings for the settled campaign, the events kept, the measured size of its record in the shown branch's file, the predicted size at the cap and the unobserved stretches. `error` is why the settings or the file could not be read, else ''; a figure not known is null, never 0.
+    eventBudget() {
+      // eslint-disable-next-line no-unused-expressions
+      this.$store.state.history.revision + this.cleared + this.campaignChanges
+
+      if (!this.GameID || !this.RaceID || !this.historyRecorded || !this.resolved) {
+        return null
+      }
+
+      const cap = this.eventCap
+
+      try {
+        if (this.eventRecord.error) {
+          throw new Error(this.eventRecord.error)
+        }
+
+        const io = campaignStorage(this.config)
+        const file = this.eventRecord.file
+        const record = file ? file.races[this.RaceID] || null : null
+
+        return { on: archiveOn(io.settings.store, this.resolved.campaignId, this.RaceID), player: !(this.record && this.record.npr), cap, events: record ? recordEvents(record) : null, measured: record ? measuredBytes(record) : null, predicted: eventEstimate(cap), gaps: record ? gapsOf(record).filter((gap) => gap.from !== null).length : null, cut: record && isKnownNumber(record.cut) ? record.cut : null, error: '' }
+      } catch (error) {
+        return { on: false, player: true, cap, events: null, measured: null, predicted: null, gaps: null, cut: null, error: error.message }
+      }
+    },
+
+    // The Retention panel's line on the event archive: whether the shown race keeps one, the events kept of the cap, the measured size of its record in the shown branch's file, the predicted size at the cap, the unobserved stretches and the date the cap cut the oldest events from; or why none of it is known.
+    eventBudgetText() {
+      const budget = this.eventBudget
+
+      if (!budget) {
+        return 'Unavailable: the campaign of the open save is not settled.'
+      }
+
+      if (budget.error) {
+        return `Unavailable: ${budget.error}.`
+      }
+
+      if (!budget.player) {
+        return 'Not kept: the event archive is for player races only.'
+      }
+
+      const state = budget.on ? 'On for this race in this campaign' : 'Off for this race in this campaign, so nothing more is captured'
+      const kept = budget.events === null ? `none kept yet, at most ${this.count(budget.cap, 0)}` : `${this.count(budget.events, 0)} events kept of at most ${this.count(budget.cap, 0)}`
+      const measured = budget.measured === null ? 'none recorded yet' : `${this.size(budget.measured)} measured as compact JSON`
+      const gaps = budget.gaps === null ? '' : ` ${this.count(budget.gaps, 0)} ${budget.gaps === 1 ? 'stretch' : 'stretches'} between captures ${budget.gaps === 1 ? 'was' : 'were'} not observed, as was the time before the first capture.`
+      const cut = budget.cut === null ? '' : ` The cap cut the oldest events: the record is complete from ${this.date(budget.cut)}.`
+
+      return `${state}; ${kept}; ${measured}; about ${this.size(budget.predicted)} predicted at the cap, at about ${EVENT_BYTES} bytes an event.${gaps}${cut}`
+    },
+
+    // The cap picked and not yet confirmed. The cap is one setting of the installation, read by the recorder for every campaign, race and branch, so any decrease waits here, whatever the shown branch holds; the shown branch's figures are added when its archive is known, and are never the whole of what is cut. Null when none is waiting.
+    eventCapChange() {
+      const cap = this.eventCapPick
+
+      if (!cap) {
+        return null
+      }
+
+      const scope = 'The cap applies to every campaign, race and branch of this installation, and takes effect at the next capture of each. Events it cuts are gone for good: a larger cap keeps the events observed from now on and never brings them back.'
+      const record = this.eventRecord
+
+      if (record.error) {
+        return { cap, text: `${scope} The archive of the shown branch could not be read, so what it would lose is not shown.` }
+      }
+
+      if (!record.file) {
+        return { cap, text: `${scope} The shown branch holds no archive, and the others are not read here, so the events they would lose are not shown.` }
+      }
+
+      const races = Object.entries(record.file.races).map(([RaceID, entry]) => ({ RaceID, dropped: capRecord(entry, cap).dropped }))
+      const shown = races.filter(({ RaceID }) => RaceID === String(this.RaceID)).reduce((sum, race) => sum + race.dropped, 0)
+      const others = races.filter(({ RaceID }) => RaceID !== String(this.RaceID)).reduce((sum, race) => sum + race.dropped, 0)
+      const own = shown ? `In the shown branch, the next capture of this race cuts ${this.count(shown, 0)} of its oldest events (whole increments, so a little more than the excess can go).` : 'In the shown branch, the next capture of this race cuts none of its events.'
+      const rest = others ? ` The archives of other races in this branch lose ${this.count(others, 0)} events in all when each is next captured.` : ''
+
+      return { cap, text: `${scope} ${own}${rest} Other branches and campaigns are not counted here.` }
     },
 
     // The profile picked and not yet confirmed: what the recorder's next save would do to the shown branch under it (the new sample goes in, then every thinning pass runs, so that is more than thinning the stored samples alone when the count sits at a pass boundary), the figure for the stored samples as they are now labelled as such, and what it cannot undo. Null when none is waiting.
@@ -1906,6 +2029,24 @@ export default {
     pickRetention(id) {
       this.retentionPick = id === this.retentionProfile ? null : id
     },
+    // Picks a cap on the events the archive keeps for a race. The cap is one setting of the installation that every campaign's recorder reads, so a decrease always waits for confirmation, whatever the shown branch holds; an increase cuts nothing and is kept at once.
+    pickEventCap(cap) {
+      if (cap === this.eventCap) {
+        this.eventCapPick = null
+      } else if (cap < this.eventCap) {
+        this.eventCapPick = cap
+      } else {
+        this.eventCap = cap
+        this.eventCapPick = null
+      }
+    },
+    applyEventCap() {
+      if (this.eventCapPick) {
+        this.eventCap = this.eventCapPick
+      }
+
+      this.eventCapPick = null
+    },
     applyRetention() {
       if (this.retentionPick) {
         this.retentionProfile = this.retentionPick
@@ -1950,7 +2091,7 @@ export default {
     // The preview's totals in words.
     totalsText(totals) {
       const plural = (amount, noun) => `${this.count(amount)} ${noun}${amount === 1 ? '' : 's'}`
-      const parts = [`adds ${plural(totals.added, 'snapshot')}`, `meets ${plural(totals.conflicts, 'conflict')} at a shared game time (Merge keeps the stored snapshot, Replace takes the backup's)`, `drops ${plural(totals.removed, 'stored snapshot')} under Replace`, `restores ${plural(totals.annotations, 'annotation')}`, `changes ${plural(totals.registry, 'campaign record')}`]
+      const parts = [`adds ${plural(totals.added, 'snapshot')}`, `meets ${plural(totals.conflicts, 'conflict')} at a shared game time (Merge keeps the stored snapshot, Replace takes the backup's)`, `drops ${plural(totals.removed, 'stored snapshot')} under Replace`, ...(totals.events || totals.eventsRemoved ? [`adds ${plural(totals.events, 'event')} and drops or overwrites ${plural(totals.eventsRemoved, 'stored event')} under Replace`] : []), `restores ${plural(totals.annotations, 'annotation')}`, `changes ${plural(totals.registry, 'campaign record')}`]
 
       return `Applying ${parts.join('; ')}. A copy of what it touches is kept first.`
     },

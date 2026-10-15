@@ -111,7 +111,7 @@
                 <v-btn outlined color="error" :disabled="!totalCount" @click="ask('all')">Reset all</v-btn>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, and Empire History, which has files of its own.</div>
+            <div class="panel-foot caption text--secondary">Each page remembers its options, filters, searches, views, and each table's sort and rows per page: app-wide, or per empire for what is about the empire's own things (its systems, colonies, fleets, a search over them). A reset brings back each page's defaults the next time it opens. It keeps the Display settings, the Warnings mutes, the Galaxy Map's pinned systems and clusters, what was new at the last visit to the Game Log and Warnings, the Game Log's saved presets, event archive choice and pinned events with the cap on the events kept, and Empire History, which has files of its own.</div>
           </v-card>
         </v-col>
       </v-row>
@@ -265,8 +265,8 @@ import { CATEGORIES, MAX_BYTES, adoptBackup, buildExport, buildSchema, commitImp
 
 const SEPARATORS = ['Tick', 'Comma', 'Dash', 'Space', 'None']
 
-// The settings the Display panel holds. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
-const APP_SETTINGS = [...APPEARANCE_SETTINGS, 'darkMode', 'spyNPR', 'selectedSeparator']
+// The settings the Display panel holds, and the Game Log's saved presets, which are written by hand and not a view. A reset keeps them. `darkMode` is no longer written; a file that still holds it keeps it.
+const APP_SETTINGS = [...APPEARANCE_SETTINGS, 'darkMode', 'spyNPR', 'selectedSeparator', 'logPresets']
 
 // The theme policies as the Theme control offers them.
 const THEMES = POLICIES.map((id) => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) }))

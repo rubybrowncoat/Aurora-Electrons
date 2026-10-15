@@ -55,6 +55,9 @@ export const mergeHistories = (kept, added) => {
   return { history: { gameName: kept.gameName !== undefined ? kept.gameName : added.gameName, races: races.merged, intel }, overlaps, added: count }
 }
 
+// The race settings that belong to one branch of the campaign they were made in, never copied by an attach: a pin names its branch by id, and the ids of another campaign (or the new branch an attach makes) are other timelines, so a copy would show the pin on a branch it was never made on.
+const BRANCH_BOUND_KEYS = ['logPins']
+
 // The settings subtree `{ race: { [RaceID]: { [key]: value } } }` with the values of `added` that `kept` holds none for: { settings, copied, kept }.
 const mergeSettings = (kept, added) => {
   const merged = clone(isObject(kept) ? kept : {}) || {}
@@ -65,7 +68,7 @@ const mergeSettings = (kept, added) => {
     merged.race = isObject(merged.race) ? merged.race : {}
     merged.race[RaceID] = isObject(merged.race[RaceID]) ? merged.race[RaceID] : {}
 
-    Object.entries(isObject(values) ? values : {}).forEach(([key, value]) => {
+    Object.entries(isObject(values) ? values : {}).filter(([key]) => !BRANCH_BOUND_KEYS.includes(key)).forEach(([key, value]) => {
       if (merged.race[RaceID][key] === undefined) {
         merged.race[RaceID][key] = clone(value)
         copied += 1

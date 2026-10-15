@@ -19,6 +19,8 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -223,7 +225,7 @@ const seedLegacy = (inst, { file = legacyFile([100, 200]), settings = legacySett
 // Every check is `{ name, run(m) }` over the loaded modules. A failed assertion is the check failing.
 const defineSuite = (m) => {
   const cases = []
-  const assert = require('assert').strict
+  const assert = require('./lib/bounded-assert')
   const test = (group, name, run) => cases.push({ group, name, run })
   const { campaign, history } = m
   const attachModule = m['campaign-attach']
@@ -541,6 +543,28 @@ const defineSuite = (m) => {
 
     assert.equal(next.resolution.campaignId, target)
     assert.equal(activeCampaigns(inst).length, 1)
+  })
+
+  test('matrix', 'attaching a campaign as a new branch never copies the pins of its races, which name their branch by id, while the other settings still come across', async () => {
+    const inst = installation()
+    const first = await pass(inst, saveOf({ n: 40 }), { path: 'C:/saves/a.db' })
+    const other = await pass(inst, saveOf({ n: 41 }), { path: 'C:/saves/b.db' })
+    const [target, source] = [first.resolution.campaignId, other.resolution.campaignId]
+    const pins = { version: 1, seeded: {}, pins: [{ id: 'p1', branch: 'b1' }] }
+
+    keep(inst, source, 7, 'logPins', pins)
+    keep(inst, source, 7, 'mapPinned', [5])
+
+    const preview = attachModule.previewAttach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'new-branch' })
+
+    assert.equal(preview.settingsCopied, 1, 'the preview counts a pin as copied')
+
+    const done = attachModule.attach(inst.io, { from: { campaignId: source }, to: { campaignId: target, branchId: 'b1' }, mode: 'new-branch' })
+
+    assert.notEqual(done.branchId, 'b1')
+    assert.equal(kept(inst, target, 7, 'logPins'), undefined, 'a pin of the source reached the target campaign')
+    assert.deepEqual(kept(inst, target, 7, 'mapPinned'), [5])
+    assert.deepEqual(kept(inst, source, 7, 'logPins'), pins, 'the attached campaign was changed')
   })
 
   test('matrix', 'attaching as a new branch keeps the target branch as it was and gives the history a branch of its own', async () => {
@@ -2007,7 +2031,7 @@ const realDatabase = (handle) => ({
 
 const realChecks = async (m) => {
   const results = []
-  const assert = require('assert').strict
+  const assert = require('./lib/bounded-assert')
   const { campaign, history } = m
   const real = []
 
@@ -2128,6 +2152,7 @@ const MUTATIONS = [
   { name: 'a path is set with the store\'s own set, which makes lists of numeric segments', file: 'main/store-host.js', find: '  const next = store.store\n\n  setPath(next, key, value)\n  store.store = next', replace: '  store.set(key, value)', fails: ['two windows share one settings store'] },
   { name: 'an error of the host is not thrown in the window', file: 'preload/store-client.js', find: 'if (!answer || !answer.ok) {', replace: 'if (false) {', fails: ['a write the store refuses'] },
   { name: 'an attach merges over the settings it read before', file: 'campaign-attach.js', find: 'mergeSettings(isObject(all.campaign) ? all.campaign[campaign.id] : undefined, source.settings).settings', replace: 'mergeSettings(undefined, source.settings).settings', fails: ['attaching a history from before campaigns keeps a setting'] },
+  { name: 'an attach copies the pins of a race, whose branch ids are the source campaign\'s', file: 'campaign-attach.js', find: '.filter(([key]) => !BRANCH_BOUND_KEYS.includes(key))', replace: '', fails: ['attaching a campaign as a new branch never copies the pins'] },
   { name: 'a campaign id with hyphens is refused by the undo', file: 'preferences.js', find: 'const CAMPAIGN_SEGMENT = /^[A-Za-z0-9_-]+$/', replace: 'const CAMPAIGN_SEGMENT = /^[A-Za-z0-9_]+$/', fails: ['an import into a campaign with a production-shaped id'] },
   { name: 'an unsafe segment is accepted in a backup', file: 'preferences.js', find: 'const safePath = (path) => typeof path === \'string\' && path.split(\'.\').every((part, index, parts) => !UNSAFE_SEGMENTS.includes(part) &&', replace: 'const safePath = (path) => typeof path === \'string\' && path.split(\'.\').every((part, index, parts) => true &&', fails: ['an import into a campaign with a production-shaped id'] },
   { name: 'a backup from before campaigns is replayed into the legacy settings', file: 'preferences.js', find: ['return match ? `campaign.', '{campaigns.get(match[1])}', '{match[2] || \'\'}` : path'].join('$'), replace: 'return path', fails: ['a backup kept from before campaigns is moved'] },
@@ -2187,36 +2212,60 @@ const MUTATIONS = [
   { name: 'a change back to the restored value stays queued', file: 'renderer/mixins/persisted-view.js', find: 'delete this.$_persistedViewWaiting[name]', replace: 'void 0', fails: ['a persisted field toggled away and back'] },
 ]
 
-const applyMutations = async (copy) => {
-  const results = []
+// One mutation broken in `copy` (and put back after), with the cases it names run against it.
+const applyMutation = async (copy, mutation) => {
+  const target = path.join(copy, mutation.file.includes('/') ? mutation.file : `renderer/utilities/${mutation.file}`)
+  const original = fs.readFileSync(target, 'utf8')
+  const parts = original.split(mutation.find)
 
-  for (const mutation of MUTATIONS) {
-    const target = path.join(copy, mutation.file.includes('/') ? mutation.file : `renderer/utilities/${mutation.file}`)
-    const original = fs.readFileSync(target, 'utf8')
-    const parts = original.split(mutation.find)
-
-    if (parts.length !== 2) {
-      results.push({ group: 'mutations', name: mutation.name, error: new Error(`the text to break occurs ${parts.length - 1} times in ${mutation.file}, not once: the mutation no longer applies`) })
-      continue
-    }
-
-    fs.writeFileSync(target, parts.join(mutation.replace))
-
-    try {
-      const modules = await loadModules(copy)
-      const outcome = await runSuite(modules, mutation.fails)
-      const failed = outcome.filter((entry) => entry.error)
-      const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
-
-      results.push({ group: 'mutations', name: `${mutation.name} (fails: ${mutation.fails.join('; ')})`, error: missed.length ? new Error(`the checks that guard this did not fail: ${missed.join('; ')}`) : null })
-    } catch (error) {
-      results.push({ group: 'mutations', name: mutation.name, error })
-    } finally {
-      fs.writeFileSync(target, original)
-    }
+  if (parts.length !== 2) {
+    return { group: 'mutations', name: mutation.name, error: new Error(`the text to break occurs ${parts.length - 1} times in ${mutation.file}, not once: the mutation no longer applies`) }
   }
 
-  return results
+  fs.writeFileSync(target, parts.join(mutation.replace))
+
+  try {
+    const modules = await loadModules(copy)
+    const outcome = await runSuite(modules, mutation.fails)
+    const failed = outcome.filter((entry) => entry.error)
+    const missed = mutation.fails.filter((start) => !failed.some((entry) => entry.name.startsWith(start)))
+
+    return { group: 'mutations', name: `${mutation.name} (fails: ${mutation.fails.join('; ')})`, error: missed.length ? new Error(`the checks that guard this did not fail: ${missed.join('; ')}`) : null }
+  } catch (error) {
+    return { group: 'mutations', name: mutation.name, error }
+  } finally {
+    fs.writeFileSync(target, original)
+  }
+}
+
+// The mutations run in child processes, several side by side (CHECK_JOBS): each child copies the sources once and judges its share one after another, the way the whole run once did in one process, so no two mutations share a copy, a module or a global. `--mutants=<i>,<i>` is the child's mode; its last line is the list of its results.
+const MUTANTS_PREFIX = 'MUTANTS_RESULT '
+const CHILD_MUTANTS = process.argv.filter((argument) => argument.startsWith('--mutants=')).map((argument) => argument.slice(10).split(',').map(Number))[0]
+
+const childMain = async () => {
+  const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-campaigns-'))
+  const results = []
+
+  try {
+    copySources(copy)
+
+    for (const index of CHILD_MUTANTS) {
+      const { group, name, error } = await applyMutation(copy, MUTATIONS[index])
+
+      results.push({ group, name, error: error ? String(error.stack || error.message) : null })
+    }
+  } finally {
+    fs.rmSync(copy, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+
+  process.stdout.write(`${MUTANTS_PREFIX}${JSON.stringify(results)}\n`, () => process.exit(0))
+}
+
+const applyMutations = async () => {
+  const chunks = chunksOf(MUTATIONS.length)
+  const outcomes = spread(chunks, await inParallel(chunks, async (chunk) => lastJson(await runChild(__filename, [`--mutants=${chunk.join(',')}`]), MUTANTS_PREFIX)))
+
+  return outcomes.map((outcome, index) => (outcome instanceof Error ? { group: 'mutations', name: MUTATIONS[index].name, error: outcome } : { ...outcome, error: outcome.error === null ? null : Object.assign(new Error(outcome.error.split('\n')[0]), { stack: outcome.error }) }))
 }
 
 const main = async () => {
@@ -2224,14 +2273,7 @@ const main = async () => {
   const results = [...await runSuite(modules), ...await realChecks(modules)]
 
   if (!process.argv.includes('--no-mutations')) {
-    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-campaigns-'))
-
-    try {
-      copySources(copy)
-      results.push(...await applyMutations(copy))
-    } finally {
-      fs.rmSync(copy, { recursive: true, force: true })
-    }
+    results.push(...await applyMutations())
   }
 
   let group = null
@@ -2251,7 +2293,7 @@ const main = async () => {
   process.exit(failed ? 1 : 0)
 }
 
-main().catch((error) => {
+;(CHILD_MUTANTS ? childMain() : main()).catch((error) => {
   console.error(error)
   process.exit(2)
 })

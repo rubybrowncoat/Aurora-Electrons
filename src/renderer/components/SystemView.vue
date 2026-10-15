@@ -41,19 +41,6 @@ const AU_KM = 149597870.7
 const PX_PER_AU = 150
 const WORLD_MAGNIFICATION = 1000
 
-const bodyTypes = {
-  1: 'Asteroid',
-  2: 'Terrestrial Planet',
-  3: 'Dwarf Planet',
-  4: 'Gas Giant',
-  5: 'Super Jovian',
-  7: 'Small Moon',
-  8: 'Moon',
-  9: 'Large Moon',
-  10: 'Small Terrestrial Moon',
-  11: 'Large Terrestrial Moon',
-  14: 'Comet',
-}
 const renderOrbitBodyType = new Set([2, 3, 4, 5, 7, 8, 9, 10, 11]) // 7, 8, 9, 10, 11
 const lunarBodyTypeIds = new Set([7, 8, 9, 10, 11])
 
@@ -363,11 +350,6 @@ export default {
   },
   data() {
     return {
-      _initRaf: null,
-      _resizeRaf: null,
-
-      _needsUpdate: false,
-
       userInteracted: false,
     }
   },
@@ -836,7 +818,6 @@ export default {
     redrawPhysicalBodyMarkers() {
       if (!this._annotationRegistry || !this.viewport) return
 
-      const s = this.viewport.scale?.x || 1
       const visible = this._getVisibleWorldRect(64)
       const query = { x: visible.xMin, y: visible.yMin, width: visible.xMax - visible.xMin, height: visible.yMax - visible.yMin }
 
@@ -1212,7 +1193,7 @@ export default {
       this.redrawPhysicalBodyMarkers()
     },
 
-    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, labelPadPx = 8, markerProvider = null } = {}) {
+    drawSystem(system, stars, { origin = { x: this.pixi.view.width / 2, y: this.pixi.view.height / 2 }, orbitStyle = { alpha: 0.45, width: 1 }, starSize = { exaggeration: 1, minPx: 0, maxPx: 1e7 }, minStarRadius = 6, markerProvider = null } = {}) {
       const root = new PIXI.Container()
       root.position.set(toNumber(origin.x), toNumber(origin.y))
       this.worldLayer.addChild(root)
@@ -1597,7 +1578,7 @@ export default {
 
       // Interactivity
       marker.interactive = true
-      marker.on('pointerdown', (e, ...asd) => {
+      marker.on('pointerdown', (e) => {
         const xy = this.viewport.toWorld(e.data.global.x, e.data.global.y)
         this.viewport.snap(xy.x, xy.y, { time: 300, removeOnComplete: true })
       })

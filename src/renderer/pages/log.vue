@@ -5,17 +5,10 @@
     <template v-if="ready">
       <div class="toolbar">
         <v-text-field v-model="search" label="Search messages" prepend-inner-icon="mdi-magnify" clearable dense outlined hide-details class="tool tool--search" />
+        <v-combobox :value="keywords" label="Keywords (any)" multiple chips small-chips deletable-chips dense outlined hide-details clearable :delimiters="[',']" append-icon="" class="tool tool--keywords" @change="setKeywords" />
         <v-autocomplete v-model="place" :items="placeOptions" label="System or colony" clearable dense outlined hide-details class="tool tool--place" />
-        <v-select :value="selectedTypes" :items="typeOptions" label="Event types" multiple dense outlined hide-details class="tool tool--types" @change="setTypes">
-          <template #prepend-item>
-            <v-list-item @click="setTypes(null)"><v-list-item-title>All types</v-list-item-title></v-list-item>
-            <v-list-item @click="setTypes([])"><v-list-item-title>No types</v-list-item-title></v-list-item>
-            <v-divider />
-          </template>
-          <template #selection="{ index }">
-            <span v-if="index === 0" class="v-select__selection v-select__selection--comma">{{ activeTypes === null ? 'All types' : `${selectedTypes.length} types` }}</span>
-          </template>
-        </v-select>
+        <log-type-filter class="tool tool--types" :groups="typeGroups" :selected="selectedTypes" :all="activeTypes === null" @change="setTypes" />
+        <log-presets :presets="presets" :keywords="keywords" :type-count="activeTypes === null ? null : activeTypes.length" @apply="applyPreset" @save="savePreset" @rename="renamePreset" @remove="removePreset" />
         <v-menu offset-y left :close-on-content-click="false" max-width="340">
           <template #activator="{ on, attrs }">
             <v-btn outlined aria-label="Game Log options" v-bind="attrs" v-on="on"><v-icon small left>mdi-tune-variant</v-icon>Options<span v-if="activeOptionCount">&nbsp;({{ activeOptionCount }})</span></v-btn>
@@ -26,12 +19,22 @@
             <div class="caption text--secondary mt-1">The same type on one game day folds into an expandable row. No message is removed.</div>
             <v-checkbox v-model="hideNonCustomized" label="Only custom-coloured events" dense hide-details />
             <div class="caption text--secondary mt-1">Types with a colour entry in this race's game settings, including black.</div>
+            <template v-if="canArchive">
+              <v-divider class="my-3" />
+              <v-switch :input-value="archiveChoice" label="Keep an event archive" dense hide-details class="mt-0" @change="setArchive" />
+              <div class="caption text--secondary mt-1">Records this race's events on this branch, so the ones a later save no longer holds stay readable. Up to {{ count(eventCap) }} events are kept, about {{ capSize }} as stored (an estimate). Switching it off keeps what was recorded.</div>
+              <div v-if="archiveMessage" class="caption error--text mt-1" role="alert">{{ archiveMessage }}</div>
+            </template>
             <v-btn small text class="mt-3" @click="resetFilters">Reset filters</v-btn>
           </v-card>
         </v-menu>
       </div>
 
       <stat-tiles dense class="my-2" :tiles="tiles" />
+
+      <pinned-panel class="mb-3" :entries="pinEntries" :unavailable="pinUnavailable" :message="pinMessage" @open="(row) => detail = row" @note="changeNote" @unpin="unpin" />
+
+      <archive-panel v-if="archiveChoice && canArchive && archive" class="mb-3" :status="archive.status" :reason="archive.reason || ''" :record="archiveRecord" :cap="eventCap" :start-year="Number(StartYear)" :source="archiveListed ? 'archive' : 'save'" @source="(value) => listSource = value" />
 
       <v-card class="panel mb-3" data-summary="How many events the game log holds for each month, to find busy periods and narrow the list below to one." elevation="1">
         <div class="panel-head">
@@ -54,10 +57,10 @@
 
       <v-card class="panel" data-summary="The events in the game log, newest first, to review what happened and read any message in full." elevation="1">
         <div class="panel-head">
-          <div class="subtitle-2">Events <span class="caption text--secondary">{{ count(filteredEvents.length) }} of {{ count(logEvents.length) }}</span></div>
+          <div class="subtitle-2">Events <span class="caption text--secondary">{{ count(filteredEvents.length) }} of {{ count(listEvents.length) }}</span><span v-if="archiveListed" class="caption text--secondary"> · from the archive</span></div>
           <div class="caption text--secondary">
             {{ collapseRepeats ? `${count(eventRows.length)} rows before expanding repeats` : 'Newest first' }}
-            <span v-if="lastSeen === null"> · First visit</span>
+            <span v-if="firstVisit"> · First visit</span>
           </div>
         </div>
         <window-virtual-scroll v-if="displayRows.length" ref="events" :items="displayRows" :item-height="84" :bench="4" class="events">
@@ -70,10 +73,13 @@
                   <span class="event-type">{{ row.event.TypeName }}</span>
                   <span v-if="row.group" class="repeat-count">{{ count(row.events.length) }} events</span>
                   <span v-if="isNew(row.event)" class="new-label">New</span>
+                  <span v-if="!row.group && isPinned(row.event)" class="new-label pinned-label">Pinned</span>
                   <span class="event-date">{{ row.group ? row.event.Day : row.event.DateTime }}</span>
                   <!-- Vuetify activates a row on Enter, even from a child link; keep link keys on the link. -->
                   <page-link v-if="row.event.KnownSystemID && (!row.group || row.sameSystem)" :to="systemLink(row.event)" :name="row.event.SystemName" />
                   <page-link v-if="row.event.SystemBodyID && (!row.group || row.sameColony)" :to="bodyLink(row.event)" :name="row.event.ColonyName" />
+                  <span v-if="row.event.archived && row.event.ColonyName && (!row.group || row.sameColony)" class="event-place">{{ row.event.ColonyName }}</span>
+                  <v-btn v-if="!row.group" icon x-small :style="{ color: 'inherit' }" :disabled="!canPin" :aria-pressed="String(isPinned(row.event))" :aria-label="isPinned(row.event) ? 'Unpin this event' : 'Pin this event'" :title="pinTitle(row.event)" @click.stop="togglePin(row.event)" @keydown.native.stop><v-icon small>{{ isPinned(row.event) ? 'mdi-pin' : 'mdi-pin-outline' }}</v-icon></v-btn>
                   <v-btn icon x-small :style="{ color: 'inherit' }" :aria-label="`Hide ${row.event.TypeName} events`" :title="`Hide ${row.event.TypeName} events`" @click.stop="hideType(row.event)" @keydown.native.stop><v-icon small>mdi-eye-off-outline</v-icon></v-btn>
                   <v-icon v-if="row.group" small :style="{ color: 'inherit' }">{{ expandedGroups.includes(row.key) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
                 </div>
@@ -85,9 +91,9 @@
             </v-list-item>
           </template>
         </window-virtual-scroll>
-        <div v-else class="pa-6 text--secondary">{{ logEvents.length ? 'No events match these filters.' : 'This race has no events in the save.' }}</div>
+        <div v-else class="pa-6 text--secondary">{{ listPending ? 'Reading the archive.' : listEvents.length ? 'No events match these filters.' : archiveListed ? 'The archive holds no events of this race.' : 'This race has no events in the save.' }}</div>
         <div class="panel-foot caption text--secondary">
-          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message. "New" compares the game's increment with the previous visit to this page.
+          Newest events first. Rows keep this race's custom alert and text colours. Click a message to read it in full; expand a daily repeat to read each message; pin an event to keep it in the Pinned panel. "New" compares the game time of an event with the end of the newest increment the previous visit to this page saw on this branch; the first visit to a branch inherits what its parent saw up to the fork.
         </div>
       </v-card>
     </template>
@@ -95,12 +101,14 @@
     <v-dialog :value="!!detail" max-width="760" @input="(value) => { if (!value) detail = null }">
       <v-card v-if="detail" class="event-detail">
         <v-card-title class="event-detail-title">{{ detail.TypeName }}<v-spacer /><v-btn icon aria-label="Close event" @click="detail = null"><v-icon>mdi-close</v-icon></v-btn></v-card-title>
-        <v-card-subtitle class="event-detail-meta">{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span></v-card-subtitle>
+        <v-card-subtitle class="event-detail-meta">{{ detail.DateTime }}<span v-if="detail.SystemName"> · {{ detail.SystemName }}</span><span v-if="detail.ColonyName"> · {{ detail.ColonyName }}</span><span v-if="detail.archived"> · From the archive</span><span v-if="isPinned(detail)"> · Pinned</span></v-card-subtitle>
         <v-card-text class="event-detail-message" :style="eventStyle(detail)">{{ detail.MessageText }}</v-card-text>
+        <v-card-text v-if="pinMessage" class="error--text py-2" role="alert">{{ pinMessage }}</v-card-text>
         <v-card-actions class="event-detail-actions">
           <v-btn v-if="detail.KnownSystemID" text :to="systemLink(detail)">Galaxy Map</v-btn>
           <v-btn v-if="detail.SystemBodyID" text :to="bodyLink(detail)">Colonization Planner</v-btn>
           <v-btn text @click="hideType(detail)">Hide event type</v-btn>
+          <v-btn text :disabled="!canPin" @click="togglePin(detail)"><v-icon small left>{{ isPinned(detail) ? 'mdi-pin-off-outline' : 'mdi-pin-outline' }}</v-icon>{{ isPinned(detail) ? 'Unpin' : 'Pin' }}</v-btn>
           <v-spacer />
           <v-btn text @click="detail = null">Close</v-btn>
         </v-card-actions>
@@ -112,6 +120,10 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import ArchivePanel from '../components/log/ArchivePanel.vue'
+import LogPresets from '../components/log/LogPresets.vue'
+import LogTypeFilter from '../components/log/LogTypeFilter.vue'
+import PinnedPanel from '../components/log/PinnedPanel.vue'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import { chartTheme } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
@@ -124,13 +136,24 @@ import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { eventColorToRGBA, gameTime } from '../utilities/aurora'
+import { readRegistry } from '../utilities/campaign'
 import { linkTo, queryId } from '../utilities/deep-links'
+import { EVENT_ICONS } from '../utilities/event-icons'
+import { eventCapOfSettings, eventEstimate, readLogWindow, rowCounts, rowFingerprint, saveArchiveChoice } from '../utilities/event-archive'
+import { PIN_STATES, pinKey, pinOfRow, pinsOf, pinState, readPins, seededPins, withNote, withPin, withoutPin } from '../utilities/event-pins'
+import { cleanKeywords, groupTypes, keywordTest, newPresetId, presetTypes, readPresets, withPreset, withRenamedPreset, withoutPreset } from '../utilities/event-triage'
+import { bytesText, campaignStorage } from '../utilities/history'
+import { branchLineage, gameDateText } from '../utilities/history-milestones'
 import { tracked } from '../utilities/load-tracking'
+import { archiveEvents, pinnableRow, playerPins, readArchiveFile, readArchiveNames } from '../utilities/log-archive-view'
+import { isNewEvent, newestEnd, readLook, withLook } from '../utilities/log-visit'
 
 const INPUT_LABELS = { logEvents: 'the game log' }
 
+const NO_LOOK = Object.freeze({ key: null, t: null, settled: false })
+
 export default {
-  components: { ChartCanvas, LoadState, PageLink, StatTiles, WindowVirtualScroll },
+  components: { ArchivePanel, ChartCanvas, LoadState, LogPresets, LogTypeFilter, PageLink, PinnedPanel, StatTiles, WindowVirtualScroll },
   mixins: [
     countFormat,
     deepLink,
@@ -139,259 +162,34 @@ export default {
       search: { key: 'logSearch', default: '', scope: 'race', normalise: (stored) => stored || '' },
       place: { key: 'logPlace', default: null, scope: 'race', normalise: (stored) => stored || null },
       activeTypes: { key: 'logTypes', default: null, scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored : null) },
+      keywords: { key: 'logKeywords', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? cleanKeywords(stored) : undefined) },
       dateFrom: { key: 'logDateFrom', default: '', scope: 'race', normalise: (stored) => stored || '' },
       dateTo: { key: 'logDateTo', default: '', scope: 'race', normalise: (stored) => stored || '' },
       collapseRepeats: { key: 'logCollapseRepeats', default: true, normalise: (stored) => stored !== false },
       hideNonCustomized: { key: 'logOnlyCustomized', default: false, normalise: (stored) => !!stored },
+      presets: { key: 'logPresets', default: [], normalise: readPresets },
     }),
   ],
   data() {
     return {
-      lastSeen: null,
+      // The previous visit to this branch: { key, t, settled }, `t` the game time events are compared with (null: a first visit). It is read once for a campaign, race and branch and stays fixed while the page is open.
+      look: NO_LOOK,
+      // The pins of the race: { key, store } with `store` null when what is stored cannot be read. Frozen, as one holds up to 500 pins.
+      pinStore: Object.freeze({ key: null, store: null }),
+      pinMessage: '',
+      // The event archive: the choice, what the branch's file holds for the race (null while it is off or not read), which list the page shows, and the last refusal.
+      archiveChoice: false,
+      archive: null,
+      listSource: 'save',
+      archiveMessage: '',
       settledContext: null,
       expandedGroups: [],
       detail: null,
-      eventIcons: {
-        0: 'mdi-help-circle-outline', // No Event Type
-        1: 'mdi-factory', // Production
-        2: 'mdi-ferry', // Ship Construction
-        3: 'mdi-wrench', // Ship Repair
-        4: 'mdi-swap-horizontal', // Ship Refit
-        7: 'mdi-delete', // Ship Scrapped
-        9: 'mdi-shield-account', // Unit Trained
-        10: 'mdi-account-cog', // Commander Update
-        11: 'mdi-shield', // Shield Recharge
-        12: 'mdi-crosshairs', // Targeting
-        14: 'mdi-crosshairs-question', // Targeting Problem
-        15: 'mdi-rocket', // Missile Launch
-        16: 'mdi-ammunition', // Out of Ammo
-        17: 'mdi-rocket-outline', // No Missile Assigned
-        18: 'mdi-timer-sand', // Weapon Reloading
-        19: 'mdi-bullseye-arrow', // Chance To Hit
-        20: 'mdi-bullseye', // Target Hit
-        21: 'mdi-crosshairs-off', // Target Missed
-        22: 'mdi-flash-outline', // Weapon Recharging
-        25: 'mdi-check-circle', // System Intact
-        26: 'mdi-bomb', // Secondary Explosion
-        27: 'mdi-sail-boat-sink', // Ship Destroyed
-        28: 'mdi-file-document-alert', // Damage Report
-        35: 'mdi-account-star', // Team Skill
-        37: 'mdi-radar', // System Surveyed
-        41: 'mdi-clipboard-text', // Orders Assigned
-        42: 'mdi-clipboard-alert', // Orders Not Possible
-        43: 'mdi-diamond-stone', // Minerals Located
-        44: 'mdi-domain', // Ruins Located
-        45: 'mdi-clipboard-check', // Orders Completed
-        46: 'mdi-gas-station-off', // Insufficient Fuel
-        52: 'mdi-eye-off', // Target Lost
-        53: 'mdi-rocket-launch-outline', // Missiles Lost
-        54: 'mdi-transit-transfer', // Transit Failure
-        55: 'mdi-message-processing', // Communication
-        57: 'mdi-domain', // Ruins Exploited
-        58: 'mdi-cog-off', // No Spare Parts
-        59: 'mdi-wrench-check', // Successful Repair
-        60: 'mdi-flask', // Research Completed
-        63: 'mdi-flask-empty-remove', // Inactive Lab
-        64: 'mdi-alert-decagram', // Mineral Shortage
-        65: 'mdi-fuel', // Low Fuel
-        66: 'mdi-diamond-outline', // Mineral Exhausted
-        71: 'mdi-gas-station-off-outline', // Fuel Exhausted
-        75: 'mdi-shield-sword', // Ground Combat Update
-        76: 'mdi-weather-windy', // Gas Removed
-        77: 'mdi-leaf', // Terraforming Report
-        80: 'mdi-barrel', // Harvester Capacity
-        81: 'mdi-snowflake-melt', // Ice Sheet Melted
-        82: 'mdi-emoticon-happy-outline', // Morale Increase
-        83: 'mdi-archive-arrow-down-outline', // Pickup Failed
-        87: 'mdi-bridge', // Jump Gate Underway
-        88: 'mdi-flask-plus', // Research Started
-        90: 'mdi-account-arrow-up', // Commander Promoted
-        91: 'mdi-ray-start-end', // Conditional Order
-        92: 'mdi-timer-off', // Life Pod Expired
-        93: 'mdi-magnify-scan', // Search and Rescue
-        97: 'mdi-chip', // System Damaged
-        98: 'mdi-account-plus', // New Naval Officer
-        99: 'mdi-heart-pulse', // Commander Health
-        100: 'mdi-mine', // Mine Restored
-        101: 'mdi-factory', // Factory Restored
-        106: 'mdi-account-search', // Intelligence Update
-        107: 'mdi-email', // Fleet Message
-        108: 'mdi-robot-dead', // Wreck Salvaged
-        111: 'mdi-cog-outline', // Components Scrapped
-        115: 'mdi-home-city', // Pop Status Change
-        116: 'mdi-vector-polyline-remove', // Insufficient JGC
-        117: 'mdi-dots-horizontal', // Message Continued
-        119: 'mdi-timer-outline', // Fire Delay
-        122: 'mdi-cog-stop', // Overhaul Complete
-        125: 'mdi-crane', // Shipyard Modified
-        127: 'mdi-download-network', // Tech Downloaded
-        128: 'mdi-magnify-scan', // Tech Data Scanned
-        129: 'mdi-account-tie', // Command Assignment
-        133: 'mdi-office-building', // Civilian Construction
-        135: 'mdi-gas-station-off', // Fuel Shortage
-        138: 'mdi-vector-link', // Jump Point Detected
-        139: 'mdi-domain', // Civilian Activity
-        140: 'mdi-block-helper', // Illegal Order
-        141: 'mdi-diamond-stone', // New Mineral Deposit
-        142: 'mdi-trending-up', // Accessibility Increase
-        143: 'mdi-radar', // Geo Survey Complete
-        145: 'mdi-tools', // No Freighter Overhaul
-        146: 'mdi-wrench-cog', // Maintenance Problem
-        147: 'mdi-alien', // New Alien Race
-        148: 'mdi-emoticon-angry-outline', // Unrest Increasing
-        149: 'mdi-emoticon-happy-outline', // Unrest Decreasing
-        155: 'mdi-emoticon-happy-outline', // Morale Increase
-        157: 'mdi-incognito', // Successful Espionage
-        169: 'mdi-tune', // Increment Adjustment
-        173: 'mdi-hand-coin', // Reparations
-        174: 'mdi-sack', // Planet Looted
-        177: 'mdi-alert-octagram', // Overkill
-        178: 'mdi-handshake', // Ship Surrender
-        179: 'mdi-earth', // Breathable Atmosphere
-        180: 'mdi-handshake-outline', // Diplomacy
-        181: 'mdi-target-account', // New Hostile Contact
-        182: 'mdi-account-question', // New Neutral Contact
-        183: 'mdi-account', // New Friendly Contact
-        184: 'mdi-account-multiple', // New Allied Contact
-        186: 'mdi-ferry', // Wreck Contact
-        187: 'mdi-package-variant-closed', // Mineral Packet Contact
-        191: 'mdi-ferry', // Civilian Contact
-        195: 'mdi-earth-plus', // New System Discovered
-        200: 'mdi-flare', // Missile Self-destruct
-        201: 'mdi-timer-minus', // Overhaul Clock Reduced
-        203: 'mdi-thermometer-off', // Thermal Contact Lost
-        204: 'mdi-access-point-off', // GPD Contact Lost
-        206: 'mdi-target-account', // Hostile Contact Update
-        207: 'mdi-account-question', // Neutral Contact Update
-        208: 'mdi-account', // Friendly Contact Update
-        209: 'mdi-account-multiple', // Allied Contact Update
-        210: 'mdi-ferry', // Civilian Contact Update
-        211: 'mdi-mine', // Civilian Mining Colony
-        212: 'mdi-ferry', // New Shipping Line
-        215: 'mdi-star-circle', // Outstanding New Officer
-        216: 'mdi-star', // Exceptional New Officer
-        217: 'mdi-star-outline', // Promising New Officer
-        218: 'mdi-file-chart', // Geological Survey Data
-        219: 'mdi-arm-flex', // Boarding Attempt
-        220: 'mdi-sword-cross', // Boarding Combat
-        221: 'mdi-account-remove', // Crew Losses
-        224: 'mdi-cog', // Wreck Components
-        227: 'mdi-car-arrow-right', // Ramming Attempt
-        228: 'mdi-cash-remove', // Empire in Debt
-        229: 'mdi-flask-minus', // Overallocation of Labs
-        232: 'mdi-radar', // New Alien Class
-        233: 'mdi-rocket', // New Alien Ship
-        235: 'mdi-account-star', // Crew Grade Increase
-        237: 'mdi-shield-off', // Shield Deactivation
-        238: 'mdi-file-document', // Tech Data Learned
-        245: 'mdi-magnet', // Tractor(s) Released
-        252: 'mdi-emoticon-sad-outline', // Crew Morale Falling
-        253: 'mdi-beach', // Shore Leave Complete
-        254: 'mdi-air-humidifier-off', // Life Support Failure
-        255: 'mdi-gas-station-off', // Probe Out of Fuel
-        256: 'mdi-account-tie', // New Administrator
-        257: 'mdi-account', // New Scientist
-        258: 'mdi-handcuffs', // POWs Rescued
-        260: 'mdi-alpha-a-box', // Ancient Construct
-        265: 'mdi-clock-outline', // Time Check
-        266: 'mdi-truck-fast-outline', // Invalid Unload System
-        276: 'mdi-progress-close', // Conversion Halted
-        277: 'mdi-lifebuoy', // Lifepods Launched
-        278: 'mdi-run-fast', // Crew Escape
-        279: 'mdi-account-group-outline', // Insufficient Population
-        280: 'mdi-star-four-points', // Commander Experience
-        281: 'mdi-trash-can', // Replacement Unit Disbanded
-        282: 'mdi-restore-alert', // Recovery Failure
-        283: 'mdi-account-group', // Ship Overcrowded
-        284: 'mdi-terrain', // Change to Dominant Terrain
-        285: 'mdi-crosshairs', // New Combat Contact
-        286: 'mdi-account-cog', // Admin Command Update
-        287: 'mdi-book-off', // Training Task Abandoned
-        288: 'mdi-home-search', // Ground Survey Potential
-        289: 'mdi-account-tie', // Senior Officer Required
-        290: 'mdi-school', // Maximum Fleet Training
-        291: 'mdi-account-plus', // New Ground Force Officer
-        292: 'mdi-account-cancel', // Retirement
-        293: 'mdi-earth', // New Alien Population
-        294: 'mdi-beaker-alert', // Acid Burn
-        295: 'mdi-ship-wheel', // Intact Ship Salvaged
-        296: 'mdi-medal', // Medal Awarded
-        297: 'mdi-sword-cross', // Boarding Underway
-        298: 'mdi-account-group', // New Alien Ground Unit
-        299: 'mdi-lightbulb-on', // Breakthrough Achieved
-        300: 'mdi-crosshairs', // Ground Attack Summary
-        301: 'mdi-file-document-multiple', // Element Loss Summary
-        302: 'mdi-file-document-multiple', // Attack vs GUC Summary
-        303: 'mdi-shield-home', // Ground Defence Summary
-        304: 'mdi-file-document', // Element vs GUC Report
-        305: 'mdi-file-document', // Ship vs GUC Report
-        306: 'mdi-file-document-multiple', // GUC vs GUC Summary
-        307: 'mdi-file-document-multiple', // Formation Attack Summary
-        308: 'mdi-file-document-multiple', // Formation Loss Summary
-        309: 'mdi-file-document-multiple', // Orbital vs GUC Summary
-        310: 'mdi-swap-horizontal', // Orbital Support Reassigned
-        311: 'mdi-swap-horizontal', // Ground Support Reassigned
-        312: 'mdi-domain', // Installations Salvaged
-        313: 'mdi-target-variant', // Target Out of Range
-        314: 'mdi-eye', // Ground Combat Intelligence
-        315: 'mdi-translate', // Alien Communication
-        316: 'mdi-snowflake', // Ice Sheet Frozen
-        317: 'mdi-progress-close', // Shipyard Task Abandoned
-        318: 'mdi-book-off', // Training not Possible
-        319: 'mdi-airplane', // Fighter Construction
-        320: 'mdi-factory', // Production Started
-        321: 'mdi-timer-alert', // Deployment Time Exceeded
-        322: 'mdi-account-off', // Commander Unassigned
-        323: 'mdi-school', // Formation Training Task
-        324: 'mdi-nuke', // Planet Destroyed
-        325: 'mdi-account-reactivate', // Commander Restored
-        326: 'mdi-bomb-off', // Incorrect Ordnance
-        327: 'mdi-swap-vertical', // Fleet Transfer
-        328: 'mdi-domain-off', // Installation Scrapped
-        329: 'mdi-shield-off', // Ground Units Scrapped
-        330: 'mdi-shield-sun-outline', // Orbital Support Summary
-        331: 'mdi-shield-sun', // Energy Point Defence
-        332: 'mdi-shield-home-outline', // STO Point Defence
-        333: 'mdi-shield-airplane-outline', // AMM Point Defence
-        334: 'mdi-ship-wheel', // Ship Combat - Energy
-        335: 'mdi-rocket', // Ship Combat - Missile
-        336: 'mdi-shield-home', // STO Combat
-        337: 'mdi-bullseye', // Missile vs Ship
-        338: 'mdi-crosshairs', // Attacked by STO
-        339: 'mdi-flash', // Attacked By Energy Weapons
-        340: 'mdi-rocket', // Attacked By Missiles
-        341: 'mdi-shield', // Attacked By AA Fire
-        342: 'mdi-sword-cross', // Boarding Damage
-        343: 'mdi-beaker-alert', // Acid Damage
-        344: 'mdi-home-alert', // Collaterall Damage
-        345: 'mdi-file-document-alert', // Damage Summary
-        346: 'mdi-shield-airplane', // Fighter Point Defence
-        347: 'mdi-airplane', // Fighter Combat - Energy
-        348: 'mdi-airplane', // Fighter Combat - Missile
-        349: 'mdi-shield-check', // Fleet PD Summary
-        350: 'mdi-ferry', // Civilian Ship Scrapped
-        351: 'mdi-hammer-wrench', // Damage Control
-        352: 'mdi-bomb', // Bombardment Summary
-        353: 'mdi-timer-sand-paused', // Transit Delay
-        354: 'mdi-shield-home', // Population PD Summary
-        355: 'mdi-dots-horizontal', // (unused)
-        356: 'mdi-ferry', // New Wreck Detected
-        357: 'mdi-robot-dead', // Alien Salvage
-        358: 'mdi-test-tube', // Test Data
-        359: 'mdi-archive-arrow-down', // Ground Unit Unloaded
-        360: 'mdi-warehouse', // Stockpile Warning
-        361: 'mdi-cog-off', // Maintenance Failure
-        362: 'mdi-account-question', // Neutral Contact Update - AC
-        363: 'mdi-account', // Friendly Contact Update - AC
-        364: 'mdi-account-multiple', // Allied Contact Update - AC
-        365: 'mdi-car-arrow-right', // Successful Ramming Attack
-        366: 'mdi-car-arrow-left', // Ship Rammed
-        367: 'mdi-account-search', // Interrogation Update
-      },
+      eventIcons: EVENT_ICONS,
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'racePrefix']),
+    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'racePrefix', 'campaignId']),
 
     contextKey() {
       return this.racePrefix
@@ -399,6 +197,130 @@ export default {
 
     ready() {
       return !!this.database && !!this.contextKey && this.inputsLoaded
+    },
+
+    // The branch of the campaign the open save belongs to, or null while it is not settled.
+    branchId() {
+      const settled = this.$store.getters['history/campaign']
+
+      return settled ? settled.branchId : null
+    },
+
+    // The save's own rows and the log's window, which the read attaches to them.
+    logWindow() {
+      return this.logEvents.logWindow
+    },
+
+    // The rows the page lists: the save's, or the archive's when the player chose it and the archive holds the race.
+    archiveRecord() {
+      return this.archive && this.archive.status === 'ok' ? this.archive.record : null
+    },
+
+    archiveListed() {
+      return this.listSource === 'archive' && !!this.archiveRecord
+    },
+
+    listPending() {
+      return this.archiveListed && !this.archiveNames
+    },
+
+    listEvents() {
+      if (!this.archiveListed) {
+        return this.logEvents
+      }
+
+      return this.archiveNames ? archiveEvents(this.archiveRecord, this.archiveNames, this.StartYear) : []
+    },
+
+    // The previous visit to this branch, as game time; null on a first visit.
+    lastSeen() {
+      return this.look.t
+    },
+
+    firstVisit() {
+      return this.look.settled && this.look.t === null
+    },
+
+    // What the visit depends on: it is settled and written when the save, the campaign, the race, the branch or the newest increment of the save changes.
+    visitState() {
+      const logWindow = this.logWindow
+
+      if (!this.ready || !this.branchId || logWindow === undefined) {
+        return null
+      }
+
+      return `${this.contextKey}|${this.branchId}|${newestEnd(logWindow && logWindow.ledger)}`
+    },
+
+    keywordMatch() {
+      return keywordTest(this.keywords)
+    },
+
+    // The Options' archive switch is for a player race of a settled campaign.
+    canArchive() {
+      return !!this.campaignId && !!this.branchId && !!this.RaceID && !this.$store.state.RaceNPR
+    },
+
+    eventCap() {
+      return eventCapOfSettings(this.config)
+    },
+
+    capSize() {
+      return bytesText(eventEstimate(this.eventCap))
+    },
+
+    // What changes the archive the page reads: the choice, the branch, the race, and the recorder having written (its pass is asked for at the switch).
+    archiveKey() {
+      return this.canArchive && this.archiveChoice ? `${this.campaignId}|${this.branchId}|${this.RaceID}|${this.$store.state.history.revision}` : null
+    },
+
+    pinsKey() {
+      return this.racePrefix ? `${this.racePrefix}.logPins` : null
+    },
+
+    canPin() {
+      return !!this.branchId && !!this.pinStore.store
+    },
+
+    pinUnavailable() {
+      return this.pinsKey && !this.pinStore.store && this.pinStore.key === this.pinsKey ? 'what is stored for this race is not a pin store this version reads.' : ''
+    },
+
+    branchPins() {
+      return this.pinStore.store && this.branchId ? pinsOf(this.pinStore.store, this.branchId) : []
+    },
+
+    pinKeys() {
+      return new Set(this.branchPins.map(pinKey))
+    },
+
+    // The branch's pins with what the open save says of each: its rows with the pinned increments are counted once, and each pin is judged by its content, never by a row's place.
+    pinEntries() {
+      const pins = playerPins(this.branchPins)
+
+      if (!pins.length) {
+        return []
+      }
+
+      const increments = new Set(pins.map((pin) => pin.increment[0]))
+      const rows = this.logEvents.filter((event) => increments.has(event.IncrementID))
+      const counts = rowCounts(rows)
+      const found = new Map()
+
+      rows.forEach((row) => {
+        const key = rowFingerprint(row)
+
+        if (!found.has(key)) {
+          found.set(key, row)
+        }
+      })
+
+      return pins.map((pin) => {
+        const state = pinState(pin, counts, this.logWindow || null)
+        const [system, colony] = [pin.names.system || (pin.fields[3] > 0 ? `System ${pin.fields[3]}` : null), pin.names.colony || (pin.fields[4] > 0 ? `Colony ${pin.fields[4]}` : null)]
+
+        return { pin, state, stateText: PIN_STATES[state], row: found.get(pinKey(pin)) || null, date: gameDateText(this.StartYear, pin.fields[0]), type: pin.names.type || `Event type ${pin.fields[1]}`, message: pin.fields[2] || '', places: [system, colony].filter(Boolean).join(' · ') }
+      })
     },
 
     appearance() {
@@ -416,7 +338,7 @@ export default {
     placeOptions() {
       const places = new Map()
 
-      this.logEvents.forEach((event) => {
+      this.listEvents.forEach((event) => {
         if (event.KnownSystemID) {
           places.set(`system-${event.KnownSystemID}`, { text: `System: ${event.SystemName}`, name: event.SystemName })
         }
@@ -444,17 +366,21 @@ export default {
     baseEvents() {
       const search = (this.search || '').trim().toLowerCase()
 
-      return this.logEvents.filter((event) => (!search || event.searchText.includes(search)) && (!this.place || this.place === `system-${event.KnownSystemID}` || this.place === `colony-${event.ColonyID}`) && (!this.hideNonCustomized || event.Customized))
+      return this.listEvents.filter((event) => (!search || event.searchText.includes(search)) && (!this.keywordMatch || this.keywordMatch(event.searchText)) && (!this.place || this.place === `system-${event.KnownSystemID}` || this.place === `colony-${event.ColonyID}`) && (!this.hideNonCustomized || event.Customized))
     },
 
     typeOptions() {
       const types = new Map()
       const counts = new Map()
 
-      this.logEvents.forEach((event) => types.set(event.EventType, event.TypeName))
+      this.listEvents.forEach((event) => types.set(event.EventType, event.TypeName))
       this.baseEvents.filter(this.inDateRange).forEach((event) => counts.set(event.EventType, (counts.get(event.EventType) || 0) + 1))
 
       return [...types].map(([value, name]) => ({ value, text: `${name} (${this.count(counts.get(value) || 0)})` })).sort((a, b) => a.text.localeCompare(b.text))
+    },
+
+    typeGroups() {
+      return groupTypes(this.typeOptions)
     },
 
     selectedTypes() {
@@ -476,10 +402,6 @@ export default {
       return this.filteredEvents.filter(this.isNew).length
     },
 
-    latestIncrement() {
-      return this.logEvents.reduce((latest, event) => Math.max(latest, event.IncrementID), 0)
-    },
-
     tiles() {
       const types = new Map()
       const months = new Map()
@@ -491,25 +413,25 @@ export default {
       const busiest = (counts) => [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]
       const type = busiest(types)
       const month = busiest(months)
-      const typeName = type ? this.logEvents.find((event) => event.EventType === type[0]).TypeName : '—'
+      const typeName = type ? this.listEvents.find((event) => event.EventType === type[0]).TypeName : '—'
 
       return [
-        { label: 'Events in range', value: this.count(this.filteredEvents.length), note: `of ${this.count(this.logEvents.length)} in this race's log` },
+        { label: 'Events in range', value: this.count(this.filteredEvents.length), note: `of ${this.count(this.listEvents.length)} in this ${this.archiveListed ? 'archive' : "race's log"}` },
         { label: 'Busiest type', value: typeName, note: type ? `${this.count(type[1])} events in this view` : 'No events in this view' },
         { label: 'Busiest month', value: month ? month[0] : '—', note: month ? `${this.count(month[1])} events in this view` : 'No events in this view' },
-        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after the previous visit' },
+        { label: 'New since last look', value: this.lastSeen === null ? '—' : this.count(this.newCount), note: this.lastSeen === null ? 'This visit starts the record' : 'Events in this view after the previous visit to this branch' },
       ]
     },
 
     timeline() {
-      if (!this.logEvents.length) {
+      if (!this.listEvents.length) {
         return []
       }
 
       const counts = new Map()
       this.timelineEvents.forEach((event) => counts.set(event.Month, (counts.get(event.Month) || 0) + 1))
-      let at = gameTime(this.StartYear, this.logEvents[this.logEvents.length - 1].Time).startOf('month')
-      const end = this.logEvents[0].Month
+      let at = gameTime(this.StartYear, this.listEvents[this.listEvents.length - 1].Time).startOf('month')
+      const end = this.listEvents[0].Month
       const months = []
 
       while (at.format('YYYY-MM') <= end) {
@@ -625,18 +547,36 @@ export default {
         this.settledContext = prefix
         this.expandedGroups = []
         this.detail = null
-        this.lastSeen = this.config.get(`${prefix}.logLastSeen`, null)
+        this.pinMessage = ''
+        this.archiveMessage = ''
+        this.listSource = 'save'
+        this.look = NO_LOOK
+        this.archiveChoice = this.config.get(`${prefix}.logArchive`) === true
       },
     },
-    ready(value) {
-      if (value) {
-        this.markVisit()
-      }
+    visitState: {
+      immediate: true,
+      handler(state) {
+        if (state) {
+          this.visit()
+        }
+      },
     },
-    latestIncrement() {
-      if (this.ready) {
-        this.markVisit()
-      }
+    // The pins are read for the race when it is picked, and seeded with the parent branch's once the branch is known.
+    pinsKey: {
+      immediate: true,
+      handler() {
+        this.loadPins()
+      },
+    },
+    branchId() {
+      this.seedPins()
+    },
+    archiveKey: {
+      immediate: true,
+      handler() {
+        this.loadArchive()
+      },
     },
     filteredEvents() {
       this.expandedGroups = []
@@ -662,12 +602,34 @@ export default {
 
     resetFilters() {
       this.search = ''
+      this.keywords = []
       this.place = null
       this.activeTypes = null
       this.dateFrom = ''
       this.dateTo = ''
       this.collapseRepeats = true
       this.hideNonCustomized = false
+    },
+
+    setKeywords(keywords) {
+      this.keywords = cleanKeywords(keywords)
+    },
+
+    applyPreset(preset) {
+      this.keywords = [...preset.keywords]
+      this.activeTypes = presetTypes(preset, this.typeOptions.map((type) => type.value))
+    },
+
+    savePreset(name) {
+      this.presets = withPreset(this.presets, { name, keywords: this.keywords, types: this.activeTypes })
+    },
+
+    renamePreset({ id, name }) {
+      this.presets = withRenamedPreset(this.presets, id, name)
+    },
+
+    removePreset(id) {
+      this.presets = withoutPreset(this.presets, id)
     },
 
     setTypes(types) {
@@ -690,16 +652,213 @@ export default {
     },
 
     isNew(event) {
-      return this.lastSeen !== null && event.IncrementID > this.lastSeen
+      return isNewEvent(event, this.lastSeen)
     },
 
+    // Settles what the previous visit to this branch was (once for the campaign, race and branch; it stays fixed while the page is open) and then records this save's newest increment for the next visit.
+    visit() {
+      const key = `${this.contextKey}|${this.branchId}`
+
+      if (this.look.key !== key) {
+        const stored = this.config.get(`${this.contextKey}.logLastSeen`, null)
+        const logWindow = this.logWindow
+        const { t } = readLook(stored, this.branchId, logWindow ? logWindow.ledger : null, this.lineage())
+
+        this.look = Object.freeze({ key, t, settled: true })
+      }
+
+      this.markVisit()
+    },
+
+    // The stored value is this save's newest increment, not the highest ever seen, so an earlier save of the same branch counts from where it stands. An old number is replaced by the record.
     markVisit() {
-      if (!this.contextKey) {
+      const t = newestEnd(this.logWindow && this.logWindow.ledger)
+      const key = `${this.contextKey}.logLastSeen`
+      const stored = this.config.get(key, null)
+
+      if (t === null || (stored && typeof stored === 'object' && stored[this.branchId] && stored[this.branchId].t === t)) {
         return
       }
 
-      // Keep the previous visit fixed on screen; only the next visit reads the new watermark. It is this save's latest event, not the highest ever seen, so an earlier save of the same game starts counting from where it stands.
-      this.config.set(`${this.contextKey}.logLastSeen`, this.latestIncrement)
+      this.config.set(key, withLook(stored, this.branchId, t))
+    },
+
+    // The registry's account of the branches of the open campaign, or null when it cannot be read.
+    lineage() {
+      try {
+        return branchLineage(readRegistry(campaignStorage(this.config)).campaigns[this.campaignId])
+      } catch (error) {
+        return null
+      }
+    },
+
+    // ---- Pins ----
+
+    loadPins() {
+      const key = this.pinsKey
+
+      this.pinStore = Object.freeze({ key, store: key ? readPins(this.config.get(key)) : null })
+      this.seedPins()
+    },
+
+    // A branch is given its parent's pins of the events that had happened by the fork, once. A race with no pin at all is seeded in memory and written with its first pin.
+    seedPins() {
+      const { key, store } = this.pinStore
+      const branch = this.branchId
+
+      if (!key || !store || !branch || store.seeded[branch]) {
+        return
+      }
+
+      const lineage = this.lineage()
+      const seeded = lineage ? seededPins(store, branch, lineage) : store
+
+      if (seeded === store) {
+        return
+      }
+
+      if (store.pins.length) {
+        this.commitPins((current) => current)
+      } else {
+        this.pinStore = Object.freeze({ key, store: seeded })
+      }
+    },
+
+    // The change made in one read-change-write of what is stored: it is read again here, seeded for the branch, and refused when it cannot be read, so an unreadable store is never overwritten. Returns the reason it was not made, or null.
+    commitPins(change) {
+      const key = this.pinsKey
+
+      if (!key || !this.branchId) {
+        return 'The campaign of the open save is not settled yet.'
+      }
+
+      const stored = readPins(this.config.get(key))
+
+      if (!stored) {
+        return 'The pins could not be read, so nothing was changed.'
+      }
+
+      const lineage = this.lineage()
+      let next
+
+      try {
+        next = change(lineage ? seededPins(stored, this.branchId, lineage) : stored)
+      } catch (error) {
+        return error.message
+      }
+
+      if (next !== stored) {
+        try {
+          this.config.set(key, next)
+        } catch (error) {
+          return `The pins could not be written: ${error.message}`
+        }
+      }
+
+      this.pinStore = Object.freeze({ key, store: next })
+
+      return null
+    },
+
+    isPinned(event) {
+      return this.pinKeys.size > 0 && this.pinKeys.has(rowFingerprint(event))
+    },
+
+    pinTitle(event) {
+      return this.canPin ? (this.isPinned(event) ? 'Unpin this event' : 'Pin this event') : 'Pins are unavailable'
+    },
+
+    // The identity of an event's increment: the archive's row carries it, a row of the save is looked up in the window.
+    incrementOf(event) {
+      if (event.archived) {
+        return event.increment
+      }
+
+      return (this.logWindow && this.logWindow.ledger.get(event.IncrementID)) || null
+    },
+
+    // How many identical events the event's group holds: the archive keeps the count, the save's rows of the increment are counted.
+    groupCount(event) {
+      if (event.archived) {
+        return event.copies
+      }
+
+      const key = rowFingerprint(event)
+
+      return this.logEvents.filter((row) => row.IncrementID === event.IncrementID && rowFingerprint(row) === key).length
+    },
+
+    togglePin(event) {
+      this.pinMessage = ''
+
+      if (!pinnableRow(event)) {
+        this.pinMessage = 'A game-master-only event cannot be pinned.'
+
+        return
+      }
+
+      const pin = this.pinStore.store && this.branchId ? pinOfRow(this.pinStore.store, this.branchId, event) : null
+      const branch = this.branchId
+      const increment = pin ? null : this.incrementOf(event)
+
+      if (!pin && !increment) {
+        this.pinMessage = 'The save does not name the increment of this event, so it cannot be pinned.'
+
+        return
+      }
+
+      // A dialog outlives a refresh of the save: the group it shows may be gone from the rows held now, and a pin on it would hold no event.
+      if (!pin && this.groupCount(event) < 1) {
+        this.pinMessage = 'The open save no longer holds this event; it cannot be pinned.'
+
+        return
+      }
+
+      const names = { type: event.TypeName, system: event.SystemName, colony: event.ColonyName }
+      const failure = this.commitPins((store) => (pin ? withoutPin(store, branch, pin.id) : withPin(store, branch, event, { increment, count: this.groupCount(event), names, at: Date.now(), id: newPresetId() })))
+
+      if (failure) {
+        this.pinMessage = failure
+      }
+    },
+
+    unpin(id) {
+      this.pinMessage = this.commitPins((store) => withoutPin(store, this.branchId, id)) || ''
+    },
+
+    changeNote({ id, note }) {
+      this.pinMessage = this.commitPins((store) => withNote(store, this.branchId, id, note)) || ''
+    },
+
+    // ---- Event archive ----
+
+    loadArchive() {
+      this.archive = this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null
+
+      if (!this.archiveRecord && this.listSource === 'archive') {
+        this.listSource = 'save'
+      }
+    },
+
+    // The choice is kept per race and campaign; switching on asks the recorder for a pass on the open save, so what it holds is captured at once. Switching off keeps what was recorded.
+    setArchive(on) {
+      this.archiveMessage = ''
+
+      try {
+        saveArchiveChoice(this.config, this.campaignId, this.RaceID, !!on)
+      } catch (error) {
+        this.archiveMessage = `The choice could not be saved: ${error.message}`
+
+        return
+      }
+
+      this.archiveChoice = !!on
+
+      if (on) {
+        this.$store.commit('history/capture')
+      } else {
+        this.listSource = 'save'
+      }
     },
 
     openRow(row) {
@@ -733,10 +892,10 @@ export default {
         }
 
         const startYear = this.StartYear
-        const [rows] = await this.database.query(`select L.rowid as id, L.IncrementID, L.Time, L.EventType, L.MessageText, coalesce(T.Description, 'Event type ' || L.EventType) as TypeName, C.EventTypeID is not null as Customized, C.AlertColour, C.TextColour, S.SystemID as KnownSystemID, S.Name as SystemName, P.PopulationID as ColonyID, P.PopName as ColonyName, B.SystemBodyID, B.Name as SystemBodyName, B.BodyClass, B.PlanetNumber, B.OrbitNumber, Star.Component from FCT_GameLog as L left join DIM_EventType as T on T.EventTypeID = L.EventType left join FCT_EventColour as C on C.EventTypeID = L.EventType and C.GameID = L.GameID and C.RaceID = L.RaceID left join FCT_Population as P on P.PopulationID = L.PopulationID and P.GameID = L.GameID and P.RaceID = L.RaceID left join FCT_RaceSysSurvey as S on S.SystemID = case when L.SystemID > 0 then L.SystemID else P.SystemID end and S.GameID = L.GameID and S.RaceID = L.RaceID left join FCT_SystemBody as B on B.SystemBodyID = P.SystemBodyID and B.GameID = L.GameID left join FCT_Star as Star on Star.StarID = B.StarID and Star.GameID = L.GameID where L.GameID = ${this.GameID} and L.RaceID = ${this.RaceID} order by L.Time desc, L.IncrementID desc, L.rowid desc`)
+        const [rows] = await this.database.query(`select L.rowid as id, L.IncrementID, L.Time, L.EventType, L.MessageText, L.SystemID, L.PopulationID, L.Xcor, L.Ycor, L.IDType, L.SMOnly, coalesce(T.Description, 'Event type ' || L.EventType) as TypeName, C.EventTypeID is not null as Customized, C.AlertColour, C.TextColour, S.SystemID as KnownSystemID, S.Name as SystemName, P.PopulationID as ColonyID, P.PopName as ColonyName, B.SystemBodyID, B.Name as SystemBodyName, B.BodyClass, B.PlanetNumber, B.OrbitNumber, Star.Component from FCT_GameLog as L left join DIM_EventType as T on T.EventTypeID = L.EventType left join FCT_EventColour as C on C.EventTypeID = L.EventType and C.GameID = L.GameID and C.RaceID = L.RaceID left join FCT_Population as P on P.PopulationID = L.PopulationID and P.GameID = L.GameID and P.RaceID = L.RaceID left join FCT_RaceSysSurvey as S on S.SystemID = case when L.SystemID > 0 then L.SystemID else P.SystemID end and S.GameID = L.GameID and S.RaceID = L.RaceID left join FCT_SystemBody as B on B.SystemBodyID = P.SystemBodyID and B.GameID = L.GameID left join FCT_Star as Star on Star.StarID = B.StarID and Star.GameID = L.GameID where L.GameID = ${this.GameID} and L.RaceID = ${this.RaceID} and coalesce(L.SMOnly, 0) = 0 order by L.Time desc, L.IncrementID desc, L.rowid desc`)
         const dates = new Map()
 
-        return rows.map((event) => {
+        const events = rows.map((event) => {
           // Many events share an increment's timestamp. Format that game date once.
           if (!dates.has(event.Time)) {
             dates.set(event.Time, gameTime(startYear, event.Time).format('YYYY-MM-DD HH:mm:ss'))
@@ -745,8 +904,27 @@ export default {
 
           return { ...event, DateTime, Day: DateTime.slice(0, 10), Month: DateTime.slice(0, 7), searchText: `${event.MessageText || ''} ${event.TypeName} ${event.SystemName || ''} ${event.ColonyName || ''}`.toLowerCase() }
         })
+
+        // The log's window (the ledger of increments the log spans) goes with the rows, so pins are judged against the rows and the window of one read. A window that cannot be read leaves the pins unread, not the page.
+        const logWindow = await readLogWindow(this.database, this.GameID).catch(() => null)
+
+        // Not enumerable, so nothing walks the ledger's thousands of increments.
+        Object.defineProperty(events, 'logWindow', { value: logWindow })
+
+        return events
       }),
       default: [],
+    },
+    // What the archive's rows need named, read only while the list shows the archive.
+    archiveNames: {
+      async get() {
+        if (!this.archiveListed || !this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return readArchiveNames(this.database, this.GameID, this.RaceID, this.archiveRecord).catch(() => null)
+      },
+      default: null,
     },
   },
 }
@@ -767,6 +945,7 @@ export default {
   }
 
   .tool--search,
+  .tool--keywords,
   .tool--place {
     flex-basis: 240px;
   }
@@ -856,6 +1035,7 @@ export default {
   }
 
   .repeat-count,
+  .pinned-label,
   .new-label {
     white-space: nowrap;
     font-size: calc(12px * var(--ae-font-scale));

@@ -18,11 +18,14 @@ const os = require('os')
 const path = require('path')
 const nodeVm = require('vm')
 const crypto = require('crypto')
-const assert = require('assert').strict
+const { format } = require('util')
 const Vue = require('vue')
 const { compileTemplate } = require('vue/compiler-sfc')
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, replacing } = require('./lib/page-loader')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1535,6 +1538,49 @@ const pageSuite = async ({ history }, variant = {}) => {
     assert.equal(vm.retentionProfile, 'standard')
   })
 
+  check('page: a smaller cap on the event archive waits for confirmation even when the shown branch holds no archive, the confirmation says the cap applies to every campaign, race and branch at their next capture, and a larger cap is kept at once', async () => {
+    const config = new MemoryConfig()
+    const { vm, tree } = mount({ file: longFile, config })
+
+    assert.equal(vm.eventRecord.file, null, 'the shown branch holds no archive')
+    assert.equal(vm.eventCap, 50000)
+    find(tree(), 'data-event-cap', 25000).data.on.click()
+    await flush()
+
+    const text = textOf(find(tree(), 'data-event-cap-confirm'))
+
+    assert.equal(vm.eventCap, 50000, 'nothing changes until it is confirmed')
+    assert.equal(vm.eventCapPick, 25000)
+    assert.equal(config.has('historyEventCap'), false)
+    assert.match(text, /from 50'000 to 25'000 events\?/)
+    assert.match(text, /applies to every campaign, race and branch of this installation, and takes effect at the next capture of each/)
+    assert.match(text, /gone for good/)
+    assert.match(text, /The shown branch holds no archive/)
+    assert.doesNotMatch(text, /\b(I|you|your|we|our)\b/i)
+
+    find(tree(), 'data-event-cap-cancel').data.on.click()
+    await flush()
+
+    assert.equal(find(tree(), 'data-event-cap-confirm'), undefined, 'a cancel closes it')
+    assert.equal(vm.eventCap, 50000)
+    assert.equal(config.has('historyEventCap'), false)
+
+    find(tree(), 'data-event-cap', 25000).data.on.click()
+    await flush()
+    find(tree(), 'data-event-cap-apply').data.on.click()
+    await flush()
+
+    assert.equal(vm.eventCap, 25000)
+    assert.equal(config.get('historyEventCap'), 25000)
+
+    find(tree(), 'data-event-cap', 100000).data.on.click()
+    await flush()
+
+    assert.equal(find(tree(), 'data-event-cap-confirm'), undefined, 'a larger cap needs none')
+    assert.equal(vm.eventCap, 100000)
+    assert.equal(config.get('historyEventCap'), 100000)
+  })
+
   check('page: the profile reads as it is chosen: a series above the cap says it is thinned at the next save, and with the cap it is not', () => {
     const above = mount({ file: longFile, config: new MemoryConfig([['historyRetention', '"compact"']]) })
     const within = mount({ file: longFile })
@@ -1724,6 +1770,8 @@ const PAGE_MUTATIONS = [
   { name: 'the confirmation leaves out the samples an observation replaces', mutate: replacing('const replaced = held.next.replaced ? ', 'const replaced = false ? '), fails: ['page: the confirmation counts the sample an unchanged observation removes'] },
   { name: 'the confirmation gives the whole discard as the allowance', mutate: replacing('count(held.next.replaced, 0)} to what thinning', 'count(held.next.dropped, 0)} to what thinning'), fails: ['page: the confirmation counts the sample an unchanged observation removes', 'page: the confirmation words the allowance'] },
   { name: 'the allowance worded as the samples a save removes', mutate: replacing(' to what thinning alone would discard.', ' of the samples counted above can be those.'), fails: ['page: the confirmation counts the sample an unchanged observation removes', 'page: the confirmation words the allowance'] },
+  { name: 'a smaller event cap waits only when the shown branch would lose events', mutate: replacing('} else if (cap < this.eventCap) {\n        this.eventCapPick = cap', '} else if (this.eventRecord.file && Object.values(this.eventRecord.file.races).some((record) => capRecord(record, cap).dropped)) {\n        this.eventCapPick = cap'), fails: ['page: a smaller cap on the event archive waits'] },
+  { name: 'the event cap confirmation leaves out that the cap applies to every campaign', mutate: replacing('The cap applies to every campaign, race and branch of this installation, and takes effect at the next capture of each.', 'The cap applies to this branch.'), fails: ['page: a smaller cap on the event archive waits'] },
 ]
 
 // A mutant's text is written with `#{` where the module has a template placeholder, so no quoted string here holds one.
@@ -1785,70 +1833,117 @@ const runChecks = async (list) => {
   return results
 }
 
-const main = async () => {
+const RESULT = 'RESULT '
+const MUTANTS = [...UTILITY_MUTATIONS.map((mutation) => ({ ...mutation, page: false })), ...PAGE_MUTATIONS.map((mutation) => ({ ...mutation, page: true }))]
+
+// What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs), or the arguments of `show`.
+const baselineEntries = async (entries) => {
   const real = await loadModules(utilitiesDirectory)
 
-  console.log('The utilities: thinning, status and figures')
+  entries.push({ log: 'The utilities: thinning, status and figures' })
 
   const utilityChecks = [...suite(real), ...recorderSuite(real), ...backupSuite(real)]
 
   for (const [name, result] of await runChecks(utilityChecks)) {
-    show(name, result)
+    entries.push({ show: [name, result] })
   }
 
-  console.log('\nThe Retention panel of the page (its script and template, over scripts/lib/page-loader.js)')
+  entries.push({ log: '\nThe Retention panel of the page (its script and template, over scripts/lib/page-loader.js)' })
 
   for (const [name, held] of await pageSuite(real)) {
-    show(name, await held())
+    entries.push({ show: [name, await held()] })
+  }
+}
+
+const utilityEntries = async (entries, { name, file, find, replace, fails }) => {
+  const began = Date.now()
+  const directory = mutatedCopy(file, find, replace)
+
+  try {
+    const mutant = await loadModules(directory)
+    const named = [...suite(mutant), ...recorderSuite(mutant), ...backupSuite(mutant)].filter(({ group, name: checkName }) => fails.some((start) => `${group}: ${checkName}`.startsWith(start)))
+    const absent = fails.filter((start) => !named.some(({ group, name: checkName }) => `${group}: ${checkName}`.startsWith(start)))
+    const results = await runChecks(named)
+    const missed = fails.filter((start) => !results.some(([checkName, result]) => checkName.startsWith(start) && result !== true))
+
+    entries.push({ show: [`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${((Date.now() - began) / 1000).toFixed(1)} s`] })
+  } catch (error) {
+    entries.push({ show: [`mutation caught: ${name}`, `does not load: ${error.message}`] })
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const pageEntries = async (entries, { name, mutate, change, fails }) => {
+  const began = Date.now()
+
+  try {
+    const real = await loadModules(utilitiesDirectory)
+    const warned = warnings.length
+    const statements = await pageSuite(real, { mutate, change })
+    const named = statements.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+    const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+    const failed = []
+
+    for (const [statement, held] of named) {
+      if ((await held()) !== true) {
+        failed.push(statement)
+      }
+    }
+
+    warnings.length = warned
+
+    const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+
+    entries.push({ show: [`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} fail, ${((Date.now() - began) / 1000).toFixed(1)} s`] })
+  } catch (error) {
+    entries.push({ show: [`page mutation caught: ${name}`, `does not load: ${error.message}`] })
+  }
+}
+
+// A child runs the baseline (`--baseline`) or some mutations in turn (`--mutants=<i>,<i>`) in a process of its own, so no chunk shares the modules, the declared views or the Vue warnings of another, and prints its entries as JSON on its last line: those of the baseline, or the list of the entries of each mutation.
+const childMain = async () => {
+  const given = process.argv.find((argument) => argument.startsWith('--mutants='))
+  const entries = []
+
+  if (given) {
+    for (const index of given.slice('--mutants='.length).split(',')) {
+      const own = []
+      const mutation = MUTANTS[Number(index)]
+
+      console.log = (...parts) => own.push({ log: format(...parts) })
+      await (mutation.page ? pageEntries : utilityEntries)(own, mutation)
+      entries.push(own)
+    }
+  } else {
+    console.log = (...parts) => entries.push({ log: format(...parts) })
+    await baselineEntries(entries)
   }
 
-  if (!process.argv.includes('--no-mutations')) {
+  process.stdout.write(`${RESULT}${JSON.stringify(entries)}\n`, () => process.exit(0))
+}
+
+const main = async () => {
+  if (process.argv.includes('--baseline') || process.argv.some((argument) => argument.startsWith('--mutants='))) {
+    return childMain()
+  }
+
+  const mutating = !process.argv.includes('--no-mutations')
+  const chunks = mutating ? chunksOf(MUTANTS.length) : []
+  const items = [['--baseline'], ...chunks.map((list) => [`--mutants=${list.join(',')}`])]
+  const outcomes = await inParallel(items, async (args) => lastJson(await runChild(__filename, args), RESULT))
+  const replay = (entries) => entries.forEach((entry) => (entry.log !== undefined ? console.log(entry.log) : show(...entry.show)))
+
+  if (outcomes[0] instanceof Error) {
+    throw outcomes[0]
+  }
+
+  replay(outcomes[0])
+
+  if (mutating) {
     console.log('\nMutations: each must fail the checks it names')
 
-    for (const { name, file, find, replace, fails } of UTILITY_MUTATIONS) {
-      const began = Date.now()
-      const directory = mutatedCopy(file, find, replace)
-
-      try {
-        const mutant = await loadModules(directory)
-        const named = [...suite(mutant), ...recorderSuite(mutant), ...backupSuite(mutant)].filter(({ group, name: checkName }) => fails.some((start) => `${group}: ${checkName}`.startsWith(start)))
-        const absent = fails.filter((start) => !named.some(({ group, name: checkName }) => `${group}: ${checkName}`.startsWith(start)))
-        const results = await runChecks(named)
-        const missed = fails.filter((start) => !results.some(([checkName, result]) => checkName.startsWith(start) && result !== true))
-
-        show(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${((Date.now() - began) / 1000).toFixed(1)} s`)
-      } catch (error) {
-        show(`mutation caught: ${name}`, `does not load: ${error.message}`)
-      } finally {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
-    }
-
-    for (const { name, mutate, change, fails } of PAGE_MUTATIONS) {
-      const began = Date.now()
-
-      try {
-        const warned = warnings.length
-        const statements = await pageSuite(real, { mutate, change })
-        const named = statements.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
-        const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
-        const failed = []
-
-        for (const [statement, held] of named) {
-          if ((await held()) !== true) {
-            failed.push(statement)
-          }
-        }
-
-        warnings.length = warned
-
-        const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
-
-        show(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-      } catch (error) {
-        show(`page mutation caught: ${name}`, `does not load: ${error.message}`)
-      }
-    }
+    spread(chunks, outcomes.slice(1)).forEach((outcome, index) => (outcome instanceof Error ? show(`${MUTANTS[index].page ? 'page mutation' : 'mutation'} caught: ${MUTANTS[index].name}`, `does not run: ${outcome.message}`) : replay(outcome)))
   }
 
   console.log(`\n${total - failures} of ${total} checks passed`)

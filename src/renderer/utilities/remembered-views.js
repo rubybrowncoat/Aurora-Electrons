@@ -1,15 +1,18 @@
 // What Settings resets: the views the pages remember, in the settings store. A campaign's empire keeps its values under `campaign.<campaign id>.race.<RaceID>` (see utilities/campaign.js); the `game` subtree is a history of the app before campaigns, kept as the original of the migration, and no reset reads or changes it.
 
-// What an empire's pages keep that isn't a view: the Warnings mutes and snoozes and what each check listed at the last visit, the Game Log's last event seen, the Galaxy Map's pinned systems and clusters, and the colonies the History page follows. A reset keeps them too.
-export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsSnoozed', 'warningsLastLook', 'logLastSeen', 'mapPinned', 'mapGroups', 'historyColonies']
+// What an empire's pages keep that isn't a view: the Warnings mutes and snoozes and what each check listed at the last visit, the Game Log's last event seen, its event archive choice and pinned events, the Galaxy Map's pinned systems and clusters, and the colonies the History page follows. A reset keeps them too.
+export const KEPT_EMPIRE_KEYS = ['warningsMuted', 'warningsSnoozed', 'warningsLastLook', 'logLastSeen', 'logArchive', 'logPins', 'mapPinned', 'mapGroups', 'historyColonies']
+
+// The app-wide settings that are a budget and not a view: the cap on the events the event archive keeps for a race. A reset that dropped it to the default could cut an archive at its next capture, which no later choice restores.
+export const KEPT_APP_KEYS = ['historyEventCap']
 
 // The top-level keys that are not app-wide views: the campaigns' and the pre-campaign records of empires.
 const EMPIRE_ROOTS = ['campaign', 'game']
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
-// The app-wide keys a reset clears: every top-level key but the empires' and the settings in `appSettings` (the Display settings).
-export const appViews = (store, appSettings) => Object.keys(store).filter((key) => !EMPIRE_ROOTS.includes(key) && !appSettings.includes(key))
+// The app-wide keys a reset clears: every top-level key but the empires' and the settings in `appSettings` (the Display settings) and the kept budgets.
+export const appViews = (store, appSettings) => Object.keys(store).filter((key) => !EMPIRE_ROOTS.includes(key) && !appSettings.includes(key) && !KEPT_APP_KEYS.includes(key))
 
 // The keys a reset clears for each empire of each campaign with any stored: [{ campaignId, RaceID, keys }], ids as stored (strings).
 export const empireViews = (store) => Object.entries(isObject(store.campaign) ? store.campaign : {}).flatMap(([campaignId, campaign]) => Object.entries(isObject(campaign) && isObject(campaign.race) ? campaign.race : {}).map(([RaceID, values]) => ({ campaignId, RaceID, keys: isObject(values) ? Object.keys(values).filter((key) => !KEPT_EMPIRE_KEYS.includes(key)) : [] }))).filter(({ keys }) => keys.length)

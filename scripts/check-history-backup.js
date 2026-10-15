@@ -21,8 +21,9 @@ const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
-const assert = require('assert').strict
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
+const { inParallel } = require('./lib/check-pool')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -38,10 +39,10 @@ const STUBS = {
 }
 
 const loadModules = async (base) => {
-  const names = ['history-backup', 'campaign', 'history', 'scenario-records', 'recording-owner', 'colony-series'].map((name) => `renderer/utilities/${name}`)
+  const names = ['history-backup', 'campaign', 'history', 'scenario-records', 'recording-owner', 'colony-series', 'event-archive'].map((name) => `renderer/utilities/${name}`)
   const loaded = await loadUtilities(names, { stubs: STUBS, directory: base })
 
-  return { backup: loaded[names[0]], campaign: loaded[names[1]], history: loaded[names[2]], records: loaded[names[3]], owner: loaded[names[4]], colony: loaded[names[5]] }
+  return { backup: loaded[names[0]], campaign: loaded[names[1]], history: loaded[names[2]], records: loaded[names[3]], owner: loaded[names[4]], colony: loaded[names[5]], events: loaded[names[6]] }
 }
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
@@ -118,7 +119,7 @@ const installation = ({ dir = null, first = 1 } = {}) => {
 const defineSuite = (m) => {
   const checks = []
   const check = (group, name, run) => checks.push({ group, name, run })
-  const { backup, campaign, records, history, colony } = m
+  const { backup, campaign, records, history, colony, events } = m
 
   const anchorRows = (key, count = 10) => Array.from({ length: count }, (_, index) => [100 + index, index + 1, Number((1 + key / 100 + index / 1000).toFixed(4)), 1, 1, 1, 1])
   const ledger = (n, salt = 0) => Array.from({ length: n }, (_, index) => ({ IncrementID: index + 1, GameTime: (index + 1) * 5 + salt }))
@@ -463,7 +464,7 @@ const defineSuite = (m) => {
   })
 
   check('rejection', 'a file of a future schema is refused whole, whichever of the envelope, the campaign records or the annotations is newer', async () => {
-    refused(edited((doc) => { doc.version = 3 }), /version 3, written by a newer version/)
+    refused(edited((doc) => { doc.version = 4 }), /version 4, written by a newer version/)
     refused(edited((doc) => { doc.schemas.registry = 2 }), /campaign records of the backup are of version 2/)
     refused(edited((doc) => { doc.schemas.annotations = 2 }), /annotations of the backup are of version 2/)
     refused(edited((doc) => { doc.campaigns[0].annotations[0].version = 2 }), /annotations are of version 2/)
@@ -589,7 +590,7 @@ const defineSuite = (m) => {
 
       const bytes = live.bytes()
       const memory = live.snapshot()
-      const attempts = [edited((doc) => { doc.version = 3 }), edited((doc) => { doc.campaigns[0].branches.b1.races[1].snapshots.reverse() }), '{', 'x'.repeat(backup.MAX_BYTES + 1)]
+      const attempts = [edited((doc) => { doc.version = 4 }), edited((doc) => { doc.campaigns[0].branches.b1.races[1].snapshots.reverse() }), '{', 'x'.repeat(backup.MAX_BYTES + 1)]
 
       attempts.forEach((body) => {
         const out = backup.parseBackup(body)
@@ -2027,7 +2028,7 @@ const defineSuite = (m) => {
     const doc = JSON.parse(textOf(envelope))
 
     doc.version = 1
-    doc.campaigns.forEach((item) => { delete item.colonyCoverage })
+    doc.campaigns.forEach((item) => { delete item.colonyCoverage; delete item.eventCoverage; delete item.events })
     doc.digest = campaign.hashValue(doc.campaigns)
 
     return parsed(doc)
@@ -2237,15 +2238,15 @@ const defineSuite = (m) => {
     assert.equal(backup.parseBackup(colonied(() => {})).errors, undefined)
   })
 
-  check('colonies', 'a backup is of version 2 and says it covers the colony files; a version 1 backup is read as before and never says so, and a version 2 backup without the statement is refused', async () => {
+  check('colonies', 'a backup says it covers the colony files; a version 1 backup is read as before and never says so, and a backup from version 2 on without the statement is refused', async () => {
     const { stored } = pair()
 
     stored.put('file:campaign-c1-b1-colonies', colonyFile({ 1: [100] }))
 
     const envelope = parsed(exportOf(stored))
 
-    assert.equal(backup.VERSION, 2)
-    assert.equal(envelope.version, 2)
+    assert.ok(backup.VERSION >= backup.COLONY_COVERAGE_VERSION)
+    assert.equal(envelope.version, backup.VERSION)
     assert.ok(envelope.campaigns.every((item) => item.colonyCoverage === true))
 
     const old = uncovered(envelope)
@@ -2395,6 +2396,606 @@ const defineSuite = (m) => {
     await restore(third.stored, parsed(copy.envelope))
 
     assert.deepEqual(colonyOf(third.stored, 'b1'), kept)
+  })
+
+  // ---- event archives ----
+
+  // One group of identical rows of an increment's events: the nine fields of an event and how many identical rows there were.
+  const eventGroup = (id, tag, count) => [id * 5, 3, `${tag} ${id}`, 12, null, null, null, 0, 0, count]
+
+  // An event record of a race: `ids` the increments that hold events of it, `tag` what the events say and `count` how many identical rows each increment holds.
+  const eventRecord = (ids, tag = 'event', count = 1) => ({ increments: ids.map((id) => [id, id * 5, 5, [eventGroup(id, tag, count)]]), spans: [[ids[0] * 5, ids[ids.length - 1] * 5 + 5]], revision: 1, captures: [], conflicts: [] })
+
+  // An event archive: `races` is { [RaceID]: [ids, tag?, count?] }.
+  const eventFile = (races) => ({ version: events.EVENT_ARCHIVE_VERSION, races: Object.fromEntries(Object.entries(races).map(([RaceID, spec]) => [RaceID, eventRecord(...spec)])) })
+
+  const eventOf = (inst, branchId = 'b1') => clone(inst.files.get(`file:campaign-c1-${branchId}-events`))
+
+  const eventIds = (file, RaceID = 1) => (file && file.races && file.races[RaceID] ? file.races[RaceID].increments.map((increment) => increment[0]) : [])
+
+  const eventWrites = (inst) => inst.writes.filter((name) => name.endsWith('-events'))
+
+  // A backup as one made before event archives were recorded in it (version 1 or 2): no `eventCoverage`, no `events`, the digest sealed again.
+  const beforeEvents = (envelope, version) => {
+    const doc = JSON.parse(textOf(envelope))
+
+    doc.version = version
+    doc.campaigns.forEach((item) => {
+      delete item.eventCoverage
+      delete item.events
+
+      if (version < backup.COLONY_COVERAGE_VERSION) {
+        delete item.colonyCoverage
+      }
+    })
+    doc.digest = campaign.hashValue(doc.campaigns)
+
+    return parsed(doc)
+  }
+
+  // The stored installation holds archives on both branches, and the other one archives that differ from them on race 1 and add race 3.
+  const withEvents = (stored, other) => {
+    stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]], 2: [[4]] }))
+    stored.put('file:campaign-c1-b2-events', eventFile({ 1: [[1]] }))
+    other.put('file:campaign-c1-b1-events', eventFile({ 1: [[2, 5], 'other'], 3: [[7]] }))
+    other.put('file:campaign-c1-b2-events', eventFile({ 1: [[9]] }))
+  }
+
+  check('events', 'the event archive of each branch goes into the backup beside its history and comes back exactly in an empty installation, each branch apart from the others; an installation without archives gives a backup with none', async () => {
+    const { stored, other } = pair()
+
+    stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]], 2: [[4]] }))
+    stored.put('file:campaign-c1-b2-events', eventFile({ 1: [[1]] }))
+
+    const bare = parsed(exportOf(other)).campaigns[0]
+
+    assert.equal(bare.events, undefined)
+    assert.equal(bare.eventCoverage, true, 'a backup says it records the event archives, so that none is a known state')
+    assert.deepEqual(Object.keys(bare).sort(), ['annotations', 'branches', 'colonyCoverage', 'entry', 'eventCoverage', 'id'], 'nothing but the statement is added to a campaign without archives')
+
+    const envelope = parsed(exportOf(stored))
+
+    assert.deepEqual(Object.keys(envelope.campaigns[0].events).sort(), ['b1', 'b2'])
+    assert.deepEqual(envelope.campaigns[0].events.b1, eventOf(stored, 'b1'))
+
+    const empty = installation({ first: 3 })
+    const row = plan(empty, envelope).preview.campaigns[0].files[0].events
+
+    assert.equal(row.status, 'new')
+    assert.equal(row.kind, 'events')
+    assert.equal(row.totals.added, 4)
+
+    await restore(empty, envelope)
+
+    assert.deepEqual(eventOf(empty, 'b1'), eventOf(stored, 'b1'))
+    assert.deepEqual(eventOf(empty, 'b2'), eventOf(stored, 'b2'))
+    assert.deepEqual(eventIds(eventOf(empty, 'b2')), [1], 'the second branch has its own archive, not the first\'s')
+    assert.equal(plan(empty, envelope).preview.nothingToDo, true)
+
+    // an archive cleared of every race is still an archive, and comes back as one
+    const cleared = pair()
+
+    cleared.stored.put('file:campaign-c1-b1-events', { version: events.EVENT_ARCHIVE_VERSION, races: {} })
+
+    const kept = parsed(exportOf(cleared.stored))
+    const again = installation({ first: 4 })
+
+    assert.deepEqual(kept.campaigns[0].events, { b1: { version: events.EVENT_ARCHIVE_VERSION, races: {} } })
+
+    await restore(again, kept)
+
+    assert.deepEqual(eventOf(again, 'b1'), { version: events.EVENT_ARCHIVE_VERSION, races: {} })
+  })
+
+  check('events', 'a backup made before event archives were recorded in it (version 1 or 2) restores over stored archives without touching them, under every policy, and its preview shows no event row', async () => {
+    for (const version of [1, 2]) {
+      const { stored, other } = pair()
+
+      withEvents(stored, other)
+
+      const before = [eventOf(stored, 'b1'), eventOf(stored, 'b2')]
+      const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'merge' } } } } }
+      const old = beforeEvents(exportOf(other), version)
+
+      assert.equal(old.version, version)
+      assert.ok(plan(stored, old, choices).preview.campaigns[0].files.every((row) => row.events === undefined))
+
+      const { result } = await restore(stored, old, choices)
+
+      assert.equal(result.applied, true)
+      assert.deepEqual(timesOf(stored.fileOf('c1', 'b1')), [200, 300, 400, 500], 'the history was restored')
+      assert.deepEqual([eventOf(stored, 'b1'), eventOf(stored, 'b2')], before)
+      assert.deepEqual(eventWrites(stored), [])
+    }
+  })
+
+  check('events', 'the event archives of a branch are merged, replaced or kept by the policy of its history file and the races chosen: a merge adds the races the stored archive lacks and keeps the others, a replace gives the branch exactly the archive of the backup', async () => {
+    const { stored, other } = pair()
+
+    withEvents(stored, other)
+
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'merge' }, b2: { policy: 'replace' } } } } }
+    const planned = plan(stored, parsed(exportOf(other)), choices)
+    const [b1, b2] = planned.preview.campaigns[0].files.map((file) => file.events)
+
+    assert.equal(b1.policy, 'merge')
+    assert.equal(b1.totals.stored, 4)
+    assert.equal(b1.totals.backup, 3)
+    assert.equal(b1.totals.added, 1, 'race 3 is not stored')
+    assert.equal(b1.totals.conflicts, 2, 'the backup\'s race 1 differs from the stored one, which stays')
+    assert.equal(b1.totals.removed, 0)
+    assert.equal(b1.status, 'changes')
+    assert.ok(b1.series.every((row) => row.label.startsWith('events of race')))
+    assert.equal(b2.policy, 'replace')
+    assert.equal(b2.totals.conflicts, 1, 'the stored record of race 1 is overwritten')
+    assert.equal(planned.preview.totals.events, 1)
+    assert.equal(planned.preview.totals.eventsRemoved, 1)
+    assert.ok(planned.preview.needsConfirmation.some((message) => /event archive/.test(message)), 'a replace asks to confirm the events it drops or overwrites')
+
+    const before = stored.snapshot()
+
+    await rejects(() => restore(stored, parsed(exportOf(other)), choices, { confirmed: false }), 'Rejected')
+
+    assert.equal(stored.snapshot(), before, 'nothing is written without the confirmation')
+
+    await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.deepEqual(Object.keys(eventOf(stored, 'b1').races).sort(), ['1', '2', '3'], 'a merge never removes a race')
+    assert.deepEqual(eventIds(eventOf(stored, 'b1')), [1, 2, 3], 'the stored record of race 1 stays')
+    assert.deepEqual(eventIds(eventOf(stored, 'b1'), 3), [7])
+    assert.deepEqual(eventOf(stored, 'b2'), eventOf(other, 'b2'), 'a replace takes the backup\'s archive')
+
+    // a replace of a backup that records its archives drops a stored race it lacks, and a keep leaves the file as it is
+    const second = pair()
+
+    withEvents(second.stored, second.other)
+
+    const replaced = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'keep' } } } } }
+    const b2Before = eventOf(second.stored, 'b2')
+    const shown = plan(second.stored, parsed(exportOf(second.other)), replaced)
+
+    assert.equal(shown.preview.campaigns[0].files[0].events.totals.removed, 1)
+    assert.equal(shown.preview.campaigns[0].files[1].events.status, 'kept')
+
+    await restore(second.stored, parsed(exportOf(second.other)), replaced)
+
+    assert.deepEqual(eventOf(second.stored, 'b1'), eventOf(second.other, 'b1'), 'exactly the archive of the backup')
+    assert.deepEqual(eventOf(second.stored, 'b2'), b2Before)
+    assert.deepEqual(eventWrites(second.stored), ['file:campaign-c1-b1-events'])
+
+    // the races chosen are the only ones a policy touches
+    const third = pair()
+
+    withEvents(third.stored, third.other)
+
+    const b1Before = eventOf(third.stored, 'b1')
+
+    await restore(third.stored, parsed(exportOf(third.other)), { campaigns: { c1: { files: { b1: { policy: 'merge', races: ['1'] }, b2: { policy: 'keep' } } } } })
+
+    assert.deepEqual(eventOf(third.stored, 'b1'), b1Before, 'race 1 was chosen, and a merge keeps its stored record; race 3 was not chosen')
+
+    await restore(third.stored, parsed(exportOf(third.other)), { campaigns: { c1: { files: { b1: { policy: 'replace', races: ['2'] }, b2: { policy: 'keep' } } } } })
+
+    assert.deepEqual(Object.keys(eventOf(third.stored, 'b1').races), ['1'], 'race 2 was chosen and the backup lacks it')
+    assert.deepEqual(eventOf(third.stored, 'b1').races[1], b1Before.races[1], 'race 1 was not chosen')
+  })
+
+  check('events', 'a branch whose timeline is not the stored one keeps its event archive, shown as kept with the reason, and a stored archive this version cannot read is shown as kept and stops the restore', async () => {
+    const stored = installation()
+    const other = installation({ first: 2 })
+
+    seed(stored, { entries: [entryOf({ id: 'c1', branches: { b1: tipOf(150) } })], files: { 'c1-b1': fileOf({ races: { 1: { times: [100] } } }), 'c1-b1-events': eventFile({ 1: [[1, 2]] }) } })
+    seed(other, { entries: [entryOf({ id: 'c1', branches: { b1: tipOf(150, 7) } })], files: { 'c1-b1': fileOf({ races: { 1: { times: [200] } } }), 'c1-b1-events': eventFile({ 1: [[5]] }) } })
+
+    const before = stored.snapshot()
+    const [row] = plan(stored, parsed(exportOf(other)), { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } }).preview.campaigns[0].files
+
+    assert.match(row.events.locked, /different timeline/)
+    assert.equal(row.events.policy, 'keep')
+    assert.equal(row.events.status, 'kept')
+
+    await restore(stored, parsed(exportOf(other)))
+
+    assert.equal(stored.snapshot(), before)
+
+    // a stored archive this version cannot read is shown as kept with the reason, and the restore is refused whole, because a safety copy that covers the archives cannot be made of it
+    const damaged = pair()
+
+    withEvents(damaged.stored, damaged.other)
+    damaged.stored.put('file:campaign-c1-b1-events', { version: events.EVENT_ARCHIVE_VERSION, races: 5 })
+
+    const [shown] = plan(damaged.stored, parsed(exportOf(damaged.other))).preview.campaigns[0].files
+
+    assert.match(shown.events.locked, /not one this version reads/)
+    assert.equal(shown.events.status, 'kept')
+
+    const damagedBefore = damaged.stored.snapshot()
+    const stopped = await rejects(() => restore(damaged.stored, parsed(exportOf(damaged.other))), 'Rejected')
+
+    assert.match(stopped.message, /event archive of branch b1 of campaign c1 cannot be read/)
+    assert.equal(damaged.stored.snapshot(), damagedBefore, 'nothing was written, and the damaged file is as it was')
+  })
+
+  check('events', 'a backup whose event archives are malformed is refused whatever its digest: a branch the campaign lacks, an empty file, another version, a key not read, a bad race id, increments out of order, a bad group, a bad span, a bad capture record, and a statement of coverage that is not true or not allowed', async () => {
+    const evented = (change) => {
+      const { stored } = pair()
+
+      stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2]], 2: [[4]] }))
+
+      const doc = JSON.parse(textOf(exportOf(stored)))
+
+      change(doc.campaigns[0].events, doc)
+
+      return sealed(JSON.stringify(doc))
+    }
+
+    refused(evented((archives) => { archives.b9 = archives.b1 }), /not a map of the branches/)
+    refused(evented((_archives, doc) => { doc.campaigns[0].events = {} }), /not a map of the branches/)
+    refused(evented((archives) => { archives.b1 = {} }), /is not an event archive/)
+    refused(evented((archives) => { archives.b1 = 'text' }), /is not an event archive/)
+    refused(evented((archives) => { archives.b1.version = 2 }), /not an event archive this version reads/)
+    refused(evented((archives) => { archives.b1.extra = 1 }), /not an event archive this version reads/)
+    refused(evented((archives) => { archives.b1.races.x = archives.b1.races[1] }), /race x is not a record/)
+    refused(evented((archives) => { archives.b1.races[1].increments.reverse() }), /increments out of order/)
+    refused(evented((archives) => { archives.b1.races[1].increments[0][3][0][9] = 0 }), /increment this version cannot read/)
+    refused(evented((archives) => { archives.b1.races[1].increments[0][3] = [] }), /increment this version cannot read/)
+    refused(evented((archives) => { archives.b1.races[1].spans = [[5, 1]] }), /span this version cannot read/)
+    refused(evented((archives) => { archives.b1.races[1].revision = -1 }), /capture record this version cannot read/)
+    refused(evented((archives) => { archives.b1.races[1].increments[0][3][0][9] = 1e9 }), /holds more events than any cap allows/)
+    refused(evented((archives) => { archives.b1.races[1].increments[0][3][0][9] = events.MAX_EVENTS }), /holds more events than any cap allows/)
+    assert.equal(backup.parseBackup(evented((archives) => { archives.b1.races[1].increments[0][3][0][9] = events.MAX_EVENTS - 1 })).errors, undefined, 'exactly the most a cap allows is read')
+    refused(evented((_archives, doc) => { doc.campaigns[0].eventCoverage = false }), /event coverage is not true/)
+    refused(evented((_archives, doc) => { delete doc.campaigns[0].eventCoverage }), /event coverage is not true/)
+    refused(evented((_archives, doc) => { doc.version = 2 }), /holds eventCoverage or events, which a version 2 backup does not state/)
+    refused(evented((_archives, doc) => { doc.version = 2; delete doc.campaigns[0].eventCoverage }), /holds eventCoverage or events, which a version 2 backup does not state/)
+    assert.equal(backup.parseBackup(evented(() => {})).errors, undefined)
+  })
+
+  check('events', 'a backup is of version 3 and says it covers the event archives; one of version 1 or 2 is read as before and never says so, and a version 3 backup without the statement is refused', async () => {
+    const { stored } = pair()
+
+    stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1]] }))
+
+    const envelope = parsed(exportOf(stored))
+
+    assert.equal(backup.VERSION, 3)
+    assert.equal(backup.EVENT_COVERAGE_VERSION, 3)
+    assert.equal(envelope.version, 3)
+    assert.ok(envelope.campaigns.every((item) => item.eventCoverage === true))
+
+    for (const version of [1, 2]) {
+      const old = beforeEvents(envelope, version)
+
+      assert.equal(old.version, version)
+      assert.equal(old.campaigns[0].eventCoverage, undefined)
+      assert.equal(old.campaigns[0].events, undefined)
+    }
+
+    const doc = JSON.parse(textOf(envelope))
+
+    delete doc.campaigns[0].eventCoverage
+    refused(sealed(JSON.stringify(doc)), /event coverage is not true/)
+  })
+
+  check('events', 'a stored event archive this version cannot read is never left out of a backup that says it covers the event archives: the export and the safety copy are refused naming the branch and nothing is written, while a store that is not there is covered as none', async () => {
+    const readable = eventFile({ 1: [[1, 2]] })
+    const broken = [{ ...readable, races: 5 }, { ...readable, version: 2 }, { ...readable, extra: 1 }, { races: readable.races }, { ...readable, races: { x: readable.races[1] } }, { ...readable, races: { 1: { ...readable.races[1], increments: 'none' } } }, 'text', 7]
+
+    for (const file of broken) {
+      const { stored, other } = pair()
+
+      stored.put('file:campaign-c1-b1-events', readable)
+      stored.put('file:campaign-c1-b2-events', file)
+
+      const refusal = await rejects(async () => exportOf(stored), 'Rejected')
+
+      assert.match(refusal.message, /event archive of branch b2 of campaign c1 cannot be read/, JSON.stringify(file))
+
+      const before = stored.snapshot()
+      const stopped = await rejects(() => restore(stored, parsed(exportOf(other))), 'Rejected')
+
+      assert.match(stopped.message, /backup of the current history could not be made.*event archive of branch b2 of campaign c1 cannot be read/, JSON.stringify(file))
+      assert.equal(stored.snapshot(), before, 'nothing was written')
+    }
+
+    const empty = pair().stored
+
+    empty.put('file:campaign-c1-b1-events', {})
+
+    const exported = parsed(exportOf(empty))
+
+    assert.equal(exported.campaigns[0].eventCoverage, true)
+    assert.equal(exported.campaigns[0].events, undefined, 'a store with nothing in it is no archive')
+  })
+
+  check('events', 'a preview of event archives writes nothing, counts them as files with the history\'s but not in the snapshot figures, and a restore writes exactly the files the preview counted', async () => {
+    const { stored, other } = pair()
+
+    withEvents(stored, other)
+
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'merge' }, b2: { policy: 'merge' } } } } }
+    const before = stored.snapshot()
+    const planned = plan(stored, parsed(exportOf(other)), choices)
+    const rows = planned.preview.campaigns[0].files
+
+    assert.equal(stored.snapshot(), before)
+    assert.equal(planned.preview.totals.files, 3, 'two history files and the archive of branch b1 change; a merge keeps the stored race of branch b2 as it is')
+    assert.equal(rows.reduce((sum, row) => sum + row.events.totals.conflicts, 0), 3, 'the events of race 1 of both branches differ')
+    assert.equal(planned.preview.totals.conflicts, rows.reduce((sum, row) => sum + row.totals.conflicts, 0), 'the conflicts of the history files, not the events')
+    assert.equal(planned.preview.totals.events, 1)
+
+    const { result } = await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.equal(result.files, 3)
+    assert.equal(eventWrites(stored).length, 1)
+  })
+
+  check('events', 'a restore of event archives is undone from its safety copy: the copy holds the archives as they were, and restoring it with Replace brings them back', async () => {
+    const { stored, other } = pair()
+
+    withEvents(stored, other)
+
+    const original = eventOf(stored, 'b1')
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } }
+
+    await restore(stored, parsed(exportOf(other)), choices)
+
+    assert.deepEqual(Object.keys(eventOf(stored, 'b1').races).sort(), ['1', '3'])
+
+    const [held] = backup.keptBackups(stored.io)
+
+    assert.deepEqual(held.envelope.campaigns[0].events.b1, original)
+
+    await restore(stored, parsed(held.envelope), choices)
+
+    assert.deepEqual(eventOf(stored, 'b1'), original)
+  })
+
+  check('events', 'a safety copy taken before a restore that adds event archives restores them away again with Replace: from a branch with no archive the file is emptied, and nothing is shown or written where neither side holds archives; a Merge of the copy changes nothing', async () => {
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' } } } } }
+
+    // no archive on either side: nothing to restore
+    const bare = pair()
+    const quiet = plan(bare.stored, parsed(exportOf(bare.other)), choices)
+
+    assert.ok(quiet.preview.campaigns[0].files.every((row) => row.events === undefined))
+    assert.equal(eventWrites(bare.stored).length, 0)
+
+    // a branch with no archive takes a restore that adds one
+    const { stored, other } = pair()
+
+    other.put('file:campaign-c1-b1-events', eventFile({ 1: [[2, 5]], 3: [[7]] }))
+    await restore(stored, parsed(exportOf(other)))
+
+    assert.deepEqual(Object.keys(eventOf(stored, 'b1').races).sort(), ['1', '3'])
+
+    const [held] = backup.keptBackups(stored.io)
+
+    assert.equal(held.envelope.campaigns[0].eventCoverage, true)
+    assert.equal(held.envelope.campaigns[0].events, undefined, 'the copy has no archive to hold')
+
+    const planned = plan(stored, parsed(held.envelope), choices)
+
+    assert.equal(planned.preview.nothingToDo, false)
+    assert.equal(planned.preview.campaigns[0].files[0].events.totals.removed, 3)
+
+    await restore(stored, parsed(held.envelope), choices)
+
+    assert.deepEqual(eventOf(stored, 'b1'), { version: events.EVENT_ARCHIVE_VERSION, races: {} }, 'the archive is as it was, none: a readable archive with no race, which is the branch\'s own file')
+    assert.equal(plan(stored, parsed(held.envelope), choices).preview.nothingToDo, true)
+
+    // a Merge of the copy adds, it never removes
+    const third = pair()
+
+    third.other.put('file:campaign-c1-b1-events', eventFile({ 1: [[2]] }))
+    await restore(third.stored, parsed(exportOf(third.other)))
+
+    const [copy] = backup.keptBackups(third.stored.io)
+    const kept = eventOf(third.stored, 'b1')
+
+    await restore(third.stored, parsed(copy.envelope))
+
+    assert.deepEqual(eventOf(third.stored, 'b1'), kept)
+  })
+
+  check('events', 'a covered Replace that restores the absence of an archive onto a fork that was never marked as seeded writes a readable empty archive, so the next capture does not take the parent\'s archive again, whether or not the branch is marked', async () => {
+    const choices = { campaigns: { c1: { files: { b2: { policy: 'replace' } } } } }
+    const emptyArchive = { version: events.EVENT_ARCHIVE_VERSION, races: {} }
+
+    for (const marked of [false, true]) {
+      const { stored, other } = pair()
+
+      if (marked) {
+        const registry = stored.registry()
+
+        registry.campaigns.c1.branches.b2.eventsSeeded = true
+        stored.put('registry', registry)
+      }
+
+      // the parent holds an archive up to the fork, and so does the fork itself; the backup's fork has none
+      stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]] }))
+      stored.put('file:campaign-c1-b2-events', eventFile({ 1: [[1]], 2: [[2]] }))
+
+      const fork = stored.registry().campaigns.c1
+
+      assert.equal(fork.branches.b2.parent, 'b1')
+      assert.equal(fork.branches.b2.eventsSeeded === true, marked)
+
+      await restore(stored, parsed(exportOf(other)), choices)
+
+      assert.deepEqual(eventOf(stored, 'b2'), emptyArchive, 'the fork keeps a file of its own, with no race')
+      assert.deepEqual(eventIds(eventOf(stored, 'b1')), [1, 2, 3], 'the parent is not touched')
+      assert.deepEqual(events.eventBase(stored.io, stored.registry().campaigns.c1, 'b2'), emptyArchive, 'the next capture starts from nothing, not from the parent')
+      assert.deepEqual(events.eventSeed(stored.io, stored.registry().campaigns.c1, 'b2', 320), {}, 'and a branch below it is not given the parent\'s archive through it')
+
+      // the safety copy still undoes the restore exactly
+      const [held] = backup.keptBackups(stored.io)
+
+      await restore(stored, parsed(held.envelope), choices)
+
+      assert.deepEqual(eventOf(stored, 'b2'), eventFile({ 1: [[1]], 2: [[2]] }))
+    }
+  })
+
+  check('events', 'a race record that carries failures (the captures whose read failed) comes back exactly in a backup and a restore, and a backup holds the failures as the file check reads them', async () => {
+    const { stored } = pair()
+    const file = eventFile({ 1: [[1, 2]] })
+
+    file.races[1].failures = [{ at: 1700000000000, t: 25, reason: 'the log could not be read' }, { at: 1700000001000, t: 30, reason: 'locked' }]
+    stored.put('file:campaign-c1-b1-events', file)
+
+    const envelope = parsed(exportOf(stored))
+
+    assert.deepEqual(envelope.campaigns[0].events.b1, file)
+
+    const empty = installation({ first: 3 })
+
+    await restore(empty, envelope)
+
+    assert.deepEqual(eventOf(empty, 'b1'), file)
+    assert.deepEqual(parsed(exportOf(empty)).campaigns[0].events.b1, file)
+
+    // a record whose failures the file check does not read is not carried into a backup either way: the backup and the file check agree
+    const bad = JSON.parse(JSON.stringify(file))
+
+    bad.races[1].failures = 'none'
+
+    const doc = JSON.parse(textOf(envelope))
+
+    doc.campaigns[0].events.b1 = bad
+
+    const out = backup.parseBackup(sealed(JSON.stringify(doc)))
+
+    assert.equal(out.envelope === undefined, events.eventFileProblem(bad) !== null)
+  })
+
+  check('events', 'a Replace of a parent and its unmarked fork, neither holding an archive file yet, from a backup that holds the parent\'s events from before the fork and none for the fork, leaves the fork an empty archive: what it would inherit is read from the parent as the restore leaves it', async () => {
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'replace' } } } } }
+    const emptyArchive = { version: events.EVENT_ARCHIVE_VERSION, races: {} }
+    const forkOf = (inst) => ({ ...inst.registry().campaigns.c1, id: 'c1' })
+    const { stored, other } = pair()
+
+    other.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]] }))
+
+    assert.equal(eventOf(stored, 'b1'), undefined)
+    assert.equal(eventOf(stored, 'b2'), undefined)
+    assert.equal(stored.registry().campaigns.c1.branches.b2.eventsSeeded, undefined)
+    assert.deepEqual(events.eventBase(stored.io, forkOf(stored), 'b2'), {}, 'nothing to inherit before the restore')
+
+    const envelope = parsed(exportOf(other))
+
+    assert.equal(envelope.campaigns[0].events.b2, undefined)
+
+    const shown = plan(stored, envelope, choices).preview.campaigns[0].files[1].events
+
+    assert.ok(shown, 'the plan has an event row for the fork')
+    assert.equal(shown.totals.removed, 3, 'the events the restore gives the parent are what the fork would inherit')
+
+    await restore(stored, envelope, choices)
+
+    assert.deepEqual(eventIds(eventOf(stored, 'b1')), [1, 2, 3], 'the parent has the backup\'s archive')
+    assert.deepEqual(eventOf(stored, 'b2'), emptyArchive)
+    assert.deepEqual(events.eventBase(stored.io, forkOf(stored), 'b2'), emptyArchive, 'the next capture of the fork starts from nothing')
+    assert.equal(plan(stored, envelope, choices).preview.nothingToDo, true)
+  })
+
+  check('events', 'a lineage numbered in reverse (b1 forked from b2) restored with Replace on both branches, from a backup that holds the parent\'s events from before the fork, leaves the child, b1, an empty archive: archives are planned in ancestry order, not numeric order', async () => {
+    const choices = { campaigns: { c1: { files: { b1: { policy: 'replace' }, b2: { policy: 'replace' } } } } }
+    const emptyArchive = { version: events.EVENT_ARCHIVE_VERSION, races: {} }
+    const source = installation({ first: 2 })
+    const entry = entryOf({ id: 'c1', branches: { b1: tipOf(100), b2: tipOf(100) } })
+
+    entry.branches.b1.parent = 'b2'
+    entry.branches.b1.fork = { n: 64, digest: 'fork', t: 320 }
+    entry.branches.b2.parent = null
+    entry.branches.b2.fork = null
+    seed(source, { entries: [entry], files: { 'c1-b1': fileOf({ races: { 1: { times: [100] } } }), 'c1-b2': fileOf({ races: { 1: { times: [100] } } }), 'c1-b2-events': eventFile({ 1: [[1, 2, 3]] }) } })
+
+    const envelope = parsed(exportOf(source))
+    const empty = installation({ first: 3 })
+    const forkOf = (inst) => ({ ...inst.registry().campaigns.c1, id: 'c1' })
+    const shown = plan(empty, envelope, choices).preview.campaigns[0].files
+
+    assert.deepEqual(shown.map((row) => row.branchId), ['b1', 'b2'], 'the rows stay in numeric order')
+    assert.equal(shown[0].events.totals.removed, 3, 'the child would inherit the parent\'s restored events, and the plan removes them')
+
+    await restore(empty, envelope, choices)
+
+    assert.deepEqual(eventIds(eventOf(empty, 'b2')), [1, 2, 3], 'the parent has the backup\'s archive')
+    assert.deepEqual(eventOf(empty, 'b1'), emptyArchive, 'the child has an empty archive of its own')
+    assert.deepEqual(events.eventBase(empty.io, forkOf(empty), 'b1'), emptyArchive, 'the next capture of the child starts from nothing')
+    assert.equal(plan(empty, envelope, choices).preview.nothingToDo, true)
+  })
+
+  check('events', 'a covered Replace of an unmarked fork with no archive file of its own, whose parent holds events from before the fork, writes a readable empty archive, so the next capture does not inherit them; a fork that could inherit nothing, a Merge and a branch whose history is kept are not touched, and the races not chosen stay inherited as stored', async () => {
+    const choices = { campaigns: { c1: { files: { b2: { policy: 'replace' } } } } }
+    const emptyArchive = { version: events.EVENT_ARCHIVE_VERSION, races: {} }
+    const forkOf = (inst) => ({ ...inst.registry().campaigns.c1, id: 'c1' })
+
+    // the parent holds events from before the fork (the fork is at game time 320); the fork has no file of its own and is not marked
+    const { stored, other } = pair()
+
+    stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]], 2: [[4]] }))
+
+    assert.equal(stored.registry().campaigns.c1.branches.b2.eventsSeeded, undefined)
+    assert.equal(eventOf(stored, 'b2'), undefined, 'the fork has no file of its own')
+    assert.ok(Object.keys(events.eventBase(stored.io, forkOf(stored), 'b2').races).length > 0, 'it would inherit the parent\'s events')
+
+    const envelope = parsed(exportOf(other))
+    const planned = plan(stored, envelope, choices)
+    const shown = planned.preview.campaigns[0].files[1].events
+
+    assert.ok(shown, 'the plan has an event row for the fork')
+    assert.equal(shown.totals.removed, 4, 'the inherited events are what the Replace drops')
+    assert.ok(planned.preview.needsConfirmation.some((message) => /event archive/.test(message)))
+
+    const before = eventOf(stored, 'b1')
+
+    await restore(stored, envelope, choices)
+
+    assert.deepEqual(eventOf(stored, 'b2'), emptyArchive)
+    assert.deepEqual(eventOf(stored, 'b1'), before, 'the parent is not touched')
+    assert.deepEqual(events.eventBase(stored.io, forkOf(stored), 'b2'), emptyArchive, 'the next capture starts from nothing')
+
+    // a Merge and a kept history leave the fork as it was, inheriting
+    for (const policy of ['merge', 'keep']) {
+      const run = pair()
+
+      run.stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]] }))
+
+      const pending = plan(run.stored, parsed(exportOf(run.other)), { campaigns: { c1: { files: { b2: { policy } } } } })
+
+      assert.equal(pending.preview.campaigns[0].files[1].events, undefined, policy)
+      assert.equal(pending.writes.files.some((write) => write.name.endsWith('-b2-events')), false, policy)
+    }
+
+    // a fork that could inherit nothing is not given a file: the parent's events all come after the fork
+    const late = pair()
+
+    late.stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[70, 71]] }))
+
+    const quiet = plan(late.stored, parsed(exportOf(late.other)), choices)
+
+    assert.equal(quiet.preview.campaigns[0].files[1].events, undefined)
+    assert.equal(quiet.writes.files.some((write) => write.name.endsWith('-b2-events')), false)
+
+    // a fork already marked as seeded inherits nothing, so it is left with no file too
+    const marked = pair()
+    const registry = marked.stored.registry()
+
+    registry.campaigns.c1.branches.b2.eventsSeeded = true
+    marked.stored.put('registry', registry)
+    marked.stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2, 3]] }))
+    assert.equal(plan(marked.stored, parsed(exportOf(marked.other)), choices).preview.campaigns[0].files[1].events, undefined)
+
+    // the races not chosen stay as the fork inherits them: they are written into its own file
+    const partial = pair()
+
+    partial.stored.put('file:campaign-c1-b1-events', eventFile({ 1: [[1, 2]], 2: [[3]] }))
+    await restore(partial.stored, parsed(exportOf(partial.other)), { campaigns: { c1: { files: { b2: { policy: 'replace', races: ['2'] } } } } })
+
+    assert.deepEqual(Object.keys(eventOf(partial.stored, 'b2').races), ['1'])
+    assert.deepEqual(eventOf(partial.stored, 'b2').races[1], eventOf(partial.stored, 'b1').races[1])
   })
 
   return checks
@@ -2549,11 +3150,11 @@ const MUTANTS = [
   { name: 'the colony series of a backup are not checked', find: 'Object.entries(campaign.colonies).forEach(([branchId, file]) => checkColonyFile(', replace: 'Object.entries({}).forEach(([branchId, file]) => checkColonyFile(', fails: ['a backup whose colony series are malformed'] },
   { name: 'the columns of a colony file are not compared', find: 'if (canonical(file.columns) !== canonical(COLONY_COLUMNS)) {', replace: 'if (false) {', fails: ['a backup whose colony series are malformed'] },
   { name: 'colony snapshots may be out of time order', find: 'if (index > 0 && !(snapshot.t > colonyBefore(series, index))) {', replace: 'if (false) {', fails: ['a backup whose colony series are malformed'] },
-  { name: 'a campaign may not hold colony series', find: '\'annotations\', \'colonies\', \'colonyCoverage\'], where)', replace: '\'annotations\', \'colonyCoverage\'], where)', fails: ['the colony series of each branch go into'] },
+  { name: 'a campaign may not hold colony series', find: '\'annotations\', \'colonies\', \'colonyCoverage\', \'events\', \'eventCoverage\'], where)', replace: '\'annotations\', \'colonyCoverage\', \'events\', \'eventCoverage\'], where)', fails: ['the colony series of each branch go into'] },
   { name: 'a backup leaves the colony series out', find: '...(Object.keys(colonies).length ? { colonies } : {})', replace: '...({})', fails: ['the colony series of each branch go into', 'the colony series of a branch are merged', 'a restore of colony series is undone'] },
   { name: 'the colony files of a restore are not written', find: 'writes.files.push(colonies.write)', replace: 'void colonies.write', fails: ['the colony series of each branch go into', 'a preview of colony series writes nothing', 'the colony series of a branch are merged'] },
   { name: 'a replace of a backup without coverage drops the colony series it lacks', find: '{ ...(isObject(stored.races) ? stored.races : {}), ...present }', replace: 'present', fails: ['the colony series of a branch are merged'] },
-  { name: 'the colony series of a branch whose history is kept are restored anyway', find: 'policy: row.policy, locked: row.locked, status: \'kept\', stored: Object.keys(stored)', replace: 'policy: \'replace\', locked: null, status: \'kept\', stored: Object.keys(stored)', fails: ['a branch whose timeline is not the stored one keeps its colony'] },
+  { name: 'the colony series of a branch whose history is kept are restored anyway', find: '{ name, requested: row.requested, policy: row.policy, locked: row.locked,', replace: '{ name, requested: row.requested, policy: \'replace\', locked: null,', fails: ['a branch whose timeline is not the stored one keeps its colony'] },
   { name: 'a stored colony file that cannot be read is replaced', find: 'if (!view.locked && !usableFile(stored)) {', replace: 'if (false) {', fails: ['a branch whose timeline is not the stored one keeps its colony'] },
   { name: 'a backup with no colony file for a branch shows a colony row for it', find: 'isObject(given.colonies[branchId]) ? given.colonies[branchId] : null', replace: 'isObject(given.colonies[branchId]) ? given.colonies[branchId] : { races: {} }', fails: ['a backup made before colony coverage', 'a safety copy taken'] },
   { name: 'a backup does not say it records the colony files', find: 'branches, colonyCoverage: true, ...(', replace: 'branches, ...(', fails: ['the colony series of each branch go into', 'a safety copy taken'] },
@@ -2565,10 +3166,40 @@ const MUTANTS = [
   { name: 'a colony file that cannot be read is left out of a backup that covers the colony files', find: 'if (series !== undefined && series !== null && !(isObject(series) && Object.keys(series).length === 0)) {', replace: 'if (isObject(series) && isObject(series.races)) {', fails: ['a stored colony file this version cannot read'] },
   { name: 'the colony file of a backup is not checked as it is built', find: 'checkColonyFile(series, `Campaign $' + '{id} branch $' + '{branchId} colony series`)', replace: 'void series', fails: ['a stored colony file this version cannot read'] },
   { name: 'a colony file with nothing in it is refused as unreadable', find: '!(isObject(series) && Object.keys(series).length === 0)) {', replace: 'true) {', fails: ['a stored colony file this version cannot read'] },
-  { name: 'a backup of version 2 may leave out its colony coverage', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'envelope.version >= COLONY_COVERAGE_VERSION ? (campaign.colonyCoverage !== undefined && campaign.colonyCoverage !== true) : campaign.colonyCoverage !== undefined', fails: ['a backup is of version 2', 'a backup whose colony series are malformed'] },
+  { name: 'a backup of version 2 may leave out its colony coverage', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'envelope.version >= COLONY_COVERAGE_VERSION ? (campaign.colonyCoverage !== undefined && campaign.colonyCoverage !== true) : campaign.colonyCoverage !== undefined', fails: ['a backup says it covers the colony files', 'a backup whose colony series are malformed'] },
   { name: 'a backup of version 1 may state colony coverage', find: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : campaign.colonyCoverage !== undefined', replace: 'envelope.version >= COLONY_COVERAGE_VERSION ? campaign.colonyCoverage !== true : false', fails: ['a backup whose colony series are malformed'] },
-  { name: 'a backup is written as version 1', find: 'export const VERSION = 2', replace: 'export const VERSION = 1', fails: ['a backup is of version 2'] },
-  { name: 'the colony files are not counted with the history files', find: 'const filed = (campaign) => campaign.files.flatMap((file) => (file.colonies ? [file, file.colonies] : [file]))', replace: 'const filed = (campaign) => campaign.files', fails: ['a preview of colony series writes nothing'] },
+  { name: 'a backup is written as version 2', find: 'export const VERSION = 3', replace: 'export const VERSION = 2', fails: ['a backup is of version 3'] },
+  { name: 'the colony files are not counted with the history files', find: '[file, ...(file.colonies ? [file.colonies] : []), ...(file.events ? [file.events] : [])]', replace: '[file, ...(file.events ? [file.events] : [])]', fails: ['a preview of colony series writes nothing'] },
+  { name: 'the event archives of a backup are not checked', find: 'Object.entries(campaign.events).forEach(([branchId, file]) => checkEventFile(', replace: 'Object.entries({}).forEach(([branchId, file]) => checkEventFile(', fails: ['a backup whose event archives are malformed'] },
+  { name: 'an event archive with nothing in it is accepted in a backup', find: 'if (!isObject(file) || !Object.keys(file).length) {\n    bad(where, \'is not an event archive\')', replace: 'if (!isObject(file)) {\n    bad(where, \'is not an event archive\')', fails: ['a backup whose event archives are malformed'] },
+  { name: 'a campaign may not hold event archives', find: '\'events\', \'eventCoverage\'], where)', replace: '\'eventCoverage\'], where)', fails: ['the event archive of each branch goes into'] },
+  { name: 'a backup leaves the event archives out', find: '...(Object.keys(events).length ? { events } : {})', replace: '...({})', fails: ['the event archive of each branch goes into', 'the event archives of a branch are merged', 'a restore of event archives is undone'] },
+  { name: 'the event archives of a restore are not written', find: 'writes.files.push(archive.write)', replace: 'void archive.write', fails: ['the event archive of each branch goes into', 'a preview of event archives writes nothing', 'the event archives of a branch are merged'] },
+  { name: 'a replace of a backup with coverage keeps the stored races it lacks', find: '} else if (view.policy === \'replace\' && covered) {', replace: '} else if (false) {', fails: ['the event archives of a branch are merged', 'a safety copy taken before a restore that adds event archives'] },
+  { name: 'a merge overwrites the stored record of a race', find: 'stat.conflicts = offer', replace: 'stat.conflicts = offer; result[RaceID] = clone(theirs)', fails: ['the event archives of a branch are merged'] },
+  { name: 'the races chosen are not honoured for the event archives', find: '.sort((a, b) => Number(a) - Number(b)).filter(chosen)', replace: '.sort((a, b) => Number(a) - Number(b))', fails: ['the event archives of a branch are merged'] },
+  { name: 'the event archive of a branch whose history is kept is restored anyway', find: 'kind: \'events\', name, requested: row.requested, policy: row.policy, locked: row.locked,', replace: 'kind: \'events\', name, requested: row.requested, policy: \'replace\', locked: null,', fails: ['a branch whose timeline is not the stored one keeps its event archive'] },
+  { name: 'a stored event archive that cannot be read is replaced', find: 'if (!view.locked && unreadable) {', replace: 'if (false) {', fails: ['a branch whose timeline is not the stored one keeps its event archive'] },
+  { name: 'a backup with no archive for a branch shows an event row for it', find: 'isObject(given.events[branchId]) ? given.events[branchId] : null', replace: 'isObject(given.events[branchId]) ? given.events[branchId] : { version: 1, races: {} }', fails: ['a backup made before event archives', 'a safety copy taken before a restore that adds event archives'] },
+  { name: 'a backup does not say it records the event archives', find: 'eventCoverage: true, ...(Object.keys(events).length', replace: '...(Object.keys(events).length', fails: ['the event archive of each branch goes into', 'a safety copy taken before a restore that adds event archives'] },
+  { name: 'a backup is taken to cover the event archives whether or not it says so', find: 'const eventsCovered = given.eventCoverage === true', replace: 'const eventsCovered = true', fails: ['a backup made before event archives'] },
+  { name: 'an event coverage that is not true is accepted', find: 'envelope.version >= EVENT_COVERAGE_VERSION ? campaign.eventCoverage !== true : campaign.eventCoverage !== undefined || campaign.events !== undefined', replace: 'false', fails: ['a backup whose event archives are malformed', 'a backup is of version 3'] },
+  { name: 'a backup of version 1 or 2 may hold event archives', find: ': campaign.eventCoverage !== undefined || campaign.events !== undefined) {', replace: ': campaign.eventCoverage !== undefined) {', fails: ['a backup whose event archives are malformed'] },
+  { name: 'a backup of version 3 may leave out its event coverage', find: 'envelope.version >= EVENT_COVERAGE_VERSION ? campaign.eventCoverage !== true :', replace: 'envelope.version >= EVENT_COVERAGE_VERSION ? (campaign.eventCoverage !== undefined && campaign.eventCoverage !== true) :', fails: ['a backup is of version 3', 'a backup whose event archives are malformed'] },
+  { name: 'an event archive that cannot be read is left out of a backup that covers the event archives', find: 'if (unreadable) {\n        throw new Rejected(', replace: 'if (false) {\n        throw new Rejected(', fails: ['a stored event archive this version cannot read'] },
+  { name: 'the event archives are not counted with the history files', find: '...(file.events ? [file.events] : [])])', replace: '])', fails: ['a preview of event archives writes nothing'] },
+  { name: 'the events of an archive are counted with the snapshots', find: 'filter((file) => file.kind !== \'events\')', replace: 'filter(() => true)', fails: ['a preview of event archives writes nothing'] },
+  { name: 'a replace of event archives asks for no confirmation', find: 'if (droppedEvents) {', replace: 'if (false) {', fails: ['the event archives of a branch are merged'] },
+  { name: 'a restored absence of an archive is written as no file', find: 'const file = { version: EVENT_ARCHIVE_VERSION, races: result }', replace: 'const file = !offered && !Object.keys(result).length ? {} : { version: EVENT_ARCHIVE_VERSION, races: result }', fails: ['a safety copy taken before a restore that adds event archives', 'a covered Replace that restores the absence'] },
+  { name: 'the failures of a race record are dropped from a restored archive', find: 'result[RaceID] = clone(theirs)\n        stat.added = offer', replace: 'result[RaceID] = { ...clone(theirs), failures: undefined }\n        stat.added = offer', fails: ['a race record that carries failures'] },
+  { name: 'a stored event archive is not considered when the backup holds none for the branch', find: 'if (offeredEvents || inherited || (eventsCovered && isObject(heldEvents)', replace: 'if (offeredEvents || inherited || (false && isObject(heldEvents)', fails: ['a safety copy taken before a restore that adds event archives'] },
+  { name: 'the event archives of a backup are not checked by the file check', find: 'const problem = eventFileProblem(file)\n\n  if (problem) {\n    bad(where', replace: 'const problem = null\n\n  if (problem) {\n    bad(where', fails: ['a backup whose event archives are malformed'] },
+  { name: 'a covered Replace of a fork that has no file but could inherit is not planned', find: 'if (offeredEvents || inherited || (eventsCovered', replace: 'if (offeredEvents || (eventsCovered', fails: ['a covered Replace of an unmarked fork'] },
+  { name: 'a fork that could inherit nothing is planned too', find: 'const inherited = isObject(base.races) && Object.keys(base.races).length ? base.races : null', replace: 'const inherited = isObject(base.races) ? base.races : {}', fails: ['a covered Replace of an unmarked fork'] },
+  { name: 'a Replace of an inheriting fork does not start from what it inherits', find: 'inherited && view.policy === \'replace\' && covered ? inherited : {}', replace: '{}', fails: ['a covered Replace of an unmarked fork'] },
+  { name: 'what a fork would inherit is read from the stores as they stand before the restore', find: 'eventBase(afterRestore, { id: given.id', replace: 'eventBase(io, { id: given.id', fails: ['a Replace of a parent and its unmarked fork'] },
+  { name: 'the event archives are planned in numeric order, not in ancestry order', find: '.sort((a, b) => depthOf(a) - depthOf(b) || branchOrder(a, b))', replace: '', fails: ['a lineage numbered in reverse'] },
+  { name: 'the event archive of a branch is not remembered for the branches planned after it', find: 'plannedEvents.set(archive.write.name, archive.write.value)', replace: 'void archive.write.value', fails: ['a Replace of a parent and its unmarked fork'] },
 ]
 
 // The utilities copied, with one mutant applied, to the layout the loader reads: `<root>/src/renderer/utilities`. The mutant's `file` is relative to the root.
@@ -2632,22 +3263,6 @@ const tryMutant = async (mutant) => {
   }
 }
 
-// `items` through `work`, no more than `limit` at a time, the results in the order of the items.
-const inParallel = async (items, limit, work) => {
-  const results = new Array(items.length)
-  let next = 0
-
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++
-
-      results[index] = await work(items[index])
-    }
-  }))
-
-  return results
-}
-
 const main = async () => {
   if (process.env.HISTORY_BACKUP_TREE) {
     const results = await runSuite(await loadModules(process.env.HISTORY_BACKUP_TREE), JSON.parse(process.env.HISTORY_BACKUP_ONLY))
@@ -2685,7 +3300,7 @@ const main = async () => {
 
     const names = [...new Set(MUTANTS.flatMap((mutant) => mutant.fails))]
 
-    for (const [name, result] of await inParallel(MUTANTS, 4, tryMutant)) {
+    for (const [name, result] of await inParallel(MUTANTS, tryMutant)) {
       show(name, result)
     }
 
