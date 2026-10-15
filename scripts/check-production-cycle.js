@@ -33,6 +33,7 @@ const os = require('os')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -1751,39 +1752,8 @@ const structureChecks = async (database) => {
 
 const instantiatePage = (options, database, game, race) => instantiate(options, { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} }, database, GameID: game, RaceID: race })
 
-const main = async () => {
-  const saves = parseArguments(process.argv.slice(2))
-  const apps = await loadUtilities(['production', 'minerals', 'industry-cycle', 'decimal', 'provenance'], { stubs: STUBS })
-  const pageOptions = await loadPage('pages/production', { stubs: STUBS })
-
-  console.log('== the cycle: worked cases ==')
-  workedCases(cycle, apps).forEach(([statement, held]) => check(statement, held))
-  scheduleCases(apps.production).forEach(([statement, held]) => check(statement, held))
-
-  const bounds = orderBounds()
-
-  check('SYNTHETIC with 20 t of Duranium arriving each cycle, every order finishes both jobs, and the finish cycle depends on the order', bounds.outcomes.every((outcome) => outcome.A && outcome.B) && new Set(bounds.outcomes.map((outcome) => `${outcome.A}-${outcome.B}`)).size > 1, JSON.stringify(bounds.outcomes))
-
-  const mutants = [
-    { name: 'a model whose jobs each see the whole stock (no shared debit)', fails: 'SYNTHETIC conservation: the jobs of a cycle take no more of a mineral than the colony held, in either order', run: () => workedCases((input) => cycle({ ...input, wholeStock: true })) },
-    { name: 'a model that does not round the build to 4 decimals', fails: 'SYNTHETIC the build is rounded to 4 decimals: 10 t over 3 t a unit is 3.3333 units, not 3.3333333', run: () => workedCases((input) => cycle({ ...input, unrounded: true })) },
-  ]
-
-  mutants.forEach((mutant) => {
-    const failed = mutant.run().filter(([, held]) => !held).map(([statement]) => statement)
-
-    check(`${mutant.name} fails the check "${mutant.fails}"`, failed.includes(mutant.fails), `${failed.length} checks fail`)
-  })
-
-  const counted = await mutatedEngine(null, null)
-  const engineResults = engineCases(counted['industry-cycle'], counted.decimal)
-
-  console.log('\n== the cycle engine and the page\'s forecast ==')
-  engineResults.forEach(({ statement, held }) => check(statement, held))
-  const wrapperResults = wrapperCases(apps)
-
-  wrapperResults.forEach(([statement, held]) => check(statement, held))
-
+// The mutants that run the engine's, the wrapper's and the page's cases again, each with one change; each must fail the case named with it.
+const mutantLists = () => {
   const ENGINE_MUTANTS = [
     { name: 'an engine whose projects do not debit the stock they build from', from: 'left[resource] = subtract(left[resource] || ZERO, multiply(need, requested))', to: 'left[resource] = left[resource] || ZERO', fails: 'conserved' },
     { name: 'an engine that does not round a build to 4 decimals', from: 'requested = round(requested, BUILD_DECIMALS)', to: 'requested = requested', fails: 'rounded' },
@@ -1845,15 +1815,6 @@ const main = async () => {
     { name: 'an engine whose tally counts at most one run that cut a project', from: '    tally.cut += 1\n', to: '    tally.cut = 1\n', fails: 'tally' },
   ]
 
-  for (const mutant of ENGINE_MUTANTS) {
-    const loaded = await mutatedEngine(mutant.from, mutant.to, mutant.file)
-    const mutated = engineCases(loaded['industry-cycle'], loaded.decimal)
-    const named = engineResults.find(({ key }) => key === mutant.fails)
-    const broken = mutated.filter(({ held }) => !held).map(({ key }) => key)
-
-    check(`${mutant.name} fails the check "${named.statement.slice(0, 90)}..."`, named.held && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
-  }
-
   const WRAPPER_MUTANTS = [
     { name: 'a wrapper that gives the date of a crowded colony as plain when the orders were only sampled', file: 'production.js', from: 'const sampled = !engine.orders.exhaustive', to: 'const sampled = false', fails: 'sampled' },
     { name: 'a wrapper that dates the start of a queued project by the base order alone', file: 'production.js', from: 'start: queued ? figure.startEarliest : 0, startRange', to: 'start: queued ? figure.start : 0, startRange', fails: 'startRange' },
@@ -1862,14 +1823,6 @@ const main = async () => {
     { name: 'a wrapper that lets an overflow of one colony out of the forecast', file: 'production.js', from: 'return { gaps: [overflowGap(error)] }', to: 'throw error', fails: 'overflowWrapper' },
     { name: 'a wrapper that makes the figures of every project of a wide colony without a look at the pace', file: 'production.js', from: '    if (index > 0 && pace.expired()) {\n      yield\n    }\n\n    const figure = engine.projects[project.ID]', to: '    const figure = engine.projects[project.ID]', fails: 'wideWrapper' },
   ]
-
-  for (const mutant of WRAPPER_MUTANTS) {
-    const mutated = wrapperCases(await mutatedUtilities(mutant.file, mutant.from, mutant.to))
-    const named = wrapperResults.find(([, , key]) => key === mutant.fails)
-    const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)
-
-    check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
-  }
 
   const PAGE_MUTANTS = [
     { name: 'a page that gives a Short job of a colony the forecast cannot run a finish date', from: 'if (!planned) {', to: 'if (planned) {', fails: 'fallbackShort' },
@@ -1890,15 +1843,114 @@ const main = async () => {
     { name: 'a page that gives a paused project the Forecasting status while the run is pending', from: 'if (forecasting && (queued || paused !== true)) {', to: 'if (forecasting) {', fails: 'pausedPage' },
   ]
 
+  return { engine: ENGINE_MUTANTS, wrapper: WRAPPER_MUTANTS, page: PAGE_MUTANTS }
+}
+
+// A mutant run in a process of its own: `--mutant=<engine, wrapper or page>:<index in its list>` prints the keys of the cases it breaks on its last line. The mutants load their own copies of the modules, so each can run beside the others.
+const MUTANT_PREFIX = 'MUTANT_RESULT '
+
+const brokenBy = async (kind, index) => {
+  const mutant = mutantLists()[kind][index]
+
+  if (kind === 'engine') {
+    const loaded = await mutatedEngine(mutant.from, mutant.to, mutant.file)
+
+    return engineCases(loaded['industry-cycle'], loaded.decimal).filter(({ held }) => !held).map(({ key }) => key)
+  }
+
+  if (kind === 'wrapper') {
+    return wrapperCases(await mutatedUtilities(mutant.file, mutant.from, mutant.to)).filter(([, held]) => !held).map(([, , key]) => key)
+  }
+
+  const mutated = await pageCases(mutant.mixin ? await pageWithMutatedMixin(mutant.from, mutant.to) : await loadPage('pages/production', { stubs: STUBS, mutate: onceReplacing(mutant.from, mutant.to) }))
+
+  return mutated.filter(([, held]) => !held).map(([, , key]) => key)
+}
+
+// Starts every mutant in a child, `jobs()` at a time, and answers with the function that gives the keys a mutant broke (or throws what stopped it) once they are in.
+const startMutants = (lists) => {
+  const all = Object.entries(lists).flatMap(([kind, list]) => [...list.keys()].map((index) => [kind, index]))
+  const done = inParallel(all, ([kind, index]) => runChild(__filename, [`--mutant=${kind}:${index}`]).then((result) => lastJson(result, MUTANT_PREFIX)))
+
+  return async (kind, index) => {
+    const outcome = (await done)[all.findIndex(([one, at]) => one === kind && at === index)]
+
+    if (outcome instanceof Error) {
+      throw outcome
+    }
+
+    return outcome
+  }
+}
+
+const main = async () => {
+  const child = process.argv.slice(2).find((argument) => argument.startsWith('--mutant='))
+
+  if (child) {
+    const [kind, index] = child.slice('--mutant='.length).split(':')
+    const broken = await brokenBy(kind, Number(index))
+
+    process.stdout.write(`${MUTANT_PREFIX}${JSON.stringify(broken)}\n`, () => process.exit(0))
+
+    return
+  }
+
+  const saves = parseArguments(process.argv.slice(2))
+  const lists = mutantLists()
+  const brokenOf = startMutants(lists)
+  const apps = await loadUtilities(['production', 'minerals', 'industry-cycle', 'decimal', 'provenance'], { stubs: STUBS })
+  const pageOptions = await loadPage('pages/production', { stubs: STUBS })
+
+  console.log('== the cycle: worked cases ==')
+  workedCases(cycle, apps).forEach(([statement, held]) => check(statement, held))
+  scheduleCases(apps.production).forEach(([statement, held]) => check(statement, held))
+
+  const bounds = orderBounds()
+
+  check('SYNTHETIC with 20 t of Duranium arriving each cycle, every order finishes both jobs, and the finish cycle depends on the order', bounds.outcomes.every((outcome) => outcome.A && outcome.B) && new Set(bounds.outcomes.map((outcome) => `${outcome.A}-${outcome.B}`)).size > 1, JSON.stringify(bounds.outcomes))
+
+  const mutants = [
+    { name: 'a model whose jobs each see the whole stock (no shared debit)', fails: 'SYNTHETIC conservation: the jobs of a cycle take no more of a mineral than the colony held, in either order', run: () => workedCases((input) => cycle({ ...input, wholeStock: true })) },
+    { name: 'a model that does not round the build to 4 decimals', fails: 'SYNTHETIC the build is rounded to 4 decimals: 10 t over 3 t a unit is 3.3333 units, not 3.3333333', run: () => workedCases((input) => cycle({ ...input, unrounded: true })) },
+  ]
+
+  mutants.forEach((mutant) => {
+    const failed = mutant.run().filter(([, held]) => !held).map(([statement]) => statement)
+
+    check(`${mutant.name} fails the check "${mutant.fails}"`, failed.includes(mutant.fails), `${failed.length} checks fail`)
+  })
+
+  const counted = await mutatedEngine(null, null)
+  const engineResults = engineCases(counted['industry-cycle'], counted.decimal)
+
+  console.log('\n== the cycle engine and the page\'s forecast ==')
+  engineResults.forEach(({ statement, held }) => check(statement, held))
+  const wrapperResults = wrapperCases(apps)
+
+  wrapperResults.forEach(([statement, held]) => check(statement, held))
+
+  for (const [index, mutant] of lists.engine.entries()) {
+    const named = engineResults.find(({ key }) => key === mutant.fails)
+    const broken = await brokenOf('engine', index)
+
+    check(`${mutant.name} fails the check "${named.statement.slice(0, 90)}..."`, named.held && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
+  }
+
+  for (const [index, mutant] of lists.wrapper.entries()) {
+    const named = wrapperResults.find(([, , key]) => key === mutant.fails)
+    const broken = await brokenOf('wrapper', index)
+
+    check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
+  }
+
   const pageResults = await pageCases(pageOptions)
 
   console.log('\n== the page\'s rows on synthetic colonies ==')
   pageResults.forEach(([statement, held]) => check(statement, held))
 
-  for (const mutant of PAGE_MUTANTS) {
-    const mutated = await pageCases(mutant.mixin ? await pageWithMutatedMixin(mutant.from, mutant.to) : await loadPage('pages/production', { stubs: STUBS, mutate: onceReplacing(mutant.from, mutant.to) }))
+  for (const [index, mutant] of lists.page.entries()) {
     const named = pageResults.find(([, , key]) => key === mutant.fails)
-    const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)
+    const broken = await brokenOf('page', index)
 
     check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${broken.join(', ')}`)
   }

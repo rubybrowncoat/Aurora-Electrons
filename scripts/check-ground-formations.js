@@ -15,6 +15,7 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -38,13 +39,17 @@ const check = (name, ok, detail = '') => {
 }
 
 const parseArguments = (argv) => {
-  const options = { mutations: true, breadth: true }
+  const options = { mutations: true, breadth: true, part: null }
 
-  for (const argument of argv) {
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index]
+
     if (argument === '--no-mutations') {
       options.mutations = false
     } else if (argument === '--no-breadth') {
       options.breadth = false
+    } else if (argument === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argument}`)
       process.exit(2)
@@ -868,41 +873,80 @@ const runMutant = async ([name, from, to, ids]) => {
   }
 }
 
-const main = async () => {
-  const options = parseArguments(process.argv.slice(2))
+// ---------- the parts: the constructed race, each save, the control and each mutant run in a process of their own ----------
+
+const coveredSaves = () => new Set(OWNER_SAVES.map((owner) => `${path.resolve(root, owner[0])}|${owner[1]}|${owner[2]}`))
+
+// One part, in this process: `constructed`, `owner:<index>`, `breadth:<index>`, `control` or `mutant:<index>`.
+const runPart = async (part) => {
+  const [kind, index] = part.split(':')
   const mod = (await loadUtilities([MODULE]))[MODULE]
 
-  console.log('Constructed race and loader')
+  if (part === 'constructed') {
+    console.log('Constructed race and loader')
 
-  const results = [...(await builderResults(mod)), ...(await databaseResults(mod))]
+    const results = [...(await builderResults(mod)), ...(await databaseResults(mod))]
 
-  results.forEach((result) => check(result.name, result.ok, result.detail))
+    results.forEach((result) => check(result.name, result.ok, result.detail))
+  } else if (kind === 'owner') {
+    await ownerSave(mod, OWNER_SAVES[Number(index)])
+  } else if (kind === 'breadth') {
+    await breadthSave(mod, breadthFiles()[Number(index)], coveredSaves())
+  } else if (part === 'control') {
+    const results = [...(await builderResults(mod)), ...(await databaseResults(mod))]
 
-  const covered = new Set()
-
-  console.log('\nNamed saves')
-
-  for (const owner of OWNER_SAVES) {
-    covered.add(`${path.resolve(root, owner[0])}|${owner[1]}|${owner[2]}`)
-    await ownerSave(mod, owner)
+    check('control: the unmodified utility passes every check the mutations are judged by', results.every((result) => result.ok))
+  } else if (kind === 'mutant') {
+    await runMutant(MUTANTS[Number(index)])
+  } else {
+    throw new Error(`No part is named ${part}`)
   }
+}
+
+const main = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.part !== null) {
+    await runPart(options.part)
+    endSection(checks, failures, { unsupportedSaves, emptySaves, skippedSaves })
+  }
+
+  const breadth = options.breadth ? breadthFiles() : []
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'constructed', weight: 10 },
+    ...OWNER_SAVES.map((_owner, index) => ({ part: `owner:${index}`, weight: 10 })),
+    ...breadth.map((_file, index) => ({ part: `breadth:${index}`, weight: 5 })),
+    ...(options.mutations ? [{ part: 'control', weight: 10 }, ...MUTANTS.map((_mutant, index) => ({ part: `mutant:${index}`, weight: 3 }))] : []),
+  ]
+
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part], weight })))
+  let at = 0
+
+  const printed = () => {
+    const counts = printSection(sections[at++])
+
+    checks += counts.checks
+    failures += counts.failures
+    unsupportedSaves += counts.extra.unsupportedSaves
+    emptySaves += counts.extra.emptySaves
+    skippedSaves += counts.extra.skippedSaves
+  }
+
+  printed()
+  console.log('\nNamed saves')
+  OWNER_SAVES.forEach(printed)
 
   if (options.breadth) {
     console.log('\nEvery other save found')
-
-    for (const file of breadthFiles()) {
-      await breadthSave(mod, file, covered)
-    }
+    breadth.forEach(printed)
   }
 
   if (options.mutations) {
     console.log('\nMutations')
-
-    check('control: the unmodified utility passes every check the mutations are judged by', results.every((result) => result.ok))
-
-    for (const mutant of MUTANTS) {
-      await runMutant(mutant)
-    }
+    printed()
+    MUTANTS.forEach(printed)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed (${unsupportedSaves} unsupported, ${emptySaves} empty, ${skippedSaves} skipped)`)

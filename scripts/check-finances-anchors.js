@@ -270,7 +270,7 @@ const mockSave = ({ GameID = 1, name = 'Campaign', template = 1, n, fork = null,
 
 const defineSuite = (m, prepared) => {
   const cases = []
-  const assert = require('assert').strict
+  const assert = require('./lib/bounded-assert')
   const test = (group, name, run) => cases.push({ group, name, run })
   const near = (actual, expected, message, tolerance = 1e-6) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message}: ${actual} is not within ${tolerance} of ${expected}`)
   const statuses = (check) => check.windows.map((window) => window.status)

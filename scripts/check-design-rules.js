@@ -17,9 +17,9 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { spawn } = require('child_process')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { inParallel, jobs, runChild } = require('./lib/check-pool')
 
 const RULES = ['engine', 'speed', 'range', 'jump', 'maintenance', 'missile', 'sensor']
 
@@ -2246,48 +2246,26 @@ const tryMutant = async ({ find, replace, fails }, data, sensorData) => {
 }
 
 // A mutant in a process of its own: the loader of the utilities imports modules from data URLs made of their source, so two copies of an unchanged utility in one process are one module with one rule registry, and a fault that changes what is registered would reach the checks that follow it. A process that dies with no result is a mutant that did not run.
-const mutantInProcess = (name) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename, '--run-mutant', name], { stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = ''
-  let errors = ''
+const mutantInProcess = async (name) => {
+  const { code, stdout, stderr } = await runChild(__filename, ['--run-mutant', name])
 
-  child.stdout.on('data', (chunk) => {
-    output += chunk
-  })
-  child.stderr.on('data', (chunk) => {
-    errors += chunk
-  })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    try {
-      resolve(JSON.parse(output.trim().split('\n').pop()))
-    } catch {
-      resolve({ status: 'not run', message: `the process exited with ${code} and no result: ${(errors || output).trim().slice(0, 400)}` })
-    }
-  })
-})
-
-const MUTANT_PROCESSES = Math.max(1, Math.min(4, os.cpus().length - 1))
-
-// Every mutant runs in a process of its own, at most MUTANT_PROCESSES at a time, and the results are printed in the order of the list. A mutant is caught when each check it names fails.
-const runMutants = async () => {
-  const results = new Array(ALL_MUTANTS.length)
-  let next = 0
-
-  const worker = async () => {
-    while (next < ALL_MUTANTS.length) {
-      const index = next++
-
-      results[index] = await mutantInProcess(ALL_MUTANTS[index].name)
-    }
+  try {
+    return JSON.parse(stdout.trim().split('\n').pop())
+  } catch {
+    return { status: 'not run', message: `the process exited with ${code} and no result: ${(stderr || stdout).trim().slice(0, 400)}` }
   }
+}
 
-  await Promise.all(Array.from({ length: Math.min(MUTANT_PROCESSES, ALL_MUTANTS.length) }, worker))
+// Every mutant in a process of its own, as many at a time as the pool allows; resolves the results in the order of the list.
+const startMutants = () => inParallel(ALL_MUTANTS, ({ name }) => mutantInProcess(name), jobs())
 
+// Prints the results in the order of the list. A mutant is caught when each check it names fails.
+const printMutants = (results) => {
   let caught = 0
 
-  results.forEach(({ status, message }, index) => {
+  results.forEach((result, index) => {
     const { name } = ALL_MUTANTS[index]
+    const { status, message } = result instanceof Error ? { status: 'not run', message: result.message } : result
 
     if (status === 'caught') {
       caught++
@@ -2305,6 +2283,7 @@ const runFixtures = async () => {
   const data = loadFixtures()
   const sensorData = loadSensorFixtures()
   const library = await loadMissileLibrary()
+  const pending = startMutants()
   const registry = () => JSON.stringify(library.provenance.listRules())
   const registryBefore = registry()
   const totals = { checked: 0, mismatches: 0, explained: 0, unsupported: 0, unknown: 0, resolved: 0 }
@@ -2348,7 +2327,7 @@ const runFixtures = async () => {
     console.log(result === true ? `check passed: ${name}` : `CHECK FAILED: ${name}: ${result}`)
   }
 
-  const mutants = await runMutants()
+  const mutants = printMutants(await pending)
   const registryAfter = registry()
   const registrySame = registryBefore === registryAfter
 

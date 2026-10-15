@@ -20,8 +20,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { spawn } = require('child_process')
-const assert = require('assert').strict
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
+const { inParallel } = require('./lib/check-pool')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -1854,20 +1855,20 @@ const tryMutant = async (mutant) => {
   }
 }
 
-// `items` through `work`, no more than `limit` at a time, the results in the order of the items.
-const inParallel = async (items, limit, work) => {
-  const results = new Array(items.length)
-  let next = 0
+const controlOf = async () => {
+  let directory = null
 
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++
+  try {
+    directory = mutatedTree(null)
 
-      results[index] = await work(items[index])
+    return await checksInChild(path.join(directory, 'src'), [...new Set(MUTANTS.flatMap((mutant) => mutant.fails))])
+  } catch (error) {
+    return error
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
     }
-  }))
-
-  return results
+  }
 }
 
 const main = async () => {
@@ -1878,7 +1879,10 @@ const main = async () => {
     process.exit(0)
   }
 
-  const results = await runSuite(await loadModules(src))
+  const mutating = !process.argv.includes('--no-mutations')
+
+  // The unchanged tree, in this process, the mutants and the control, each in a process of its own, all sharing the CHECK_JOBS places.
+  const [results, ...rest] = await inParallel([null, ...(mutating ? [...MUTANTS, 'control'] : [])], async (item) => (item === null ? runSuite(await loadModules(src)) : item === 'control' ? controlOf() : tryMutant(item)))
   let group = null
   let failed = 0
   let total = 0
@@ -1893,6 +1897,10 @@ const main = async () => {
     }
   }
 
+  if (results instanceof Error) {
+    throw results
+  }
+
   results.forEach(([next, name, result]) => {
     if (next !== group) {
       group = next
@@ -1902,29 +1910,14 @@ const main = async () => {
     show(name, result)
   })
 
-  if (!process.argv.includes('--no-mutations')) {
+  if (mutating) {
     console.log('\nmutants')
 
-    const names = [...new Set(MUTANTS.flatMap((mutant) => mutant.fails))]
-
-    for (const [name, result] of await inParallel(MUTANTS, 4, tryMutant)) {
+    for (const [name, result] of rest.slice(0, MUTANTS.length)) {
       show(name, result)
     }
 
-    let control = null
-    let directory = null
-
-    try {
-      directory = mutatedTree(null)
-      control = await checksInChild(path.join(directory, 'src'), names)
-    } catch (error) {
-      control = error
-    } finally {
-      if (directory) {
-        fs.rmSync(directory, { recursive: true, force: true })
-      }
-    }
-
+    const control = rest[MUTANTS.length]
     const wrong = control instanceof Error ? [control.message] : control.filter(([, , result]) => result !== true).map(([, name]) => name)
 
     show('a control run of the unchanged copy passes every check the mutants name', wrong.length === 0 && !(control instanceof Error) ? true : `fails ${wrong.join('; ')}`)

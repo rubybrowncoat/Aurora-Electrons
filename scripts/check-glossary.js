@@ -14,10 +14,10 @@
   Usage: node scripts/check-glossary.js
 */
 const fs = require('fs')
-const { spawn } = require('child_process')
 const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
+const { inParallel, runChild } = require('./lib/check-pool')
 
 const rendererDirectory = path.resolve(__dirname, '..', 'src', 'renderer')
 const MODULES = ['glossary', 'navigation', 'provenance']
@@ -108,6 +108,8 @@ const templateText = (source) => {
   return [words.replace(/\s+/g, ' ').trim(), ...attributes]
 }
 
+const REGISTERS_RULE = /\bregisterRule\(/
+
 // The utility modules a rule is registered in, as the names `loadUtilities` takes ('warnings/common'): found by the call every rule file makes, so that a new rule file is loaded without a list to keep.
 const ruleModuleNames = (directory) => {
   const found = []
@@ -118,7 +120,7 @@ const ruleModuleNames = (directory) => {
 
       if (entry.isDirectory()) {
         walk(file)
-      } else if (entry.name.endsWith('.js') && /\bregisterRule\(/.test(fs.readFileSync(path.join(directory, file), 'utf8'))) {
+      } else if (entry.name.endsWith('.js') && REGISTERS_RULE.test(fs.readFileSync(path.join(directory, file), 'utf8'))) {
         found.push(file.replace(/\\/g, '/').replace(/\.js$/, ''))
       }
     }
@@ -129,8 +131,8 @@ const ruleModuleNames = (directory) => {
   return found
 }
 
-// Every module the checks run: the glossary and the registry of pages, the rules whose figures the definitions state, and every module that registers a rule, which the check of the glossary's links against the rules needs.
-const loadModules = (directory) => loadUtilities([...new Set([...MODULES, ...RULE_MODULES, ...ruleModuleNames(directory)])], { stubs: STUBS, directory })
+// Every module the checks run: the glossary and the registry of pages, the rules whose figures the definitions state, and every module that registers a rule, which the check of the glossary's links against the rules needs. `ruleModules` is the discovery of the tree, made once and handed to each child, since a mutation never changes whether a file registers a rule (mutatedCopy refuses one that would).
+const loadModules = (directory, ruleModules) => loadUtilities([...new Set([...MODULES, ...RULE_MODULES, ...ruleModules])], { stubs: STUBS, directory })
 
 // The checks that need no save, over the modules `m` ({ glossary, navigation }) and the renderer folder `tree` they and the component sources were read from: [[name, async () => true or a message]]. Run on the real sources and again on each mutated copy, where one at least must fail.
 const synthetic = (m, tree) => {
@@ -379,7 +381,14 @@ const mutatedCopy = (file, from, to) => {
     throw new Error(`The mutation of ${file} does not apply exactly once: ${from}`)
   }
 
-  fs.writeFileSync(target, source.replace(from, () => to))
+  const changed = source.replace(from, () => to)
+
+  if (REGISTERS_RULE.test(source) !== REGISTERS_RULE.test(changed)) {
+    fs.rmSync(directory, { recursive: true, force: true })
+    throw new Error(`The mutation of ${file} changes whether it registers a rule, which the rule modules found once for the real tree would miss: ${from}`)
+  }
+
+  fs.writeFileSync(target, changed)
 
   return directory
 }
@@ -423,9 +432,6 @@ const MUTATIONS = [
   ['the failure rate stops growing with the years', path.join('utilities', 'design-rules.js'), 'const failureRate = Number(baseFailureChance) * year / 100', 'const failureRate = Number(baseFailureChance) / 100', ['the failure rate and the draw of maintenance life']],
 ]
 
-// How many mutants run at once, each in a Node process of its own.
-const CHILDREN = 4
-
 const runChecks = async (modules, tree) => {
   const results = []
 
@@ -447,51 +453,27 @@ const runChecks = async (modules, tree) => {
 const RESULT_PREFIX = 'GLOSSARY-RESULT '
 
 // The checks of one tree of the renderer's sources in a Node process of their own, as [[name, result]]: the rule registry is a module-level map, so rules a mutant overwrites would otherwise stay for every tree run after it.
-const checksInChild = (tree) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename], { env: { ...process.env, GLOSSARY_TREE: tree }, stdio: ['ignore', 'pipe', 'pipe'] })
-  let out = ''
-  let errors = ''
+const checksInChild = async (tree, ruleModules) => {
+  const { code, stdout, stderr } = await runChild(__filename, [], { env: { GLOSSARY_TREE: tree, GLOSSARY_RULE_MODULES: JSON.stringify(ruleModules) } })
+  const line = stdout.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
 
-  child.stdout.on('data', (chunk) => { out += chunk })
-  child.stderr.on('data', (chunk) => { errors += chunk })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    const line = out.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
+  if (code !== 0 || !line) {
+    throw new Error(`The checks of ${tree} ended with ${code}: ${stderr.trim().slice(0, 300)}`)
+  }
 
-    if (code !== 0 || !line) {
-      reject(new Error(`The checks of ${tree} ended with ${code}: ${errors.trim().slice(0, 300)}`))
-    } else {
-      resolve(JSON.parse(line.slice(RESULT_PREFIX.length)))
-    }
-  })
-})
-
-// `items` through `work`, no more than `limit` at a time, the results in the order of the items.
-const inParallel = async (items, limit, work) => {
-  const results = new Array(items.length)
-  let next = 0
-
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++
-
-      results[index] = await work(items[index])
-    }
-  }))
-
-  return results
+  return JSON.parse(line.slice(RESULT_PREFIX.length))
 }
 
 const failedNames = (results) => results.filter(([, result]) => result !== true).map(([name]) => name)
 
 // One mutation in a fresh process: [label, true or what is wrong, detail]. The checks it must break (each named by a part of the name) must be among those that fail.
-const tryMutation = async ([label, file, from, to, expected]) => {
+const tryMutation = async ([label, file, from, to, expected], ruleModules) => {
   let directory
 
   try {
     directory = mutatedCopy(file, from, to)
 
-    const failed = failedNames(await checksInChild(directory))
+    const failed = failedNames(await checksInChild(directory, ruleModules))
     const missed = expected.filter((part) => !failed.some((name) => name.includes(part)))
 
     return [label, missed.length ? `does not break "${missed.join('", "')}"; the checks that fail: ${failed.join('; ') || 'none'}` : true, `${failed.length} checks fail`]
@@ -507,25 +489,36 @@ const tryMutation = async ([label, file, from, to, expected]) => {
 const run = async () => {
   if (process.env.GLOSSARY_TREE) {
     const tree = process.env.GLOSSARY_TREE
-    const modules = await loadModules(path.join(tree, 'utilities'))
+    const modules = await loadModules(path.join(tree, 'utilities'), JSON.parse(process.env.GLOSSARY_RULE_MODULES))
 
     console.log(RESULT_PREFIX + JSON.stringify(await runChecks(modules, tree)))
     process.exit(0)
   }
 
-  const modules = await loadModules(path.join(rendererDirectory, 'utilities'))
+  const ruleModules = ruleModuleNames(path.join(rendererDirectory, 'utilities'))
+
+  // The mutations and the control run in children, side by side, while this process runs the checks of the real sources; the results print in order.
+  const children = inParallel([...MUTATIONS, null], (mutation) => (mutation ? tryMutation(mutation, ruleModules) : checksInChild(rendererDirectory, ruleModules)))
+  const modules = await loadModules(path.join(rendererDirectory, 'utilities'), ruleModules)
 
   for (const [name, result] of await runChecks(modules, rendererDirectory)) {
     check(name, result)
   }
 
-  for (const [label, result, detail] of await inParallel(MUTATIONS, CHILDREN, tryMutation)) {
+  const results = await children
+  const control = results.pop()
+
+  for (const [label, result, detail] of results) {
     check(`mutation caught: ${label}`, result, detail)
   }
 
-  const control = failedNames(await checksInChild(rendererDirectory))
+  if (control instanceof Error) {
+    throw control
+  }
 
-  check('a fresh process on the unchanged sources passes every check', control.length === 0 ? true : `fails ${control.join('; ')}`)
+  const uncaught = failedNames(control)
+
+  check('a fresh process on the unchanged sources passes every check', uncaught.length === 0 ? true : `fails ${uncaught.join('; ')}`)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

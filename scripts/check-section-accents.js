@@ -8,12 +8,12 @@
 
   Run: node scripts/check-section-accents.js
 */
-const { spawnSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 
 const { loadUtilities } = require('./lib/utilities')
 const { plantedCopy } = require('./lib/mutant-source')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1041,16 +1041,14 @@ const INVALID = [
   ['an anchor that matches nothing', { file: APPEARANCE, from: 'export const PRESETS = {{{', to: 'export const PRESETS = {' }],
 ]
 
-// Every fault is judged in a process of its own, because each fresh copy of the modules stays in memory and the many copies of a whole run exhaust the heap of one process.
+// Every fault is judged in a process of its own, because each fresh copy of the modules stays in memory and the many copies of a whole run exhaust the heap of one process; the processes run side by side (CHECK_JOBS).
 const FAULTS = [...MUTATIONS, ...INVALID].map(([, fault]) => fault)
 
-const judgeApart = (index) => {
-  const { stdout, stderr, status } = spawnSync(process.execPath, [__filename, '--fault', String(index)], { encoding: 'utf8', maxBuffer: 1 << 26 })
-
+const judgeApart = async (index) => {
   try {
-    return JSON.parse(stdout.trim().split('\n').pop())
-  } catch {
-    return { error: `the judging process ended with status ${status}: ${stderr.trim().split('\n').pop()}` }
+    return lastJson(await runChild(__filename, ['--fault', String(index)]))
+  } catch (error) {
+    return { error: error.message }
   }
 }
 
@@ -1067,6 +1065,8 @@ const run = async () => {
 
   console.log('Section accents')
 
+  const verdicts = inParallel([...FAULTS.keys()], judgeApart)
+
   for (const [name, result] of await runChecks()) {
     tally(result === true)
     console.log(`${result === true ? 'PASS' : 'FAIL'}  ${name}${result === true ? '' : `  [${typeof result === 'string' ? result : 'false'}]`}`)
@@ -1074,8 +1074,10 @@ const run = async () => {
 
   console.log('\nMutations: each must fail at least one check, and the checks it fails are listed by number')
 
+  const judged = await verdicts
+
   for (const [index, [label]] of MUTATIONS.entries()) {
-    const { failed, invalid, error } = judgeApart(index)
+    const { failed, invalid, error } = judged[index]
 
     if (invalid !== undefined) {
       tally(false)
@@ -1090,7 +1092,7 @@ const run = async () => {
   }
 
   for (const [index, [label]] of INVALID.entries()) {
-    const unparsable = judgeApart(MUTATIONS.length + index)
+    const unparsable = judged[MUTATIONS.length + index]
 
     tally(unparsable.invalid !== undefined)
     console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)

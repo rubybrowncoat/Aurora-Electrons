@@ -17,12 +17,12 @@
 
   Mutants: each deliberate fault in a copy of the utilities (or of the page's script) is run, in a process of its own (--run-mutant), with the checks it names, and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
-const { spawn } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { jobs, inParallel, runChild } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1699,45 +1699,27 @@ const runProbe = async (mode) => {
 }
 
 // A child of this script, its last line of output read as JSON. A child that dies with no result did not run.
-const inChild = (argv) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename, ...argv], { stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = ''
-  let errors = ''
+const inChild = async (argv) => {
+  const { code, stdout, stderr } = await runChild(__filename, argv)
 
-  child.stdout.on('data', (chunk) => {
-    output += chunk
-  })
-  child.stderr.on('data', (chunk) => {
-    errors += chunk
-  })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    try {
-      resolve(JSON.parse(output.trim().split('\n').pop()))
-    } catch {
-      resolve({ error: `the process exited with ${code} and no result: ${(errors || output).trim().slice(0, 400)}` })
-    }
-  })
-})
-
-const MUTANT_PROCESSES = Math.max(1, Math.min(3, os.cpus().length - 1))
+  try {
+    return JSON.parse(stdout.trim().split('\n').pop())
+  } catch {
+    return { error: `the process exited with ${code} and no result: ${(stderr || stdout).trim().slice(0, 400)}` }
+  }
+}
 
 const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
 
-// Every planted fault in a process of its own, at most MUTANT_PROCESSES at a time, results printed in the order of the list.
+// Every planted fault in a process of its own, as many at a time as the pool allows, results printed in the order of the list.
 const runMutants = async (options) => {
-  const results = new Array(MUTANTS.length)
-  let next = 0
+  const results = await inParallel(MUTANTS, (mutant) => inChild(['--run-mutant', mutant.id, ...forwardedSaves(options)]), jobs())
 
-  const worker = async () => {
-    while (next < MUTANTS.length) {
-      const index = next++
-
-      results[index] = await inChild(['--run-mutant', MUTANTS[index].id, ...forwardedSaves(options)])
+  results.forEach((result, index) => {
+    if (result instanceof Error) {
+      results[index] = { error: result.message }
     }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(MUTANT_PROCESSES, MUTANTS.length) }, worker))
+  })
 
   MUTANTS.forEach(({ kind, name, fails }, index) => {
     const { error, absent, outcomes, seconds } = results[index]
@@ -1766,8 +1748,7 @@ const runMutants = async (options) => {
 
 // A rule planted by one process is in no other: the first probe registers a rule in its copy of the utilities, the second (a process of its own, as each mutant is) loads the same and must not have it, and neither the real utilities of either probe nor those of this process have it.
 const checkIsolation = async (real, options) => {
-  const planted = await inChild(['--run-probe', 'plant', ...forwardedSaves(options)])
-  const later = await inChild(['--run-probe', 'read', ...forwardedSaves(options)])
+  const [planted, later] = await Promise.all([inChild(['--run-probe', 'plant', ...forwardedSaves(options)]), inChild(['--run-probe', 'read', ...forwardedSaves(options)])])
 
   if (planted.error || later.error) {
     return `a probe did not run: ${planted.error || later.error}`

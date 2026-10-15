@@ -9,6 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
+const { endSection, printSection, runSections } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const HS_SCALE = 1000
@@ -27,6 +28,8 @@ const options = (() => {
 
     if (name === '--quick') {
       parsed.quick = true
+    } else if (name === '--part') {
+      parsed.part = argv[++index]
     } else if (name === '--stock' || name === '--modded') {
       parsed[name.slice(2)] = { file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) }
     } else {
@@ -516,9 +519,7 @@ const statusChecks = (packTanks, createTankPacker) => {
   check('crew is the tanks\' crew summed, and null when a tank\'s crew is unknown', crewless.crew === null && crewed.crew === 6 && crewed.count === 3)
 }
 
-const searchChecks = async (utilities, saves) => {
-  heading('The propulsion search with the packages')
-
+const searchChecks = async (utilities, saves, phase) => {
   const { packerFor } = utilities['tank-packing']
   const { searchPropulsion } = utilities['design-search']
   const { packTanks, meetsRequest, createTankPacker, tankPackageResult } = utilities['design-rules']
@@ -552,6 +553,22 @@ const searchChecks = async (utilities, saves) => {
   const SEARCH_SLICE = 2000
 
   const tech = { engineTech: 10, fuelTech: 0.7, thermalTech: 1, thermalCost: 1, minThrust: 0.5, maxThrust: 1.5, maxSize: 12 }
+  const sparseTanks = () => tanksOf([[1, 1, 1], ...Array.from({ length: 15 }, (_unused, index) => [600001 + 2 * index, 500000 + index, 500000 + index])])
+  const sparseInput = (tanks) => ({ hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks, maxCount: 40, share: 0.6, slice: SEARCH_SLICE })
+  const summary = (run) => JSON.stringify({ evaluated: run.result.counts.evaluated, matched: run.result.counts.feasible, packages: run.result.packages, sets: run.result.sets.map((set) => [set.engine.sizeHS, set.engine.thrust, set.count, set.tankHS, set.litres, set.cost, set.tanks.map((tank) => `${tank.id}x${tank.count}`)]) })
+
+  if (phase === 'cancel') {
+    const cancelTanks = sparseTanks()
+    const cancelled = searchPropulsion(sparseInput(cancelTanks))
+
+    for (let step = 0; step < 5; step++) {
+      cancelled.next()
+    }
+
+    return summary(search(sparseInput(cancelTanks)))
+  }
+
+  heading('The propulsion search with the packages')
 
   for (const save of saves) {
     const input = { hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks: save.tanks, maxCount: 40, share: 0.6, slice: SEARCH_SLICE }
@@ -589,7 +606,6 @@ const searchChecks = async (utilities, saves) => {
 
   check('the package result of a bound-exhausted package is estimated, not the planner\'s-policy status', tankPackageResult(stuck).status === STATUS.ESTIMATED && tankPackageResult(packTanks({ litres: 10, tanks: [] })).status === STATUS.UNAVAILABLE)
 
-  const sparseTanks = () => tanksOf([[1, 1, 1], ...Array.from({ length: 15 }, (_unused, index) => [600001 + 2 * index, 500000 + index, 500000 + index])])
   const sparsePacker = createTankPacker(sparseTanks())
   const coldPacker = createTankPacker(sparseTanks())
   const { warmCells, maxUnits } = sparsePacker.catalogue
@@ -637,71 +653,118 @@ const searchChecks = async (utilities, saves) => {
 
   check('abandoning a warm half way costs nothing: the packer still answers exactly as one never warmed, and a second warm completes the same table', midway > 0 && midway < interrupted.built() && [1e3, 123456, 9e7, 3e11].every((request) => countsOf(interrupted.pack(request)) === countsOf(reference.pack(request))) && countsOf(abandoned.pack(900000)) === countsOf(coldPacker.pack(900000)) && abandoned.pack(900000).status === 'optimal', `${midway} cells after two steps of the abandoned warm`)
 
-  const sparseInput = (tanks) => ({ hullHS: 60, speed: 2500, goal: { mode: 'range', value: 2e9 }, tech, tanks, maxCount: 40, share: 0.6, slice: SEARCH_SLICE })
   const sparseSearchTanks = sparseTanks()
   const sparseRun = search(sparseInput(sparseSearchTanks))
-  const summary = (run) => JSON.stringify({ evaluated: run.result.counts.evaluated, matched: run.result.counts.feasible, packages: run.result.packages, sets: run.result.sets.map((set) => [set.engine.sizeHS, set.engine.thrust, set.count, set.tankHS, set.litres, set.cost, set.tanks.map((tank) => `${tank.id}x${tank.count}`)]) })
   const sparseBuiltAtEnd = packerFor(sparseSearchTanks).built()
 
   check('the search of a sparse catalogue yields before it evaluates anything (the first step warms, building at most catalogue.warmCells cells), and no step evaluates more candidates than its slice', sparseRun.firstEvaluated === 0 && sparseRun.firstBuilt <= warmCells && sparseRun.maxStepCandidates <= SEARCH_SLICE && sparseBuiltAtEnd === maxUnits, `first step: ${sparseRun.firstBuilt} cells built, ${sparseRun.firstEvaluated} candidates; at most ${sparseRun.maxStepCandidates} of ${SEARCH_SLICE} candidates in a step over ${sparseRun.yields} yields`)
   check('the search of a sparse catalogue finds sets whose packages are all proved and hold their litres', sparseRun.result.sets.length > 0 && sparseRun.result.packages.boundExhausted === 0 && sparseRun.result.sets.every((set) => set.tankPackage.status === 'optimal' && meetsRequest(set.litres, set.tankPackage.requestedLitres)), `${sparseRun.result.sets.length} sets, packages ${JSON.stringify(sparseRun.result.packages)}`)
 
-  const cancelTanks = sparseTanks()
-  const cancelled = searchPropulsion(sparseInput(cancelTanks))
-
-  for (let step = 0; step < 5; step++) {
-    cancelled.next()
-  }
-
-  check('a search abandoned after five steps leaves the next search of the same tanks unchanged: it returns what a search from a fresh array returns', summary(search(sparseInput(cancelTanks))) === summary(sparseRun))
-
-  console.log('  step times are not asserted here; scripts/bench-tank-packing.js reports them over a fixed number of cold runs')
+  return summary(sparseRun)
 }
 
 // ---------- main ----------
 
-const run = async () => {
-  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'tank-packing', 'provenance'])
+// The checks of one save: its tanks against the enumeration, then the large requests. Prints the SKIP line when the save is not there.
+const saveChecks = async (data, utilities, label, { file, game, race }) => {
   const { packTanks } = utilities['design-rules']
-  const { createTankPacker, packerFor } = utilities['tank-packing']
-  const data = utilities['design-data']
-  const saves = []
+  const { createTankPacker } = utilities['tank-packing']
+  const database = await openSave(file)
 
-  checkCounterexample(packTanks)
-  syntheticSweeps(packTanks)
-  nondominatedChecks(packerFor)
-  statusChecks(packTanks, createTankPacker)
+  if (!database) {
+    console.log(`\nSKIP  ${label}: ${file} is not there`)
+
+    return
+  }
+
+  heading(`${label} save: ${database.file}, game ${game}, race ${race}`)
+
+  const tanks = await data.loadStockTanks(database, { GameID: game, RaceID: race })
+  const rand = mulberry32(game)
+  const dense = []
+
+  for (let request = 1; request <= (options.quick ? 700 : 1200); request += options.quick ? 17 : 7) {
+    dense.push(request)
+  }
+
+  console.log(`  ${tanks.length} tanks: ${tanks.map((tank) => `${tank.litres} L/${tank.sizeHS} HS/${tank.cost} BP`).join(', ')}`)
+  check(`${label}: every tank has whole litres, HS in thousandths and BP in hundredths`, tanks.every((tank) => Number.isInteger(tank.litres) && Math.abs(tank.sizeHS * HS_SCALE - Math.round(tank.sizeHS * HS_SCALE)) < 1e-6 && Math.abs(tank.cost * COST_SCALE - Math.round(tank.cost * COST_SCALE)) < 1e-6))
+
+  sweep(label, tanks, [...dense, ...requestList(rand, options.quick ? 40 : 150, 40000)], packTanks, { high: 40000 })
+  largeRequests(label, tanks, createTankPacker, { stockClosedForm: label === 'stock' })
+  database.close()
+}
+
+// The tanks of the saves that are there, quietly, for the search checks.
+const loadSaves = async (data) => {
+  const saves = []
 
   for (const [label, { file, game, race }] of [['stock', options.stock], ['modded', options.modded]]) {
     const database = await openSave(file)
 
-    if (!database) {
-      console.log(`\nSKIP  ${label}: ${file} is not there`)
-
-      continue
+    if (database) {
+      saves.push({ label, tanks: await data.loadStockTanks(database, { GameID: game, RaceID: race }) })
+      database.close()
     }
-
-    heading(`${label} save: ${database.file}, game ${game}, race ${race}`)
-
-    const tanks = await data.loadStockTanks(database, { GameID: game, RaceID: race })
-    const rand = mulberry32(game)
-    const dense = []
-
-    for (let request = 1; request <= (options.quick ? 700 : 1200); request += options.quick ? 17 : 7) {
-      dense.push(request)
-    }
-
-    console.log(`  ${tanks.length} tanks: ${tanks.map((tank) => `${tank.litres} L/${tank.sizeHS} HS/${tank.cost} BP`).join(', ')}`)
-    check(`${label}: every tank has whole litres, HS in thousandths and BP in hundredths`, tanks.every((tank) => Number.isInteger(tank.litres) && Math.abs(tank.sizeHS * HS_SCALE - Math.round(tank.sizeHS * HS_SCALE)) < 1e-6 && Math.abs(tank.cost * COST_SCALE - Math.round(tank.cost * COST_SCALE)) < 1e-6))
-
-    sweep(label, tanks, [...dense, ...requestList(rand, options.quick ? 40 : 150, 40000)], packTanks, { high: 40000 })
-    largeRequests(label, tanks, createTankPacker, { stockClosedForm: label === 'stock' })
-    saves.push({ label, tanks })
-    database.close()
   }
 
-  if (saves.length) {
-    await searchChecks(utilities, saves)
+  return saves
+}
+
+// The parts that run in processes of their own (head, stock, modded, search, cancel), in the order the output reads, with the time each takes as its weight. The two searches of the sparse catalogue take most of the time and are independent: the cancel part is the search that follows an abandoned one, compared in the parent with the search of a fresh array.
+const PARTS = [{ part: 'head', weight: 5 }, { part: 'stock', weight: 15 }, { part: 'modded', weight: 50 }, { part: 'search', weight: 100 }, { part: 'cancel', weight: 100 }]
+
+const forwarded = () => [...(options.quick ? ['--quick'] : []), ...['stock', 'modded'].flatMap((label) => [`--${label}`, options[label].file, options[label].game, options[label].race])].map(String)
+
+const run = async () => {
+  const utilities = await loadUtilities(['design-data', 'design-rules', 'design-search', 'tank-packing', 'provenance'])
+  const data = utilities['design-data']
+
+  if (options.part === 'head') {
+    const { packTanks } = utilities['design-rules']
+    const { createTankPacker, packerFor } = utilities['tank-packing']
+
+    checkCounterexample(packTanks)
+    syntheticSweeps(packTanks)
+    nondominatedChecks(packerFor)
+    statusChecks(packTanks, createTankPacker)
+    endSection(checks, failures)
+  }
+
+  if (options.part === 'stock' || options.part === 'modded') {
+    await saveChecks(data, utilities, options.part, options[options.part])
+    endSection(checks, failures)
+  }
+
+  if (options.part === 'search' || options.part === 'cancel') {
+    const saves = await loadSaves(data)
+    const summary = saves.length ? await searchChecks(utilities, saves, options.part) : null
+
+    endSection(checks, failures, { ran: saves.length > 0, summary })
+  }
+
+  const results = await runSections(__filename, PARTS.map(({ part, weight }) => ({ args: ['--part', part, ...forwarded()], weight })))
+  let searchSummary = null
+  let cancelSummary = null
+  let ran = false
+
+  results.forEach((result, index) => {
+    const section = printSection(result)
+
+    checks += section.checks
+    failures += section.failures
+
+    if (PARTS[index].part === 'search') {
+      ran = section.extra.ran
+      searchSummary = section.extra.summary
+    } else if (PARTS[index].part === 'cancel') {
+      cancelSummary = section.extra.summary
+    }
+  })
+
+  if (ran) {
+    check('a search abandoned after five steps leaves the next search of the same tanks unchanged: it returns what a search from a fresh array returns', cancelSummary === searchSummary)
+    console.log('  step times are not asserted here; scripts/bench-tank-packing.js reports them over a fixed number of cold runs')
   }
 
   console.log(`\n${checks - failures}/${checks} checks passed`)

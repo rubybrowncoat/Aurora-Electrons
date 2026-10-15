@@ -12,6 +12,7 @@ const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -409,12 +410,14 @@ const MUTATIONS = [
 ]
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785] }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -555,11 +558,9 @@ const PAGE_MUTATIONS = [
   ['the Missile panel is shown for any category', 'return this.activeCategoryId === MISSILE_CATEGORY_ID', 'return true'],
 ]
 
-const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['missile-hit', 'provenance'])
-  const mods = { hit: utilities['missile-hit'], provenance: utilities.provenance }
+// ---------- the parts: the checks of the real sources, each mutant, the page and each save run in a process of their own ----------
 
+const checkSynthetic = (mods) => {
   console.log('Synthetic checks')
 
   for (const [name, test] of synthetic(mods)) {
@@ -573,55 +574,114 @@ const run = async () => {
 
     check(name, result)
   }
+}
 
-  console.log('\nMutations: each must fail at least one check')
+const checkMutation = async ([label, from, to, nth]) => {
+  const directory = mutatedCopy(FILE, from, to, nth)
 
-  for (const [label, from, to, nth] of MUTATIONS) {
-    const directory = mutatedCopy(FILE, from, to, nth)
-
-    try {
-      let failed = []
-
-      try {
-        const mutant = await loadUtilities(['missile-hit', 'provenance'], { directory })
-
-        failed = synthetic({ hit: mutant['missile-hit'], provenance: mutant.provenance }).filter(([, test]) => {
-          try {
-            return test() !== true
-          } catch (error) {
-            return true
-          }
-        })
-      } catch (error) {
-        failed = [[`does not load: ${error.message}`]]
-      }
-
-      check(`mutation caught: ${label}`, failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  }
-
-  console.log('\nThe Designed Tech page (its script on a pseudo instance, scripts/lib/page-loader.js)')
-
-  for (const [statement, held] of await pageStatements(null)) {
-    check(`page: ${statement}`, held)
-  }
-
-  for (const [label, from, to] of PAGE_MUTATIONS) {
+  try {
     let failed = []
 
     try {
-      failed = (await pageStatements(replacing(from, to))).filter(([, held]) => !held)
+      const mutant = await loadUtilities(['missile-hit', 'provenance'], { directory })
+
+      failed = synthetic({ hit: mutant['missile-hit'], provenance: mutant.provenance }).filter(([, test]) => {
+        try {
+          return test() !== true
+        } catch (error) {
+          return true
+        }
+      })
     } catch (error) {
       failed = [[`does not load: ${error.message}`]]
     }
 
-    check(`page mutation caught: ${label}`, failed.length > 0 ? true : 'every page check still passes', `${failed.length} checks fail`)
+    check(`mutation caught: ${label}`, failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const checkPage = async () => {
+  for (const [statement, held] of await pageStatements(null)) {
+    check(`page: ${statement}`, held)
+  }
+}
+
+const checkPageMutation = async ([label, from, to]) => {
+  let failed = []
+
+  try {
+    failed = (await pageStatements(replacing(from, to))).filter(([, held]) => !held)
+  } catch (error) {
+    failed = [[`does not load: ${error.message}`]]
   }
 
-  await compareSave('modded', options.modded, mods)
-  await compareSave('stock', options.stock, mods)
+  check(`page mutation caught: ${label}`, failed.length > 0 ? true : 'every page check still passes', `${failed.length} checks fail`)
+}
+
+const SAVE_LABELS = ['modded', 'stock']
+
+// One part, in this process: `synthetic`, a mutation by its index (`mutation:3`), `page`, a page mutation by its index (`pagemutation:1`) or a save by its label.
+const runPart = async (part, options) => {
+  const [kind, index] = part.split(':')
+
+  if (kind === 'mutation') {
+    await checkMutation(MUTATIONS[Number(index)])
+  } else if (kind === 'pagemutation') {
+    await checkPageMutation(PAGE_MUTATIONS[Number(index)])
+  } else if (part === 'page') {
+    await checkPage()
+  } else if (part === 'synthetic' || SAVE_LABELS.includes(part)) {
+    const utilities = await loadUtilities(['missile-hit', 'provenance'])
+    const mods = { hit: utilities['missile-hit'], provenance: utilities.provenance }
+
+    if (part === 'synthetic') {
+      checkSynthetic(mods)
+    } else {
+      await compareSave(part, options[part], mods)
+    }
+  } else {
+    throw new Error(`No part is named ${part}`)
+  }
+}
+
+const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+
+const run = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.part !== null) {
+    await runPart(options.part, options)
+    endSection(checks, failures)
+  }
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'synthetic', weight: 5 },
+    ...MUTATIONS.map((_mutation, index) => ({ part: `mutation:${index}`, weight: 3 })),
+    { part: 'page', weight: 5 },
+    ...PAGE_MUTATIONS.map((_mutation, index) => ({ part: `pagemutation:${index}`, weight: 5 })),
+    ...SAVE_LABELS.map((label) => ({ part: label, weight: 10 })),
+  ]
+
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
+  let at = 0
+
+  const printed = () => {
+    const counts = printSection(sections[at++])
+
+    checks += counts.checks
+    failures += counts.failures
+  }
+
+  printed()
+  console.log('\nMutations: each must fail at least one check')
+  MUTATIONS.forEach(printed)
+  console.log('\nThe Designed Tech page (its script on a pseudo instance, scripts/lib/page-loader.js)')
+  printed()
+  PAGE_MUTATIONS.forEach(printed)
+  SAVE_LABELS.forEach(printed)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

@@ -18,6 +18,7 @@
   FULL=1 runs every typeface and scale on all three viewports; the default is a short matrix on 1280x720. PAGES=/production,/finances narrows the pages.
 */
 const { chromium } = require('playwright')
+const { inParallel, jobs } = require('./lib/check-pool')
 
 const BASE = process.env.BASE_URL || 'http://localhost:9080'
 const FULL = process.env.FULL === '1'
@@ -212,6 +213,10 @@ const watch = (page) => {
   const note = (message) => page.aeErrors.push({ phase: page.aePhase || 'start', message: message.split('\n')[0].slice(0, 300) })
 
   page.aeErrors = []
+  page.aePending = 0
+  page.on('request', () => page.aePending++)
+  page.on('requestfinished', () => page.aePending--)
+  page.on('requestfailed', () => page.aePending--)
   page.on('pageerror', (error) => note(`uncaught: ${error.message}`))
   page.on('console', (message) => {
     if (message.type() === 'error' && !/^Failed to load resource/.test(message.text())) {
@@ -222,6 +227,48 @@ const watch = (page) => {
 
 // Everything reported since the last take, once per message and phase, as problems of the kind `runtime`.
 const errorsOf = (page) => [...new Set(page.aeErrors.splice(0).map(({ phase, message }) => `${message} [during ${phase}]`))].map((text) => ['runtime', text])
+
+// Runs in the page. Resolves once nothing has changed for `quiet` ms and two frames have been drawn since: no change to the document (a node, an attribute, a text) and no transition or animation with an end still running; endless animations (a spinner) do not count. Resolves at `max` ms at the latest, so a page that never stops changing is read after the same time a fixed wait would have given it.
+const quietPage = ([quiet, max]) => new Promise((resolve) => {
+  let last = performance.now()
+  let frames = 0
+  const observer = new MutationObserver(() => {
+    last = performance.now()
+    frames = 0
+  })
+  const stop = () => {
+    observer.disconnect()
+    clearTimeout(cap)
+    resolve()
+  }
+  const cap = setTimeout(stop, max)
+  const tick = () => {
+    frames++
+
+    if (document.getAnimations().some((animation) => animation.playState === 'running' && animation.effect && Number.isFinite(animation.effect.getComputedTiming().endTime))) {
+      last = performance.now()
+      frames = 0
+    }
+
+    if (frames >= 2 && performance.now() - last >= quiet) {
+      stop()
+    } else {
+      requestAnimationFrame(tick)
+    }
+  }
+
+  observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
+  requestAnimationFrame(tick)
+})
+
+// Waits until the page has settled (see `quietPage`) and has no request in flight, for `max` ms at most: what a fixed wait of `max` ms stood for, ending as soon as the page is still.
+const settle = async (page, quiet, max) => {
+  const deadline = Date.now() + max
+
+  do {
+    await page.evaluate(quietPage, [quiet, Math.max(deadline - Date.now(), 1)])
+  } while (page.aePending > 0 && Date.now() < deadline)
+}
 
 // The pointer over the centre of the start of a selector's element, scrolled into view, after it was parked in the corner.
 const hoverOn = async (page, selector) => {
@@ -237,7 +284,7 @@ const hoverOn = async (page, selector) => {
 
   await page.mouse.move(page.viewportSize().width - 2, 2)
   await page.mouse.move(x, y)
-  await page.waitForTimeout(120)
+  await settle(page, 40, 120)
 
   return { x, y }
 }
@@ -334,14 +381,14 @@ const keyboardReach = async (page, index) => {
     element.scrollIntoView({ block: 'center' })
     element.focus()
   }, control)
-  await page.waitForTimeout(400)
+  await settle(page, 100, 400)
 
   const shown = await popupOf(page, control)
   const ax = shown.text === null ? null : await accessibleOf(page, control)
   const cut = await stillCut(page, index)
 
   await page.evaluate((query) => document.querySelector(query).blur(), control)
-  await page.waitForTimeout(80)
+  await settle(page, 30, 80)
   await page.keyboard.press('Escape')
 
   const left = await popupOf(page, control)
@@ -367,7 +414,7 @@ const opened = async (page) => {
 
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => window.$app && window.$app.$store, null, { timeout: 60000 })
-  await page.waitForTimeout(800)
+  await page.waitForFunction(() => window.$app.$store.getters.RaceID || document.querySelector('.empire-list__game'), null, { timeout: 60000 })
 
   if (!(await page.evaluate(() => window.$app.$store.getters.RaceID))) {
     const game = page.locator('.empire-list__game:has-text("Aurelian Empire")').first()
@@ -375,7 +422,7 @@ const opened = async (page) => {
     await game.waitFor({ timeout: 120000 })
     await game.click()
     await page.waitForFunction(() => window.$app.$store.getters.RaceID, null, { timeout: 60000 })
-    await page.waitForTimeout(1500)
+    await settle(page, 400, 1500)
   }
 }
 
@@ -386,7 +433,7 @@ const go = async (page, route) => {
       page.aePhase = route
       await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), route)
       await page.waitForFunction((target) => window.$app && window.$app.$route.path === target, route, { timeout: 20000 })
-      await page.waitForTimeout(1800)
+      await settle(page, 500, 1800)
 
       return
     } catch (error) {
@@ -410,10 +457,6 @@ const previewFont = (page, family, scale) => page.evaluate(async ([f, s, url]) =
 
 // The KNOWN entry a failure is the failure of: the route it was read on, its kind, its text and its place.
 const knownFor = ({ where, kind, text, at }) => KNOWN.find((item) => where.includes(` ${item.route} `) && item.kind === kind && item.text.test(text) && item.at === at)
-
-const fail = (where, kind, text, at = '') => {
-  failures.push({ where, kind, text, at })
-}
 
 // Mounts the fixtures: elements that end in an ellipsis in the ways the pages do, and two that the check must flag.
 const mount = (cut) => {
@@ -695,6 +738,8 @@ const pageFixture = async (page) => {
 
 // A table whose cell wraps a signed number with its unit, in a panel of the page, where the check must report it and no KNOWN entry may excuse it.
 const knownFixture = async (page) => {
+  await previewFont(page, 'roboto', 1)
+  await settle(page, 250, 700)
   await page.evaluate(() => {
     document.getElementById('ae-fixture')?.remove()
 
@@ -731,9 +776,9 @@ const menuReach = async (page, index) => {
     element.scrollIntoView({ block: 'center' })
     element.focus()
   }, control)
-  await page.waitForTimeout(120)
+  await settle(page, 40, 120)
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(300)
+  await settle(page, 120, 300)
 
   const opened = await page.evaluate((query) => document.querySelector(query).closest('.v-input__slot').getAttribute('aria-expanded') === 'true', control)
   const shown = await page.evaluate((query) => {
@@ -750,14 +795,14 @@ const menuReach = async (page, index) => {
   }, control)
 
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(300)
+  await settle(page, 120, 300)
 
   const back = await popupOf(page, control)
   const ax = back.text === null ? null : await accessibleOf(page, control)
   const cut = await stillCut(page, index)
 
   await page.evaluate((query) => document.querySelector(query).blur(), control)
-  await page.waitForTimeout(80)
+  await settle(page, 30, 80)
 
   const end = await page.evaluate((query) => document.querySelector(query).getAttribute('aria-describedby'), control)
 
@@ -765,20 +810,20 @@ const menuReach = async (page, index) => {
 }
 
 // A page in a typeface and size: what the scan finds and how many cut texts were read with the pointer and with the keyboard.
-const readPage = async (page, where, family, scale) => {
+const readPage = async (page, where, family, scale, renderWait = 5000) => {
   const found = []
   let pointer = 0
   let keyboard = 0
   let menus = 0
 
   await previewFont(page, family, scale)
-  await page.waitForTimeout(700)
+  await settle(page, 250, 700)
 
   if (!(await page.evaluate(([f, s]) => window.__typography === `${f}:${s}` && Boolean(document.querySelector('.v-application')), [family, scale]))) {
     throw new Error(`${where}: the page reloaded during the run`)
   }
 
-  const shown = await page.waitForFunction(rendered, null, { timeout: 5000 }).then(() => true, (error) => {
+  const shown = await page.waitForFunction(rendered, null, { timeout: renderWait }).then(() => true, (error) => {
     if (error.name !== 'TimeoutError') {
       throw error
     }
@@ -793,6 +838,8 @@ const readPage = async (page, where, family, scale) => {
   }
 
   const { problems, cut } = await page.evaluate(scan, FOCUSABLE)
+
+  console.error(`EQ ${where} cut=${cut} problems=${problems.length} ${JSON.stringify(problems).length}`)
 
   found.push(...problems)
 
@@ -881,7 +928,7 @@ const renderFixture = async (page) => {
         throw new Error(`render fixture ${mode}: the page reloaded during the run`)
       }
 
-      const read = await readPage(page, `render fixture ${mode}`, 'roboto', 1)
+      const read = await readPage(page, `render fixture ${mode}`, 'roboto', 1, 2000)
       const foreign = read.found.filter(([kind, text]) => kind === 'runtime' && !(mode === 'throws' && thrownAt('/information').includes(text)))
       const own = read.found.filter((entry) => !foreign.includes(entry))
       const seen = [...new Set(own.map(([kind]) => kind))].sort()
@@ -923,7 +970,7 @@ const paletteCheck = async (page, width, height, family, scale) => {
   page.aePhase = `palette ${family} ${scale} on /technologies`
   await previewFont(page, family, scale)
   await page.keyboard.press('Control+k')
-  await page.waitForTimeout(700)
+  await settle(page, 150, 700)
 
   const box = await page.evaluate(() => {
     const dialog = document.querySelector('.page-palette')
@@ -937,7 +984,7 @@ const paletteCheck = async (page, width, height, family, scale) => {
   }
 
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(300)
+  await settle(page, 120, 300)
 
   return [...found, ...errorsOf(page)]
 }
@@ -998,96 +1045,178 @@ const settled = async (page, route, task) => {
   }
 }
 
+// A page of its own in a window of its own (a context, so the fonts, the scale and the storage of one page never reach another), opened on the app with the race picked. What it reported while it opened goes with the first step that takes the page.
+const openPage = async (browser, width, height) => {
+  const page = await (await browser.newContext({ viewport: { width, height } })).newPage()
+
+  try {
+    watch(page)
+    await open(page)
+  } catch (error) {
+    await page.context().close().catch(() => {})
+
+    throw error
+  }
+
+  return { page, opening: errorsOf(page).map(([kind, text]) => ({ where: `${width}x${height} open`, kind, text, at: '' })) }
+}
+
+// The steps of one window, each on a page of its own while it runs: the fixtures (the first on a page opened afresh, in the typeface it opens in; the others set the typeface they read in), every route with all its combinations, and every palette. The failures of a step are kept with it and put together in the order of the steps, whichever finished first.
+const stepsOf = (width, height) => {
+  const size = `${width}x${height}`
+  const steps = []
+  const step = (fresh, work) => steps.push({ width, height, fresh, work })
+
+  if (width === VIEWPORTS[0][0]) {
+    step(true, async (page, fail, drain) => {
+      await go(page, '/about')
+
+      const found = await settled(page, '/about', () => fixtures(page))
+
+      found.forEach(([name, detail]) => fail('fixtures', name, detail))
+      drain('fixtures')
+    })
+    step(false, async (page, fail) => {
+      await go(page, '/about')
+
+      const read = await settled(page, '/about', () => pageFixture(page))
+
+      read.found.forEach(([kind, text]) => fail('page fixture', kind, text))
+
+      return { fixtureReads: read }
+    })
+    step(false, async (page, fail) => {
+      await go(page, '/about')
+
+      const rendering = await settled(page, '/about', () => renderFixture(page))
+
+      rendering.forEach(([name, detail]) => fail('render fixture', name, detail))
+    })
+    step(false, async (page, fail) => {
+      await go(page, '/about')
+
+      const foreign = await settled(page, '/about', () => foreignFixture(page))
+
+      foreign.forEach(([name, detail]) => fail('render fixture', name, detail))
+    })
+    step(false, async (page, fail) => {
+      await go(page, '/about')
+
+      const palette = await settled(page, '/about', () => paletteFixture(page))
+
+      palette.forEach(([name, detail]) => fail('palette fixture', name, detail))
+    })
+    step(false, async (page, fail) => {
+      await go(page, '/about')
+
+      const foreignPalette = await settled(page, '/about', () => foreignPaletteFixture(page))
+
+      foreignPalette.forEach(([name, detail]) => fail('palette fixture', name, detail))
+    })
+    step(false, async (page, fail, drain) => {
+      await go(page, '/warnings')
+
+      const { wrapped, known } = await settled(page, '/warnings', () => knownFixture(page))
+
+      if (!wrapped.length) {
+        fail('fixtures', 'check: a wrapped signed number with its unit is reported', 'the fixture "-987654 MSP" was not reported')
+      }
+
+      drain('known fixture')
+
+      if (known.length) {
+        fail('fixtures', 'check: a KNOWN entry excuses only its own place', `the fixture "-987654 MSP" in another place on /warnings was excused: ${JSON.stringify(known)}`)
+      }
+    })
+  }
+
+  for (const route of PAGES) {
+    step(false, async (page, fail) => {
+      const counts = { pointer: 0, keyboard: 0, menus: 0 }
+
+      await go(page, route)
+
+      for (const [family, scale] of COMBOS) {
+        const where = `${size} ${route} ${family} ${scale}`
+        const result = await settled(page, route, () => readPage(page, where, family, scale))
+
+        result.found.forEach(([kind, text, at]) => fail(where, kind, text, at))
+        counts.pointer += result.pointer
+        counts.keyboard += result.keyboard
+        counts.menus += result.menus
+      }
+
+      return counts
+    })
+  }
+
+  if (width === 1280) {
+    for (const [family, scale] of COMBOS) {
+      step(false, async (page, fail) => {
+        const where = `${size} palette ${family} ${scale}`
+        const found = await paletteCheck(page, width, height, family, scale)
+
+        found.forEach(([kind, text]) => fail(where, kind, text))
+      })
+    }
+  }
+
+  return steps
+}
+
+// How many pages are open side by side: the pool's share of the machine, and no more than the dev server and the browser take without the timing of the page's own observers drifting.
+const PAGES_AT_ONCE = 8
+
 const run = async () => {
   const browser = await chromium.launch()
+  const idle = new Map(VIEWPORTS.map(([width, height]) => [`${width}x${height}`, []]))
   let pointerChecked = 0
   let keyboardChecked = 0
   let menusChecked = 0
   let fixtureReads = { keyboard: 0, menus: 0 }
 
-  try {
-    for (const [width, height] of VIEWPORTS) {
-      const page = await (await browser.newContext({ viewport: { width, height } })).newPage()
+  // Runs a step on an idle page of its window (or a page opened afresh), and keeps the page for the next step unless the step wanted a fresh page or failed.
+  const execute = async ({ width, height, fresh, work }) => {
+    const key = `${width}x${height}`
+    const held = (!fresh && idle.get(key).pop()) || await openPage(browser, width, height)
+    const failed = held.opening.splice(0)
+    const fail = (where, kind, text, at = '') => failed.push({ where, kind, text, at })
+    const drain = (where) => errorsOf(held.page).forEach(([kind, text]) => fail(where, kind, text))
 
-      const drain = (where) => errorsOf(page).forEach(([kind, text]) => fail(where, kind, text))
+    try {
+      const value = await work(held.page, fail, drain)
 
-      watch(page)
-      await open(page)
-      drain(`${width}x${height} open`)
+      drain(`${key} end of run`)
 
-      if (width === VIEWPORTS[0][0]) {
-        await go(page, '/about')
-        const found = await settled(page, '/about', () => fixtures(page))
-
-        found.forEach(([name, detail]) => fail('fixtures', name, detail))
-        drain('fixtures')
-
-        await go(page, '/about')
-
-        const read = await settled(page, '/about', () => pageFixture(page))
-
-        read.found.forEach(([kind, text]) => fail('page fixture', kind, text))
-        fixtureReads = read
-
-        await go(page, '/about')
-
-        const rendering = await settled(page, '/about', () => renderFixture(page))
-
-        rendering.forEach(([name, detail]) => fail('render fixture', name, detail))
-
-        const foreign = await settled(page, '/about', () => foreignFixture(page))
-
-        foreign.forEach(([name, detail]) => fail('render fixture', name, detail))
-
-        const palette = await settled(page, '/about', () => paletteFixture(page))
-
-        palette.forEach(([name, detail]) => fail('palette fixture', name, detail))
-
-        const foreignPalette = await settled(page, '/about', () => foreignPaletteFixture(page))
-
-        foreignPalette.forEach(([name, detail]) => fail('palette fixture', name, detail))
-
-        await go(page, '/warnings')
-
-        const { wrapped, known } = await settled(page, '/warnings', () => knownFixture(page))
-
-        if (!wrapped.length) {
-          fail('fixtures', 'check: a wrapped signed number with its unit is reported', 'the fixture "-987654 MSP" was not reported')
-        }
-
-        drain('known fixture')
-
-        if (known.length) {
-          fail('fixtures', 'check: a KNOWN entry excuses only its own place', `the fixture "-987654 MSP" in another place on /warnings was excused: ${JSON.stringify(known)}`)
-        }
+      if (fresh) {
+        await held.page.context().close()
+      } else {
+        idle.get(key).push(held)
       }
 
-      for (const route of PAGES) {
-        await go(page, route)
+      return { failed, ...value }
+    } catch (error) {
+      await held.page.context().close().catch(() => {})
 
-        for (const [family, scale] of COMBOS) {
-          const where = `${width}x${height} ${route} ${family} ${scale}`
-          const result = await settled(page, route, () => readPage(page, where, family, scale))
-
-          result.found.forEach(([kind, text, at]) => fail(where, kind, text, at))
-          pointerChecked += result.pointer
-          keyboardChecked += result.keyboard
-          menusChecked += result.menus
-        }
-      }
-
-      if (width === 1280) {
-        for (const [family, scale] of COMBOS) {
-          const where = `${width}x${height} palette ${family} ${scale}`
-          const found = await paletteCheck(page, width, height, family, scale)
-
-          found.forEach(([kind, text]) => fail(where, kind, text))
-        }
-      }
-
-      drain(`${width}x${height} end of run`)
-      await page.context().close()
+      throw error
     }
+  }
+
+  try {
+    const steps = VIEWPORTS.flatMap(([width, height]) => stepsOf(width, height))
+    const results = await inParallel(steps, execute, Math.min(PAGES_AT_ONCE, jobs(), steps.length))
+
+    results.forEach((result) => {
+      if (result instanceof Error) {
+        throw result
+      }
+
+      failures.push(...result.failed)
+      pointerChecked += result.pointer || 0
+      keyboardChecked += result.keyboard || 0
+      menusChecked += result.menus || 0
+      fixtureReads = result.fixtureReads || fixtureReads
+    })
   } finally {
     await browser.close()
   }

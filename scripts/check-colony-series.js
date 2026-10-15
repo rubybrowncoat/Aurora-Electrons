@@ -14,11 +14,13 @@
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('assert').strict
 const sqlite3 = require('sqlite3')
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { plantedCopy } = require('./lib/mutant-source')
 const { loadPage, replacing, instantiate } = require('./lib/page-loader')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -70,10 +72,17 @@ const handleOf = (file) => {
   return handles.get(file)
 }
 
-const rowsOf = async (file, sql) => {
-  const handle = await handleOf(file)
+const rowCache = new Map()
 
-  return new Promise((resolve, reject) => handle.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))
+// A save is read only, so the rows a statement gives are the same each time it is run. Each caller gets rows of its own.
+const rowsOf = async (file, sql) => {
+  const key = `${file}\n${sql}`
+
+  if (!rowCache.has(key)) {
+    rowCache.set(key, handleOf(file).then((handle) => new Promise((resolve, reject) => handle.all(sql, (error, rows) => (error ? reject(error) : resolve(rows))))))
+  }
+
+  return (await rowCache.get(key)).map((row) => ({ ...row }))
 }
 
 // The database the recorder reads, as scripts/check-history-retention.js gives it: one transaction that is the connection, each statement logged, the colony statement made to fail on request.
@@ -1079,15 +1088,17 @@ const planted = (mutation) => {
   return copy
 }
 
-const main = async () => {
+// What the baseline and each mutation print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
+const baselineEntries = async () => {
   const real = await loadModules(utilitiesDirectory)
   const context = contextOf(real)
+  const entries = []
 
   if (!fs.existsSync(MODDED.file)) {
-    console.log(`  skip   ${MODDED.file} is not here, so the single group is not run`)
+    entries.push({ log: `  skip   ${MODDED.file} is not here, so the single group is not run` })
   }
 
-  console.log('The colony series')
+  entries.push({ log: 'The colony series' })
 
   for (const entry of checks) {
     number++
@@ -1100,63 +1111,100 @@ const main = async () => {
     const outcome = await outcomeOf(context, entry)
 
     if (outcome === 'skip') {
-      console.log(`  skip   ${number}. ${entry.key}: the saves of ${path.relative(root, FALRYX)} are not here`)
+      entries.push({ log: `  skip   ${number}. ${entry.key}: the saves of ${path.relative(root, FALRYX)} are not here` })
       continue
     }
 
-    show(`${number}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`)
+    entries.push({ show: [`${number}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`] })
   }
 
-  if (!process.argv.includes('--no-mutations')) {
-    console.log('\nMutations: each must break the checks it names')
+  return entries
+}
 
-    for (const mutation of MUTATIONS) {
-      const began = Date.now()
-      let directory = null
+const mutationEntries = async (mutation) => {
+  const began = Date.now()
+  let directory = null
 
-      try {
-        directory = mutation.page ? null : planted(mutation)
+  try {
+    directory = mutation.page ? null : planted(mutation)
 
-        const mutant = contextOf(mutation.page ? real : await loadModules(directory), { mutate: mutation.page || null })
-        const named = checks.filter((entry) => mutation.fails.includes(entry.key))
-        const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
-        const missed = []
-        const skipped = []
+    const mutant = contextOf(await loadModules(mutation.page ? utilitiesDirectory : directory), { mutate: mutation.page || null })
+    const named = checks.filter((entry) => mutation.fails.includes(entry.key))
+    const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
+    const missed = []
+    const skipped = []
 
-        for (const entry of named) {
-          if (entry.needs === 'single' && !fs.existsSync(MODDED.file)) {
-            skipped.push(entry.key)
-            continue
-          }
+    for (const entry of named) {
+      if (entry.needs === 'single' && !fs.existsSync(MODDED.file)) {
+        skipped.push(entry.key)
+        continue
+      }
 
-          const outcome = await outcomeOf(mutant, entry)
+      const outcome = await outcomeOf(mutant, entry)
 
-          if (outcome === 'skip') {
-            skipped.push(entry.key)
-          } else if (outcome === true) {
-            missed.push(entry.key)
-          }
-        }
-
-        const ran = named.length - skipped.length
-
-        show(`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${mutation.fails.join(', ')}; ${((Date.now() - began) / 1000).toFixed(1)} s`)
-      } catch (error) {
-        show(`mutation caught: ${mutation.name}`, `does not load: ${error.message}`)
-      } finally {
-        if (directory) {
-          fs.rmSync(directory, { recursive: true, force: true })
-        }
+      if (outcome === 'skip') {
+        skipped.push(entry.key)
+      } else if (outcome === true) {
+        missed.push(entry.key)
       }
     }
+
+    const ran = named.length - skipped.length
+
+    return [{ show: [`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${mutation.fails.join(', ')}; ${((Date.now() - began) / 1000).toFixed(1)} s`] }]
+  } catch (error) {
+    return [{ show: [`mutation caught: ${mutation.name}`, `does not load: ${error.message}`] }]
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
   }
+}
+
+const RESULT = 'RESULT '
+
+// A child runs the baseline (`--baseline`) or some mutations in turn (`--mutants=<i>,<i>`) in a process of its own, so no chunk shares the module state, the stores or the scenarios of another, and prints its entries as JSON on its last line: those of the baseline, or the list of the entries of each mutation.
+const childMain = async () => {
+  const given = process.argv.find((argument) => argument.startsWith('--mutants='))
+  let entries = null
+
+  if (given) {
+    entries = []
+
+    for (const index of given.slice('--mutants='.length).split(',')) {
+      entries.push(await mutationEntries(MUTATIONS[Number(index)]))
+    }
+  } else {
+    entries = await baselineEntries()
+  }
+
+  process.stdout.write(`${RESULT}${JSON.stringify(entries)}\n`, () => process.exit(0))
+}
+
+const main = async () => {
+  if (process.argv.includes('--baseline') || process.argv.some((argument) => argument.startsWith('--mutants='))) {
+    return childMain()
+  }
+
+  const mutations = process.argv.includes('--no-mutations') ? [] : MUTATIONS
+  const chunks = chunksOf(mutations.length)
+  const items = [['--baseline'], ...chunks.map((list) => [`--mutants=${list.join(',')}`])]
+  const outcomes = await inParallel(items, async (args) => lastJson(await runChild(__filename, args), RESULT))
+  const replay = (entries) => entries.forEach((entry) => (entry.log !== undefined ? console.log(entry.log) : show(...entry.show)))
+
+  if (outcomes[0] instanceof Error) {
+    throw outcomes[0]
+  }
+
+  replay(outcomes[0])
+
+  if (mutations.length) {
+    console.log('\nMutations: each must break the checks it names')
+  }
+
+  spread(chunks, outcomes.slice(1)).forEach((outcome, index) => (outcome instanceof Error ? show(`mutation caught: ${mutations[index].name}`, `does not run: ${outcome.message}`) : replay(outcome)))
 
   console.log(`\n${total - failures} of ${total} checks passed`)
-
-  for (const handle of handles.values()) {
-    ;(await handle).close()
-  }
-
   process.exit(failures ? 1 : 0)
 }
 

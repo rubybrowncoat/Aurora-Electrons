@@ -15,6 +15,7 @@ const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -981,12 +982,14 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785] }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -1025,11 +1028,11 @@ const openSave = (file) => new Promise((resolve, reject) => {
   })
 })
 
-const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities([...NAMES, 'design-data', 'race-tech'])
-  const mods = modulesOf(utilities)
+// ---------- the parts: each mutant, the checks of the real sources and each save run in a process of their own ----------
 
+const MUTANTS = [...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })), ...PAGE_MUTATIONS.map((mutation, index) => ({ kind: 'page', id: `page:${index}`, ...mutation }))]
+
+const checkHead = async (mods) => {
   console.log('The comparison and the search')
 
   for (const [name, test] of synthetic(mods)) {
@@ -1049,135 +1052,194 @@ const run = async () => {
   for (const [statement, held] of await pageStatements(null, mods)) {
     check(`page: ${statement}`, held())
   }
+}
 
-  console.log('\nMutations: each must fail the checks it names')
+const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
+  const directory = mutatedCopy(file, find, replace)
+  const began = Date.now()
 
-  for (const { name, file, find, replace, fails } of MUTATIONS) {
-    const directory = mutatedCopy(file, find, replace)
-    const began = Date.now()
-
-    try {
-      let failed = null
-      let absent = []
-
-      try {
-        const mutant = modulesOf(await loadUtilities(NAMES, { directory }))
-
-        // Only the checks the mutation names are run: the others cannot change what it must break.
-        const named = synthetic(mutant).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
-
-        absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
-
-        failed = named.filter(([, test]) => {
-          try {
-            return test() !== true
-          } catch (error) {
-            return true
-          }
-        }).map(([checkName]) => checkName)
-      } catch (error) {
-        check(`mutation caught: ${name}`, `does not load: ${error.message}`)
-        continue
-      }
-
-      const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
-
-      check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  }
-
-  for (const { name, find, replace, fails } of PAGE_MUTATIONS) {
-    const began = Date.now()
+  try {
     let failed = null
     let absent = []
 
     try {
-      const named = (await pageStatements(replacing(find, replace), mods)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+      const mutant = modulesOf(await loadUtilities(NAMES, { directory }))
 
-      absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
-      failed = named.filter(([, held]) => held() !== true).map(([statement]) => statement)
+      // Only the checks the mutation names are run: the others cannot change what it must break.
+      const named = synthetic(mutant).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
+
+      absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+
+      failed = named.filter(([, test]) => {
+        try {
+          return test() !== true
+        } catch (error) {
+          return true
+        }
+      }).map(([checkName]) => checkName)
     } catch (error) {
-      check(`page mutation caught: ${name}`, `does not load: ${error.message}`)
-      continue
+      check(`mutation caught: ${name}`, `does not load: ${error.message}`)
+
+      return
     }
 
-    const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+    const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
 
-    check(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+    check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const checkPageMutation = async ({ name, find, replace, fails }, mods) => {
+  const began = Date.now()
+  let failed = null
+  let absent = []
+
+  try {
+    const named = (await pageStatements(replacing(find, replace), mods)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+
+    absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+    failed = named.filter(([, held]) => held() !== true).map(([statement]) => statement)
+  } catch (error) {
+    check(`page mutation caught: ${name}`, `does not load: ${error.message}`)
+
+    return
   }
 
-  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]]) {
-    console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
+  const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
 
-    const database = await openSave(file)
+  check(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+}
 
-    if (!database) {
-      console.log(`SKIP  ${file} is not there`)
-      continue
+const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
+  console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
+
+  const database = await openSave(file)
+
+  if (!database) {
+    console.log(`SKIP  ${file} is not there`)
+
+    return
+  }
+
+  const context = { GameID, RaceID }
+  const tech = await utilities['race-tech'].loadRaceTech(database, context)
+  const tanks = await utilities['design-data'].loadStockTanks(database, context)
+  const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
+  const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
+
+  const designTech = {
+    engineTech: level(ENGINE_TECH_TYPE, 'info'),
+    fuelTech: level(FUEL_TECH_TYPE, 'info'),
+    thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
+    thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
+    minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
+    maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
+    maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
+  }
+
+  // A small part of the race's grid, so the enumeration can walk it.
+  const small = { ...designTech, maxSize: Math.min(3, designTech.maxSize), maxThrust: Math.min(designTech.maxThrust, Math.max(designTech.minThrust, 0.7)) }
+
+  const domains = [
+    ['a range target on the race\'s tanks', { hullHS: 40, speed: 2000, fraction: 0.5, goal: { mode: 'range', value: 3e9 }, share: 0.5, maxCount: 30, tech: small, tanks }],
+    ['an endurance target', { hullHS: 60, speed: 1500, fraction: 0.5, goal: { mode: 'endurance', value: 100 }, share: 0.4, minCount: 4, maxCount: 20, tech: small, tanks }],
+  ]
+
+  for (const [name, input] of domains) {
+    const every = everySet(mods, input)
+
+    for (const pairs of [COMBINATIONS[1], COMBINATIONS[3], COMBINATIONS[6]]) {
+      const expected = oracle(every, axesOf(pairs))
+      const { efficient } = withFront(mods, input, pairs)
+      check(`${label}: the front of ${pairs.map(([key, goal]) => `${goal} ${key}`).join(', ')} equals the oracle over every set that meets the targets: ${name} (${expected.front.length} of ${every.length})`, frontVerdict(mods, efficient, expected, every.length))
     }
+  }
 
-    const context = { GameID, RaceID }
-    const tech = await utilities['race-tech'].loadRaceTech(database, context)
-    const tanks = await utilities['design-data'].loadStockTanks(database, context)
-    const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
-    const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
+  const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
+  const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
+  const asked = finish(runOf(mods, { ...input, axes: axesOf(COMBINATIONS[1]) }))
+  const { efficient } = asked.result
+  const legacy = asked.result.pareto.speed
+  const kept = legacy.filter((set) => !legacy.some((other) => other !== set && dominatesOnShare(other, set, 'speed')))
 
-    const designTech = {
-      engineTech: level(ENGINE_TECH_TYPE, 'info'),
-      fuelTech: level(FUEL_TECH_TYPE, 'info'),
-      thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
-      thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
-      minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
-      maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
-      maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
-    }
+  check(`${label}: the default search with a front of tonnage and speed is complete (${efficient.members.length} efficient sets of ${efficient.source.compared} compared)`, asked.status === 'complete' && efficient.status === 'complete' && efficient.source.feasible === asked.counts.feasible ? true : short([asked.status, efficient.status]))
+  check(`${label}: its front is the earlier frontier of share and speed, less the sets a same-share set beats`, JSON.stringify(idsOf(mods, kept)) === JSON.stringify(efficient.members.map((member) => member.name).sort()) ? true : `${kept.length} against ${efficient.members.length}`)
 
-    // A small part of the race's grid, so the enumeration can walk it.
-    const small = { ...designTech, maxSize: Math.min(3, designTech.maxSize), maxThrust: Math.min(designTech.maxThrust, Math.max(designTech.minThrust, 0.7)) }
+  if (anchor) {
+    const result = asked.result
 
-    const domains = [
-      ['a range target on the race\'s tanks', { hullHS: 40, speed: 2000, fraction: 0.5, goal: { mode: 'range', value: 3e9 }, share: 0.5, maxCount: 30, tech: small, tanks }],
-      ['an endurance target', { hullHS: 60, speed: 1500, fraction: 0.5, goal: { mode: 'endurance', value: 100 }, share: 0.4, minCount: 4, maxCount: 20, tech: small, tanks }],
-    ]
+    check(`${label}: the default search with a front gives the result taken before fronts existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+  } else {
+    console.log('SKIP  no digest of the unchanged search is recorded for this save')
+  }
 
-    for (const [name, input] of domains) {
-      const every = everySet(mods, input)
+  const cut = runOf(mods, { ...input, axes: axesOf(COMBINATIONS[3]) })
 
-      for (const pairs of [COMBINATIONS[1], COMBINATIONS[3], COMBINATIONS[6]]) {
-        const expected = oracle(every, axesOf(pairs))
-        const { efficient } = withFront(mods, input, pairs)
-        check(`${label}: the front of ${pairs.map(([key, goal]) => `${goal} ${key}`).join(', ')} equals the oracle over every set that meets the targets: ${name} (${expected.front.length} of ${every.length})`, frontVerdict(mods, efficient, expected, every.length))
-      }
-    }
+  cut.advance(0)
+  cut.cancel()
 
-    const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
-    const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
-    const asked = finish(runOf(mods, { ...input, axes: axesOf(COMBINATIONS[1]) }))
-    const { efficient } = asked.result
-    const legacy = asked.result.pareto.speed
-    const kept = legacy.filter((set) => !legacy.some((other) => other !== set && dominatesOnShare(other, set, 'speed')))
+  check(`${label}: a default search stopped at its first step has a provisional front`, cut.outcome().result.efficient.status === 'provisional' ? true : short(cut.outcome().result.efficient.status))
 
-    check(`${label}: the default search with a front of tonnage and speed is complete (${efficient.members.length} efficient sets of ${efficient.source.compared} compared)`, asked.status === 'complete' && efficient.status === 'complete' && efficient.source.feasible === asked.counts.feasible ? true : short([asked.status, efficient.status]))
-    check(`${label}: its front is the earlier frontier of share and speed, less the sets a same-share set beats`, JSON.stringify(idsOf(mods, kept)) === JSON.stringify(efficient.members.map((member) => member.name).sort()) ? true : `${kept.length} against ${efficient.members.length}`)
+  database.close()
+}
 
-    if (anchor) {
-      const result = asked.result
+const SAVE_LABELS = ['modded', 'stock']
 
-      check(`${label}: the default search with a front gives the result taken before fronts existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
-    } else {
-      console.log('SKIP  no digest of the unchanged search is recorded for this save')
-    }
+// One part, in this process: `head`, a mutant by its id or a save by its label.
+const runPart = async (part, options) => {
+  const mutant = MUTANTS.find(({ id }) => id === part)
 
-    const cut = runOf(mods, { ...input, axes: axesOf(COMBINATIONS[3]) })
+  if (mutant && mutant.kind === 'utility') {
+    await checkUtilityMutation(mutant)
 
-    cut.advance(0)
-    cut.cancel()
+    return
+  }
 
-    check(`${label}: a default search stopped at its first step has a provisional front`, cut.outcome().result.efficient.status === 'provisional' ? true : short(cut.outcome().result.efficient.status))
+  const utilities = await loadUtilities([...NAMES, 'design-data', 'race-tech'])
+  const mods = modulesOf(utilities)
 
-    database.close()
+  if (part === 'head') {
+    await checkHead(mods)
+  } else if (mutant) {
+    await checkPageMutation(mutant, mods)
+  } else if (SAVE_LABELS.includes(part)) {
+    await checkSave(part, options[part], utilities, mods)
+  } else {
+    throw new Error(`No part is named ${part}`)
+  }
+}
+
+const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+
+const run = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.part !== null) {
+    await runPart(options.part, options)
+    endSection(checks, failures)
+  }
+
+  // The longest parts first: the saves, then the checks of the real sources, then the mutants.
+  const parts = [{ part: 'head', weight: 30 }, ...MUTANTS.map(({ id }) => ({ part: id, weight: 3 })), ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 }))]
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
+  const printed = (index) => {
+    const counts = printSection(sections[index])
+
+    checks += counts.checks
+    failures += counts.failures
+  }
+
+  printed(0)
+  console.log('\nMutations: each must fail the checks it names')
+
+  for (let index = 1; index <= MUTANTS.length; index++) {
+    printed(index)
+  }
+
+  for (let index = MUTANTS.length + 1; index < sections.length; index++) {
+    printed(index)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

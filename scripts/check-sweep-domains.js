@@ -12,6 +12,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -642,12 +643,14 @@ const ANCHORS = {
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785] }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -689,11 +692,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
 // The digests recorded before the search kept counts hash this projection: the sets and best sets, then the evaluated and matched figures that `counts.evaluated` and `counts.feasible` now hold, in the order the search returned them then.
 const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts }) => crypto.createHash('sha256').update(JSON.stringify({ sets, lightest, fastest, cheapest, pareto, packages, evaluated: counts.evaluated, matched: counts.feasible })).digest('hex').slice(0, 16)
 
-const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities(['sweep-domain', 'design-search', 'design-rules', 'design-data', 'race-tech'])
-  const mods = { domain: utilities['sweep-domain'], search: utilities['design-search'], rules: utilities['design-rules'] }
+// ---------- the parts: the checks of the real sources, each mutant and each save run in a process of their own ----------
 
+const checkSynthetic = (mods) => {
   console.log('Synthetic domains')
 
   for (const [name, test] of synthetic(mods)) {
@@ -707,103 +708,155 @@ const run = async () => {
 
     check(name, result)
   }
+}
 
-  console.log('\nMutations: each must fail at least one check')
+const checkMutation = async ([label, file, from, to, probe]) => {
+  const directory = mutatedCopy(file, from, to)
 
-  for (const [label, file, from, to, probe] of MUTATIONS) {
-    const directory = mutatedCopy(file, from, to)
+  try {
+    let failed = []
 
     try {
-      let failed = []
+      const mutant = await loadUtilities(['sweep-domain', 'design-search', 'design-rules'], { directory })
 
-      try {
-        const mutant = await loadUtilities(['sweep-domain', 'design-search', 'design-rules'], { directory })
-
-        failed = synthetic({ domain: mutant['sweep-domain'], search: mutant['design-search'], rules: mutant['design-rules'] }).filter(([, test]) => {
-          try {
-            return test() !== true
-          } catch (error) {
-            return true
-          }
-        })
-      } catch (error) {
-        failed = [[`does not load: ${error.message}`]]
-      }
-
-      let probed = true
-
-      if (probe) {
+      failed = synthetic({ domain: mutant['sweep-domain'], search: mutant['design-search'], rules: mutant['design-rules'] }).filter(([, test]) => {
         try {
-          const mutant = await loadUtilities(['sweep-domain', 'design-search'], { directory })
-
-          probed = probe({ domain: mutant['sweep-domain'], search: mutant['design-search'] })
+          return test() !== true
         } catch (error) {
-          probed = false
+          return true
         }
+      })
+    } catch (error) {
+      failed = [[`does not load: ${error.message}`]]
+    }
+
+    let probed = true
+
+    if (probe) {
+      try {
+        const mutant = await loadUtilities(['sweep-domain', 'design-search'], { directory })
+
+        probed = probe({ domain: mutant['sweep-domain'], search: mutant['design-search'] })
+      } catch (error) {
+        probed = false
       }
-
-      check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
     }
+
+    check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
+  console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
+
+  const database = await openSave(file)
+
+  if (!database) {
+    console.log(`SKIP  ${file} is not there`)
+
+    return
   }
 
-  const saves = [['modded', options.modded], ['stock', options.stock]]
+  const context = { GameID, RaceID }
+  const tech = await utilities['race-tech'].loadRaceTech(database, context)
+  const tanks = await utilities['design-data'].loadStockTanks(database, context)
+  const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
+  const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
 
-  for (const [label, [file, GameID, RaceID]] of saves) {
-    console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
-
-    const database = await openSave(file)
-
-    if (!database) {
-      console.log(`SKIP  ${file} is not there`)
-      continue
-    }
-
-    const context = { GameID, RaceID }
-    const tech = await utilities['race-tech'].loadRaceTech(database, context)
-    const tanks = await utilities['design-data'].loadStockTanks(database, context)
-    const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
-    const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
-
-    const designTech = {
-      engineTech: level(ENGINE_TECH_TYPE, 'info'),
-      fuelTech: level(FUEL_TECH_TYPE, 'info'),
-      thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
-      thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
-      minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
-      maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
-      maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
-    }
-
-    const sweep = mods.search.engineSweep({ tech: designTech, minCount: 1, maxCount: 100 })
-    const oldGrid = { sizes: oldSizes(designTech.maxSize), thrusts: oldThrusts(designTech.minThrust, designTech.maxThrust) }
-
-    check(`${label}: the engine grid of the researched techs (${designTech.maxSize} HS, thrust ${designTech.minThrust} to ${designTech.maxThrust}) is the grid of the search before the domains`, sweep.ok && same(sweep.sizes.toArray(), oldGrid.sizes) === true && same(sweep.thrusts.toArray(), oldGrid.thrusts) === true ? true : short(sweep.problems), `${sweep.sizes.count} sizes x ${sweep.thrusts.count} thrusts x ${sweep.counts.count} counts = ${sweep.combinations} combinations`)
-
-    const preview = mods.domain.describeSweep(sweep.sizes)
-    const previewTons = mods.domain.describeSweep(sweep.sizes, { unit: 'tons' })
-
-    check(`${label}: the preview counts the sizes and the iterator yields as many, in HS and in tons, from one canonical domain`, preview.count === sweep.sizes.count && previewTons.count === preview.count && previewTons.last === preview.last * 50 && [...sweep.sizes.values()].length === preview.count ? true : short([preview, previewTons]), `${preview.text}; ${previewTons.text}`)
-
-    const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
-    const current = drain(mods.search.searchPropulsion({ ...input, sweep }))
-
-    // The search on the old grid: the same sweep with the old lists in place of the domain grids.
-    const oldSweep = { ok: true, problems: [], sizes: { toArray: () => oldGrid.sizes }, thrusts: { toArray: () => oldGrid.thrusts }, counts: sweep.counts }
-    const old = drain(mods.search.searchPropulsion({ ...input, sweep: oldSweep }))
-    const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
-
-    check(`${label}: the default search on the domain grid gives the result of the search on the old grid (${current.counts.evaluated} candidates, ${current.counts.feasible} matched, ${current.sets.length} kept)`, digest(current) === digest(old) && current.counts.evaluated === old.counts.evaluated ? true : `${digest(current)} vs ${digest(old)}`, digest(current))
-
-    if (anchor) {
-      check(`${label}: the default search still gives the result taken before the domains existed`, current.counts.evaluated === anchor.evaluated && current.counts.feasible === anchor.matched && digest(current) === anchor.digest ? true : `${current.counts.evaluated}/${current.counts.feasible}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
-    } else {
-      console.log('SKIP  no digest of the unchanged search is recorded for this save')
-    }
-
-    database.close()
+  const designTech = {
+    engineTech: level(ENGINE_TECH_TYPE, 'info'),
+    fuelTech: level(FUEL_TECH_TYPE, 'info'),
+    thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
+    thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
+    minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
+    maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
+    maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
   }
+
+  const sweep = mods.search.engineSweep({ tech: designTech, minCount: 1, maxCount: 100 })
+  const oldGrid = { sizes: oldSizes(designTech.maxSize), thrusts: oldThrusts(designTech.minThrust, designTech.maxThrust) }
+
+  check(`${label}: the engine grid of the researched techs (${designTech.maxSize} HS, thrust ${designTech.minThrust} to ${designTech.maxThrust}) is the grid of the search before the domains`, sweep.ok && same(sweep.sizes.toArray(), oldGrid.sizes) === true && same(sweep.thrusts.toArray(), oldGrid.thrusts) === true ? true : short(sweep.problems), `${sweep.sizes.count} sizes x ${sweep.thrusts.count} thrusts x ${sweep.counts.count} counts = ${sweep.combinations} combinations`)
+
+  const preview = mods.domain.describeSweep(sweep.sizes)
+  const previewTons = mods.domain.describeSweep(sweep.sizes, { unit: 'tons' })
+
+  check(`${label}: the preview counts the sizes and the iterator yields as many, in HS and in tons, from one canonical domain`, preview.count === sweep.sizes.count && previewTons.count === preview.count && previewTons.last === preview.last * 50 && [...sweep.sizes.values()].length === preview.count ? true : short([preview, previewTons]), `${preview.text}; ${previewTons.text}`)
+
+  const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
+  const current = drain(mods.search.searchPropulsion({ ...input, sweep }))
+
+  // The search on the old grid: the same sweep with the old lists in place of the domain grids.
+  const oldSweep = { ok: true, problems: [], sizes: { toArray: () => oldGrid.sizes }, thrusts: { toArray: () => oldGrid.thrusts }, counts: sweep.counts }
+  const old = drain(mods.search.searchPropulsion({ ...input, sweep: oldSweep }))
+  const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
+
+  check(`${label}: the default search on the domain grid gives the result of the search on the old grid (${current.counts.evaluated} candidates, ${current.counts.feasible} matched, ${current.sets.length} kept)`, digest(current) === digest(old) && current.counts.evaluated === old.counts.evaluated ? true : `${digest(current)} vs ${digest(old)}`, digest(current))
+
+  if (anchor) {
+    check(`${label}: the default search still gives the result taken before the domains existed`, current.counts.evaluated === anchor.evaluated && current.counts.feasible === anchor.matched && digest(current) === anchor.digest ? true : `${current.counts.evaluated}/${current.counts.feasible}/${digest(current)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+  } else {
+    console.log('SKIP  no digest of the unchanged search is recorded for this save')
+  }
+
+  database.close()
+}
+
+const SAVE_LABELS = ['modded', 'stock']
+
+// One part, in this process: `synthetic`, a mutation by its index (`mutation:3`) or a save by its label.
+const runPart = async (part, options) => {
+  if (part.startsWith('mutation:')) {
+    await checkMutation(MUTATIONS[Number(part.slice('mutation:'.length))])
+
+    return
+  }
+
+  const utilities = await loadUtilities(['sweep-domain', 'design-search', 'design-rules', 'design-data', 'race-tech'])
+  const mods = { domain: utilities['sweep-domain'], search: utilities['design-search'], rules: utilities['design-rules'] }
+
+  if (part === 'synthetic') {
+    checkSynthetic(mods)
+  } else if (SAVE_LABELS.includes(part)) {
+    await checkSave(part, options[part], utilities, mods)
+  } else {
+    throw new Error(`No part is named ${part}`)
+  }
+}
+
+const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+
+const run = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.part !== null) {
+    await runPart(options.part, options)
+    endSection(checks, failures)
+  }
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'synthetic', weight: 10 },
+    ...MUTATIONS.map((_mutation, index) => ({ part: `mutation:${index}`, weight: 5 })),
+    ...SAVE_LABELS.map((label) => ({ part: label, weight: 30 })),
+  ]
+
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
+  let at = 0
+
+  const printed = () => {
+    const counts = printSection(sections[at++])
+
+    checks += counts.checks
+    failures += counts.failures
+  }
+
+  printed()
+  console.log('\nMutations: each must fail at least one check')
+  MUTATIONS.forEach(printed)
+  SAVE_LABELS.forEach(printed)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

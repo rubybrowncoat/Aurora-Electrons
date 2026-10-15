@@ -25,6 +25,7 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1470,7 +1471,7 @@ const mutatedCopy = (file, from, to) => {
 // ---------- the saves ----------
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true, part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1478,6 +1479,8 @@ const parseArguments = (argv) => {
       index += 3
     } else if (argv[index] === '--no-mutations') {
       options.mutations = false
+    } else if (argv[index] === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -1601,117 +1604,181 @@ const saveChecks = async (m, database, { GameID, RaceID }, label) => {
   return results
 }
 
+// ---------- the parts: each mutant, each group of the real sources and each save run in a process of their own ----------
+
+const MUTANTS = [
+  ...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })),
+  ...PAGE_MUTATIONS.map((mutation, index) => ({ kind: 'page', id: `page:${index}`, ...mutation })),
+  ...PANEL_MUTATIONS.map((mutation, index) => ({ kind: 'panel', id: `panel:${index}`, ...mutation })),
+]
+
+const SAVE_LABELS = ['modded', 'stock']
+
+const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
+  const began = Date.now()
+  let directory = null
+
+  try {
+    directory = mutatedCopy(file, find, replace)
+
+    const mutant = await loadAll(directory)
+    const all = GROUPS(mutant)
+    const named = all.filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
+    const absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+    const failed = []
+
+    for (const [checkName, test] of named) {
+      if ((await settle(test)) !== true) {
+        failed.push(checkName)
+      }
+    }
+
+    const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
+
+    check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  } catch (error) {
+    check(`mutation caught: ${name}`, `does not load: ${error.message}`)
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+const checkPageMutation = async ({ kind, name, find, replace, fails }, real) => {
+  const statementsOf = kind === 'page' ? pageStatements : panelStatements
+  const began = Date.now()
+
+  try {
+    const named = (await statementsOf(replacing(find, replace), real)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+    const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+    const failed = []
+
+    for (const [statement, held] of named) {
+      if ((await settle(held)) !== true) {
+        failed.push(statement)
+      }
+    }
+
+    const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+
+    check(`${kind} mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  } catch (error) {
+    check(`${kind} mutation caught: ${name}`, `does not load: ${error.message}`)
+  }
+}
+
+const checkSave = async (label, [file, GameID, RaceID], real) => {
+  console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
+
+  const database = await openSave(file)
+
+  if (!database) {
+    console.log(`SKIP  ${file} is not there`)
+
+    return
+  }
+
+  for (const [name, verdict, detail] of await saveChecks(real, database, { GameID, RaceID }, label)) {
+    check(name, await settle(() => verdict), detail)
+  }
+
+  database.close()
+}
+
+const checkBrowser = async () => {
+  try {
+    for (const [statement, verdict] of await browserStatements(process.env.BASE_URL)) {
+      check(statement, verdict)
+    }
+  } catch (error) {
+    check('browser: the case ran to its end', error.message.split('\n')[0])
+  }
+}
+
+// One part, in this process: `groups`, `page`, `panel`, `browser`, a mutant by its id or a save by its label.
+const runPart = async (part, options) => {
+  const mutant = MUTANTS.find(({ id }) => id === part)
+
+  if (mutant && mutant.kind === 'utility') {
+    await checkUtilityMutation(mutant)
+  } else if (part === 'browser') {
+    await checkBrowser()
+  } else {
+    const real = await loadAll()
+
+    if (part === 'groups') {
+      for (const [name, test] of GROUPS(real)) {
+        check(name, await settle(test))
+      }
+    } else if (part === 'page') {
+      for (const [statement, held] of await pageStatements(null, real)) {
+        check(statement, await settle(held))
+      }
+    } else if (part === 'panel') {
+      for (const [statement, held] of await panelStatements(null, real)) {
+        check(statement, await settle(held))
+      }
+    } else if (mutant) {
+      await checkPageMutation(mutant, real)
+    } else if (SAVE_LABELS.includes(part)) {
+      await checkSave(part, options[part], real)
+    } else {
+      throw new Error(`No part is named ${part}`)
+    }
+  }
+}
+
+const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
-  const real = await loadAll()
+
+  if (options.part !== null) {
+    await runPart(options.part, options)
+    endSection(checks, failures)
+  }
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'groups', weight: 30 },
+    { part: 'page', weight: 10 },
+    { part: 'panel', weight: 10 },
+    ...(process.env.BASE_URL ? [{ part: 'browser', weight: 20 }] : []),
+    ...(options.mutations ? MUTANTS.map(({ id }) => ({ part: id, weight: 3 })) : []),
+    ...SAVE_LABELS.map((label) => ({ part: label, weight: 20 })),
+  ]
+
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
+  let at = 0
+
+  const printed = () => {
+    const counts = printSection(sections[at++])
+
+    checks += counts.checks
+    failures += counts.failures
+  }
 
   console.log('The mission brief: units, evaluation, ranking, presets, alternatives and the record')
-
-  for (const [name, test] of GROUPS(real)) {
-    check(name, await settle(test))
-  }
-
+  printed()
   console.log('\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)')
-
-  for (const [statement, held] of await pageStatements(null, real)) {
-    check(statement, await settle(held))
-  }
-
+  printed()
   console.log('\nThe panel (its script, template and Vue, without a document)')
-
-  for (const [statement, held] of await panelStatements(null, real)) {
-    check(statement, await settle(held))
-  }
+  printed()
 
   if (process.env.BASE_URL) {
     console.log(`\nThe browser (${process.env.BASE_URL})`)
-
-    try {
-      for (const [statement, verdict] of await browserStatements(process.env.BASE_URL)) {
-        check(statement, verdict)
-      }
-    } catch (error) {
-      check('browser: the case ran to its end', error.message.split('\n')[0])
-    }
+    printed()
   } else {
     console.log('\nSKIP  the browser case: BASE_URL is not set (start bun run web, then BASE_URL=http://localhost:9080)')
   }
 
   if (options.mutations) {
     console.log('\nMutations: each must fail the checks it names')
-
-    for (const { name, file, find, replace, fails } of MUTATIONS) {
-      const began = Date.now()
-      let directory = null
-
-      try {
-        directory = mutatedCopy(file, find, replace)
-
-        const mutant = await loadAll(directory)
-        const all = GROUPS(mutant)
-        const named = all.filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
-        const absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
-        const failed = []
-
-        for (const [checkName, test] of named) {
-          if ((await settle(test)) !== true) {
-            failed.push(checkName)
-          }
-        }
-
-        const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
-
-        check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-      } catch (error) {
-        check(`mutation caught: ${name}`, `does not load: ${error.message}`)
-      } finally {
-        if (directory) {
-          fs.rmSync(directory, { recursive: true, force: true })
-        }
-      }
-    }
-
-    for (const [mutations, statementsOf, kind] of [[PAGE_MUTATIONS, pageStatements, 'page'], [PANEL_MUTATIONS, panelStatements, 'panel']]) {
-      for (const { name, find, replace, fails } of mutations) {
-        const began = Date.now()
-
-        try {
-          const named = (await statementsOf(replacing(find, replace), real)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
-          const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
-          const failed = []
-
-          for (const [statement, held] of named) {
-            if ((await settle(held)) !== true) {
-              failed.push(statement)
-            }
-          }
-
-          const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
-
-          check(`${kind} mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-        } catch (error) {
-          check(`${kind} mutation caught: ${name}`, `does not load: ${error.message}`)
-        }
-      }
-    }
+    MUTANTS.forEach(printed)
   }
 
-  for (const [label, [file, GameID, RaceID]] of [['modded', options.modded], ['stock', options.stock]]) {
-    console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
-
-    const database = await openSave(file)
-
-    if (!database) {
-      console.log(`SKIP  ${file} is not there`)
-      continue
-    }
-
-    for (const [name, verdict, detail] of await saveChecks(real, database, { GameID, RaceID }, label)) {
-      check(name, await settle(() => verdict), detail)
-    }
-
-    database.close()
-  }
+  SAVE_LABELS.forEach(printed)
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)

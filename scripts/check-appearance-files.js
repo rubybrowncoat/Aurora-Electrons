@@ -9,6 +9,7 @@ const fs = require('fs')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { plantedCopy } = require('./lib/mutant-source')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -707,6 +708,17 @@ const INVALID = [
   ['an anchor that matches nothing', APPEARANCE, 'export const PRESETS = {{{', 'export const PRESETS = {'],
 ]
 
+// Each fault is judged in a process of its own (`--fault <index>`), so that the faults run side by side (CHECK_JOBS) and each fresh copy of the modules is freed with its process.
+const FAULTS = [...MUTATIONS, ...INVALID]
+
+const judgeApart = async (index) => {
+  try {
+    return lastJson(await runChild(__filename, ['--fault', String(index)]))
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
 const run = async () => {
   let failures = 0
   let checks = 0
@@ -720,6 +732,8 @@ const run = async () => {
 
   console.log('Appearance files')
 
+  const verdicts = inParallel([...FAULTS.keys()], judgeApart)
+
   for (const [name, result] of await runChecks()) {
     tally(result === true)
     console.log(`${result === true ? 'PASS' : 'FAIL'}  ${name}${result === true ? '' : `  [${typeof result === 'string' ? result : 'false'}]`}`)
@@ -732,8 +746,10 @@ const run = async () => {
 
   console.log('\nMutations: each must fail at least one check')
 
-  for (const fault of MUTATIONS) {
-    const { failed, invalid, error } = await judge(fault)
+  const judged = await verdicts
+
+  for (const [index, fault] of MUTATIONS.entries()) {
+    const { failed, invalid, error } = judged[index]
     const [label] = fault
 
     if (invalid !== undefined) {
@@ -748,9 +764,9 @@ const run = async () => {
     }
   }
 
-  for (const entry of INVALID) {
+  for (const [index, entry] of INVALID.entries()) {
     const [label] = entry
-    const unparsable = await judge(entry)
+    const unparsable = judged[MUTATIONS.length + index]
 
     tally(unparsable.invalid !== undefined)
     console.log(`${unparsable.invalid !== undefined ? 'PASS' : 'FAIL'}  runner: ${label} is reported as an invalid mutant and not as caught${unparsable.invalid !== undefined ? '' : `  [${JSON.stringify(unparsable)}]`}`)
@@ -760,7 +776,11 @@ const run = async () => {
   process.exit(failures ? 1 : 0)
 }
 
-run().catch((error) => {
-  console.error(error)
-  process.exit(2)
-})
+if (process.argv[2] === '--fault') {
+  judge(FAULTS[Number(process.argv[3])]).then((verdict) => console.log(JSON.stringify(verdict)))
+} else {
+  run().catch((error) => {
+    console.error(error)
+    process.exit(2)
+  })
+}

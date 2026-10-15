@@ -17,6 +17,8 @@ const os = require('os')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
+const { jobs } = require('./lib/check-pool')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const DEFAULT_SAVES = [
@@ -55,17 +57,20 @@ const unsupportedNote = (name, detail = '') => {
 
 const parseArguments = (argv) => {
   const saves = []
+  let part = null
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--save') {
       saves.push({ file: argv[++index], game: Number(argv[++index]), race: Number(argv[++index]) })
+    } else if (argv[index] === '--part') {
+      part = argv[++index]
     } else {
       console.error(`Unknown option ${argv[index]}`)
       process.exit(2)
     }
   }
 
-  return saves.length ? saves : DEFAULT_SAVES
+  return { saves: saves.length ? saves : DEFAULT_SAVES, part }
 }
 
 // A read-only stand-in for the app's database object: `query(sql)` resolves to [rows], as Sequelize's raw query does.
@@ -722,97 +727,159 @@ const saveCases = async (database, save, vm, apps) => {
   }
 }
 
-const main = async () => {
-  const saves = parseArguments(process.argv.slice(2))
+const NARROW_SCAN = ['const SCAN_LIMIT = 400', 'const SCAN_LIMIT = 1']
+
+const MUTANTS = [
+  { name: 'a calculation that takes the stock of a component against every hull (the stock times the hulls)', from: 'const held = stockOf(stock, part.componentId)', to: 'const held = stockOf(stock, part.componentId) * hulls', fails: 'stockOnce' },
+  { name: 'a calculation that uses the whole stock, past what the hulls need', from: 'const used = needed === null || held === null ? null : Math.min(held, needed)', to: 'const used = needed === null || held === null ? null : held', fails: 'stockCapped' },
+  { name: 'a calculation that rounds the units to build down', from: 'Math.ceil(remaining - EPSILON)', to: 'Math.floor(remaining - EPSILON)', fails: 'wholeUnits' },
+  { name: 'a calculation that builds armour with a project', from: 'const BUILT_WITH_THE_HULL = new Set([COMPONENT_ARMOUR, COMPONENT_MISSILE_ENGINE])', to: 'const BUILT_WITH_THE_HULL = new Set([COMPONENT_MISSILE_ENGINE])', fails: 'buildable' },
+  { name: 'a calculation that builds a component the race has not researched', from: 'if (part.researched === 0) {', to: 'if (false) {', fails: 'buildable' },
+  { name: 'a held share that leaves out the paused projects', from: '} else if (project.Queue === 0) {', to: '} else if (project.Queue === 0 && !project.Paused) {', fails: 'heldPaused' },
+  { name: 'a held share that counts a queued project', from: '} else if (project.Queue === 0) {', to: '} else {', fails: 'heldQueue' },
+  { name: 'a held share that counts only the construction projects of type 0 (component and station projects held nothing)', from: '} else if (category === \'construction\') {', to: '} else if (category === \'construction\' && project.ProductionType === 0) {', fails: 'heldCategory' },
+  { name: 'a held share that counts the ordnance projects with construction', from: '} else if (category === \'construction\') {', to: '} else if (category !== \'unknown\') {', fails: 'heldCategory' },
+  { name: 'a split of the share that gives each project the same part', from: 'const weights = rows.map((row) => row.bp)', to: 'const weights = rows.map(() => 1)', fails: 'minimal' },
+  { name: 'a split of the share that gives a project no minimum', from: 'const parts = weights.map(() => 1)', to: 'const parts = weights.map(() => 0)', fails: 'allocate' },
+  { name: 'a floor on half the capacity', from: 'rows.reduce((all, row) => all + floorOf(row, capacity.value, cycles, cycleDays), 0)', to: 'rows.reduce((all, row) => all + floorOf(row, capacity.value / 2, cycles, cycleDays), 0)', fails: 'floorShare' },
+  { name: 'a calculation that lets the ceiling of the search pass the share free', from: 'const ceiling = Math.floor(result.available * SHARE_STEP + EPSILON)', to: 'const ceiling = Math.floor(Math.max(result.available, 100) * SHARE_STEP + EPSILON)', fails: 'commitmentsInfeasible' },
+  { name: 'a calculation that reports an infeasible deadline beyond the whole capacity as exact', from: 'result.requiredKind = \'floor\'', to: 'result.requiredKind = \'floor\'\n    result.requiredExact = true', fails: 'infeasible' },
+  { name: 'a calculation that gives the shortfall without the share free taken off', from: 'const lacking = result.required - result.available', to: 'const lacking = result.required', fails: 'infeasible' },
+  { name: 'a search that overshoots the least share', from: 'low = middle + 1', to: 'low = middle + 2', fails: 'contendedLeast' },
+  { name: 'a calculation that counts a batch as in time on the best order of the colony\'s projects', from: 'meets: everyLatest && last(\'latest\') <= deadline + EPSILON', to: 'meets: everyEarliest && last(\'earliest\') <= deadline + EPSILON', fails: 'contended' },
+  { name: 'a calculation that does not say which colony project the batch moves', from: 'result.displaced = base.gaps ? [] : displacedBy(colony, base, chosen.run)', to: 'result.displaced = []', fails: 'displaced' },
+  { name: 'a calculation that loses the mineral a batch is held up by', from: 'result.stalled = stalled || null', to: 'result.stalled = null', fails: 'stallDistinct' },
+  { name: 'a calculation that gives a share where the construction capacity is not known', from: 'if (!isAvailable(capacity) || !isNumber(capacity.value)) {', to: 'if (false) {', fails: 'capacityUnknown' },
+  { name: 'a floor that leaves out the rounding of a build to 4 decimals (the plain division as a bound)', from: 'const perCycle = row.units / cycles - BUILD_ROUNDING', to: 'const perCycle = row.units / cycles', fails: 'roundingFloor' },
+  { name: 'a split that gives fewer hundredths than there are projects instead of refusing', from: 'if (total < weights.length) {', to: 'if (total < 1) {', fails: 'allocate' },
+  { name: 'a share needed that is not looked for above the share free', from: 'const beyond = yield * first(Math.max(lower, ceiling + 1), WHOLE_CAPACITY)', to: 'const beyond = { found: null, gaps: null }', fails: 'cycleRequired' },
+  { name: 'a shortfall of a share the colony could never give', from: 'if (result.required !== null) {', to: 'if (true) {', fails: 'unreachable' },
+  { name: 'an earliest finish given as exact where the projects differ', from: 'earliestExact: everyEarliest && figures.every((figure) => figure.earliest === figure.latest),', to: 'earliestExact: everyEarliest,', fails: 'orderBound' },
+  { name: 'a stock row with no amount read as none held (in the plan)', from: 'return isNumber(stock[componentId]) ? Math.max(0, stock[componentId]) : null', to: 'return isNumber(stock[componentId]) ? Math.max(0, stock[componentId]) : 0', fails: 'stockNull' },
+  { name: 'a stock row with no amount read as none held (in the read)', from: '= isNumber(row.Amount) ? row.Amount : null', to: '= isNumber(row.Amount) ? row.Amount : 0', fails: 'stockNull' },
+  { name: 'a calculation that treats the minerals shared with the colony\'s other projects as never short', from: 'result.contested = !uncontested(colony, rows)', to: 'result.contested = false', fails: 'nonMonotone' },
+  { name: 'a split of the shares whose order of seats depends on the total (a split that is not inside the split of a larger total)', from: 'if (shares[index] * (2 * parts[best] - 1) > shares[best] * (2 * parts[index] - 1)) {', to: 'if (shares[index] * (2 * parts[best] - 1) > shares[best] * (2 * parts[index] - 1) * (1 + (total % 5) / 10)) {', fails: 'apportion' },
+  { name: 'a calculation that runs the batch against the colony as it is when a share above the free one is wanted (nothing released)', from: 'const state = legal.released.length ? { ...colony, projects: legal.projects } : colony', to: 'const state = colony', fails: 'releaseLegal' },
+  { name: 'a release that takes the newest project of the others before the paused ones', from: 'Number(b.Paused === 1) - Number(a.Paused === 1) || b.ID - a.ID', to: 'b.ID - a.ID', fails: 'redistribute' },
+  { name: 'a release that takes the oldest project first', from: 'Number(b.Paused === 1) - Number(a.Paused === 1) || b.ID - a.ID', to: 'Number(b.Paused === 1) - Number(a.Paused === 1) || a.ID - b.ID', fails: 'redistribute' },
+  { name: 'a release that takes more of a project than it holds', from: 'const taken = Math.min(left, held)', to: 'const taken = left', fails: 'redistribute' },
+  { name: 'a component whose stock is not known read as none to build (units 0)', from: 'const units = buildability.buildable === true ? (remaining === null ? null :', to: 'const units = buildability.buildable === true ? (remaining === null ? 0 :', fails: 'unknownUnits' },
+  { name: 'a demand bound that leaves out the rounding of a build to 4 decimals (the nominal units times the need)', from: 'all + (units + BUILD_ROUNDING) * each, 0) <= stockOfRow(name)', to: 'all + units * each, 0) <= stockOfRow(name)', fails: 'roundedDemand' },
+  { name: 'a search of the shares that does not scan a narrow range a hundredth at a time (the sparse sweep as the search)', from: 'const scanned = result.contested && to - from < SCAN_LIMIT', to: 'const scanned = false', fails: 'islandScan' },
+  { name: 'a search that calls a share not found infeasible where the search was not complete', from: 'result.status = within.complete ? \'infeasible\' : \'searchLimited\'', to: 'result.status = \'infeasible\'', fails: 'searchLimited', narrow: true },
+  { name: 'a sweep of the shares taken for a complete search', from: 'const complete = !result.contested || scanned', to: 'const complete = true', fails: 'searchLimited', narrow: true },
+  { name: 'a batch that needs more of a mineral than the colony holds searched instead of proved impossible', from: '&& batchShort(colony, rows)', to: '&& false', fails: 'searchProof', narrow: true },
+  { name: 'a verdict that gives a search-limited plan the words of one the colony cannot do', from: 'if (plan.status === \'searchLimited\') {', to: 'if (false) {', fails: 'searchLimitedVerdict', page: true },
+  { name: 'an NPR colony (or any colony the forecast leaves gaps for) proved impossible from the colony\'s own stock, its gaps dropped', from: 'if (probed && probed.gaps) {', to: 'if (false) {', fails: 'nprProof' },
+  { name: 'a calculator that says a smaller share may do it of an exact contested share too', from: 'if (plan.contested && plan.requiredKind === \'found\') {', to: 'if (plan.contested) {', fails: 'confidenceCopy', page: true },
+  { name: 'a share tile that says not reachable at any share of a plan that is only not settled', from: '(plan.settled ? \'Not reachable', to: '(true ? \'Not reachable', fails: 'confidenceCopy', page: true },
+  { name: 'a verdict that says the colony cannot do it at any share of a plan that is only not settled', from: 'text: plan.settled ? `The colony cannot do it', to: 'text: true ? `The colony cannot do it', fails: 'unsettledCopy', page: true },
+  { name: 'a gap the search above the free share meets returned as an infeasible, settled plan', from: 'return { ...result, status: \'unknown\', settled: false, finish: null, allocation: [], gaps: beyond.gaps }', to: 'return { ...result, gaps: beyond.gaps }', fails: 'gapsUnknown' },
+  { name: 'a plan whose search above the free share was a sample called settled', from: 'result.settled = result.settled && beyond.complete', to: 'result.settled = result.settled', fails: 'settledMeaning' },
+  { name: 'a share found by a sample called settled', from: 'result.settled = result.requiredKind === \'exact\'', to: 'result.settled = true', fails: 'settledMeaning' },
+  { name: 'a plan settled until a search says it is not (an unknown plan settled)', from: 'contested: false, settled: false, release', to: 'contested: false, settled: true, release', fails: 'settledMeaning' },
+]
+
+// ---------- the parts: the checks of the real sources, a share of the mutants and each save run in a process of their own ----------
+
+// What every part works on: the utilities, the page's options and store, and the page's capacity results for the synthetic colony.
+const sharedOf = async () => {
   const apps = await loadUtilities(UTILITIES, { stubs: STUBS })
   const pageOptions = await loadPage('pages/production', { stubs: STUBS })
   const store = { $store: { getters: { 'capabilities/blockedBonuses': new Set() }, state: {}, dispatch: async () => {} } }
   const synthetic = instantiate(pageOptions, { ...store, data: { populationProductionModifiers: { 7: MODIFIERS } } })
   const capacities = Object.fromEntries(['construction', 'ordnance', 'fighter'].map((kind) => [kind, synthetic.populationCapacityResult(7, kind)]))
 
+  return { apps, pageOptions, store, capacities }
+}
+
+const checkHead = async ({ apps, capacities }) => {
   check('the synthetic colony\'s construction capacity is the 36,500 BP a year its rates give', capacities.construction.status !== 'unavailable' && Math.abs(capacities.construction.value - 36500) < 1e-6, String(capacities.construction.value))
 
   console.log('\n== the calculator: worked cases ==')
-  const NARROW_SCAN = ['const SCAN_LIMIT = 400', 'const SCAN_LIMIT = 1']
+
+  const narrowApps = await mutatedUtilities(NARROW_SCAN[0], NARROW_SCAN[1])
+  const verdict = verdictOf(await loadCalculator())
+
+  syntheticCases(apps, capacities, narrowApps, verdict).forEach(([statement, held]) => check(statement, held))
+}
+
+const checkMutants = async ({ apps, capacities }, mutants) => {
   const narrowApps = await mutatedUtilities(NARROW_SCAN[0], NARROW_SCAN[1])
   const verdict = verdictOf(await loadCalculator())
   const results = syntheticCases(apps, capacities, narrowApps, verdict)
 
-  results.forEach(([statement, held]) => check(statement, held))
-
-  const MUTANTS = [
-    { name: 'a calculation that takes the stock of a component against every hull (the stock times the hulls)', from: 'const held = stockOf(stock, part.componentId)', to: 'const held = stockOf(stock, part.componentId) * hulls', fails: 'stockOnce' },
-    { name: 'a calculation that uses the whole stock, past what the hulls need', from: 'const used = needed === null || held === null ? null : Math.min(held, needed)', to: 'const used = needed === null || held === null ? null : held', fails: 'stockCapped' },
-    { name: 'a calculation that rounds the units to build down', from: 'Math.ceil(remaining - EPSILON)', to: 'Math.floor(remaining - EPSILON)', fails: 'wholeUnits' },
-    { name: 'a calculation that builds armour with a project', from: 'const BUILT_WITH_THE_HULL = new Set([COMPONENT_ARMOUR, COMPONENT_MISSILE_ENGINE])', to: 'const BUILT_WITH_THE_HULL = new Set([COMPONENT_MISSILE_ENGINE])', fails: 'buildable' },
-    { name: 'a calculation that builds a component the race has not researched', from: 'if (part.researched === 0) {', to: 'if (false) {', fails: 'buildable' },
-    { name: 'a held share that leaves out the paused projects', from: '} else if (project.Queue === 0) {', to: '} else if (project.Queue === 0 && !project.Paused) {', fails: 'heldPaused' },
-    { name: 'a held share that counts a queued project', from: '} else if (project.Queue === 0) {', to: '} else {', fails: 'heldQueue' },
-    { name: 'a held share that counts only the construction projects of type 0 (component and station projects held nothing)', from: '} else if (category === \'construction\') {', to: '} else if (category === \'construction\' && project.ProductionType === 0) {', fails: 'heldCategory' },
-    { name: 'a held share that counts the ordnance projects with construction', from: '} else if (category === \'construction\') {', to: '} else if (category !== \'unknown\') {', fails: 'heldCategory' },
-    { name: 'a split of the share that gives each project the same part', from: 'const weights = rows.map((row) => row.bp)', to: 'const weights = rows.map(() => 1)', fails: 'minimal' },
-    { name: 'a split of the share that gives a project no minimum', from: 'const parts = weights.map(() => 1)', to: 'const parts = weights.map(() => 0)', fails: 'allocate' },
-    { name: 'a floor on half the capacity', from: 'rows.reduce((all, row) => all + floorOf(row, capacity.value, cycles, cycleDays), 0)', to: 'rows.reduce((all, row) => all + floorOf(row, capacity.value / 2, cycles, cycleDays), 0)', fails: 'floorShare' },
-    { name: 'a calculation that lets the ceiling of the search pass the share free', from: 'const ceiling = Math.floor(result.available * SHARE_STEP + EPSILON)', to: 'const ceiling = Math.floor(Math.max(result.available, 100) * SHARE_STEP + EPSILON)', fails: 'commitmentsInfeasible' },
-    { name: 'a calculation that reports an infeasible deadline beyond the whole capacity as exact', from: 'result.requiredKind = \'floor\'', to: 'result.requiredKind = \'floor\'\n    result.requiredExact = true', fails: 'infeasible' },
-    { name: 'a calculation that gives the shortfall without the share free taken off', from: 'const lacking = result.required - result.available', to: 'const lacking = result.required', fails: 'infeasible' },
-    { name: 'a search that overshoots the least share', from: 'low = middle + 1', to: 'low = middle + 2', fails: 'contendedLeast' },
-    { name: 'a calculation that counts a batch as in time on the best order of the colony\'s projects', from: 'meets: everyLatest && last(\'latest\') <= deadline + EPSILON', to: 'meets: everyEarliest && last(\'earliest\') <= deadline + EPSILON', fails: 'contended' },
-    { name: 'a calculation that does not say which colony project the batch moves', from: 'result.displaced = base.gaps ? [] : displacedBy(colony, base, chosen.run)', to: 'result.displaced = []', fails: 'displaced' },
-    { name: 'a calculation that loses the mineral a batch is held up by', from: 'result.stalled = stalled || null', to: 'result.stalled = null', fails: 'stallDistinct' },
-    { name: 'a calculation that gives a share where the construction capacity is not known', from: 'if (!isAvailable(capacity) || !isNumber(capacity.value)) {', to: 'if (false) {', fails: 'capacityUnknown' },
-    { name: 'a floor that leaves out the rounding of a build to 4 decimals (the plain division as a bound)', from: 'const perCycle = row.units / cycles - BUILD_ROUNDING', to: 'const perCycle = row.units / cycles', fails: 'roundingFloor' },
-    { name: 'a split that gives fewer hundredths than there are projects instead of refusing', from: 'if (total < weights.length) {', to: 'if (total < 1) {', fails: 'allocate' },
-    { name: 'a share needed that is not looked for above the share free', from: 'const beyond = yield * first(Math.max(lower, ceiling + 1), WHOLE_CAPACITY)', to: 'const beyond = { found: null, gaps: null }', fails: 'cycleRequired' },
-    { name: 'a shortfall of a share the colony could never give', from: 'if (result.required !== null) {', to: 'if (true) {', fails: 'unreachable' },
-    { name: 'an earliest finish given as exact where the projects differ', from: 'earliestExact: everyEarliest && figures.every((figure) => figure.earliest === figure.latest),', to: 'earliestExact: everyEarliest,', fails: 'orderBound' },
-    { name: 'a stock row with no amount read as none held (in the plan)', from: 'return isNumber(stock[componentId]) ? Math.max(0, stock[componentId]) : null', to: 'return isNumber(stock[componentId]) ? Math.max(0, stock[componentId]) : 0', fails: 'stockNull' },
-    { name: 'a stock row with no amount read as none held (in the read)', from: '= isNumber(row.Amount) ? row.Amount : null', to: '= isNumber(row.Amount) ? row.Amount : 0', fails: 'stockNull' },
-    { name: 'a calculation that treats the minerals shared with the colony\'s other projects as never short', from: 'result.contested = !uncontested(colony, rows)', to: 'result.contested = false', fails: 'nonMonotone' },
-    { name: 'a split of the shares whose order of seats depends on the total (a split that is not inside the split of a larger total)', from: 'if (shares[index] * (2 * parts[best] - 1) > shares[best] * (2 * parts[index] - 1)) {', to: 'if (shares[index] * (2 * parts[best] - 1) > shares[best] * (2 * parts[index] - 1) * (1 + (total % 5) / 10)) {', fails: 'apportion' },
-    { name: 'a calculation that runs the batch against the colony as it is when a share above the free one is wanted (nothing released)', from: 'const state = legal.released.length ? { ...colony, projects: legal.projects } : colony', to: 'const state = colony', fails: 'releaseLegal' },
-    { name: 'a release that takes the newest project of the others before the paused ones', from: 'Number(b.Paused === 1) - Number(a.Paused === 1) || b.ID - a.ID', to: 'b.ID - a.ID', fails: 'redistribute' },
-    { name: 'a release that takes the oldest project first', from: 'Number(b.Paused === 1) - Number(a.Paused === 1) || b.ID - a.ID', to: 'Number(b.Paused === 1) - Number(a.Paused === 1) || a.ID - b.ID', fails: 'redistribute' },
-    { name: 'a release that takes more of a project than it holds', from: 'const taken = Math.min(left, held)', to: 'const taken = left', fails: 'redistribute' },
-    { name: 'a component whose stock is not known read as none to build (units 0)', from: 'const units = buildability.buildable === true ? (remaining === null ? null :', to: 'const units = buildability.buildable === true ? (remaining === null ? 0 :', fails: 'unknownUnits' },
-    { name: 'a demand bound that leaves out the rounding of a build to 4 decimals (the nominal units times the need)', from: 'all + (units + BUILD_ROUNDING) * each, 0) <= stockOfRow(name)', to: 'all + units * each, 0) <= stockOfRow(name)', fails: 'roundedDemand' },
-    { name: 'a search of the shares that does not scan a narrow range a hundredth at a time (the sparse sweep as the search)', from: 'const scanned = result.contested && to - from < SCAN_LIMIT', to: 'const scanned = false', fails: 'islandScan' },
-    { name: 'a search that calls a share not found infeasible where the search was not complete', from: 'result.status = within.complete ? \'infeasible\' : \'searchLimited\'', to: 'result.status = \'infeasible\'', fails: 'searchLimited', narrow: true },
-    { name: 'a sweep of the shares taken for a complete search', from: 'const complete = !result.contested || scanned', to: 'const complete = true', fails: 'searchLimited', narrow: true },
-    { name: 'a batch that needs more of a mineral than the colony holds searched instead of proved impossible', from: '&& batchShort(colony, rows)', to: '&& false', fails: 'searchProof', narrow: true },
-    { name: 'a verdict that gives a search-limited plan the words of one the colony cannot do', from: 'if (plan.status === \'searchLimited\') {', to: 'if (false) {', fails: 'searchLimitedVerdict', page: true },
-    { name: 'an NPR colony (or any colony the forecast leaves gaps for) proved impossible from the colony\'s own stock, its gaps dropped', from: 'if (probed && probed.gaps) {', to: 'if (false) {', fails: 'nprProof' },
-    { name: 'a calculator that says a smaller share may do it of an exact contested share too', from: 'if (plan.contested && plan.requiredKind === \'found\') {', to: 'if (plan.contested) {', fails: 'confidenceCopy', page: true },
-    { name: 'a share tile that says not reachable at any share of a plan that is only not settled', from: '(plan.settled ? \'Not reachable', to: '(true ? \'Not reachable', fails: 'confidenceCopy', page: true },
-    { name: 'a verdict that says the colony cannot do it at any share of a plan that is only not settled', from: 'text: plan.settled ? `The colony cannot do it', to: 'text: true ? `The colony cannot do it', fails: 'unsettledCopy', page: true },
-    { name: 'a gap the search above the free share meets returned as an infeasible, settled plan', from: 'return { ...result, status: \'unknown\', settled: false, finish: null, allocation: [], gaps: beyond.gaps }', to: 'return { ...result, gaps: beyond.gaps }', fails: 'gapsUnknown' },
-    { name: 'a plan whose search above the free share was a sample called settled', from: 'result.settled = result.settled && beyond.complete', to: 'result.settled = result.settled', fails: 'settledMeaning' },
-    { name: 'a share found by a sample called settled', from: 'result.settled = result.requiredKind === \'exact\'', to: 'result.settled = true', fails: 'settledMeaning' },
-    { name: 'a plan settled until a search says it is not (an unknown plan settled)', from: 'contested: false, settled: false, release', to: 'contested: false, settled: true, release', fails: 'settledMeaning' },
-  ]
-
-  for (const mutant of MUTANTS) {
+  for (const mutant of mutants) {
     const mutated = mutant.page ? syntheticCases(apps, capacities, narrowApps, verdictOf(await loadCalculator(replacing(mutant.from, mutant.to)))) : syntheticCases(await mutatedUtilities(mutant.from, mutant.to), capacities, mutant.narrow ? await mutatedUtilities([mutant.from, NARROW_SCAN[0]], [mutant.to, NARROW_SCAN[1]]) : narrowApps, verdict)
     const named = results.find(([, , key]) => key === mutant.fails)
     const broken = mutated.filter(([, held]) => !held).map(([, , key]) => key)
 
     check(`${mutant.name} fails the check "${named[0].slice(0, 90)}..."`, named[1] && broken.includes(mutant.fails), `${broken.length} cases fail: ${[...new Set(broken)].join(', ')}`)
   }
+}
 
-  for (const save of saves) {
-    const database = await openSave(save.file)
+const checkSave = async ({ apps, pageOptions, store }, save) => {
+  const database = await openSave(save.file)
 
-    if (!database) {
-      console.log(`SKIP  ${save.file}: not there (not run)`)
-      continue
-    }
+  if (!database) {
+    console.log(`SKIP  ${save.file}: not there (not run)`)
 
-    try {
-      console.log(`\n== ${database.file} ==`)
-      await saveCases(database, save, instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race }), apps)
-    } finally {
-      database.close()
-    }
+    return
+  }
+
+  try {
+    console.log(`\n== ${database.file} ==`)
+    await saveCases(database, save, instantiate(pageOptions, { ...store, database, GameID: save.game, RaceID: save.race }), apps)
+  } finally {
+    database.close()
+  }
+}
+
+// The mutants in `count` contiguous shares of the list, so that the shares print in the order of the list.
+const shareOf = (index, count) => MUTANTS.slice(Math.floor(index * MUTANTS.length / count), Math.floor((index + 1) * MUTANTS.length / count))
+
+// One part, in this process: `head`, `mutants:<share>:<shares>` or `save:<index>`.
+const runPart = async (part, saves) => {
+  const [kind, first, second] = part.split(':')
+  const shared = await sharedOf()
+
+  if (part === 'head') {
+    await checkHead(shared)
+  } else if (kind === 'mutants') {
+    await checkMutants(shared, shareOf(Number(first), Number(second)))
+  } else if (kind === 'save') {
+    await checkSave(shared, saves[Number(first)])
+  } else {
+    throw new Error(`No part is named ${part}`)
+  }
+}
+
+const main = async () => {
+  const { saves, part } = parseArguments(process.argv.slice(2))
+
+  if (part !== null) {
+    await runPart(part, saves)
+    endSection(checks, failures, { unsupported })
+  }
+
+  const shares = Math.min(MUTANTS.length, jobs() * 2)
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'head', weight: 10 },
+    ...Array.from({ length: shares }, (_unused, index) => ({ part: `mutants:${index}:${shares}`, weight: 20 })),
+    ...saves.map((_save, index) => ({ part: `save:${index}`, weight: 30 })),
+  ]
+
+  const forwarded = saves.flatMap((save) => ['--save', save.file, String(save.game), String(save.race)])
+  const sections = await runSections(__filename, parts.map(({ part: name, weight }) => ({ args: ['--part', name, ...forwarded], weight })))
+
+  for (const section of sections) {
+    const counts = printSection(section)
+
+    checks += counts.checks
+    failures += counts.failures
+    unsupported += counts.extra.unsupported
   }
 
   console.log(`\n${checks - failures}/${checks} checks passed; ${unsupported} unsupported (the save holds no case)`)

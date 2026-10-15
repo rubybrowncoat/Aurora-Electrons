@@ -17,10 +17,12 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const assert = require('assert').strict
 const { createRequire } = require('module')
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1395,59 +1397,108 @@ const caught = (mutant, results) => {
   return survived.length === 0 && missing.length === 0 ? true : `${missing.length ? `no check starts with: ${missing.join('; ')}. ` : ''}${survived.length ? `these checks still pass: ${survived.join('; ')}` : ''}`
 }
 
-const main = async () => {
-  const real = await loadModules(utilitiesDirectory)
-  const families = [await familyOf(real, SAVES, 140, 784), await familyOf(real, SAVES_FALRYX, 141, 791)].filter(Boolean)
-  const saves = savesChecks(families)
+const RESULT = 'RESULT '
+const MUTANTS = [...UTILITY_MUTATIONS.map((mutant) => ({ mutant, page: false })), ...PAGE_MUTATIONS.map((mutant) => ({ mutant, page: true }))]
 
-  console.log('The export of the history page: CSV and PNG of what is shown')
+const savesOf = async (real) => savesChecks([await familyOf(real, SAVES, 140, 784), await familyOf(real, SAVES_FALRYX, 141, 791)].filter(Boolean))
+
+// What the baseline, each mutant and the control print, as entries a child hands to the parent: a line of text, or the arguments of `show`.
+const baselineEntries = async () => {
+  const real = await loadModules(utilitiesDirectory)
+  const saves = await savesOf(real)
+  const entries = [{ log: 'The export of the history page: CSV and PNG of what is shown' }]
 
   for (const [name, result, detail, skip] of await runChecks(suite(real))) {
-    show(name, result, detail, skip)
+    entries.push({ show: [name, result, detail, skip] })
   }
 
-  console.log('\nThe export buttons of the page (its script over scripts/lib/page-loader.js)')
+  entries.push({ log: '\nThe export buttons of the page (its script over scripts/lib/page-loader.js)' })
 
   for (const [name, result, detail, skip] of await runChecks(await pageSuite(real, { saves }))) {
-    show(name, result, detail, skip)
+    entries.push({ show: [name, result, detail, skip] })
   }
 
-  if (!process.argv.includes('--no-mutations')) {
+  return entries
+}
+
+const mutantEntries = async ({ mutant, page }) => {
+  let directory = null
+
+  try {
+    let results = null
+
+    if (page) {
+      results = await runChecks(await pageSuite(await loadModules(utilitiesDirectory), { mutate: mutant.mutate }), mutant.fails)
+    } else {
+      directory = mutatedCopy(mutant)
+      results = await runChecks(suite(await loadModules(directory)), mutant.fails)
+    }
+
+    return [{ show: [`mutant caught: ${mutant.name}`, caught(mutant, results)] }]
+  } catch (error) {
+    return [{ show: [`mutant caught: ${mutant.name}`, error.message] }]
+  } finally {
+    if (directory) {
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
+  }
+}
+
+const controlEntries = async () => {
+  const real = await loadModules(utilitiesDirectory)
+  const saves = await savesOf(real)
+  const control = await runChecks(suite(real), [...new Set(UTILITY_MUTATIONS.flatMap((mutant) => mutant.fails))])
+  const controlPage = await runChecks(await pageSuite(real, { saves }), [...new Set(PAGE_MUTATIONS.flatMap((mutant) => mutant.fails))])
+  const wrong = [...control, ...controlPage].filter(([, result]) => result !== true).map(([name]) => name)
+
+  return [{ show: ['a control run of the unchanged code passes every check the mutants name', wrong.length === 0 ? true : `fails ${wrong.join('; ')}`] }]
+}
+
+// A child runs the baseline (`--baseline`), the control (`--control`) or some mutants in turn (`--mutants=<i>,<i>`) in a process of its own, so no chunk shares the modules, the stores or the stand-ins on globalThis of another, and prints its entries as JSON on its last line: those of the baseline or the control, or the list of the entries of each mutant.
+const childMain = async () => {
+  const given = process.argv.find((argument) => argument.startsWith('--mutants='))
+  let entries = null
+
+  if (given) {
+    entries = []
+
+    for (const index of given.slice('--mutants='.length).split(',')) {
+      entries.push(await mutantEntries(MUTANTS[Number(index)]))
+    }
+  } else {
+    entries = process.argv.includes('--control') ? await controlEntries() : await baselineEntries()
+  }
+
+  process.stdout.write(`${RESULT}${JSON.stringify(entries)}\n`, () => process.exit(0))
+}
+
+const main = async () => {
+  if (['--baseline', '--control'].some((flag) => process.argv.includes(flag)) || process.argv.some((argument) => argument.startsWith('--mutants='))) {
+    return childMain()
+  }
+
+  const mutating = !process.argv.includes('--no-mutations')
+  const chunks = mutating ? chunksOf(MUTANTS.length) : []
+  const items = [['--baseline'], ...(mutating ? [['--control'], ...chunks.map((list) => [`--mutants=${list.join(',')}`])] : [])]
+  const outcomes = await inParallel(items, async (args) => lastJson(await runChild(__filename, args), RESULT))
+  const replay = (entries) => entries.forEach((entry) => (entry.log !== undefined ? console.log(entry.log) : show(...entry.show)))
+
+  if (outcomes[0] instanceof Error) {
+    throw outcomes[0]
+  }
+
+  replay(outcomes[0])
+
+  if (mutating) {
     console.log('\nmutants')
 
-    for (const mutant of UTILITY_MUTATIONS) {
-      let directory = null
+    spread(chunks, outcomes.slice(2)).forEach((outcome, index) => (outcome instanceof Error ? show(`mutant caught: ${MUTANTS[index].mutant.name}`, `does not run: ${outcome.message}`) : replay(outcome)))
 
-      try {
-        directory = mutatedCopy(mutant)
-
-        const results = await runChecks(suite(await loadModules(directory)), mutant.fails)
-
-        show(`mutant caught: ${mutant.name}`, caught(mutant, results))
-      } catch (error) {
-        show(`mutant caught: ${mutant.name}`, error.message)
-      } finally {
-        if (directory) {
-          fs.rmSync(directory, { recursive: true, force: true })
-        }
-      }
+    if (outcomes[1] instanceof Error) {
+      show('a control run of the unchanged code passes every check the mutants name', `does not run: ${outcomes[1].message}`)
+    } else {
+      replay(outcomes[1])
     }
-
-    for (const mutant of PAGE_MUTATIONS) {
-      try {
-        const results = await runChecks(await pageSuite(real, { mutate: mutant.mutate }), mutant.fails)
-
-        show(`mutant caught: ${mutant.name}`, caught(mutant, results))
-      } catch (error) {
-        show(`mutant caught: ${mutant.name}`, error.message)
-      }
-    }
-
-    const control = await runChecks(suite(real), [...new Set(UTILITY_MUTATIONS.flatMap((mutant) => mutant.fails))])
-    const controlPage = await runChecks(await pageSuite(real, { saves }), [...new Set(PAGE_MUTATIONS.flatMap((mutant) => mutant.fails))])
-    const wrong = [...control, ...controlPage].filter(([, result]) => result !== true).map(([name]) => name)
-
-    show('a control run of the unchanged code passes every check the mutants name', wrong.length === 0 ? true : `fails ${wrong.join('; ')}`)
   }
 
   console.log(`\n${total - failures} of ${total} checks passed${skipped ? ` (${skipped} skipped: the owner's saves are not here)` : ''}`)

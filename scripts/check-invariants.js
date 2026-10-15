@@ -7,7 +7,7 @@
 
   A case that fails is a mismatch and sets exit code 1. A case marked `known` documents an invariant a helper is known to break today: it names why and the backlog task that fixes it, prints as KNOWN instead of FAIL and does not set the exit code. When a known case starts to pass the run says so, so the mark can be removed.
 */
-const assert = require('assert').strict
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 
 // The packages the utilities import, as the least their callers here need of them. Dates and numerals are never formatted by a case, and electron-store becomes an in-memory file per name that reports every write to `globalThis.onHistoryWrite`.

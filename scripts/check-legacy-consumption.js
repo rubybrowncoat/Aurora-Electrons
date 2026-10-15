@@ -24,6 +24,7 @@ const { spawn } = require('child_process')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
+const { inParallel } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -1684,22 +1685,6 @@ const runList = async (list, only) => {
   return results
 }
 
-// `items` through `work`, no more than `limit` at a time, the results in the order of the items.
-const inParallel = async (items, limit, work) => {
-  const results = new Array(items.length)
-  let next = 0
-
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++
-
-      results[index] = await work(items[index])
-    }
-  }))
-
-  return results
-}
-
 const tryMutation = async ([label, file, from, to, fails]) => {
   let directory
 
@@ -1739,34 +1724,48 @@ const run = async () => {
   }
 
   const { list, cleanup } = suite(rendererDirectory, saves, unsupported)
-  let skipped = 0
-
-  try {
-    for (const [, result, name] of await runList(list, null)) {
-      if (isSkip(result)) {
-        skipped++
-        console.log(`SKIP  ${name}  [${result.skip}]`)
-        unsupported.push(result.skip)
-      } else {
-        check(name, result)
-      }
-    }
-  } finally {
-    await cleanup()
-  }
 
   // A mutation that names a check with no case here (a save or the campaign is not there) cannot be caught by it, and is left out.
   const hasNoCase = (id) => (id.startsWith('passive-') && !campaignSnapshots()) || (id.includes(':') && saves.some((save) => save.key === id.split(':')[1] && !fs.existsSync(path.resolve(root, save.file))))
   const [runnable, left] = [MUTATIONS.filter(([, , , , fails]) => !fails.some(hasNoCase)), MUTATIONS.filter(([, , , , fails]) => fails.some(hasNoCase))]
+  const named = [...new Set(runnable.flatMap(([, , , , fails]) => fails))]
+  // The checks run here, the control and each mutation in a child of its own, all of them side by side; what they say is told in the order of a run one after another.
+  const finished = await inParallel([null, 'control', ...runnable], async (item) => {
+    if (item === null) {
+      try {
+        return await runList(list, null)
+      } finally {
+        await cleanup()
+      }
+    }
+
+    return item === 'control' ? checksInChild(rendererDirectory, named) : tryMutation(item)
+  })
+  let skipped = 0
+
+  finished.slice(0, 2).forEach((outcome) => {
+    if (outcome instanceof Error) {
+      throw outcome
+    }
+  })
+
+  for (const [, result, name] of finished[0]) {
+    if (isSkip(result)) {
+      skipped++
+      console.log(`SKIP  ${name}  [${result.skip}]`)
+      unsupported.push(result.skip)
+    } else {
+      check(name, result)
+    }
+  }
 
   left.forEach(([label]) => unsupported.push(`mutation not run: "${label}" names a check with no case here`))
 
-  for (const [label, result, detail] of await inParallel(runnable, 3, tryMutation)) {
+  for (const [label, result, detail] of finished.slice(2)) {
     check(`mutation caught: ${label}`, result, detail)
   }
 
-  const named = [...new Set(runnable.flatMap(([, , , , fails]) => fails))]
-  const control = (await checksInChild(rendererDirectory, named)).filter(([, result]) => result !== true && !isSkip(result)).map(([id]) => id)
+  const control = finished[1].filter(([, result]) => result !== true && !isSkip(result)).map(([id]) => id)
 
   check('a fresh process on the unchanged sources passes every check the mutations name', control.length === 0 ? true : `fails ${control.join('; ')}`)
 

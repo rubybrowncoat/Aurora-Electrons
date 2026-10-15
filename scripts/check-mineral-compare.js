@@ -14,10 +14,13 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const v8 = require('v8')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, replacing } = require('./lib/page-loader')
+const { jobs } = require('./lib/check-pool')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -856,8 +859,8 @@ const openSave = (file) => new Promise((resolve, reject) => {
   })
 })
 
-// The snapshots the app takes of each recorded save, and the unrounded sums of the colony stockpiles read from the save itself.
-const loadCampaign = async (m) => {
+// The files of the recorded saves in order, or null when the campaign is not there.
+const campaignFiles = () => {
   const list = path.join(PASSIVE, 'snapshots.csv')
 
   if (!fs.existsSync(list)) {
@@ -866,10 +869,11 @@ const loadCampaign = async (m) => {
 
   const files = fs.readFileSync(list, 'utf8').split(/\r?\n/).slice(1).filter(Boolean).map((line) => path.join(PASSIVE, 'snapshots', line.split(',')[2]))
 
-  if (files.length < 2 || !files.every((file) => fs.existsSync(file))) {
-    return null
-  }
+  return files.length < 2 || !files.every((file) => fs.existsSync(file)) ? null : files
+}
 
+// The snapshots the app takes of each of the recorded saves in `files`, and the unrounded sums of the colony stockpiles read from the save itself.
+const readCampaign = async (m, files) => {
   const names = ['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite']
   const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: [], oracle: [] }]))
 
@@ -996,23 +1000,25 @@ const PAGE_MUTATIONS = [
   { name: 'the default picks changed', find: 'default: [1, 2, 11], normalise', replace: 'default: [1, 2, 3], normalise', fails: ['page: the minerals picked and the scale are views declared for the app', 'page: the minerals the page starts with are Duranium, Neutronium and Gallicite'] },
 ]
 
-const run = async () => {
-  const utilities = await loadUtilities(NAMES, { stubs: STUBS })
-  const { appearance } = await loadUtilities(['appearance'], { stubs: { vue: 'export default { observable: (value) => value }' } })
-  const themes = Object.fromEntries(Object.keys(appearance.PRESETS).map((id) => [id, appearance.resolveAppearance(id).charts.categorical]))
-  const modules = (loaded) => ({ compare: loaded['mineral-compare'], minerals: loaded.minerals, provenance: loaded.provenance, history: loaded.history, encodings: appearance.SERIES_ENCODINGS })
-  const m = modules(utilities)
+// ---------- the parts: each mutant and the checks of the real sources run in a process of their own, the campaign read in slices before them ----------
 
-  console.log('The recorded campaign: the snapshots of each save (this takes a while)')
+const MUTANTS = [...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })), ...PAGE_MUTATIONS.map((mutation, index) => ({ kind: 'page', id: `page:${index}`, ...mutation }))]
 
-  const campaign = await loadCampaign(m)
+const modulesOf = (loaded, appearance) => ({ compare: loaded['mineral-compare'], minerals: loaded.minerals, provenance: loaded.provenance, history: loaded.history, encodings: appearance.SERIES_ENCODINGS })
 
-  if (campaign) {
-    console.log(`  ${campaign.races[1].snapshots.length} saves read for ${CAMPAIGN_RACES.length} races`)
-  } else {
-    console.log('SKIP  the passive campaign (artifacts/passive-campaign-20261013) is not there')
-  }
+const loadAppearance = async () => (await loadUtilities(['appearance'], { stubs: { vue: 'export default { observable: (value) => value }' } })).appearance
 
+const themesOf = (appearance) => Object.fromEntries(Object.keys(appearance.PRESETS).map((id) => [id, appearance.resolveAppearance(id).charts.categorical]))
+
+// The recorded campaign as the parent read it (a structured clone, so nothing a snapshot holds is changed), or null when it is not there.
+const campaignOf = (file) => (file ? v8.deserialize(fs.readFileSync(file)) : null)
+
+// The checks of the real sources over a synthetic snapshot set and the recorded campaign; the statements of the page.
+const checkHead = async (campaignFile) => {
+  const appearance = await loadAppearance()
+  const themes = themesOf(appearance)
+  const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
+  const campaign = campaignOf(campaignFile)
   const synthetic = (loaded) => [...pure(loaded, themes), ...(campaign ? campaignStatements(loaded, campaign) : [])]
 
   console.log('\nThe comparison, on snapshots worked by hand and on the recorded campaign')
@@ -1039,70 +1045,176 @@ const run = async () => {
   }
 
   check('the page raises no Vue warning', warnings.length === 0 ? true : warnings.slice(0, 3).join(' | '))
+}
 
-  console.log('\nMutations: each must fail the checks it names')
+const checkUtilityMutation = async ({ name, find, replace, fails, campaign: campaignFails = [] }, campaignFile) => {
+  const appearance = await loadAppearance()
+  const themes = themesOf(appearance)
+  const campaign = campaignOf(campaignFile)
+  const synthetic = (loaded) => [...pure(loaded, themes), ...(campaign ? campaignStatements(loaded, campaign) : [])]
+  const directory = mutatedCopy(UTILITY, find, replace)
+  const began = Date.now()
 
-  for (const { name, find, replace, fails, campaign: campaignFails = [] } of MUTATIONS) {
-    const directory = mutatedCopy(UTILITY, find, replace)
-    const began = Date.now()
-
-    try {
-      const names = campaign ? [...fails, ...campaignFails] : fails
-      let failed = null
-      let absent = []
-
-      try {
-        const mutant = modules(await loadUtilities(NAMES, { stubs: STUBS, directory }))
-
-        // Only the checks the mutation names are run: the others cannot change what it must break.
-        const named = synthetic(mutant).filter(([checkName]) => names.some((start) => checkName.startsWith(start)))
-
-        absent = names.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
-        failed = named.filter(([, test]) => {
-          try {
-            return test() !== true
-          } catch (error) {
-            return true
-          }
-        }).map(([checkName]) => checkName)
-      } catch (error) {
-        check(`mutation caught: ${name}`, `does not load: ${error.message}`)
-        continue
-      }
-
-      const missed = names.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
-
-      check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  }
-
-  for (const { name, find, replace, fails } of PAGE_MUTATIONS) {
-    const began = Date.now()
+  try {
+    const names = campaign ? [...fails, ...campaignFails] : fails
     let failed = null
     let absent = []
 
     try {
-      const statements = await pageStatements(replacing(find, replace), context)
-      const named = statements.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+      const mutant = modulesOf(await loadUtilities(NAMES, { stubs: STUBS, directory }), appearance)
 
-      absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
-      failed = []
+      // Only the checks the mutation names are run: the others cannot change what it must break.
+      const named = synthetic(mutant).filter(([checkName]) => names.some((start) => checkName.startsWith(start)))
 
-      for (const [statement, held] of named) {
-        if ((await held()) !== true) {
-          failed.push(statement)
+      absent = names.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+      failed = named.filter(([, test]) => {
+        try {
+          return test() !== true
+        } catch (error) {
+          return true
         }
-      }
+      }).map(([checkName]) => checkName)
     } catch (error) {
-      check(`page mutation caught: ${name}`, `does not load: ${error.message}`)
-      continue
+      check(`mutation caught: ${name}`, `does not load: ${error.message}`)
+
+      return
     }
 
-    const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+    const missed = names.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
 
-    check(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+    check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const checkPageMutation = async ({ name, find, replace, fails }, campaignFile) => {
+  const appearance = await loadAppearance()
+  const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
+  const settings = await loadUtilities(['campaign', 'preferences', 'remembered-views'], { stubs: STUBS })
+  const context = { m, themes: themesOf(appearance), campaign: campaignOf(campaignFile), settings }
+  const began = Date.now()
+  let failed = null
+  let absent = []
+
+  try {
+    const statements = await pageStatements(replacing(find, replace), context)
+    const named = statements.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+
+    absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
+    failed = []
+
+    for (const [statement, held] of named) {
+      if ((await held()) !== true) {
+        failed.push(statement)
+      }
+    }
+  } catch (error) {
+    check(`page mutation caught: ${name}`, `does not load: ${error.message}`)
+
+    return
+  }
+
+  const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
+
+  check(`page mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
+}
+
+// Reads the share `slice` of `of` of the recorded saves into `out`, as the structured clone `campaignOf` reads.
+const readSlice = async (slice, of, out) => {
+  const appearance = await loadAppearance()
+  const m = modulesOf(await loadUtilities(NAMES, { stubs: STUBS }), appearance)
+  const files = campaignFiles()
+  const share = Math.ceil(files.length / of)
+
+  fs.writeFileSync(out, v8.serialize(await readCampaign(m, files.slice(slice * share, (slice + 1) * share))))
+}
+
+const parseArguments = (argv) => {
+  const options = { part: null, campaign: null, slice: null }
+
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--part') {
+      options.part = argv[++index]
+    } else if (argv[index] === '--campaign') {
+      options.campaign = argv[++index]
+    } else if (argv[index] === '--slice') {
+      options.slice = [Number(argv[index + 1]), Number(argv[index + 2]), argv[index + 3]]
+      index += 3
+    } else {
+      console.error(`Unknown argument: ${argv[index]}`)
+      process.exit(2)
+    }
+  }
+
+  return options
+}
+
+const run = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.slice !== null) {
+    await readSlice(...options.slice)
+    endSection(0, 0)
+  }
+
+  if (options.part !== null) {
+    const mutant = MUTANTS.find(({ id }) => id === options.part)
+
+    if (options.part === 'head') {
+      await checkHead(options.campaign)
+    } else if (mutant && mutant.kind === 'utility') {
+      await checkUtilityMutation(mutant, options.campaign)
+    } else if (mutant) {
+      await checkPageMutation(mutant, options.campaign)
+    } else {
+      throw new Error(`No part is named ${options.part}`)
+    }
+
+    endSection(checks, failures)
+  }
+
+  console.log('The recorded campaign: the snapshots of each save (this takes a while)')
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-mineral-compare-campaign-'))
+
+  try {
+    const files = campaignFiles()
+    let campaignFile = null
+
+    if (files) {
+      const count = Math.min(jobs(), files.length)
+      const outs = Array.from({ length: count }, (_unused, slice) => path.join(directory, `slice-${slice}.bin`))
+
+      await runSections(__filename, outs.map((out, slice) => ({ args: ['--slice', String(slice), String(count), out] })))
+
+      const slices = outs.map((out) => v8.deserialize(fs.readFileSync(out)))
+      const races = Object.fromEntries(CAMPAIGN_RACES.map((race) => [race, { snapshots: slices.flatMap((slice) => slice.races[race].snapshots), oracle: slices.flatMap((slice) => slice.races[race].oracle) }]))
+
+      campaignFile = path.join(directory, 'campaign.bin')
+      fs.writeFileSync(campaignFile, v8.serialize({ races }))
+      console.log(`  ${races[1].snapshots.length} saves read for ${CAMPAIGN_RACES.length} races`)
+    } else {
+      console.log('SKIP  the passive campaign (artifacts/passive-campaign-20261013) is not there')
+    }
+
+    const forwarded = campaignFile ? ['--campaign', campaignFile] : []
+    const parts = [{ part: 'head', weight: 30 }, ...MUTANTS.map(({ id }) => ({ part: id, weight: 3 }))]
+    const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwarded], weight })))
+    let at = 0
+
+    const printed = () => {
+      const counts = printSection(sections[at++])
+
+      checks += counts.checks
+      failures += counts.failures
+    }
+
+    printed()
+    console.log('\nMutations: each must fail the checks it names')
+    MUTANTS.forEach(printed)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

@@ -16,13 +16,16 @@
 */
 const fs = require('fs')
 const path = require('path')
-const assert = require('assert').strict
+const { format } = require('util')
 const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { parse: parseComponent } = require('vue/compiler-sfc')
+const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched, plantedCopy } = require('./lib/mutant-source')
 const { loadPage } = require('./lib/page-loader')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
+const { chunksOf, spread } = require('./lib/mutant-chunks')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1515,6 +1518,8 @@ const tuplesOf = async (database, GameID) => {
 const rowIds = (read) => (read.ok ? read.rows.map((row) => row.raw) : [])
 
 check('sig-real', 'on every save each row of the 24 checks carries a signature that is a non-empty text or null, and in words a reader of its check tells each of its tokens; a check that is not read, and checks that list nothing, are said and never counted as agreement', 'reads', async ({ m, ctx }) => {
+  await ctx.saves(ctx.keys)
+
   const signed = {}
   let rowsSeen = 0
 
@@ -1558,6 +1563,8 @@ check('sig-stable', 'a second read of a save gives every row the same signature,
 })
 
 check('sig-names', 'no signature is made of the name of the row it describes', 'reads', async ({ ctx }) => {
+  await ctx.saves(ctx.keys)
+
   let compared = 0
 
   for (const key of ctx.keys) {
@@ -1581,6 +1588,9 @@ check('sig-names', 'no signature is made of the name of the row it describes', '
 check('stamps-real', 'on the saves the identity stamp of every ship, colony, commander and wreck a check lists is read, and two objects have one stamp exactly when SQL written here reads one tuple for them', 'reads', async ({ m, ctx }) => {
   let objects = 0
   const keys = ctx.keys.filter((key) => ctx.fast.includes(key) || key.startsWith('f29') || key === 'stock')
+
+  await ctx.saves(keys)
+
   const byStamp = new Map()
   const byTuple = new Map()
 
@@ -1613,6 +1623,8 @@ check('stamps-real', 'on the saves the identity stamp of every ship, colony, com
 
 check('real-hide', 'on every save every row of every check that can be snoozed is held by a snooze to clear, to a date and to a declared change, a row that cannot be evaluated or is listed twice cannot be snoozed, and the date ends them all when it comes', 'reads', async ({ m, ctx }) => {
   const { makeRecord, evaluate, readStamps } = m.snoozes
+  await ctx.saves(ctx.keys)
+
   let held = 0
   let refused = 0
 
@@ -1669,6 +1681,8 @@ check('real-hide', 'on every save every row of every check that can be snoozed i
 check('real-fail', 'a read that fails leaves every snooze of the check alone, whatever the rows of the save say, and the reads of the page that fail are the ones the page marks as failed', 'reads', async ({ m, ctx }) => {
   const { evaluate, makeRecord } = m.snoozes
 
+  await ctx.saves(ctx.fast)
+
   for (const key of ctx.fast) {
     const { reads, save } = await ctx.save(key)
     const broken = { query: async () => { throw new Error('disk I/O error') } }
@@ -1703,6 +1717,8 @@ check('rewind-real', 'a snooze set at a later save and judged on an earlier one 
   const pairs = [['f2930673230', 'f2904201340'], ['f2740177930', 'f2398452450'], ['f2794985390', 'f2740177930']].filter(([later, earlier]) => ctx.keys.includes(later) && ctx.keys.includes(earlier))
 
   assert.ok(pairs.length >= (ctx.keys.some((key) => key.startsWith('f')) ? 2 : 0))
+
+  await ctx.saves(pairs.flat())
 
   let kept = 0
   let shown = 0
@@ -1746,6 +1762,8 @@ check('fork-real', 'across each fork of the real saves a snooze of one branch se
     { name: 'b2 to b3', parent: 'f2794985390', child: 'f2904201340' },
     { name: 'b3 to b4, the fork after increment 361910', parent: 'f2904201340', child: 'f2930673230' },
   ].filter((pair) => ctx.keys.includes(pair.parent) && ctx.keys.includes(pair.child))
+
+  await ctx.saves([...new Set([...pairs.flatMap(({ parent, child }) => [parent, child]), 'f2740177930'].filter((key) => ctx.keys.includes(key)))])
 
   assert.equal(pairs.length, 3)
   assert.equal(first.relation, 'new')
@@ -1949,7 +1967,6 @@ const MUTATIONS = [
 
 let failures = 0
 let total = 0
-let number = 0
 
 const show = (label, result, detail = '') => {
   const ok = result === true
@@ -1996,6 +2013,7 @@ const contextOf = (m, { shared = null, keys = SAVE_KEYS } = {}) => {
     minObjects: 100,
     minHeld: 500,
     save,
+    saves: (list) => Promise.all(list.map((key) => save(key))),
     forks,
   }
 }
@@ -2054,82 +2072,158 @@ const planted = (mutation) => {
   return { directories, copies, pageEdits }
 }
 
-const main = async () => {
+const ARGS = process.argv.slice(2)
+const ONLY = (ARGS.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
+const ALL = ARGS.includes('--all')
+const RESULT = 'RESULT '
+
+const selectedChecks = checks.filter((item) => !ONLY.length || ONLY.includes(item.key))
+
+// What the baseline and each mutation print, as entries a child hands to the parent: a line of text (what a check prints as it runs, and a skip), or the arguments of `show`. The entries of a check carry its number, `at`, which is its place among the checks run.
+const baselineEntries = async (entries, keys) => {
   const real = await loadModules(utilitiesDirectory, pagesDirectory, NAMES_WITH_HISTORY)
   const context = contextOf(real)
+  let at = 0
 
-  if (!SAVE_KEYS.length) {
-    console.log('  skip   no save is here, so the reads and the forks are not run')
-  }
+  console.log = (...parts) => entries.push({ at, log: format(...parts) })
 
-  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
-
-  console.log('The warning snoozes')
-
-  for (const entry of checks.filter((item) => !only.length || only.includes(item.key))) {
-    number++
+  for (const entry of selectedChecks.filter((item) => keys.includes(item.key))) {
+    at = selectedChecks.indexOf(entry) + 1
 
     const began = Date.now()
     const outcome = await outcomeOf(real, context, entry)
 
     if (outcome === 'skip') {
-      console.log(`  skip   ${number}. ${entry.key}: the saves it reads are not here (a skip is not agreement)`)
+      entries.push({ at, log: `  skip   ${at}. ${entry.key}: the saves it reads are not here (a skip is not agreement)` })
       continue
     }
 
-    show(`${number}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`)
+    entries.push({ at, show: [`${at}. ${entry.key}: ${entry.name}`, outcome, entry.needs === 'unit' ? '' : `${((Date.now() - began) / 1000).toFixed(1)} s`] })
+  }
+}
+
+// The checks of the baseline in the groups that run in a process each: the reads and the forks of the saves (which share what they read), the checks of the page in two (each loads the page), and the rest.
+const baselineGroups = () => {
+  const of = (...needs) => selectedChecks.filter((entry) => needs.includes(entry.needs)).map((entry) => entry.key)
+  const page = of('page')
+
+  return [of('reads', 'forks'), ...chunksOf(page.length, 2).map((list) => list.map((index) => page[index])), of('unit')].filter((keys) => keys.length)
+}
+
+// The reads and the branches of the unmodified modules, made when a mutation first asks for them, in the process of that mutation (and kept for the next mutation of the process): what a mutation that is not about the reads is judged on.
+const baselineOf = () => {
+  let held = null
+  const context = () => {
+    held = held || loadModules(utilitiesDirectory, pagesDirectory, NAMES_WITH_HISTORY).then((real) => contextOf(real))
+
+    return held
   }
 
-  if (!process.argv.includes('--no-mutations')) {
-    console.log('\nMutations: each must break every check it names')
+  return { save: async (key) => (await context()).save(key), forks: async () => (await context()).forks() }
+}
 
-    for (const mutation of MUTATIONS.filter((item) => !only.length || item.fails.some((key) => only.includes(key)))) {
-      const began = Date.now()
-      let planting = null
+const baseline = baselineOf()
 
-      try {
-        planting = planted(mutation)
+// A mutation that is judged on the reads or the branches of the unmodified modules, and so is run with the others that are, to make them once.
+const readsBaseline = (mutation) => !mutation.rereads && (ALL || mutation.fails.some((key) => ['reads', 'forks'].includes((checks.find((entry) => entry.key === key) || {}).needs)))
 
-        const mutant = await loadModules(planting.directories.utilities, planting.directories.pages, NAMES, planting.pageEdits)
-        const reread = contextOf(mutant, { keys: FAST_SAVES })
-        const mutantContext = mutation.rereads ? { ...reread, minSigned: 0, minObjects: 0, minHeld: 0 } : contextOf(mutant, { shared: { save: context.save, forks: context.forks }, keys: SAVE_KEYS })
-        const named = checks.filter((entry) => mutation.fails.includes(entry.key))
-        const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
-        const missed = []
-        const skipped = []
-        const broke = []
+const mutationEntries = async (entries, mutation) => {
+  const began = Date.now()
+  let planting = null
 
-        for (const entry of process.argv.includes('--all') ? checks : named) {
-          const outcome = await outcomeOf(mutant, mutantContext, entry)
+  try {
+    planting = planted(mutation)
 
-          if (outcome === 'skip') {
-            skipped.push(entry.key)
-          } else if (outcome !== true) {
-            broke.push(entry.key)
-          } else if (named.includes(entry)) {
-            missed.push(entry.key)
-          }
-        }
+    const mutant = await loadModules(planting.directories.utilities, planting.directories.pages, NAMES, planting.pageEdits)
+    const reread = contextOf(mutant, { keys: FAST_SAVES })
+    const mutantContext = mutation.rereads ? { ...reread, minSigned: 0, minObjects: 0, minHeld: 0 } : contextOf(mutant, { shared: baseline, keys: SAVE_KEYS })
+    const named = checks.filter((entry) => mutation.fails.includes(entry.key))
+    const absent = mutation.fails.filter((key) => !named.some((entry) => entry.key === key))
+    const missed = []
+    const skipped = []
+    const broke = []
 
-        const ran = named.length - skipped.length
+    for (const entry of ALL ? checks : named) {
+      const outcome = await outcomeOf(mutant, mutantContext, entry)
 
-        show(`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${process.argv.includes('--all') ? `breaks ${broke.join(', ')}` : mutation.fails.join(', ')}${skipped.length ? `; not run: ${skipped.join(', ')}` : ''}; ${((Date.now() - began) / 1000).toFixed(1)} s`)
-      } catch (error) {
-        show(`mutation caught: ${mutation.name}`, `does not apply or load: ${error.message}`)
-      } finally {
-        if (planting) {
-          planting.copies.forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
-        }
+      if (outcome === 'skip') {
+        skipped.push(entry.key)
+      } else if (outcome !== true) {
+        broke.push(entry.key)
+      } else if (named.includes(entry)) {
+        missed.push(entry.key)
       }
     }
+
+    const ran = named.length - skipped.length
+
+    entries.push({ show: [`mutation caught: ${mutation.name}`, absent.length ? `no check is keyed ${absent.join(', ')}` : !ran ? `none of the named checks could run (${skipped.join(', ')}), so nothing is shown` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${ALL ? `breaks ${broke.join(', ')}` : mutation.fails.join(', ')}${skipped.length ? `; not run: ${skipped.join(', ')}` : ''}; ${((Date.now() - began) / 1000).toFixed(1)} s`] })
+  } catch (error) {
+    entries.push({ show: [`mutation caught: ${mutation.name}`, `does not apply or load: ${error.message}`] })
+  } finally {
+    if (planting) {
+      planting.copies.forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
+    }
   }
+}
+
+// A child runs a group of the baseline (`--baseline --checks=key,key`) or some mutations in turn (`--mutants=<i>,<i>`) in a process of its own, so no group or chunk shares the modules, the stores or the reads of another, and prints its entries as JSON on its last line: those of the group, or the list of the entries of each mutation.
+const childMain = async () => {
+  const given = ARGS.find((argument) => argument.startsWith('--mutants='))
+  const checked = ARGS.find((argument) => argument.startsWith('--checks='))
+  const entries = []
+
+  if (given) {
+    for (const index of given.slice('--mutants='.length).split(',')) {
+      const own = []
+
+      console.log = (...parts) => own.push({ log: format(...parts) })
+      await mutationEntries(own, MUTATIONS[Number(index)])
+      entries.push(own)
+    }
+  } else {
+    await baselineEntries(entries, checked.slice('--checks='.length).split(','))
+  }
+
+  process.stdout.write(`${RESULT}${JSON.stringify(entries)}\n`, () => process.exit(0))
+}
+
+const main = async () => {
+  if (ARGS.includes('--baseline') || ARGS.some((argument) => argument.startsWith('--mutants='))) {
+    return childMain()
+  }
+
+  const groups = baselineGroups()
+  const mutations = ARGS.includes('--no-mutations') ? [] : MUTATIONS.filter((item) => !ONLY.length || item.fails.some((key) => ONLY.includes(key)))
+  const indexes = mutations.map((_mutation, index) => index)
+  const withReads = indexes.filter((index) => readsBaseline(mutations[index]))
+  const rest = indexes.filter((index) => !withReads.includes(index))
+  const chunks = [withReads, ...chunksOf(rest.length).map((list) => list.map((index) => rest[index]))].filter((list) => list.length)
+  const tasks = [...groups.slice(0, 1).map((_keys, at) => ({ group: at })), ...chunks.slice(0, 1).map((_list, at) => ({ chunk: at })), ...groups.slice(1).map((_keys, at) => ({ group: at + 1 })), ...chunks.slice(1).map((_list, at) => ({ chunk: at + 1 }))]
+  const argsOf = (task) => (task.group !== undefined ? ['--baseline', `--checks=${groups[task.group].join(',')}`, ...ARGS] : [`--mutants=${chunks[task.chunk].map((index) => MUTATIONS.indexOf(mutations[index])).join(',')}`, ...ARGS])
+  const outcomes = await inParallel(tasks, async (task) => lastJson(await runChild(__filename, argsOf(task)), RESULT))
+  const groupOutcomes = groups.map((_keys, at) => outcomes[tasks.findIndex((task) => task.group === at)])
+  const replay = (entries) => entries.forEach((entry) => (entry.log !== undefined ? console.log(entry.log) : show(...entry.show)))
+  const failed = groupOutcomes.find((outcome) => outcome instanceof Error)
+
+  if (failed) {
+    throw failed
+  }
+
+  if (!SAVE_KEYS.length) {
+    console.log('  skip   no save is here, so the reads and the forks are not run')
+  }
+
+  console.log('The warning snoozes')
+  replay(groupOutcomes.flat().sort((a, b) => a.at - b.at))
+
+  if (!ARGS.includes('--no-mutations')) {
+    console.log('\nMutations: each must break every check it names')
+  }
+
+  spread(chunks, chunks.map((_list, at) => outcomes[tasks.findIndex((task) => task.chunk === at)])).forEach((outcome, index) => (outcome instanceof Error ? show(`mutation caught: ${mutations[index].name}`, `does not run: ${outcome.message}`) : replay(outcome)))
 
   console.log(`\n${total - failures} of ${total} checks passed`)
-
-  for (const handle of handles.values()) {
-    ;(await handle).close()
-  }
-
   process.exit(failures ? 1 : 0)
 }
 

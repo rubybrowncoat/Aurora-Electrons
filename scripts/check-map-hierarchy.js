@@ -24,6 +24,7 @@ const { parse: parseComponent } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
+const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -1363,9 +1364,44 @@ const agrees = (result) => result === true
 // A mutated check counts only when it failed on a finding: a check that could not run, or threw, says nothing.
 const disagrees = (result) => result !== true && !/^(UNSUPPORTED|threw)/.test(result)
 
+// A mutant runs the checks it names over the mutated sources, in a process of its own (`--mutant <index>`): the page and its modules leave state on globalThis, and a process apart is also what lets the mutants run side by side (CHECK_JOBS). The child prints { results: [[id, result]] }, or { invalid } when the sources do not patch or load.
+const judgeMutant = async (mutant) => {
+  let ctx
+
+  try {
+    const texts = readTexts()
+
+    mutant.patches.forEach(([key, find, replacement]) => {
+      texts[key] = patched(FILES[key], texts[key], find, replacement)
+    })
+    ctx = await contextOf(texts)
+  } catch (error) {
+    return { invalid: error.message }
+  }
+
+  const results = []
+
+  for (const id of mutant.fails) {
+    results.push([id, await run(CHECKS.find((item) => item.id === id), ctx)])
+  }
+
+  return { results }
+}
+
+const judgeApart = async (index) => {
+  try {
+    return lastJson(await runChild(__filename, ['--mutant', String(index)]))
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
+const namesUnknown = (mutant) => mutant.fails.some((id) => !CHECKS.some((item) => item.id === id))
+
 const main = async () => {
   console.log('Visual hierarchy of the map, the system view and the charts: AE-022-01')
 
+  const verdicts = process.argv.includes('--no-mutations') ? Promise.resolve([]) : inParallel([...MUTANTS.keys()], async (index) => (namesUnknown(MUTANTS[index]) ? null : judgeApart(index)))
   const base = await contextOf(readTexts())
   const control = new Map()
 
@@ -1379,7 +1415,9 @@ const main = async () => {
   if (!process.argv.includes('--no-mutations')) {
     console.log('\nmutants')
 
-    for (const mutant of MUTANTS) {
+    const judged = await verdicts
+
+    for (const [index, mutant] of MUTANTS.entries()) {
       const unknown = mutant.fails.filter((id) => !CHECKS.some((item) => item.id === id))
       const unproven = mutant.fails.filter((id) => !agrees(control.get(id)))
 
@@ -1389,17 +1427,16 @@ const main = async () => {
         continue
       }
 
-      let ctx
+      const { invalid, error, results } = judged[index]
 
-      try {
-        const texts = readTexts()
+      if (invalid !== undefined) {
+        show(`mutant caught: ${mutant.name}`, `invalid mutant: ${invalid}`)
 
-        mutant.patches.forEach(([key, find, replacement]) => {
-          texts[key] = patched(FILES[key], texts[key], find, replacement)
-        })
-        ctx = await contextOf(texts)
-      } catch (error) {
-        show(`mutant caught: ${mutant.name}`, `invalid mutant: ${error.message}`)
+        continue
+      }
+
+      if (error !== undefined) {
+        show(`mutant caught: ${mutant.name}`, `the judging process failed: ${error}`)
 
         continue
       }
@@ -1407,9 +1444,7 @@ const main = async () => {
       const survived = []
       const silent = []
 
-      for (const id of mutant.fails) {
-        const result = await run(CHECKS.find((item) => item.id === id), ctx)
-
+      for (const [id, result] of results) {
         if (agrees(result)) {
           survived.push(id)
         } else if (!disagrees(result)) {
@@ -1425,7 +1460,11 @@ const main = async () => {
   process.exit(failures ? 1 : 0)
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(2)
-})
+if (process.argv.includes('--mutant')) {
+  judgeMutant(MUTANTS[Number(process.argv[process.argv.indexOf('--mutant') + 1])]).then((verdict) => process.stdout.write(`${JSON.stringify(verdict)}\n`, () => process.exit(0)))
+} else {
+  main().catch((error) => {
+    console.error(error)
+    process.exit(2)
+  })
+}

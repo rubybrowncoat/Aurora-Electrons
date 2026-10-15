@@ -13,6 +13,7 @@ const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -1127,12 +1128,14 @@ const digest = ({ sets, lightest, fastest, cheapest, pareto, packages, counts })
 const DEFAULT_TECH = { minThrust: 0.5, maxThrust: 1, maxSize: 25, thermalTech: 1, thermalCost: 1 }
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785] }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['../AuroraDB_271_skoormit_saved.db', 138, 785], part: null }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
       options[argv[index].slice(2)] = [argv[index + 1], Number(argv[index + 2]), Number(argv[index + 3])]
       index += 3
+    } else if (argv[index] === '--part') {
+      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -1171,11 +1174,9 @@ const openSave = (file) => new Promise((resolve, reject) => {
   })
 })
 
-const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
-  const utilities = await loadUtilities([...NAMES, 'design-data', 'race-tech'])
-  const mods = modulesOf(utilities)
+// ---------- the parts: each mutant, the checks of the real sources, the page and each save run in a process of their own ----------
 
+const checkSynthetic = (mods) => {
   console.log('Synthetic domains')
 
   for (const [name, test] of synthetic(mods)) {
@@ -1189,141 +1190,201 @@ const run = async () => {
 
     check(name, result)
   }
+}
 
-  console.log('\nMutations: each must fail at least one check')
+const checkMutation = async ([label, file, from, to, probe]) => {
+  const directory = mutatedCopy(file, from, to)
 
-  for (const [label, file, from, to, probe] of MUTATIONS) {
-    const directory = mutatedCopy(file, from, to)
-
-    try {
-      let failed = []
-      let mutant = null
-
-      try {
-        mutant = modulesOf(await loadUtilities(NAMES, { directory }))
-
-        failed = synthetic(mutant).filter(([, test]) => {
-          try {
-            return test() !== true
-          } catch (error) {
-            return true
-          }
-        })
-      } catch (error) {
-        failed = [[`does not load: ${error.message}`]]
-      }
-
-      let probed = true
-
-      if (probe && mutant) {
-        try {
-          probed = probe(mutant)
-        } catch (error) {
-          probed = false
-        }
-      }
-
-      check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
-    } finally {
-      fs.rmSync(directory, { recursive: true, force: true })
-    }
-  }
-
-  console.log('\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)')
-
-  for (const [statement, held] of await pageStatements(null)) {
-    check(`page: ${statement}`, held)
-  }
-
-  for (const [label, from, to] of PAGE_MUTATIONS) {
+  try {
     let failed = []
+    let mutant = null
 
     try {
-      failed = (await pageStatements(replacing(from, to))).filter(([, held]) => held !== true)
+      mutant = modulesOf(await loadUtilities(NAMES, { directory }))
+
+      failed = synthetic(mutant).filter(([, test]) => {
+        try {
+          return test() !== true
+        } catch (error) {
+          return true
+        }
+      })
     } catch (error) {
       failed = [[`does not load: ${error.message}`]]
     }
 
-    check(`page mutation caught: ${label}`, failed.length > 0 ? true : 'every page check still passes', `${failed.length} checks fail`)
+    let probed = true
+
+    if (probe && mutant) {
+      try {
+        probed = probe(mutant)
+      } catch (error) {
+        probed = false
+      }
+    }
+
+    check(`mutation caught: ${label}`, !probed ? 'the mutant does not show the fault it names' : failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+const checkPage = async () => {
+  for (const [statement, held] of await pageStatements(null)) {
+    check(`page: ${statement}`, held)
+  }
+}
+
+const checkPageMutation = async ([label, from, to]) => {
+  let failed = []
+
+  try {
+    failed = (await pageStatements(replacing(from, to))).filter(([, held]) => held !== true)
+  } catch (error) {
+    failed = [[`does not load: ${error.message}`]]
   }
 
-  const saves = [['modded', options.modded], ['stock', options.stock]]
+  check(`page mutation caught: ${label}`, failed.length > 0 ? true : 'every page check still passes', `${failed.length} checks fail`)
+}
 
-  for (const [label, [file, GameID, RaceID]] of saves) {
-    console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
+const checkSave = async (label, [file, GameID, RaceID], utilities, mods) => {
+  console.log(`\n${label} save: ${file} (game ${GameID}, race ${RaceID})`)
 
-    const database = await openSave(file)
+  const database = await openSave(file)
 
-    if (!database) {
-      console.log(`SKIP  ${file} is not there`)
-      continue
-    }
+  if (!database) {
+    console.log(`SKIP  ${file} is not there`)
 
-    const context = { GameID, RaceID }
-    const tech = await utilities['race-tech'].loadRaceTech(database, context)
-    const tanks = await utilities['design-data'].loadStockTanks(database, context)
-    const engines = await utilities['design-data'].loadRaceEngines(database, context)
-    const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
-    const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
+    return
+  }
 
-    const designTech = {
-      engineTech: level(ENGINE_TECH_TYPE, 'info'),
-      fuelTech: level(FUEL_TECH_TYPE, 'info'),
-      thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
-      thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
-      minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
-      maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
-      maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
-    }
+  const context = { GameID, RaceID }
+  const tech = await utilities['race-tech'].loadRaceTech(database, context)
+  const tanks = await utilities['design-data'].loadStockTanks(database, context)
+  const engines = await utilities['design-data'].loadRaceEngines(database, context)
+  const level = (type, key, fallback) => (tech.lines[type].pick ? tech.lines[type].pick[key] : fallback)
+  const { ENGINE_TECH_TYPE, FUEL_TECH_TYPE, THERMAL_TECH_TYPE, MAX_THRUST_TECH_TYPE, MIN_THRUST_TECH_TYPE, MAX_ENGINE_SIZE_TECH_TYPE } = utilities['race-tech']
 
-    // A small part of the race's grid, so the enumeration can walk it: the engines of up to 3 HS between the least thrust and the lowest of the greatest and 0.7.
-    const small = { ...designTech, maxSize: Math.min(3, designTech.maxSize), maxThrust: Math.min(designTech.maxThrust, Math.max(designTech.minThrust, 0.7)) }
-    const own = engines.find((engine) => !engine.obsolete)
-    const random = generator(GameID * 1000 + RaceID)
+  const designTech = {
+    engineTech: level(ENGINE_TECH_TYPE, 'info'),
+    fuelTech: level(FUEL_TECH_TYPE, 'info'),
+    thermalTech: level(THERMAL_TECH_TYPE, 'info', DEFAULT_TECH.thermalTech),
+    thermalCost: level(THERMAL_TECH_TYPE, 'info2', DEFAULT_TECH.thermalCost),
+    minThrust: level(MIN_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.minThrust),
+    maxThrust: level(MAX_THRUST_TECH_TYPE, 'info', DEFAULT_TECH.maxThrust),
+    maxSize: level(MAX_ENGINE_SIZE_TECH_TYPE, 'info', DEFAULT_TECH.maxSize),
+  }
 
-    const domains = [
-      ['a range target on the race\'s tanks', { hullHS: 40, speed: 2000, fraction: 0.5, goal: { mode: 'range', value: 3e9 }, share: 0.5, maxCount: 30, tech: small, tanks }],
-      ['custom count limits and an endurance target', { hullHS: 60, speed: 1500, fraction: 0.5, goal: { mode: 'endurance', value: 100 }, share: 0.4, minCount: 4, maxCount: 20, tech: small, tanks }],
-      ['the limits policy and military engines', { hullHS: 40, speed: 2000, goal: { mode: 'range', value: 2e9 }, kind: 'military', share: 0.5, maxCount: 20, include: 'limits', tech: small, tanks }],
-      ['no target', { hullHS: 40, speed: 3000, share: 0.5, maxCount: 25, tech: small, tanks }],
-      ...(own ? [['one of the race\'s own engines', { hullHS: 100 + Math.round(random() * 100), speed: 1500, goal: { mode: 'range', value: 2e9 }, share: 0.6, maxCount: 80, engine: own, tech: small, tanks }]] : []),
-    ]
+  // A small part of the race's grid, so the enumeration can walk it: the engines of up to 3 HS between the least thrust and the lowest of the greatest and 0.7.
+  const small = { ...designTech, maxSize: Math.min(3, designTech.maxSize), maxThrust: Math.min(designTech.maxThrust, Math.max(designTech.minThrust, 0.7)) }
+  const own = engines.find((engine) => !engine.obsolete)
+  const random = generator(GameID * 1000 + RaceID)
 
-    for (const [name, input] of domains) {
-      check(`${label}: the search and an unpruned enumeration agree: ${name}`, agrees(mods, input))
-    }
+  const domains = [
+    ['a range target on the race\'s tanks', { hullHS: 40, speed: 2000, fraction: 0.5, goal: { mode: 'range', value: 3e9 }, share: 0.5, maxCount: 30, tech: small, tanks }],
+    ['custom count limits and an endurance target', { hullHS: 60, speed: 1500, fraction: 0.5, goal: { mode: 'endurance', value: 100 }, share: 0.4, minCount: 4, maxCount: 20, tech: small, tanks }],
+    ['the limits policy and military engines', { hullHS: 40, speed: 2000, goal: { mode: 'range', value: 2e9 }, kind: 'military', share: 0.5, maxCount: 20, include: 'limits', tech: small, tanks }],
+    ['no target', { hullHS: 40, speed: 3000, share: 0.5, maxCount: 25, tech: small, tanks }],
+    ...(own ? [['one of the race\'s own engines', { hullHS: 100 + Math.round(random() * 100), speed: 1500, goal: { mode: 'range', value: 2e9 }, share: 0.6, maxCount: 80, engine: own, tech: small, tanks }]] : []),
+  ]
 
-    const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
-    const sweep = mods.search.engineSweep({ tech: designTech, minCount: 1, maxCount: 100 })
-    const made = mods.search.propulsionRun(input)
-    const outcome = finish(made)
-    const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
+  for (const [name, input] of domains) {
+    check(`${label}: the search and an unpruned enumeration agree: ${name}`, agrees(mods, input))
+  }
 
-    check(`${label}: the default search is a complete run of its whole domain within the default budget (${outcome.counts.evaluated} evaluated, ${outcome.counts.pruned} dropped of ${outcome.counts.total}, ${outcome.counts.feasible} meet the targets, ${outcome.counts.retained} kept)`, outcome.status === 'complete' && outcome.counts.total === sweep.combinations && outcome.counts.unexplored === 0 && outcome.counts.evaluated + outcome.counts.pruned === outcome.counts.total && outcome.result.sets.length === 50 && outcome.result.output.omitted === outcome.counts.feasible - 50 && outcome.descriptor.input === input ? true : short([outcome.status, outcome.counts]))
+  const input = { ...DEFAULT_INPUT, tech: designTech, tanks }
+  const sweep = mods.search.engineSweep({ tech: designTech, minCount: 1, maxCount: 100 })
+  const made = mods.search.propulsionRun(input)
+  const outcome = finish(made)
+  const anchor = ANCHORS[`${path.basename(file)}:${GameID}:${RaceID}`]
 
-    if (anchor) {
-      const result = outcome.result
+  check(`${label}: the default search is a complete run of its whole domain within the default budget (${outcome.counts.evaluated} evaluated, ${outcome.counts.pruned} dropped of ${outcome.counts.total}, ${outcome.counts.feasible} meet the targets, ${outcome.counts.retained} kept)`, outcome.status === 'complete' && outcome.counts.total === sweep.combinations && outcome.counts.unexplored === 0 && outcome.counts.evaluated + outcome.counts.pruned === outcome.counts.total && outcome.result.sets.length === 50 && outcome.result.output.omitted === outcome.counts.feasible - 50 && outcome.descriptor.input === input ? true : short([outcome.status, outcome.counts]))
 
-      check(`${label}: the default search through the run still gives the result taken before runs existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && result.counts.total === anchor.total && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+  if (anchor) {
+    const result = outcome.result
+
+    check(`${label}: the default search through the run still gives the result taken before runs existed`, result.counts.evaluated === anchor.evaluated && result.counts.feasible === anchor.matched && result.counts.total === anchor.total && digest(result) === anchor.digest ? true : `${result.counts.evaluated}/${result.counts.feasible}/${digest(result)} vs ${anchor.evaluated}/${anchor.matched}/${anchor.digest}`, `${anchor.evaluated} evaluated, ${anchor.matched} matched, digest ${anchor.digest}`)
+  } else {
+    console.log('SKIP  no digest of the unchanged search is recorded for this save')
+  }
+
+  const stopped = mods.search.propulsionRun(input)
+  const key = stopped.descriptor.inputKey
+  let slices = 0
+
+  while (stopped.running && slices < 10) {
+    stopped.advance(mods.run.RESPONSIVENESS.sliceMs)
+    slices++
+  }
+
+  const cut = stopped.cancel() && stopped.outcome()
+
+  check(`${label}: the default search cancelled after ${slices} slices is incomplete, names the input it was given, and holds the best of what it explored (${cut.counts.evaluated} of ${cut.counts.total} candidates)`, cut.status === 'cancelled' && cut.incomplete && cut.descriptor.input === input && cut.descriptor.inputKey === key && cut.counts.unexplored > 0 && cut.result && cut.result.sets.length > 0 && cut.counts.evaluated > 0 ? true : short([cut.status, cut.counts]))
+
+  database.close()
+}
+
+const SAVE_LABELS = ['modded', 'stock']
+
+// One part, in this process: `synthetic`, a mutation by its id (`utility:3`, `page:1`), `page` or a save by its label.
+const runPart = async (part, options) => {
+  const [kind, index] = part.split(':')
+
+  if (kind === 'utility') {
+    await checkMutation(MUTATIONS[Number(index)])
+  } else if (kind === 'page' && index !== undefined) {
+    await checkPageMutation(PAGE_MUTATIONS[Number(index)])
+  } else if (part === 'page') {
+    await checkPage()
+  } else if (part === 'synthetic' || SAVE_LABELS.includes(part)) {
+    const utilities = await loadUtilities([...NAMES, 'design-data', 'race-tech'])
+
+    if (part === 'synthetic') {
+      checkSynthetic(modulesOf(utilities))
     } else {
-      console.log('SKIP  no digest of the unchanged search is recorded for this save')
+      await checkSave(part, options[part], utilities, modulesOf(utilities))
     }
-
-    const stopped = mods.search.propulsionRun(input)
-    const key = stopped.descriptor.inputKey
-    let slices = 0
-
-    while (stopped.running && slices < 10) {
-      stopped.advance(mods.run.RESPONSIVENESS.sliceMs)
-      slices++
-    }
-
-    const cut = stopped.cancel() && stopped.outcome()
-
-    check(`${label}: the default search cancelled after ${slices} slices is incomplete, names the input it was given, and holds the best of what it explored (${cut.counts.evaluated} of ${cut.counts.total} candidates)`, cut.status === 'cancelled' && cut.incomplete && cut.descriptor.input === input && cut.descriptor.inputKey === key && cut.counts.unexplored > 0 && cut.result && cut.result.sets.length > 0 && cut.counts.evaluated > 0 ? true : short([cut.status, cut.counts]))
-
-    database.close()
+  } else {
+    throw new Error(`No part is named ${part}`)
   }
+}
+
+const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+
+const run = async () => {
+  const options = parseArguments(process.argv.slice(2))
+
+  if (options.part !== null) {
+    await runPart(options.part, options)
+    endSection(checks, failures)
+  }
+
+  // In the order they print; the longest start first.
+  const parts = [
+    { part: 'synthetic', weight: 20 },
+    ...MUTATIONS.map((_mutation, index) => ({ part: `utility:${index}`, weight: 10 })),
+    { part: 'page', weight: 2 },
+    ...PAGE_MUTATIONS.map((_mutation, index) => ({ part: `page:${index}`, weight: 2 })),
+    ...SAVE_LABELS.map((label) => ({ part: label, weight: 60 })),
+  ]
+
+  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
+  let at = 0
+
+  const printed = () => {
+    const counts = printSection(sections[at++])
+
+    checks += counts.checks
+    failures += counts.failures
+  }
+
+  printed()
+  console.log('\nMutations: each must fail at least one check')
+  MUTATIONS.forEach(printed)
+  console.log('\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)')
+  printed()
+  PAGE_MUTATIONS.forEach(printed)
+  SAVE_LABELS.forEach(printed)
 
   console.log('\nstep times are not asserted here; scripts/bench-tank-packing.js reports them against the responsiveness budget')
   console.log(`\n${checks - failures} of ${checks} checks passed`)
