@@ -247,6 +247,8 @@
         </div>
       </v-card>
 
+      <stock-rates :empire-record="record" :colony-record="colonyRecord" :colonies="colonyBudget ? colonyBudget.entries : []" :race-id="RaceID" :race-name="record ? record.raceName || '' : ''" :campaign-id="resolved ? resolved.campaignId : null" :branch-id="shownBranchId" :game-id="GameID" :chart-options="options" :year="year" :date="date" :separator="separator" />
+
       <colony-series :database="database" :config="config" :game-id="GameID" :race-id="RaceID" :game-time="GameTime" :resolved="resolved" :view="colonyBudget" :cap="retentionView.profile.cap" :date="date" :separator="separator" @changed="colonyChanges++" />
 
       <v-card class="panel history-retention" data-summary="How many samples this race's history keeps, how far apart they are, whether and when its older half was thinned, and how large the record is, with the colony series and the game log's event archive kept beside it. A retention profile caps the samples one series keeps; it applies only to samples observed or still kept, and never brings back a sample that was thinned. A cap on the events the archive keeps cuts the oldest ones when the race is next captured." elevation="1">
@@ -485,6 +487,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartFont, chartTheme, seriesIdentity, withAlpha } from '../components/charts/theme'
 import ColonySeries from '../components/history/ColonySeries.vue'
+import StockRates from '../components/history/StockRates.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -580,7 +583,7 @@ const linkText = (link) => (link ? `${link.label}: ${link.name || link.id}${link
 
 export default {
   name: 'HistoryPage',
-  components: { ChartCanvas, ColonySeries, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, ColonySeries, ProvenanceMark, SeriesKey, StatTiles, StockRates },
   mixins: [
     persistedView({
       view: { key: 'historyView', default: 'charts', valid: oneOf(['charts', 'table']) },
