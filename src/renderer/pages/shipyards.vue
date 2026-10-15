@@ -235,6 +235,8 @@
           </div>
         </v-card>
 
+        <platform-paths v-if="view === 'classes'" :classes="classes" :extras="platformSources.extras" :components="components" :yards="yards" :colonies="platformColonies" :context="eligibilityContext" :version="formulaVersion" :researched="platformSources.researched" />
+
         <v-card v-if="runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, each with the cost the save stores beside the cost the rules give. Use it to check the rules against the game and to see when the work ends." elevation="1">
           <div class="panel-head">
             <span>Running refits and retools<provenance-mark rule="production.shipFinish" label /></span>
@@ -292,6 +294,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import PlatformPaths from '../components/shipyards/PlatformPaths.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
@@ -301,6 +304,7 @@ import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
+import { loadPlatformSources } from '../utilities/platform-paths'
 import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate, sortNullLast } from '../utilities/production'
 import { describeResult, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { REFIT_TASK_TYPES, SHIPYARD_TYPE, YARD_OPERATIONS, checkRefitTask, checkRetoolTask, costShare, inBand, loadRefitClasses, loadRefitTasks, loadRetoolTasks, loadShipCounts, loadYards, noRetoolCheck, refitCost, refitRate, refitTime, refitTotal, retoolCost, retoolTime, tooledClassOf, yardEligibility } from '../utilities/refits'
@@ -308,6 +312,7 @@ import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
   refitData: 'the ship classes and their components',
+  platformSources: 'the colonies\' component stock, industrial projects and installations',
   shipCounts: 'the ships',
   yards: 'the shipyards',
   refitTasks: 'the running refits',
@@ -348,7 +353,7 @@ const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
 export default {
   name: 'ShipyardsPage',
-  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { LoadState, PageLink, PlatformPaths, ProvenanceMark, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -413,6 +418,13 @@ export default {
 
     modifiersOf() {
       return this.populationProductionModifiers
+    },
+
+    // What the platform comparison reads of each colony: the page's reads of its stock, projects and installations with its production modifiers and its construction capacity as a result.
+    platformColonies() {
+      const { platformSources, modifiersOf } = this
+
+      return Object.fromEntries(Object.entries(platformSources.colonies).map(([id, colony]) => [id, { ...colony, modifiers: modifiersOf[id], capacity: this.populationCapacityResult(id, 'construction') }]))
     },
 
     // What the yards take, for the shared eligibility: the classes by id, the components and the save's formula version, with a cache for the refits between classes.
@@ -963,6 +975,17 @@ export default {
         return await loadRefitClasses(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: { classes: [], components: {} },
+    },
+    // What the platform comparison reads beside the classes and the yards: each class's armour and mining modules, whether the race has researched each component of its classes, and each colony's component stock, projects, spaceports and construction workers.
+    platformSources: {
+      get: tracked('platformSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { extras: {}, colonies: {}, researched: null, stockRead: false }
+        }
+
+        return await loadPlatformSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: { extras: {}, colonies: {}, researched: null, stockRead: false },
     },
     // The race's ships, not destroyed, by class: the own-ship count the other pages use.
     shipCounts: {
