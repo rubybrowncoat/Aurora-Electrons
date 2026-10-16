@@ -6,6 +6,8 @@ export const state = () => {
     revision: 0,
     failures: [],
     campaigns: {},
+    // { [GameID]: generation }: the copy of the save (the store's freshness generation) a pass of the recorder last wrote the empire's snapshot of each game for. A failure of a later pass is in `failures`; a game without an entry for the copy now open has no confirmed recording of it yet.
+    passes: {},
     captures: 0,
   }
 }
@@ -52,6 +54,7 @@ export const mutations = {
     state.revision++
     state.failures = []
     state.campaigns = {}
+    state.passes = {}
   },
   recorded (state) {
     state.revision++
@@ -59,6 +62,10 @@ export const mutations = {
   // The Colony series panel asks the recorder for one pass on the open save (a colony was just chosen, so its first observation is this save's).
   capture (state) {
     state.captures++
+  },
+  // A pass of the recorder ended on the copy of the save `generation`: `GameIDs` are the games whose empire snapshot it wrote.
+  passed (state, { GameIDs, generation }) {
+    state.passes = { ...state.passes, ...Object.fromEntries(GameIDs.map((GameID) => [GameID, generation])) }
   },
   failures (state, failures) {
     state.failures = failures

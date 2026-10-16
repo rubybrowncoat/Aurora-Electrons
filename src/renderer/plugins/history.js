@@ -18,6 +18,8 @@ export default ({ store, ownerGrace }) => {
     const generation = store.state.freshness.generation
     const isCurrent = () => store.state.freshness.generation === generation && store.state.database === database
     const pass = { generation, status: 'running' }
+    // The games whose snapshot this pass wrote.
+    const saved = new Set()
 
     // Once per database: the lock is asked for when the save is first recorded, when its path is known.
     claimRecording({ database: store.state.savePath || '', onOwner: own })
@@ -25,7 +27,7 @@ export default ({ store, ownerGrace }) => {
     latest = pass
 
     // Open views refresh after each game's file is written, so a game that fails later in the pass doesn't leave them stale.
-    recordHistory(database, { storage: campaignStorage(store.getters.config), path: store.state.savePath, isCurrent, ownerGrace, onResolved: (GameID, resolution) => isCurrent() && store.commit('history/resolved', { GameID, resolution, generation }), onSaved: () => store.commit('history/recorded') }).then(({ failed, superseded }) => {
+    recordHistory(database, { storage: campaignStorage(store.getters.config), path: store.state.savePath, isCurrent, ownerGrace, onResolved: (GameID, resolution) => isCurrent() && store.commit('history/resolved', { GameID, resolution, generation }), onSaved: (GameID) => { saved.add(GameID); store.commit('history/recorded') } }).then(({ failed, superseded }) => {
       // A pass that a newer copy replaced reports nothing: what it failed on belonged to the copy the app has left.
       if (superseded || !isCurrent()) {
         pass.status = 'done'
@@ -40,6 +42,8 @@ export default ({ store, ownerGrace }) => {
       pass.status = failed.some(({ stage }) => stage === 'readonly') ? 'refused' : 'done'
 
       store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
+      // Only the end of a pass confirms what it wrote, and a failure reported with it is read first (utilities/economy-digest.js `recordingStateOf`).
+      store.commit('history/passed', { GameIDs: [...saved], generation })
     }).catch((error) => {
       pass.status = 'done'
 

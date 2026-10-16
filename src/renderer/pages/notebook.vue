@@ -4,6 +4,8 @@
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready" @retry="retryFailedInputs" />
 
       <template v-if="ready">
+        <change-digest :config="config" :campaign="resolved" :race-id="RaceID" :game-time="GameTime" :notes="digestNotes" :names="installationNames" :start-year="StartYear" :separator="separator" :history-revision="historyRevision" :recording="recording" />
+
         <v-card class="panel notebook-form" data-summary="A note on one body, colony, fleet or tech, with a status and the next action to take. It keeps the economy's projects in one place; a note gives the game no order and writes nothing to the save." elevation="1">
           <div class="panel-head">
             <span>{{ draft.uuid ? 'Edit note' : 'New note' }}</span>
@@ -88,11 +90,13 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import ChangeDigest from '../components/notebook/ChangeDigest.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import loadState from '../mixins/load-state'
 import { readRegistry } from '../utilities/campaign'
 import { linkTo } from '../utilities/deep-links'
+import { recordingStateOf } from '../utilities/economy-digest'
 import { ALL_SYSTEMS, NEXT_LENGTH, NOTE_STATUSES, NOTE_TARGETS, NOTE_TARGET_KEYS, TITLE_LENGTH, bodyIdsOf, deleteNote, filterBySystem, loadBodies, loadNoteObjects, noteChoices, readNotes, registerEconomyNotes, saveNote, scopeOf, systemOptions, withBodies } from '../utilities/economy-notes'
 import { campaignStorage } from '../utilities/history'
 import { LINK_STATUS_TEXT, branchLineage } from '../utilities/history-milestones'
@@ -100,6 +104,7 @@ import { tracked } from '../utilities/load-tracking'
 
 const INPUT_LABELS = {
   objects: 'the colonies, fleets, techs and systems',
+  installationNames: 'the installation types',
 }
 
 const LINK_WORDS = { linked: 'linked', missing: 'gone', changed: 'changed', unknown: 'not checked', ambiguous: 'ambiguous' }
@@ -113,7 +118,7 @@ const linkView = (link) => ({ ...link, color: link.status === 'linked' ? undefin
 
 export default {
   name: 'NotebookPage',
-  components: { LoadState, PageLink },
+  components: { ChangeDigest, LoadState, PageLink },
   mixins: [loadState(INPUT_LABELS)],
   data() {
     return {
@@ -133,7 +138,27 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'GameTime', 'RaceID']),
+    ...mapGetters(['config', 'database', 'GameID', 'GameTime', 'RaceID', 'StartYear']),
+
+    separator() {
+      const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
+
+      return selectedSeparator === 'Tick' ? "'" : selectedSeparator === 'Comma' ? ',' : selectedSeparator === 'Dash' ? '-' : selectedSeparator === 'Space' ? ' ' : ''
+    },
+
+    historyRevision() {
+      return this.$store.state.history.revision
+    },
+
+    // What the recorder has reported for the open save: '' only once a pass of it wrote the empire's snapshot of this game on this copy of the save, the stage of its failure, or 'pending' (a pass still running, or none yet): the digest then compares nothing.
+    recording() {
+      return recordingStateOf(this.$store.state.history, this.GameID, this.$store.state.freshness.generation)
+    },
+
+    // The notes the digest compares, null while they cannot be read whole (no repository, no settled scope, a refused read, or a note this version cannot read, which is there but not listed and so would read as removed).
+    digestNotes() {
+      return this.repository && this.scope && !this.read.error && !this.read.notes.length ? this.read.entries : null
+    },
 
     // The campaign and branch the recorder settled this game to, null until it has.
     resolved() {
@@ -419,6 +444,19 @@ export default {
     },
   },
   asyncComputed: {
+    // The names of the installation types, for the digest's installations.
+    installationNames: {
+      get: tracked('installationNames', async function () {
+        if (!this.database) {
+          return {}
+        }
+
+        const [rows] = await this.database.query('select DIM_PlanetaryInstallation.PlanetaryInstallationID, DIM_PlanetaryInstallation.Name from DIM_PlanetaryInstallation')
+
+        return Object.fromEntries(rows.map((row) => [row.PlanetaryInstallationID, row.Name]))
+      }),
+      default: {},
+    },
     // The repository of scenario records, loaded with the page: its module needs the app's settings store, so a page that is read without it still loads.
     records: {
       async get() {
