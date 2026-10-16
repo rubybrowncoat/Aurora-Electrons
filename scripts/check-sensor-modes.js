@@ -21,6 +21,9 @@
 */
 const fs = require('fs')
 const path = require('path')
+const nodeVm = require('vm')
+const Vue = require('vue')
+const { compileTemplate } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 
@@ -214,6 +217,52 @@ const chartProblems = (template) => {
 // The typed fields among `names` that no input of the template is bound to.
 const unboundTyped = (template, names) => names.filter((name) => !template.includes(`v-model="${name}"`))
 
+// The template compiled to render functions, and the walk of a rendered tree. `mutate` rewrites the template first (a planted fault) and is compiled each time; the stock template is compiled once. The Vuetify elements are not registered, so Vue's warnings about unknown elements are silenced.
+let compiledRender = null
+
+Vue.config.silent = true
+Vue.config.productionTip = false
+
+const renderFunctions = (mutate = null) => {
+  if (mutate || !compiledRender) {
+    const compiled = compileTemplate({ source: TEMPLATE(mutate || undefined), filename: 'sensors.vue', id: 'sensors' })
+
+    if (compiled.errors.length) {
+      throw new Error(`The template does not compile: ${compiled.errors.join('; ')}`)
+    }
+
+    const functions = nodeVm.runInThisContext(`(function () {\n${compiled.code}\nreturn { render, staticRenderFns }\n})()`)
+
+    if (mutate) {
+      return functions
+    }
+
+    compiledRender = functions
+  }
+
+  return compiledRender
+}
+
+const textOf = (node) => (typeof node.text === 'string' ? node.text : (node.children || []).map(textOf).join(''))
+
+const nodesOf = (node, test, found = []) => {
+  if (test(node)) {
+    found.push(node)
+  }
+
+  ;(node.children || []).forEach((child) => nodesOf(child, test, found))
+
+  return found
+}
+
+const attributeOf = (node, name) => (node.data && node.data.attrs ? node.data.attrs[name] : undefined)
+
+// A boolean attribute is on unless it is absent or bound to false, as Vuetify reads it: a static `disabled` or `readonly` compiles to an empty string and is on.
+const flagged = (node, name) => ![undefined, null, false].includes(attributeOf(node, name))
+
+// An input that takes what is typed: neither disabled nor read-only, and bound to a value it can write.
+const editable = (node) => !flagged(node, 'disabled') && !flagged(node, 'readonly') && Boolean(node.data.model && typeof node.data.model.callback === 'function')
+
 // ---------- the pages ----------
 
 let loadedModules = null
@@ -234,7 +283,7 @@ const asyncNamesOf = (options) => [...new Set([...(options.mixins || []).flatMap
 const MISSILE_STORE = { getters: { 'history/campaign': { campaignId: 'c1', branchId: 'b1' }, GameTime: 100 }, state: {} }
 
 const pageStatements = async (mutates, stock) => {
-  const { sensors = null, missile = null, designed = null, panel = null } = mutates || {}
+  const { sensors = null, missile = null, designed = null, panel = null, template = null } = mutates || {}
 
   globalThis.__modesFields = {}
 
@@ -260,6 +309,16 @@ const pageStatements = async (mutates, stock) => {
   const techWith = (...ids) => buildTech(m, researchedAlso(LEVELS, ...ids))
   const store = { getters: {}, state: {} }
   const page = (data = {}) => instantiate(options, { $store: store, database: {}, GameID: 138, RaceID: RACE, data: { classRead: CLASSES, ownedRows: OWNED, activeRows: ACTIVE, beamRows: BEAMS, tech, reduction: { levels: [], techs: {} }, loadErrors: {}, ready: true, ...NOTHING, ...data } })
+  // The page as Vue renders it: the page's script with its template compiled, over the same data as `page`. Elements the page does not register stay plain nodes, so what is read is their attributes, bound values and text.
+  const rendered = (data = {}) => {
+    const { render, staticRenderFns } = renderFunctions(template)
+    const getters = { database: {}, GameID: 138, RaceID: RACE, config: { get: (_name, fallback) => fallback } }
+    const Page = Vue.extend({ mixins: [options], data: () => ({ classRead: CLASSES, ownedRows: OWNED, activeRows: ACTIVE, beamRows: BEAMS, tech, reduction: { levels: [], techs: {} }, loadErrors: {}, ready: true, ...NOTHING, ...data }), beforeCreate () { this.$store = { getters, state: {} } }, render, staticRenderFns })
+    const vm = new Page()
+    const tree = vm._render()
+
+    return { vm, tree, chip: nodesOf(tree, (node) => attributeOf(node, 'data-sensors') === 'jammer-idle')[0], input: nodesOf(tree, (node) => attributeOf(node, 'data-sensors') === 'jammer')[0] }
+  }
   const known = (result) => result.status !== 'unavailable'
   const noted = (result, text) => JSON.stringify(result.assumptions || []).includes(text)
   const SIZED = { targetTons: '250', wantedRange: '20000000' }
@@ -594,7 +653,7 @@ const pageStatements = async (mutates, stock) => {
 
       return kinds === 'search,fireControl' && saved.includes('Search sensor') && saved.includes('Missile fire control') && m.sp.sensorOf(ACTIVE[1]).kind === 'fireControl' && m.sp.sensorOf(ACTIVE[0]).kind === 'search' ? true : short([kinds, saved])
     }],
-    ['active: against a missile target the page sizes the fire control, checks a saved pair and lists the saved designs with no jammer on the fire control, as the planner does', () => {
+    ['active: against a missile target the page sizes the pair, checks a saved pair and lists the saved designs with no jammer on either member, as the planner does', () => {
       const mfc = activeRow({ id: 504, name: 'MFC 12M', type: 25, kind: 'fireControl', rangeKm: 12000000, resolution: 1, eccm: 1 })
       const data = { targetKind: 'missile', targetMsp: '20', wantedRange: '10000000', resolutionPick: '1', jammer: '5', activeRows: [SEARCH, mfc], pairSearchId: 501, pairFcId: 504 }
       const vm = page(data)
@@ -604,9 +663,29 @@ const pageStatements = async (mutates, stock) => {
       const jammed = standalone('5').selected
       const unjammed = standalone('0').selected
       const pair = vm.pairChecks[0].check
+      const bare = page({ ...data, jammer: '' })
       const listed = Object.fromEntries(vm.existingItems.map((item) => [item.id, item.reaches[0].reach.value]))
+      const listedBare = Object.fromEntries(bare.existingItems.map((item) => [item.id, item.reaches[0].reach.value]))
 
-      return sized.fireControl.sizeHS === jammed.fireControl.sizeHS && sized.fireControl.sizeHS === unjammed.fireControl.sizeHS && sized.search.sizeHS === jammed.search.sizeHS && sized.search.sizeHS > unjammed.search.sizeHS && pair.fireControl.reach.value === 12000000 && pair.fireControl.reach.value === listed[504] && pair.fireControl.meets === true && pair.limiting !== 'fireControl' && pair.search.reach.value === listed[501] ? true : short({ page: [sized.fireControl.sizeHS, sized.search.sizeHS], jammed: [jammed.fireControl.sizeHS, jammed.search.sizeHS], unjammed: [unjammed.fireControl.sizeHS, unjammed.search.sizeHS], pair: [pair.fireControl.reach.value, pair.limiting], listed })
+      return sized.fireControl.sizeHS === jammed.fireControl.sizeHS && sized.fireControl.sizeHS === unjammed.fireControl.sizeHS && sized.search.sizeHS === jammed.search.sizeHS && sized.search.sizeHS === unjammed.search.sizeHS && pair.fireControl.reach.value === 12000000 && pair.fireControl.reach.value === listed[504] && pair.fireControl.meets === true && pair.limiting !== 'fireControl' && pair.search.reach.value === listed[501] && pair.search.reach.value === bare.pairChecks[0].check.search.reach.value && listed[501] === listedBare[501] && listed[504] === listedBare[504] ? true : short({ page: [sized.fireControl.sizeHS, sized.search.sizeHS], jammed: [jammed.fireControl.sizeHS, jammed.search.sizeHS], unjammed: [unjammed.fireControl.sizeHS, unjammed.search.sizeHS], pair: [pair.fireControl.reach.value, pair.limiting], listed, listedBare })
+    }],
+    ['active: against a missile target the jammer is marked as not applied, what is typed in it is kept and is no problem, and a ship target is scaled by it', () => {
+      const typed = { targetKind: 'missile', targetMsp: '20', wantedRange: '10000000', resolutionPick: '1' }
+      const missile = page({ ...typed, jammer: 'abc' })
+      const kept = page({ ...typed, jammer: '5' })
+      const ship = { targetKind: 'tons', targetTons: '250', wantedRange: '10000000', resolutionPick: '1' }
+      const scaled = page({ ...ship, jammer: '5' })
+      const unscaled = page({ ...ship, jammer: '' })
+      const idle = rendered({ ...typed, jammer: '5' })
+      const live = rendered({ ...ship, jammer: '5' })
+      const typedOver = rendered({ ...typed, jammer: '5' })
+
+      typedOver.input.data.model.callback('7')
+
+      const afterTyping = rendered({ ...typed, jammer: typedOver.vm.jammer })
+      const voice = idle.chip ? `${textOf(idle.chip)} ${idle.input.data.attrs['aria-label'] || ''} ${idle.input.data.attrs.title || ''}` : ''
+
+      return missile.jammerIdle === true && kept.jammerIdle === true && kept.jammer === '5' && missile.activeProblems.length === 0 && page({ ...ship, jammer: 'abc' }).activeProblems.length > 0 && scaled.jammerIdle === false && scaled.sizing.selected.search.sizeHS > unscaled.sizing.selected.search.sizeHS && scaled.sizing.request.searchJammer === 5 && kept.sizing.request.searchJammer === 0 && kept.sizing.request.fireControlJammer === 0 && idle.chip !== undefined && live.chip === undefined && idle.input !== undefined && live.input !== undefined && editable(idle.input) && editable(live.input) && idle.input.data.model.value === '5' && live.input.data.model.value === '5' && typedOver.vm.jammer === '7' && afterTyping.input.data.model.value === '7' && afterTyping.chip !== undefined && !PRONOUNS.test(voice) ? true : short({ idle: [missile.jammerIdle, kept.jammerIdle, kept.jammer], problems: missile.activeProblems, ship: [scaled.jammerIdle, scaled.sizing.selected.search.sizeHS, unscaled.sizing.selected.search.sizeHS], requests: [scaled.sizing.request.searchJammer, kept.sizing.request.searchJammer, kept.sizing.request.fireControlJammer], chips: [idle.chip !== undefined, live.chip !== undefined], inputs: [idle.input !== undefined, live.input !== undefined], typed: [typedOver.vm.jammer, afterTyping.chip !== undefined] })
     }],
     ['active: a blank target or wanted range gives one line naming what to type in place of a table of Unknown rows', () => {
       const empty = (data) => m.sv.sizingEmpty(page(data).sizing.request)
@@ -780,8 +859,15 @@ const pageStatements = async (mutates, stock) => {
 
 const MUTATIONS = [
   { name: 'the proposed fire control is read as a search sensor', page: 'sensors', find: "'Proposed missile fire control', 'fireControl')", replace: "'Proposed missile fire control', 'search')", fails: ['active: the proposed pair is a search sensor and a fire control'] },
-  { name: 'the sizing reads a scenario of a missile without its fire control policy', page: 'sensors', find: 'sizing: activeSizing({ target: entry, wantedRangeKm', replace: 'sizing: activeSizing({ target: { key: entry.key, signature: entry.signature, fireControlSignature: entry.fireControlSignature }, wantedRangeKm', fails: ['active: against a missile target the page sizes'] },
-  { name: 'the saved pair reads a scenario of a missile without its fire control policy', page: 'sensors', find: 'fireControl: this.pairFireControl, target: entry,', replace: 'fireControl: this.pairFireControl, target: { key: entry.key, signature: entry.signature, fireControlSignature: entry.fireControlSignature },', fails: ['active: against a missile target the page sizes'] },
+  { name: 'the sizing reads a scenario of a missile without its jammer policy', page: 'sensors', find: 'sizing: activeSizing({ target: entry, wantedRangeKm', replace: 'sizing: activeSizing({ target: { key: entry.key, signature: entry.signature, fireControlSignature: entry.fireControlSignature }, wantedRangeKm', fails: ['active: against a missile target the page sizes'] },
+  { name: 'the saved pair reads a scenario of a missile without its jammer policy', page: 'sensors', find: 'fireControl: this.pairFireControl, target: entry,', replace: 'fireControl: this.pairFireControl, target: { key: entry.key, signature: entry.signature, fireControlSignature: entry.fireControlSignature },', fails: ['active: against a missile target the page sizes'] },
+  { name: 'the jammer is not marked as not applied against a missile', page: 'sensors', find: "jammerIdle() {\n      return this.targetKind === 'missile'", replace: 'jammerIdle() {\n      return false', fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'the jammer is marked as not applied against a ship too', page: 'sensors', find: "jammerIdle() {\n      return this.targetKind === 'missile'", replace: 'jammerIdle() {\n      return true', fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'the jammer field is made disabled', page: 'template', find: 'data-sensors="jammer" />', replace: 'data-sensors="jammer" disabled />', fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'the jammer field is made read-only', page: 'template', find: 'data-sensors="jammer" />', replace: 'data-sensors="jammer" readonly />', fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'the jammer field is disabled against a missile', page: 'template', find: 'data-sensors="jammer" />', replace: ':disabled="jammerIdle" data-sensors="jammer" />', fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'a typed jammer that is no number is a problem against a missile', page: 'sensors', find: "this.jammerIdle ? '' : this.figureProblem(this.jammer, 'Jammer', true)", replace: "this.figureProblem(this.jammer, 'Jammer', true)", fails: ['active: against a missile target the jammer is marked'] },
+  { name: 'the saved designs are listed under the jammer against a missile', page: 'sensors', find: 'existingDesigns({ sensors: this.visibleActive, target: this.target, jammer: this.jammer })', replace: 'existingDesigns({ sensors: this.visibleActive, target: { ...this.target, results: this.target.results.map((entry) => ({ ...entry, searchJammer: true })) }, jammer: this.jammer })', fails: ['active: against a missile target the page sizes'] },
   { name: 'the saved pair\'s alternative drops its request', page: 'sensors', find: 'request: check.alternative.sizing.request, ', replace: '', fails: ['active: the shared sizing panel'] },
   { name: 'the sizing panel reads the request of a sizing that has none', page: 'panel', find: 'empty: sizingEmpty(sizing.request)', replace: "empty: sizing.request.signature ? '' : ''", fails: ['active: the shared sizing panel'] },
   { name: 'the proposed pair loses the provenance of its design', page: 'sensors', find: 'source: design ? member.design : null', replace: 'source: null', fails: ['active: every reach of the proposed pair'] },
@@ -832,7 +918,7 @@ const MUTATIONS = [
   { name: 'Designed Tech ignores the design of a link', page: 'designed', find: 'this.focusDesignId = queryId(query.design)', replace: 'this.focusDesignId = null', fails: ['links: Designed Tech takes the design'] },
 ]
 
-const MUTATION_PAGES = { sensors: 'sensors', missile: 'missile', designed: 'designed', panel: 'panel' }
+const MUTATION_PAGES = { sensors: 'sensors', missile: 'missile', designed: 'designed', panel: 'panel', template: 'template' }
 
 const runMutations = async (stock) => {
   for (const { name, page, find, replace, fails } of MUTATIONS) {

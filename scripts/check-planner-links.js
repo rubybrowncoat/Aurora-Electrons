@@ -8,7 +8,7 @@
   - handoff: a saved missile hands over the figures the save stores and its own ID, a reoptimised or nominated candidate its evaluated figures and tech by ID and kind, with where the figures come from, and a missile whose size or range is not known hands over nothing;
   - resolve: a handed-over missile against the save: held, changed, gone, another race's, unowned, not researched, not read yet or unreadable, each tech level researched, hypothetical, researched since or unusable, and the status each gives the target;
   - sizing: the provenance of the missile target reaches the signature of every sizing figure, the range handed over is the wanted range;
-  - sensors: the Sensor Planner opens Active mode on the missile with its size, range, resolution and jammer in the persisted inputs, keeps the link while the inputs are the missile's, drops it on an edit, and tells why it does not apply or what a design it cannot show is;
+  - sensors: the Sensor Planner opens Active mode on the missile with its size, range and resolution in the persisted inputs, lists the jammer carried as not applied (a missile target takes none) and leaves the typed one, keeps the link while the inputs are the missile's, drops it on an edit, and tells why it does not apply or what a design it cannot show is;
   - designer: the Missile Designer links every column to the Sensor Planner and to Designed Tech, pins the saved missile a link names and tells why it does not;
   - designed: Designed Tech opens on a missile by its own key, links a missile row to the Missile Designer, and tells why a design or a missile of a link is not shown;
   - template: a data-summary on every panel, the impersonal voice, and every link a keyboard reaches;
@@ -592,8 +592,8 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
     }],
 
     // ---------- sensors ----------
-    ['sensors: a link with a held saved missile opens Active mode with its size, range, resolution and jammer as the inputs', () => {
-      const vm = sensorsPage({ mode: 'beam', targetKind: 'tons', targetTons: '250' })
+    ['sensors: a link with a held saved missile opens Active mode with its size, range and resolution as the inputs, and lists the jammer it carries as not applied, leaving the one typed', () => {
+      const vm = sensorsPage({ mode: 'beam', targetKind: 'tons', targetTons: '250', jammer: '3' })
 
       vm.applyLink(queryOf(SAVED))
 
@@ -602,7 +602,17 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
       vm.handoffStanding = standing(7)
       vm.settleHandoff()
 
-      return when(pending && vm.mode === 'active' && vm.targetKind === 'missile' && vm.targetMsp === '12.5' && vm.wantedRange === '4000000' && vm.resolutionPick === '20' && vm.jammer === '1' && vm.handoffApplied === true && vm.handoffHeld && vm.target.label === 'Hawk, 12.5 MSP' && vm.sizing.request.wantedRangeKm === 4000000, [vm.mode, vm.targetKind, vm.targetMsp, vm.wantedRange, vm.resolutionPick, vm.jammer])
+      const rows = Object.fromEntries(vm.handoffFigures.map((entry) => [entry.key, entry]))
+      const row = rows.jammer
+      const settled = { jammer: vm.jammer, held: vm.handoffHeld }
+
+      vm.jammer = '6'
+
+      const own = row.result.assumptions || []
+      const sibling = rows.signature.result.assumptions || []
+      const marked = row.result.status === 'assumed' && row.result.value === SAVED.jammer && own.length === sibling.length + 1 && own.every((note) => typeof note === 'string' && note.trim() !== '') && row.unit !== ''
+
+      return when(pending && vm.mode === 'active' && vm.targetKind === 'missile' && vm.targetMsp === '12.5' && vm.wantedRange === '4000000' && vm.resolutionPick === '20' && settled.jammer === '3' && settled.held && vm.handoffApplied === true && vm.handoffHeld && vm.jammerIdle === true && marked && vm.sizing.request.searchJammer === 0 && vm.sizing.request.fireControlJammer === 0 && vm.target.label === 'Hawk, 12.5 MSP' && vm.sizing.request.wantedRangeKm === 4000000, [vm.mode, vm.targetKind, vm.targetMsp, vm.wantedRange, vm.resolutionPick, settled, row])
     }],
     ['sensors: the range handed over is the wanted range and the missile keeps the provenance of the handover in every sizing figure', () => {
       const vm = sensorsPage()
@@ -636,7 +646,7 @@ const pageStatements = async ({ utilities = {}, sensors = null, missile = null, 
 
       const rows = Object.fromEntries(vm.handoffFigures.map((row) => [row.key, row]))
 
-      return when(rows.size.result.status === 'assumed' && rows.range.result.status === 'assumed' && !known(rows.signature.result) && rows.signature.text === 'Not carried' && !known(rows.jammer.result) && rows.resolution.text === 'Not carried', rows)
+      return when(rows.size.result.status === 'assumed' && rows.range.result.status === 'assumed' && !known(rows.signature.result) && rows.signature.text === 'Not carried' && !known(rows.jammer.result) && rows.jammer.text === rows.signature.text && rows.jammer.unit === '' && rows.resolution.text === 'Not carried', rows)
     }],
     ['sensors: the inputs are the persisted ones of the page, kept for the race', () => {
       const names = ['mode', 'targetKind', 'targetMsp', 'wantedRange', 'resolutionPick', 'jammer']
@@ -1185,6 +1195,9 @@ const MUTATIONS = [
   { name: 'an unreadable target loses its reasons', sensors: mutated('this.handoffProblems = parsed ? parsed.problems : []', 'this.handoffProblems = []'), fails: ['sensors: an unreadable target applies none of its figures'] },
   { name: 'a design the mode does not list is left unexplained', sensors: mutated('else if (!this.focusStanding || this.focusStanding.id !== this.focusSensorId) {', 'else if (false) {'), fails: ['sensors: a design a link names that the mode does not list'] },
   { name: 'a later link keeps the earlier handover', sensors: mutated('this.handoff = parsed ? parsed.target : null', 'this.handoff = parsed ? parsed.target : this.handoff'), fails: ['sensors: a later link without a target gives the handover up'] },
+  { name: 'the handover puts its jammer in the typed input', sensors: mutated('this.resolutionPick = String(target.resolution)\n      }\n', "this.resolutionPick = String(target.resolution)\n      }\n\n      if (target.jammer !== null) {\n        this.jammer = target.jammer === 0 ? '' : String(target.jammer)\n      }\n"), fails: ['sensors: a link with a held saved missile opens Active mode'] },
+  { name: 'an edited jammer ends the handover of a missile', sensors: mutated('String(this.resolutionPick) === String(target.resolution))\n    },', "String(this.resolutionPick) === String(target.resolution)) && (target.jammer === null || (String(this.jammer).trim() === '' ? 0 : entered(this.jammer)) === target.jammer)\n    },"), fails: ['sensors: a link with a held saved missile opens Active mode'] },
+  { name: 'the carried jammer loses its scenario provenance', sensors: mutated("result: scenario(target.jammer, '', 'the jammer', [", "result: null, unused: scenario(target.jammer, '', 'the jammer', ["), fails: ['sensors: a link with a held saved missile opens Active mode'] },
   { name: 'a column links to no Sensor Planner', missile: mutated('sensors: handoff.ok ? linkTo.sensors({ target: handoff.target }) : null', 'sensors: null'), fails: ['designer: every column links'] },
   { name: 'a column links to no Designed Tech row', missile: mutated("designedTech: column.kind === 'saved' && column.savedId ? linkTo.designedTech({ missile: column.savedId }) : null", 'designedTech: null'), fails: ['designer: every column links'] },
   { name: 'a link pins a missile of another name', missile: mutated('choice && (!this.linkedMissileName || choice.name === this.linkedMissileName) ? choice : null', 'choice'), fails: ['designer: a link that names a missile with a name'] },

@@ -39,8 +39,8 @@
               <v-select v-model="resolutionPick" :items="resolutionItems" item-text="text" item-value="value" aria-label="Resolution of the sensor, or the best" dense outlined hide-details data-sensors="resolution" />
             </div>
             <div class="tool tool--figure">
-              <div class="tool__label caption text--secondary">Jammer</div>
-              <v-text-field v-model="jammer" type="text" placeholder="None" aria-label="Jammer level of the target, blank for none" dense outlined hide-details data-sensors="jammer" />
+              <div class="tool__label caption text--secondary">Jammer<v-chip v-if="jammerIdle" x-small outlined class="ml-1" data-sensors="jammer-idle">Not applied</v-chip></div>
+              <v-text-field v-model="jammer" type="text" placeholder="None" :aria-label="jammerIdle ? 'Jammer level of the target, not applied to a missile target' : 'Jammer level of the target, blank for none'" :title="jammerIdle ? 'A missile target takes no jammer, for the search sensor or the missile fire control. The figure is kept for a ship target.' : ''" dense outlined hide-details data-sensors="jammer" />
             </div>
           </template>
           <template v-else-if="mode === 'beam'">
@@ -101,7 +101,7 @@
         <v-alert v-if="mode === 'passive' && !classes.length" type="info" outlined dense class="mt-3" data-sensors="no-classes">The race has no ship classes.</v-alert>
         <v-alert v-if="handoffProblemText" type="warning" outlined dense dismissible class="mt-3" data-planner-link="unreadable" @input="dismissHandoffProblems">{{ handoffProblemText }}</v-alert>
         <v-alert v-if="focusNotice" type="warning" outlined dense dismissible class="mt-3" data-planner-link="design" @input="dismissFocusNotice">{{ focusNotice }}</v-alert>
-        <v-card v-if="handoffResolution" class="panel" data-summary="The missile handed over by the Missile Designer: its name, size and range, the target signature, resolution and jammer it was evaluated under, where the figures come from and the tech it is built on, so the sizing reads against that missile and each figure traces back to it." elevation="1" data-planner-link="handoff">
+        <v-card v-if="handoffResolution" class="panel" data-summary="The missile handed over by the Missile Designer: its name, size and range, the target signature and resolution it was evaluated under, the jammer it carried, which a missile target does not take, where the figures come from and the tech it is built on, so the sizing reads against that missile and each figure traces back to it." elevation="1" data-planner-link="handoff">
           <div class="panel-head">
             <span>Missile from the Missile Designer<v-chip x-small outlined class="ml-2" data-planner-link="source">{{ handoffSourceText }}</v-chip><v-chip v-if="handoffResolution.applies" x-small outlined class="ml-2" :color="handoffHeld ? undefined : 'warning'" data-planner-link="state">{{ handoffHeld ? 'In the sizing' : 'Edited since' }}</v-chip></span>
           </div>
@@ -131,7 +131,7 @@
               </template>
             </div>
           </div>
-          <div class="panel-foot caption text--secondary">The size and the range are those the Missile Designer evaluated, the range being the wanted range of the sizing. A saved missile is checked against the save and keeps the detection rule's own status while its stored size and range are the ones handed over; a candidate, a hypothetical or typed tech level, or a saved missile that changed since is marked assumed in every figure the target feeds. The signature, resolution and jammer are the scenario of the Missile Designer. Editing a sizing input ends the handover.</div>
+          <div class="panel-foot caption text--secondary">The size and the range are those the Missile Designer evaluated, the range being the wanted range of the sizing. A saved missile is checked against the save and keeps the detection rule's own status while its stored size and range are the ones handed over; a candidate, a hypothetical or typed tech level, or a saved missile that changed since is marked assumed in every figure the target feeds. The signature and resolution are the scenario of the Missile Designer. The jammer is listed as carried and is not applied: a missile target takes no jammer, so the sizing does not read it and the jammer typed in the toolbar is left as it was. Editing a sizing input ends the handover.</div>
         </v-card>
 
         <template v-if="mode === 'passive'">
@@ -319,8 +319,8 @@
               <active-sizing-panel :scenarios="sizingScenarios" />
             </div>
             <div class="panel-foot caption text--secondary">
-              <div>A sensor sees a target to its range cut by the square of the target's cross-section over the resolution when the target is under it, and shortened by 0.75 for each level the jammer stands over the ECCM. The missile fire control reaches twice the range of a search sensor of the same size. For each resolution the table lists the smallest legal size of each that reaches the wanted range, so a larger resolution needs a larger sensor against a small target. The best resolution is the pair with the lowest BP, then the smaller HS, then the higher resolution; a pair with no known cost is judged on size. A size beyond the largest legal one is reported as such, never as 0.</div>
-              <div class="mt-2">The cross-section of a typed size is the size over 50 t per HS, never under 0.3 HS; a missile is seen by its size over 20 MSP per HS, never under 0.3 HS. A class with a working cloak has a second table with the cloak damaged. The jammer is the target's sensor jamming, not a missile's jammer. A hypothetical tech level is marked assumed in every figure that reads it.</div>
+              <div>A sensor sees a target to its range cut by the square of the target's cross-section over the resolution when the target is under it, and, for a ship, shortened by 0.75 for each level the jammer stands over the ECCM. The missile fire control reaches twice the range of a search sensor of the same size. For each resolution the table lists the smallest legal size of each that reaches the wanted range, so a larger resolution needs a larger sensor against a small target. The best resolution is the pair with the lowest BP, then the smaller HS, then the higher resolution; a pair with no known cost is judged on size. A size beyond the largest legal one is reported as such, never as 0.</div>
+              <div class="mt-2">The cross-section of a typed size is the size over 50 t per HS, never under 0.3 HS. A missile is seen by its size over 20 MSP per HS, never under 0.3 HS, by the search sensor, and by its size in MSP, never under 0.33, by the missile fire control; no jammer applies to a missile for either, so the Jammer figure is not applied to a missile target. A class with a working cloak has a second table with the cloak damaged. The jammer is the target's sensor jamming, not a missile's jammer. A hypothetical tech level is marked assumed in every figure that reads it.</div>
             </div>
           </v-card>
 
@@ -405,7 +405,7 @@
                 <div v-else class="caption text--secondary mt-3" data-sensors="pair-no-alternative">No pair of legal sizes reaches the range, so none is proposed.</div>
               </div>
             </div>
-            <div class="panel-foot caption text--secondary">Each member is measured at its stored range, resolution and ECCM against the target and the jammer. The pair reaches as far as the shorter member. A search sensor that falls short limits the pair whatever the fire control reaches, and the reverse; when both fall short, the member that reaches less is named. The pair to design instead is the best one at the saved resolution of the search sensor when one reaches the range, else the best overall.</div>
+            <div class="panel-foot caption text--secondary">Each member is measured at its stored range, resolution and ECCM against the target and the jammer; a missile target takes no jammer. The pair reaches as far as the shorter member. A search sensor that falls short limits the pair whatever the fire control reaches, and the reverse; when both fall short, the member that reaches less is named. The pair to design instead is the best one at the saved resolution of the search sensor when one reaches the range, else the best overall.</div>
           </v-card>
 
           <v-card class="panel" data-summary="What the proposed pair costs at each hardening and ECCM level the race has: BP, Uridium and Corbomite, and whether the pair still reaches the wanted range against the jammer." elevation="1">
@@ -439,7 +439,7 @@
                 </tbody>
               </v-simple-table>
             </div>
-            <div class="panel-foot caption text--secondary">The sizes stay those of the proposed pair at the chosen resolution; the levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor and ECCM the Corbomite on top of it. The row in the tint is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair.</div>
+            <div class="panel-foot caption text--secondary">The sizes stay those of the proposed pair at the chosen resolution; the levels change the cost and the ECCM the pair meets the jammer with. Hardening sets the Uridium of the sensor and ECCM the Corbomite on top of it. The row in the tint is the level the tech lines are set to. The jammer is the target's sensor jamming, lowered by the ECCM of the pair; a missile target takes no jammer, so the ECCM changes no reach against it.</div>
           </v-card>
 
           <v-card class="panel" data-summary="The active sensors and missile fire controls the race has researched, with the stored figures and how far each reaches the target, linked to their designs and techs." elevation="1">
@@ -463,7 +463,7 @@
                 <span :key="scenario.key" class="text-no-wrap" :data-sensors="`existing-reach-${scenario.key}`">{{ shown(item.reaches.find((entry) => entry.key === scenario.key).reach, 3, MILLION) }}</span><provenance-mark :key="`${scenario.key}-mark`" :result="item.reaches.find((entry) => entry.key === scenario.key).reach" />
               </template>
             </v-data-table>
-            <div class="panel-foot caption text--secondary">The figures are as the save stores them. The reach is the stored range cut by the resolution against the target and shortened by the jammer over the ECCM, so a design the stored figures do not give a reach for shows Unknown. A missile fire control reaches as far as its own stored range. The links open the design in Designed Tech and its research in the Tech Tree.</div>
+            <div class="panel-foot caption text--secondary">The figures are as the save stores them. The reach is the stored range cut by the resolution against the target and, for a ship, shortened by the jammer over the ECCM, so a design the stored figures do not give a reach for shows Unknown. A missile target takes no jammer. A missile fire control reaches as far as its own stored range. The links open the design in Designed Tech and its research in the Tech Tree.</div>
           </v-card>
 
           <v-card class="panel" data-summary="How far the proposed pair reaches each class of the race, with the cloak working and damaged, to see which classes the pair sees at the wanted range." elevation="1">
@@ -986,7 +986,7 @@ export default {
         this.targetKind === 'tons' ? this.figureProblem(this.targetTons, 'Target size') : '',
         this.targetKind === 'missile' ? this.figureProblem(this.targetMsp, 'Missile size') : '',
         this.figureProblem(this.wantedRange, 'Wanted range'),
-        this.figureProblem(this.jammer, 'Jammer', true),
+        this.jammerIdle ? '' : this.figureProblem(this.jammer, 'Jammer', true),
         this.curveTonsRead.error ? `Sizes of the curve: ${this.curveTonsRead.error}; the defaults are shown.` : '',
       ]
 
@@ -1011,6 +1011,11 @@ export default {
     // The class an own-class target is: the chosen one, else the class of the signature panels.
     targetClass() {
       return this.classes.find((cls) => cls.id === this.targetClassId) || this.selectedClass
+    },
+
+    // Whether the typed jammer is left out of the sizing: a missile target takes none, for the search sensor as for the fire control.
+    jammerIdle() {
+      return this.targetKind === 'missile'
     },
 
     target() {
@@ -1272,7 +1277,7 @@ export default {
       return this.handoff ? resolveMissileTarget({ target: this.handoff, standing: this.handoffStanding, tech: this.tech }) : null
     },
 
-    // The inputs are still the handed-over figures: the mode, the missile target and its size and range, and the resolution and jammer the link carried.
+    // The inputs are still the handed-over figures: the mode, the missile target and its size and range, and the resolution the link carried. The jammer is not one of them, as the sizing does not read it.
     handoffHeld() {
       const target = this.handoff
 
@@ -1281,9 +1286,8 @@ export default {
       }
 
       const resolutionCarried = target.resolution !== null && validResolution(String(target.resolution))
-      const jammer = String(this.jammer).trim() === '' ? 0 : entered(this.jammer)
 
-      return this.mode === 'active' && this.targetKind === 'missile' && entered(this.targetMsp) === target.msp && entered(this.wantedRange) === target.range && (!resolutionCarried || String(this.resolutionPick) === String(target.resolution)) && (target.jammer === null || jammer === target.jammer)
+      return this.mode === 'active' && this.targetKind === 'missile' && entered(this.targetMsp) === target.msp && entered(this.wantedRange) === target.range && (!resolutionCarried || String(this.resolutionPick) === String(target.resolution))
     },
 
     // The handover is in the link: while the saved missile is being checked, and while it applies and has not been edited away.
@@ -1310,7 +1314,7 @@ export default {
       return this.handoff ? { saved: 'Saved missile', researched: 'Candidate on researched tech', hypothetical: 'Candidate on hypothetical tech', manual: 'Candidate on typed tech' }[this.handoff.source] : ''
     },
 
-    // Each handed-over figure as a result: the size and the range carry the target's provenance, the rest are the Missile Designer's scenario, assumed, or unknown where the link carries none.
+    // Each handed-over figure as a result: the size and the range carry the target's provenance, the signature, resolution and jammer are the Missile Designer's scenario, assumed, or unknown where the link carries none; the jammer also says it is not applied, since a missile target takes none and the sizing does not read it.
     handoffFigures() {
       const resolution = this.handoffResolution
       const target = this.handoff
@@ -1321,7 +1325,7 @@ export default {
 
       const { origin } = resolution
       const handed = (value, units) => envelope({ value, status: origin.status, rule: SENSOR_RULES.detection, units, inputs: { present: origin.present }, assumptions: origin.assumptions })
-      const scenario = (value, units, name) => (value === null ? unavailable({ rule: SENSOR_RULES.detection, missing: [`${name}: the link carries none`], units }) : envelope({ value, status: STATUS.ASSUMED, rule: SENSOR_RULES.detection, units, inputs: { present: [name] }, assumptions: [`${name} was typed in the Missile Designer scenario and carried in the link, not read from the save`] }))
+      const scenario = (value, units, name, notes = []) => (value === null ? unavailable({ rule: SENSOR_RULES.detection, missing: [`${name}: the link carries none`], units }) : envelope({ value, status: STATUS.ASSUMED, rule: SENSOR_RULES.detection, units, inputs: { present: [name] }, assumptions: [`${name} was typed in the Missile Designer scenario and carried in the link, not read from the save`, ...notes] }))
       const best = target.resolution === 'best'
       const carried = (value, decimals) => (value === null ? 'Not carried' : this.count(value, decimals))
 
@@ -1330,7 +1334,7 @@ export default {
         { key: 'range', label: 'Wanted range', result: handed(target.range, 'km'), text: this.count(target.range, 0), unit: 'km' },
         { key: 'signature', label: 'Target signature evaluated under', result: scenario(target.signature, 'HS', 'the target signature'), text: carried(target.signature, 2), unit: target.signature === null ? '' : 'HS' },
         { key: 'resolution', label: 'Resolution', result: best ? null : scenario(target.resolution, 'HS', 'the resolution'), text: best ? 'Best' : carried(target.resolution, 2), unit: target.resolution === null || best ? '' : 'HS' },
-        { key: 'jammer', label: 'Jammer', result: scenario(target.jammer, '', 'the jammer'), text: carried(target.jammer, 2), unit: '' },
+        { key: 'jammer', label: 'Jammer', result: scenario(target.jammer, '', 'the jammer', ['a missile target takes no jammer, so the figure is not applied to the sizing']), text: carried(target.jammer, 2), unit: target.jammer === null ? '' : 'not applied' },
       ]
     },
 
@@ -1639,7 +1643,7 @@ export default {
       }
     },
 
-    // Puts the handed-over figures in the inputs once, when they apply: Active mode with the missile as the target, its size, the range as the wanted range, and the resolution and jammer the link carried. Anything typed afterwards is the user's.
+    // Puts the handed-over figures in the inputs once, when they apply: Active mode with the missile as the target, its size, the range as the wanted range and the resolution the link carried. The jammer is not put in: a missile target takes none, and the typed one is kept for a ship target. Anything typed afterwards is the user's.
     settleHandoff() {
       const resolution = this.handoffResolution
 
@@ -1656,10 +1660,6 @@ export default {
 
       if (target.resolution !== null && validResolution(String(target.resolution))) {
         this.resolutionPick = String(target.resolution)
-      }
-
-      if (target.jammer !== null) {
-        this.jammer = target.jammer === 0 ? '' : String(target.jammer)
       }
 
       this.handoffApplied = true

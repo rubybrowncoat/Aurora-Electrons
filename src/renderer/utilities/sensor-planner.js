@@ -5,9 +5,9 @@
 // Return shapes:
 // - `sensorTechOf(tech, resolution)`: the `tech` argument of every function here, from `tech` (tech-scenarios.js `withCandidates`) and its `resolution` (`resolveChoices`). `{ strength, em, thermal, hardening, eccm, distance, speed, singleWeapon, levels: { hardening, eccm }, assumptions, hypothetical }`; each line is `{ role, typeId, label, level: { id, name, info, info2, cost }|null, info, info2, kind, hypothetical, assumption, unresolved }`, `singleWeapon` also `{ weapons: { unrestricted, single }, offersSingle }`, `levels` the researched levels and the chosen hypothetical one as `{ level, researched, hypothetical, current, assumption }`.
 // - `techLineOptions(tech, resolution, role)`: the levels a menu offers for a line, `{ id, name, info, info2, researched, hypothetical, current, status, text }`; an unresearched level is never `researched`.
-// - `targetOf({ kind, tons, cls, msp })`: `{ kind, label, signature, fireControlSignature, fireControlJammer, uncloaked, tons, results: [{ key, label, signature, fireControlSignature, fireControlJammer }] }`: `signature` is what a search sensor sees and `fireControlSignature` what a missile fire control sees (the same cross-section for a ship, the missile's size in MSP, never under 0.33, for a missile), and `fireControlJammer` is false where no jammer applies to a fire control (a missile target); each entry of `results` carries the three, as a target of its own for `activeSizing`, `savedPairCheck` and `existingDesigns`.
+// - `targetOf({ kind, tons, cls, msp })`: `{ kind, label, signature, fireControlSignature, searchJammer, fireControlJammer, uncloaked, tons, results: [{ key, label, signature, fireControlSignature, searchJammer, fireControlJammer }] }`: `signature` is what a search sensor sees and `fireControlSignature` what a missile fire control sees (the same cross-section for a ship; for a missile the size in MSP over 20, never under 0.3, to a search sensor and the size in MSP, never under 0.33, to a fire control), and `searchJammer` and `fireControlJammer` are false where no jammer applies to that member (a missile target: neither); each entry of `results` carries the five, as a target of its own for `activeSizing`, `savedPairCheck` and `existingDesigns`.
 // - `targetOf`'s `origin`, `{ name, status, present, assumptions }`, is a missile handed over by the Missile Designer (utilities/planner-links.js): the signatures of a missile target take its status and assumptions in place of the typed ones, so every sizing figure carries where the missile comes from.
-// - `activeSizing(...)`: `{ request: { signature, fireControlSignature, wantedRangeKm, jammer, fireControlJammer, resolution }, problems, rows, selected, best, bestBasis, tiles: { rangeReached, sizeNeeded, bestResolution, cost } }`, a row per legal resolution `{ resolution, selected, best, search, fireControl, totalCost, totalHS, reach, feasible, failing, limiting }` and a member `{ mode, sizing, sizeHS, size, reach, design, cost }`.
+// - `activeSizing(...)`: `{ request: { signature, fireControlSignature, wantedRangeKm, jammer, searchJammer, fireControlJammer, resolution }, problems, rows, selected, best, bestBasis, tiles: { rangeReached, sizeNeeded, bestResolution, cost } }`, `jammer` the one typed and `searchJammer` and `fireControlJammer` what each member is set against (0 where the target takes no jammer), a row per legal resolution `{ resolution, selected, best, search, fireControl, totalCost, totalHS, reach, feasible, failing, limiting }` and a member `{ mode, sizing, sizeHS, size, reach, design, cost }`.
 // - `savedPairCheck(...)`: `{ search, fireControl, reach, meets, limiting, alternative: { basis, row, sizing } }`.
 // - `existingDesigns(...)`: `[{ row, reach, scenarios: [{ key, label, reach }] }]`.
 // - `rangeCurve(...)`: `{ series: [{ key, name, points: [{ x (tons), y (km) }] }], rows: [{ tons, signature, ranges: [{ key, name, result }] }] }`.
@@ -168,7 +168,7 @@ const eccmOf = (tech) => (techOf(tech).eccm.info === null ? null : Math.trunc(te
 const noTarget = (label, missing) => {
   const signature = unavailable({ rule: SENSOR_RULES.detection, missing: [missing] })
 
-  return Object.freeze({ kind: null, label, signature, fireControlSignature: signature, fireControlJammer: true, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label, signature, fireControlSignature: signature, fireControlJammer: true })]) })
+  return Object.freeze({ kind: null, label, signature, fireControlSignature: signature, searchJammer: true, fireControlJammer: true, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label, signature, fireControlSignature: signature, searchJammer: true, fireControlJammer: true })]) })
 }
 
 const typedSignature = (rule, value, label, assumptions) => envelope({ value, status: STATUS.ASSUMED, rule, inputs: { present: [label] }, assumptions })
@@ -181,13 +181,13 @@ export const targetOf = ({ kind, tons = null, cls = null, msp = null, origin = n
     }
 
     const { crossSection } = classSignatures(cls)
-    const results = [Object.freeze({ key: 'effective', label: crossSection.cloaked ? 'Cloak working' : 'Cross-section', signature: crossSection.effective, fireControlSignature: crossSection.effective, fireControlJammer: true })]
+    const results = [Object.freeze({ key: 'effective', label: crossSection.cloaked ? 'Cloak working' : 'Cross-section', signature: crossSection.effective, fireControlSignature: crossSection.effective, searchJammer: true, fireControlJammer: true })]
 
     if (crossSection.cloaked && isAvailable(crossSection.uncloaked)) {
-      results.push(Object.freeze({ key: 'uncloaked', label: 'Cloak damaged', signature: crossSection.uncloaked, fireControlSignature: crossSection.uncloaked, fireControlJammer: true }))
+      results.push(Object.freeze({ key: 'uncloaked', label: 'Cloak damaged', signature: crossSection.uncloaked, fireControlSignature: crossSection.uncloaked, searchJammer: true, fireControlJammer: true }))
     }
 
-    return Object.freeze({ kind, label: cls.name, signature: crossSection.effective, fireControlSignature: crossSection.effective, fireControlJammer: true, uncloaked: crossSection.cloaked ? crossSection.uncloaked : null, tons: numberOf(cls.sizeHS) !== null ? cls.sizeHS * TONS_PER_HS : null, results: Object.freeze(results) })
+    return Object.freeze({ kind, label: cls.name, signature: crossSection.effective, fireControlSignature: crossSection.effective, searchJammer: true, fireControlJammer: true, uncloaked: crossSection.cloaked ? crossSection.uncloaked : null, tons: numberOf(cls.sizeHS) !== null ? cls.sizeHS * TONS_PER_HS : null, results: Object.freeze(results) })
   }
 
   if (kind === 'tons') {
@@ -199,7 +199,7 @@ export const targetOf = ({ kind, tons = null, cls = null, msp = null, origin = n
 
     const signature = typedSignature(CROSS_SECTION_RULE, classCrossSection({ sizeHS: size / TONS_PER_HS }), 'target size', [`a target of ${size} t typed here`, `the cross-section is the size over ${TONS_PER_HS} t per HS, never under 0.3 HS`])
 
-    return Object.freeze({ kind, label: `${size} t`, signature, fireControlSignature: signature, fireControlJammer: true, uncloaked: null, tons: size, results: Object.freeze([Object.freeze({ key: 'effective', label: `${size} t`, signature, fireControlSignature: signature, fireControlJammer: true })]) })
+    return Object.freeze({ kind, label: `${size} t`, signature, fireControlSignature: signature, searchJammer: true, fireControlJammer: true, uncloaked: null, tons: size, results: Object.freeze([Object.freeze({ key: 'effective', label: `${size} t`, signature, fireControlSignature: signature, searchJammer: true, fireControlJammer: true })]) })
   }
 
   if (kind === 'missile') {
@@ -209,13 +209,13 @@ export const targetOf = ({ kind, tons = null, cls = null, msp = null, origin = n
       return noTarget('No missile', 'the missile size in MSP, above zero')
     }
 
-    const sees = ['a missile is seen by its size over 20 MSP per HS, never under 0.3 HS', 'a missile fire control sees a missile by its size in MSP, never under 0.33, and no jammer applies to it']
+    const sees = ['a missile is seen by its size in MSP over 20 per HS, never under 0.3 HS, and no jammer applies to it', 'a missile fire control sees a missile by its size in MSP, never under 0.33, and no jammer applies to it']
     const label = origin ? `${origin.name}, ${size} MSP` : `${size} MSP missile`
     const seenBy = (value, text) => (origin ? envelope({ value, status: origin.status, rule: SENSOR_RULES.detection, inputs: { present: origin.present }, assumptions: [...origin.assumptions, text] }) : typedSignature(SENSOR_RULES.detection, value, 'missile size', [`a missile of ${size} MSP typed here`, text]))
     const signature = seenBy(missileSignature({ sizeMsp: size }), sees[0])
     const fireControlSignature = seenBy(missileFireControlSignature({ sizeMsp: size }), sees[1])
 
-    return Object.freeze({ kind, label, signature, fireControlSignature, fireControlJammer: false, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label, signature, fireControlSignature, fireControlJammer: false })]) })
+    return Object.freeze({ kind, label, signature, fireControlSignature, searchJammer: false, fireControlJammer: false, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label, signature, fireControlSignature, searchJammer: false, fireControlJammer: false })]) })
   }
 
   return noTarget('No target', 'the target')
@@ -223,8 +223,8 @@ export const targetOf = ({ kind, tons = null, cls = null, msp = null, origin = n
 
 const signatureOf = (target) => (target && target.signature ? target.signature : unavailable({ rule: SENSOR_RULES.detection, missing: ['the target'] }))
 
-// What each member of a pair is set against: the search sensor the target's search signature and the jammer; the missile fire control the target's fire control signature (the same cross-section for a ship, the missile's size in MSP for a missile) and, for a missile, no jammer.
-const inputsOf = (target, jammer) => ({ search: { signature: signatureOf(target), jammer }, fireControl: { signature: target && target.fireControlSignature ? target.fireControlSignature : signatureOf(target), jammer: target && target.fireControlJammer === false ? 0 : jammer } })
+// What each member of a pair is set against: the search sensor the target's search signature and the jammer, the missile fire control the target's fire control signature (the same cross-section for a ship, the missile's size in MSP for a missile); a missile target takes no jammer for either member, a ship target the one jammer for both.
+const inputsOf = (target, jammer) => ({ search: { signature: signatureOf(target), jammer: target && target.searchJammer === false ? 0 : jammer }, fireControl: { signature: target && target.fireControlSignature ? target.fireControlSignature : signatureOf(target), jammer: target && target.fireControlJammer === false ? 0 : jammer } })
 
 // ---------- the effective range of a sensor ----------
 
@@ -309,7 +309,7 @@ export const activeSizing = ({ target = null, wantedRangeKm = null, resolution =
   const bestSource = best ? (bestBasis === 'cost' ? best.totalCost : best.totalHS) : null
 
   return Object.freeze({
-    request: Object.freeze({ signature: inputs.search.signature, fireControlSignature: inputs.fireControl.signature, wantedRangeKm: wanted, jammer: jam, fireControlJammer: inputs.fireControl.jammer, resolution: wantedResolution }),
+    request: Object.freeze({ signature: inputs.search.signature, fireControlSignature: inputs.fireControl.signature, wantedRangeKm: wanted, jammer: jam, searchJammer: inputs.search.jammer, fireControlJammer: inputs.fireControl.jammer, resolution: wantedResolution }),
     problems: Object.freeze(problems),
     rows: Object.freeze(flagged),
     selected,
@@ -373,11 +373,11 @@ export const savedPairCheck = ({ search = null, fireControl = null, target = nul
 // Each saved active sensor and missile fire control with its reach against the target, for every scenario of the target (the cloak working, and the cloak damaged where one works).
 export const existingDesigns = ({ sensors = [], target = null, jammer = 0 } = {}) => {
   const jam = jammerOf(jammer)
-  const scenarios = target && target.results ? target.results : [{ key: 'effective', label: 'Cross-section', signature: signatureOf(target), fireControlSignature: signatureOf(target), fireControlJammer: true }]
+  const scenarios = target && target.results ? target.results : [{ key: 'effective', label: 'Cross-section', signature: signatureOf(target), fireControlSignature: inputsOf(target, 0).fireControl.signature, searchJammer: !target || target.searchJammer !== false, fireControlJammer: !target || target.fireControlJammer !== false }]
 
   return sensors.map((row) => {
     const fireControl = row.kind === 'fireControl'
-    const reaching = scenarios.map((scenario) => ({ key: scenario.key, label: scenario.label, reach: reachOf({ rangeKm: row.rangeKm, resolution: row.resolution, eccm: row.eccm, signature: fireControl ? scenario.fireControlSignature : scenario.signature, jammer: fireControl && scenario.fireControlJammer === false ? 0 : jam, source: row.source }) }))
+    const reaching = scenarios.map((scenario) => ({ key: scenario.key, label: scenario.label, reach: reachOf({ rangeKm: row.rangeKm, resolution: row.resolution, eccm: row.eccm, signature: fireControl ? scenario.fireControlSignature : scenario.signature, jammer: (fireControl ? scenario.fireControlJammer : scenario.searchJammer) === false ? 0 : jam, source: row.source }) }))
 
     return { row, reach: reaching[0].reach, scenarios: reaching }
   })
@@ -437,7 +437,7 @@ export const hardeningEccmTradeoff = ({ sizing, tech = NO_SENSOR_TECH, levels = 
     return { pair: null, rows: [] }
   }
 
-  const { signature, fireControlSignature, wantedRangeKm, jammer, fireControlJammer } = sizing.request
+  const { signature, fireControlSignature, wantedRangeKm, searchJammer, fireControlJammer } = sizing.request
   const rows = []
 
   for (const entryHardening of options.hardening) {
@@ -445,7 +445,7 @@ export const hardeningEccmTradeoff = ({ sizing, tech = NO_SENSOR_TECH, levels = 
       const search = tradeoffMember({ member: pair.search, entryHardening, entryEccm, tech: figures, pair })
       const fireControl = tradeoffMember({ member: pair.fireControl, entryHardening, entryEccm, tech: figures, pair })
       const eccm = entryEccm.level.info === null ? null : Math.trunc(entryEccm.level.info)
-      const ranges = [[search, signature, jammer], [fireControl, fireControlSignature, fireControlJammer]].map(([design, against, jamming]) => (isAvailable(design) ? reachOf({ rangeKm: design.value.rangeKm, resolution: pair.resolution, eccm, signature: against, jammer: jamming, source: design }) : unavailable({ rule: SENSOR_RULES.detection, missing: design.inputs.missing, units: 'km' })))
+      const ranges = [[search, signature, searchJammer], [fireControl, fireControlSignature, fireControlJammer]].map(([design, against, jamming]) => (isAvailable(design) ? reachOf({ rangeKm: design.value.rangeKm, resolution: pair.resolution, eccm, signature: against, jammer: jamming, source: design }) : unavailable({ rule: SENSOR_RULES.detection, missing: design.inputs.missing, units: 'km' })))
       const reach = shorterOf(ranges[0], ranges[1])
       const total = (field, units) => combine({ rule: SENSOR_RULES.active, parts: { search: partOf(search, field, units), 'missile fire control': partOf(fireControl, field, units) }, compute: (values) => values.search + values['missile fire control'], units })
 

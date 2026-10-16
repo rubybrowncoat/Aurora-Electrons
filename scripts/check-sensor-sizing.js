@@ -444,12 +444,12 @@ check('limiting: a row of the sizing names the member beyond the largest size, a
   unknown(onlySearch.totalHS, 'the size of a pair with a member beyond the largest size')
 })
 
-// A missile target is seen by a search sensor as max(size in MSP / 20, 0.3) HS under the jammer, and by a missile fire control as max(size in MSP, 0.33) with no jammer (docs/plans/planners/mechanics-sensors.md).
+// A missile target is seen by a search sensor as max(size in MSP / 20, 0.3) HS and by a missile fire control as max(size in MSP, 0.33), and no jammer applies to either (docs/plans/planners/mechanics-sensors.md).
 const searchSignatureOfMissile = (msp) => Math.max(msp / 20, 0.3)
 
 const fireControlSignatureOfMissile = (msp) => Math.max(msp, 0.33)
 
-check('pair: against a missile target the fire control is sized by the size of the missile in MSP with no jammer, the search sensor by the size over 20 under the jammer, each the smallest legal size', (m) => {
+check('pair: against a missile target both members are sized with no jammer, the fire control by the size of the missile in MSP, the search sensor by the size over 20, each the smallest legal size, the same whatever the jammer', (m) => {
   const { st } = planOf(m)
   const sizes = SIZES(m)
   let rows = 0
@@ -457,17 +457,20 @@ check('pair: against a missile target the fire control is sized by the size of t
   for (const msp of [0.1, 6, 20, 40, 200, 2000]) {
     for (const wanted of [1e5, 1e6, 1e7, 1e8]) {
       for (const jammer of [0, 3]) {
-        const sizing = m.sp.activeSizing({ target: m.sp.targetOf({ kind: 'missile', msp }), wantedRangeKm: wanted, jammer, tech: st })
+        const target = m.sp.targetOf({ kind: 'missile', msp })
+        const sizing = m.sp.activeSizing({ target, wantedRangeKm: wanted, jammer, tech: st })
+        const bare = m.sp.activeSizing({ target, wantedRangeKm: wanted, jammer: 0, tech: st })
 
         assert.equal(sizing.request.signature.value, searchSignatureOfMissile(msp))
         assert.equal(sizing.request.fireControlSignature.value, fireControlSignatureOfMissile(msp))
+        assert.equal(sizing.request.searchJammer, 0)
         assert.equal(sizing.request.fireControlJammer, 0)
-        assert.equal(sizing.request.jammer, jammer)
+        assert.equal(sizing.request.jammer, jammer, 'the typed jammer is kept in the request, though no member is set against it')
 
         for (const row of sizing.rows) {
           for (const [key, member, fireControl] of [['search', row.search, false], ['fireControl', row.fireControl, true]]) {
             const label = `${msp} MSP, ${wanted} km, jammer ${jammer}, resolution ${row.resolution}, ${key}`
-            const reachOf = (sizeHS) => effectiveRange({ sizeHS, resolution: row.resolution, fireControl, signature: fireControl ? fireControlSignatureOfMissile(msp) : searchSignatureOfMissile(msp), jammer: fireControl ? 0 : jammer })
+            const reachOf = (sizeHS) => effectiveRange({ sizeHS, resolution: row.resolution, fireControl, signature: fireControl ? fireControlSignatureOfMissile(msp) : searchSignatureOfMissile(msp), jammer: 0 })
 
             if (member.sizeHS === null) {
               assert.ok(!meetsRange(reachOf(sizes[sizes.length - 1]), wanted), `${label}: the largest size reaches the range, yet no size is given`)
@@ -479,6 +482,7 @@ check('pair: against a missile target the fire control is sized by the size of t
             assert.ok(index >= 0, `${label}: ${member.sizeHS} HS is not a legal size`)
             assert.ok(meetsRange(reachOf(member.sizeHS), wanted), `${label}: ${member.sizeHS} HS does not reach the range`)
             close(member.reach.value, reachOf(member.sizeHS), `${label}: reach`, 1e-6)
+            assert.equal(member.sizeHS, bare.rows.find((entry) => entry.resolution === row.resolution)[key].sizeHS, `${label}: the jammer changes the size`)
 
             if (index > 0) {
               assert.ok(!meetsRange(reachOf(sizes[index - 1]), wanted), `${label}: ${sizes[index - 1]} HS also reaches the range`)
@@ -500,7 +504,7 @@ check('pair: against a missile target the fire control is sized by the size of t
   assert.ok(small.fireControl.reach.value > 1e7)
   assert.ok(small.search.sizeHS > small.fireControl.sizeHS)
 
-  return { lines: [`${rows} sized members over 6 missile sizes, 4 ranges, 2 jammers and every resolution, against the literal range of each member`] }
+  return { lines: [`${rows} sized members over 6 missile sizes, 4 ranges, 2 jammers and every resolution, against the literal range of each member, none under a jammer`] }
 })
 
 check('limiting: a saved fire control of resolution 20 is not limiting against a 20 MSP missile at 100,000 km, and one far under the size of the missile is', (m) => {
@@ -516,7 +520,7 @@ check('limiting: a saved fire control of resolution 20 is not limiting against a
   const jammed = m.sp.savedPairCheck({ search: saved(1e6, 1), fireControl: saved(1e6, 20), target, wantedRangeKm: 100000, jammer: 5, tech: st })
 
   close(jammed.fireControl.reach.value, 1e6, 'no jammer applies to a fire control against a missile')
-  close(jammed.search.reach.value, 1e6 * 0.75 ** 5, 'the search sensor keeps the jammer')
+  close(jammed.search.reach.value, 1e6, 'no jammer applies to the search sensor against a missile either')
   assert.equal(jammed.limiting, null)
 
   const small = m.sp.targetOf({ kind: 'missile', msp: 6 })
@@ -587,12 +591,12 @@ check('minerals: the reach against a jammer follows the ECCM of the level, the s
   assert.deepEqual(m.sp.hardeningEccmTradeoff({ sizing: m.sp.activeSizing({ target: tonsTarget(m, 250), wantedRangeKm: 2e7, resolution: 106, tech: st }), tech: st }), { pair: null, rows: [] })
 })
 
-check('minerals: against a missile target the tradeoff reach of the fire control takes the size of the missile in MSP and no jammer', (m) => {
+check('minerals: against a missile target the tradeoff reach of both members takes the signature of the missile and no jammer, at every ECCM', (m) => {
   const { st } = planOf(m, { choices: { [ECCM]: 2043 } })
-  const range = (sizeHS, resolution, fireControl, msp, jammer, eccm) => effectiveRange({ sizeHS, resolution, fireControl, signature: fireControl ? Math.max(msp, 0.33) : Math.max(msp / 20, 0.3), jammer: fireControl ? 0 : jammer, eccm })
+  const range = (sizeHS, resolution, fireControl, msp, eccm) => effectiveRange({ sizeHS, resolution, fireControl, signature: fireControl ? Math.max(msp, 0.33) : Math.max(msp / 20, 0.3), jammer: 0, eccm })
   let limited = 0
-  let jammed = 0
   let compared = 0
+  const reaches = new Map()
 
   for (const msp of [0.5, 1, 3, 10]) {
     for (const resolution of [1, 3, 10]) {
@@ -609,15 +613,17 @@ check('minerals: against a missile target the tradeoff reach of the fire control
 
           for (const [eccmId, eccm] of [[2043, 2], [2041, 0]]) {
             const row = tradeoff.rows.find((entry) => entry.eccm.level.id === eccmId && entry.hardening.level.id === 2032)
-            const searchReach = range(pair.search.sizeHS, resolution, false, msp, jammer, eccm)
-            const controlReach = range(pair.fireControl.sizeHS, resolution, true, msp, jammer, eccm)
+            const searchReach = range(pair.search.sizeHS, resolution, false, msp, eccm)
+            const controlReach = range(pair.fireControl.sizeHS, resolution, true, msp, eccm)
+            const key = `${msp}|${resolution}|${wanted}|${eccmId}`
 
             close(row.reach.value, Math.min(searchReach, controlReach), `${msp} MSP, resolution ${resolution}, ${wanted} km, jammer ${jammer}, ECCM ${eccm}`, 1e-6)
+            assert.ok(!reaches.has(`${key}|${jammer}`))
+            reaches.set(`${key}|${jammer}`, row.reach.value)
             compared++
 
             if (controlReach < searchReach) {
               limited++
-              jammed += jammer > eccm ? 1 : 0
             }
           }
         }
@@ -627,7 +633,12 @@ check('minerals: against a missile target the tradeoff reach of the fire control
 
   assert.ok(compared > 20, `${compared} rows compared`)
   assert.ok(limited > 0, 'some pair is limited by its fire control, so the fire control reach is observed')
-  assert.ok(jammed > 0, 'some pair limited by its fire control sits under a jammer the search sensor feels')
+
+  for (const [key, value] of reaches) {
+    if (key.endsWith('|3')) {
+      close(value, reaches.get(`${key.slice(0, -2)}|0`), `${key}: the jammer moves the reach of a missile target`, 1e-12)
+    }
+  }
 })
 
 // ---------- research ----------
@@ -1074,13 +1085,14 @@ check('target: a reach of a proposed sensor carries the provenance of its design
   unknown(m.sp.rangeCurve({ sensors: [saved(null, 20, 1, { id: 13, name: 'No range', source: design })], tonsList: [50] }).rows[0].ranges[0].result, 'a sensor with no range stays unknown whatever its design')
 })
 
-check('target: a missile gives a fire control signature of its size in MSP, never under 0.33, and no jammer applies; a ship gives both members one cross-section', (m) => {
+check('target: a missile gives a fire control signature of its size in MSP, never under 0.33, and no jammer applies to either member; a ship gives both members one cross-section and the jammer', (m) => {
   for (const [msp, search, fireControl] of [[40, 2, 40], [20, 1, 20], [6, 0.3, 6], [1, 0.3, 1], [0.1, 0.3, 0.33], [0.33, 0.3, 0.33]]) {
     const target = m.sp.targetOf({ kind: 'missile', msp })
 
     assert.equal(target.signature.value, search, `${msp} MSP: search`)
     assert.equal(target.fireControlSignature.value, fireControl, `${msp} MSP: fire control`)
     assert.equal(target.fireControlSignature.status, 'assumed')
+    assert.equal(target.searchJammer, false)
     assert.equal(target.fireControlJammer, false)
     assert.equal(target.results[0].fireControlSignature, target.fireControlSignature)
   }
@@ -1090,6 +1102,7 @@ check('target: a missile gives a fire control signature of its size in MSP, neve
 
   for (const target of [tonsTarget(m, 250), m.sp.targetOf({ kind: 'class', cls: klass() })]) {
     assert.equal(target.fireControlSignature, target.signature, 'a ship is one cross-section to both')
+    assert.equal(target.searchJammer, true)
     assert.equal(target.fireControlJammer, true)
     assert.ok(target.results.every((entry) => entry.fireControlSignature === entry.signature))
   }
@@ -1099,7 +1112,7 @@ check('target: a missile gives a fire control signature of its size in MSP, neve
   }
 })
 
-check('target: each scenario of a target is a target of its own, with the signature and the jammer policy of the fire control, for sizing, the saved pair and the saved designs', (m) => {
+check('target: each scenario of a target is a target of its own, with the signature and the jammer policy of both members, for sizing, the saved pair and the saved designs', (m) => {
   const { st } = planOf(m)
   const missile = m.sp.targetOf({ kind: 'missile', msp: 20 })
   const ship = tonsTarget(m, 250)
@@ -1107,6 +1120,7 @@ check('target: each scenario of a target is a target of its own, with the signat
 
   for (const target of [missile, ship, cloaked]) {
     for (const entry of target.results) {
+      assert.equal(entry.searchJammer, target.searchJammer, `${target.label} ${entry.key}: the search jammer policy`)
       assert.equal(entry.fireControlJammer, target.fireControlJammer, `${target.label} ${entry.key}: the jammer policy`)
       assert.ok(entry.fireControlSignature && entry.signature)
     }
@@ -1118,8 +1132,10 @@ check('target: each scenario of a target is a target of its own, with the signat
 
     assert.equal(entry.selected.fireControl.sizeHS, whole.selected.fireControl.sizeHS, `jammer ${jammer}: the fire control sized from the scenario`)
     assert.equal(entry.selected.search.sizeHS, whole.selected.search.sizeHS, `jammer ${jammer}: the search sensor sized from the scenario`)
+    assert.equal(entry.request.searchJammer, 0)
     assert.equal(entry.request.fireControlJammer, 0)
     assert.equal(entry.selected.fireControl.sizeHS, m.sp.activeSizing({ target: missile, wantedRangeKm: 1e7, resolution: 1, jammer: 0, tech: st }).selected.fireControl.sizeHS, `jammer ${jammer}: no jammer on the fire control`)
+    assert.equal(entry.selected.search.sizeHS, m.sp.activeSizing({ target: missile, wantedRangeKm: 1e7, resolution: 1, jammer: 0, tech: st }).selected.search.sizeHS, `jammer ${jammer}: no jammer on the search sensor`)
 
     const saved12 = m.sp.savedPairCheck({ search: saved(1e7, 1), fireControl: saved(1.2e7, 1, 1), target: missile.results[0], wantedRangeKm: 1e7, jammer, tech: st })
 
@@ -1129,14 +1145,15 @@ check('target: each scenario of a target is a target of its own, with the signat
 
   const shipEntry = m.sp.activeSizing({ target: ship.results[0], wantedRangeKm: 1e7, resolution: 1, jammer: 5, tech: st })
 
+  assert.equal(shipEntry.request.searchJammer, 5, 'a ship scenario keeps the jammer on the search sensor')
   assert.equal(shipEntry.request.fireControlJammer, 5, 'a ship scenario keeps the jammer on the fire control')
 })
 
-check('target: a saved fire control is measured against a missile by the size of the missile in MSP and a search sensor by the size over 20, the jammer on the search sensor only', (m) => {
+check('target: a saved fire control is measured against a missile by the size of the missile in MSP and a search sensor by the size over 20, the jammer on neither', (m) => {
   const target = m.sp.targetOf({ kind: 'missile', msp: 6 })
   const rows = m.sp.existingDesigns({ sensors: [saved(1e6, 10, 0, { id: 1, kind: 'search' }), saved(1e6, 10, 0, { id: 2, kind: 'fireControl' }), saved(1e6, 10, 0, { id: 3 })], target, jammer: 2 })
 
-  close(rows[0].reach.value, 1e6 * (0.3 / 10) ** 2 * 0.75 ** 2, 'a search sensor: 0.3 HS under the jammer')
+  close(rows[0].reach.value, 1e6 * (0.3 / 10) ** 2, 'a search sensor: 0.3 HS, no jammer')
   close(rows[1].reach.value, 1e6 * (6 / 10) ** 2, 'a fire control: 6 points, no jammer')
   close(rows[2].reach.value, rows[0].reach.value, 'a sensor of no kind is read as a search sensor')
 
@@ -1144,6 +1161,48 @@ check('target: a saved fire control is measured against a missile by the size of
 
   close(ship[1].reach.value, ship[0].reach.value, 'a ship is one cross-section under the jammer to both')
   assert.equal(m.sp.sensorOf({ id: 4, name: 'X', kind: 'fireControl', rangeKm: 1, resolution: 1, eccm: 0 }).kind, 'fireControl')
+})
+
+check('jammer: a missile target gives the same search sensor reach whatever the jammer, and a ship target is scaled by it, in the sizing, the saved pair, the saved designs and the hardening and ECCM rows', (m) => {
+  const { st } = planOf(m, { choices: { [ECCM]: 2043 } })
+  const missile = m.sp.targetOf({ kind: 'missile', msp: 40 })
+  const ship = tonsTarget(m, 250)
+  const sensors = [saved(1e6, 1, 0, { id: 1, kind: 'search' }), saved(1e6, 1, 0, { id: 2, kind: 'fireControl' })]
+  const read = (target, jammer) => {
+    const sizing = m.sp.activeSizing({ target, wantedRangeKm: 1e7, resolution: 1, jammer, tech: st })
+    const rows = m.sp.hardeningEccmTradeoff({ sizing, tech: st }).rows.filter((row) => row.hardening.level.id === 2032)
+
+    assert.equal(sizing.selected.feasible, true, `${target.label}, jammer ${jammer}: a pair is sized`)
+
+    return { search: sizing.selected.search, pair: m.sp.savedPairCheck({ search: sensors[0], fireControl: sensors[1], target, wantedRangeKm: 1e5, jammer, tech: st }), designs: m.sp.existingDesigns({ sensors, target, jammer }), eccm0: rows.find((row) => row.eccm.level.id === 2041), eccm2: rows.find((row) => row.eccm.level.id === 2043) }
+  }
+
+  for (const [kind, target] of [['a missile target', missile], ['the scenario of a missile target', missile.results[0]]]) {
+    const bare = read(target, 0)
+
+    close(bare.pair.search.reach.value, 1e6, `${kind}: a saved search sensor sees a missile of 2 HS at its whole range`)
+
+    for (const jammer of [1, 2, 5, 8]) {
+      const now = read(target, jammer)
+      const label = `${kind}, jammer ${jammer}`
+
+      assert.equal(now.search.sizeHS, bare.search.sizeHS, `${label}: the size of the search sensor`)
+      close(now.search.reach.value, bare.search.reach.value, `${label}: the reach of the sized search sensor`)
+      close(now.pair.search.reach.value, bare.pair.search.reach.value, `${label}: the saved search sensor`)
+      close(now.designs[0].reach.value, bare.designs[0].reach.value, `${label}: the saved design of a search sensor`)
+      close(now.eccm0.reach.value, bare.eccm0.reach.value, `${label}: the reach of the pair at an ECCM of 0`)
+      close(now.eccm0.reach.value, now.eccm2.reach.value, `${label}: an ECCM moves nothing against a missile`)
+    }
+  }
+
+  const bareShip = read(ship, 0)
+  const jammedShip = read(ship, 5)
+
+  assert.ok(jammedShip.search.sizeHS > bareShip.search.sizeHS, 'a ship under a jammer asks for a larger search sensor')
+  close(jammedShip.pair.search.reach.value, 1e6 * 0.75 ** 5, 'a saved search sensor of ECCM 0 under a jammer of 5')
+  close(jammedShip.designs[0].reach.value, 1e6 * 0.75 ** 5, 'the saved design of a search sensor under a jammer of 5')
+  close(bareShip.pair.search.reach.value, 1e6, 'a saved search sensor with no jammer')
+  assert.ok(jammedShip.eccm0.reach.value < jammedShip.eccm2.reach.value, 'a ship under a jammer is seen further with the higher ECCM')
 })
 
 check('research: the reach of each hardening and ECCM row carries the provenance of the designs it is built from, under a hypothetical strength, EM sensitivity and an ECCM against a jammer', (m) => {
@@ -1686,15 +1745,21 @@ const MUTATIONS = [
   { name: 'the fire control signature floor of a missile 0.3', file: 'design-rules.js', find: 'export const MISSILE_FIRE_CONTROL_SIGNATURE_MIN = 0.33', replace: 'export const MISSILE_FIRE_CONTROL_SIGNATURE_MIN = 0.3', fails: ['target: a missile gives', 'pair: against a missile target'] },
   { name: 'the fire control signature of a missile over 20 MSP per HS', file: 'design-rules.js', find: 'Math.max(sizeMsp, MISSILE_FIRE_CONTROL_SIGNATURE_MIN)', replace: 'Math.max(sizeMsp / 20, MISSILE_FIRE_CONTROL_SIGNATURE_MIN)', fails: ['target: a missile gives', 'limiting: a saved fire control'] },
   { name: 'a saved fire control measured by the search signature', file: 'sensor-planner.js', find: 'signature: fireControl ? scenario.fireControlSignature : scenario.signature', replace: 'signature: scenario.signature', fails: ['target: a saved fire control'] },
-  { name: 'a missile scenario that drops the jammer policy of the fire control', file: 'sensor-planner.js', find: 'fireControlSignature, fireControlJammer: false })', replace: 'fireControlSignature })', fails: ['target: each scenario of a target'] },
+  { name: 'a missile scenario that drops the jammer policy of the fire control', file: 'sensor-planner.js', find: 'fireControlSignature, searchJammer: false, fireControlJammer: false })])', replace: 'fireControlSignature, searchJammer: false })])', fails: ['target: each scenario of a target'] },
+  { name: 'a missile scenario that drops the jammer policy of the search sensor', file: 'sensor-planner.js', find: 'fireControlSignature, searchJammer: false, fireControlJammer: false })])', replace: 'fireControlSignature, fireControlJammer: false })])', fails: ['target: each scenario of a target', 'jammer: a missile target'] },
+  { name: 'a missile target that takes the jammer on the search sensor', file: 'sensor-planner.js', find: 'return Object.freeze({ kind, label, signature, fireControlSignature, searchJammer: false,', replace: 'return Object.freeze({ kind, label, signature, fireControlSignature, searchJammer: true,', fails: ['target: a missile gives', 'target: each scenario of a target'] },
   { name: 'the reach of a trade-off row without the provenance of its designs', file: 'sensor-planner.js', find: 'jammer: jamming, source: design })', replace: 'jammer: jamming })', fails: ['research: the reach of each hardening'] },
   { name: 'a held weapon number row with no number read as absent', file: 'sensor-planner.js', find: 'if (weapons.currentUnknown || (!weapon && weapons.unknown.length)) {', replace: 'if (false) {', fails: ['beam: a weapon number row'] },
   { name: 'an absent weapon number row read as unknown', file: 'sensor-planner.js', find: '(!weapon && weapons.unknown.length)', replace: '(!weapon && !singleWeapon)', fails: ['beam: a weapon number row'] },
   { name: 'the chosen weapon number level with no number ignored', file: 'sensor-planner.js', find: 'weapons.currentUnknown || (', replace: '(', fails: ['beam: a weapon number row'] },
   { name: 'a zero wanted range of a saved pair taken as asked', file: 'sensor-planner.js', find: 'const wanted = positiveOf(wantedRangeKm)\n  const inputs', replace: 'const wanted = numberOf(wantedRangeKm)\n  const inputs', fails: ['limiting: a wanted range or tracking speed'] },
   { name: 'a zero request of a saved beam control taken as asked', file: 'sensor-planner.js', find: 'const wantedRange = positiveOf(rangeKm)\n  const wantedTracking = positiveOf(trackingKmS)', replace: 'const wantedRange = numberOf(rangeKm)\n  const wantedTracking = numberOf(trackingKmS)', fails: ['limiting: a wanted range or tracking speed'] },
-  { name: 'a saved fire control under the jammer of a missile target', file: 'sensor-planner.js', find: 'jammer: fireControl && scenario.fireControlJammer === false ? 0 : jam', replace: 'jammer: jam', fails: ['target: a saved fire control'] },
-  { name: 'the tradeoff reach of both members against the search signature', file: 'sensor-planner.js', find: '[fireControl, fireControlSignature, fireControlJammer]', replace: '[fireControl, signature, jammer]', fails: ['minerals: against a missile target'] },
+  { name: 'a saved fire control under the jammer of a missile target', file: 'sensor-planner.js', find: '(fireControl ? scenario.fireControlJammer : scenario.searchJammer) === false ? 0 : jam', replace: 'fireControl ? jam : scenario.searchJammer === false ? 0 : jam', fails: ['target: a saved fire control'] },
+  { name: 'a saved search sensor under the jammer of a missile target', file: 'sensor-planner.js', find: '(fireControl ? scenario.fireControlJammer : scenario.searchJammer) === false ? 0 : jam', replace: 'fireControl && scenario.fireControlJammer === false ? 0 : jam', fails: ['target: a saved fire control', 'jammer: a missile target'] },
+  { name: 'the tradeoff reach of both members against the search signature', file: 'sensor-planner.js', find: '[fireControl, fireControlSignature, fireControlJammer]', replace: '[fireControl, signature, fireControlJammer]', fails: ['minerals: against a missile target'] },
+  { name: 'the tradeoff reach of the search sensor under the jammer of a missile target', file: 'sensor-planner.js', find: '[search, signature, searchJammer]', replace: '[search, signature, sizing.request.jammer]', fails: ['minerals: against a missile target', 'jammer: a missile target'] },
+  { name: 'the jammer applied to a search sensor against a missile', file: 'sensor-planner.js', find: 'search: { signature: signatureOf(target), jammer: target && target.searchJammer === false ? 0 : jammer }', replace: 'search: { signature: signatureOf(target), jammer }', fails: ['pair: against a missile target', 'limiting: a saved fire control', 'minerals: against a missile target', 'jammer: a missile target'] },
+  { name: 'the jammer dropped from the search sensor against a ship', file: 'sensor-planner.js', find: 'jammer: target && target.searchJammer === false ? 0 : jammer }, fireControl', replace: 'jammer: 0 }, fireControl', fails: ['pair: a jammer is cut by 0.75', 'jammer: a missile target'] },
   { name: 'the best pair the dearest', file: 'sensor-planner.js', find: 'a.totalCost.value - b.totalCost.value', replace: 'b.totalCost.value - a.totalCost.value', fails: ['pair: the best row'] },
   { name: 'a tie broken to the lower resolution', file: 'sensor-planner.js', find: 'b.resolution - a.resolution', replace: 'a.resolution - b.resolution', fails: ['pair: the best row'] },
   { name: 'the fire control sized as a search sensor', file: 'sensor-planner.js', find: 'mode: SENSOR_MODES.missileFireControl, name', replace: 'mode: SENSOR_MODES.search, name', fails: ['pair: each member', 'pair: the fire control'] },
@@ -1732,7 +1797,7 @@ const MUTATIONS = [
   { name: 'a blank size the target of 0', file: 'sensor-planner.js', find: 'const signature = unavailable({ rule: SENSOR_RULES.detection, missing: [missing] })', replace: 'const signature = ofRule({ rule: SENSOR_RULES.detection, value: 0, inputs: { present: [] } })', fails: ['target: a blank'] },
   { name: 'no floor under a target in tons', file: 'sensor-planner.js', find: 'classCrossSection({ sizeHS: size / TONS_PER_HS })', replace: 'size / TONS_PER_HS', fails: ['target: a size in tons'] },
   { name: 'a missile read as a twentieth of its size again', file: 'sensor-planner.js', find: 'missileSignature({ sizeMsp: size })', replace: 'missileSignature({ sizeMsp: size / 20 })', fails: ['target: a missile'] },
-  { name: 'the first scenario of a cloaked class the uncloaked size', file: 'sensor-planner.js', find: 'signature: crossSection.effective, fireControlSignature: crossSection.effective, fireControlJammer: true })]', replace: 'signature: crossSection.uncloaked, fireControlSignature: crossSection.uncloaked, fireControlJammer: true })]', fails: ['target: a saved class'] },
+  { name: 'the first scenario of a cloaked class the uncloaked size', file: 'sensor-planner.js', find: 'signature: crossSection.effective, fireControlSignature: crossSection.effective, searchJammer: true, fireControlJammer: true })]', replace: 'signature: crossSection.uncloaked, fireControlSignature: crossSection.uncloaked, searchJammer: true, fireControlJammer: true })]', fails: ['target: a saved class'] },
   { name: 'the active sensor range read from the component value', file: 'design-data.js', find: 'rangeKm: row.MaxSensorRange,', replace: 'rangeKm: row.ComponentValue,', fails: ['loaders: the active', 'minerals (save)', 'saves: a saved active sensor'] },
   { name: 'the active sensors of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    kind', fails: ['loaders: the active'] },
   { name: 'the beam fire controls of every race read', file: 'design-data.js', find: 'c.GameID in (0, :game) and r.GameID = :game and r.RaceID = :race order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', replace: 'c.GameID in (0, :game) and r.GameID = :game order by c.SDComponentID`, { replacements: { game, race } })\n\n  return rows.map((row) => Object.freeze({\n    id: row.SDComponentID,\n    name: row.Name,\n    type: row.ComponentTypeID,\n    sizeHS', fails: ['loaders: the beam'] },
