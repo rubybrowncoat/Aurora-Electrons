@@ -283,6 +283,104 @@
           </div>
         </v-card>
 
+        <v-card class="panel" data-summary="Surveyed bodies that could host a civilian mining complex, with their reserve, accessibility and the years assumed complexes would take to dig them out, ranked by the page's headline order or by an optional longevity preference with editable weights, to compare short-lived and long-lived sites." elevation="1">
+          <div class="panel-head">
+            <span>Civilian mining candidates<provenance-mark rule="minerals.cmcCandidate" /></span>
+            <span class="head-tools body-2">
+              <span class="text--secondary">{{ candidateSummary }}</span>
+              <v-btn-toggle v-model="cmcRanking" mandatory dense>
+                <v-btn v-for="option in rankings" :key="option.id" :value="option.id" small>{{ option.label }}</v-btn>
+              </v-btn-toggle>
+            </span>
+          </div>
+          <div class="candidate-tools">
+            <v-text-field v-for="field in settingFields" :key="field.key" v-model="cmcPreference[field.key]" :label="field.label" :hint="field.hint" :error-messages="settingError(field)" :maxlength="settingMaxText" persistent-hint dense outlined class="candidate-field" />
+            <v-btn text small class="candidate-reset" @click="resetPreference">Reset to defaults</v-btn>
+          </div>
+          <div v-if="candidates.fellBack" class="selection-bar caption warning--text">The longevity ranking is not available, so the rows keep the headline order: {{ candidates.blocking.join('; ') }}.<provenance-mark rule="cmcCandidate.score" /></div>
+          <div v-for="note in candidates.notes" :key="note" class="selection-bar caption warning--text">{{ note }}.<provenance-mark rule="cmcCandidate.input" /></div>
+          <ul class="candidate-assumptions caption text--secondary">
+            <li v-for="line in candidates.lines" :key="line.key"><span>{{ line.label }}: </span><strong>{{ line.value === null ? (line.note ? '' : '—') : `${count(line.value, 2)}${line.unit}` }}</strong><span v-if="line.note"><span v-if="line.value !== null"> · </span>{{ line.note }}</span><provenance-mark :result="line.result" /></li>
+          </ul>
+          <v-data-table :headers="candidateHeaders" :items="candidates.rows" item-key="key" show-expand single-expand :expanded.sync="candidateExpanded" disable-sort disable-pagination hide-default-footer :no-data-text="candidateEmptyText">
+            <template v-for="(rule, column) in candidateRules" #[`header.${column}`]="{ header }">
+              <span :key="column">{{ header.text }}<provenance-mark :rule="rule" /></span>
+            </template>
+            <template #[`item.rank`]="{ item }">
+              <div class="py-2">
+                <div class="font-weight-medium text-no-wrap">{{ rankText(item.rank) }}<provenance-mark :result="item.rankResult" /></div>
+                <div class="caption text--secondary text-no-wrap">Headline {{ rankText(item.headlineRank) }}<provenance-mark :result="item.potentialResult" /></div>
+                <div class="caption text--secondary text-no-wrap">Longevity {{ rankText(item.longevityRank) }}<provenance-mark :result="item.score" /></div>
+              </div>
+            </template>
+            <template #[`item.name`]="{ item }">
+              <div class="py-2 d-flex align-center">
+                <div>
+                  <div class="font-weight-medium text-no-wrap">{{ item.name }}</div>
+                  <div class="caption text--secondary text-no-wrap">{{ item.place }}</div>
+                  <div v-if="item.status === 'possible'" class="caption warning--text text-no-wrap">Possible: {{ item.possibleBecause.join(' and ') }}</div>
+                </div>
+                <page-link class="ml-2" :to="plannerLink([item])" :name="item.name" />
+              </div>
+            </template>
+            <template #[`item.potential`]="{ item }">
+              <span v-if="item.potential === null" class="text--secondary">—</span>
+              <span v-else>{{ roundToDecimal(item.potential, 1) }}</span><provenance-mark :result="item.potentialResult" />
+            </template>
+            <template #[`item.reserve`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap" :title="isAvailable(item.reserve) ? `${count(item.reserve.value)} t` : describeResult(item.reserve)">{{ isAvailable(item.reserve) ? compact(item.reserve.value) : '—' }}<provenance-mark :result="item.reserve" /></div>
+                <div class="caption text--secondary text-no-wrap">{{ item.lines.map((line) => line.mineral).join(' and ') }}</div>
+              </div>
+            </template>
+            <template #[`item.accessibility`]="{ item }">
+              <span class="text-no-wrap">{{ isAvailable(item.accessibility) ? count(item.accessibility.value, 2) : '—' }}</span><provenance-mark :result="item.accessibility" />
+            </template>
+            <template #[`item.lifetime`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap">{{ yearsText(item.lifetime) }}<provenance-mark :result="item.lifetime" /></div>
+                <div v-if="item.lines.length > 1" class="caption text--secondary text-no-wrap">longest of {{ item.lines.length }} deposits</div>
+              </div>
+            </template>
+            <template #[`item.score`]="{ item }">
+              <div class="py-2">
+                <div class="font-weight-medium text-no-wrap">{{ isAvailable(item.score) ? count(item.score.value, 2) : '—' }}<provenance-mark :result="item.score" /></div>
+                <div v-for="entry in item.terms" :key="entry.key" class="caption text--secondary text-no-wrap">{{ termText(entry) }}<provenance-mark :result="entry.term" /></div>
+              </div>
+            </template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="expand-cell">
+                <v-simple-table dense class="detail-table">
+                  <thead>
+                    <tr>
+                      <th>Mineral</th>
+                      <th class="text-right">In the ground<provenance-mark rule="cmcCandidate.deposit" /></th>
+                      <th>Accessibility<provenance-mark rule="cmcCandidate.deposit" /></th>
+                      <th class="text-right">Assumed output</th>
+                      <th class="text-right">Lifetime</th>
+                      <th>Meets the deposit rule</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="line in item.lines" :key="line.MaterialID">
+                      <td class="font-weight-medium">{{ line.mineral }}</td>
+                      <td class="text-right" :title="tonsTitle(line.Amount)">{{ tons(line.Amount) }}<provenance-mark :result="line.amountResult" /></td>
+                      <td>{{ plain(line.Accessibility) }}<provenance-mark :result="line.accessibilityResult" /></td>
+                      <td class="text-right">{{ perYear(line.rate) }}<provenance-mark :result="line.rate" /></td>
+                      <td class="text-right">{{ yearsText(line.lifetime) }}<provenance-mark :result="line.lifetime" /></td>
+                      <td>{{ line.qualifies ? 'Yes' : 'Not known' }}</td>
+                    </tr>
+                  </tbody>
+                </v-simple-table>
+              </td>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            A candidate is a surveyed body in reach of its star, with no complex on it yet, that holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better; a body with such a deposit whose amount or accessibility is not recorded is listed as possible and stays unknown, and so is a body with a colony whose civilian installations are not fully recorded, as it may already hold a complex. The game's other conditions are not checked here. The headline order is the one of the deposits table: mining potential, then accessibility, then amount. The longevity order is a preference of the player: the weighted mean of the reserve, accessibility and lifetime terms, each between 0 and 1, where every contribution is the term times its weight over the sum of the weights and the contributions add up to the score. The lifetime is how long the assumed complexes would take to dig out the qualifying deposits, the longest of them. Neither order is the game's choice of where a complex is founded, which follows its own scoring and a dice roll, and nothing here predicts it.
+            A dash is a figure the save does not record or a field left blank, never 0: hover its mark for what is missing.
+          </div>
+        </v-card>
+
         <v-card class="panel" data-summary="What each colony holds, reserves and needs of minerals, to find shortages and stock that can be moved." elevation="1">
           <div class="panel-head">
             <span>{{ focus ? `${focus.name} in the colonies` : 'Minerals in the colonies' }}<provenance-mark rule="minerals.colonyStock" /></span>
@@ -444,6 +542,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
+import { DEFAULT_SETTINGS, MAX_TEXT, RANKINGS, SETTING_FIELDS, candidateRanking, normaliseSettings } from '../utilities/cmc-candidates'
 import { CMC_PURCHASE_COST, CMC_TAX_INCOME, NO_CMC_POLICY, POLICY_STATES, TARGET_STATES, cmcPolicyRows, loadCmcPolicy } from '../utilities/cmc-policy'
 import { cmcBodyInReach } from '../utilities/colonization'
 import { SUPPLY_BASE_MILLIONS, cmcAllowedOf, loadRoutes } from '../utilities/colonization-data'
@@ -452,7 +551,7 @@ import { PRESSING, STOCK_COLUMNS, STOCK_STATES, colonyMineralResults, loadPacket
 import { KM_PER_AU, buildDistanceMap, jumpLinks, searchRoutes } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
-import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MASS_DRIVER_TONS, MINERALS, bestSiteResult, betterSite, bodyPotentialResult, compact, depositPotential, depositPotentialResult, depositReadable, massDriverRateResult, miningDistanceResult, pastHalf, perMineResult, qualifiesForCmc, withinOrbitalReach } from '../utilities/minerals'
+import { ACCESSIBILITY_FLOOR, CMC_MINERAL_IDS, MASS_DRIVER_TONS, MINERALS, bestSiteResult, betterSite, bodyPotentialResult, compact, compactYears, depositPotential, depositPotentialResult, depositReadable, massDriverRateResult, miningDistanceResult, pastHalf, perMineResult, qualifiesForCmc, withinOrbitalReach } from '../utilities/minerals'
 import { describeResult, isAvailable, ruleSupports, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
@@ -532,6 +631,8 @@ export default {
       colonyTable: tableView('mineralsColoniesTable', { sortBy: ['stateOrder'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       policyTable: tableView('mineralsCmcPolicyTable', { sortBy: ['stateOrder'], sortDesc: [false] }),
       cmcAcknowledged: { key: 'mineralsCmcTaxAcknowledged', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? stored.filter(Number.isInteger) : undefined) },
+      cmcRanking: { key: 'mineralsCmcRanking', default: 'headline', scope: 'race', valid: oneOf(RANKINGS.map((option) => option.id)) },
+      cmcPreference: { key: 'mineralsCmcPreference', default: { ...DEFAULT_SETTINGS }, scope: 'race', normalise: normaliseSettings },
     }),
   ],
   data() {
@@ -550,6 +651,11 @@ export default {
       groundSurvey: GROUND_SURVEY,
       stockStates: STOCK_STATES,
       policyStates: POLICY_STATES,
+      rankings: RANKINGS,
+      settingFields: SETTING_FIELDS,
+      settingMaxText: MAX_TEXT,
+      candidateExpanded: [],
+      candidateRules: { rank: 'minerals.siteOrder', potential: 'minerals.bodyPotential', reserve: 'cmcCandidate.reserve', accessibility: 'cmcCandidate.accessibility', lifetime: 'cmcCandidate.lifetime', score: 'cmcCandidate.score' },
       policyRules: { outputSort: 'cmcPolicy.output', choiceSort: 'cmcPolicy.choice', targetSort: 'cmcPolicy.destination', drivers: 'cmcPolicy.drivers', throughput: 'cmcPolicy.throughput', switchSort: 'cmcPolicy.switch' },
       choiceLabels: { buy: 'Bought', tax: 'Taxed', npr: 'Kept (NPR)' },
       tonnageColumns: ['stock', 'reserve', 'free', 'needs', 'inbound'],
@@ -733,7 +839,8 @@ export default {
         const depositList = MINERALS.map((mineral) => row.deposits[mineral.id]).filter(Boolean)
         const placed = Number.isFinite(row.Xcor) && Number.isFinite(row.Ycor)
         const distanceResult = miningDistanceResult(placed ? distanceTo(row) : null, { origins: this.routes.colonies.length, placed })
-        const cmcMinerals = cmcBodyInReach(row) ? CMC_MINERAL_IDS.filter((id) => qualifiesForCmc(row.deposits[id])).map((id) => this.mineralName(id)) : []
+        const inReach = cmcBodyInReach(row)
+        const cmcMinerals = inReach ? CMC_MINERAL_IDS.filter((id) => qualifiesForCmc(row.deposits[id])).map((id) => this.mineralName(id)) : []
 
         return {
           ...row,
@@ -745,8 +852,10 @@ export default {
           depositList,
           unreadable: depositList.filter((deposit) => !depositReadable(deposit)).length,
           complexes: sum(own, 'Complexes'),
+          complexGaps: sum(own, 'ComplexGaps'),
           complexColonies: own.filter((colony) => colony.Complexes > 0),
           cmcCandidate: cmcMinerals.join(' and '),
+          cmcInReach: inReach,
           workers: [
             ...own.map((colony) => ({ key: `colony-${colony.PopulationID}`, text: colony.PopName, note: this.minesText(colony) })),
             ...(fleet ? [{ key: 'orbital', text: this.counted(fleet.Ships, 'orbital miner', 'orbital miners'), note: this.counted(fleet.Modules, 'module', 'modules') }] : []),
@@ -1149,6 +1258,36 @@ export default {
       return cmcPolicyRows(this.policy, { RaceID: this.RaceID, version: this.formulaVersion, acknowledged: this.cmcAcknowledged })
     },
 
+    // The civilian mining candidates, ranked by the headline order or the longevity preference (utilities/cmc-candidates.js), in every system whatever the view.
+    candidates() {
+      return candidateRanking({ bodies: this.bodies, race: this.race, allowed: this.raceRules.AllowCMC, settings: this.cmcPreference, ranking: this.cmcRanking })
+    },
+
+    candidateHeaders() {
+      return [
+        { text: 'Rank', value: 'rank' },
+        { text: 'Body', value: 'name' },
+        { text: 'Potential', value: 'potential', align: 'end' },
+        { text: 'Reserve', value: 'reserve', align: 'end' },
+        { text: 'Accessibility', value: 'accessibility' },
+        { text: 'Lifetime', value: 'lifetime', align: 'end' },
+        { text: 'Longevity score', value: 'score' },
+        { text: '', value: 'data-table-expand' },
+      ]
+    },
+
+    candidateSummary() {
+      const { rows, shown } = this.candidates
+      const possible = rows.filter((row) => row.status === 'possible').length
+      const known = rows.length - possible
+
+      return `${this.counted(known, 'candidate', 'candidates')}${possible ? `, ${this.counted(possible, 'possible', 'possible')}` : ''} · ordered by ${shown === 'longevity' ? 'the longevity preference' : 'the headline order'}`
+    },
+
+    candidateEmptyText() {
+      return this.raceRules.AllowCMC ? 'No surveyed body in reach, without a complex, holds more than 10,000 t of Duranium or Gallicite at accessibility 0.7 or better.' : 'Civilian mining complexes are switched off for the game.'
+    },
+
     policyRows() {
       const stocks = Object.fromEntries(this.colonyStocks.map((entry) => [entry.colony.PopulationID, entry]))
 
@@ -1443,6 +1582,33 @@ export default {
       return linkTo.planner({ bodies: rows.map((row) => row.body || row) })
     },
 
+    settingError(field) {
+      const read = this.candidates.parsed[field.key]
+
+      return read.state === 'ok' ? [] : [read.state === 'blank' ? 'Blank, so not known' : `Rejected: ${read.reason}`]
+    },
+
+    resetPreference() {
+      this.cmcPreference = { ...DEFAULT_SETTINGS }
+    },
+
+    rankText(rank) {
+      return rank === null ? '—' : `#${rank}`
+    },
+
+    yearsText(result) {
+      return isAvailable(result) ? `${compactYears(result.value, this.separator)} yr` : '—'
+    },
+
+    // One term of a longevity score: its value, the weight it carries and what it adds to the score.
+    termText(entry) {
+      if (!isAvailable(entry.term)) {
+        return `${entry.label}: —`
+      }
+
+      return `${entry.label}: ${this.count(entry.term.value, 2)} × ${entry.weight === null ? '—' : this.count(entry.weight, 2)} → ${entry.contribution === null ? '—' : this.count(entry.contribution, 2)}`
+    },
+
     colonyLink(row) {
       return linkTo.colonyOutlook(row.PopulationID)
     },
@@ -1551,9 +1717,9 @@ export default {
           return null
         }
 
-        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, FCT_Game.* from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
+        const [[race]] = await this.database.query(`select FCT_Race.MineProduction, FCT_Race.MaximumOrbitalMiningDiameter, (select max(DIM_PlanetaryInstallation.MiningProductionValue) from DIM_PlanetaryInstallation where DIM_PlanetaryInstallation.CivilianInstallation = 1) as ComplexMining, FCT_Game.* from FCT_Race inner join FCT_Game on FCT_Game.GameID = FCT_Race.GameID where FCT_Race.GameID = ${this.GameID} and FCT_Race.RaceID = ${this.RaceID}`)
 
-        return race ? { MineProduction: race.MineProduction, MaximumOrbitalMiningDiameter: race.MaximumOrbitalMiningDiameter, AllowCMC: cmcAllowedOf(race) } : null
+        return race ? { MineProduction: race.MineProduction, MaximumOrbitalMiningDiameter: race.MaximumOrbitalMiningDiameter, ComplexMining: race.ComplexMining, AllowCMC: cmcAllowedOf(race) } : null
       }),
       default: null,
     },
@@ -1589,7 +1755,7 @@ export default {
           return []
         }
 
-        const [deposits] = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID})`)
+        const [deposits] = await this.database.query(`select FCT_MineralDeposit.MaterialID, FCT_MineralDeposit.Amount, FCT_MineralDeposit.Accessibility, FCT_MineralDeposit.HalfOriginalAmount, FCT_MineralDeposit.OriginalAcc, FCT_SystemBody.SystemID, FCT_SystemBody.SystemBodyID, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBody.BodyTypeID, FCT_SystemBody.Radius, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.GroundMineralSurvey, FCT_SystemBody.OrbitalDistance, FCT_SystemBody.Eccentricity, FCT_SystemBody.RadiationLevel, VIR_Parent.OrbitalDistance as ParentOrbitalDistance, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName from FCT_MineralDeposit inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_MineralDeposit.SystemBodyID inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBody as VIR_Parent on VIR_Parent.SystemBodyID = FCT_SystemBody.ParentBodyID and FCT_SystemBody.ParentBodyType = 1 left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID where FCT_MineralDeposit.GameID = ${this.GameID} and FCT_MineralDeposit.SystemBodyID in (select FCT_SystemBodySurveys.SystemBodyID from FCT_SystemBodySurveys where FCT_SystemBodySurveys.GameID = ${this.GameID} and FCT_SystemBodySurveys.RaceID = ${this.RaceID})`)
 
         return Object.freeze(deposits)
       }),
@@ -1603,7 +1769,7 @@ export default {
           return []
         }
 
-        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers, coalesce(VIR_Installations.Gaps, 0) as InstallationGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.CivilianInstallation is null or DIM_PlanetaryInstallation.Workers is null or DIM_PlanetaryInstallation.MiningProductionValue is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
+        const [colonies] = await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.SystemID, FCT_Population.SystemBodyID, FCT_Population.Population, FCT_Population.Capital, FCT_Population.MassDriverDest, case when FCT_Race.NPR = 1 then 1 else FCT_Population.PurchaseCivilianMinerals end as PurchaseCivilianMinerals, ${STOCK_COLUMNS}, FCT_SystemBody.Xcor, FCT_SystemBody.Ycor, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.Automines, 0) as Automines, coalesce(VIR_Installations.Complexes, 0) as Complexes, coalesce(VIR_Installations.MassDrivers, 0) as MassDrivers, coalesce(VIR_Installations.Gaps, 0) as InstallationGaps, coalesce(VIR_Installations.ComplexGaps, 0) as ComplexGaps from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID inner join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID and FCT_RaceSysSurvey.GameID = FCT_Population.GameID left join (select FCT_PopulationInstallations.PopID, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers > 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Mines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 0 and DIM_PlanetaryInstallation.Workers = 0 then FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MiningProductionValue else 0 end) as Automines, sum(case when DIM_PlanetaryInstallation.CivilianInstallation = 1 and DIM_PlanetaryInstallation.MiningProductionValue > 0 then FCT_PopulationInstallations.Amount else 0 end) as Complexes, sum(FCT_PopulationInstallations.Amount * DIM_PlanetaryInstallation.MassDriverValue) as MassDrivers, sum(case when FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.CivilianInstallation is null or DIM_PlanetaryInstallation.Workers is null or DIM_PlanetaryInstallation.MiningProductionValue is null or DIM_PlanetaryInstallation.MassDriverValue is null then 1 else 0 end) as Gaps, sum(case when DIM_PlanetaryInstallation.CivilianInstallation is null or (DIM_PlanetaryInstallation.CivilianInstallation = 1 and (FCT_PopulationInstallations.Amount is null or DIM_PlanetaryInstallation.MiningProductionValue is null)) then 1 else 0 end) as ComplexGaps from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`)
 
         return Object.freeze(colonies)
       }),
@@ -1768,6 +1934,29 @@ export default {
     flex-wrap: wrap;
     gap: 8px 12px;
     padding: 0 24px 12px;
+  }
+
+  .candidate-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 12px;
+    padding: 0 24px 12px;
+  }
+
+  .candidate-field {
+    flex: 0 0 170px;
+    max-width: 170px;
+  }
+
+  .candidate-reset {
+    align-self: center;
+  }
+
+  .candidate-assumptions {
+    margin: 0;
+    padding: 0 24px 12px;
+    list-style: none;
   }
 
   .overview-row {
