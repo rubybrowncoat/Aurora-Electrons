@@ -241,6 +241,54 @@
             People aboard an Ark ship count as orbital population only while its fleet sits at its colony's body with no move orders and is not a civilian fleet. Empty berths are room in the standard berths, not people, and stay apart from the population in orbit; people beyond the berths of a damaged ship are not counted. Orbital population is not surface population or workers, and the colony projections above leave it out. Its growth and its transfer to the surface are not verified, so none is applied and no forecast is made for it. A dash is a figure the save cannot support, and the mark beside it names what is missing.
           </div>
         </v-card>
+
+        <v-card class="panel mine-bootstrap" data-summary="Three ways to add mining capacity at a colony: mines built at another colony and carried in, mines built by the colony's own industry, and mines built with ground engineers moved in. Each route shows what works now, what limits it and what the save does not say." elevation="1">
+          <div class="panel-head">
+            <span>Mine bootstrap<provenance-mark rule="mineBootstrap.localBuild" label /></span>
+          </div>
+          <v-row dense class="px-4 pt-2">
+            <v-col cols="12" sm="6" md="3">
+              <v-select v-model="bootstrapColonyId" :items="bootstrapColonyItems" item-text="text" item-value="value" label="Colony to gain mining" aria-label="Colony to gain mining" dense outlined hide-details clearable />
+            </v-col>
+            <v-col cols="12" sm="6" md="3">
+              <v-select :value="bootstrapType ? bootstrapType.PlanetaryInstallationID : null" :items="bootstrapTypeItems" item-text="text" item-value="value" label="Mine type" aria-label="Mine type" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapTypeId = $event" />
+            </v-col>
+            <v-col cols="12" sm="6" md="2">
+              <v-text-field v-model="bootstrapQuantity" label="Number of mines" aria-label="Number of mines" type="number" min="1" dense outlined hide-details :disabled="!bootstrapColonyId" :error="bootstrapColonyId !== null && bootstrapCount === null" />
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-select :value="bootstrapBuilders.length ? (bootstrapBuilders.find((option) => option.colony.PopulationID === bootstrapBuilderId) || bootstrapBuilders[0]).colony.PopulationID : null" :items="bootstrapBuilderItems" item-text="text" item-value="value" label="Builder for the import" aria-label="Builder for the import" dense outlined hide-details :disabled="!bootstrapColonyId" @change="bootstrapBuilderId = $event" />
+            </v-col>
+          </v-row>
+          <div v-if="bootstrapSources.problems.length" class="px-4 pb-2 caption text--secondary" data-bootstrap-problems>Not read: {{ bootstrapSources.problems.map((problem) => problem.text).join('; ') }}.</div>
+          <div v-if="!bootstrapTarget" class="px-4 py-3 caption text--secondary">Pick the colony that should gain mining capacity to compare the three routes.</div>
+          <div v-else-if="!bootstrapRoutes.length" class="px-4 py-3 caption text--secondary">The comparison needs a mine type the race can build and a position for the colony.</div>
+          <v-row v-else dense class="px-4 pb-2">
+            <v-col v-for="route in bootstrapRoutes" :key="route.id" cols="12" md="4">
+              <div class="route-card" :data-route="route.id">
+                <div class="d-flex align-center mb-1">
+                  <span class="font-weight-medium">{{ route.title }}</span>
+                  <v-chip small label class="ml-2" :color="routeColor(route.status)">{{ routeStatus[route.status] }}</v-chip>
+                </div>
+                <table v-if="routeFigures(route).length" class="route-figures caption">
+                  <tr v-for="figure in routeFigures(route)" :key="figure.label">
+                    <td class="text--secondary">{{ figure.label }}</td>
+                    <td>{{ figure.text }}<provenance-mark v-if="figure.result" :result="figure.result" /></td>
+                  </tr>
+                </table>
+                <div v-if="route.worksNow.length" class="chart-title mt-2">Works now</div>
+                <ul v-if="route.worksNow.length" class="route-list caption"><li v-for="line in route.worksNow" :key="line">{{ line }}</li></ul>
+                <div v-if="route.limits.length" class="chart-title mt-2">Limits</div>
+                <ul v-if="route.limits.length" class="route-list caption"><li v-for="line in route.limits" :key="line">{{ line }}</li></ul>
+                <div v-if="route.missing.length" class="chart-title mt-2">Missing inputs</div>
+                <ul v-if="route.missing.length" class="route-list caption text--secondary"><li v-for="line in route.missing" :key="line">{{ line }}</li></ul>
+              </div>
+            </v-col>
+          </v-row>
+          <div class="panel-foot caption text--secondary">
+            Each route builds the same number of mines of one type. Import builds them at another colony of the race, with the build time of that colony's idle construction capacity, and carries them by freighter: the tonnage is the cargo points of the mines, the freight deficit is the tonnage beyond one lift of the class, and the labour deficit is the workers the manned mines need beyond the colony's free workers; automated mines need none, and a shortage the colony already has is shown apart. A freighter class crosses a jump point that is not stabilised on both sides only with jump drives that cover its size; any other class takes a route over stabilised jump points, or the route needs a jump-capable tender. Local industry uses the colony's own idle construction capacity, which carries its saved efficiency, so a colony short of workers builds slower, and manned mines add to the workers it needs. Ground-force assistance adds the construction rating of engineer formations at other colonies, weighted by their commanders' Production bonus and headquarters capacity; a formation travels whole in one troop ship, and the engineers already at the colony are counted in its capacity by the same rule. It is unavailable where the save lacks the columns or the version is not 2.7, and the figure is an upper bound because the assignment of engineers to fortification work is not saved. Mines already installed elsewhere, whether the freighters and troop ships are free, the move time of troops and the mineral stock beyond the colony's own are not counted. A dash is a figure the save cannot support, and the mark beside it names what is missing.
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -259,7 +307,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
-import productionModifiers from '../mixins/production-modifiers'
+import productionModifiers, { capacityResult } from '../mixins/production-modifiers'
 import queueForecast from '../mixins/queue-forecast'
 import { activeAppearance } from '../utilities/appearance'
 import { ORBIT_REASONS, arkLayer, loadArks } from '../utilities/arks'
@@ -269,9 +317,12 @@ import { linkTo, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
-import { prepareForecast } from '../utilities/production'
+import { industryUsage, prepareForecast } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
 import { committedSplitResult, committedWorkforce, workforceNeeds } from '../utilities/workforce-demand'
+import { loadFormulaVersion } from '../utilities/capabilities'
+import { ROUTE_STATUS, builderOptions, compareRoutes, engineerCapacityGap, fullStaffModifiers, idleConstruction, mineRequirements, plural, withMappedEngineers } from '../utilities/mine-bootstrap'
+import { NO_BOOTSTRAP_SOURCES, loadBootstrapSources } from '../utilities/mine-bootstrap-data'
 
 const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
 
@@ -297,6 +348,8 @@ const INPUT_LABELS = {
   industry: 'the industrial projects',
   yardActivities: 'the shipyard activities',
   installationTypes: 'the installation types',
+  bootstrapSources: 'the mine bootstrap reads',
+  bootstrapVersion: 'the formula version',
 }
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
@@ -333,6 +386,11 @@ export default {
       focusId: null,
       linkTo,
       expanded: [],
+      bootstrapColonyId: null,
+      bootstrapTypeId: null,
+      bootstrapQuantity: '10',
+      bootstrapBuilderId: null,
+      routeStatus: ROUTE_STATUS,
       arkExpanded: [],
     }
   },
@@ -661,12 +719,98 @@ export default {
         { key: 'free', label: 'Free (short when negative)' },
       ]
     },
+
+    // The colony meant to gain mining capacity: its row of the outlook.
+    bootstrapTarget() {
+      return this.rows.find((row) => row.PopulationID === this.bootstrapColonyId) || null
+    },
+
+    bootstrapColonyItems() {
+      return this.rows.map((row) => ({ text: row.name, value: row.PopulationID }))
+    },
+
+    bootstrapType() {
+      const { types } = this.bootstrapSources
+
+      return types.find((type) => type.PlanetaryInstallationID === this.bootstrapTypeId) || types[0] || null
+    },
+
+    bootstrapTypeItems() {
+      return this.bootstrapSources.types.map((type) => ({ text: type.Name, value: type.PlanetaryInstallationID }))
+    },
+
+    // The number of mines, a whole number above 0; null for anything else.
+    bootstrapCount() {
+      const count = Number(this.bootstrapQuantity)
+
+      return Number.isInteger(count) && count > 0 ? count : null
+    },
+
+    bootstrapRequirement() {
+      return this.bootstrapType ? mineRequirements(this.bootstrapType, this.bootstrapCount) : null
+    },
+
+    // The share of each colony's capacities the running projects hold.
+    bootstrapUsage() {
+      return industryUsage(this.bootstrapSources.projects)
+    },
+
+    // The colonies that could build the mines, the quickest first, each with its charted route to the colony.
+    bootstrapBuilders() {
+      const { colonies, jumpPoints } = this.bootstrapSources
+      const target = this.bootstrapTarget
+      const places = Object.fromEntries(colonies.map((colony) => [colony.PopulationID, colony]))
+
+      if (!target || !this.bootstrapRequirement || !places[target.PopulationID]) {
+        return []
+      }
+
+      const builders = this.rows.filter((row) => row.PopulationID !== target.PopulationID && places[row.PopulationID]).map((row) => ({ colony: places[row.PopulationID], rate: idleConstruction(this.mappedConstruction(row), this.bootstrapUsage[`${row.PopulationID}-construction`]), stock: places[row.PopulationID].stock }))
+
+      return builderOptions({ requirement: this.bootstrapRequirement, target: places[target.PopulationID], builders, jumpPoints })
+    },
+
+    bootstrapBuilderItems() {
+      return this.bootstrapBuilders.map((builder) => ({ text: `${builder.colony.PopName}${builder.route ? ` (${builder.route.jumps} ${plural(builder.route.jumps, 'jump')})` : ' (no route)'}`, value: builder.colony.PopulationID }))
+    },
+
+    // The three routes to mining capacity at the colony: import, local industry and ground-force assistance.
+    bootstrapRoutes() {
+      const target = this.bootstrapTarget
+      const requirement = this.bootstrapRequirement
+      const place = target ? this.bootstrapSources.colonies.find((colony) => colony.PopulationID === target.PopulationID) : null
+
+      if (!target || !requirement || !place) {
+        return []
+      }
+
+      const { freighters, troops, ground, shuttleTechnology, problems } = this.bootstrapSources
+      const modifiers = this.populationProductionModifiers[target.PopulationID]
+      const mapped = withMappedEngineers(modifiers, ground, this.bootstrapVersion, target.PopulationID)
+      const full = fullStaffModifiers(mapped || modifiers, target.Efficiency)
+      const capacityNow = this.mappedConstruction(target)
+      const usage = this.bootstrapUsage[`${target.PopulationID}-construction`]
+      const workers = { now: target.workersNow, later: target.workersLater, cost: valueOrNull(target.r.cost) }
+      const stock = place.stock
+      const builder = this.bootstrapBuilders.find((option) => option.colony.PopulationID === this.bootstrapBuilderId) || this.bootstrapBuilders[0] || null
+      const failed = (sources) => problems.filter((problem) => sources.includes(problem.source)).map((problem) => problem.text)
+
+      return compareRoutes({
+        requirement,
+        target: place,
+        local: { capacity: { now: capacityNow, full: full ? capacityResult(full, 'construction', this.blockedBonuses) : null }, usage, colony: target, workers, stock, gaps: failed(['projects']) },
+        importing: { builder, freighters, shuttleTechnology, version: this.bootstrapVersion, workers, gaps: failed(['freight', 'jumps', 'colonies', 'handling', 'projects']) },
+        ground: { ground, factor: modifiers, capacity: capacityNow, usage, version: this.bootstrapVersion, troopCapacity: troops, workers, stock, gaps: failed(['freight', 'projects']) },
+        format: (value, decimals) => this.bootstrapNumber(value, decimals),
+      })
+    },
   },
   watch: {
     // A colony picked by a link opens expanded.
     focusRow(row, previous) {
       if (row && (!previous || previous.PopulationID !== row.PopulationID)) {
         this.expanded = [row]
+        this.bootstrapColonyId = row.PopulationID
       }
     },
     RaceID() {
@@ -686,6 +830,66 @@ export default {
     },
     people(millions) {
       return Number.isFinite(millions) ? peopleOf(millions) : '—'
+    },
+    routeFigures(route) {
+      const figures = route.figures
+      const results = figures.results || {}
+      const bp = (value) => (Number.isFinite(value) ? `${this.count(value)} BP/yr` : '—')
+      const daysOf = (value) => (Number.isFinite(value) ? `${this.bootstrapNumber(value, value < 10 ? 1 : 0)} ${plural(roundToDecimal(value, value < 10 ? 1 : 0), 'day')}` : '—')
+      const counted = (value, one, many) => `${this.count(value)} ${plural(roundToDecimal(value, 0), one, many)}`
+      const share = (value) => percent(value, 0)
+      const tonnes = (value) => (Number.isFinite(value) ? `${this.count(value)} t` : '—')
+
+      if (route.id === 'local' && figures.rate) {
+        return [
+          { label: 'Build time', text: daysOf(valueOrNull(figures.days)), result: figures.days },
+          { label: 'Idle construction capacity', text: bp(valueOrNull(figures.rate)), result: figures.rate },
+          { label: 'Capacity if fully staffed', text: bp(valueOrNull(figures.full)), result: figures.full },
+          { label: 'Efficiency now', text: Number.isFinite(figures.efficiencyNow) ? share(figures.efficiencyNow) : '—', result: results.efficiencyNow },
+          { label: 'Efficiency with the mines', text: Number.isFinite(figures.efficiencyAfter) ? share(figures.efficiencyAfter) : '—', result: results.efficiencyAfter },
+        ]
+      } else if (route.id === 'import' && figures.builder) {
+        const labour = results.labour || {}
+
+        return [
+          { label: 'Built at', text: `${figures.builder.name}, ${Number.isFinite(figures.builder.jumps) ? counted(figures.builder.jumps, 'jump') : 'no route'}, ${daysOf(figures.builder.buildDays)}`, result: results.buildDays },
+          { label: 'Freight', text: Number.isFinite(figures.freightDeficit) ? `${tonnes(valueOrNull(figures.tonnes))} in ${Number.isFinite(figures.trips) ? counted(figures.trips, 'trip') : '—'}, ${tonnes(figures.freightDeficit)} beyond one lift` : '—', result: results.freight || figures.tonnes },
+          { label: 'Hauling time', text: daysOf(figures.haulDays), result: results.haulDays },
+          { label: 'Hauling and build time', text: daysOf(figures.totalDays), result: results.totalDays },
+          { label: 'Workers the mines need', text: this.people(figures.labour.needed), result: labour.needed },
+          { label: 'Workers short for the mines, now', text: this.people(figures.labour.deficitNow), result: labour.deficitNow },
+          { label: 'Workers short at the colony before the mines', text: this.people(figures.labour.existingNow), result: labour.existingNow },
+        ]
+      } else if (route.id === 'ground' && figures.candidates) {
+        const carried = figures.carried ? figures.carried.length : figures.candidates.length
+
+        return [
+          { label: 'Engineers that can move', text: `${counted(carried, 'formation')} of ${figures.candidates.length}, ${bp(figures.added)}`, result: results.added },
+          { label: 'Engineers already at the colony', text: bp(figures.present), result: results.present },
+          { label: 'Build rate now', text: bp(figures.rateNow), result: results.rateNow },
+          { label: 'Build rate with them', text: bp(figures.rateWith), result: results.rateWith },
+          { label: 'Build time now', text: daysOf(figures.daysNow), result: results.daysNow },
+          { label: 'Build time with them', text: daysOf(figures.daysWith), result: results.daysWith },
+          { label: 'Troop capacity needed, held', text: figures.troopCapacity ? `${tonnes(figures.troopNeeded)}, ${tonnes(figures.troopCapacity.lift)}` : '—', result: results.troop },
+        ]
+      }
+
+      return []
+    },
+    bootstrapNumber(value, decimals) {
+      return separatedNumber(roundToDecimal(value, decimals), this.separator)
+    },
+    // The colony's construction capacity with the engineers at it counted by the mapped command rule, as the ground route counts them; the Production page's figure when the rule is not mapped for the save, and unavailable (naming the formations) when a figure of the engineers is unknown.
+    mappedConstruction(row) {
+      const modifiers = this.populationProductionModifiers[row.PopulationID]
+      const { ground } = this.bootstrapSources
+      const gap = engineerCapacityGap(modifiers, ground, this.bootstrapVersion, row.PopulationID)
+      const mapped = withMappedEngineers(modifiers, ground, this.bootstrapVersion, row.PopulationID)
+
+      return gap || (mapped ? capacityResult(mapped, 'construction', this.blockedBonuses) : row.r.construction)
+    },
+    routeColor(status) {
+      return { works: 'success', limited: 'warning', blocked: 'error' }[status]
     },
     percent,
     years(months) {
@@ -1046,6 +1250,28 @@ export default {
       }),
       default: {},
     },
+    // Everything the mine bootstrap panel compares, read only once a colony is picked: the mine types, the colonies' places, shuttle service and stock, the projects that hold construction capacity, the freighters and troop ships, the ground formations with their commanders, the charted jump points and the cargo shuttle technology.
+    bootstrapSources: {
+      get: tracked('bootstrapSources', async function () {
+        if (!this.bootstrapColonyId || !this.database || !this.GameID || !this.RaceID) {
+          return NO_BOOTSTRAP_SOURCES
+        }
+
+        return await loadBootstrapSources(this.database, { GameID: this.GameID, RaceID: this.RaceID, blocked: this.blockedBonuses })
+      }),
+      default: NO_BOOTSTRAP_SOURCES,
+    },
+    // The formula version the save's schema stands for, read with the mine bootstrap sources: null for a save that is not 2.7-shaped.
+    bootstrapVersion: {
+      get: tracked('bootstrapVersion', async function () {
+        if (!this.bootstrapColonyId || !this.database) {
+          return null
+        }
+
+        return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
   },
 }
 
@@ -1140,6 +1366,22 @@ function percent(fraction, decimals) {
 
   .worker-segment {
     height: 100%;
+  }
+
+  .route-card {
+    height: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--ae-border, rgba(128, 128, 128, 0.35));
+    border-radius: 4px;
+  }
+
+  .route-list {
+    margin: 0 0 6px;
+    padding-left: 18px;
+  }
+
+  .route-figures td {
+    padding: 1px 8px 1px 0;
   }
 
   .segment-short,
