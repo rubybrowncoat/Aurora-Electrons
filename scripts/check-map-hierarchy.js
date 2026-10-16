@@ -8,7 +8,7 @@
   - what carries meaning stays visible at both levels: the hazard, selection, contact and warning colours are the tokens AE-007 gates (utilities/appearance-contrast.js GRAPHIC_CHECKS, 3:1) and are drawn unscaled; a system that Show marks (by a glyph, or by a line under its name: a contact, a rift, a danger line, a ship, a flag, the date found and the rest) keeps its name in the full ink and at its old size, the sizes between the two thresholds included; the selected node and edge and the stabilised links keep their full width; the zero line of the flow charts that draw their own grid keeps its ink; and what recedes stays above the floor of its mark (3:1 for an orbit line, 4.5:1 for a name, and the FLOORS of the utility for the decorative marks);
   - the PNG is composed from the screen's state: `exportPng` runs for real against a recording canvas, and the dots of the grid, the background, the legend (every label, the jump-link example at the colour and thickness of the links on screen, the square, triangle or diamond of a merged border legend, labels wider than the picture wrapped within it) and the names of the borders come from the composition the page computes from the level in force;
   - the choice is one view preference, `mapHierarchy`, declared with `persistedView` by the map, the chart canvas and the two pages that draw their own gridlines: written on change, restored from a reopened store, a value no longer offered falls back to the default, Settings exports and imports it among the app-wide views, and the map's watcher of the level runs against observable stores and writes to none;
-  - the label collision of the system view, the overlay controls and selection, the pan and zoom of the map, and the borders and the overview are as at the commit before the change (6b4e17a): the same source, and the level changes only the label ink and size of a system's data.
+  - the label collision of the system view, the overlay controls and selection, the pan and zoom of the map, and the borders and the overview are as at the commit before the change (aefcd38): the same source, and the level changes only the label ink and size of a system's data.
 
   Each mutation of the utilities, of the page, of the system view or of the chart canvas must fail the checks it names (UNSUPPORTED and a thrown check do not count as agreement), and a mutation that does not parse or whose text is not there exactly once is refused. Prints `N of N checks passed`; any failed check sets exit code 1.
 */
@@ -27,7 +27,7 @@ const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
-const BASE = '6b4e17a'
+const BASE = 'aefcd38'
 
 const FILES = {
   map: 'src/renderer/pages/map.vue',
