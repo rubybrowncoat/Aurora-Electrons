@@ -120,9 +120,12 @@ const inboundOf = (packets, populationId, name) => {
   return row ? summed('minerals.inFlight', row, name, `FCT_MassDriverPackets.${name}`) : ofRule({ rule: 'minerals.inFlight', value: 0, inputs: { present: ['FCT_MassDriverPackets'] } })
 }
 
+// A colony's stock of one mineral and what is on its way to it by mass driver, as results: the part of `colonyMineralResults` that needs neither the reserve nor the queue.
+export const stockAndInbound = (colony, packets, mineral) => ({ stock: stored('minerals.colonyStock', colony[mineral.name], `FCT_Population.${mineral.name}`), inbound: inboundOf(packets, colony.PopulationID, mineral.name) })
+
 // `colonyMinerals` with the unknown kept apart from 0: each of a mineral's stock, reserve, free, needs, inbound and state is a provenance result in `results`, and the same name holds its value, or null when unknown. A colony whose stock or reserve is not recorded has no free stock and no state; one whose queue needs are unknown has no state. `needs` and `packets` are the whole reads (`loadQueueNeeds`, `loadPacketsInFlight`), or null when one was not made; `exporting` is whether the colony's mass driver ships somewhere.
 export const colonyMineralResults = (colony, needs, packets, exporting = false) => MINERALS.map((mineral) => {
-  const stock = stored('minerals.colonyStock', colony[mineral.name], `FCT_Population.${mineral.name}`)
+  const { stock, inbound } = stockAndInbound(colony, packets, mineral)
   const reserve = stored('minerals.colonyStock', colony[`Reserve${mineral.name}`], `FCT_Population.Reserve${mineral.name}`)
   const needsResult = queueNeedsOf(needs, colony.PopulationID, mineral.name)
   const results = {
@@ -130,7 +133,7 @@ export const colonyMineralResults = (colony, needs, packets, exporting = false) 
     reserve,
     free: combine({ rule: 'minerals.colonyStock', parts: { stock, reserve }, compute: (values) => Math.max(0, values.stock - values.reserve) }),
     needs: needsResult,
-    inbound: inboundOf(packets, colony.PopulationID, mineral.name),
+    inbound,
     state: combine({ rule: 'minerals.stockState', parts: { stock, reserve, needs: needsResult }, compute: (values) => stockState(values, exporting) }),
   }
 

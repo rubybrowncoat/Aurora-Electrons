@@ -138,6 +138,7 @@
             {{ hasLedger ? 'Observed uses are the ledger\'s, annualised; a switched-off use is left out of the Used column and the runway, and nothing is modelled on top of the ledger.' : 'Without a ledger every use is a modelled forecast, not a measurement: the industry queue and the shipyards\' tasks and activities running now over the next 12 months, the refineries and maintenance facilities at their current output. A use whose inputs the save does not hold is missing, with the reason, and leaves the runway unknown until it is switched off. Ground unit training has no rule and is not counted. Maintenance is held to the minerals the colonies hold, with no haul counted; where a stock is short of a year\'s need and a mine works a deposit of that mineral (at the colony, or at another colony sharing an NPR\'s stock), the figure is missing unless another mineral already settles it, as what the mine adds is not quantified. Shipbuilding minerals are assumed to reach the yard as fast as the tasks take them.' }}
           </div>
         </v-card>
+        <mineral-supply :mineral="focusMineral" :supply="supply" :colonies="supplyColonies" :scenario="focusScenario" @update:scenario="enterSupplyScenario" />
 
         <v-dialog v-model="flowsOpen" max-width="960" scrollable content-class="mineral-outlook">
           <v-card>
@@ -243,6 +244,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
+import MineralSupply from '../components/minerals/MineralSupply.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
@@ -251,6 +253,7 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
+import { loadPacketsInFlight } from '../utilities/colony-minerals'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
 import { linkTo, queryId } from '../utilities/deep-links'
@@ -261,6 +264,7 @@ import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION
 import { categoryRows, categoryUses, depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
+import { loadTransfers, loadSiteRoutes, mineralSupply, scenarioEntries, transferFlows } from '../utilities/mineral-supply'
 import { describeResult, describeRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
 
 const BUCKET_DAYS = 5
@@ -282,6 +286,9 @@ const INPUT_LABELS = {
   shipyardTasks: 'the shipyard tasks',
   shipyardActivities: 'the shipyard activities',
   populationProductionModifiers: 'production modifiers',
+  siteRoutes: 'the colonies\' mass drivers and destinations',
+  packetsByDestination: 'mass-driver packets by destination',
+  transfers: 'the ledger\'s transfers between colonies',
 }
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
 
@@ -299,7 +306,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, LoadState, MineralSupply, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -326,6 +333,7 @@ export default {
       fallbackFocusId: null,
       flowsOpen: false,
       expandedDeposits: [],
+      supplyScenario: {},
       depositPageSizes: DEPOSIT_PAGE_SIZES,
     }
   },
@@ -528,6 +536,27 @@ export default {
 
     focusMineral() {
       return MINERALS.find((mineral) => mineral.id === this.focusMineralId) || null
+    },
+
+    // The deliveries entered for the focused mineral: the page keeps them by mineral, so an assumption made for one never reaches another.
+    focusScenario() {
+      return (this.focusMineral && this.supplyScenario[this.focusMineral.id]) || {}
+    },
+
+    // The colonies a hypothetical delivery can go to, by name.
+    supplyColonies() {
+      return this.siteRoutes.map((colony) => ({ id: colony.PopulationID, name: colony.PopName })).sort((a, b) => a.name.localeCompare(b.name))
+    },
+
+    // The focused mineral's extraction, export capacity and delivered supply, kept apart: what each site extracts, what it adds to its own stock, what leaves it by a route the save names, and what is in flight to each destination. Nothing is delivered to a colony that no route or packet names.
+    supply() {
+      const { focusMineral } = this
+
+      if (!focusMineral || !this.forecastReady) {
+        return null
+      }
+
+      return mineralSupply({ surface: this.surfaceMining, orbital: this.orbitalMining, navalAdmins: this.navalAdmins, routes: this.siteRoutes, packets: this.packetsByDestination, cargo: this.cargo, RaceID: this.RaceID, materialId: focusMineral.id, flows: transferFlows(this.transfers, this.perYear), entries: scenarioEntries(this.focusScenario) })
     },
 
     // One row per use of the runway table above: where its figure comes from (observed, modelled or missing, with the reason), what it stands on, its t/yr over every mineral and over the focused one, and whether it counts.
@@ -859,12 +888,20 @@ export default {
         this.fallbackFocusId = null
       }
     },
-    // A mineral restored for another race is the user's pick, not the stand-in of the race before.
+    // A mineral restored for another race is the user's pick, not the stand-in of the race before; the deliveries entered belong to the race and game they were entered for.
     RaceID() {
       this.fallbackFocusId = null
+      this.supplyScenario = {}
+    },
+    GameID() {
+      this.supplyScenario = {}
     },
   },
   methods: {
+    // The deliveries entered for the focused mineral replace its own entries; those of the other minerals stay as they were.
+    enterSupplyScenario(inputs) {
+      this.supplyScenario = { ...this.supplyScenario, [this.focusMineralId]: inputs }
+    },
     applyLink(query) {
       const id = queryId(query.mineral)
 
@@ -1181,6 +1218,42 @@ export default {
         return await this.database.query(`select ${completeSums('FCT_MassDriverPackets')}, count(*) as Packets from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${this.GameID} and FCT_MassDriverPackets.RaceID = ${this.RaceID}`).then(([items]) => items[0] || null)
       }),
       default: null,
+    },
+    // One row per colony of the race with its drivers, destination and every mineral's stock: what decides whether a site's output can leave it by packet.
+    siteRoutes: {
+      get: tracked('siteRoutes', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await loadSiteRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: [],
+    },
+    // The mass-driver packets in flight by the colony they are bound for.
+    packetsByDestination: {
+      get: tracked('packetsByDestination', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadPacketsInFlight(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: {},
+    },
+    // The ledger's moves between colonies (mass-driver sends and receipts, freighter loads and unloads) over the window, by colony and mineral.
+    transfers: {
+      get: tracked('transfers', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        // Read before the first await, so a window change re-runs this getter.
+        const windowDays = Number(this.windowDays) || 365
+
+        return await loadTransfers(this.database, { GameID: this.GameID, RaceID: this.RaceID, windowDays })
+      }),
+      default: [],
     },
     // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now. Older saves don't have the table: null means "not loaded", [] means "none". Any other failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {
