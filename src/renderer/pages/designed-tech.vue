@@ -41,6 +41,8 @@
           </div>
         </div>
 
+        <v-alert v-if="focusNotice" type="warning" outlined dense dismissible class="mt-2" data-planner-link="design" @input="dismissFocusNotice">{{ focusNotice }}</v-alert>
+
         <stat-tiles class="mt-1" :tiles="tiles" />
 
         <v-card class="panel" data-summary="Every known component design in the chosen category, with its figures. Filter and sort it to pick a design, and tick two or more to compare." elevation="1">
@@ -72,7 +74,7 @@
               <div class="py-2 d-flex align-center">
                 <v-icon small class="mr-2">{{ iconOf(item) }}</v-icon>
                 <div class="name-cell">
-                  <div class="font-weight-medium text-no-wrap">{{ item.Name }}<page-link v-if="sensorLink(item)" :to="sensorLink(item)" :name="item.Name" class="ml-1" /></div>
+                  <div class="font-weight-medium text-no-wrap">{{ item.Name }}<page-link v-if="sensorLink(item)" :to="sensorLink(item)" :name="item.Name" class="ml-1" /><page-link v-if="missileLink(item)" :to="missileLink(item)" :name="item.Name" class="ml-1" /></div>
                   <div class="caption text--secondary text-no-wrap">{{ typeLine(item) }}<span v-if="item.Obsolete" class="warning--text font-weight-medium"> · Obsolete</span></div>
                 </div>
               </div>
@@ -188,7 +190,8 @@ import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
 import { loadFormulaVersion } from '../utilities/capabilities'
-import { linkTo, queryId } from '../utilities/deep-links'
+import { cutText, linkTo, queryId } from '../utilities/deep-links'
+import { STANDING, beginRead, isCurrentRead, loadComponentStanding, loadMissileStanding } from '../utilities/planner-links'
 import { HIGH, LOW, MISSILE_CATEGORY_ID, SPECIES_CATEGORY_ID, USAGE_COLUMNS, augmentComponent, augmentMissile, augmentSpecies, categoryNote, cellOf as designCell, classUsageByComponent, columnRule, columnsFor, compareMarks, designTiles, isUnused, obsoleteResult, sortRows, tagsOf, withUsage } from '../utilities/designed-tech'
 import { tracked } from '../utilities/load-tracking'
 import { MINERALS } from '../utilities/minerals'
@@ -253,6 +256,10 @@ export default {
     return {
       expanded: [],
       focusDesignId: null,
+      // The missile a link names (Designed Tech's own key: its rows have no component ID), what the save says of the design or missile a link names that no row holds, and the words for a link's ID that is not one.
+      focusMissileId: null,
+      focusStanding: null,
+      focusInvalid: '',
       pageSizes: PAGE_SIZES,
       maxCompare: MAX_COMPARE,
       sortRows,
@@ -448,12 +455,32 @@ export default {
 
     // The design a link names, once the designs are read.
     focusRow() {
-      return this.focusDesignId === null ? null : this.allItems.find((item) => item.SDComponentID === this.focusDesignId) || null
+      const id = this.focusDesignId !== null ? this.focusDesignId : this.focusMissileId !== null ? `missile-${this.focusMissileId}` : null
+
+      return id === null ? null : this.allItems.find((item) => item.SDComponentID === id) || null
     },
 
-    // A link names the component design the page is on.
+    // Why the design or missile a link names is not the focus: an ID that is not one, or one no row holds, with what the save says of it.
+    focusNotice() {
+      const kind = this.focusDesignId !== null ? 'design' : 'missile'
+      const id = this.focusDesignId !== null ? this.focusDesignId : this.focusMissileId
+
+      if (id === null) {
+        return this.focusInvalid
+      } else if (this.focusRow) {
+        return ''
+      } else if (!this.focusStanding || this.focusStanding.id !== id || this.focusStanding.kind !== kind) {
+        return `The ${kind} ${id} named by the link is being checked against the save.`
+      } else if (this.focusStanding.state === STANDING.HELD) {
+        return `The ${kind} ${id}${this.focusStanding.name ? ` (${this.focusStanding.name})` : ''} is a design of the race, and no row of this page holds it. Nothing is focused.`
+      }
+
+      return `${this.focusStanding.text} Nothing is focused.`
+    },
+
+    // A link names the component design or the missile the page is on.
     linkQuery() {
-      return this.ready ? linkTo.designedTech({ design: this.focusRow ? this.focusRow.SDComponentID : null }).query : null
+      return this.ready ? linkTo.designedTech(this.focusRow && this.focusRow.CategoryID === MISSILE_CATEGORY_ID ? { missile: this.focusRow.MissileID } : { design: this.focusRow ? this.focusRow.SDComponentID : null }).query : null
     },
 
     linkLabel() {
@@ -461,6 +488,18 @@ export default {
     },
   },
   watch: {
+    database() {
+      this.readFocusStanding()
+    },
+
+    GameID() {
+      this.readFocusStanding()
+    },
+
+    RaceID() {
+      this.readFocusStanding()
+    },
+
     // A design a link names opens its category with the design picked and found by its name, the obsolete ones shown when it is one.
     focusRow(row) {
       if (row) {
@@ -493,6 +532,11 @@ export default {
     },
   },
   methods: {
+    // The Missile Designer's page of a saved missile, as a link to it; null for a row that is not a missile.
+    missileLink(item) {
+      return item.CategoryID === MISSILE_CATEGORY_ID ? linkTo.missileDesigner({ missile: item.MissileID, name: item.Name }) : null
+    },
+
     // The Sensor Planner mode that shows a component design, as a link to the design; null for a design it does not show.
     sensorLink(item) {
       const mode = sensorModeOf(item.ComponentTypeID)
@@ -502,6 +546,39 @@ export default {
 
     applyLink(query) {
       this.focusDesignId = queryId(query.design)
+      this.focusMissileId = queryId(query.missile)
+
+      const first = (value) => (Array.isArray(value) ? value[0] : value)
+      const unreadable = [['design', query.design, this.focusDesignId], ['missile', query.missile, this.focusMissileId]].find(([, raw, id]) => first(raw) !== undefined && first(raw) !== '' && id === null)
+
+      this.focusInvalid = unreadable ? `The link names the ${unreadable[0]} "${cutText(first(unreadable[1]))}", which is not an ID (a whole number above 0). Nothing is focused.` : ''
+      this.readFocusStanding()
+    },
+
+    // What the save says of the design or missile a link names, the latest read only counting.
+    async readFocusStanding() {
+      const kind = this.focusDesignId !== null ? 'design' : 'missile'
+      const id = this.focusDesignId !== null ? this.focusDesignId : this.focusMissileId
+      const stamp = beginRead(this, 'focus')
+
+      this.focusStanding = null
+
+      if (id === null || !this.database || !this.GameID || !this.RaceID) {
+        return
+      }
+
+      const context = { GameID: this.GameID, RaceID: this.RaceID }
+      const standing = kind === 'design' ? await loadComponentStanding(this.database, context, id) : await loadMissileStanding(this.database, context, id)
+
+      if (isCurrentRead(this, stamp) && id === (kind === 'design' ? this.focusDesignId : this.focusMissileId)) {
+        this.focusStanding = { ...standing, kind }
+      }
+    },
+
+    dismissFocusNotice() {
+      this.focusDesignId = null
+      this.focusMissileId = null
+      this.focusInvalid = ''
     },
 
     cellOf(column, item) {

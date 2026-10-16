@@ -99,6 +99,40 @@
         <v-alert v-for="choice in unresolvedChoices" :key="choice.type" type="warning" outlined dense class="mt-3" data-tech="unresolved">{{ choice.text }}</v-alert>
         <v-chip v-if="focusRow" small outlined close class="mt-3" data-sensors="focus" @click:close="clearFocus">Focused design: {{ focusRow.name }}</v-chip>
         <v-alert v-if="mode === 'passive' && !classes.length" type="info" outlined dense class="mt-3" data-sensors="no-classes">The race has no ship classes.</v-alert>
+        <v-alert v-if="handoffProblemText" type="warning" outlined dense dismissible class="mt-3" data-planner-link="unreadable" @input="dismissHandoffProblems">{{ handoffProblemText }}</v-alert>
+        <v-alert v-if="focusNotice" type="warning" outlined dense dismissible class="mt-3" data-planner-link="design" @input="dismissFocusNotice">{{ focusNotice }}</v-alert>
+        <v-card v-if="handoffResolution" class="panel" data-summary="The missile handed over by the Missile Designer: its name, size and range, the target signature, resolution and jammer it was evaluated under, where the figures come from and the tech it is built on, so the sizing reads against that missile and each figure traces back to it." elevation="1" data-planner-link="handoff">
+          <div class="panel-head">
+            <span>Missile from the Missile Designer<v-chip x-small outlined class="ml-2" data-planner-link="source">{{ handoffSourceText }}</v-chip><v-chip v-if="handoffResolution.applies" x-small outlined class="ml-2" :color="handoffHeld ? undefined : 'warning'" data-planner-link="state">{{ handoffHeld ? 'In the sizing' : 'Edited since' }}</v-chip></span>
+          </div>
+          <div class="panel-body">
+            <div class="d-flex align-baseline"><span class="font-weight-medium handoff-name" data-planner-link="name">{{ handoffName }}</span><span v-if="handoff.missile !== null" class="caption text--secondary ml-2 text-no-wrap">Design {{ handoff.missile }}</span></div>
+            <v-alert v-if="!handoffResolution.applies" type="warning" outlined dense class="mt-2 mb-0" data-planner-link="not-applied">{{ handoffNotAppliedText }}</v-alert>
+            <template v-else>
+              <v-alert v-if="!handoffHeld" type="info" outlined dense class="mt-2 mb-0" data-planner-link="edited">The sizing inputs were edited after the handover, so the target is the one typed above and no longer carries the missile's provenance. Entering the figures below again restores it.</v-alert>
+              <v-simple-table dense class="mt-2" data-planner-link="figures">
+                <tbody>
+                  <tr v-for="row in handoffFigures" :key="row.key" :data-figure="row.key">
+                    <th scope="row" class="text-left">{{ row.label }}</th>
+                    <td class="text-no-wrap">{{ row.text }}<span v-if="row.unit" class="caption text--secondary"> {{ row.unit }}</span><provenance-mark v-if="row.result" :result="row.result" /></td>
+                  </tr>
+                </tbody>
+              </v-simple-table>
+              <div v-for="note in handoffResolution.notes" :key="note" class="caption warning--text mt-2" data-planner-link="note">{{ note }}</div>
+              <div v-if="handoffResolution.tech.length" class="caption mt-2" data-planner-link="tech">
+                <div class="text--secondary">Tech the missile is built on</div>
+                <div v-for="level in handoffResolution.tech" :key="`${level.type}-${level.id}`" class="d-flex align-center" :data-tech-state="level.state">{{ level.text }}<page-link v-if="level.known" :to="linkTo.techTree({ tech: level.id })" :name="level.name" class="ml-1" /></div>
+              </div>
+            </template>
+            <div class="d-flex align-center caption text--secondary mt-2">
+              <span>Back to the Missile Designer</span><page-link :to="handoffBackLink" :name="handoffLabel" class="ml-1" data-planner-link="back" />
+              <template v-if="handoffDesignedTech">
+                <span class="ml-4">Row in Designed Tech</span><page-link :to="handoffDesignedTech" :name="handoffLabel" class="ml-1" data-planner-link="designed-tech" />
+              </template>
+            </div>
+          </div>
+          <div class="panel-foot caption text--secondary">The size and the range are those the Missile Designer evaluated, the range being the wanted range of the sizing. A saved missile is checked against the save and keeps the detection rule's own status while its stored size and range are the ones handed over; a candidate, a hypothetical or typed tech level, or a saved missile that changed since is marked assumed in every figure the target feeds. The signature, resolution and jammer are the scenario of the Missile Designer. Editing a sizing input ends the handover.</div>
+        </v-card>
 
         <template v-if="mode === 'passive'">
           <v-card class="panel" data-summary="The thermal and EM signatures of each class and its cross-section with the cloak working and damaged, then how far the typed enemy sensors reach each. A figure is marked confirmed, estimated, assumed or unavailable, and a stored figure the rules do not reproduce is flagged, so the classes can be compared on what a sensor sees." elevation="1">
@@ -579,12 +613,13 @@ import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import techLevels, { TECH_INPUT_LABELS, techChoiceField } from '../mixins/tech-levels'
 import { activeAppearance } from '../utilities/appearance'
-import { linkTo, queryId } from '../utilities/deep-links'
+import { cutText, linkTo, queryId, queryMissileTarget } from '../utilities/deep-links'
 import { NO_SIGNATURE_CLASSES, NO_THERMAL_REDUCTION, SENSOR_COMPONENT_TYPES, loadSignatureClasses, loadThermalReduction, ownedActiveSensors, ownedBeamFireControls, ownedPassiveSensors } from '../utilities/design-data'
 import { SENSOR_RESOLUTIONS_HS, SENSOR_RULES, TONS_PER_HS } from '../utilities/design-rules'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { entered } from '../utilities/missile-hit'
+import { beginRead, componentPlacementText, isCurrentRead, loadComponentStanding, loadMissileStanding, resolveMissileTarget, targetProblemText } from '../utilities/planner-links'
 import { STATUSES, STATUS_MARKS, STATUS, envelope, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { DEFAULT_CURVE_TONS, SENSOR_MODE_LINES, SENSOR_TECH_LINES, activeSizing, beamSizing, existingBeamControls, existingDesigns, hardeningEccmTradeoff, passiveProposal, rangeCurve as sensorRangeCurve, savedPairCheck, sensorOf, sensorTechOf, targetOf } from '../utilities/sensor-planner'
 import { axisRows, beamTiles, multiplierRows, sizingTiles } from '../utilities/sensor-view'
@@ -723,6 +758,14 @@ export default {
       targetKinds: TARGET_KINDS,
       resolutionItems: RESOLUTION_ITEMS,
       focusSensorId: null,
+      // The missile a link hands over (utilities/deep-links.js `queryMissileTarget`): the target, or null; why a target in the query was unreadable; what the save says of the saved missile it names (undefined until read); whether its figures were put in the inputs.
+      handoff: null,
+      handoffProblems: [],
+      handoffStanding: undefined,
+      handoffApplied: false,
+      // What the save says of a design a link names that the open mode does not list, and the text of a link's design that is not an ID.
+      focusStanding: null,
+      focusInvalid: '',
     }
   },
   computed: {
@@ -971,7 +1014,7 @@ export default {
     },
 
     target() {
-      return targetOf({ kind: this.targetKind, tons: this.targetTons, cls: this.targetClass, msp: this.targetMsp })
+      return targetOf({ kind: this.targetKind, tons: this.targetTons, cls: this.targetClass, msp: this.targetMsp, origin: this.handoffLive && this.handoffResolution.applies ? this.handoffResolution.origin : null })
     },
 
     // The pair sized for each scenario of the target: the cloak working, and a second one with the cloak damaged for a class that has a cloak.
@@ -1222,13 +1265,131 @@ export default {
       return pool.find((row) => row.id === this.focusSensorId) || null
     },
 
+    // ---------- the missile handed over ----------
+
+    // The handed-over missile against the open save and its tech: whether it applies, its provenance and the state of each tech level. Null for a link with none.
+    handoffResolution() {
+      return this.handoff ? resolveMissileTarget({ target: this.handoff, standing: this.handoffStanding, tech: this.tech }) : null
+    },
+
+    // The inputs are still the handed-over figures: the mode, the missile target and its size and range, and the resolution and jammer the link carried.
+    handoffHeld() {
+      const target = this.handoff
+
+      if (!target) {
+        return false
+      }
+
+      const resolutionCarried = target.resolution !== null && validResolution(String(target.resolution))
+      const jammer = String(this.jammer).trim() === '' ? 0 : entered(this.jammer)
+
+      return this.mode === 'active' && this.targetKind === 'missile' && entered(this.targetMsp) === target.msp && entered(this.wantedRange) === target.range && (!resolutionCarried || String(this.resolutionPick) === String(target.resolution)) && (target.jammer === null || jammer === target.jammer)
+    },
+
+    // The handover is in the link: while the saved missile is being checked, and while it applies and has not been edited away.
+    handoffLive() {
+      const resolution = this.handoffResolution
+
+      return Boolean(resolution) && (resolution.pending || (resolution.applies && (!this.handoffApplied || this.handoffHeld)))
+    },
+
+    handoffName() {
+      if (!this.handoff) {
+        return ''
+      }
+
+      return this.handoff.name || (this.handoff.missile === null ? 'Candidate' : `Saved missile ${this.handoff.missile}`)
+    },
+
+    // The name as a link or a history entry shows it: the name is whole in the panel and in every check, and cut where it is only a label.
+    handoffLabel() {
+      return cutText(this.handoffName)
+    },
+
+    handoffSourceText() {
+      return this.handoff ? { saved: 'Saved missile', researched: 'Candidate on researched tech', hypothetical: 'Candidate on hypothetical tech', manual: 'Candidate on typed tech' }[this.handoff.source] : ''
+    },
+
+    // Each handed-over figure as a result: the size and the range carry the target's provenance, the rest are the Missile Designer's scenario, assumed, or unknown where the link carries none.
+    handoffFigures() {
+      const resolution = this.handoffResolution
+      const target = this.handoff
+
+      if (!resolution || !resolution.origin) {
+        return EMPTY_LIST
+      }
+
+      const { origin } = resolution
+      const handed = (value, units) => envelope({ value, status: origin.status, rule: SENSOR_RULES.detection, units, inputs: { present: origin.present }, assumptions: origin.assumptions })
+      const scenario = (value, units, name) => (value === null ? unavailable({ rule: SENSOR_RULES.detection, missing: [`${name}: the link carries none`], units }) : envelope({ value, status: STATUS.ASSUMED, rule: SENSOR_RULES.detection, units, inputs: { present: [name] }, assumptions: [`${name} was typed in the Missile Designer scenario and carried in the link, not read from the save`] }))
+      const best = target.resolution === 'best'
+      const carried = (value, decimals) => (value === null ? 'Not carried' : this.count(value, decimals))
+
+      return [
+        { key: 'size', label: 'Size', result: handed(target.msp, 'MSP'), text: this.count(target.msp, 2), unit: 'MSP' },
+        { key: 'range', label: 'Wanted range', result: handed(target.range, 'km'), text: this.count(target.range, 0), unit: 'km' },
+        { key: 'signature', label: 'Target signature evaluated under', result: scenario(target.signature, 'HS', 'the target signature'), text: carried(target.signature, 2), unit: target.signature === null ? '' : 'HS' },
+        { key: 'resolution', label: 'Resolution', result: best ? null : scenario(target.resolution, 'HS', 'the resolution'), text: best ? 'Best' : carried(target.resolution, 2), unit: target.resolution === null || best ? '' : 'HS' },
+        { key: 'jammer', label: 'Jammer', result: scenario(target.jammer, '', 'the jammer'), text: carried(target.jammer, 2), unit: '' },
+      ]
+    },
+
+    // The words for a handover that does not apply, and for a target of the link that could not be read.
+    handoffNotAppliedText() {
+      return targetProblemText({ resolution: this.handoffResolution })
+    },
+
+    handoffProblemText() {
+      return this.handoffProblems.length ? targetProblemText({ problems: this.handoffProblems }) : ''
+    },
+
+    // The links of the panel: back to the Missile Designer (the saved missile's own page, or the page as it was for a candidate) and the saved missile's row in Designed Tech.
+    handoffBackLink() {
+      return linkTo.missileDesigner({ missile: this.handoff ? this.handoff.missile : null, name: this.handoff ? this.handoff.name : '' })
+    },
+
+    handoffDesignedTech() {
+      return this.handoff && this.handoff.missile !== null ? linkTo.designedTech({ missile: this.handoff.missile }) : null
+    },
+
+    // Why a design a link names is not the focus: text that is no ID, or a design the open mode does not list, with what the save says of it.
+    focusNotice() {
+      if (this.focusSensorId === null) {
+        return this.focusInvalid === '' ? '' : `The link names the design "${cutText(this.focusInvalid)}", which is not a design ID (a whole number above 0). No design is focused.`
+      } else if (this.focusRow) {
+        return ''
+      } else if (!this.focusStanding || this.focusStanding.id !== this.focusSensorId) {
+        return `The design ${this.focusSensorId} named by the link is being checked against the save.`
+      }
+
+      return `${componentPlacementText({ standing: this.focusStanding, mode: MODES.find((entry) => entry.value === this.mode).text, found: false })} No design is focused.`
+    },
+
     // A link names the mode and the design the page is on.
     linkQuery() {
-      return this.ready ? linkTo.sensors({ mode: this.mode, sensor: this.focusRow ? this.focusRow.id : null }).query : null
+      return this.ready ? linkTo.sensors({ mode: this.mode, sensor: this.focusRow ? this.focusRow.id : null, target: this.handoffLive ? this.handoff : null }).query : null
     },
 
     linkLabel() {
-      return this.focusRow ? this.focusRow.name : ''
+      return this.focusRow ? this.focusRow.name : this.handoffLive && this.handoffResolution.applies ? this.handoffLabel : ''
+    },
+  },
+  watch: {
+    // The saved missile is checked and the tech read: the handover is put in the inputs once it applies.
+    handoffResolution() {
+      this.settleHandoff()
+    },
+
+    ready() {
+      this.settleHandoff()
+    },
+
+    database() {
+      this.readStandings()
+    },
+
+    context() {
+      this.readStandings()
     },
   },
   asyncComputed: {
@@ -1420,11 +1581,97 @@ export default {
       }
 
       this.focusSensorId = queryId(query.sensor)
+      this.focusInvalid = this.focusSensorId === null && (Array.isArray(query.sensor) ? query.sensor[0] : query.sensor) !== undefined ? String(Array.isArray(query.sensor) ? query.sensor[0] : query.sensor) : ''
 
       if (this.focusSensorId !== null) {
         this.pairSearchId = null
         this.pairFcId = null
       }
+
+      const parsed = queryMissileTarget(query)
+
+      this.handoff = parsed ? parsed.target : null
+      this.handoffProblems = parsed ? parsed.problems : []
+      this.handoffStanding = undefined
+      this.handoffApplied = false
+      this.readStandings()
+      this.settleHandoff()
+    },
+
+    // The standing of the saved missile and of the design a link names: what the save says of each, the latest read only counting.
+    readStandings() {
+      this.readHandoffStanding()
+      this.readFocusStanding()
+    },
+
+    async readHandoffStanding() {
+      const id = this.handoff ? this.handoff.missile : null
+      const stamp = beginRead(this, 'handoff')
+
+      this.handoffStanding = undefined
+
+      if (id === null || !this.database || !this.GameID || !this.RaceID) {
+        return
+      }
+
+      const standing = await loadMissileStanding(this.database, this.context, id)
+
+      if (isCurrentRead(this, stamp) && this.handoff && id === this.handoff.missile) {
+        this.handoffStanding = standing
+        this.settleHandoff()
+      }
+    },
+
+    async readFocusStanding() {
+      const id = this.focusSensorId
+      const stamp = beginRead(this, 'focus')
+
+      this.focusStanding = null
+
+      if (id === null || !this.database || !this.GameID || !this.RaceID) {
+        return
+      }
+
+      const standing = await loadComponentStanding(this.database, this.context, id)
+
+      if (isCurrentRead(this, stamp) && id === this.focusSensorId) {
+        this.focusStanding = standing
+      }
+    },
+
+    // Puts the handed-over figures in the inputs once, when they apply: Active mode with the missile as the target, its size, the range as the wanted range, and the resolution and jammer the link carried. Anything typed afterwards is the user's.
+    settleHandoff() {
+      const resolution = this.handoffResolution
+
+      if (!resolution || !resolution.applies || this.handoffApplied || !this.ready) {
+        return
+      }
+
+      const target = this.handoff
+
+      this.mode = 'active'
+      this.targetKind = 'missile'
+      this.targetMsp = String(target.msp)
+      this.wantedRange = String(target.range)
+
+      if (target.resolution !== null && validResolution(String(target.resolution))) {
+        this.resolutionPick = String(target.resolution)
+      }
+
+      if (target.jammer !== null) {
+        this.jammer = target.jammer === 0 ? '' : String(target.jammer)
+      }
+
+      this.handoffApplied = true
+    },
+
+    dismissHandoffProblems() {
+      this.handoffProblems = []
+    },
+
+    dismissFocusNotice() {
+      this.focusSensorId = null
+      this.focusInvalid = ''
     },
 
     // One kind's curve, its chart (the strongest own sensors and the typed enemy one, at the points of the curve's series a logarithmic axis can show) and the sensors it holds. The table lists every sensor.
@@ -1474,6 +1721,16 @@ export default {
 
   .tool {
     min-width: 0;
+  }
+
+  // The missile's name stops at two lines whatever its length; the plugin that serves cut text gives the whole name as the title while it is cut.
+  .handoff-name {
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .tool__label {

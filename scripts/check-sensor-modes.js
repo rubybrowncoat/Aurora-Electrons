@@ -634,9 +634,9 @@ const pageStatements = async (mutates, stock) => {
     ['template: every top-level panel of the three modes carries a data-summary and a head', () => {
       const template = TEMPLATE()
       const problems = panelProblems(template)
-      const needed = ['active-tiles', 'beam-tiles', 'data-sensors="curve-table"', 'data-sensors="tradeoff-table"', 'data-sensors="existing"', 'data-sensors="class-reach"', 'data-sensors="beam-axes"', 'data-sensors="beam-multipliers"', 'data-sensors="existing-beam"'].filter((name) => !template.includes(name))
+      const needed = ['active-tiles', 'beam-tiles', 'data-planner-link="handoff"', 'data-sensors="curve-table"', 'data-sensors="tradeoff-table"', 'data-sensors="existing"', 'data-sensors="class-reach"', 'data-sensors="beam-axes"', 'data-sensors="beam-multipliers"', 'data-sensors="existing-beam"'].filter((name) => !template.includes(name))
 
-      return problems.length === 0 && needed.length === 0 && (template.match(/<v-card\b[^>]*class="panel"/g) || []).length === 13 ? true : short([...problems, ...needed])
+      return problems.length === 0 && needed.length === 0 && (template.match(/<v-card\b[^>]*class="panel"/g) || []).length === 14 ? true : short([...problems, ...needed])
     }],
     ['template: a panel without its data-summary is found in each mode', () => {
       return panelProblems(TEMPLATE((source) => source.replace(/ data-summary="The smallest search sensor[^"]*"/, ''))).length === 1 && panelProblems(TEMPLATE((source) => source.replace(/ data-summary="The range and the tracking speed wanted[^"]*"/, ''))).length === 1 ? true : 'the missing summaries were not found'

@@ -6,6 +6,7 @@
 // - `sensorTechOf(tech, resolution)`: the `tech` argument of every function here, from `tech` (tech-scenarios.js `withCandidates`) and its `resolution` (`resolveChoices`). `{ strength, em, thermal, hardening, eccm, distance, speed, singleWeapon, levels: { hardening, eccm }, assumptions, hypothetical }`; each line is `{ role, typeId, label, level: { id, name, info, info2, cost }|null, info, info2, kind, hypothetical, assumption, unresolved }`, `singleWeapon` also `{ weapons: { unrestricted, single }, offersSingle }`, `levels` the researched levels and the chosen hypothetical one as `{ level, researched, hypothetical, current, assumption }`.
 // - `techLineOptions(tech, resolution, role)`: the levels a menu offers for a line, `{ id, name, info, info2, researched, hypothetical, current, status, text }`; an unresearched level is never `researched`.
 // - `targetOf({ kind, tons, cls, msp })`: `{ kind, label, signature, fireControlSignature, fireControlJammer, uncloaked, tons, results: [{ key, label, signature, fireControlSignature, fireControlJammer }] }`: `signature` is what a search sensor sees and `fireControlSignature` what a missile fire control sees (the same cross-section for a ship, the missile's size in MSP, never under 0.33, for a missile), and `fireControlJammer` is false where no jammer applies to a fire control (a missile target); each entry of `results` carries the three, as a target of its own for `activeSizing`, `savedPairCheck` and `existingDesigns`.
+// - `targetOf`'s `origin`, `{ name, status, present, assumptions }`, is a missile handed over by the Missile Designer (utilities/planner-links.js): the signatures of a missile target take its status and assumptions in place of the typed ones, so every sizing figure carries where the missile comes from.
 // - `activeSizing(...)`: `{ request: { signature, fireControlSignature, wantedRangeKm, jammer, fireControlJammer, resolution }, problems, rows, selected, best, bestBasis, tiles: { rangeReached, sizeNeeded, bestResolution, cost } }`, a row per legal resolution `{ resolution, selected, best, search, fireControl, totalCost, totalHS, reach, feasible, failing, limiting }` and a member `{ mode, sizing, sizeHS, size, reach, design, cost }`.
 // - `savedPairCheck(...)`: `{ search, fireControl, reach, meets, limiting, alternative: { basis, row, sizing } }`.
 // - `existingDesigns(...)`: `[{ row, reach, scenarios: [{ key, label, reach }] }]`.
@@ -173,7 +174,7 @@ const noTarget = (label, missing) => {
 const typedSignature = (rule, value, label, assumptions) => envelope({ value, status: STATUS.ASSUMED, rule, inputs: { present: [label] }, assumptions })
 
 // The target a sensor is sized or measured against: a size in tons (the cross-section is the size over 50 t per HS, never under 0.3 HS), a saved class of the race (its stored cross-section, with the uncloaked size as a second scenario where a cloak works) or a missile size in MSP (its signature, never under 0.3 HS). Blank or not above zero is unknown: the signature is unavailable, never 0.
-export const targetOf = ({ kind, tons = null, cls = null, msp = null } = {}) => {
+export const targetOf = ({ kind, tons = null, cls = null, msp = null, origin = null } = {}) => {
   if (kind === 'class') {
     if (!cls) {
       return noTarget('No class', 'a ship class of the race')
@@ -208,11 +209,13 @@ export const targetOf = ({ kind, tons = null, cls = null, msp = null } = {}) => 
       return noTarget('No missile', 'the missile size in MSP, above zero')
     }
 
-    const signature = typedSignature(SENSOR_RULES.detection, missileSignature({ sizeMsp: size }), 'missile size', [`a missile of ${size} MSP typed here`, 'a missile is seen by its size over 20 MSP per HS, never under 0.3 HS'])
+    const sees = ['a missile is seen by its size over 20 MSP per HS, never under 0.3 HS', 'a missile fire control sees a missile by its size in MSP, never under 0.33, and no jammer applies to it']
+    const label = origin ? `${origin.name}, ${size} MSP` : `${size} MSP missile`
+    const seenBy = (value, text) => (origin ? envelope({ value, status: origin.status, rule: SENSOR_RULES.detection, inputs: { present: origin.present }, assumptions: [...origin.assumptions, text] }) : typedSignature(SENSOR_RULES.detection, value, 'missile size', [`a missile of ${size} MSP typed here`, text]))
+    const signature = seenBy(missileSignature({ sizeMsp: size }), sees[0])
+    const fireControlSignature = seenBy(missileFireControlSignature({ sizeMsp: size }), sees[1])
 
-    const fireControlSignature = typedSignature(SENSOR_RULES.detection, missileFireControlSignature({ sizeMsp: size }), 'missile size', [`a missile of ${size} MSP typed here`, 'a missile fire control sees a missile by its size in MSP, never under 0.33, and no jammer applies to it'])
-
-    return Object.freeze({ kind, label: `${size} MSP missile`, signature, fireControlSignature, fireControlJammer: false, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label: `${size} MSP missile`, signature, fireControlSignature, fireControlJammer: false })]) })
+    return Object.freeze({ kind, label, signature, fireControlSignature, fireControlJammer: false, uncloaked: null, tons: null, results: Object.freeze([Object.freeze({ key: 'effective', label, signature, fireControlSignature, fireControlJammer: false })]) })
   }
 
   return noTarget('No target', 'the target')

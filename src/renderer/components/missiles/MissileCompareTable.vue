@@ -17,6 +17,9 @@
             </div>
             <div v-if="column.savedId" class="caption text--secondary">Design {{ column.savedId }}</div>
             <div v-else-if="column.seededFrom" class="caption text--secondary">Seeded from design {{ column.seededFrom }}</div>
+            <div v-if="links[column.key] && links[column.key].designedTech" class="d-flex align-center caption text--secondary" data-compare="designed-tech-link">Row in Designed Tech<page-link :to="links[column.key].designedTech" :name="column.name" class="ml-1" /></div>
+            <div v-if="links[column.key] && links[column.key].sensors" class="d-flex align-center caption text--secondary" data-compare="sensors-link">Size sensors for this missile<page-link :to="links[column.key].sensors" :name="column.name" class="ml-1" /></div>
+            <div v-else-if="links[column.key] && links[column.key].reason" class="caption text--secondary" data-compare="handoff-reason">{{ links[column.key].reason }}</div>
             <div v-for="message in column.valid ? [] : Object.values(column.errors)" :key="message" class="caption error--text" data-compare="error">{{ message }}</div>
             <div v-for="entry in column.blocked" :key="entry.id" class="caption error--text" data-compare="blocked" :data-blocked="entry.id">Not applied: {{ entry.reason }}</div>
             <div v-if="column.withheld" class="caption text--secondary" data-compare="withheld">No figure is shown for this column: the option asked for is not applied, so any figure would be that of another missile.</div>
@@ -97,6 +100,7 @@
 <script>
 import countFormat from '../../mixins/count-format'
 import { FIGURE_ROWS, GATED_OPTIONS, INPUT_ROWS, SOURCE_LABELS, gatedStateText } from '../../utilities/missile-designer'
+import PageLink from '../page/PageLink.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 const VERDICTS = { agree: 'Agrees', differ: 'Differs', unknown: 'Unknown', unsupported: 'Unsupported', none: 'No active sensor' }
@@ -106,12 +110,16 @@ const GATED_COLOURS = { 'not-offered': undefined, carried: 'primary', recorded: 
 // The side-by-side table of a comparison (utilities/missile-designer.js `compareDesigns`): one column a missile, the baseline first, with the same rows of inputs, figures and gated options for each, every figure with its provenance mark, a size in MSP, HS and tons, and for a saved design what the save stored beside what the rules rebuild, judged. Nothing is worked out here.
 export default {
   name: 'MissileCompareTable',
-  components: { ProvenanceMark },
+  components: { PageLink, ProvenanceMark },
   mixins: [countFormat],
   props: {
     comparison: {
       type: Object,
       required: true,
+    },
+    links: {
+      type: Object,
+      default: () => ({}),
     },
   },
   data() {

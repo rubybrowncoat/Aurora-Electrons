@@ -556,7 +556,7 @@ const figureResults = (evaluation, extras, scenario) => {
 // The shape every column has, so the table's columns carry the same rows: what a figure needs it to be a column is filled in by the caller.
 const inRowOrder = (inputs) => Object.fromEntries([...INPUT_ROWS.filter((definition) => definition.id in inputs).map((definition) => [definition.id, inputs[definition.id]]), ...Object.entries(inputs).filter(([id]) => !INPUT_ROWS.some((definition) => definition.id === id))])
 
-const columnOf = (base) => Object.freeze({ errors: {}, rowErrors: [], pdError: '', gated: [], blocked: [], withheld: '', assumptions: [], hypothetical: [], comparison: null, evaluation: null, figures: {}, valid: true, ...base, inputs: inRowOrder(base.inputs || {}) })
+const columnOf = (base) => Object.freeze({ errors: {}, rowErrors: [], pdError: '', gated: [], blocked: [], withheld: '', assumptions: [], hypothetical: [], tech: [], comparison: null, evaluation: null, figures: {}, valid: true, ...base, inputs: inRowOrder(base.inputs || {}) })
 
 const withOverboost = (cells, engineFigures, basis) => {
   const over = engineFigures ? overboostOf(engineFigures) : null
@@ -654,7 +654,8 @@ const designedColumn = ({ role, key, draft, context, scenario, version, name }) 
   const hypothetical = manual ? { lines: [], assumptions: [] } : hypotheticalOf(context.resolution, used.map((line) => DESIGN_LINES[line]))
   const source = manual ? SOURCES.MANUAL : hypothetical.lines.length ? SOURCES.HYPOTHETICAL : SOURCES.RESEARCHED
   const assumptions = manual ? [MANUAL_ASSUMPTION] : hypothetical.assumptions
-  const base = { key, role, kind: 'designed', name, source, savedId: null, seededFrom: draft.seededFrom || null, hypothetical: hypothetical.assumptions, assumptions, errors }
+  const levels = manual ? [] : used.map((line) => ({ line, type: DESIGN_LINES[line], resolved: context.resolution[DESIGN_LINES[line]] })).filter(({ resolved }) => resolved && resolved.level).map(({ line, type, resolved }) => Object.freeze({ line, type, id: resolved.level.id, name: resolved.level.name, kind: resolved.hypothetical ? 'hypothetical' : 'researched' }))
+  const base = { key, role, kind: 'designed', name, source, savedId: null, seededFrom: draft.seededFrom || null, hypothetical: hypothetical.assumptions, assumptions, tech: Object.freeze(levels), errors }
   const carried = draft.carried
   const gatedFrom = (blocked, evaluation) => GATED_OPTIONS.map((option) => {
     const carriedNow = { secondStage: carried.stages > 0, shipDecoy: carried.shipDecoy, groundPod: carried.groundPod, enhancedRadiation: carried.enhancedRadiation }[option.id]

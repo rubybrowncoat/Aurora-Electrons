@@ -9,6 +9,7 @@
         <v-alert v-if="hypotheticalNotice" type="warning" outlined dense class="mt-1" data-tech="hypothetical">{{ hypotheticalNotice }}</v-alert>
         <v-alert v-for="item in unresolvedChoices" :key="item.type" type="warning" outlined dense class="mt-1" data-tech="unresolved">{{ item.text }}</v-alert>
         <v-alert v-if="scenarioNotice" type="info" outlined dense class="mt-1" data-tech="scenario-notice">{{ scenarioNotice }}</v-alert>
+        <v-alert v-if="linkNotice" type="warning" outlined dense dismissible class="mt-1" data-link="notice" @input="dismissLink">{{ linkNotice }}</v-alert>
 
         <v-card class="panel" data-summary="The saved missile pinned as the baseline and the scenario every column is judged under: the target's speed and missile jammer, the launcher's tactical modifier, the point-defence figure and the target's signature. A baseline keeps the figures the save stored; a design made here starts from a copy of it or from nothing." elevation="1">
           <div class="panel-head">
@@ -17,7 +18,7 @@
           <div class="panel-body">
             <div class="toolbar">
               <div class="tool tool--baseline">
-                <div class="tool__label caption text--secondary">Baseline, a saved missile</div>
+                <div class="tool__label caption text--secondary">Baseline, a saved missile<page-link v-if="baselineLink" :to="baselineLink" :name="baselineName" class="ml-1" /></div>
                 <v-autocomplete :value="baselineId" :items="savedItems" item-text="text" item-value="value" placeholder="None" prepend-inner-icon="mdi-rocket-launch-outline" aria-label="Saved missile pinned as the baseline" clearable dense outlined hide-details data-field="baseline" @change="setBaseline" />
               </div>
               <div class="tool tool--actions">
@@ -95,7 +96,7 @@
           </div>
           <div v-if="copyMessage" class="panel-body pt-0 pb-0 caption text--secondary" data-designer="copy-message">{{ copyMessage }}</div>
           <div v-if="!comparison.columns.length" class="panel-body text--secondary" data-designer="empty">Pin a saved missile as the baseline, or add an alternative, to compare.</div>
-          <missile-compare-table v-else :comparison="comparison" @remove="removeAlternative" />
+          <missile-compare-table v-else :comparison="comparison" :links="columnLinks" @remove="removeAlternative" />
           <div class="panel-foot caption text--secondary">
             Size is the full MSP sum of every part, raised to the floor of 1 MSP and cut to the size limit; 20 MSP are 1 HS and 50 tons are 1 HS. Fuel is 2,500 litres to the MSP, cut to a whole litre; speed and endurance are cut to 0.1. A saved missile's recomputed figures are rebuilt from the levels the race holds that reproduce what it stored, so agreement shows that some held level gives the figure; a figure the save lacks is unknown, never 0, and unknown or unsupported is never agreement. The planner figure is the planner's own heuristic and no game statistic. It is per warhead: the strength and the hit chance are those of one warhead and neither is multiplied by the number of warheads. A saved missile's hit chance and planner figure use its recomputed speed and warhead.
           </div>
@@ -252,10 +253,11 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ActiveSizingPanel from '../components/sensors/ActiveSizingPanel.vue'
 import countFormat from '../mixins/count-format'
+import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView from '../mixins/persisted-view'
 import { loadFormulaVersion } from '../utilities/capabilities'
-import { linkTo } from '../utilities/deep-links'
+import { cutText, linkTo, queryId } from '../utilities/deep-links'
 import { loadSensorFixture, SENSOR_COMPONENT_TYPES } from '../utilities/design-data'
 import { SENSOR_RESOLUTIONS_HS, SENSOR_RULES } from '../utilities/design-rules'
 import { LAUNCH_ROLES, emptySelection, launcherView, normaliseSelection, sensorOfSelection } from '../utilities/launcher-coverage'
@@ -263,6 +265,7 @@ import { tracked } from '../utilities/load-tracking'
 import { DESIGN_LINES, DESIGN_LINE_TYPES, LINE_LABELS, MAX_ALTERNATIVES, NO_DESIGNS, addAlternative, carryOf, compareDesigns, deleteDesign, designerContext, emptyDraft, loadDesigns, moveDesign, payloadOf, pdProblem, problemsOf, readDesigns, registerDesigner, removeAlternative, saveDesign, savedAlternative, savedChoices, scenarioOf, seedAlternative, summaryText, techChoicesOf, techFigures, techLinksOf } from '../utilities/missile-designer'
 import { entered } from '../utilities/missile-hit'
 import { AXIS_ORDER, COLUMNS, GOALS, GOAL_IDS, OPTION_LABELS, SWEEP_AXES, describeMissileFront, describeStatus, domainAround, exportOutcome, frontTable, missileRun, nominations, normaliseFields, readRequest, referenceOfColumn, stageOfDraft, tableOf, techNotesOf } from '../utilities/missile-optimizer'
+import { STANDING, beginRead, isCurrentRead, loadMissileStanding, missileHandoff, missileLinkState } from '../utilities/planner-links'
 import { STATUS, envelope, unavailable } from '../utilities/provenance'
 import { RESPONSIVENESS, TERMINATION, createRunSlot } from '../utilities/search-run'
 import { activeSizing, sensorTechOf } from '../utilities/sensor-planner'
@@ -307,6 +310,7 @@ export default {
   components: { ActiveSizingPanel, LauncherCoverage, LoadState, MissileCompareTable, MissileDraftEditor, MissileOptimiser, MissileOptimiserResults, PageLink },
   mixins: [
     countFormat,
+    deepLink,
     loadState(INPUT_LABELS),
     persistedView({
       baselineId: { key: 'missileDesignerBaseline', default: null, scope: 'race', valid: (value) => value === null || Number.isInteger(value) },
@@ -333,6 +337,11 @@ export default {
       embedResolution: 'best',
       // The hypothetical choices that could not be written to the scenario record, by tech type: they hold for this page only.
       heldChoices: {},
+      // The saved missile a link names (its ID, the text of the link when it is not an ID, and the name the link gave it) and what the save says of it: null until read, and while no link names one.
+      linkedMissileId: null,
+      linkedMissileRaw: '',
+      linkedMissileName: '',
+      linkedStanding: null,
       scenarioMessage: '',
       scenarioRevision: 0,
       alternativeMessage: '',
@@ -471,6 +480,73 @@ export default {
       const parts = [this.scenarioMessage, this.records && this.records.error ? `The scenario records are not available (${this.records.error}), so the choice is kept for this page only.` : '', this.techScenario.error ? `The scenario records cannot be read (${this.techScenario.error.message}), so saved choices are not applied.` : '', ...this.techScenario.notes.map((note) => note.reason)]
 
       return parts.filter(Boolean).join(' ')
+    },
+
+    // The saved design a link names, once the designs are read: only a design of the race that is the one the link meant (a link from another page names it too) is pinned.
+    linkedChoice() {
+      if (this.linkedMissileId === null) {
+        return null
+      }
+
+      const choice = savedChoices(this.designs).find((item) => item.id === this.linkedMissileId) || null
+
+      return choice && (!this.linkedMissileName || choice.name === this.linkedMissileName) ? choice : null
+    },
+
+    // Why a link's missile is not the baseline, or an empty text: an ID that is not one, a missile that is gone, another race's, not researched or changed, or a design of the race that the designer does not list.
+    linkNotice() {
+      if (this.linkedMissileRaw !== '' && this.linkedMissileId === null) {
+        return `The link names the missile "${cutText(this.linkedMissileRaw)}", which is not a missile ID (a whole number above 0). The baseline is as it was.`
+      } else if (this.linkedMissileId === null || this.linkedChoice || !this.ready) {
+        return ''
+      }
+
+      const listed = savedChoices(this.designs).find((item) => item.id === this.linkedMissileId)
+      const standing = listed ? { id: listed.id, state: STANDING.HELD, name: listed.name, text: '' } : this.linkedStanding
+
+      if (!standing) {
+        return `The missile ${this.linkedMissileId} named by the link is being checked against the save.`
+      }
+
+      const state = missileLinkState({ standing, name: this.linkedMissileName })
+
+      return `${state.state === STANDING.HELD ? `The missile ${state.id} (${state.name}) is a design of the race that the designer does not list: a second stage of another design is not offered on its own.` : state.text} The baseline is as it was.`
+    },
+
+    // The Designed Tech page's row of the baseline, and the baseline's name for the link's title.
+    baselineLink() {
+      return this.baselineId !== null && savedChoices(this.designs).some((item) => item.id === this.baselineId) ? linkTo.designedTech({ missile: this.baselineId }) : null
+    },
+
+    baselineName() {
+      const choice = savedChoices(this.designs).find((item) => item.id === this.baselineId)
+
+      return choice ? choice.name : ''
+    },
+
+    // The target signature, resolution and jammer the designer assumed, as the missile handover passes them: what the sizing panel starts from.
+    handoffScenario() {
+      const jammer = String(this.embedJammer).trim() === '' ? this.launcherJammer : this.embedJammer
+
+      return { signature: entered(this.targetSignature), resolution: this.embedResolution === 'best' ? 'best' : entered(this.embedResolution), jammer: String(jammer).trim() === '' ? 0 : entered(jammer) }
+    },
+
+    // The links of each column: the missile handed to the Sensor Planner (or why it cannot be) and, for a saved design, its row in Designed Tech.
+    columnLinks() {
+      return Object.fromEntries(this.comparison.columns.map((column) => {
+        const handoff = missileHandoff(column, this.handoffScenario)
+
+        return [column.key, { sensors: handoff.ok ? linkTo.sensors({ target: handoff.target }) : null, reason: handoff.ok ? '' : handoff.reason, designedTech: column.kind === 'saved' && column.savedId ? linkTo.designedTech({ missile: column.savedId }) : null }]
+      }))
+    },
+
+    // A link names the saved missile the page is on: the baseline. The incoming link is consumed once it settles, so a baseline picked or opened afterwards is the one named.
+    linkQuery() {
+      return this.ready ? linkTo.missileDesigner({ missile: this.linkedChoice ? this.linkedChoice.id : this.baselineId }).query : null
+    },
+
+    linkLabel() {
+      return this.baselineName
     },
 
     savedItems() {
@@ -747,6 +823,19 @@ export default {
     },
   },
   watch: {
+    // A saved missile a link names is pinned once the designs are read.
+    linkedChoice() {
+      this.settleLink()
+    },
+
+    linkedMissileId() {
+      this.readLinkStanding()
+    },
+
+    database() {
+      this.readLinkStanding()
+    },
+
     // An input that changes while a run goes ends it; the result already kept stays and is marked out of date.
     optimiserRequestKey() {
       if (this.optimiserRunning) {
@@ -759,6 +848,7 @@ export default {
       this.stopOptimiser(TERMINATION.SAVE_CHANGED)
       this.optimiserOutcome = null
       this.optimiserMessage = ''
+      this.readLinkStanding()
     },
   },
   beforeDestroy() {
@@ -768,6 +858,63 @@ export default {
     setBaseline(id) {
       this.baselineId = id === undefined || id === null ? null : id
       this.releaseLink('missile', this.baselineId)
+      this.dismissLink()
+    },
+
+    // The missile and name of a link, as the query gives them: the saved missile a link names becomes the baseline once it is known to be one the race holds (settleLink), and anything else it names is told in the notice. The link is applied when the route changes under the open page (Back, Forward, a link), so a query that names no missile is a step to no baseline.
+    applyLink(query) {
+      const first = (value) => (Array.isArray(value) ? value[0] : value)
+      const raw = first(query.missile) === undefined ? '' : String(first(query.missile))
+
+      if (raw === '') {
+        this.baselineId = null
+      }
+
+      this.linkedMissileRaw = raw
+      this.linkedMissileId = queryId(query.missile)
+      this.linkedMissileName = this.linkedMissileId === null || first(query.name) === undefined ? '' : String(first(query.name))
+      this.settleLink()
+    },
+
+    // Pins the saved design the link names when it is one the race holds, the one the link meant, and consumes the link: from then on the baseline is the focus.
+    settleLink() {
+      const choice = this.linkedChoice
+
+      if (!choice) {
+        return
+      }
+
+      if (this.baselineId !== choice.id) {
+        this.baselineId = choice.id
+        this.releaseLink('missile', choice.id)
+      }
+
+      this.dismissLink()
+    },
+
+    // What the save says of the missile a link names that is not a design the race holds: the latest read only counts.
+    async readLinkStanding() {
+      const id = this.linkedMissileId
+      const stamp = beginRead(this, 'link')
+
+      this.linkedStanding = null
+
+      if (id === null || !this.database || !this.GameID || !this.RaceID) {
+        return
+      }
+
+      const standing = await loadMissileStanding(this.database, this.context, id)
+
+      if (isCurrentRead(this, stamp) && id === this.linkedMissileId) {
+        this.linkedStanding = standing
+      }
+    },
+
+    // The link's notice is given up, with the missile it named.
+    dismissLink() {
+      this.linkedMissileId = null
+      this.linkedMissileRaw = ''
+      this.linkedMissileName = ''
     },
 
     // A link of the comparison that was read is given up when the choice it names is made again on the page, so that the next save links it to the open save.
@@ -939,6 +1086,7 @@ export default {
       const { payload } = entry
 
       this.baselineId = payload.baselineId
+      this.dismissLink()
       this.alternatives = JSON.parse(JSON.stringify(payload.alternatives))
       this.hitTargetSpeed = payload.scenario.targetSpeed
       this.hitJammer = payload.scenario.jammer
