@@ -16,8 +16,8 @@ const BODY_GROUPS = { 1: 'planet', 2: 'moon', 3: 'asteroid', 5: 'comet' }
 const BODY_TYPES = { 1: 'Asteroid', 2: 'Terrestrial planet', 3: 'Dwarf planet', 4: 'Gas giant', 5: 'Super-Jovian', 7: 'Small moon', 8: 'Moon', 9: 'Large moon', 10: 'Small terrestrial moon', 11: 'Terrestrial moon', 14: 'Comet' }
 const CONTACT_TYPES = { 1: 'Ship', 3: 'Missile salvo', 4: 'Population', 9: 'Packet', 12: 'Ground forces', 14: 'STO ground forces', 16: 'Shipyard', 22: 'Waypoint' }
 // FCT_Waypoint.WaypointType values the game names with a prefix when the waypoint has no name of its own; a waypoint marked for deletion (4) is gone at the next increment.
-const WAYPOINT_NAMES = { 0: 'Waypoint', 1: 'Point of Interest', 2: 'Urgent POI', 3: 'Transit POI', 5: 'Training Waypoint', 6: 'Rendezvous Waypoint', 8: 'Temporary' }
-const MARKED_FOR_DELETION = 4
+export const WAYPOINT_NAMES = { 0: 'Waypoint', 1: 'Point of Interest', 2: 'Urgent POI', 3: 'Transit POI', 5: 'Training Waypoint', 6: 'Rendezvous Waypoint', 8: 'Temporary' }
+export const MARKED_FOR_DELETION = 4
 
 // How many bodies of each kind and survey locations the known systems hold, so the picker can say what it will list before it reads them: { planet, moon, asteroid, comet, survey }.
 export const countLargePlaces = async (database, context) => {

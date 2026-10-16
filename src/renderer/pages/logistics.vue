@@ -6,6 +6,7 @@
           <v-btn-toggle v-model="view" mandatory dense>
             <v-btn value="fuel" small><v-icon small left>mdi-gas-station</v-icon>Fuel</v-btn>
             <v-btn value="maintenance" small><v-icon small left>mdi-wrench</v-icon>Maintenance supplies</v-btn>
+            <v-btn value="stations" small><v-icon small left>mdi-flag-variant</v-icon>Fleet stations</v-btn>
           </v-btn-toggle>
         </v-col>
       </v-row>
@@ -150,7 +151,7 @@
           </v-card>
         </template>
 
-        <template v-else>
+        <template v-else-if="view === 'maintenance'">
           <v-card class="panel" data-summary="The colonies where ships are maintained, with their supply stock, production and upkeep. Use it to spot locations that will run short of maintenance supplies." elevation="1">
             <div class="panel-head">
               <span>Maintenance locations<provenance-mark rule="logistics.maintenanceLocation" label /></span>
@@ -229,6 +230,10 @@
             </v-data-table>
           </v-card>
         </template>
+
+        <template v-else>
+          <fleet-stations :key="`${GameID}-${RaceID}`" :state="stationState" :view="stationView" :repository="stationRepository" :repository-error="stationRepositoryError" :scope="stationScope" :context="stationContext" :database="database" :game-id="GameID" :race-id="RaceID" @retry="retryStations" @changed="stationsChanged" />
+        </template>
       </template>
     </v-container>
   </div>
@@ -241,6 +246,7 @@ import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
 import MspSupply from '../components/logistics/MspSupply.vue'
+import FleetStations from '../components/fleets/FleetStations.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -248,6 +254,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
+import fleetStations, { STATION_INPUTS, STATION_LABELS } from '../mixins/fleet-stations'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
@@ -272,13 +279,15 @@ const INPUT_LABELS = {
   populationProductionModifiers: 'production modifiers',
   formulaVersion: 'the save\'s schema',
   mspSupply: 'the incoming minerals',
+  ...STATION_LABELS,
 }
 // The read of the incoming minerals feeds the supplied-output panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
 const OPTIONAL_INPUTS = ['mspSupply']
-const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
+// The reads behind the fleet stations panel feed that panel alone, each with its own loading, failure and Retry there.
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key) && !STATION_INPUTS.includes(key))
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
-const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
+const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies', stations: 'Fleet stations' }
 const PAGE_SIZES = [15, 30, -1]
 // How far ahead the harvesters' obtainable fuel looks, in years.
 const HARVESTER_HORIZONS = [
@@ -293,10 +302,11 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, LoadState, MspSupply, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, FleetStations, LoadState, MspSupply, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
+    fleetStations,
     loadState(INPUT_LABELS),
     productionModifiers,
     persistedView({
