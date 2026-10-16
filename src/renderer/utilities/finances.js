@@ -115,6 +115,9 @@ const sortedUnique = (values) => [...new Set(values)].sort((a, b) => a - b)
 // The treasury as a result; unavailable when the race has no stored treasury.
 export const treasuryResult = (row) => (row && finite(row.WealthPoints) ? ofRule({ rule: 'finances.treasury', value: row.WealthPoints, inputs: { present: ['treasury'] } }) : absent('finances.treasury', 'treasury'))
 
+// What a treasury `balance` does under a constant yearly net `rate`: covered while the net is not a loss (even in debt), depleted when the treasury is empty or negative under a loss, else it lasts the balance over the loss. The one rule the Finances runway and every scenario built on it use.
+export const runwayOf = (balance, rate) => (rate >= 0 ? { state: 'covered', years: null } : balance > 0 ? { state: 'lasts', years: balance / -rate } : { state: 'depleted', years: 0 })
+
 // The cycle length: the shortest gap between the logged cycle ends, and the longest of them (the one length when the history holds a single end).
 const cycleOf = (times) => {
   const gaps = times.slice(1).map((time, index) => (time - times[index]) / SECONDS_PER_DAY).filter((gap) => gap > 0)
@@ -245,7 +248,7 @@ export const buildLedger = ({ treasury, wealth, windowDays }) => {
   const runway = combine({
     rule: 'finances.treasuryRunway',
     parts: { treasury: treasuryRes, net },
-    compute: ({ treasury: balance, net: rate }) => (rate >= 0 ? { state: 'covered', years: null } : balance > 0 ? { state: 'lasts', years: balance / -rate } : { state: 'depleted', years: 0 }),
+    compute: ({ treasury: balance, net: rate }) => runwayOf(balance, rate),
   })
   const biggestCategory = spendingTotal > 0 ? categories.filter((category) => !category.income).sort((a, b) => b.total - a.total)[0] : null
   const treasurySeries = combine({

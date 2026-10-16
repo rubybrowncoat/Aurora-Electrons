@@ -188,6 +188,8 @@
           </div>
           <div class="panel-foot caption text--secondary">A shipping-line payout is what a line earns for a trip at the rates above, with the distance in billion km: the one-way route travelled loaded, every unit carried the whole leg. A computer-run empire's lines are paid half of it. The log holds the race's own flows, and its spending is the race's whole logged expenditure. The civilian uses are listed as the game logs them; nothing states which of them, if any, carries a payout or offsets one, so a payout is not added to the spending, no net cost is worked out, and the estimate is shown only for a game version the rates are published for.</div>
         </v-card>
+
+        <shipping-runway :ledger="ledger" :treasury="treasury" :wealth="wealth" :window-days="windowDays" :window-options="windowOptions" :formula-version="formulaVersion" :npr="shippingTax ? shippingTax.npr : null" :tax="shippingTax" :tax-state="shippingTaxState" :date="date" :separator="separator" :history-recorded="historyRecorded" @retry="retryShippingTax" />
       </template>
     </v-container>
   </div>
@@ -199,6 +201,7 @@ import { mapGetters, mapState } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, withAlpha } from '../components/charts/theme'
+import ShippingRunway from '../components/finances/ShippingRunway.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import loadState from '../mixins/load-state'
@@ -210,10 +213,11 @@ import { loadFormulaVersion } from '../utilities/capabilities'
 import { CATEGORIES, amountText, civilianCategories, describeTariffVersion, netCostResult, payoutEstimate, rateOf, treasuryMapping } from '../utilities/civilian-tariff'
 import { HISTORY_DAYS, SECONDS_PER_DAY, buildLedger, reasonText, statusText } from '../utilities/finances'
 import { branchStore } from '../utilities/history'
-import { tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { valueOrNull } from '../utilities/provenance'
+import { loadShippingTax } from '../utilities/shipping-runway'
 import { ledgerEvidence, recordedAnchors, reconcileTreasury, residualLabel, wealthLogSql } from '../utilities/treasury-anchors'
 
 const WINDOW_DAYS = [30, 90, 180, 365]
@@ -227,7 +231,12 @@ const INPUT_LABELS = {
   formulaVersion: 'the save\'s schema',
   treasuryLog: 'the treasury log',
   treasuryLedger: 'the ledger of the save',
+  shippingTax: 'the shipping-line tax rate and the race kind',
 }
+
+// The read of the shipping runway panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
+const OPTIONAL_INPUTS = ['shippingTax']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 const TARIFF_MAPPING = treasuryMapping()
 
@@ -250,7 +259,7 @@ const compact = (value) => {
 
 export default {
   name: 'FinancesPage',
-  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey },
+  components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey, ShippingRunway },
   mixins: [
     loadState(INPUT_LABELS),
     persistedView({
@@ -292,6 +301,21 @@ export default {
 
     ready() {
       return this.inputsLoaded && !!this.treasury
+    },
+
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
+    // The shipping runway panel's read: loading until it has settled, else the words naming it with its message. The panel shows no figure from a read that is in flight or failed.
+    shippingTaxState() {
+      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
     },
 
     ledger() {
@@ -619,6 +643,9 @@ export default {
     },
   },
   methods: {
+    retryShippingTax() {
+      OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+    },
     // A rate or payout in text, a dash for an unknown one.
     amountText(value) {
       return amountText(value, this.separator)
@@ -725,6 +752,17 @@ export default {
         }
 
         return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
+    // The race's shipping-line tax rate and kind (utilities/shipping-runway.js `loadShippingTax`), read for the shipping runway panel alone: a save without the column or with no value stored gives no rate and no kind, never 0% nor a player's race. The kind is the stored value, not the selection's flag, which turns an unstored kind into a player's.
+    shippingTax: {
+      get: tracked('shippingTax', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return await loadShippingTax(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: null,
     },

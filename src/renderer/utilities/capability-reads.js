@@ -104,6 +104,7 @@ export const READS = {
   },
   '/finances': {
     treasury: { label: 'the treasury', reads: 'FCT_Game(GameID GameTime StartYear) FCT_Race(AnnualWealth GameID RaceID WealthPoints)' },
+    shippingTax: { label: 'the shipping-line tax rate and the race kind', reads: 'FCT_Race' },
     wealth: { label: 'the wealth history', reads: 'DIM_WealthUse(Description DisplayOrder Income WealthUseID) FCT_Game(GameID GameTime) FCT_WealthData(Amount GameID RaceID TimeUsed UseID)' },
     treasuryLog: { label: 'the treasury log', reads: 'DIM_WealthUse(Income WealthUseID) FCT_WealthData(Amount GameID RaceID TimeUsed UseID)' },
     treasuryLedger: { label: 'the ledger of the save', reads: 'FCT_Increments(GameID GameTime IncrementID Length)' },
