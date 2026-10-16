@@ -1655,7 +1655,7 @@ const pageStatements = (ctx) => {
   add('capabilities: the mine bootstrap reads are an optional input of the Colony Outlook page, which degrades without them, and every other route\'s inputs stay required', () => {
     const optional = (ctx.capabilitiesText.match(/const OPTIONAL = Object\.freeze\(\{([\s\S]*?)\r?\n\}\)/) || [])[1] || ''
 
-    assert.ok(/'\/colony-outlook': \(key\) => key === 'bootstrapSources',?(\r?\n|$)/.test(optional), optional)
+    assert.ok(/'\/colony-outlook': \(key\) => key === 'bootstrapSources'( \|\| key === '\w+')*,?(\r?\n|$)/.test(optional), optional)
     assert.ok(!/'\/colony-outlook'[^\n]*(bootstrapVersion|\|\| true|=> true)/.test(optional))
 
     return true
@@ -2084,7 +2084,7 @@ const MUTATIONS = [
   { name: 'the freight figure not a result', file: U, find: 'results.freight = derived(rule, lifted ? lifted.trips : null,', replace: 'results.freightText = derived(rule, lifted ? lifted.trips : null,', fails: ['results'] },
   { name: 'the troop capacity result with no figure', file: U, find: 'troop: derived(rule, troopNeeded,', replace: 'troop: derived(rule, null,', fails: ['results'] },
   { name: 'the shortage at the colony given no result', file: U, find: 'existingNow: derived(rule, labour.existingNow,', replace: 'existingNow: derived(rule, null,', fails: ['results'] },
-  { name: 'the bootstrap reads required of the page', file: C, find: '\'/colony-outlook\': (key) => key === \'bootstrapSources\',', replace: '\'/colony-outlook\': (key) => false,', fails: ['capabilities'] },
+  { name: 'the bootstrap reads required of the page', file: C, find: '\'/colony-outlook\': (key) => key === \'bootstrapSources\'', replace: '\'/colony-outlook\': (key) => false && key === \'bootstrapSources\'', fails: ['capabilities'] },
   { name: 'a column of the classes read whether the save has it or not', file: D, find: 'const optional = selectedColumns(\'FCT_ShipClass\', shipClass, [\'ColonistCapacity\', \'Size\', \'EnginePower\', \'FuelEfficiency\', \'FuelCapacity\', \'MilitaryEngines\'])', replace: 'const optional = [\'ColonistCapacity\', \'Size\', \'EnginePower\', \'FuelEfficiency\', \'FuelCapacity\', \'MilitaryEngines\'].map((name) => `FCT_ShipClass.${name} as ${name}`).join(\', \')', fails: ['loaders'] },
   { name: 'the cargo handling read whether the save has it or not', file: D, find: 'const served = hasAll(installation, [\'PlanetaryInstallationID\', \'Name\', \'CargoShuttleValue\']) && hasAll(built, [\'GameID\', \'PopID\', \'PlanetaryInstallationID\', \'Amount\'])', replace: 'const served = true', fails: ['loaders'] },
   { name: 'the shuttle technology read whether the save has it or not', file: D, find: 'if (![\'RaceID\', \'CargoShuttleLoadModifier\'].every((name) => race.has(name))) {', replace: 'if (false) {', fails: ['loaders'] },

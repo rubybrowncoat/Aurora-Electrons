@@ -242,6 +242,8 @@
           </div>
         </v-card>
 
+        <colonist-floor :key="`${GameID}-${RaceID}`" :colonies="rows" :sources="colonistSources" :committed-view="committedView" :loading="colonistState.loading" :failed="colonistState.failed" :error="colonistState.error" @retry="retryColonistSources" />
+
         <v-card class="panel mine-bootstrap" data-summary="Three ways to add mining capacity at a colony: mines built at another colony and carried in, mines built by the colony's own industry, and mines built with ground engineers moved in. Each route shows what works now, what limits it and what the save does not say." elevation="1">
           <div class="panel-head">
             <span>Mine bootstrap<provenance-mark rule="mineBootstrap.localBuild" label /></span>
@@ -298,6 +300,7 @@
 import { mapGetters, mapState } from 'vuex'
 
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
+import ColonistFloor from '../components/colonies/ColonistFloor.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, patternImage, seriesIdentity, withAlpha } from '../components/charts/theme'
 import LoadState from '../components/page/LoadState.vue'
@@ -314,7 +317,7 @@ import { ORBIT_REASONS, arkLayer, loadArks } from '../utilities/arks'
 import { populationName } from '../utilities/aurora'
 import { WORKER_TOLERANCE, attentionResult, outlookColonies, people as peopleOf, totalResult } from '../utilities/colonies'
 import { linkTo, queryId } from '../utilities/deep-links'
-import { tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { MINERALS } from '../utilities/minerals'
 import { industryUsage, prepareForecast } from '../utilities/production'
@@ -323,6 +326,7 @@ import { committedSplitResult, committedWorkforce, workforceNeeds } from '../uti
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { ROUTE_STATUS, builderOptions, compareRoutes, engineerCapacityGap, fullStaffModifiers, idleConstruction, mineRequirements, plural, withMappedEngineers } from '../utilities/mine-bootstrap'
 import { NO_BOOTSTRAP_SOURCES, loadBootstrapSources } from '../utilities/mine-bootstrap-data'
+import { NO_COLONIST_SOURCES, loadColonistSources } from '../utilities/colonist-floor'
 
 const CAPACITY_KINDS = ['construction', 'ordnance', 'fighter']
 
@@ -350,7 +354,11 @@ const INPUT_LABELS = {
   installationTypes: 'the installation types',
   bootstrapSources: 'the mine bootstrap reads',
   bootstrapVersion: 'the formula version',
+  colonistSources: 'the colonist source fields',
 }
+// The read of the colonist panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
+const OPTIONAL_INPUTS = ['colonistSources']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
@@ -363,7 +371,7 @@ const COLONY_PAGE_SIZES = [25, 50, -1]
 
 export default {
   name: 'ColonyOutlookPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, ColonistFloor, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -397,6 +405,22 @@ export default {
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
     ...mapState(['RaceNPR']),
+
+    // The reads behind the page's own panels that failed: the read of the colonist panel is its own (`colonistState`).
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
+    // The colonist panel's read: loading until it has settled, else the words naming it with its message. The panel shows no figures from a read that is in flight or failed.
+    colonistState() {
+      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    },
 
     // Whether the workers needed count the queue and the shipyard upgrades as well as what stands today.
     committedView() {
@@ -818,6 +842,11 @@ export default {
     },
   },
   methods: {
+    // Reads again the read of the colonist panel when it failed.
+    retryColonistSources() {
+      OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+    },
+
     applyLink(query) {
       this.focusId = queryId(query.colony)
     },
@@ -1271,6 +1300,17 @@ export default {
         return await loadFormulaVersion(this.database)
       }),
       default: null,
+    },
+    // The colonist source fields of the race's colonies (role, status, emigrant pool and pressure), read for the colonist floor panel.
+    colonistSources: {
+      get: tracked('colonistSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_COLONIST_SOURCES
+        }
+
+        return await loadColonistSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_COLONIST_SOURCES,
     },
   },
 }

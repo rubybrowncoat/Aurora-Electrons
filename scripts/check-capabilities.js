@@ -146,9 +146,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap reads of /colony-outlook and the sites reads of /mineral-outlook, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange and the mine bootstrap and colonist source reads of /colony-outlook and the sites reads of /mineral-outlook, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   Object.entries(capabilities.INPUTS).forEach(([route, inputs]) => inputs.forEach((input) => {
     Object.entries(input.resolved).forEach(([table, resolved]) => {
