@@ -150,6 +150,30 @@ where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} an
   return { jumpPoints, capital: colonies.find((colony) => colony.Capital) || null, colonies }
 }
 
+// The Lagrange points of the systems the race knows, for the transit estimate: where a ship can jump between two of them inside a system (jump-graph.js `searchRoutes`). The points belong to no race, so a system's are all read once the race knows it.
+export const loadLagrangePoints = (database, { GameID, RaceID }) => rows(database, `select FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor
+from FCT_LagrangePoint
+inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = FCT_LagrangePoint.GameID
+where FCT_LagrangePoint.GameID = ${GameID}`)
+
+// The largest jump drive of a class as the size of ship it carries, and whether a drive of that kind has no rating stored, read for `driveOfClass` without `JUMP_DRIVE_COLUMNS`' reading of a missing figure as 0: `alias` is the largest rating stored (0 when the class has no such component, which is a drive that carries nothing), `alias`Unknown 1 when a component of that kind has no rating, so a rating that is stored can still prove the hull carried while an unrecorded one only leaves it open. `kind` is the condition on the component's special function that picks the kind: 0 for the ordinary drives, none for every kind, null for a drive whose kind the save does not store (the shared columns leave it out of the ordinary ones, so `driveOfClass` may not read it as no drive).
+const driveColumns = (alias, kind) => {
+  const from = `from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = 16${kind}`
+
+  return `coalesce((select max(FCT_ShipDesignComponents.ComponentValue) ${from}), 0) as ${alias}, coalesce((select max(FCT_ShipDesignComponents.ComponentValue is null) ${from}), 0) as ${alias}Unknown`
+}
+
+const ORDINARY_DRIVES = ' and FCT_ShipDesignComponents.SpecialFunction = 0'
+const UNKNOWN_KIND_DRIVES = ' and FCT_ShipDesignComponents.SpecialFunction is null'
+
+// The ship classes the race has ships of that move, for the transit estimate's choice of a representative ship: the top speed, the size of the largest hull, whether the class is military and the largest jump drives it carries with whether any has no rating (`driveColumns`: the ordinary ones, every kind, and those of a kind the save does not store, `NoKindDrive`), the figures `driveOfClass` reads. A class whose speed the save lacks is not offered: there is no speed to take from it.
+export const loadTransitClasses = (database, { GameID, RaceID }) => rows(database, `select FCT_ShipClass.ShipClassID, FCT_ShipClass.ClassName, FCT_ShipClass.MaxSpeed, FCT_ShipClass.Size, FCT_ShipClass.MilitaryEngines, ${driveColumns('Drive', ORDINARY_DRIVES)}, ${driveColumns('AnyDrive', '')}, ${driveColumns('NoKindDrive', UNKNOWN_KIND_DRIVES)}, count(FCT_Ship.ShipID) as Ships
+from FCT_ShipClass
+inner join FCT_Ship on FCT_Ship.ShipClassID = FCT_ShipClass.ShipClassID and FCT_Ship.GameID = FCT_ShipClass.GameID and FCT_Ship.RaceID = ${RaceID}
+where FCT_ShipClass.GameID = ${GameID} and FCT_ShipClass.RaceID = ${RaceID} and FCT_ShipClass.MaxSpeed > 1
+group by FCT_ShipClass.ShipClassID
+order by FCT_ShipClass.MaxSpeed desc, FCT_ShipClass.ClassName`)
+
 const MINERAL_COLUMNS = MINERALS.map((mineral) => mineral.name)
 const sumOf = (table) => MINERAL_COLUMNS.map((name) => `${completeSum(`${table}.${name}`)} as ${name}`).join(', ')
 const byMineralId = (row) => Object.fromEntries(MINERALS.map((mineral) => [mineral.id, row ? row[mineral.name] ?? null : null]))

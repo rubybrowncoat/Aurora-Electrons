@@ -98,6 +98,44 @@
                 <v-btn text small class="mt-2" @click="resetRanking">Reset ranking</v-btn>
               </v-card>
             </v-menu>
+            <v-menu offset-y left :close-on-content-click="false" max-width="520">
+              <template #activator="{ on, attrs }">
+                <v-btn outlined aria-label="Transit" v-bind="attrs" v-on="on"><v-icon small left>mdi-transit-connection-variant</v-icon><span class="tool__btn-label">Transit</span></v-btn>
+              </template>
+              <v-card class="pa-4 planner-menu" :style="sectionColors">
+                <div class="subtitle-2 mb-1">How transit is estimated<provenance-mark rule="habitability.transitSpeed" /></div>
+                <div class="caption text--secondary mb-3">
+                  The Transit column estimates one representative ship flying one way from the nearest colony with people to a body, by the shortest route over the jump points the race has explored. The speed and the drive are chosen here and never reveal a system or a jump point the race has not found. Planets, moons and the colonies on them keep moving, so every leg inside a system is as saved. Military restriction, danger and alien systems are not applied.
+                </div>
+                <v-row dense>
+                  <v-col cols="12" sm="6">
+                    <v-text-field :value="transitSpeed" type="number" min="0" label="Speed (km/s)" hint="Blank: no time, only jumps and distance" persistent-hint :rules="[rules.speed]" dense outlined @change="setTransitSpeed" />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-select :value="pickedClass" :items="transitClassItems" item-text="text" item-value="id" label="Take from a ship class" :hint="transitClassItems.length ? 'Its top speed and whether its own jump drive carries it' : 'The race has no ship that moves'" persistent-hint :disabled="!transitClassItems.length" dense outlined @change="takeClass" />
+                  </v-col>
+                </v-row>
+                <div class="tool__label caption text--secondary mt-2">Crossing jump points</div>
+                <v-btn-toggle v-model="transitDrive" mandatory dense>
+                  <v-tooltip v-for="option in drives" :key="option.id" bottom max-width="300">
+                    <template #activator="{ on }">
+                      <v-btn :value="option.id" small v-on="on">{{ option.label }}</v-btn>
+                    </template>
+                    <span>{{ option.hint }}</span>
+                  </v-tooltip>
+                </v-btn-toggle>
+                <v-switch v-model="transitLagrange" label="Jump between Lagrange points when shorter" dense hide-details class="mt-3" />
+                <div class="tool__label caption text--secondary mt-2">Sort the Transit column by</div>
+                <v-btn-toggle v-model="transitSort" mandatory dense>
+                  <v-tooltip v-for="option in transitSorts" :key="option.id" bottom max-width="300">
+                    <template #activator="{ on }">
+                      <v-btn :value="option.id" small v-on="on">{{ option.label }}</v-btn>
+                    </template>
+                    <span>{{ option.hint }}</span>
+                  </v-tooltip>
+                </v-btn-toggle>
+              </v-card>
+            </v-menu>
             <v-menu offset-y left :close-on-content-click="false" max-width="640">
               <template #activator="{ on, attrs }">
                 <v-btn outlined aria-label="Plan states" v-bind="attrs" v-on="on"><v-icon small left>mdi-help-circle-outline</v-icon><span class="tool__btn-label">Plan states</span></v-btn>
@@ -273,12 +311,36 @@
             </template>
           </template>
 
+          <template #[`item.transitValue`]="{ item }">
+            <div class="d-flex align-start">
+              <v-tooltip top max-width="360">
+                <template #activator="{ on }">
+                  <span class="text-no-wrap" v-on="on">
+                    <template v-if="item.transit.state === 'routed'"><span v-if="item.transit.days === null" class="text--secondary">No speed</span><template v-else>{{ flyTime(item.transit.days) }}</template><span class="caption text--secondary d-block">{{ transitCaption(item.transit) }}<provenance-mark :result="item.transit.results.route" /></span></template>
+                    <template v-else>—<span class="caption text--secondary d-block">{{ transitStateText[item.transit.state] }}</span></template>
+                  </span>
+                </template>
+                <span>{{ transitTooltip(item.transit) }}</span>
+              </v-tooltip>
+              <provenance-mark :result="item.transit.results.time" />
+            </div>
+          </template>
+
           <template #[`header.sortRank`]="{ header }">
             <v-tooltip top max-width="320">
               <template #activator="{ on }">
                 <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
               </template>
               <span>Targets are ranked for the chosen goal. The bar is each target's worth against the best one. Colonies, alien colonies, bodies no species can live on and bodies too small to be worth the trip are not ranked.</span>
+            </v-tooltip>
+          </template>
+
+          <template #[`header.transitValue`]="{ header }">
+            <v-tooltip top max-width="340">
+              <template #activator="{ on }">
+                <span v-on="on">{{ header.text }}<sup>(?)</sup></span>
+              </template>
+              <span>One representative ship flying one way from the nearest colony with people ({{ transitBasisText }}). Sorting this column orders by {{ transitSortLabel }}. A body with no explored route the ship can fly, or with no speed set for the time, is unknown and sorts last. Set the basis under Transit.</span>
             </v-tooltip>
           </template>
 
@@ -303,6 +365,7 @@ import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
 import capabilityGates from '../mixins/capability-gates'
+import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
@@ -311,9 +374,10 @@ import { areSetsEqual } from '../utilities/generic'
 import { systemBodyName } from '../utilities/aurora'
 import { people } from '../utilities/colonies'
 import { assessBodies, BEST_TARGET_SCORE, cmcNote, GOALS, NO_CMC_RULES, normaliseRanking, NO_OUTLOOK, rankBodies, rowProvenance, terraformCapacityResult, UNKNOWN_STATE } from '../utilities/colonization'
-import { loadBodies, loadCmcRules, loadGases, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies, NO_RACE_RULES, speciesPopulationResult } from '../utilities/colonization-data'
+import { loadBodies, loadCmcRules, loadGases, loadLagrangePoints, loadMineralOutlook, loadRaceRules, loadRoutes, loadSpecies, loadTransitClasses, NO_RACE_RULES, speciesPopulationResult } from '../utilities/colonization-data'
 import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
+import { DEFAULT_BASIS, DRIVES, DRIVE_IDS, SORT_IDS, TRANSIT_SORTS, TRANSIT_STATE_TEXT, basisText, driveOfClass, normaliseSpeed, sortTableItems, transitEstimator, transitSortValues, transitText } from '../utilities/colony-transit'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { derive } from '../utilities/query-cache'
@@ -331,6 +395,8 @@ const INPUT_LABELS = {
   cmcRules: 'the civilian mining rules',
   gases: 'the gases',
   routes: 'the jump routes',
+  lagrangePoints: 'the Lagrange points',
+  transitClasses: 'the ship classes',
   outlook: 'the mineral outlook',
   terraformSources: 'the terraforming capacity',
   navalAdmins: 'the naval admin commands',
@@ -399,6 +465,7 @@ export default {
   components: { BodyDetail, LoadState, ProvenanceMark, SystemSelect },
   mixins: [
     capabilityGates,
+    countFormat,
     deepLink,
     loadState(INPUT_LABELS),
     persistedView({
@@ -410,6 +477,10 @@ export default {
       ...Object.fromEntries(FILTERS.map((filter) => [filter.field, { key: filter.config, default: false, normalise: Boolean }])),
       bodyClasses: { key: 'habitabilityBodyClasses', default: [1, 2, 3, 5], normalise: (stored) => (Array.isArray(stored) ? stored.filter((value) => BODY_CLASS_NAMES[value]) : undefined) },
       systems: { key: 'habitabilitySystems', default: [] },
+      transitSpeed: { key: 'habitabilityTransitSpeed', default: DEFAULT_BASIS.speed, scope: 'race', normalise: normaliseSpeed },
+      transitDrive: { key: 'habitabilityTransitDrive', default: DEFAULT_BASIS.drive, scope: 'race', valid: oneOf(DRIVE_IDS) },
+      transitLagrange: { key: 'habitabilityTransitLagrange', default: DEFAULT_BASIS.lagrange, scope: 'race', normalise: (stored) => (typeof stored === 'boolean' ? stored : undefined) },
+      transitSort: { key: 'habitabilityTransitSort', default: 'time', scope: 'race', valid: oneOf(SORT_IDS) },
       table: tableView('habitabilityTable', { sortBy: ['sortRank'], sortDesc: [false], itemsPerPage: DEFAULT_ROWS, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
@@ -426,6 +497,7 @@ export default {
       rules: {
         required: (value) => !!value || 'Required.',
         positive: (value) => value > 0 || 'Must be positive.',
+        speed: (value) => value === '' || value === null || value === undefined || value > 0 || 'Must be above 0, or blank.',
       },
 
       linkTo,
@@ -522,6 +594,39 @@ export default {
     },
     capitalDistanceOf() {
       return buildDistanceMap(this.routes.jumpPoints, this.routes.capital ? [this.routes.capital] : [])
+    },
+
+    drives: () => DRIVES,
+    transitSorts: () => TRANSIT_SORTS,
+    transitStateText: () => TRANSIT_STATE_TEXT,
+
+    // The representative ship's basis as the Transit menu sets it.
+    transitBasis() {
+      return { speed: this.transitSpeed, drive: this.transitDrive, lagrange: this.transitLagrange }
+    },
+    transitBasisText() {
+      return basisText(this.transitBasis, this.count)
+    },
+    transitSortLabel() {
+      return TRANSIT_SORTS.find((option) => option.id === this.transitSort).label.toLowerCase()
+    },
+    // The estimate of a body's trip: a new one whenever the speed, the drive or Lagrange routing changes. It searches only the jump points the race has charted and explored, whatever the basis.
+    transitOf() {
+      return transitEstimator(this.routes, this.lagrangePoints, this.transitBasis)
+    },
+    systemNameById() {
+      return new Map(this.systemNames.map((system) => [system.SystemID, system.SystemName]))
+    },
+    transitClassItems() {
+      const drives = { drive: 'its own jump drive carries it', gates: 'no jump drive that carries it' }
+
+      return this.transitClasses.map((shipClass) => ({ id: shipClass.ShipClassID, text: `${shipClass.ClassName}: ${this.count(shipClass.MaxSpeed)} km/s, ${drives[driveOfClass(shipClass)] || 'jump drive not known'}` }))
+    },
+    // The ship class whose speed and drive are the ones set, or null when they match none (a figure typed in, or an edit after the pick).
+    pickedClass() {
+      const found = this.transitClasses.find((shipClass) => normaliseSpeed(shipClass.MaxSpeed) === this.transitSpeed && [null, this.transitDrive].includes(driveOfClass(shipClass)))
+
+      return found ? found.ShipClassID : null
     },
 
     systemNames() {
@@ -642,20 +747,30 @@ export default {
 
     // Flat items for the table: the columns sort on plain fields. A figure that does not exist (N/A, unknown, unsurveyed, no route) is null and sorts last whichever way the column is sorted (`sortItems`), never as 0.
     tableItems() {
-      return this.filteredRows.map((row) => ({
-        id: row.body.SystemBodyID,
-        row,
-        body: row.body,
-        best: row.best,
-        sortRank: row.rank || (row.unknown.length || row.best.missing.length ? null : NO_RANK - (row.best.strategy === 'none' ? 0 : row.best.capacity)),
-        stateOrder: row.state === UNKNOWN_STATE ? null : PLAN_STATES.indexOf(row.state),
-        bodyOrder: `${row.body.SystemName} ${row.body.SystemBodyOrder}`,
-        speciesName: row.best.strategy === 'none' ? null : row.best.species.SpeciesName,
-        costValue: row.best.strategy === 'none' ? null : row.best.cost,
-        capacityValue: row.best.strategy === 'none' ? null : row.best.capacity,
-        mineralValue: row.minerals.surveyed ? row.minerals.value : null,
-        distanceValue: row.distance ? row.distance.au : null,
-      }))
+      const { transitOf, transitSort } = this
+
+      return this.filteredRows.map((row) => {
+        const transit = transitOf(row.body)
+        const { value, tie } = transitSortValues(transit, transitSort)
+
+        return {
+          id: row.body.SystemBodyID,
+          row,
+          body: row.body,
+          best: row.best,
+          sortRank: row.rank || (row.unknown.length || row.best.missing.length ? null : NO_RANK - (row.best.strategy === 'none' ? 0 : row.best.capacity)),
+          stateOrder: row.state === UNKNOWN_STATE ? null : PLAN_STATES.indexOf(row.state),
+          bodyOrder: `${row.body.SystemName} ${row.body.SystemBodyOrder}`,
+          speciesName: row.best.strategy === 'none' ? null : row.best.species.SpeciesName,
+          costValue: row.best.strategy === 'none' ? null : row.best.cost,
+          capacityValue: row.best.strategy === 'none' ? null : row.best.capacity,
+          mineralValue: row.minerals.surveyed ? row.minerals.value : null,
+          distanceValue: row.distance ? row.distance.au : null,
+          transit,
+          transitValue: value,
+          transitTie: tie,
+        }
+      })
     },
 
     headers() {
@@ -667,7 +782,8 @@ export default {
         { text: 'Colony Cost', value: 'costValue', divider: true },
         { text: 'Holds', value: 'capacityValue', divider: true },
         { text: 'Minerals', value: 'mineralValue', divider: true },
-        { text: 'Distance', value: 'distanceValue' },
+        { text: 'Distance', value: 'distanceValue', divider: true },
+        { text: 'Transit', value: 'transitValue' },
       ]
     },
   },
@@ -826,6 +942,28 @@ export default {
 
       return `${roundToDecimal(distance.au, 1)} AU by the charted route from ${distance.from ? distance.from.PopName.replace(/<[^>]*>/g, '') : 'the nearest colony'}, ${distance.jumps} ${distance.jumps === 1 ? 'jump' : 'jumps'}.${capital}`
     },
+    setTransitSpeed(value) {
+      this.transitSpeed = normaliseSpeed(value)
+    },
+    // Takes the speed and the drive of a ship class; a class whose drive is not known leaves the drive as set.
+    takeClass(id) {
+      const found = this.transitClasses.find((shipClass) => shipClass.ShipClassID === id)
+
+      if (found) {
+        this.transitSpeed = normaliseSpeed(found.MaxSpeed)
+        this.transitDrive = driveOfClass(found) || this.transitDrive
+      }
+    },
+    // The transit time in the unit that reads best; a real 0 is 0 h.
+    flyTime(days) {
+      return days === 0 ? '0 h' : this.duration(days)
+    },
+    transitCaption(transit) {
+      return `${transit.jumps} ${transit.jumps === 1 ? 'jump' : 'jumps'} · ${this.count(transit.au, 1)} AU`
+    },
+    transitTooltip(transit) {
+      return transitText(transit, { systemName: (systemId) => this.systemNameById.get(systemId) || `System #${systemId}`, count: this.count })
+    },
     scarcityHint(id) {
       const mineral = this.outlook.minerals[id]
 
@@ -863,28 +1001,7 @@ export default {
     },
     // The column's sort, with a figure that does not exist last whichever way it is sorted.
     sortItems(items, sortBy, sortDesc) {
-      const [by] = sortBy
-
-      if (!by) {
-        return items
-      }
-
-      const direction = sortDesc[0] ? -1 : 1
-
-      return [...items].sort((a, b) => {
-        const x = a[by]
-        const y = b[by]
-
-        if (x === y) {
-          return 0
-        }
-
-        if (x === null || y === null) {
-          return x === null ? 1 : -1
-        }
-
-        return (typeof x === 'string' ? COLLATOR.compare(x, y) : x - y) * direction
-      })
+      return sortTableItems(items, sortBy, sortDesc, COLLATOR.compare)
     },
     costTooltip(evaluation) {
       const { cost } = evaluation.assessment
@@ -991,6 +1108,26 @@ export default {
         return kept(this, 'routes', [this.GameID, this.RaceID], () => loadRoutes(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
       }),
       default: { jumpPoints: [], capital: null, colonies: [] },
+    },
+    lagrangePoints: {
+      get: tracked('lagrangePoints', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return kept(this, 'lagrangePoints', [this.GameID, this.RaceID], () => loadLagrangePoints(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+      }),
+      default: [],
+    },
+    transitClasses: {
+      get: tracked('transitClasses', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return kept(this, 'transitClasses', [this.GameID, this.RaceID], () => loadTransitClasses(this.database, { GameID: this.GameID, RaceID: this.RaceID }).then(Object.freeze))
+      }),
+      default: [],
     },
     outlook: {
       get: tracked('outlook', async function () {
