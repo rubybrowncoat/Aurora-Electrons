@@ -19,6 +19,8 @@ const KNOWN_SHUTTLE_STRENGTH = `case when exists (select 1 ${BAYS} and (FCT_Clas
 const KNOWN_SERVICE_COLUMNS = 'case when VIR_Service.PopID is null then 0 else VIR_Service.ShuttleCapacity end as ShuttleCapacity, VIR_Service.ServiceNames'
 const knownServiceJoin = (gameId, populationColumn) => `left join (select FCT_PopulationInstallations.PopID, case when count(*) > count(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) then null else sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) end as ShuttleCapacity, group_concat(DIM_PlanetaryInstallation.Name, ', ') as ServiceNames from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${gameId} and (FCT_PopulationInstallations.Amount is null or FCT_PopulationInstallations.Amount > 0) and (DIM_PlanetaryInstallation.CargoShuttleValue is null or DIM_PlanetaryInstallation.CargoShuttleValue > 0) group by FCT_PopulationInstallations.PopID) as VIR_Service on VIR_Service.PopID = ${populationColumn}`
 
+export { KNOWN_SERVICE_COLUMNS, knownServiceJoin }
+
 export const columnsOf = async (database, table) => {
   const [rows] = await database.query(`select name from pragma_table_info('${table}')`)
 

@@ -78,8 +78,27 @@ export const mspProduction = (colony, modifier) => {
   return missing.length ? unavailable({ rule, missing }) : ofRule({ rule, value: colony.MaintenanceFacilities * colony.MSPProduction * MSP_PER_BP * modifier, inputs: { present: [MODIFIER_TEXT, 'the colony\'s maintenance facilities', 'the race\'s maintenance production rate'] } })
 }
 
-// MSP a year the colony's input minerals allow: unlimited for one mined on the colony's own body, otherwise what its stockpile can make before it runs out, null where the stockpile is not in the save. Mines elsewhere, orbital mining and incoming hauls aren't visible here, so this can understate a colony that's supplied that way.
-const mspMineralLimits = (colony) => MSP_MINERALS.map((mineral) => ({ name: mineral.name, msp: colony.Mines > 0 && colony[`Deposit${mineral.name}`] > 0 ? Infinity : isNumber(colony[mineral.name]) ? Math.max(0, colony[mineral.name]) / mineral.perMsp : null }))
+// MSP a year the colony's present stock of each input mineral allows, null where the stockpile is not in the save. Mines on the colony's body add nothing here: a mine digs a finite amount a year from a deposit that may be slow or spent, so it is never read as unlimited supply (`allocateMsp`, msp-supply.js, counts what mining, packets and hauls add and when).
+const mspMineralLimits = (colony) => MSP_MINERALS.map((mineral) => ({ name: mineral.name, msp: isNumber(colony[mineral.name]) ? Math.max(0, colony[mineral.name]) / mineral.perMsp : null }))
+
+// The input mineral whose present stock holds a producing colony furthest below its production (the first on a tie), null while production or a stockpile is not known or no mineral holds it below production.
+export const mspLimitingMineral = (colony, modifier) => {
+  const production = mspProduction(colony, modifier)
+
+  if (!colony.MaintProdStatus || !isAvailable(production)) {
+    return null
+  }
+
+  const limits = mspMineralLimits(colony)
+
+  if (limits.some((limit) => limit.msp === null)) {
+    return null
+  }
+
+  const lowest = limits.reduce((best, limit) => (limit.msp < best.msp ? limit : best), limits[0])
+
+  return lowest.msp < production.value ? lowest.name : null
+}
 
 // MSP/yr actually made, as a 'logistics.mspOutput' result: production on, and no more than the scarcest input mineral allows. Unavailable while the switch, the production or a stockpile that would limit it is not in the save; a colony making nothing makes 0.
 export const mspOutput = (colony, modifier) => {
@@ -99,7 +118,7 @@ export const mspOutput = (colony, modifier) => {
     return unavailable({ rule, missing: [...(isAvailable(production) ? [] : production.inputs.missing), ...unknown], present: production.inputs.present })
   }
 
-  return combine({ rule, parts: { production }, compute: (values) => Math.min(values.production, ...limits.map(({ msp }) => (msp === null ? Infinity : msp))), inputs: { present: ['the colony\'s input mineral stock'] } })
+  return combine({ rule, parts: { production }, compute: (values) => Math.min(values.production, ...limits.map(({ msp }) => (msp === null ? Infinity : msp))), inputs: { present: ['the colony\'s input mineral stock'] }, assumptions: ['The present stock alone: mines, orbital miners, packets and hauls are not counted', ...(mspLimitingMineral(colony, modifier) ? [`${mspLimitingMineral(colony, modifier)} limits the output to the stock held`] : [])] })
 }
 
 // The input minerals that hold a producing colony below full production; none while its production or a stockpile is not known.
@@ -456,9 +475,9 @@ registerRule({
   versions: LOGISTICS_VERSIONS,
   units: 'MSP/yr',
   verification: 'estimated',
-  structure: ['FCT_Population stockpiles of the input minerals', 'FCT_Population.Mines, Deposit<mineral>'],
-  note: 'The production figure (logistics.mspProduction) held to what the input minerals allow. Mines elsewhere, orbital mining and incoming hauls are not visible from the colony row, so the cap can understate a colony supplied that way.',
-  assumptions: ['Only the colony\'s own stockpile and its own body\'s mines supply the input minerals'],
+  structure: ['FCT_Population stockpiles of the input minerals'],
+  note: 'The production figure (logistics.mspProduction) held to what the present stock of the input minerals allows, naming the mineral that limits it. Mines on the colony\'s body are not read as unlimited supply: what mining, packets and hauls add, and when, is the supplied output of mspSupply.supplied (msp-supply.js), kept apart from this figure.',
+  assumptions: ['Only the colony\'s present stockpile supplies the input minerals'],
 })
 
 registerRule({

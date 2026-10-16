@@ -174,9 +174,9 @@
                 <span v-if="item.production === null" class="text--secondary text-no-wrap">—<provenance-mark :result="item.productionResult" /></span>
                 <template v-else-if="item.production > 0">
                   <span class="text-no-wrap">{{ count(item.production) }}<provenance-mark :result="item.productionResult" /></span>
-                  <div v-if="item.blocked > 0" class="caption error--text text-no-wrap" :title="`The ${item.missing.join(', ')} in stock won't last a year at full production, and there are no mines on a deposit of it`">Short of {{ item.missing.join(', ') }} (−{{ count(item.blocked) }})</div>
+                  <div v-if="item.blocked > 0" class="caption error--text text-no-wrap" :title="`The ${item.missing.join(', ')} in stock won't last a year at full production`">Short of {{ item.missing.join(', ') }} (−{{ count(item.blocked) }})</div>
                 </template>
-                <span v-else-if="item.blocked > 0" class="text-no-wrap error--text" :title="`Facilities are on but the colony has none of the ${item.missing.join(', ')} the MSP needs, and no mines on a deposit of it`">No {{ item.missing.join(', ') }} ({{ count(item.blocked) }})</span>
+                <span v-else-if="item.blocked > 0" class="text-no-wrap error--text" :title="`Facilities are on but the colony has none of the ${item.missing.join(', ')} the MSP needs in stock`">No {{ item.missing.join(', ') }} ({{ count(item.blocked) }})</span>
                 <span v-else-if="item.potential > 0" class="text-no-wrap" :class="item.net < 0 ? 'error--text' : 'text--secondary'">Off ({{ count(item.potential) }})</span>
                 <span v-else class="text--secondary">—</span>
                 <div v-if="item.uncounted && item.production !== null" class="caption text--secondary text-no-wrap">{{ item.uncounted }} {{ item.uncounted === 1 ? 'colony' : 'colonies' }} not counted</div>
@@ -210,9 +210,11 @@
               </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
-              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}.
+              Ships use supplies where they are, not where they're assigned: the colony's stock first, then supply ships there, then their own. A maintained ship needs its class cost / 4 in MSP a year (its full cost while overhauling); commercial ships and craft in military hangars need none. Above capacity every ship there is maintained, and uses MSP, at the capacity / tonnage rate. Production: facilities × {{ count(raceMspProduction * 4) }} MSP × the colony's production modifiers, using {{ mspMineralsText }}. Production here counts the minerals in stock alone; the panel below adds mining, packets and hauls on the days they arrive.
             </div>
           </v-card>
+
+          <msp-supply :key="`${GameID}-${RaceID}`" :rows="mspSupplyTable" :state="mspSupplyState" :problems="mspSupply ? mspSupply.problems : []" :years="mspHorizon" :horizons="mspHorizonOptions" @years="mspHorizon = $event" @retry="retryMspSupply" />
 
           <v-card v-if="supplyFleets.length" class="panel" data-summary="The supply ships carrying maintenance supplies, with how much each holds. Use it to see how much spare stock could be sent to a colony in need." elevation="1">
             <div class="panel-head">
@@ -238,6 +240,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme } from '../components/charts/theme'
+import MspSupply from '../components/logistics/MspSupply.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -250,13 +253,14 @@ import productionModifiers from '../mixins/production-modifiers'
 import { activeAppearance } from '../utilities/appearance'
 import { populationName, systemBodyName } from '../utilities/aurora'
 import { linkTo, place as placeKey } from '../utilities/deep-links'
-import { tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { MSP_MINERALS, columnTotal, compact, fullPowerBurn, gateHarvesterRows, harvesterReport, maintenanceLocations, refineryYield, soriumLasts } from '../utilities/logistics'
 import { UNKNOWN_TEXT, isKnownNumber, roundToDecimal, separatedNumber } from '../utilities/math'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sortNullLast, totalOf } from '../utilities/production'
 import { describeResult, valueOrNull } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
+import { MSP_HORIZONS, loadMspSupply, mspSupplyRows } from '../utilities/msp-supply'
 
 const INPUT_LABELS = {
   colonies: 'the colonies',
@@ -267,7 +271,11 @@ const INPUT_LABELS = {
   navalAdmins: 'naval admin commands',
   populationProductionModifiers: 'production modifiers',
   formulaVersion: 'the save\'s schema',
+  mspSupply: 'the incoming minerals',
 }
+// The read of the incoming minerals feeds the supplied-output panel alone: the rest of the page never waits for it, and a failure of it is shown on that panel.
+const OPTIONAL_INPUTS = ['mspSupply']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // Classes shown in the burn chart; the rest are folded into "Other classes".
 const BURN_CLASSES = 12
 const VIEW_NAMES = { fuel: 'Fuel', maintenance: 'Maintenance supplies' }
@@ -285,7 +293,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'LogisticsPage',
-  components: { ChartCanvas, LoadState, PageLink, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, LoadState, MspSupply, PageLink, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     countFormat,
     deepLink,
@@ -295,6 +303,7 @@ export default {
       view: { key: 'logisticsView', default: 'fuel', valid: oneOf(Object.keys(VIEW_NAMES)) },
       showIdleLocations: { key: 'logisticsShowIdleLocations', default: false },
       harvesterHorizon: { key: 'logisticsHarvesterHorizon', default: 1, valid: oneOf(HARVESTER_HORIZONS.map((option) => option.years)) },
+      mspHorizon: { key: 'logisticsMspHorizon', default: 1, valid: oneOf(MSP_HORIZONS.map((option) => option.years)) },
       refineriesTable: tableView('logisticsRefineriesTable', { sortBy: ['FuelStockpile'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       harvestersTable: tableView('logisticsHarvestersTable', { itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       locationsTable: tableView('logisticsLocationsTable', { sortBy: ['runwaySort'], sortDesc: [false], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
@@ -305,6 +314,7 @@ export default {
     return {
       pageSizes: PAGE_SIZES,
       horizonOptions: HARVESTER_HORIZONS,
+      mspHorizonOptions: MSP_HORIZONS,
       sortNullLast,
     }
   },
@@ -329,6 +339,31 @@ export default {
 
     mspMineralsText() {
       return MSP_MINERALS.map((mineral) => `${mineral.perMsp} t of ${mineral.name}`).join(', ').replace(/, ([^,]*)$/, ' and $1') + ' per MSP'
+    },
+
+    // The reads behind the page's own panels that failed: the read of the incoming minerals is its own (`mspSupplyState`).
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
+    // The read of the incoming minerals: loading until it has settled, else the words naming it with its message. The panel shows no figures from a read that is in flight or failed.
+    mspSupplyState() {
+      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    },
+
+    // The supplied maintenance output of each colony over the chosen period, null until the read is in.
+    mspSupplyTable() {
+      if (!this.mspSupply || this.mspSupplyState.loading || this.mspSupplyState.failed) {
+        return null
+      }
+
+      return mspSupplyRows({ colonies: this.colonies, sources: this.mspSupply, modifierOf: this.modifierOf, navalAdmins: this.navalAdmins, formulaVersion: this.formulaVersion, RaceID: this.RaceID, years: this.mspHorizon }).map((row) => ({ ...row, name: row.colony.PopName, place: this.place(row.colony) }))
     },
 
     // FUEL
@@ -678,9 +713,14 @@ export default {
 
       return `${separatedNumber(roundToDecimal(value, value < 100 ? 1 : 0), this.separator)} y`
     },
+
+    // Reads again the read of the incoming minerals, whether it failed whole or settled with sources it could not read.
+    retryMspSupply() {
+      OPTIONAL_INPUTS.forEach((key) => this.$asyncComputed[key].update())
+    },
   },
   asyncComputed: {
-    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility. Count deposits together: three correlated counts would scan the mineral table three times for every colony.
+    // Every colony, with what both fuel and maintenance need. Services: refuel needs a spaceport or refuelling station; resupply a spaceport, cargo shuttle station or maintenance facility.
     colonies: {
       get: tracked('colonies', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -688,19 +728,7 @@ export default {
         }
 
         return await this.database.query(`select FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population, FCT_Population.Efficiency, FCT_Population.SystemBodyID, FCT_Population.MaintenanceStockpile, FCT_Population.MaintProdStatus, FCT_Population.WarningMSP, FCT_Population.FuelStockpile, FCT_Population.FuelProdStatus, FCT_Population.WarningFuel, FCT_Population.Sorium, FCT_RaceSysSurvey.Name as SystemName, FCT_Star.Component, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBody.BodyClass, FCT_SystemBodyName.Name as SystemBodyName, FCT_Race.MSPProduction, FCT_Race.MaintenanceCapacity, FCT_Race.FuelProduction, FCT_Race.EconomicProdModifier, max(0, min(1, 1 - coalesce(FCT_SystemBody.RadiationLevel, 0) / 10000.0)) * max(0, min(1, 1 - FCT_Population.UnrestPoints / 100.0)) * coalesce(DIM_PopPoliticalStatus.ProductionMod, 1) as CapacityModifier, FCT_Population.Duranium, FCT_Population.Uridium, FCT_Population.Gallicite,
-          coalesce(VIR_Deposits.DepositDuranium, 0) as DepositDuranium,
-          coalesce(VIR_Deposits.DepositUridium, 0) as DepositUridium,
-          coalesce(VIR_Deposits.DepositGallicite, 0) as DepositGallicite,
           coalesce(VIR_Installations.Mines, 0) as Mines, coalesce(VIR_Installations.MaintenanceFacilities, 0) as MaintenanceFacilities, coalesce(VIR_Installations.Refineries, 0) as Refineries, coalesce(VIR_Installations.Refuel, 0) as CanRefuel, coalesce(VIR_Installations.Resupply, 0) as CanResupply from FCT_Population inner join FCT_Race on FCT_Race.RaceID = FCT_Population.RaceID left join DIM_PopPoliticalStatus on DIM_PopPoliticalStatus.StatusID = FCT_Population.PoliticalStatus left join FCT_SystemBody on FCT_SystemBody.SystemBodyID = FCT_Population.SystemBodyID left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_Population.SystemBodyID and FCT_SystemBodyName.RaceID = FCT_Population.RaceID left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Population.SystemID and FCT_RaceSysSurvey.RaceID = FCT_Population.RaceID left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID
-          left join (
-            select SystemBodyID,
-              sum(case when MaterialID = 1 then 1 else 0 end) as DepositDuranium,
-              sum(case when MaterialID = 9 then 1 else 0 end) as DepositUridium,
-              sum(case when MaterialID = 11 then 1 else 0 end) as DepositGallicite
-            from FCT_MineralDeposit
-            where GameID = ${this.GameID} and MaterialID in (1, 9, 11) and Amount > 0
-            group by SystemBodyID
-          ) as VIR_Deposits on VIR_Deposits.SystemBodyID = FCT_Population.SystemBodyID
           left join (select FCT_PopulationInstallations.PopID, sum(DIM_PlanetaryInstallation.MaintenanceValue * FCT_PopulationInstallations.Amount) as MaintenanceFacilities, sum(DIM_PlanetaryInstallation.RefineryProductionValue * FCT_PopulationInstallations.Amount) as Refineries, sum(DIM_PlanetaryInstallation.MiningProductionValue * FCT_PopulationInstallations.Amount) as Mines, max(case when DIM_PlanetaryInstallation.MassRefuelling > 0 then 1 else 0 end) as Refuel, max(case when DIM_PlanetaryInstallation.MaintenanceValue > 0 or DIM_PlanetaryInstallation.CargoShuttleValue > 0 then 1 else 0 end) as Resupply from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${this.GameID} and FCT_PopulationInstallations.Amount > 0 group by FCT_PopulationInstallations.PopID) as VIR_Installations on VIR_Installations.PopID = FCT_Population.PopulationID where FCT_Population.GameID = ${this.GameID} and FCT_Population.RaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
@@ -773,6 +801,20 @@ export default {
         return await loadNavalAdmins(this.database, { GameID: this.GameID, RaceID: this.RaceID, bonusId: 6, share: 'Industrial', ranks, blocked })
       }),
       default: {},
+    },
+    // The incoming minerals of the maintenance colonies (mining, packets in flight, feasible hauls), read for the supplied-output panel alone.
+    mspSupply: {
+      get: tracked('mspSupply', async function () {
+        const { database, GameID, RaceID } = this
+        const blocked = this.blockedBonuses
+
+        if (!database || !GameID || !RaceID) {
+          return null
+        }
+
+        return await loadMspSupply(database, { GameID, RaceID, blocked })
+      }),
+      default: null,
     },
   },
 }

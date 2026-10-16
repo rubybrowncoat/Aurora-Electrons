@@ -159,9 +159,9 @@ export const loadQueueNeeds = async (database, { GameID, RaceID }) => {
   return byPopulation(rows)
 }
 
-// Mass-driver packets in flight, by the PopulationID they are bound for, with each mineral's null terms counted in `Missing<mineral>`.
+// Mass-driver packets in flight, by the PopulationID they are bound for, with each mineral's null terms counted in `Missing<mineral>`. A packet keeps the race that launched it when its destination changes hands and still lands there, so the race's packets are those it launched and those bound for one of its colonies in the game.
 export const loadPacketsInFlight = async (database, { GameID, RaceID }) => {
-  const [rows] = await database.query(`select FCT_MassDriverPackets.DestID as PopulationID, ${sums('FCT_MassDriverPackets')}, ${missingTerms('FCT_MassDriverPackets')} from FCT_MassDriverPackets where FCT_MassDriverPackets.GameID = ${GameID} and FCT_MassDriverPackets.RaceID = ${RaceID} group by FCT_MassDriverPackets.DestID`)
+  const [rows] = await database.query(`select FCT_MassDriverPackets.DestID as PopulationID, ${sums('FCT_MassDriverPackets')}, ${missingTerms('FCT_MassDriverPackets')} from FCT_MassDriverPackets left join FCT_Population as VIR_Destination on VIR_Destination.PopulationID = FCT_MassDriverPackets.DestID and VIR_Destination.GameID = FCT_MassDriverPackets.GameID where FCT_MassDriverPackets.GameID = ${GameID} and (FCT_MassDriverPackets.RaceID = ${RaceID} or VIR_Destination.RaceID = ${RaceID}) group by FCT_MassDriverPackets.DestID`)
 
   return byPopulation(rows)
 }
