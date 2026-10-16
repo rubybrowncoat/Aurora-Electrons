@@ -175,6 +175,7 @@ import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, lo
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
 import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime } from '../utilities/route-plan'
+import { AVOID_OPTIONS, loadAvoidSystems } from '../utilities/safe-routes'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -190,9 +191,7 @@ const INPUT_LABELS = {
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
 const OPTIONS = [
-  { key: 'avoidDanger', config: 'routesAvoidDanger', default: true, label: 'Avoid danger', hint: 'Skips systems whose danger rating the race\'s ships there don\'t outweigh in protection value.' },
-  { key: 'avoidAlien', config: 'routesAvoidAlien', default: false, label: 'Avoid alien systems', hint: 'Skips systems controlled by an alien race without a trade treaty.' },
-  { key: 'skipNoAutoRoute', config: 'routesSkipNoAutoRoute', default: false, label: 'Skip "no auto-route" systems', hint: 'Skips the systems flagged to keep auto-routes out.' },
+  ...AVOID_OPTIONS.map((option) => ({ ...option, config: `routes${option.key.charAt(0).toUpperCase()}${option.key.slice(1)}` })),
   { key: 'civilian', config: 'routesCivilian', default: false, label: 'Civilian shipping', hint: 'Keeps out of military restricted systems and jump points, as shipping lines do.' },
   { key: 'gatesOnly', config: 'routesGatesOnly', default: false, label: 'Stabilised jump points only', hint: 'For ships that cannot make their own jump (no jump drive, or one too small for the largest ship): transits only where the jump point is stabilised on the near side.' },
   { key: 'useLagrange', config: 'routesUseLagrange', default: true, label: 'Use Lagrange points', hint: 'Jumps between stable Lagrange points inside a system when that is shorter, as fleets do unless told not to.' },
@@ -1097,7 +1096,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_RaceSysSurvey.SystemID, FCT_RaceSysSurvey.Name, FCT_RaceSysSurvey.Xcor, FCT_RaceSysSurvey.Ycor, FCT_RaceSysSurvey.DangerRating, FCT_RaceSysSurvey.NoAutoRoute, FCT_RaceSysSurvey.MilitaryRestrictedSystem, FCT_RaceSysSurvey.ControlRaceID is not null as ControlKnown, case when FCT_RaceSysSurvey.ControlRaceID is null or FCT_RaceSysSurvey.ControlRaceID in (0, ${this.RaceID}) then null else coalesce((select FCT_AlienRace.AlienRaceName from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}), 'an unknown race') end as Controller, case when exists (select 1 from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}) then (select FCT_AlienRace.TradeTreaty from FCT_AlienRace where FCT_AlienRace.AlienRaceID = FCT_RaceSysSurvey.ControlRaceID and FCT_AlienRace.ViewRaceID = ${this.RaceID} and FCT_AlienRace.GameID = ${this.GameID}) else 0 end as TradeTreaty, VIR_Protection.Protection, coalesce(VIR_Protection.ProtectionShips, 0) as ProtectionShips, coalesce(VIR_Protection.ProtectionKnown, 0) as ProtectionKnown from FCT_RaceSysSurvey left join (select FCT_Fleet.SystemID, sum(FCT_ShipClass.ProtectionValue) as Protection, count(FCT_Ship.ShipID) as ProtectionShips, count(FCT_ShipClass.ProtectionValue) as ProtectionKnown from FCT_Fleet inner join FCT_Ship on FCT_Ship.FleetID = FCT_Fleet.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Fleet.RaceID = ${this.RaceID} and FCT_Fleet.GameID = ${this.GameID} group by FCT_Fleet.SystemID) as VIR_Protection on VIR_Protection.SystemID = FCT_RaceSysSurvey.SystemID where FCT_RaceSysSurvey.GameID = ${this.GameID} and FCT_RaceSysSurvey.RaceID = ${this.RaceID}`).then(([items]) => Object.freeze(items))
+        return await loadAvoidSystems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
     },

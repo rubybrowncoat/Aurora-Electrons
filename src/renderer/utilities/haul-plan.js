@@ -3,6 +3,7 @@
 import { CARGO_POINTS } from './hauling'
 import { routeLegs, searchRoutes } from './jump-graph'
 import { hasGate, colonyEndpoint, roundTrip } from './transport'
+import { cutOffOf, detourOf } from './safe-routes'
 import { registerRule } from './provenance'
 
 // Less than a tonne is rounding.
@@ -36,8 +37,9 @@ export const spareOf = (mineral) => {
 // How many jump points a route crosses that aren't stabilised on both sides: a freighter without a jump drive needs a jump-capable ship with it there.
 const ungatedJumps = (route) => routeLegs(route).filter((leg) => leg.kind === 'jump' && !(hasGate(leg.from) && hasGate(leg.to))).length
 
-// The hauls that cover the shortfalls. Queue shortfalls come before reserve ones and the larger before the smaller; each draws on the colony with spare stock nearest on the charted route, then the next nearest, until it is covered, and every spare tonne is given once. `colonies`: [{ colony, minerals }], each colony with its PopulationID and place (SystemID, Xcor, Ycor); `jumpPoints`: the race's charted jump points. Returns `hauls`, one per pair of colonies, { key, from, to, km, jumps, ungated, minerals: [{ id, name, queue, reserve, tonnes }], tonnes, queue }, and `unmet`, what no colony on a charted route can cover, { key, colony, mineral, reason, tonnes }.
-export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
+// The hauls that cover the shortfalls. Queue shortfalls come before reserve ones and the larger before the smaller; each draws on the colony with spare stock nearest on the charted route, then the next nearest, until it is covered, and every spare tonne is given once. `colonies`: [{ colony, minerals }], each colony with its PopulationID and place (SystemID, Xcor, Ycor); `jumpPoints`: the race's charted jump points; `avoid`: safe-routes.js `avoidRules`' result or null. With an avoid setting on, each haul is searched the way it sails, from the colony that gives to the one that is short, and a route may not enter a barred system: the giving colony's own system is left freely, the short colony's system is tested like any other the route enters. A haul whose way round costs more than the nearest route carries `detour`, and an `unmet` entry carries `cut` ([{ colony, tonnes, cutOff }]: the colonies with spare of the mineral that the settings cut off, with the barred systems on the way). With nothing on, the output is the same as without `avoid`. Returns `hauls`, one per pair of colonies, { key, from, to, km, jumps, ungated, minerals: [{ id, name, queue, reserve, tonnes }], tonnes, queue }, and `unmet`, what no colony on a charted route can cover, { key, colony, mineral, reason, tonnes }.
+export const planHauls = (colonies, { jumpPoints, reserves = true, avoid = null }) => {
+  const guarded = Boolean(avoid && avoid.active)
   const spare = new Map()
   const shortfalls = []
 
@@ -56,13 +58,26 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
 
   shortfalls.sort((a, b) => HAUL_REASONS[a.reason].order - HAUL_REASONS[b.reason].order || b.tonnes - a.tonnes)
 
-  // The other colonies on a charted route from one colony, nearest first; one search per colony that is short of something.
+  // The other colonies on a charted route from one colony, nearest first; one search per colony that is short of something. With an avoid setting on, a haul is searched the way it sails, from the colony that gives to the one that is short: the giving colony's own system is left freely and the short colony's system is tested like any other the route enters.
   const sources = new Map()
+  const searches = new Map()
+  const searchFrom = (colony, limited) => {
+    const key = `${colony.PopulationID}:${limited}`
+
+    if (!searches.has(key)) {
+      searches.set(key, searchRoutes(jumpPoints, [placeOf(colony)], limited ? { order: 'km', canEnter: avoid.canEnter } : { order: 'km' }))
+    }
+
+    return searches.get(key)
+  }
   const sourcesFor = (colony) => {
     if (!sources.has(colony.PopulationID)) {
-      const search = searchRoutes(jumpPoints, [placeOf(colony)], { order: 'km' })
+      const others = colonies.filter((other) => other.colony.PopulationID !== colony.PopulationID).map((other) => (guarded ? { colony: other.colony, route: searchFrom(other.colony, true).toPlace(placeOf(colony)), openRoute: searchFrom(other.colony, false).toPlace(placeOf(colony)) } : { colony: other.colony, route: searchFrom(colony, false).toPlace(placeOf(other.colony)), openRoute: null }))
 
-      sources.set(colony.PopulationID, colonies.filter((other) => other.colony.PopulationID !== colony.PopulationID).map((other) => ({ colony: other.colony, route: search.toPlace(placeOf(other.colony)) })).filter(({ route }) => route).sort((a, b) => a.route.km - b.route.km))
+      sources.set(colony.PopulationID, {
+        reached: others.filter(({ route }) => route).map((source) => (guarded ? { ...source, detour: detourOf(source.openRoute, source.route, avoid) } : source)).sort((a, b) => a.route.km - b.route.km),
+        cut: others.filter(({ route, openRoute }) => !route && openRoute),
+      })
     }
 
     return sources.get(colony.PopulationID)
@@ -74,7 +89,7 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
   shortfalls.forEach(({ colony, mineral, reason, tonnes }) => {
     let left = tonnes
 
-    for (const source of sourcesFor(colony)) {
+    for (const source of sourcesFor(colony).reached) {
       const spareKey = `${source.colony.PopulationID}:${mineral.id}`
       const moved = Math.min(left, spare.get(spareKey) || 0)
 
@@ -85,7 +100,7 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
       const key = `${source.colony.PopulationID}-${colony.PopulationID}`
 
       if (!hauls.has(key)) {
-        hauls.set(key, { key, from: source.colony, to: colony, km: source.route.km, jumps: source.route.jumps, ungated: ungatedJumps(source.route), minerals: new Map(), tonnes: 0, queue: 0 })
+        hauls.set(key, { key, from: source.colony, to: colony, km: source.route.km, jumps: source.route.jumps, ungated: ungatedJumps(source.route), minerals: new Map(), tonnes: 0, queue: 0, ...(guarded ? { detour: source.detour } : {}) })
       }
 
       const haul = hauls.get(key)
@@ -109,7 +124,13 @@ export const planHauls = (colonies, { jumpPoints, reserves = true }) => {
     }
 
     if (left >= TONNE) {
-      unmet.push({ key: `${colony.PopulationID}:${mineral.id}:${reason}`, colony, mineral, reason, tonnes: left })
+      const entry = { key: `${colony.PopulationID}:${mineral.id}:${reason}`, colony, mineral, reason, tonnes: left }
+
+      if (guarded) {
+        entry.cut = sourcesFor(colony).cut.filter((source) => (spare.get(`${source.colony.PopulationID}:${mineral.id}`) || 0) >= TONNE).map((source) => ({ colony: source.colony, tonnes: spare.get(`${source.colony.PopulationID}:${mineral.id}`), cutOff: cutOffOf({ jumpPoints, origin: placeOf(source.colony), destination: placeOf(colony), avoid, baseline: source.openRoute }) }))
+      }
+
+      unmet.push(entry)
     }
   })
 

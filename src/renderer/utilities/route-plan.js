@@ -214,42 +214,42 @@ export const systemProtection = (system) => {
   return system.ProtectionKnown >= system.ProtectionShips && Number.isFinite(system.Protection) ? system.Protection : null
 }
 
-// Why a route may not enter a system with `options` { avoidDanger, avoidAlien, skipNoAutoRoute, civilian }, as { reason, assumed }, or null when it may. `reason` is the text; `assumed` is true when the save lacks what the test reads, so the system is avoided on an assumption. `number(n)` writes a rating. `system`: { NoAutoRoute, DangerRating, Controller, ControlKnown, TradeTreaty, MilitaryRestrictedSystem } and what `systemProtection` reads.
+// Why a route may not enter a system with `options` { avoidDanger, avoidAlien, skipNoAutoRoute, civilian }, as { reason, assumed, option }, or null when it may. `reason` is the text; `assumed` is true when the save lacks what the test reads, so the system is avoided on an assumption; `option` is the key of the option responsible. `number(n)` writes a rating. `system`: { NoAutoRoute, DangerRating, Controller, ControlKnown, TradeTreaty, MilitaryRestrictedSystem } and what `systemProtection` reads.
 export const avoidance = (system, options, number = String) => {
   if (options.skipNoAutoRoute) {
     const flag = flagOf(system.NoAutoRoute)
 
     if (flag === null) {
-      return { reason: 'No auto-route flag not in the save', assumed: true }
+      return { reason: 'No auto-route flag not in the save', assumed: true, option: 'skipNoAutoRoute' }
     } else if (flag) {
-      return { reason: 'No auto-route', assumed: false }
+      return { reason: 'No auto-route', assumed: false, option: 'skipNoAutoRoute' }
     }
   }
 
   if (options.avoidDanger) {
     if (!Number.isFinite(system.DangerRating)) {
-      return { reason: 'Danger rating not in the save', assumed: true }
+      return { reason: 'Danger rating not in the save', assumed: true, option: 'avoidDanger' }
     } else if (system.DangerRating > 0) {
       const protection = systemProtection(system)
 
       if (protection === null) {
-        return { reason: `Danger rating ${number(system.DangerRating)}, protection of the race's ships not known`, assumed: true }
+        return { reason: `Danger rating ${number(system.DangerRating)}, protection of the race's ships not known`, assumed: true, option: 'avoidDanger' }
       } else if (protection <= system.DangerRating) {
-        return { reason: `Danger rating ${number(system.DangerRating)}`, assumed: false }
+        return { reason: `Danger rating ${number(system.DangerRating)}`, assumed: false, option: 'avoidDanger' }
       }
     }
   }
 
   if (options.avoidAlien) {
     if (system.ControlKnown === false || system.ControlKnown === 0) {
-      return { reason: 'Owner not in the save', assumed: true }
+      return { reason: 'Owner not in the save', assumed: true, option: 'avoidAlien' }
     } else if (system.Controller) {
       const treaty = flagOf(system.TradeTreaty)
 
       if (treaty === null) {
-        return { reason: `Held by ${system.Controller}, trade treaty not in the save`, assumed: true }
+        return { reason: `Held by ${system.Controller}, trade treaty not in the save`, assumed: true, option: 'avoidAlien' }
       } else if (!treaty) {
-        return { reason: `Held by ${system.Controller}`, assumed: false }
+        return { reason: `Held by ${system.Controller}`, assumed: false, option: 'avoidAlien' }
       }
     }
   }
@@ -258,9 +258,9 @@ export const avoidance = (system, options, number = String) => {
     const flag = flagOf(system.MilitaryRestrictedSystem)
 
     if (flag === null) {
-      return { reason: 'Military restriction not in the save', assumed: true }
+      return { reason: 'Military restriction not in the save', assumed: true, option: 'civilian' }
     } else if (flag) {
-      return { reason: 'Military restricted', assumed: false }
+      return { reason: 'Military restricted', assumed: false, option: 'civilian' }
     }
   }
 

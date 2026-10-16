@@ -146,9 +146,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook and the shipping-line tax read of /finances, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances and the avoid settings\' systems read of /information and /hauling, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   Object.entries(capabilities.INPUTS).forEach(([route, inputs]) => inputs.forEach((input) => {
     Object.entries(input.resolved).forEach(([table, resolved]) => {

@@ -68,7 +68,12 @@
               </v-card>
             </v-menu>
           </div>
+          <div class="tool tool--actions">
+            <avoid-options :options="avoidOptionList" :settings="avoidSettings" :count="avoidCount" @change="setAvoid" />
+          </div>
         </div>
+
+        <div v-if="avoidNote" class="mt-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
 
         <stat-tiles :tiles="tiles" class="mt-1" />
 
@@ -97,7 +102,8 @@
             <template #[`item.tripDays`]="{ item }">
               <div v-if="item.status === 'ok' || item.status === 'range'" class="py-2 text-no-wrap" :title="tripTitle(item)">
                 <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
-                <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}</div>
+                <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+                <div v-if="item.detourText" class="caption text--secondary route-detour" data-detour>{{ item.detourText }}</div>
               </div>
               <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
@@ -167,22 +173,25 @@
 <script>
 import { mapGetters, mapState } from 'vuex'
 
+import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import avoidRoutes from '../mixins/avoid-routes'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
-import { joinLabels, tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
 import { isAvailable } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { amountText, describeTariffVersion, payoutRows } from '../utilities/civilian-tariff'
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
+import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -193,7 +202,11 @@ const INPUT_LABELS = {
   requests: 'the installation requests',
   shipments: 'the installations in transit',
   formulaVersion: 'the save\'s schema',
+  avoidSystems: 'the danger and control of the systems',
 }
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the danger and control the avoid settings read).
+const OPTIONAL_INPUTS = ['avoidSystems']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
 
@@ -222,8 +235,9 @@ const unique = (values) => [...new Set(values)]
 
 export default {
   name: 'TransportPage',
-  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
+    avoidRoutes,
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
@@ -232,6 +246,7 @@ export default {
       toKey: { key: 'transportTo', default: null, scope: 'race' },
       fleetIds: { key: 'transportFleets', default: [], scope: 'race', valid: (value) => Array.isArray(value) },
       ...OPTION_FIELDS,
+      ...avoidFields('transport'),
       ordersSearch: { key: 'transportOrdersSearch', default: '', scope: 'race' },
       classesTable: tableView('transportClassesTable', { sortBy: ['tonsYear'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       ordersTable: tableView('transportOrdersTable', { sortBy: ['demand'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
@@ -248,6 +263,15 @@ export default {
   computed: {
     ...mapGetters(['database', 'GameID', 'RaceID', 'CivilianShippingLinesActive']),
     ...mapState(['RaceNPR']),
+
+    // The reads that hold the page back: every one but the danger and control of the systems, which have their own note.
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
 
     options() {
       return Object.fromEntries(OPTIONS.map((option) => [option.key, this[option.key]]))
@@ -355,9 +379,9 @@ export default {
       return this.fleetIds.filter((fleetId) => existing.has(fleetId))
     },
 
-    // Where each kind of ship can go from the origin: `reachOf(group)` gives { route, open, blockers }, the route its profile can sail, the route without any rule, and what its rules stop on that one.
+    // Where each kind of ship can go from the origin: `reachOf(group)` gives { route, open, profile, blockers, safe, pending }, the route its profile can sail under the avoid settings (every figure of a run comes from it), the route without any rule, what its rules stop on that one, what the avoid settings did to it (safe-routes.js `planRun`: its baseline, detour and cut-off systems) and whether the danger and control they read are still to come (no route is planned then).
     reachOf() {
-      const { jumpPoints, jumpPointById, restricted, origin, destination, gatesOnly, systemById } = this
+      const { jumpPoints, jumpPointById, restricted, origin, destination, gatesOnly, systemById, avoid, avoidPending } = this
       const lagrangePoints = this.useLagrange ? this.lagrangePoints : []
       const systemName = (systemId) => (systemById[systemId] || {}).Name || `System #${systemId}`
       const searches = {}
@@ -381,10 +405,12 @@ export default {
         const key = `${profile.gates}:${profile.civilian}`
 
         if (!reaches[key]) {
-          const route = find(profile)
-          const open = route || find({ gates: false, civilian: false })
+          const safe = origin && destination ? planRun({ jumpPoints, origin, destination, order: 'jumps', lagrangePoints, transit: transitRule(profile, jumpPointById, restricted), avoid }) : null
+          const baseline = safe && safe.baseline
+          const route = avoidPending || !safe ? null : safe.route
+          const open = baseline || find({ gates: false, civilian: false })
 
-          reaches[key] = { route, open, profile, blockers: route || !open ? [] : routeBlockers(open, profile, restricted, systemName) }
+          reaches[key] = { route, open, profile, blockers: baseline || !open ? [] : routeBlockers(open, profile, restricted, systemName), safe, pending: avoidPending }
         }
 
         return reaches[key]
@@ -420,7 +446,7 @@ export default {
 
         const reach = reachOf(group)
 
-        group.classes.forEach((shipClass) => runs.push(this.runOf(group, shipClass, reach, endpoints)))
+        group.classes.forEach((shipClass) => runs.push({ ...this.runOf(group, shipClass, reach, endpoints), ...this.safeFields(reach) }))
       })
 
       return runs
@@ -442,7 +468,7 @@ export default {
         return null
       }
 
-      const kms = this.civilianRuns.filter((run) => run.status !== 'noroute').map((run) => run.km)
+      const kms = this.civilianRuns.filter((run) => run.status !== 'noroute' && !run.pending).map((run) => run.km)
       const npr = this.RaceNPR
       const unknown = payoutRows({ version, km: null, npr })
 
@@ -472,11 +498,11 @@ export default {
       return { text: `${describeTariffVersion(version)}${npr ? ', with a computer-run empire paid half' : ''}, over the measured route of ${shortest === longest ? this.distance(shortest) : `${this.distance(shortest)} to ${this.distance(longest)}`} one way: ${parts.join('; ')}. A payout goes to the shipping line, and no stored link ties it to a treasury use, so no cost to the race is claimed.`, result: near[0].payout }
     },
 
-    // What keeps fleets from the destination, said once for the fleets it stops.
+    // What keeps fleets from the destination, said once for the fleets it stops: the military fleets and, while shipping lines are on, the shipping line fleets too.
     problems() {
       const byNote = new Map()
 
-      this.rows.filter((row) => row.status === 'noroute').forEach((row) => {
+      this.runs.filter((row) => row.status === 'noroute').forEach((row) => {
         byNote.set(row.note, [...(byNote.get(row.note) || []), row.FleetName])
       })
 
@@ -689,7 +715,9 @@ export default {
         note: '',
       }
 
-      if (!reach.route) {
+      if (reach.pending) {
+        return { ...base, status: 'unknown', statusSort: 1, pending: true, provenance: unreadResult(), note: this.avoidNote.text }
+      } else if (!reach.route) {
         return { ...base, note: this.reachNote(group, reach) }
       }
 
@@ -713,10 +741,19 @@ export default {
       return { ...run, note: problems ? `${problems}.` : '' }
     },
 
+    // What the avoid settings did to a run, for its row: the detour as text and the distance as a result (null while none is on).
+    safeFields(reach) {
+      const detour = reach.safe && reach.safe.detour
+
+      return { detourText: detour ? detourText(detour, this.distance) : '', pathResult: this.avoid.active && reach.route ? pathResult(reach.route, this.avoid) : null }
+    },
+
     // Why a profile of ships can't sail from the origin to the destination.
-    reachNote(group, { open, blockers, profile }) {
+    reachNote(group, { open, blockers, profile, safe }) {
       if (!open) {
         return 'No explored jump route connects them.'
+      } else if (safe && safe.status === 'blocked') {
+        return cutOffText(safe.cutOff)
       }
 
       const hint = !profile.gates ? '' : group.canTransit ? ' The Stabilised jump points only option is on.' : ` A jump drive that covers the ship would make it ${open.jumps} ${open.jumps === 1 ? 'jump' : 'jumps'}.`
@@ -839,6 +876,17 @@ export default {
         return await loadFormulaVersion(this.database)
       }),
       default: null,
+    },
+    // The known systems with the danger and control the avoid settings read (`loadPlannedAvoidSystems`): optional, so the page renders at once and plans under a setting only once it is in.
+    avoidSystems: {
+      get: tracked('avoidSystems', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await loadPlannedAvoidSystems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: [],
     },
   },
 }

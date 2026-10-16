@@ -10,9 +10,11 @@
           <div class="panel-head">
             <span>Hauling plan<provenance-mark rule="hauling.planTonnes" label /></span>
             <span class="d-flex align-center flex-wrap plan-tools">
+              <avoid-options :options="avoidOptionList" :settings="avoidSettings" :count="avoidCount" @change="setAvoid" />
               <v-switch v-model="planReserves" label="Fill reserves" dense hide-details class="mt-0" />
             </span>
           </div>
+          <div v-if="avoidNote" class="panel-body py-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
           <v-data-table :headers="planHeaders" :items="planRows" item-key="key" :expanded.sync="planExpanded" show-expand single-expand :sort-by.sync="planTable.sortBy" :sort-desc.sync="planTable.sortDesc" :items-per-page.sync="planTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" :no-data-text="planEmptyText" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.toName`]="{ item }">
               <div class="py-2">
@@ -29,7 +31,8 @@
             </template>
             <template #[`item.km`]="{ item }">
               <div class="text-no-wrap">{{ item.km ? gkm(item.km) : 'In system' }}</div>
-              <div class="caption text--secondary text-no-wrap">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }}</div>
+              <div class="caption text--secondary text-no-wrap">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+              <div v-if="item.detourText" class="caption route-cell" data-detour>{{ item.detourText }}</div>
               <div v-if="item.ungated" class="caption warning--text text-no-wrap" :title="ungatedTitle">{{ item.ungated }} not stabilised</div>
             </template>
             <template #[`item.bestSort`]="{ item }">
@@ -70,10 +73,10 @@
           </v-data-table>
           <div v-if="unmetRows.length" class="panel-body pt-0">
             <div class="caption warning--text">No colony on a charted route has stock to spare for:</div>
-            <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}</div>
+            <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}<div v-for="cutText in row.cutTexts" :key="cutText" class="text--secondary" data-cut-off>{{ cutText }}</div></div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
         </v-card>
 
@@ -203,10 +206,12 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import avoidRoutes from '../mixins/avoid-routes'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
@@ -214,7 +219,8 @@ import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
 import { classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { loadJumpPoints } from '../utilities/jump-graph'
-import { tracked } from '../utilities/load-tracking'
+import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
+import { allLoaded, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
@@ -231,7 +237,11 @@ const INPUT_LABELS = {
   jumpPoints: 'the jump points',
   shuttleTechnology: 'the shuttle technology',
   formulaVersion: 'the save\'s schema',
+  avoidSystems: 'the danger and control of the systems',
 }
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the danger and control the avoid settings read).
+const OPTIONAL_INPUTS = ['avoidSystems']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
 const ROUTE_PAGE_SIZES = [15, 30, -1]
@@ -274,11 +284,13 @@ const cycleStops = (orders, raceId) => {
 
 export default {
   name: 'HaulingPage',
-  components: { LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
+    avoidRoutes,
     loadState(INPUT_LABELS),
     persistedView({
       planReserves: { key: 'haulingPlanReserves', default: false },
+      ...avoidFields('hauling'),
       planTable: tableView('haulingPlanTable', { sortBy: ['tonnes'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: ROUTE_PAGE_SIZES }),
       routesTable: tableView('haulingRoutesTable', { sortBy: ['movedSort'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: ROUTE_PAGE_SIZES }),
       deliveriesTable: tableView('haulingDeliveriesTable', { itemsPerPage: 10, itemsPerPageOptions: SUMMARY_PAGE_SIZES }),
@@ -296,6 +308,15 @@ export default {
   },
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
+
+    // The reads that hold the page back: every one but the danger and control of the systems, which have their own note.
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
 
     separator() {
       const selectedSeparator = this.config.get('selectedSeparator', 'Tick')
@@ -406,8 +427,9 @@ export default {
       return this.colonies.map((colony) => ({ colony, minerals: colonyMinerals(colony, needs[colony.PopulationID], packets[colony.PopulationID], colony.MassDrivers > 0 && colony.MassDriverDest > 0) }))
     },
 
+    // The hauls under the avoid settings; none while a setting is on and the systems it reads are not in, since a plan over a guess would be the baseline passing as the safe one.
     plan() {
-      return planHauls(this.colonyStocks, { jumpPoints: this.jumpPoints, reserves: this.planReserves })
+      return this.avoidPending ? { hauls: [], unmet: [] } : planHauls(this.colonyStocks, { jumpPoints: this.jumpPoints, reserves: this.planReserves, avoid: this.avoid })
     },
 
     freighters() {
@@ -445,6 +467,8 @@ export default {
           linkName: `${haul.from.PopName} to ${haul.to.PopName}`,
           mineralsText: haul.minerals.map((mineral) => `${mineral.name} ${this.tons(mineral.tonnes)}`).join(', '),
           reasonText: reasons({ queue: haul.queue, reserve: haul.tonnes - haul.queue }),
+          detourText: haul.detour ? detourText(haul.detour, this.gkm) : '',
+          pathResult: this.avoid.active ? pathResult({ km: haul.km }, this.avoid) : null,
           mineralDetail: `${haul.minerals.map((mineral) => `${mineral.name}: ${reasons(mineral)}`).join('. ')}.`,
           deliveredText: delivered ? `The routes already bring ${this.tons(delivered)} of minerals here a year` : '',
           transportLink: linkTo.transport(ends),
@@ -457,19 +481,26 @@ export default {
     unmetRows() {
       const byColony = new Map()
 
-      this.plan.unmet.forEach(({ colony, mineral, reason, tonnes }) => {
+      this.plan.unmet.forEach(({ colony, mineral, reason, tonnes, cut }) => {
         if (!byColony.has(colony.PopulationID)) {
-          byColony.set(colony.PopulationID, { key: colony.PopulationID, name: colony.PopName, parts: [] })
+          byColony.set(colony.PopulationID, { key: colony.PopulationID, name: colony.PopName, parts: [], cuts: new Map() })
         }
 
-        byColony.get(colony.PopulationID).parts.push(`${mineral.name} ${this.tons(tonnes)} ${HAUL_REASONS[reason].label}`)
+        const row = byColony.get(colony.PopulationID)
+
+        row.parts.push(`${mineral.name} ${this.tons(tonnes)} ${HAUL_REASONS[reason].label}`)
+        const cuts = cut || []
+
+        cuts.forEach((source) => row.cuts.set(source.colony.PopulationID, `${source.colony.PopName}: ${cutOffText(source.cutOff)}`))
       })
 
-      return [...byColony.values()].map((row) => ({ ...row, text: row.parts.join(', ') }))
+      return [...byColony.values()].map(({ cuts, ...row }) => ({ ...row, text: row.parts.join(', '), cutTexts: [...cuts.values()] }))
     },
 
     planEmptyText() {
-      if (this.plan.unmet.length) {
+      if (this.avoidPending) {
+        return this.avoidNote.text
+      } else if (this.plan.unmet.length) {
         return 'No colony on a charted route has stock to spare for what the others lack.'
       }
 
@@ -504,7 +535,8 @@ export default {
       return [
         {
           label: 'To haul',
-          value: this.tons(planned),
+          value: this.avoidPending ? '—' : this.tons(planned),
+          ...(this.avoidPending ? { result: unreadResult() } : {}),
           note: [this.plan.hauls.length ? `${this.count(this.plan.hauls.length)} ${this.plan.hauls.length === 1 ? 'haul' : 'hauls'} to ${this.count(destinations)} ${destinations === 1 ? 'colony' : 'colonies'}` : null, missing >= 1 ? `${this.tons(missing)} with no source` : null].filter(Boolean).join(', ') || this.planEmptyText,
           icon: missing >= 1 ? 'mdi-alert' : null,
           iconColor: 'warning',
@@ -703,6 +735,17 @@ export default {
         return await loadFormulaVersion(this.database)
       }),
       default: null,
+    },
+    // The known systems with the danger and control the avoid settings read (`loadPlannedAvoidSystems`): optional, so the page renders at once and plans under a setting only once it is in.
+    avoidSystems: {
+      get: tracked('avoidSystems', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await loadPlannedAvoidSystems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: [],
     },
   },
 }
