@@ -123,7 +123,7 @@ const staffed = (split, cost, extra) => (split && isNumber(cost) && isNumber(ext
 const buildDays = (rule, bp, rate) => combine({ rule, parts: { bp, rate }, compute: ({ bp: cost, rate: perYear }) => (perYear > 0 ? (cost / perYear) * DAYS_PER_YEAR : Infinity), units: 'days' })
 
 // The same days for a figure a page shows: unavailable, naming what is missing, when the cost or the rate is not known or no capacity is idle.
-const buildDaysResult = (rule, bp, rate) => {
+export const buildDaysResult = (rule, bp, rate) => {
   if (!isAvailable(bp)) {
     return unavailable({ rule, missing: bp.inputs.missing, units: 'days' })
   } else if (!rate || !isAvailable(rate)) {

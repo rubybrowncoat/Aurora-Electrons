@@ -139,6 +139,7 @@
           </div>
         </v-card>
         <mineral-supply :mineral="focusMineral" :supply="supply" :colonies="supplyColonies" :scenario="focusScenario" @update:scenario="enterSupplyScenario" />
+        <deficit-sites :key="`${GameID}-${RaceID}`" :mineral="focusMineral" :supply="supply" :deposits="siteDeposits" :sources="deploymentSources" :builders="deficitBuilders" :runway="focusRunway" :loading="shortlistState.loading" :failed="shortlistState.failed" :error="shortlistState.error" @retry="retryShortlist" />
 
         <v-dialog v-model="flowsOpen" max-width="960" scrollable content-class="mineral-outlook">
           <v-card>
@@ -244,6 +245,7 @@ import { mapGetters } from 'vuex'
 import ChartCanvas from '../components/charts/ChartCanvas.vue'
 import SeriesKey from '../components/charts/SeriesKey.vue'
 import { chartTheme, flowColor, withAlpha } from '../components/charts/theme'
+import DeficitSites from '../components/minerals/DeficitSites.vue'
 import MineralSupply from '../components/minerals/MineralSupply.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
@@ -256,16 +258,19 @@ import { activeAppearance } from '../utilities/appearance'
 import { loadPacketsInFlight } from '../utilities/colony-minerals'
 import { separatedNumber, roundToDecimal } from '../utilities/math'
 import { systemBodyName, populationName } from '../utilities/aurora'
+import { NO_DEPLOYMENT_SOURCES, NO_SITE_DEPOSITS, loadDeploymentSources, loadSiteDeposits } from '../utilities/deficit-sites'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { CATEGORY_KEYS, industryBasis, legacyColoniesQuery, legacyModels, shipyardActivitiesQuery, shipyardTasksQuery } from '../utilities/legacy-consumption'
-import { tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
+import { idleConstruction } from '../utilities/mine-bootstrap'
 import { chartGridColor, hierarchyView } from '../utilities/map-hierarchy'
 import { COMPACT_YEARS, CRITICAL_RUNWAY_YEARS, FLOW_GROUPS, MINERALS, PRODUCTION_TYPES, SECONDS_PER_DAY, TRANSFER_TYPES, annualQueueDemand, compact, compactYears, depositStateAt, flowGroupOf, ledgerCoverageDays, yearSteps } from '../utilities/minerals'
 import { categoryRows, categoryUses, depositForecastResult, flowResults, holdingsResult, miningSum, orbitalRateResult, projectionResult, queueDemandResult, runwayResult, runwayStateResult, surfaceRateResult } from '../utilities/mineral-outlook'
 import { gateMiningRows, orbitalMiningQuery, surfaceMiningQuery } from '../utilities/mining-data'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { loadTransfers, loadSiteRoutes, mineralSupply, scenarioEntries, transferFlows } from '../utilities/mineral-supply'
-import { describeResult, describeRule, isAvailable, sumResults, valueOrNull } from '../utilities/provenance'
+import { industryUsage } from '../utilities/production'
+import { describeResult, describeRule, isAvailable, sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 
 const BUCKET_DAYS = 5
 // The production cycle when the ledger has too few production ticks to measure it (the game's default).
@@ -289,8 +294,13 @@ const INPUT_LABELS = {
   siteRoutes: 'the colonies\' mass drivers and destinations',
   packetsByDestination: 'mass-driver packets by destination',
   transfers: 'the ledger\'s transfers between colonies',
+  siteDeposits: 'the surveyed deposits',
+  deploymentSources: 'the routes and mine types for new sites',
 }
 const DEPOSIT_INPUTS = ['surfaceMining', 'orbitalMining', 'navalAdmins']
+// The reads of the sites panel alone: the runway, the forecasts and the supply never wait for them, and a failure of one is shown on that panel.
+const OPTIONAL_INPUTS = ['siteDeposits', 'deploymentSources']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 // One column per mineral summing the table's rows, but only when every row records the mineral: a sum that leaves a missing amount out would read as complete (null here, so the holdings say which amount is missing).
 const completeSums = (table) => MINERALS.map((mineral) => `case when count(${table}.${mineral.name}) = count(*) then sum(${table}.${mineral.name}) end as ${mineral.name}`).join(', ')
@@ -306,7 +316,7 @@ const stripHtml = (text) => text.replace(/&mdash;/g, '—')
 
 export default {
   name: 'MineralOutlookPage',
-  components: { ChartCanvas, LoadState, MineralSupply, ProvenanceMark, SeriesKey, StatTiles },
+  components: { ChartCanvas, DeficitSites, LoadState, MineralSupply, ProvenanceMark, SeriesKey, StatTiles },
   mixins: [
     deepLink,
     loadState(INPUT_LABELS),
@@ -360,6 +370,22 @@ export default {
 
     hasLedger() {
       return !!(this.ledger && this.ledger.length)
+    },
+
+    // The reads behind the runway and the forecasts that failed: the reads of the sites panel are its own (`shortlistState`).
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
+    // The sites panel's reads: loading until each has settled, else the words naming the failed ones with the first message. The panel shows no shortlist from a read that is in flight or failed.
+    shortlistState() {
+      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
     },
 
     // Every read behind the runway and the forecasts has succeeded (a failed one keeps its last, possibly stale, value, so it doesn't count).
@@ -557,6 +583,21 @@ export default {
       }
 
       return mineralSupply({ surface: this.surfaceMining, orbital: this.orbitalMining, navalAdmins: this.navalAdmins, routes: this.siteRoutes, packets: this.packetsByDestination, cargo: this.cargo, RaceID: this.RaceID, materialId: focusMineral.id, flows: transferFlows(this.transfers, this.perYear), entries: scenarioEntries(this.focusScenario) })
+    },
+
+    // The colonies that could build new mines, each with the part of its construction capacity no running project holds (BP/yr, a result: unavailable, naming what is missing, when the capacity or a project's share is not known, or when the running projects could not be read: no project read is not the same as none running).
+    deficitBuilders() {
+      const { colonies, projects } = this.deploymentSources
+      const usage = projects ? industryUsage(projects) : null
+
+      return colonies.map((colony) => ({ colony, rate: usage ? idleConstruction(this.populationCapacityResult(colony.PopulationID, 'construction'), usage[`${colony.PopulationID}-construction`]) : unavailable({ rule: 'mineBootstrap.localBuild', missing: ['the running projects (they could not be read)'], units: 'BP/yr' }) }))
+    },
+
+    // The focused mineral's runway for the sites panel: the years the stock lasts and the result behind them.
+    focusRunway() {
+      const row = this.focusRow
+
+      return row ? { years: row.runway, result: row.results.runway } : null
     },
 
     // One row per use of the runway table above: where its figure comes from (observed, modelled or missing, with the reason), what it stands on, its t/yr over every mineral and over the focused one, and whether it counts.
@@ -898,6 +939,10 @@ export default {
     },
   },
   methods: {
+    // Reads again the reads of the sites panel that failed.
+    retryShortlist() {
+      OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+    },
     // The deliveries entered for the focused mineral replace its own entries; those of the other minerals stay as they were.
     enterSupplyScenario(inputs) {
       this.supplyScenario = { ...this.supplyScenario, [this.focusMineralId]: inputs }
@@ -1254,6 +1299,28 @@ export default {
         return await loadTransfers(this.database, { GameID: this.GameID, RaceID: this.RaceID, windowDays })
       }),
       default: [],
+    },
+    // The deposits of the bodies the race has surveyed, for the sites of a deficit mineral. A body it has not surveyed is never read.
+    siteDeposits: {
+      get: tracked('siteDeposits', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_SITE_DEPOSITS
+        }
+
+        return await loadSiteDeposits(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_SITE_DEPOSITS,
+    },
+    // The jump points, ship classes, mine types, colonies and projects that time a new site's deployment and a carrier's route.
+    deploymentSources: {
+      get: tracked('deploymentSources', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return NO_DEPLOYMENT_SOURCES
+        }
+
+        return await loadDeploymentSources(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: NO_DEPLOYMENT_SOURCES,
     },
     // The game's mineral ledger (Aurora 2.6+), in 5-day buckets counted back from now. Older saves don't have the table: null means "not loaded", [] means "none". Any other failure (the game holding a lock while it saves, say) rejects, and the page says so.
     ledger: {

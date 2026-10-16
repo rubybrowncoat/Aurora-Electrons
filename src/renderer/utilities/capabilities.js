@@ -36,11 +36,12 @@ registerRule({
   note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them) and the mine bootstrap reads of the Colony Outlook page (the panel names what it could not read and leaves its routes unavailable; the outlook itself does not rest on them). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap reads of the Colony Outlook page (the panel names what it could not read and leaves its routes unavailable; the outlook itself does not rest on them) and the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
   '/warnings': (key) => key.startsWith('check:'),
   '/lagrange': (key) => key === 'ships',
   '/colony-outlook': (key) => key === 'bootstrapSources',
+  '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
 })
 
 export const isOptional = (route, key) => Boolean(OPTIONAL[route] && OPTIONAL[route](key))

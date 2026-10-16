@@ -1211,7 +1211,7 @@ const MUTATIONS = [
   { name: 'the lost tonnes not named', file: V, find: 'return lost > 0 ?', replace: 'return lost > 1e12 ?', fails: ['panel'] },
   { name: 'the panel not mounted', file: P, find: '<mineral-supply :mineral="focusMineral"', replace: '<mineral-supplyx :mineral="focusMineral"', fails: ['page'] },
   { name: 'the panel mounted outside the forecast gate', file: P, find: '<mineral-supply :mineral="focusMineral" :supply="supply" :colonies="supplyColonies" :scenario="focusScenario" @update:scenario="enterSupplyScenario" />', replace: '', fails: ['page'] },
-  { name: 'the panel not registered', file: P, find: 'components: { ChartCanvas, LoadState, MineralSupply, ProvenanceMark, SeriesKey, StatTiles },', replace: 'components: { ChartCanvas, LoadState, ProvenanceMark, SeriesKey, StatTiles },', fails: ['page'] },
+  { name: 'the panel not registered', file: P, find: 'components: { ChartCanvas, DeficitSites, LoadState, MineralSupply, ProvenanceMark, SeriesKey, StatTiles },', replace: 'components: { ChartCanvas, DeficitSites, LoadState, ProvenanceMark, SeriesKey, StatTiles },', fails: ['page'] },
   { name: 'the deliveries not passed on', file: P, find: ' :scenario="focusScenario" @update:scenario="enterSupplyScenario"', replace: '', fails: ['page'] },
   { name: 'a read\'s label under another name', file: P, find: 'siteRoutes: \'the colonies\\\' mass drivers and destinations\'', replace: 'siteRoute: \'the colonies\\\' mass drivers and destinations\'', fails: ['page'] },
   { name: 'a read tracked under another name', file: P, find: 'tracked(\'packetsByDestination\'', replace: 'tracked(\'packetsByDestinations\'', fails: ['page'] },

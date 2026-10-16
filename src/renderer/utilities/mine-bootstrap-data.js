@@ -19,18 +19,18 @@ const KNOWN_SHUTTLE_STRENGTH = `case when exists (select 1 ${BAYS} and (FCT_Clas
 const KNOWN_SERVICE_COLUMNS = 'case when VIR_Service.PopID is null then 0 else VIR_Service.ShuttleCapacity end as ShuttleCapacity, VIR_Service.ServiceNames'
 const knownServiceJoin = (gameId, populationColumn) => `left join (select FCT_PopulationInstallations.PopID, case when count(*) > count(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) then null else sum(DIM_PlanetaryInstallation.CargoShuttleValue * FCT_PopulationInstallations.Amount) end as ShuttleCapacity, group_concat(DIM_PlanetaryInstallation.Name, ', ') as ServiceNames from FCT_PopulationInstallations inner join DIM_PlanetaryInstallation on DIM_PlanetaryInstallation.PlanetaryInstallationID = FCT_PopulationInstallations.PlanetaryInstallationID where FCT_PopulationInstallations.GameID = ${gameId} and (FCT_PopulationInstallations.Amount is null or FCT_PopulationInstallations.Amount > 0) and (DIM_PlanetaryInstallation.CargoShuttleValue is null or DIM_PlanetaryInstallation.CargoShuttleValue > 0) group by FCT_PopulationInstallations.PopID) as VIR_Service on VIR_Service.PopID = ${populationColumn}`
 
-const columnsOf = async (database, table) => {
+export const columnsOf = async (database, table) => {
   const [rows] = await database.query(`select name from pragma_table_info('${table}')`)
 
   return new Set(rows.map((row) => row.name))
 }
 
 // The select list of `names` from a table aliased `alias`: a column the save lacks reads as null.
-const selectedColumns = (alias, columns, names) => names.map((name) => (columns.has(name) ? `${alias}.${name} as ${name}` : `null as ${name}`)).join(', ')
+export const selectedColumns = (alias, columns, names) => names.map((name) => (columns.has(name) ? `${alias}.${name} as ${name}` : `null as ${name}`)).join(', ')
 
-const hasAll = (columns, names) => names.every((name) => columns.has(name))
+export const hasAll = (columns, names) => names.every((name) => columns.has(name))
 
-const gaps = (table, columns, wanted) => (columns.size === 0 ? [`${table} (table)`] : wanted.filter((name) => !columns.has(name)).map((name) => `${table}.${name}`))
+export const gaps = (table, columns, wanted) => (columns.size === 0 ? [`${table} (table)`] : wanted.filter((name) => !columns.has(name)).map((name) => `${table}.${name}`))
 
 // Whether a stored flag is set: null when the save does not say (a null value or no column), never false.
 const isSet = (value) => (value === null || value === undefined ? null : Number(value) !== 0)
