@@ -137,6 +137,67 @@
           <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
+        <v-card class="panel" data-summary="How long each fleet would take to sail the chosen run as one, with every ship at the speed of the slowest, and what it could carry. Use it to see what a mixed fleet really does beside the classes timed alone." data-fleet-panel elevation="1">
+          <div class="panel-head">
+            <span class="d-flex align-center">
+              <span>Fleets sailing together<provenance-mark rule="transport.fleetTrip" label /></span>
+              <v-chip v-if="destination" small class="ml-3">{{ origin.name }} → {{ destination.name }}</v-chip>
+            </span>
+          </div>
+          <div v-if="fleetShipsState.loading" class="panel-body py-2 caption text--secondary" data-fleet-note>Reading the ships of the fleets.</div>
+          <div v-else-if="fleetShipsState.failed" class="panel-body py-2 caption warning--text" data-fleet-note>The ships of the fleets could not be read: {{ fleetShipsState.error }}<v-btn x-small text class="ml-2" @click="retryFleetShips">Retry</v-btn></div>
+          <v-data-table v-else :headers="fleetHeaders" :items="fleetRuns" item-key="key" :expanded.sync="fleetsExpanded" show-expand single-expand :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" :items-per-page.sync="fleetsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="destination ? 'No fleet carries cargo or colonists' : 'Pick a destination above'" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
+            <template #[`item.FleetName`]="{ item }">
+              <div class="py-2">
+                <div class="font-weight-medium">{{ item.FleetName }}</div>
+                <div class="caption text--secondary">{{ item.independent }} of {{ item.ships }} under their own power<provenance-mark rule="transport.fleetSpeed" /></div>
+              </div>
+            </template>
+            <template #[`item.ships`]="{ item }">{{ count(item.ships) }}<provenance-mark rule="transport.fleetSpeed" /></template>
+            <template #[`item.cargo`]="{ item }"><span v-if="item.cargo !== null" class="text-no-wrap">{{ count(item.cargo) }} t<provenance-mark rule="transport.fleetCargo" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonists`]="{ item }"><span v-if="item.colonists !== null" class="text-no-wrap">{{ count(item.colonists) }}<provenance-mark rule="transport.fleetCargo" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.speed`]="{ item }">
+              <div v-if="item.speed !== null" class="py-2 text-no-wrap">
+                <div>{{ count(item.speed) }} km/s<provenance-mark rule="transport.fleetSpeed" /></div>
+                <div v-if="item.savedSpeed !== item.speed || item.effectiveMax !== item.speed" class="caption text--secondary" data-fleet-speeds-apart>saved {{ count(item.savedSpeed) }}<provenance-mark rule="transport.fleetSpeed" /> · maximum {{ count(item.effectiveMax) }}<provenance-mark rule="transport.fleetSpeed" /></div>
+              </div>
+              <span v-else class="text--secondary">—</span>
+            </template>
+            <template #[`item.tripDays`]="{ item }">
+              <div v-if="item.status === 'ok' || item.status === 'range'" class="py-2 text-no-wrap" :title="tripTitle(item)">
+                <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
+                <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+              </div>
+              <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
+            </template>
+            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.fuel`]="{ item }">
+              <div v-if="item.fuel !== null" class="py-2 text-no-wrap">
+                <div>{{ count(item.fuel) }} L<provenance-mark rule="transport.fleetBurn" /></div>
+                <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of the tank of {{ item.fuelLimiting }}<provenance-mark rule="transport.fleetBurn" /></div>
+              </div>
+              <span v-else class="text--secondary">—</span>
+            </template>
+            <template #[`item.statusSort`]="{ item }">
+              <div class="py-2">
+                <div class="text-no-wrap">
+                  <v-icon small :color="STATUS[item.status].color" class="mr-1">{{ STATUS[item.status].icon }}</v-icon>
+                  <span>{{ STATUS[item.status].label }}</span>
+                </div>
+                <div v-if="item.note && item.status !== 'noroute'" class="caption text--secondary">{{ item.note }}</div>
+              </div>
+            </template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="py-3">
+                <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="item.reasons" :conditions="item.conditions" :handling-rows="item.handlingRows" />
+              </td>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">A fleet sails at one speed: that of its slowest ship under its own power, from the engines it has undamaged, its overhaul and the mass of a ship it tows, which can be lower than the speed saved for the fleet and than the class's rating. Every ship shares that one travel time and burns fuel at its own engine power, scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none of its own and its holds are not counted, as loading by such a craft is not validated for this game version; a fleet with every hold in tow is not supported. A ship with no working engines that nothing carries or tows keeps the fleet from moving. Loading and unloading are timed as for the classes above, each stop taking its slowest counted ship. The classes above are each timed alone, as if every ship of it had its own engines. {{ versionNote }}</div>
+        </v-card>
+
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
           <div class="panel-head">
             <span class="d-flex align-center">
@@ -179,6 +240,7 @@
 <script>
 import { mapGetters, mapState } from 'vuex'
 
+import FleetProfile from '../components/page/FleetProfile.vue'
 import HandlingBreakdown from '../components/page/HandlingBreakdown.vue'
 import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
@@ -202,6 +264,7 @@ import { loadFormulaVersion } from '../utilities/capabilities'
 import { amountText, describeTariffVersion, payoutRows } from '../utilities/civilian-tariff'
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
+import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -214,9 +277,10 @@ const INPUT_LABELS = {
   formulaVersion: 'the save\'s schema',
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
+  fleetShips: 'the ships of the fleets',
 }
-// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems']
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together).
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips']
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -235,6 +299,7 @@ const STATUS = {
   range: { label: 'Out of range', icon: 'mdi-alert-circle-outline', color: 'warning' },
   unknown: { label: 'Not known', icon: 'mdi-help-circle-outline', color: 'warning' },
   immobile: { label: 'Can\'t move', icon: 'mdi-alert-circle-outline', color: 'warning' },
+  unsupported: { label: 'Not supported', icon: 'mdi-help-circle-outline', color: 'warning' },
   noroute: { label: 'No route', icon: 'mdi-close-circle-outline', color: 'error' },
   none: { label: 'Nothing to move', icon: 'mdi-close-circle-outline', color: 'error' },
 }
@@ -246,7 +311,7 @@ const unique = (values) => [...new Set(values)]
 
 export default {
   name: 'TransportPage',
-  components: { AvoidOptions, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
@@ -262,12 +327,14 @@ export default {
       ...avoidFields('transport'),
       ordersSearch: { key: 'transportOrdersSearch', default: '', scope: 'race' },
       classesTable: tableView('transportClassesTable', { sortBy: ['tonsYear'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      fleetsTable: tableView('transportFleetsTable', { sortBy: ['tonsYear'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       ordersTable: tableView('transportOrdersTable', { sortBy: ['demand'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
   data() {
     return {
       expanded: [],
+      fleetsExpanded: [],
       optionList: OPTIONS,
       pageSizes: PAGE_SIZES,
       STATUS,
@@ -472,6 +539,57 @@ export default {
 
     civilianRuns() {
       return this.runs.filter((run) => run.civilian)
+    },
+
+    // The military fleets that have a hold or colony bays, each with all its ships as one fleet and whether it can cross jump points that are not stabilised on its own.
+    fleetGroups() {
+      const byFleet = new Map()
+
+      this.fleetShips.forEach((ship) => {
+        if (!byFleet.has(ship.FleetID)) {
+          byFleet.set(ship.FleetID, { FleetID: ship.FleetID, FleetName: ship.FleetName, ships: [] })
+        }
+
+        byFleet.get(ship.FleetID).ships.push(ship)
+      })
+
+      return [...byFleet.values()].map((fleet) => ({ ...fleet, canTransit: fleetCanTransit(fleet.ships) }))
+    },
+
+    // The fleets read: { loading, failed, error } of the optional ships read.
+    fleetShipsState() {
+      const state = this.loadErrors.fleetShips
+
+      return { loading: state === undefined, failed: typeof state === 'string', error: typeof state === 'string' ? state : '' }
+    },
+
+    // One entry per picked military fleet, sailing as one, on the route: every ship at the fleet's one speed.
+    fleetRuns() {
+      const { endpoints, destination } = this
+      const chosen = new Set(this.chosenFleetIds)
+
+      if (!destination || this.loadErrors.fleetShips !== null) {
+        return []
+      }
+
+      return this.fleetGroups.filter((fleet) => !chosen.size || chosen.has(fleet.FleetID)).map((fleet) => this.fleetRunOf(fleet, endpoints))
+    },
+
+    fleetHeaders() {
+      return [
+        { text: 'Fleet', value: 'FleetName' },
+        { text: 'Ships', value: 'ships', align: 'end' },
+        { text: 'Cargo / trip', value: 'cargo', align: 'end' },
+        { text: 'Colonists / trip', value: 'colonists', align: 'end' },
+        { text: 'Speed', value: 'speed', align: 'end' },
+        { text: 'Round trip', value: 'tripDays', align: 'end' },
+        { text: 'Trips / yr', value: 'trips', align: 'end' },
+        { text: 'Tons / yr', value: 'tonsYear', align: 'end' },
+        { text: 'Colonists / yr', value: 'colonistsYear', align: 'end' },
+        { text: 'Fuel / trip', value: 'fuel', align: 'end' },
+        { text: 'Status', value: 'statusSort' },
+        { text: '', value: 'data-table-expand' },
+      ]
     },
 
     // What a shipping line is paid over the run, at the rates of the save's game version: one unit of each category over the measured route in billion km, with the result the figures rest on, or why no figure is given. Null while shipping lines are off or no destination is picked.
@@ -776,6 +894,75 @@ export default {
       return `Can't pass ${nameList(blockers)}.${hint}`
     },
 
+    retryFleetShips() {
+      this.$asyncComputed.fleetShips.update()
+    },
+
+    // A fleet sailing together on a route: the one speed its ships share, what it carries by the holds that count, how long a round trip takes and whether it can run, with each ship as a participant.
+    fleetRunOf(fleet, endpoints) {
+      const profile = fleetProfile(fleet.ships, fleet, { basis: 'maximum' })
+      const reach = this.reachOf({ FleetID: fleet.FleetID, FleetName: fleet.FleetName, canTransit: fleet.canTransit, civilian: false })
+      const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
+      const ok = profile.status === 'ok'
+      const base = {
+        key: String(fleet.FleetID),
+        FleetID: fleet.FleetID,
+        FleetName: fleet.FleetName,
+        ships: profile.participants.length,
+        independent: profile.participants.filter((participant) => participant.role === 'independent').length,
+        cargo: ok ? profile.cargo.counted.cargo : null,
+        colonists: ok ? profile.cargo.counted.colonists : null,
+        speed: profile.cruise,
+        savedSpeed: profile.savedSpeed,
+        effectiveMax: profile.effectiveMax,
+        jumps: 0,
+        km: 0,
+        tripSeconds: null,
+        travelSeconds: null,
+        handlingSeconds: null,
+        tripDays: null,
+        trips: null,
+        tonsYear: null,
+        colonistsYear: null,
+        fuel: null,
+        fuelShare: null,
+        fuelLimiting: '',
+        provenance: null,
+        handlingRows: [],
+        participantRows: participantRows(profile),
+        speeds: { cruise: profile.cruise, cruiseSource: profile.cruiseSource, saved: profile.savedSpeed, useMaximum: profile.useMaximumSpeed, effectiveMax: profile.effectiveMax, designMax: profile.designMax, limiting: profile.limiting ? profile.limiting.name : '' },
+        reasons: profile.reasons.map((reason) => capital(reason.text)),
+        conditions: profile.notes.map((note) => capital(note.text)),
+        statusSort: 4,
+        status: 'noroute',
+        note: '',
+      }
+
+      if (!ok) {
+        return { ...base, status: profile.status, statusSort: 1, provenance: fleetTripResult(fleetTrip(profile, 0, endpoints), profile), note: base.reasons.join('; ') }
+      } else if (reach.pending) {
+        return { ...base, status: 'unknown', statusSort: 1, pending: true, provenance: unreadResult(), note: this.avoidNote.text }
+      } else if (!reach.route) {
+        return { ...base, note: this.reachNote(fleet, reach) }
+      }
+
+      const trip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const works = trip.status === 'ok'
+      const left = profile.cargo.left.ships.length
+      const run = { ...base, ...this.safeFields(reach), pathResult: pathResult(reach.route, this.avoid), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: fleetTripResult(trip, profile), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1 }
+      const problems = trip.problems.map((problem) => capital(problem.text)).join('; ')
+
+      if (works) {
+        return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: trip.tonsYear, colonistsYear: trip.colonistsYear, fuel: trip.fuelPerTrip, fuelShare: trip.fuelShare, fuelLimiting: trip.fuelLimiting ? trip.fuelLimiting.ShipName : '', note: left ? `The holds of ${left} carried or towed craft are not counted.` : '' }
+      } else if (trip.status === 'range') {
+        return { ...run, note: `A round trip needs ${this.count(trip.fuelShare * 100)}% of the tank of ${trip.fuelLimiting.ShipName}.` }
+      } else if (trip.status === 'unknown') {
+        return { ...run, note: `Not known whether the fleet can run: ${problems}.` }
+      }
+
+      return { ...run, note: problems ? `${problems}.` : '' }
+    },
+
     tripTitle(run) {
       return `${this.duration(run.travelSeconds / SECONDS_PER_DAY)} flying at ${this.count(run.speed)} km/s, ${this.duration(run.handlingSeconds / SECONDS_PER_DAY)} loading and unloading${run.limiting ? `, the slowest stop set by ${run.limiting.ship.ShipName} at a loading strength of ${this.count(run.limiting.strength, 1)}` : ''}`
     },
@@ -856,6 +1043,17 @@ export default {
         }
 
         return await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, FCT_Ship.MothershipID, FCT_Fleet.FleetName, FCT_Fleet.ShippingLine, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.MaxSpeed > 1 and FCT_Ship.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0)) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName`).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    // The ships of every military fleet that has a hold or colony bays, whole (`loadFleetShips`): what the fleets sailing together are profiled from. Optional, so the page renders without it and the fleets panel says so while it is in flight or failed.
+    fleetShips: {
+      get: tracked('fleetShips', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await loadFleetShips(this.database, { GameID: this.GameID, RaceID: this.RaceID, fleetWhere: `FCT_Fleet.ShippingLine = 0 and FCT_Fleet.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0 or carrierClass.CargoCapacity is null or carrierClass.ColonistCapacity is null))` })
       }),
       default: [],
     },

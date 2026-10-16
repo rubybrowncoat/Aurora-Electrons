@@ -36,14 +36,14 @@ registerRule({
   note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it) and the officers' Logistics bonuses there (the handling times count an unread officer as no bonus and say so). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so) and the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
   '/warnings': (key) => key.startsWith('check:'),
   '/lagrange': (key) => key === 'ships',
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport',
+  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips',
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport',
 })
 

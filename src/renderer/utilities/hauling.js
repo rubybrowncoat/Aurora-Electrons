@@ -54,13 +54,13 @@ registerRule({
 })
 
 registerRule({
-  id: 'hauling.fuelPerYear',
+  id: 'hauling.fleetFuelPerYear',
   versions: HAULING_VERSIONS,
   units: 'L/yr',
   verification: 'estimated',
-  structure: ['FCT_ShipClass.EnginePower, FuelEfficiency', 'FCT_Fleet.Speed'],
-  note: 'Litres an hour at full power (engine power x fuel use per engine-power hour, as the Propulsion page\'s rule gives it) x hours under way x cycles a year. Refuelling and overhauls are not counted.',
-  assumptions: ['full power while moving'],
+  structure: ['FCT_ShipClass.FuelEfficiency, Size', 'FCT_ClassComponent', 'FCT_DamagedComponent', 'FCT_Fleet.Speed, UseMaximumSpeed'],
+  note: 'Litres an hour of each ship under its own power: its undamaged engine power x fuel use per engine-power hour x the share of its own top speed the fleet sails at, summed over those ships (a ship in a hangar or under tow burns none), x hours under way x cycles a year. The fleet sails at its saved speed held to what its slowest ship can reach. Refuelling and overhauls are not counted.',
+  assumptions: ['each ship burns at its own share of its own top speed, not at full power', 'the fleet\'s saved speed (held to its maximum) all the way'],
 })
 
 registerRule({
@@ -93,7 +93,7 @@ export const routeResults = (route, year, handling) => {
       cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, inputs, assumptions }),
       freight: ofRule({ rule: 'hauling.freightMoved', value: year.minerals + year.installations, inputs, assumptions }),
       colonists: ofRule({ rule: 'hauling.colonistsMoved', value: year.colonists, inputs, assumptions }),
-      fuel: ofRule({ rule: 'hauling.fuelPerYear', value: year.fuel, inputs, assumptions }),
+      fuel: ofRule({ rule: 'hauling.fleetFuelPerYear', value: year.fuel, inputs, assumptions }),
     }
   } else if (route.km !== null && handling.unknown.length && !handling.blocked.length) {
     const missing = missingInputsOf(handling.unknown)
@@ -102,7 +102,7 @@ export const routeResults = (route, year, handling) => {
       cycle: unavailable({ rule: 'hauling.cycleTime', missing }),
       freight: unavailable({ rule: 'hauling.freightMoved', missing }),
       colonists: unavailable({ rule: 'hauling.colonistsMoved', missing }),
-      fuel: unavailable({ rule: 'hauling.fuelPerYear', missing }),
+      fuel: unavailable({ rule: 'hauling.fleetFuelPerYear', missing }),
     }
   }
 
