@@ -15,6 +15,7 @@
             </span>
           </div>
           <div v-if="avoidNote" class="panel-body py-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
+          <route-positions v-if="planPositions.records.length" :positions="planPositions" :state="positionState" class="panel-body py-2" @retry="retryPosition" />
           <v-data-table :headers="planHeaders" :items="planRows" item-key="key" :expanded.sync="planExpanded" show-expand single-expand :sort-by.sync="planTable.sortBy" :sort-desc.sync="planTable.sortDesc" :items-per-page.sync="planTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" :no-data-text="planEmptyText" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.toName`]="{ item }">
               <div class="py-2">
@@ -30,15 +31,15 @@
               <span class="text-no-wrap">{{ tons(item.tonnes) }}</span>
             </template>
             <template #[`item.km`]="{ item }">
-              <div class="text-no-wrap">{{ item.km ? gkm(item.km) : 'In system' }}</div>
-              <div class="caption text--secondary text-no-wrap">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+              <div class="text-no-wrap">{{ item.km ? gkm(item.km) : 'In system' }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+              <div class="caption text--secondary text-no-wrap">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }}<provenance-mark :result="item.jumpsResult" /></div>
               <div v-if="item.detourText" class="caption route-cell" data-detour>{{ item.detourText }}</div>
               <div v-if="item.ungated" class="caption warning--text text-no-wrap" :title="ungatedTitle">{{ item.ungated }} not stabilised</div>
             </template>
             <template #[`item.bestSort`]="{ item }">
               <template v-if="item.best">
                 <div class="text-no-wrap">{{ item.best.shipClass.ClassName }}</div>
-                <div class="caption text--secondary text-no-wrap">{{ count(item.best.holds) }} {{ item.best.holds === 1 ? 'hold' : 'holds' }}, {{ fixed(item.best.oneShipDays, 1) }} d for one ship</div>
+                <div class="caption text--secondary text-no-wrap">{{ count(item.best.holds) }} {{ item.best.holds === 1 ? 'hold' : 'holds' }}, {{ fixed(item.best.oneShipDays, 1) }} d for one ship<provenance-mark v-if="item.best.oneShipResult" :result="item.best.oneShipResult" /></div>
               </template>
               <span v-else class="text--secondary">{{ freighters.length ? 'No class can' : 'No freighters' }}</span>
             </template>
@@ -61,8 +62,8 @@
                       <td class="caption">{{ estimate.shipClass.ClassName }}</td>
                       <td class="caption text-right">{{ count(estimate.holds) }}</td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.tripDays, 1)} d` : '—' }}<provenance-mark v-if="estimate.result" :result="estimate.result" /></td>
-                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.oneShipDays, 1)} d` : '—' }}</td>
-                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.classDays, 1)} d with ${count(estimate.shipClass.Ships)}` : '—' }}</td>
+                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.oneShipDays, 1)} d` : '—' }}<provenance-mark v-if="estimate.oneShipResult" :result="estimate.oneShipResult" /></td>
+                      <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.classDays, 1)} d with ${count(estimate.shipClass.Ships)}` : '—' }}<provenance-mark v-if="estimate.classResult" :result="estimate.classResult" /></td>
                       <td class="caption warning--text">{{ estimate.note }}</td>
                     </tr>
                   </tbody>
@@ -85,6 +86,7 @@
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
           <div v-if="handlingSupportNote" class="panel-body py-2 caption" :class="handlingSupportNote.tone" data-handling-note>{{ handlingSupportNote.text }}<v-btn v-if="handlingSupportState.failed" x-small text class="ml-2" @click="retryHandlingSupport">Retry</v-btn></div>
+          <route-positions v-if="fleetPositions.records.length" :positions="fleetPositions" :state="positionState" class="panel-body py-2" @retry="retryPosition" />
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
@@ -96,7 +98,7 @@
               <div class="caption route-cell">{{ item.stopsText || 'No stops, only moves' }}</div>
             </template>
             <template #[`item.kmSort`]="{ item }">
-              <span v-if="item.route.km !== null" class="text-no-wrap">{{ gkm(item.route.km) }}</span>
+              <span v-if="item.route.km !== null" class="text-no-wrap">{{ gkm(item.route.km) }}<provenance-mark v-if="item.distanceResult" :result="item.distanceResult" /></span>
               <v-tooltip v-else top>
                 <template #activator="{ on }">
                   <span class="warning--text" v-on="on">Can't trace</span>
@@ -152,7 +154,7 @@
                         <td class="caption">{{ leg.from }}</td>
                         <td class="caption text--secondary">→</td>
                         <td class="caption">{{ leg.to }}</td>
-                        <td class="caption text-right text-no-wrap">{{ gkm(leg.km) }}</td>
+                        <td class="caption text-right text-no-wrap">{{ gkm(leg.km) }}<provenance-mark v-if="item.legResults[index].status !== 'confirmed'" :result="item.legResults[index]" /></td>
                       </tr>
                     </tbody>
                   </v-simple-table>
@@ -181,7 +183,7 @@
                 <template #[`item.destination`]="{ item }">
                   <span>{{ item.destination }}</span><page-link :to="colonyLink(item.PopulationID)" :name="item.destination" class="ml-1" />
                 </template>
-                <template #[`item.amount`]="{ item }">{{ item.kind === 'colonists' ? `${count(item.amount)} people` : tons(item.amount) }}</template>
+                <template #[`item.amount`]="{ item }">{{ item.kind === 'colonists' ? `${count(item.amount)} people` : tons(item.amount) }}<provenance-mark :result="item.result" /></template>
               </v-data-table>
               <div class="panel-foot caption text--secondary">Each unload is credited with the cargo the fleet holds when it gets there, so a route that unloads at several colonies counts every hold it delivers.</div>
             </v-card>
@@ -218,24 +220,29 @@ import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
+import RoutePositions from '../components/page/RoutePositions.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import avoidRoutes from '../mixins/avoid-routes'
 import capabilityGates from '../mixins/capability-gates'
 import handlingSupport from '../mixins/handling-support'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
+import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
 import { classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { fleetProfile, hauledFleet, loadFleetShips, participantRows } from '../utilities/fleet-profile'
-import { loadJumpPoints } from '../utilities/jump-graph'
+import { loadJumpPoints, routeResults as routeFigures } from '../utilities/jump-graph'
 import { loadHandlingSupport } from '../utilities/handling-support'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
+import { ofRule } from '../utilities/provenance'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
+import { distanceResult } from '../utilities/route-plan'
+import { colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions } from '../utilities/route-position'
 import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, handlingRows, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -251,9 +258,10 @@ const INPUT_LABELS = {
   formulaVersion: 'the save\'s schema',
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
+  ...POSITION_LABELS,
 }
 // The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems']
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
@@ -297,11 +305,12 @@ const cycleStops = (orders, raceId) => {
 
 export default {
   name: 'HaulingPage',
-  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
     handlingSupport,
+    routePosition,
     loadState(INPUT_LABELS),
     persistedView({
       planReserves: { key: 'haulingPlanReserves', default: false },
@@ -381,7 +390,10 @@ export default {
         const speedText = profile.status === 'ok' ? `${this.count(profile.cruise)} km/s` : 'no speed'
         const savedText = profile.status === 'ok' && Number.isFinite(profile.savedSpeed) && profile.savedSpeed !== profile.cruise ? `(saved ${this.count(profile.savedSpeed)})` : ''
         const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
-        const results = routeResults(route, year, handling)
+        const positions = routePositions(orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)]), { facts: this.positionRead })
+        const legPositions = route.legs.map((_leg, index) => routePositions([orderExitEndpoint(orders[index]), orderEndpoint(orders[(index + 1) % orders.length])], { facts: this.positionRead }))
+        const found = routeResults(route, year, handling)
+        const results = found && Object.fromEntries(Object.entries(found).map(([name, result]) => [name, withPositions(result, positions)]))
         // A stop does something where it goes: transits and plain moves only pass through.
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
         const freightText = year ? [year.minerals ? `${this.tons(year.minerals)} minerals` : null, year.installations ? `${this.tons(year.installations)} installations` : null].filter(Boolean).join(', ') : ''
@@ -415,6 +427,10 @@ export default {
           unknown: handling.unknown,
           unknownText: handling.unknown.map((problem) => problem.text).join('; '),
           results,
+          positions,
+          legPositions,
+          legResults: route.legs.map((leg, index) => withPositions(distanceResult(leg.km), legPositions[index])),
+          distanceResult: route.km !== null && positions.caveat ? withPositions(distanceResult(route.km), positions) : null,
           freightText,
           colonistsText,
           kmSort: route.km ?? Infinity,
@@ -436,14 +452,15 @@ export default {
 
         row.cargo.deliveries.forEach((delivery) => {
           const key = `${delivery.PopulationID}-${delivery.kind}`
-          const total = (totals[key] = totals[key] || { key, PopulationID: delivery.PopulationID, destination: delivery.name, kind: delivery.kind, amount: 0, fleets: new Set() })
+          const total = (totals[key] = totals[key] || { key, PopulationID: delivery.PopulationID, destination: delivery.name, kind: delivery.kind, amount: 0, fleets: new Set(), records: [] })
 
           total.amount += row.year.trips * delivery.amount
           total.fleets.add(row.FleetName)
+          total.records.push(...row.positions.records)
         })
       })
 
-      return Object.values(totals).map((total) => ({ ...total, fleetCount: total.fleets.size, fleetNames: [...total.fleets].join(', ') })).sort((a, b) => b.amount - a.amount)
+      return Object.values(totals).map(({ records, ...total }) => ({ ...total, fleetCount: total.fleets.size, fleetNames: [...total.fleets].join(', '), result: withPositions(ofRule({ rule: 'hauling.deliveries', value: total.amount, units: total.kind === 'colonists' ? 'colonists/yr' : 't/yr', inputs: { present: ['the saved orders of the fleets'] } }), summarisePositions(records)) })).sort((a, b) => b.amount - a.amount)
     },
 
     classRows() {
@@ -462,6 +479,16 @@ export default {
       return this.avoidPending ? { hauls: [], unmet: [] } : planHauls(this.colonyStocks, { jumpPoints: this.jumpPoints, reserves: this.planReserves, avoid: this.avoid })
     },
 
+    // The positions the planned hauls rest on: every colony they draw from or deliver to.
+    planPositions() {
+      return summarisePositions(this.plan.hauls.flatMap((haul) => routePositions([colonyPlaceEndpoint(haul.from), colonyPlaceEndpoint(haul.to)], { facts: this.positionRead }).records))
+    },
+
+    // The positions the repeating routes rest on: every order's destination.
+    fleetPositions() {
+      return summarisePositions(this.routeRows.flatMap((row) => row.positions.records))
+    },
+
     freighters() {
       return this.classes.filter((shipClass) => shipClass.CargoCapacity > 0)
     },
@@ -477,12 +504,17 @@ export default {
       const reasons = (item) => Object.keys(HAUL_REASONS).filter((reason) => item[reason] >= 1).map((reason) => `${this.tons(item[reason])} ${HAUL_REASONS[reason].label}`).join(', ')
 
       return this.plan.hauls.map((haul) => {
+        const positions = routePositions([colonyPlaceEndpoint(haul.from), colonyPlaceEndpoint(haul.to)], { facts: this.positionRead })
         const estimates = freighters.map((shipClass) => {
           const estimate = haulByClass(haul, shipClass, shuttleTechnology, formulaVersion)
           const problems = estimate.problems.map((problem) => problem.text).join('; ')
           const note = estimate.status === 'range' ? 'A round trip needs more fuel than its tanks hold' : estimate.status === 'blocked' ? `Can't load or unload: ${problems}` : estimate.status === 'unknown' ? `Not known: ${problems}` : estimate.status === 'immobile' ? 'The class has no speed' : ''
 
-          return { ...estimate, timed: estimate.status === 'ok' || estimate.status === 'range', note, result: tripResult(estimate) }
+          const timed = estimate.status === 'ok' || estimate.status === 'range'
+          const result = withPositions(tripResult(estimate), positions)
+          const days = (value) => (timed ? figureOf({ rule: 'hauling.haulDays', results: [result], value, units: 'days' }) : result)
+
+          return { ...estimate, timed, note, result, oneShipResult: days(estimate.oneShipDays), classResult: days(estimate.classDays) }
         }).sort((a, b) => Number(b.status === 'ok') - Number(a.status === 'ok') || Number(b.timed) - Number(a.timed) || (a.oneShipDays ?? 0) - (b.oneShipDays ?? 0))
         const best = estimates.find((estimate) => estimate.status === 'ok') || null
         const delivered = mineralDeliveries[haul.to.PopulationID]
@@ -498,7 +530,8 @@ export default {
           mineralsText: haul.minerals.map((mineral) => `${mineral.name} ${this.tons(mineral.tonnes)}`).join(', '),
           reasonText: reasons({ queue: haul.queue, reserve: haul.tonnes - haul.queue }),
           detourText: haul.detour ? detourText(haul.detour, this.gkm) : '',
-          pathResult: this.avoid.active ? pathResult({ km: haul.km }, this.avoid) : null,
+          pathResult: this.avoid.active || positions.caveat ? withPositions(this.avoid.active ? pathResult({ km: haul.km }, this.avoid) : distanceResult(haul.km), positions) : null,
+          jumpsResult: routeFigures({ jumps: haul.jumps, km: haul.km }).jumps,
           mineralDetail: `${haul.minerals.map((mineral) => `${mineral.name}: ${reasons(mineral)}`).join('. ')}.`,
           deliveredText: delivered ? `The routes already bring ${this.tons(delivered)} of minerals here a year` : '',
           transportLink: linkTo.transport(ends),
@@ -692,7 +725,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
+        return await this.database.query(`select FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder, FCT_MoveOrders.MoveActionID, DIM_MoveAction.Description as ActionName, FCT_MoveOrders.Description, FCT_MoveOrders.DestinationType, FCT_MoveOrders.DestinationID, case when (FCT_MoveOrders.DestinationType = 1 and DIM_MoveAction.TransitOrder > 0) or (FCT_MoveOrders.DestinationType = 12 and FCT_MoveOrders.MoveActionID = 124) then 1 else 0 end as Jumps, FCT_MoveOrders.PopulationID, FCT_MoveOrders.MaxItems, FCT_MoveOrders.OrderDelay, FCT_Population.PopName, FCT_Population.RaceID as PopulationRaceID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'SystemID')} as SystemID, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Xcor')} as X, ${orderPoint(['VIR_Exit', 'VIR_LagrangeIn'], 'Ycor')} as Y, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'SystemID')} as ExitSystemID, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Xcor')} as ExitX, ${orderPoint(['VIR_Arrival', 'VIR_LagrangeOut'], 'Ycor')} as ExitY, case FCT_MoveOrders.DestinationType when 1 then VIR_Arrival.WarpPointID when 12 then VIR_LagrangeOut.LagrangePointID else FCT_MoveOrders.DestinationID end as ExitDestinationID, VIR_ArrivalSystem.Name as ArrivalSystemName, VIR_Survey.SurveyLocationID, case when FCT_Population.PopulationID is null then null else coalesce(VIR_Service.ShuttleCapacity, 0) end as ShuttleCapacity, VIR_Service.ServiceNames from FCT_MoveOrders inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_MoveOrders.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 left join DIM_MoveAction on DIM_MoveAction.MoveActionID = FCT_MoveOrders.MoveActionID left join FCT_JumpPoint as VIR_Exit on FCT_MoveOrders.DestinationType = 1 and VIR_Exit.WarpPointID = FCT_MoveOrders.DestinationID left join FCT_JumpPoint as VIR_Arrival on FCT_MoveOrders.DestinationType = 1 and VIR_Arrival.WarpPointID = case when DIM_MoveAction.TransitOrder > 0 then (case when FCT_MoveOrders.NewWarpPointID > 0 then FCT_MoveOrders.NewWarpPointID else VIR_Exit.WPLink end) else FCT_MoveOrders.DestinationID end left join FCT_RaceSysSurvey as VIR_ArrivalSystem on VIR_ArrivalSystem.SystemID = VIR_Arrival.SystemID and VIR_ArrivalSystem.RaceID = FCT_MoveOrders.RaceID and VIR_ArrivalSystem.GameID = FCT_MoveOrders.GameID left join FCT_SystemBody on FCT_MoveOrders.DestinationType in (2, 15) and FCT_SystemBody.SystemBodyID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeIn on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeIn.LagrangePointID = FCT_MoveOrders.DestinationID left join FCT_LagrangePoint as VIR_LagrangeOut on FCT_MoveOrders.DestinationType = 12 and VIR_LagrangeOut.LagrangePointID = case when FCT_MoveOrders.MoveActionID = 124 then FCT_MoveOrders.DestinationItemID else FCT_MoveOrders.DestinationID end left join FCT_SurveyLocation as VIR_Survey on FCT_MoveOrders.DestinationType = 4 and VIR_Survey.GameID = FCT_MoveOrders.GameID and VIR_Survey.SystemID = FCT_MoveOrders.StartSystemID and VIR_Survey.LocationNumber = FCT_MoveOrders.DestinationID left join FCT_Waypoint as VIR_Waypoint on FCT_MoveOrders.DestinationType = 5 and VIR_Waypoint.GameID = FCT_MoveOrders.GameID and VIR_Waypoint.WaypointID = FCT_MoveOrders.DestinationID left join FCT_Contacts as VIR_Contact on FCT_MoveOrders.DestinationType = 6 and VIR_Contact.GameID = FCT_MoveOrders.GameID and VIR_Contact.UniqueID = FCT_MoveOrders.DestinationID left join FCT_Lifepods as VIR_Lifepod on FCT_MoveOrders.DestinationType = 7 and VIR_Lifepod.GameID = FCT_MoveOrders.GameID and VIR_Lifepod.LifepodID = FCT_MoveOrders.DestinationID left join FCT_Wrecks as VIR_Wreck on FCT_MoveOrders.DestinationType = 8 and VIR_Wreck.GameID = FCT_MoveOrders.GameID and VIR_Wreck.WreckID = FCT_MoveOrders.DestinationID left join FCT_Fleet as VIR_Destination on FCT_MoveOrders.DestinationType = 10 and VIR_Destination.GameID = FCT_MoveOrders.GameID and VIR_Destination.FleetID = FCT_MoveOrders.DestinationID left join FCT_AetherGates as VIR_AetherGate on FCT_MoveOrders.DestinationType = 14 and VIR_AetherGate.GameID = FCT_MoveOrders.GameID and VIR_AetherGate.AetherGateID = FCT_MoveOrders.DestinationID left join FCT_Population on FCT_Population.PopulationID = FCT_MoveOrders.PopulationID and FCT_MoveOrders.PopulationID > 0 ${shuttleServiceJoin(this.GameID, 'FCT_MoveOrders.PopulationID')} where FCT_MoveOrders.GameID = ${this.GameID} and FCT_MoveOrders.RaceID = ${this.RaceID} order by FCT_MoveOrders.FleetID, FCT_MoveOrders.MoveOrder`).then(([items]) => items)
       }),
       default: [],
     },

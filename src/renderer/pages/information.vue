@@ -74,6 +74,7 @@
         </div>
 
         <div v-if="avoidNote" class="mt-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
+        <route-positions v-if="endpointPositions" :positions="endpointPositions" :state="positionState" class="mt-2" @retry="retryPosition" />
 
         <stat-tiles :tiles="tiles" class="mt-1" />
 
@@ -108,13 +109,13 @@
               </div>
               <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
-            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}</span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t</span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}</span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}<provenance-mark :result="item.results.trips" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t<provenance-mark :result="item.results.tonsYear" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}<provenance-mark :result="item.results.colonistsYear" /></span><span v-else class="text--secondary">—</span></template>
             <template #[`item.fuel`]="{ item }">
               <div v-if="item.fuel !== null" class="py-2 text-no-wrap">
-                <div>{{ count(item.fuel) }} L</div>
-                <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of a tank</div>
+                <div>{{ count(item.fuel) }} L<provenance-mark :result="item.results.fuel" /></div>
+                <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of a tank<provenance-mark :result="item.results.fuelShare" /></div>
               </div>
               <span v-else class="text--secondary">—</span>
             </template>
@@ -170,13 +171,13 @@
               </div>
               <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
-            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
-            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}<provenance-mark rule="transport.fleetTrip" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.trips`]="{ item }"><span v-if="item.trips !== null" class="text-no-wrap">{{ count(item.trips, 1) }}<provenance-mark :result="item.results.trips" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.tonsYear`]="{ item }"><span v-if="item.tonsYear !== null" class="text-no-wrap">{{ count(item.tonsYear) }} t<provenance-mark :result="item.results.tonsYear" /></span><span v-else class="text--secondary">—</span></template>
+            <template #[`item.colonistsYear`]="{ item }"><span v-if="item.colonistsYear !== null" class="text-no-wrap">{{ count(item.colonistsYear) }}<provenance-mark :result="item.results.colonistsYear" /></span><span v-else class="text--secondary">—</span></template>
             <template #[`item.fuel`]="{ item }">
               <div v-if="item.fuel !== null" class="py-2 text-no-wrap">
-                <div>{{ count(item.fuel) }} L<provenance-mark rule="transport.fleetBurn" /></div>
-                <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of the tank of {{ item.fuelLimiting }}<provenance-mark rule="transport.fleetBurn" /></div>
+                <div>{{ count(item.fuel) }} L<provenance-mark :result="item.results.fuel" /></div>
+                <div class="caption text--secondary">{{ count(item.fuelShare * 100) }}% of the tank of {{ item.fuelLimiting }}<provenance-mark :result="item.results.fuelShare" /></div>
               </div>
               <span v-else class="text--secondary">—</span>
             </template>
@@ -246,6 +247,7 @@ import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
+import RoutePositions from '../components/page/RoutePositions.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import capabilityGates from '../mixins/capability-gates'
 import avoidRoutes from '../mixins/avoid-routes'
@@ -254,6 +256,7 @@ import deepLink from '../mixins/deep-link'
 import handlingSupport from '../mixins/handling-support'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
+import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import { loadHandlingSupport } from '../utilities/handling-support'
 import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
@@ -265,6 +268,8 @@ import { amountText, describeTariffVersion, payoutRows } from '../utilities/civi
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
+import { distanceResult } from '../utilities/route-plan'
+import { figureOf, placeEndpoint, routePositions, viaEndpoints, withPositions } from '../utilities/route-position'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -278,9 +283,10 @@ const INPUT_LABELS = {
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   fleetShips: 'the ships of the fleets',
+  ...POSITION_LABELS,
 }
 // The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together).
-const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips']
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems', 'fleetShips', ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -311,13 +317,14 @@ const unique = (values) => [...new Set(values)]
 
 export default {
   name: 'TransportPage',
-  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
     countFormat,
     deepLink,
     handlingSupport,
+    routePosition,
     loadState(INPUT_LABELS),
     persistedView({
       fromKey: { key: 'transportFrom', default: null, scope: 'race' },
@@ -395,6 +402,11 @@ export default {
       const place = this.placeByKey[this.toKey]
 
       return place && this.origin && place.key !== this.origin.key ? place : null
+    },
+
+    // The positions the origin and the destination are held at, for the strip above the figures: null until there is a destination. The Lagrange points a route may jump between are stated on the run's own figures.
+    endpointPositions() {
+      return this.origin && this.destination ? routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination)], { facts: this.positionRead }) : null
     },
 
     // The run as a link names it: the origin, and the destination once there is one. Not known until the places are read.
@@ -666,26 +678,34 @@ export default {
       const civilianUnknown = this.civilianRuns.some((run) => run.status === 'unknown')
       const cargo = sum(working, 'cargo')
       const colonists = sum(working, 'colonists')
+      const tonsYear = sum(working, 'tonsYear')
+      const colonistsYear = sum(working, 'colonistsYear')
+      const civilianTonsYear = sum(civilian, 'tonsYear')
+      const yearOf = (runs, rule, value, units) => figureOf({ rule, results: runs.map((run) => run.provenance), value, units })
 
       return [
         {
           label: 'Freight a year',
-          value: working.length ? `${this.count(sum(working, 'tonsYear'))} t` : '—',
+          value: working.length ? `${this.count(tonsYear)} t` : '—',
+          result: yearOf(working, 'transport.freightPerYear', tonsYear, 't/yr'),
           note: working.length ? [cargo ? `${this.count(cargo)} t a trip in ${this.count(sum(working, 'ships'))} ships` : 'No fleet that can run has a cargo hold', idleNote].filter(Boolean).join('; ') : none,
         },
         {
           label: 'Colonists a year',
-          value: working.length ? this.count(sum(working, 'colonistsYear')) : '—',
+          value: working.length ? this.count(colonistsYear) : '—',
+          result: yearOf(working, 'transport.freightPerYear', colonistsYear, 'colonists/yr'),
           note: !working.length ? none : colonists ? `${this.count(colonists)} a trip` : 'No fleet that can run has colony bays',
         },
         {
           label: 'Trips a year',
           value: working.length ? this.count(trips, 1) : '—',
+          result: yearOf(working, 'transport.freightPerYear', trips, 'trips/yr'),
           note: !working.length ? none : shortest === longest ? `${first.jumps} ${first.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(first.km)} one way` : `${this.distance(shortest)} to ${this.distance(longest)} one way`,
         },
         {
           label: 'Civilian freight a year',
-          value: !this.CivilianShippingLinesActive ? 'Off in this game' : civilian.length ? `${this.count(sum(civilian, 'tonsYear'))} t` : '—',
+          value: !this.CivilianShippingLinesActive ? 'Off in this game' : civilian.length ? `${this.count(civilianTonsYear)} t` : '—',
+          result: this.CivilianShippingLinesActive ? yearOf(civilian, 'transport.civilianFreight', civilianTonsYear, 't/yr') : null,
           note: !this.CivilianShippingLinesActive ? 'Shipping lines are not run here' : !this.destination ? 'Pick a destination above' : civilian.length ? `${this.count(sum(civilian, 'colonistsYear'))} colonists a year, from ${this.count(sum(civilian, 'ships'))} of ${this.count(civilianShips)} ships` : civilianShips ? (civilianUnknown ? 'None of the shipping line ships is known to work the route' : 'None of the shipping line ships can work the route') : 'The shipping lines have no ships',
         },
       ]
@@ -843,6 +863,7 @@ export default {
         fuel: null,
         fuelShare: null,
         provenance: null,
+        results: null,
         statusSort: 4,
         status: 'noroute',
         note: '',
@@ -858,11 +879,15 @@ export default {
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
-      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: tripResult(trip), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), statusSort: works ? 0 : 1 }
+      const positions = this.positionsOf(reach)
+      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(tripResult(trip), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), statusSort: works ? 0 : 1 }
       const problems = trip.problems.map((problem) => `${problem.text.charAt(0).toUpperCase()}${problem.text.slice(1)}`).join('; ')
 
       if (works) {
-        return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: base.cargo === null ? null : base.cargo * trip.trips, colonistsYear: base.colonists === null ? null : base.colonists * trip.trips, fuel: trip.fuelPerShip * count, fuelShare: trip.fuelShare }
+        const figure = (rule, value, units) => figureOf({ rule, results: [run.provenance], value, units })
+        const results = { trips: figure('transport.freightPerYear', trip.trips, 'trips/yr'), tonsYear: figure('transport.freightPerYear', base.cargo === null ? null : base.cargo * trip.trips, 't/yr'), colonistsYear: figure('transport.freightPerYear', base.colonists === null ? null : base.colonists * trip.trips, 'colonists/yr'), fuel: figure('transport.fuelPerTrip', trip.fuelPerShip * count, 'L'), fuelShare: figure('transport.fuelPerTrip', trip.fuelShare * 100, '%') }
+
+        return { ...run, results, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: base.cargo === null ? null : base.cargo * trip.trips, colonistsYear: base.colonists === null ? null : base.colonists * trip.trips, fuel: trip.fuelPerShip * count, fuelShare: trip.fuelShare }
       } else if (status === 'range') {
         return { ...run, note: `A round trip needs ${this.count(trip.fuelShare * 100)}% of a tank.` }
       } else if (status === 'unknown') {
@@ -878,7 +903,27 @@ export default {
     safeFields(reach) {
       const detour = reach.safe && reach.safe.detour
 
-      return { detourText: detour ? detourText(detour, this.distance) : '', pathResult: this.avoid.active && reach.route ? pathResult(reach.route, this.avoid) : null }
+      return { detourText: detour ? detourText(detour, this.distance) : '', pathResult: this.pathOf(reach) }
+    },
+
+    // The positions a run's endpoints and the Lagrange points of its route are held at (utilities/route-position.js).
+    positionsOf(reach) {
+      return routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination), ...viaEndpoints(reach.route)], { facts: this.positionRead })
+    },
+
+    // A run's distance as a result: the avoid settings' own while they are on, else the plain distance, stated with the positions it rests on. Null with no route, or when neither has anything to say.
+    pathOf(reach) {
+      if (!reach.route) {
+        return null
+      }
+
+      const positions = this.positionsOf(reach)
+
+      if (!this.avoid.active && !positions.caveat) {
+        return null
+      }
+
+      return withPositions(this.avoid.active ? pathResult(reach.route, this.avoid) : distanceResult(reach.route.km), positions)
     },
 
     // Why a profile of ships can't sail from the origin to the destination.
@@ -928,6 +973,7 @@ export default {
         fuelShare: null,
         fuelLimiting: '',
         provenance: null,
+        results: null,
         handlingRows: [],
         participantRows: participantRows(profile),
         speeds: { cruise: profile.cruise, cruiseSource: profile.cruiseSource, saved: profile.savedSpeed, useMaximum: profile.useMaximumSpeed, effectiveMax: profile.effectiveMax, designMax: profile.designMax, limiting: profile.limiting ? profile.limiting.name : '' },
@@ -947,13 +993,17 @@ export default {
       }
 
       const trip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const positions = this.positionsOf(reach)
       const works = trip.status === 'ok'
       const left = profile.cargo.left.ships.length
-      const run = { ...base, ...this.safeFields(reach), pathResult: pathResult(reach.route, this.avoid), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: fleetTripResult(trip, profile), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1 }
+      const run = { ...base, ...this.safeFields(reach), pathResult: withPositions(pathResult(reach.route, this.avoid), positions), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1 }
       const problems = trip.problems.map((problem) => capital(problem.text)).join('; ')
 
       if (works) {
-        return { ...run, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: trip.tonsYear, colonistsYear: trip.colonistsYear, fuel: trip.fuelPerTrip, fuelShare: trip.fuelShare, fuelLimiting: trip.fuelLimiting ? trip.fuelLimiting.ShipName : '', note: left ? `The holds of ${left} carried or towed craft are not counted.` : '' }
+        const figure = (rule, value, units) => figureOf({ rule, results: [run.provenance], value, units })
+        const results = { trips: figure('transport.fleetTrip', trip.trips, 'trips/yr'), tonsYear: figure('transport.fleetTrip', trip.tonsYear, 't/yr'), colonistsYear: figure('transport.fleetTrip', trip.colonistsYear, 'colonists/yr'), fuel: figure('transport.fleetBurn', trip.fuelPerTrip, 'L'), fuelShare: figure('transport.fleetBurn', trip.fuelShare * 100, '%') }
+
+        return { ...run, results, tripDays: trip.tripSeconds / SECONDS_PER_DAY, trips: trip.trips, tonsYear: trip.tonsYear, colonistsYear: trip.colonistsYear, fuel: trip.fuelPerTrip, fuelShare: trip.fuelShare, fuelLimiting: trip.fuelLimiting ? trip.fuelLimiting.ShipName : '', note: left ? `The holds of ${left} carried or towed craft are not counted.` : '' }
       } else if (trip.status === 'range') {
         return { ...run, note: `A round trip needs ${this.count(trip.fuelShare * 100)}% of the tank of ${trip.fuelLimiting.ShipName}.` }
       } else if (trip.status === 'unknown') {

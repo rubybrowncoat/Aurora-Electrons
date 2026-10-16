@@ -197,7 +197,7 @@ order by FCT_AetherGates.AetherGateID`)).map((row) => ({
 }))
 
 // What the race holds now, as the game lists it: contacts last updated this increment, other races' only. A contact is stored once for each way it was detected, so the rows of one contact collapse into a place that answers to each row's `UniqueID` (`aliases`, the other place keys), the one a move order names.
-const loadContacts = async (database, context) => (await rows(database, `select max(FCT_Contacts.UniqueID) as UniqueID, group_concat(FCT_Contacts.UniqueID) as UniqueIDs, FCT_Contacts.ContactType, FCT_Contacts.SystemID, FCT_Contacts.ContactName, FCT_Contacts.Xcor, FCT_Contacts.Ycor, FCT_AlienRace.AlienRaceName, FCT_RaceSysSurvey.Name as SystemName
+const loadContacts = async (database, context) => (await rows(database, `select max(FCT_Contacts.UniqueID) as UniqueID, group_concat(FCT_Contacts.UniqueID) as UniqueIDs, FCT_Contacts.ContactType, FCT_Contacts.SystemID, FCT_Contacts.ContactName, FCT_Contacts.Xcor, FCT_Contacts.Ycor, max(FCT_Contacts.LastUpdate) as LastUpdate, FCT_AlienRace.AlienRaceName, FCT_RaceSysSurvey.Name as SystemName
 from FCT_Contacts
 inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
 ${known('FCT_Contacts', context)}
@@ -215,6 +215,7 @@ order by FCT_Contacts.ContactName`)).map((row) => ({
   SystemID: row.SystemID,
   Xcor: row.Xcor,
   Ycor: row.Ycor,
+  lastUpdate: row.LastUpdate,
   text: textOf(row.ContactName, row.AlienRaceName, row.SystemName),
 }))
 

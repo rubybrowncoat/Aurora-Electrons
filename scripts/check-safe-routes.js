@@ -619,7 +619,7 @@ const fixtures = (world) => {
 
     near(baseline.planRows[0].km, pathKm([1, 2, 6]))
     assert.equal(baseline.planRows[0].detourText, '')
-    assert.equal(baseline.planRows[0].pathResult, null)
+    assert.ok(baseline.planRows[0].pathResult === null || baseline.planRows[0].pathResult.rule.id === 'route.distanceKm', 'with no setting on, the distance is stated only as the Route Finder states it, for the positions it rests on')
     near(safer.planRows[0].km, pathKm([6, 20, 1], place(6), ORIGIN))
     assert.equal(safer.planRows[0].jumps, 2)
     assert.ok(safer.planRows[0].detourText.includes('Perilous'))

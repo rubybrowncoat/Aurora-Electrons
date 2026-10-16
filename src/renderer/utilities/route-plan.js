@@ -2,6 +2,7 @@
 
 import { routeLegs, routeResults, searchRoutes } from './jump-graph'
 import { combine, envelope, ofRule, registerRule, unavailable } from './provenance'
+import { jumpEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
 
 // A system's own place is its centre, (0, 0); any other place is where the save has it, and a place with no position there reaches nothing (`searchRoutes`).
 const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.SystemID, Xcor: 0, Ycor: 0 } : { SystemID: place.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
@@ -10,7 +11,8 @@ const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.Syste
 // - `legs`: one per leg, { index, from, to, start, route, steps, unavailable, closing }, `index` being that of the stop it leaves, `start` the position it is flown from (null out of an unavailable stop), `route` { jumps, km, from, end } or null when no explored route joins them, and `steps` its `routeLegs`.
 // - `jumps` and `km`: the totals of the legs that have a route; `missing` counts the ones that haven't, those of unavailable stops too.
 // - `systems`: the SystemIDs the route passes through in order, for the map.
-export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
+// - `positions`: the positions the plan's figures rest on (utilities/route-position.js `routePositions`), one summary for the whole plan and, on each leg, its own (null for a leg with no endpoints to state). A leg's endpoints are where it is flown from (the stop before it, or the jump point a system stop was reached at, or where the fleet already was when the system is the one it is in) and where it goes, with the Lagrange points it jumps between. `facts` is `loadPositionFacts`' read (null while it is not in); with none the age of a moving endpoint is unknown. The search and the distances use the positions the save stores, so the plan takes no adapters and is always static: arrival-position propagation has to put its positions into the search before a plan can state them.
+export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }) => {
   const targets = stops.slice(1)
 
   if (cycle && stops.length > 1) {
@@ -31,6 +33,7 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
   const systems = []
   const first = stops[0]
   let start = first && !first.unavailable ? positionOf(first) : null
+  let origin = first && !first.unavailable ? placeEndpoint(first) : null
   let jumps = 0
   let km = 0
   let missing = 0
@@ -39,7 +42,7 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
     const closing = Boolean(cycle) && index === targets.length - 1
 
     if (!start || to.unavailable) {
-      legs.push({ index, from: stops[index], to, start, route: null, steps: [], unavailable: true, closing })
+      legs.push({ index, from: stops[index], to, start, route: null, steps: [], unavailable: true, closing, positions: null })
       missing += 1
 
       if (start) {
@@ -47,6 +50,7 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
       }
 
       start = to.unavailable ? null : positionOf(to)
+      origin = to.unavailable ? null : placeEndpoint(to)
 
       return
     }
@@ -55,7 +59,9 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
     const route = to.kind === 'system' ? search.toSystem(to.SystemID) : search.toPlace(to)
     const steps = route ? routeLegs(route) : []
 
-    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing })
+    const positions = routePositions([origin, placeEndpoint(to), ...viaEndpoints(route)], { facts, adapters: {} })
+
+    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing, positions })
 
     if (route) {
       jumps += route.jumps
@@ -73,7 +79,15 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
     // A system is reached at the jump point a route comes in through, or is where the fleet already is.
     const arrival = route && route.end && to.kind === 'system' ? route.end.at : null
 
-    start = to.kind === 'system' && route ? (arrival ? { SystemID: to.SystemID, Xcor: arrival.Xcor, Ycor: arrival.Ycor } : start) : positionOf(to)
+    if (to.kind === 'system' && route) {
+      if (arrival) {
+        start = { SystemID: to.SystemID, Xcor: arrival.Xcor, Ycor: arrival.Ycor }
+        origin = jumpEndpoint(arrival)
+      }
+    } else {
+      start = positionOf(to)
+      origin = placeEndpoint(to)
+    }
   })
 
   if (targets.length) {
@@ -84,7 +98,9 @@ export const planRoute = (stops, { cycle, jumpPoints, ...options }) => {
     systems.push(first.SystemID)
   }
 
-  return { legs, jumps, km, missing, systems: systems.filter((id, index) => id !== systems[index - 1]) }
+  const positions = summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])))
+
+  return { legs, jumps, km, missing, systems: systems.filter((id, index) => id !== systems[index - 1]), positions }
 }
 
 // The rules of a planned route: its totals, the speed and time it is flown at, the stops' options and the figures drawn from them. The rules of one route's jumps and distance are in utilities/jump-graph.js.
@@ -159,8 +175,8 @@ registerRule({
   assumptions: ['shades and sizes are a display choice'],
 })
 
-// A distance in km as a result: the confirmed arithmetic over the route's positions, unavailable for a figure that is not a number.
-export const distanceResult = (km, missing = 'the route\'s distance') => (Number.isFinite(km) ? ofRule({ rule: 'route.distanceKm', value: km, inputs: { present: ROUTE_INPUTS } }) : unavailable({ rule: 'route.distanceKm', missing: [missing] }))
+// A distance in km as a result: the confirmed arithmetic over the route's positions, unavailable for a figure that is not a number. `positions` (a summary of utilities/route-position.js) makes it an estimate when an endpoint moves or is not known.
+export const distanceResult = (km, missing = 'the route\'s distance', positions = null) => withPositions(Number.isFinite(km) ? ofRule({ rule: 'route.distanceKm', value: km, inputs: { present: ROUTE_INPUTS } }) : unavailable({ rule: 'route.distanceKm', missing: [missing] }), positions)
 
 // The speed a route is flown at, as a result: `speed` is the one entered or taken from a fleet (a number above 0), else the median of `classSpeeds` (the top speeds of the classes in service that move, fastest first). With neither, unavailable: there is no default speed.
 export const flightSpeed = (speed, classSpeeds) => {
@@ -267,7 +283,7 @@ export const avoidance = (system, options, number = String) => {
   return null
 }
 
-// The jumps and distance of a whole plan as { jumps, km } results, or null for a plan with no leg. A plan none of whose legs has a route is unavailable; one with some unrouted legs gives the totals of the routed ones as an estimate that names the missing legs. `assumptions` (the options' unknown flags) go on every result.
+// The jumps and distance of a whole plan as { jumps, km } results, or null for a plan with no leg. A plan none of whose legs has a route is unavailable; one with some unrouted legs gives the totals of the routed ones as an estimate that names the missing legs. `assumptions` (the options' unknown flags) go on every result. The distance rests on the plan's positions (`plan.positions`), the jumps do not.
 export const planResults = (plan, assumptions = []) => {
   const legs = plan.legs.length
 
@@ -285,7 +301,7 @@ export const planResults = (plan, assumptions = []) => {
 
   const made = (rule, value) => (plan.missing ? envelope({ value, status: 'estimated', rule, inputs: { present: ROUTE_INPUTS, missing: [`an explored route for ${plan.missing} of ${legs} legs`] }, assumptions: [...assumptions, 'only the legs with a route are counted'] }) : ofRule({ rule, value, inputs: { present: ROUTE_INPUTS }, assumptions }))
 
-  return { jumps: made('route.jumps', plan.jumps), km: made('route.distanceKm', plan.km) }
+  return { jumps: made('route.jumps', plan.jumps), km: withPositions(made('route.distanceKm', plan.km), plan.positions) }
 }
 
 // The route's stabilised jumps and Lagrange steps as results: `steps` are the plan's steps. A jump point with no gate strength in the save is not counted as stabilised, which the result of the count says.
@@ -299,5 +315,5 @@ export const stepCounts = (steps) => {
   return { stabilised: make(stabilised), lagrange: ofRule({ rule: 'route.stabilisedJumps', value: lagrange, inputs: { present: ['the Lagrange points'] } }) }
 }
 
-// The running distance after a flight as a result: `skipped` is the number of legs before it that no explored route joins, which the total then leaves out.
-export const detailTotal = (total, skipped) => (skipped ? envelope({ value: total, status: 'estimated', rule: 'route.detailTotal', inputs: { present: ROUTE_INPUTS, missing: [`an explored route for ${skipped} earlier ${skipped === 1 ? 'leg' : 'legs'}`] }, assumptions: ['only the legs with a route are counted'] }) : ofRule({ rule: 'route.detailTotal', value: total, inputs: { present: ROUTE_INPUTS } }))
+// The running distance after a flight as a result: `skipped` is the number of legs before it that no explored route joins, which the total then leaves out. `positions` are those of the legs flown so far.
+export const detailTotal = (total, skipped, positions = null) => withPositions(skipped ? envelope({ value: total, status: 'estimated', rule: 'route.detailTotal', inputs: { present: ROUTE_INPUTS, missing: [`an explored route for ${skipped} earlier ${skipped === 1 ? 'leg' : 'legs'}`] }, assumptions: ['only the legs with a route are counted'] }) : ofRule({ rule: 'route.detailTotal', value: total, inputs: { present: ROUTE_INPUTS } }), positions)

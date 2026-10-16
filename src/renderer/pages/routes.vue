@@ -63,11 +63,12 @@
         </div>
 
         <stat-tiles :tiles="tiles" class="mt-1" />
+        <route-positions :positions="shownPositions" :state="positionState" class="mt-1" @retry="retryPosition" />
 
         <v-row>
           <v-col cols="12" lg="5" xl="4">
             <stop-list :rows="stopRows" :cycle="cycle" :groups="pickerGroups" @insert="insertStop" @replace="replaceStop" @remove="removeStop" @move="moveStop" @need="ensureLarge" @update:cycle="(value) => (cycle = value)">
-              <template #foot>Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Bodies, fleets, waypoints and the rest are where the save has them now.</template>
+              <template #foot>Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. The positions the distances rest on, and how old they are, are listed under the figures above.</template>
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
@@ -136,7 +137,7 @@
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
             <template #[`item.jumpsSort`]="{ item }"><span v-if="item.route">{{ item.route.jumps }}</span><span v-else class="text--secondary">—<provenance-mark :result="item.jumpsResult" /></span></template>
-            <template #[`item.kmSort`]="{ item }"><span v-if="item.route" class="text-no-wrap">{{ distance(item.route.km) }}</span><span v-else class="text--secondary">—<provenance-mark :result="item.kmResult" /></span></template>
+            <template #[`item.kmSort`]="{ item }"><span v-if="item.route" class="text-no-wrap">{{ distance(item.route.km) }}</span><span v-else class="text--secondary">—</span><provenance-mark v-if="!item.route || item.kmResult.status !== 'confirmed'" :result="item.kmResult" /></template>
             <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ item.route ? timeText(item.route.km) : '—' }}</span><provenance-mark :result="item.timeResult" /></template>
             <template #[`item.status`]="{ item }">
               <span :class="{ 'text--secondary': !item.reason }">{{ item.status }}</span><provenance-mark v-if="item.assumedAvoid" rule="route.avoidance" />
@@ -160,21 +161,24 @@ import SystemMap from '../components/exploration/SystemMap.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
+import RoutePositions from '../components/page/RoutePositions.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import StopList from '../components/routes/StopList.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
+import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import { activeAppearance } from '../utilities/appearance'
 import { systemBodyName } from '../utilities/aurora'
 import { linkTo, queryId, queryPlace, queryPlaceKeys } from '../utilities/deep-links'
 import { jumpLinks, KM_PER_AU, loadJumpPoints, routeLegs, routeResults, searchRoutes } from '../utilities/jump-graph'
-import { joinLabels, tracked } from '../utilities/load-tracking'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
 import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime } from '../utilities/route-plan'
+import { placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions } from '../utilities/route-position'
 import { AVOID_OPTIONS, loadAvoidSystems } from '../utilities/safe-routes'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
@@ -187,7 +191,11 @@ const INPUT_LABELS = {
   lagrangePoints: 'the Lagrange points',
   smallPlaces: 'the waypoints, wrecks and contacts',
   placeCounts: 'the bodies and survey locations',
+  ...POSITION_LABELS,
 }
+// The read that dates the positions alone: the page never waits for it, and the positions note says while it is in flight or failed that their age is unknown.
+const OPTIONAL_INPUTS = [...POSITION_INPUTS]
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
 const OPTIONS = [
@@ -216,11 +224,12 @@ const firstOf = (value) => (Array.isArray(value) ? value[0] : value)
 // The route as a list of stops, each a place key of utilities/deep-links.js, planned leg by leg (utilities/route-plan.js), with the stops' places drawn on the map and listed with their legs.
 export default {
   name: 'RoutesPage',
-  components: { LoadState, PageLink, ProvenanceMark, StatTiles, StopList, SystemMap },
+  components: { LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles, StopList, SystemMap },
   mixins: [
     countFormat,
     deepLink,
     loadState(INPUT_LABELS),
+    routePosition,
     persistedView({
       // The stops keep their repeats, and drop what isn't a place key.
       stopKeys: { key: 'routesStops', default: [], scope: 'race', normalise: (stored) => (Array.isArray(stored) ? queryPlaceKeys(stored.join(',')) : undefined) },
@@ -257,6 +266,15 @@ export default {
 
     context() {
       return { GameID: this.GameID, RaceID: this.RaceID }
+    },
+
+    // The routes' failed reads: the core ones only, since the read that dates the positions never holds the page back (`positionState`).
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
     },
 
     appearance() {
@@ -380,7 +398,7 @@ export default {
     },
 
     plan() {
-      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, ...this.searchOptions })
+      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, facts: this.positionRead, ...this.searchOptions })
     },
 
     // The plan's jumps and distance as results, null for a plan with no leg. Flags the save lacks that the options read are stated as assumptions on them.
@@ -509,7 +527,7 @@ export default {
           key,
           status: place ? 'ok' : reading ? 'loading' : 'missing',
           place,
-          leg: leg ? { closing: leg.closing, toName: leg.to.name, summary: this.figures(leg), note: this.legNotes[leg.index] || '', result: leg.route ? this.travelResult(leg.route.km) : routeResults(null).km } : null,
+          leg: leg ? { closing: leg.closing, toName: leg.to.name, summary: this.figures(leg), note: this.legNotes[leg.index] || '', result: leg.route ? this.travelResult(leg.route.km, leg.positions) : routeResults(null).km } : null,
         }
       })
     },
@@ -521,10 +539,14 @@ export default {
       const none = routeResults(null)
       let total = 0
       let skipped = 0
+      const flown = []
 
       this.plan.legs.forEach((leg) => {
+        flown.push(...(leg.positions ? leg.positions.records : []))
+
+        const passed = summarisePositions(flown)
         const row = (id, fields) => {
-          const found = { id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, kmResult: distanceResult(0), totalResult: detailTotal(total, skipped), ...fields }
+          const found = { id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, kmResult: distanceResult(0, undefined, leg.positions), totalResult: detailTotal(total, skipped, passed), ...fields }
 
           found.timeResult = travelTime(found.totalResult, speedResult)
           rows.push(found)
@@ -552,7 +574,7 @@ export default {
               gate: Boolean(step.to.WarpPointID && step.to.JumpGateStrength > 0),
               via: step.via && step.via.map((point) => this.lagrangeName(point)),
               km: step.km,
-              kmResult: distanceResult(step.km),
+              kmResult: distanceResult(step.km, undefined, leg.positions),
             })
           }
         })
@@ -569,7 +591,7 @@ export default {
 
     // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again.
     distanceRows() {
-      const { routes, openRoutes, origin, avoidDetails, speedResult } = this
+      const { routes, openRoutes, origin, avoidDetails, speedResult, positionRead } = this
 
       if (!routes) {
         return []
@@ -582,6 +604,8 @@ export default {
         const reason = found ? found.reason : null
         const blocked = !route && !reason && Boolean(openRoutes.toSystem(system.SystemID))
         const figures = routeResults(route, reason ? `a route into a system the options avoid (${reason})` : blocked ? 'a route the options allow' : 'an explored route from the first stop')
+        const positions = route ? routePositions([placeEndpoint(origin), ...viaEndpoints(route)], { facts: positionRead }) : null
+        const kmResult = withPositions(figures.km, positions)
 
         return {
           ...system,
@@ -590,13 +614,19 @@ export default {
           assumedAvoid: Boolean(found && found.assumed),
           blocked,
           jumpsResult: figures.jumps,
-          kmResult: figures.km,
-          timeResult: travelTime(figures.km, speedResult),
+          kmResult,
+          positions,
+          timeResult: travelTime(kmResult, speedResult),
           jumpsSort: route ? route.jumps : null,
           kmSort: route ? route.km : null,
           status: isOrigin ? 'First stop' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
         }
       })
+    },
+
+    // The positions the page's figures rest on: the planned legs' and those of the routes the distance table lists (the first stop and the Lagrange points), which are all there is to state with no stop to plan.
+    shownPositions() {
+      return summarisePositions([...this.plan.positions.records, ...this.distanceRows.flatMap((row) => (row.positions ? row.positions.records : []))])
     },
 
     mapNodes() {
@@ -940,8 +970,8 @@ export default {
     },
 
     // The time to fly a route of `km` at the chosen speed, as a result: unavailable with no known speed or no distance.
-    travelResult(km) {
-      return travelTime(distanceResult(km), this.speedResult)
+    travelResult(km, positions = null) {
+      return travelTime(distanceResult(km, undefined, positions), this.speedResult)
     },
 
     // Flying time in the unit that reads best; a real 0 is 0 h and an unknown time a dash.
@@ -958,7 +988,7 @@ export default {
     legTimeResult(index) {
       const leg = this.plan.legs[index]
 
-      return leg && leg.route ? this.travelResult(leg.route.km) : null
+      return leg && leg.route ? this.travelResult(leg.route.km, leg.positions) : null
     },
 
     sortNullLast(items, sortBy, sortDesc) {

@@ -1050,9 +1050,10 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
   const marks = inside.filter((node) => node.tag === 'provenance-mark')
   const rules = new Set(marks.map((mark) => attrOf(mark, 'rule')).filter(Boolean))
 
-  ;['transport.fleetSpeed', 'transport.fleetBurn', 'transport.fleetTrip'].forEach((rule) => assert.ok(rules.has(rule), `a mark for ${rule}`))
+  ;['transport.fleetSpeed', 'transport.fleetTrip'].forEach((rule) => assert.ok(rules.has(rule), `a mark for ${rule}`))
+  assert.ok(marks.some((mark) => attrOf(mark, 'result')), 'the figures of the row carry results of their own')
   rules.forEach((rule) => assert.ok(provenance.ofRule({ rule, value: 1, inputs: { present: [], missing: [] } }), `${rule} is registered`))
-  assert.ok(marks.some((mark) => attrOf(mark, 'result') && evaluated(attrOf(mark, 'result'), { item: sentinel }) === sentinel.provenance), 'the round trip carries its result')
+  assert.ok(marks.some((mark) => attrOf(mark, 'result') && evaluated(attrOf(mark, 'result'), { item: { ...sentinel, results: {} } }) === sentinel.provenance), 'the round trip carries its result')
   assert.ok(inside.some((node) => attrOf(node, 'data-fleet-note') !== undefined), 'the panel says while its read is in flight or failed')
 
   // Hauling: the profile in the expanded row and the reason in the cell.
@@ -1177,7 +1178,7 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 
   assert.ok(captioned >= 4, 'the speeds are shown')
 
-  const ready = { FleetName: 'Cycle', ships: 3, independent: 2, cargo: 1000, colonists: 200, speed: 500, savedSpeed: 300, effectiveMax: 400, tripSeconds: 86400, jumps: 2, km: 5, status: 'ok', provenance: { status: 'estimated' }, pathResult: { status: 'estimated' }, trips: 3, tonsYear: 3000, colonistsYear: 600, fuel: 12, fuelShare: 0.1, fuelLimiting: 'Hauler' }
+  const ready = { FleetName: 'Cycle', ships: 3, independent: 2, cargo: 1000, colonists: 200, speed: 500, savedSpeed: 300, effectiveMax: 400, tripSeconds: 86400, jumps: 2, km: 5, status: 'ok', provenance: { status: 'estimated' }, pathResult: { status: 'estimated' }, trips: 3, tonsYear: 3000, colonistsYear: 600, fuel: 12, fuelShare: 0.1, fuelLimiting: 'Hauler', results: { trips: { status: 'estimated' }, tonsYear: { status: 'estimated' }, colonistsYear: { status: 'estimated' }, fuel: { status: 'estimated' }, fuelShare: { status: 'estimated' } } }
   const bare = { FleetName: 'Cycle', ships: 0, independent: 0, cargo: null, colonists: null, speed: null, savedSpeed: null, effectiveMax: null, tripSeconds: null, jumps: 0, km: 0, status: 'unknown', provenance: null, pathResult: null, trips: null, tonsYear: null, colonistsYear: null, fuel: null, fuelShare: null, fuelLimiting: '' }
 
   // The rows the page itself makes, with no avoid setting on (its distance has the route finder's own result) and for each way a run can come out.
@@ -1186,6 +1187,8 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
   const items = [ready, bare, { ...ready, savedSpeed: 500, effectiveMax: 500 }, ...made]
 
   assert.ok(made.some((row) => row.status === 'ok') && made.some((row) => row.status === 'range') && made.some((row) => row.status === 'noroute') && made.some((row) => row.status === 'unsupported') && made.some((row) => row.status === 'immobile'), 'the pages\' own rows cover each way a run comes out')
+
+  const RESULT_RULES = { trips: { trips: 'transport.fleetTrip' }, tonsYear: { tonsYear: 'transport.fleetTrip' }, colonistsYear: { colonistsYear: 'transport.fleetTrip' }, fuel: { fuel: 'transport.fleetBurn', fuelShare: 'transport.fleetBurn' } }
 
   for (const slot of ['FleetName', 'ships', 'cargo', 'colonists', 'speed', 'tripDays', 'trips', 'tonsYear', 'colonistsYear', 'fuel']) {
     const node = inside.find((one) => typeof one.slotTarget === 'string' && one.slotTarget.replace(/[`'"]/g, '') === `item.${slot}`)
@@ -1201,6 +1204,23 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
       figures += audited.figures
     })
     assert.ok(figures > 0, `${slot} shows a figure`)
+
+    if (slot in RESULT_RULES) {
+      let resolved = 0
+
+      made.filter((row) => row.status === 'ok').forEach((item) => {
+        const scope = { item, count: String, duration: String, distance: String, tripTitle: String, SECONDS_PER_DAY: 86400, _s: String }
+
+        marksIn(node, scope).forEach((mark) => {
+          const field = (/^item\.results\.(\w+)$/.exec(attrOf(mark, 'result') || '') || [])[1]
+
+          assert.ok(field, `${slot}: a mark of the row's own result`)
+          assert.equal(evaluated(attrOf(mark, 'result'), scope).rule.id, RESULT_RULES[slot][field], `${slot}, ${field}: the figure is of the rule that computes it`)
+          resolved += 1
+        })
+      })
+      assert.ok(resolved > 0, `${slot}: the page's own row is resolved`)
+    }
   }
 
   // The audit sees a figure of a successful row left with no mark: a distance whose result is missing.
@@ -1279,6 +1299,8 @@ const FAULTS = [
   ['Transport marks no saved and maximum speed', 'transportPage', /(data-fleet-speeds-apart>[^<]*)<provenance-mark[^>]*\/>([^<]*)<provenance-mark[^>]*\/>/, (m) => `${m[1]}${m[2]}`, ['template']],
   ['Transport marks no distance of a fleet', 'transportPage', /(data-fleet-panel[^]*?distance\(item\.km\) \}\})<provenance-mark [^>]*pathResult[^>]*\/>/, (m) => m[1], ['template']],
   ['Transport marks no tank share', 'transportPage', /(\{\{ item\.fuelLimiting \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
+  ['Transport rules a fleet\'s fuel as its trip', 'transportPage', 'figure(\'transport.fleetBurn\', trip.fuelPerTrip, \'L\')', 'figure(\'transport.fleetTrip\', trip.fuelPerTrip, \'L\')', ['template']],
+  ['Transport rules a fleet\'s share of a tank as its trip', 'transportPage', 'figure(\'transport.fleetBurn\', trip.fuelShare * 100, \'%\')', 'figure(\'transport.fleetTrip\', trip.fuelShare * 100, \'%\')', ['template']],
   ['a panel of Transport has no summary', 'transportPage', /<v-card class="panel"(?=[^>]*data-fleet-panel)[^>]*>/, (m) => m[0].replace(/ data-summary="[^"]*"/, ''), ['template']],
   ['the first panel of Hauling has no summary', 'haulingPage', /^([^]*?<v-card class="panel") data-summary="[^"]*"/, (m) => m[1], ['template']],
   ['a panel of Transport has no summary while its optional read loads', 'transportPage', /<v-card class="panel"(?=[^>]*data-fleet-panel)[^>]*>/, (m) => m[0].replace(/ data-summary="([^"]*)"/, (_all, text) => ` :data-summary="loadErrors.fleetShips === undefined ? '' : '${text}'"`), ['template']],
@@ -1286,7 +1308,7 @@ const FAULTS = [
   ['a panel of Transport binds its summary to a name the page does not have', 'transportPage', /<v-card class="panel"(?=[^>]*data-fleet-panel)[^>]*>/, (m) => m[0].replace(/ data-summary="[^"]*"/, ' :data-summary="summaryOfTheFleets"'), ['template']],
   ['Transport marks no ship count', 'transportPage', /(count\(item\.ships\) \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
   ['Transport marks no count of ships under their own power', 'transportPage', /(\{\{ item\.independent \}\} of \{\{ item\.ships \}\}[^<]*)<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
-  ['Transport gives a fleet no result for its distance when no avoid setting is on', 'transportPage', 'pathResult: pathResult(reach.route, this.avoid), ', 'pathResult: null, ', ['pages', 'template']],
+  ['Transport gives a fleet no result for its distance when no avoid setting is on', 'transportPage', /pathResult: (?:withPositions\()?pathResult\(reach\.route, this\.avoid\)(?:, positions\))?, /, () => 'pathResult: null, ', ['pages', 'template']],
   ['Transport drops a fleet whose holds the save leaves empty', 'transportPage', ' or carrierClass.CargoCapacity is null or carrierClass.ColonistCapacity is null', '', ['pages']],
   ['Hauling marks no ship count', 'haulingPage', /(item\.Ships === 1 \? 'ship' : 'ships' \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
   ['Hauling marks no speed of the fleet', 'haulingPage', /(\{\{ item\.speedText \}\})<provenance-mark[^>]*\/>/, (m) => m[1], ['template']],
@@ -1325,7 +1347,7 @@ const BENIGN = [
   { label: 'the attributes of the fleets panel reordered', target: 'transportPage', at: /<v-card class="panel" (data-summary="[^"]*") (data-fleet-panel) (elevation="1")>/, to: (m) => `<v-card class="panel" ${m[3]} ${m[2]} ${m[1]}>` },
   { label: 'the attributes of the participants rows reordered', target: 'component', at: /<tr v-for="row in participants" :key="row.key" (:data-participant="row.key") (:data-role="row.role") (:data-limiting="[^"]*")>/, to: (m) => `<tr ${m[3]} ${m[2]} ${m[1]} v-for="row in participants" :key="row.key">` },
   { label: 'the label of the fleets input reworded', target: 'transportPage', at: /^( {2}fleetShips: )'[^']*'/m, to: (m) => `${m[1]}'the membership of the fleets'` },
-  { label: 'the optional inputs listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[('[^']*'(?:, '[^']*')*)\]/, to: (m) => `${m[1]}[${m[2].split(', ').reverse().join(', ')}]` },
+  { label: 'the optional inputs listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[((?:'[^']*'|\.\.\.\w+)(?:, (?:'[^']*'|\.\.\.\w+))*)\]/, to: (m) => `${m[1]}[${m[2].split(', ').reverse().join(', ')}]` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
