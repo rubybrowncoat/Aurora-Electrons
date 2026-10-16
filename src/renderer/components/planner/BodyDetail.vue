@@ -100,6 +100,33 @@
           </v-list>
           <div v-if="plan.partial" class="caption text--secondary mt-1">The temperature range can't fit this orbit completely, so the plan aims for the best compromise.</div>
 
+          <div class="overline mt-3">What limits the colony cost at each stage</div>
+          <v-simple-table dense class="limit-table" data-limits="table">
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th class="text-right">Colony cost</th>
+                <th>Limits the cost</th>
+                <th>Next limit</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in stageRows" :key="row.key" data-limits="stage">
+                <td>{{ row.title }}<div v-if="row.change" class="caption text--secondary">{{ row.change }}</div></td>
+                <td class="text-right text-no-wrap">{{ row.cost }}<provenance-mark :result="row.result" /></td>
+                <td>
+                  <v-chip v-for="entry in row.limiting" :key="entry.key" x-small label outlined class="mr-1 my-1" :title="entry.title" data-limits="limiting"><v-icon v-if="entry.fixed" x-small left>mdi-lock-outline</v-icon>{{ entry.text }}</v-chip>
+                  <span v-if="!row.limiting.length" class="text--secondary">None</span>
+                </td>
+                <td>
+                  <v-chip v-for="entry in row.next" :key="entry.key" x-small label outlined class="mr-1 my-1" :title="entry.title" data-limits="next"><v-icon v-if="entry.fixed" x-small left>mdi-lock-outline</v-icon>{{ entry.text }}</v-chip>
+                  <span v-if="!row.next.length" class="text--secondary">None</span>
+                </td>
+              </tr>
+            </tbody>
+          </v-simple-table>
+          <div v-for="note in limitNotes" :key="note" class="caption text--secondary mt-1">{{ note }}</div>
+
           <v-row dense class="mt-2">
             <v-col v-for="tile in tiles" :key="tile.label" cols="6" sm="3">
               <v-card outlined class="pa-3">
@@ -150,7 +177,7 @@ import ProvenanceMark from '../page/ProvenanceMark.vue'
 import { activeAppearance, toneColor } from '../../utilities/appearance'
 import { systemBodyName } from '../../utilities/aurora'
 import { linkTo } from '../../utilities/deep-links'
-import { FACTORS, infrastructurePerMillion, limitingFactor } from '../../utilities/habitability'
+import { FACTORS, infrastructurePerMillion, limitingFactors } from '../../utilities/habitability'
 import { people } from '../../utilities/colonies'
 import { cmcNote, rowProvenance } from '../../utilities/colonization'
 import { roundToDecimal, separatedNumber } from '../../utilities/math'
@@ -158,6 +185,7 @@ import { compact } from '../../utilities/minerals'
 import { isAvailable, unavailable, valueOrNull } from '../../utilities/provenance'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, terraformBreakdown } from '../../utilities/terraform-capacity'
 import { OUTCOMES, planYears } from '../../utilities/terraforming'
+import { terraformStages } from '../../utilities/terraform-limits'
 
 const GROUND_SURVEY = { 0: 'completed', 1: 'minimal', 2: 'low', 3: 'good', 4: 'high', 5: 'excellent' }
 const INSTALLATION_YEARS = [5, 10, 25, 50]
@@ -170,6 +198,7 @@ export default {
     shown: { type: Object, required: true },
     speciesOptions: { type: Array, required: true },
     terraformCapacity: { type: Number, required: true },
+    gases: { type: Array, default: () => [] },
     terraformSources: { type: Object, default: () => NO_TERRAFORM_SOURCES },
     navalAdmins: { type: Object, default: () => ({}) },
     rules: { type: Object, required: true },
@@ -211,10 +240,58 @@ export default {
 
     factors() {
       const { factors } = this.assessment.cost
-      const limiting = limitingFactor(factors)
+      const limiting = new Set(limitingFactors(factors).map((factor) => factor.key))
       const top = Math.max(2, ...FACTORS.map((factor) => factors[factor.key]))
 
-      return FACTORS.map((factor) => ({ ...factor, width: Math.min(100, (100 * factors[factor.key]) / top), text: factors[factor.key] ? roundToDecimal(factors[factor.key], 2).toString() : '-', limiting: !!limiting && limiting.key === factor.key }))
+      return FACTORS.map((factor) => ({ ...factor, width: Math.min(100, (100 * factors[factor.key]) / top), text: factors[factor.key] ? roundToDecimal(factors[factor.key], 2).toString() : '-', limiting: limiting.has(factor.key) }))
+    },
+
+    gasInfo() {
+      const byId = new Map(this.gases.map((gas) => [gas.GasID, gas]))
+
+      return (id) => byId.get(id)
+    },
+
+    // The plan's stages with what limits the colony cost at each, null without a plan.
+    limits() {
+      return this.plan ? terraformStages({ assessment: this.assessment, body: this.item.body, species: this.shown.species, skill: this.rules.ColonizationSkill, gasInfo: this.gasInfo }) : null
+    },
+
+    stageRows() {
+      if (!this.limits) {
+        return []
+      }
+
+      const at = { current: 'now', periapsis: 'at periapsis', apoapsis: 'at apoapsis' }
+      const names = (list) => list.map((key) => (FACTORS.find((factor) => factor.key === key) || { label: key }).label).join(', ')
+      const entries = (list, swings) => list.map((entry) => ({ ...entry, text: `${entry.label} ${roundToDecimal(entry.value, 2)}${swings ? ` ${entry.at.map((point) => at[point]).join(' and ')}` : ''}`, title: entry.fixed ? 'Fixed: no gas operation changes it.' : '' }))
+
+      return this.limits.stages.map((stage) => {
+        const swings = stage.points.periapsis !== stage.points.current
+        const changes = [stage.cleared.length ? `Clears ${names(stage.cleared)}.` : '', stage.overtaken.length ? `${names(stage.overtaken)} no longer set the cost, but stay.` : '', stage.revealed.length ? `Reveals ${names(stage.revealed)}.` : '', stage.blocked ? 'Only a fixed factor remains: no gas operation lowers the cost further.' : ''].filter(Boolean)
+
+        return {
+          key: stage.index,
+          title: stage.kind === 'start' ? 'As it is' : stage.kind === 'settle' ? 'The surface settles' : stage.kind === 'target' ? 'The plan\'s end state, with no gas operation' : `Set ${stage.step.label} to ${roundToDecimal(stage.step.set, 3)} atm`,
+          change: changes.join(' '),
+          cost: this.cost(stage.cost.worst),
+          result: stage.result,
+          limiting: entries(stage.limiting, swings),
+          next: entries(stage.next, swings),
+        }
+      })
+    },
+
+    limitNotes() {
+      if (!this.limits) {
+        return []
+      }
+
+      return [
+        ...(this.limits.lowGravity ? [`Gravity below the species' minimum is fixed: no gas operation removes it, so the colony cost can't fall under ${this.cost(this.limits.floorWorst)} on this body (1 before the colonisation skill).`] : []),
+        ...(this.limits.tidalLock ? ['A tidally locked body has its temperature factor divided by 5, and that stays whatever the atmosphere.'] : []),
+        'Stages after the first are the plan\'s estimate: each gas operation is taken in full, in the plan\'s order, and the water extent changes only when the surface settles.',
+      ]
     },
 
     infrastructureLine() {

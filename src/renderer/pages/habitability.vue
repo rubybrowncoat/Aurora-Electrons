@@ -347,7 +347,7 @@
           <template #expanded-item="{ item }">
             <td :colspan="headers.length + 1" class="px-4 py-3 planner-detail">
               <v-alert v-if="terraformResult.status === 'unavailable'" type="warning" outlined dense class="mb-3">Terraforming time cannot be worked out: {{ terraformResult.inputs.missing.join(', ') }} missing. The years and installation counts below do not apply.</v-alert>
-              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :terraform-sources="terraformSources" :naval-admins="navalAdmins" :rules="detailRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
+              <body-detail :item="item" :shown="shownEvaluation(item)" :species-options="speciesChoices(item)" :terraform-capacity="terraformCapacityPerYear" :gases="gases" :terraform-sources="terraformSources" :naval-admins="navalAdmins" :rules="detailRules" :separator="separator" @species="(id) => $set(detailSpecies, item.id, id)" />
             </td>
           </template>
         </v-data-table>

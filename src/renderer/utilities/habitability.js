@@ -165,6 +165,18 @@ const dangerousGas = (body, species, temperature, planned) => {
   return worst
 }
 
+// The colony cost of a breathing gas outside the species' range.
+export const BREATHING_PENALTY = 2
+
+// Whether the breathing gas is outside the species' range or too large a share of the air, whatever else sets the cost. The colony cost only counts it while the cost before it is under 2.
+export const breathingFails = (body, species) => {
+  const breathing = body.Atmosphere.filter((candidate) => candidate.AtmosGasID === species.BreatheID)
+  const pressure = breathing.reduce((total, candidate) => total + candidate.GasAtm, 0)
+  const share = breathing.reduce((total, candidate) => total + candidate.AtmosGasAmount, 0)
+
+  return pressure < species.MinimumBreathablePressure || pressure > species.MaximumBreathablePressure || share > MAX_BREATHABLE_PERCENT
+}
+
 // The six things that add to a colony cost, each as the game's colony cost factor, and which one decides. The cost is the largest factor, not their sum (the breathable-gas rule only applies below 2). `planned` marks a body that doesn't exist yet. Returns the cost before the race's colonisation skill.
 export const costFactors = (body, species, temperature, planned = false) => {
   const tidal = body.TidalLock && body.BodyClass !== BODY_CLASS.MOON ? 5 : 1
@@ -184,15 +196,9 @@ export const costFactors = (body, species, temperature, planned = false) => {
   let cost = Math.max(dangerCost, temperatureCost, pressureCost)
   let breathableCost = 0
 
-  if (round4(cost) < 2) {
-    const breathing = body.Atmosphere.filter((candidate) => candidate.AtmosGasID === species.BreatheID)
-    const pressure = breathing.reduce((total, candidate) => total + candidate.GasAtm, 0)
-    const share = breathing.reduce((total, candidate) => total + candidate.AtmosGasAmount, 0)
-
-    if (pressure < species.MinimumBreathablePressure || pressure > species.MaximumBreathablePressure || share > MAX_BREATHABLE_PERCENT) {
-      breathableCost = 2
-      cost = 2
-    }
+  if (round4(cost) < 2 && breathingFails(body, species)) {
+    breathableCost = BREATHING_PENALTY
+    cost = BREATHING_PENALTY
   }
 
   const hydrosphereCost = body.HydroExt < 20 ? (20 - body.HydroExt) / 10 : 0
@@ -233,6 +239,19 @@ export const uncolonisableReason = (body, species) => {
 // The orbit that sets the temperature swing: a moon follows its parent planet.
 export const orbitOf = (body) => (body.BodyClass === BODY_CLASS.MOON ? { distance: body.ParentOrbitalDistance, eccentricity: body.ParentEccentricity } : { distance: body.OrbitalDistance, eccentricity: body.Eccentricity })
 
+// The cost factors of a body at the three points of its orbit: now, at periapsis and at apoapsis. A body that is neither eccentric nor a moon has only the one, now. `planned` is for a body that doesn't exist yet.
+export const costPoints = (body, species, planned = false) => {
+  const current = costFactors(body, species, body.SurfaceTemp, planned)
+
+  if (body.Eccentricity > 0 || body.BodyClass === BODY_CLASS.MOON) {
+    const { distance, eccentricity } = orbitOf(body)
+
+    return { current, periapsis: costFactors(body, species, temperatureAtDistance(body, distance * (1 - eccentricity)), planned), apoapsis: costFactors(body, species, temperatureAtDistance(body, distance * (1 + eccentricity)), planned) }
+  }
+
+  return { current, periapsis: current, apoapsis: current }
+}
+
 // Colony cost now, at periapsis and apoapsis, and the worst of them, all times the race's colonisation skill (a tech multiplier, 1 without it). `raw` is the same worst case before the skill, the cost the environment alone sets. `planned` is for a body that doesn't exist yet.
 export const colonyCost = (body, species, skill, planned = false) => {
   const reason = uncolonisableReason(body, species)
@@ -241,16 +260,10 @@ export const colonyCost = (body, species, skill, planned = false) => {
     return { colonisable: false, reason }
   }
 
-  const now = costFactors(body, species, body.SurfaceTemp, planned)
-  let periapsis = now.cost
-  let apoapsis = now.cost
-
-  if (body.Eccentricity > 0 || body.BodyClass === BODY_CLASS.MOON) {
-    const { distance, eccentricity } = orbitOf(body)
-
-    periapsis = costFactors(body, species, temperatureAtDistance(body, distance * (1 - eccentricity)), planned).cost
-    apoapsis = costFactors(body, species, temperatureAtDistance(body, distance * (1 + eccentricity)), planned).cost
-  }
+  const points = costPoints(body, species, planned)
+  const now = points.current
+  const periapsis = points.periapsis.cost
+  const apoapsis = points.apoapsis.cost
 
   const raw = Math.max(now.cost, periapsis, apoapsis)
 
@@ -273,6 +286,14 @@ export const limitingFactor = (factors) => {
   const [first] = FACTORS.map((factor) => ({ ...factor, value: factors[factor.key] })).sort((a, b) => b.value - a.value)
 
   return first && first.value > 0 ? first : null
+}
+
+// Every factor that sets a cost: all those equal to the largest at the game's four decimals (the cost is rounded there, so factors that agree there are tied), none at zero cost. The factor `limitingFactor` names is always one of them.
+export const limitingFactors = (factors) => {
+  const rounded = FACTORS.map((factor) => round4(factors[factor.key]))
+  const top = Math.max(0, ...rounded)
+
+  return top > 0 ? FACTORS.map((factor) => ({ ...factor, value: factors[factor.key] })).filter((_factor, index) => rounded[index] === top) : []
 }
 
 // Infrastructure per million people at a colony cost. A low-gravity colony needs twice as much. The game does this in decimals, so float noise is rounded off before the ceiling.

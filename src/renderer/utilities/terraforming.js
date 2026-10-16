@@ -96,7 +96,7 @@ const summariseAtmosphere = (body, species) => {
   return summary
 }
 
-const hydrosphereState = (temperature, pressure) => {
+export const hydrosphereState = (temperature, pressure) => {
   if (!Number.isFinite(pressure) || pressure <= 0 || (pressure < 0.006 && temperature > 245)) {
     return HYDROSPHERE.NONE
   }
@@ -129,7 +129,7 @@ const targetHydroExtent = (current, hydrosphere) => {
 const equilibriumVapour = (hydrosphere, extent, pressure) => (hydrosphere === HYDROSPHERE.LIQUID && Number.isFinite(extent) && extent >= 0 ? Math.max(pressure, 0) * (extent / 100) * HUMIDITY : 0)
 
 // The ice sheet reflects more than bare rock: changing between the two moves the albedo.
-const albedoForHydrosphere = (baseAlbedo, was, now, extent) => {
+export const albedoForHydrosphere = (baseAlbedo, was, now, extent) => {
   if (now === was) {
     return baseAlbedo
   }
