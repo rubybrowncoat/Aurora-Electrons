@@ -445,6 +445,7 @@ export const rankBodies = async (assessed, { speciesId, goal, ranking, rules, te
 export const costDriver = (assessmentCost) => (assessmentCost.colonisable ? limitingFactor(assessmentCost.factors) : null)
 
 const COST_INPUTS = ['body environment', 'species ranges', 'colonisation skill']
+const CAPACITY_INPUTS = ['body size and water', 'species density']
 
 // Whether a deposit value that is unknown could change a row: its state (a rich deposit makes a mining target), whether it is worth the trip, or the score of a goal that counts the deposits. A people-only goal on a body that holds the smallest colony whatever its deposits is not affected, and neither is a body that is no target either way.
 const mineralsDecide = (facts, state, goal, room, ranking) => {
@@ -470,9 +471,27 @@ export const rowProvenance = (row) => {
   return {
     cost: lacking ? unavailable({ rule: 'habitability.colonyCost', missing: lacking }) : colonisable ? ofRule({ rule: 'habitability.colonyCost', value: best.cost, inputs: { present: COST_INPUTS }, assumptions: [...skill, ...(best.strategy === 'terraform' ? ['the terraforming plan is carried out'] : [])] }) : null,
     infrastructure: lacking ? unavailable({ rule: 'habitability.infraPerMillion', missing: lacking }) : colonisable ? infrastructurePerMillionResult(best.assessment.cost.worst, best.species, best.assessment.cost.lowGravity, skill) : null,
-    capacity: lacking ? unavailable({ rule: 'habitability.bodyCapacity', missing: lacking }) : colonisable ? ofRule({ rule: 'habitability.bodyCapacity', value: best.capacity, inputs: { present: ['body size and water', 'species density'] } }) : null,
+    capacity: lacking ? unavailable({ rule: 'habitability.bodyCapacity', missing: lacking }) : colonisable ? ofRule({ rule: 'habitability.bodyCapacity', value: best.capacity, inputs: { present: CAPACITY_INPUTS } }) : null,
     score: row.unknown.length ? unavailable({ rule: 'habitability.score', missing: row.unknown }) : scored,
     distance: row.distance ? ofRule({ rule: 'habitability.distance', value: row.distance, inputs: { present: ['charted jump points', 'colony places'] } }) : unavailable({ rule: 'habitability.distance', missing: [basis.origins.colonies ? 'a charted, explored route from a colony' : 'a capital or colony with people to measure from'] }),
     minerals: row.minerals.surveyed ? mineralsResult(row.minerals, basis.outlookKnown ? [] : ['no mineral ledger in the save: every mineral counts once']) : null,
+  }
+}
+
+// The results behind one species' cost and population limit on a body as it is today: null where the species cannot settle the body, unavailable, naming the missing inputs, where the save lacks them. The figures are `assessment.cost.worst` and `capacityNow`, those the body detail shows.
+export const nowProvenance = (row, evaluation) => {
+  const { assessment, missing } = evaluation
+
+  if (missing.length) {
+    return { cost: unavailable({ rule: 'habitability.colonyCost', missing }), capacity: unavailable({ rule: 'habitability.bodyCapacity', missing }) }
+  }
+
+  if (!assessment.cost.colonisable) {
+    return { cost: null, capacity: null }
+  }
+
+  return {
+    cost: ofRule({ rule: 'habitability.colonyCost', value: assessment.cost.worst, inputs: { present: COST_INPUTS }, assumptions: row.basis.skillAssumed ? [SKILL_ASSUMPTION] : [] }),
+    capacity: ofRule({ rule: 'habitability.bodyCapacity', value: evaluation.capacityNow, inputs: { present: CAPACITY_INPUTS } }),
   }
 }

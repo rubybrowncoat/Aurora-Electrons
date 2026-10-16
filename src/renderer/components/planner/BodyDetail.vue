@@ -24,7 +24,7 @@
       <v-col cols="12" md="4">
         <v-card outlined class="pa-3 mb-3">
           <div class="overline">Colony cost</div>
-          <div class="headline">
+          <div class="headline" data-detail="cost">
             <template v-if="plan"><span class="text--secondary">{{ cost(assessment.cost.worst) }}</span> → {{ cost(assessment.after.worst) }}</template>
             <template v-else>{{ cost(assessment.cost.worst) }}</template>
             <span v-if="assessment.lowGravity" class="caption">LG</span>
@@ -44,7 +44,7 @@
 
         <v-card outlined class="pa-3 mb-3">
           <div class="overline">What it holds</div>
-          <div class="headline">
+          <div class="headline" data-detail="capacity">
             <template v-if="plan && afterCapacity !== null && Math.abs(afterCapacity - shown.capacityNow) > 0.005"><span class="text--secondary">{{ people(shown.capacityNow) }}</span> → {{ people(afterCapacity) }}</template>
             <template v-else>{{ people(shown.capacityNow) }}</template>
           </div>

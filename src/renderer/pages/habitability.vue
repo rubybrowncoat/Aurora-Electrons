@@ -196,6 +196,8 @@
       <load-state :failed="failedInputsText" :error="loadErrors[failedInputs[0]]" :loading="!ready || !rows" class="mt-3" @retry="retryFailedInputs" />
       <v-alert v-if="ready && rows && !speciesRows.length" type="info" outlined dense class="mt-3">The race has no colony with a species yet, so there is nothing to compare bodies against.</v-alert>
 
+      <colony-worksheet v-if="ready && rows && speciesRows.length && selectedBodies.length" :selection="selectedBodies" :rows="rows" :species="speciesRows" :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" />
+
       <v-card v-if="ready && rows && speciesRows.length" class="mt-3" elevation="2">
         <v-data-table :loading="$asyncComputed.assessed.updating || $asyncComputed.rows.updating" :headers="headers" :items="tableItems" item-key="id" :expanded.sync="expandedRows" show-expand :custom-sort="sortItems" :sort-by.sync="table.sortBy" :sort-desc.sync="table.sortDesc" :items-per-page.sync="table.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
           <template #[`item.data-table-expand`]="{ item, isExpanded, expand }">
@@ -364,6 +366,7 @@ import { sectionStyle } from '../components/navigation/section-style'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import BodyDetail from '../components/planner/BodyDetail.vue'
+import ColonyWorksheet from '../components/planner/ColonyWorksheet.vue'
 import capabilityGates from '../mixins/capability-gates'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
@@ -378,6 +381,7 @@ import { loadBodies, loadCmcRules, loadGases, loadLagrangePoints, loadMineralOut
 import { bodyReference, linkTo, queryBodies, queryIds } from '../utilities/deep-links'
 import { PLAN_STATES, STATE_BY_ID, STATE_GROUPS } from '../utilities/colonization-states'
 import { DEFAULT_BASIS, DRIVES, DRIVE_IDS, SORT_IDS, TRANSIT_SORTS, TRANSIT_STATE_TEXT, basisText, driveOfClass, normaliseSpeed, sortTableItems, transitEstimator, transitSortValues, transitText } from '../utilities/colony-transit'
+import { evaluationOf } from '../utilities/colony-worksheet'
 import { buildDistanceMap } from '../utilities/jump-graph'
 import { tracked } from '../utilities/load-tracking'
 import { derive } from '../utilities/query-cache'
@@ -462,7 +466,7 @@ const SystemSelect = {
 const kept = (vm, slot, inputs, compute) => derive(vm.database, `planner.${slot}`, inputs, compute)
 
 export default {
-  components: { BodyDetail, LoadState, ProvenanceMark, SystemSelect },
+  components: { BodyDetail, ColonyWorksheet, LoadState, ProvenanceMark, SystemSelect },
   mixins: [
     capabilityGates,
     countFormat,
@@ -901,9 +905,7 @@ export default {
 
     // The evaluation the detail panel shows: the species picked there, else the row's best.
     shownEvaluation(item) {
-      const picked = this.detailSpecies[item.id]
-
-      return (picked && item.row.evaluations.find((evaluation) => evaluation.species.SpeciesID === picked)) || item.best
+      return evaluationOf(item.row, this.detailSpecies[item.id])
     },
     speciesChoices(item) {
       return item.row.evaluations
