@@ -88,7 +88,8 @@
               <page-link v-if="destination" class="ml-1" :to="routesLink" :name="`${origin.name} to ${destination.name}`" />
             </span>
           </div>
-          <v-data-table :headers="classHeaders" :items="rows" item-key="key" :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="noRowsText">
+          <div v-if="handlingSupportNote" class="panel-body py-2 caption" :class="handlingSupportNote.tone" data-handling-note>{{ handlingSupportNote.text }}<v-btn v-if="handlingSupportState.failed" x-small text class="ml-2" @click="retryHandlingSupport">Retry</v-btn></div>
+          <v-data-table :headers="classHeaders" :items="rows" item-key="key" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="classesTable.sortBy" :sort-desc.sync="classesTable.sortDesc" :items-per-page.sync="classesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="noRowsText" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
                 <div class="font-weight-medium">{{ item.FleetName }}</div>
@@ -126,8 +127,13 @@
                 <div v-if="item.note && item.status !== 'noroute'" class="caption text--secondary">{{ item.note }}</div>
               </div>
             </template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="py-3">
+                <handling-breakdown :rows="item.handlingRows" />
+              </td>
+            </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength: the strength of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology, plus the technology once more if the colony has a spaceport or cargo shuttle station; commander, governor and sector Logistics bonuses are not counted, so times err long. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. A system stands in as a colony site at its star, with no spaceport or cargo shuttle station. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength and by its crew share (a crew short of the class's applies once, more crew is no faster, and no crew aboard stops loading). The strength is that of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess, plus the technology once more if the colony has a spaceport or cargo shuttle station, which no bonus multiplies. A bonus the save cannot settle counts as 1, so the time errs long; a system stands in as a colony site with no governor or sector. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
           <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
@@ -173,16 +179,20 @@
 <script>
 import { mapGetters, mapState } from 'vuex'
 
+import HandlingBreakdown from '../components/page/HandlingBreakdown.vue'
 import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
+import capabilityGates from '../mixins/capability-gates'
 import avoidRoutes from '../mixins/avoid-routes'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
+import handlingSupport from '../mixins/handling-support'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
+import { loadHandlingSupport } from '../utilities/handling-support'
 import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
 import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
@@ -190,7 +200,7 @@ import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilitie
 import { isAvailable } from '../utilities/provenance'
 import { loadFormulaVersion } from '../utilities/capabilities'
 import { amountText, describeTariffVersion, payoutRows } from '../utilities/civilian-tariff'
-import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
+import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 
 const INPUT_LABELS = {
@@ -202,10 +212,11 @@ const INPUT_LABELS = {
   requests: 'the installation requests',
   shipments: 'the installations in transit',
   formulaVersion: 'the save\'s schema',
+  handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
 }
-// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the danger and control the avoid settings read).
-const OPTIONAL_INPUTS = ['avoidSystems']
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read).
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems']
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 const SECONDS_PER_DAY = 86400
 const PAGE_SIZES = [15, 30, -1]
@@ -235,11 +246,13 @@ const unique = (values) => [...new Set(values)]
 
 export default {
   name: 'TransportPage',
-  components: { AvoidOptions, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     avoidRoutes,
+    capabilityGates,
     countFormat,
     deepLink,
+    handlingSupport,
     loadState(INPUT_LABELS),
     persistedView({
       fromKey: { key: 'transportFrom', default: null, scope: 'race' },
@@ -254,6 +267,7 @@ export default {
   ],
   data() {
     return {
+      expanded: [],
       optionList: OPTIONS,
       pageSizes: PAGE_SIZES,
       STATUS,
@@ -264,7 +278,7 @@ export default {
     ...mapGetters(['database', 'GameID', 'RaceID', 'CivilianShippingLinesActive']),
     ...mapState(['RaceNPR']),
 
-    // The reads that hold the page back: every one but the danger and control of the systems, which have their own note.
+    // The reads that hold the page back: every one but the officers' bonuses, which have their own note.
     failedInputs() {
       return CORE_INPUTS.filter((key) => this.loadErrors[key])
     },
@@ -424,7 +438,7 @@ export default {
 
     // The two ends of the run as places a ship loads or unloads: a colony with the spaceports and cargo shuttle stations it has, and a system as a colony site with none.
     endpoints() {
-      const endpointOf = (place) => (place ? colonyEndpoint(place.kind === 'colony' ? place.colony : { ShuttleCapacity: 0 }, place.name) : null)
+      const endpointOf = (place) => (place ? colonyEndpoint(place.kind === 'colony' ? place.colony : { ShuttleCapacity: 0, SystemID: place.SystemID }, place.name) : null)
 
       return { origin: endpointOf(this.origin), destination: endpointOf(this.destination) }
     },
@@ -572,6 +586,7 @@ export default {
         { text: 'Colonists / yr', value: 'colonistsYear', align: 'end' },
         { text: 'Fuel / trip', value: 'fuel', align: 'end' },
         { text: 'Status', value: 'statusSort' },
+        { text: '', value: 'data-table-expand' },
       ]
     },
 
@@ -721,11 +736,11 @@ export default {
         return { ...base, note: this.reachNote(group, reach) }
       }
 
-      const trip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion })
+      const trip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
-      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: tripResult(trip), statusSort: works ? 0 : 1 }
+      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: tripResult(trip), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), statusSort: works ? 0 : 1 }
       const problems = trip.problems.map((problem) => `${problem.text.charAt(0).toUpperCase()}${problem.text.slice(1)}`).join('; ')
 
       if (works) {
@@ -840,7 +855,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, FCT_Ship.MothershipID, FCT_Fleet.FleetName, FCT_Fleet.ShippingLine, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.MaxSpeed > 1 and FCT_Ship.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0)) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, FCT_Ship.MothershipID, FCT_Fleet.FleetName, FCT_Fleet.ShippingLine, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_ShipClass.ClassName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.FuelCapacity, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID} and FCT_ShipClass.MaxSpeed > 1 and FCT_Ship.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0)) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -874,6 +889,22 @@ export default {
         }
 
         return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
+    // The officers' Logistics bonuses that multiply a ship's loading strength (`loadHandlingSupport`): optional, so the page renders without them and counts each as unknown until they are in.
+    handlingSupport: {
+      get: tracked('handlingSupport', async function () {
+        const { database, GameID, RaceID } = this
+        const gates = this.capabilityGates('/information')
+
+        if (!database || !GameID || !RaceID) {
+          return null
+        }
+
+        const { ranks, blocked } = await gates
+
+        return await loadHandlingSupport(database, { GameID, RaceID, ranks, blocked })
       }),
       default: null,
     },

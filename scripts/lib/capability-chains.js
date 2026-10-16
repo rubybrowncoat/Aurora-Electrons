@@ -13,7 +13,7 @@ const path = require('path')
 const { Sequelize } = require('sequelize')
 const { loadUtilities } = require('./utilities')
 
-const NAVAL_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress']
+const NAVAL_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress', '/hauling', '/information']
 const MODULES = ['capabilities', 'minerals', 'mining-data', 'mineral-outlook', 'logistics', 'naval-admins', 'survey', 'terraform-capacity', 'cmc-policy']
 const OPEN_EXISTING = 0x2
 
@@ -126,8 +126,8 @@ const results = async (mods, { database, race }) => {
 }
 
 const reportChecks = (rank, check) => {
-  check('naval: FCT_Commander.RankID dropped leaves the five reports degraded by the shared group, with their independent inputs required and met', NAVAL_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false))
-  check('naval: every one of the five names FCT_Commander.RankID and says what is left out', NAVAL_ROUTES.every((route) => rank.reports[route].degraded.some((entry) => entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))))
+  check('naval: FCT_Commander.RankID dropped leaves the reports that read the naval admin ranks degraded by the shared group, with their independent inputs required and met', NAVAL_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false))
+  check('naval: every one of them names FCT_Commander.RankID and says what is left out', NAVAL_ROUTES.every((route) => rank.reports[route].degraded.some((entry) => entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))))
 }
 
 // `ctx`: { check, stubs, source, alteredCopy, mutatedCopy, preflightOf, capabilities }.

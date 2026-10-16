@@ -645,14 +645,10 @@ export const systemsWithinJumps = (graph, systemId, jumps) => {
   return reached
 }
 
-// An admin command's radius in jumps, or null when it has no base. A Naval Headquarters adds one jump per doubling of its level (levels 1, 2, 4, 8 give 1, 2, 3, 4), times the command type's multiplier (Patrol and Survey 2). A command on a flag bridge reaches only its own system.
+// An admin command's radius in jumps. A Naval Headquarters adds one jump per doubling of its level (levels 1, 2, 4, 8 give 1, 2, 3, 4; a fractional level is cut to a whole one first), times the command type's multiplier (Patrol and Survey 2). A population with no headquarters capacity still reaches its own system (radius 0), and so does a command on a flag bridge; a command with no location at all has no system to reach (`loadNavalAdmins` leaves its range empty).
 export const navalAdminRadius = ({ ShipID, HeadquartersLevel, Radius }) => {
-  if (ShipID) {
+  if (ShipID || !(HeadquartersLevel >= 1)) {
     return 0
-  }
-
-  if (!(HeadquartersLevel >= 1)) {
-    return null
   }
 
   return (1 + Math.floor(Math.log2(HeadquartersLevel))) * (Radius || 1)
@@ -733,6 +729,13 @@ export const navalAdminChain = (admins, systemId, commandId) => {
 
 // The chain's multiplier, null while the chain is unknown (`navalAdminChain`).
 export const navalAdminChainBonus = (admins, systemId, commandId) => navalAdminChain(admins, systemId, commandId).bonus
+
+// The naval admin chain a ship's fleet answers to: the fleet's own command up the tree, and for a fleet with no command (0 or null) the race's root command, the one with no parent. `admins`: as `loadNavalAdmins` gives them; `systemId`: where the ship is, or loads; `commandId`: the fleet's NavalAdminCommandID. Returns `navalAdminChain`'s { bonus, unknown }.
+export const fleetCommandChain = (admins, systemId, commandId) => {
+  const root = Object.values(admins).find((admin) => !admin.ParentCommandID)
+
+  return navalAdminChain(admins, systemId, commandId || (root ? root.NavalAdminCommandID : 0))
+}
 
 // Tons at a readable precision: 47.3 Mt, 307 kt. Teratonnes only come from deposits set in the game's editor.
 export const compact = (value) => {

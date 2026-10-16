@@ -76,7 +76,7 @@
             <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}<div v-for="cutText in row.cutTexts" :key="cutText" class="text--secondary" data-cut-off>{{ cutText }}</div></div>
           </div>
           <div class="panel-foot caption text--secondary">
-            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged and without Logistics bonuses; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
+            A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged; a class has no commander, governor or sector, so its Logistics bonuses count as 1 and a real ship may load faster; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
         </v-card>
 
@@ -84,6 +84,7 @@
           <div class="panel-head">
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
+          <div v-if="handlingSupportNote" class="panel-body py-2 caption" :class="handlingSupportNote.tone" data-handling-note>{{ handlingSupportNote.text }}<v-btn v-if="handlingSupportState.failed" x-small text class="ml-2" @click="retryHandlingSupport">Retry</v-btn></div>
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
@@ -158,12 +159,13 @@
                 </div>
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
                 <div v-if="item.year" class="caption text--secondary mt-2">Each cycle: {{ fixed(item.year.movingDays, 2) }} days moving and {{ fixed(item.handlingHours, 1) }} hours loading and unloading.<span v-if="item.limiting"> The slowest stop is {{ item.limiting.place }}, set by {{ item.limiting.ship.ShipName }} at a loading strength of {{ fixed(item.limiting.strength, 1) }}.</span></div>
+                <handling-breakdown :rows="item.handlingRows" class="mt-2" />
                 <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
               </td>
             </template>
           </v-data-table>
           <div class="panel-foot caption text--secondary">
-            Fleets Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the docs' cargo-handling time as Transport times it: every ship works at once and the slowest sets the stop's time, each at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology, plus the technology once more at a colony with a spaceport or cargo shuttle station. A ship over 500 t with no undamaged bays can load or unload only at such a colony, and a route where a ship can't is named with the reason and left out of the totals; so is a route where it isn't known whether a ship can. Commander, governor, admin and sector Logistics bonuses aren't counted, so a time can come out long; refuelling and overhauls aren't counted. {{ versionNote }}
+            Fleets Aurora runs on repeat (cycle moves), walked order by order as the game measures a fleet's orders: straight to each destination where it is now (a body, jump point, Lagrange point, survey location, waypoint, fleet, contact, wreck or life pod), and through the jump points and Lagrange points the orders take. Route Finder plans its own route through the same stops, so its distance can differ from what the orders fly. Trips assume full loads (or the set amounts) at the fleet's set speed. Loading and unloading follow the docs' cargo-handling time as Transport times it: every ship works at once and the slowest sets the stop's time, each at the strength of its undamaged cargo shuttle bays (a craft of 500 t or less counts as one) times the race's cargo handling technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess, plus the technology once more at a colony with a spaceport or cargo shuttle station, which no bonus multiplies. A ship over 500 t with no undamaged bays can load or unload only at such a colony, and a route where a ship can't is named with the reason and left out of the totals; so is a route where it isn't known whether a ship can. A bonus the save cannot settle counts as 1, so the time errs long; a crew short of the class's is applied once, and no crew aboard stops loading; refuelling and overhauls aren't counted. {{ versionNote }}
           </div>
         </v-card>
 
@@ -206,12 +208,15 @@
 <script>
 import { mapGetters } from 'vuex'
 
+import HandlingBreakdown from '../components/page/HandlingBreakdown.vue'
 import AvoidOptions from '../components/page/AvoidOptions.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import avoidRoutes from '../mixins/avoid-routes'
+import capabilityGates from '../mixins/capability-gates'
+import handlingSupport from '../mixins/handling-support'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
@@ -219,12 +224,13 @@ import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
 import { classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { loadJumpPoints } from '../utilities/jump-graph'
+import { loadHandlingSupport } from '../utilities/handling-support'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
 import { allLoaded, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
-import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, shuttleServiceJoin, tripResult } from '../utilities/transport'
+import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, handlingRows, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
   classes: 'the freighter classes',
@@ -237,10 +243,11 @@ const INPUT_LABELS = {
   jumpPoints: 'the jump points',
   shuttleTechnology: 'the shuttle technology',
   formulaVersion: 'the save\'s schema',
+  handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
 }
-// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the danger and control the avoid settings read).
-const OPTIONAL_INPUTS = ['avoidSystems']
+// The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read).
+const OPTIONAL_INPUTS = ['handlingSupport', 'avoidSystems']
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // DIM_MoveAction: "Move to Location".
 const MOVE_TO_LOCATION = 2
@@ -284,9 +291,11 @@ const cycleStops = (orders, raceId) => {
 
 export default {
   name: 'HaulingPage',
-  components: { AvoidOptions, LoadState, PageLink, ProvenanceMark, StatTiles },
+  components: { AvoidOptions, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, StatTiles },
   mixins: [
     avoidRoutes,
+    capabilityGates,
+    handlingSupport,
     loadState(INPUT_LABELS),
     persistedView({
       planReserves: { key: 'haulingPlanReserves', default: false },
@@ -309,7 +318,7 @@ export default {
   computed: {
     ...mapGetters(['config', 'database', 'GameID', 'RaceID']),
 
-    // The reads that hold the page back: every one but the danger and control of the systems, which have their own note.
+    // The reads that hold the page back: every one but the officers' bonuses, which have their own note.
     failedInputs() {
       return CORE_INPUTS.filter((key) => this.loadErrors[key])
     },
@@ -359,7 +368,7 @@ export default {
         const route = walkRoute(orders)
         const cargo = cycleCargo(orders, fleet)
         const ships = this.shipsByFleet[fleet.FleetID] || []
-        const handling = cycleHandling(orders, cargo, fleet, ships, this.formulaVersion)
+        const handling = cycleHandling(orders, cargo, fleet, ships, { version: this.formulaVersion, support: this.officerSupport })
         const year = routeYear(fleet, route, cargo, handling, orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
         const results = routeResults(route, year, handling)
         // A stop does something where it goes: transits and plain moves only pass through.
@@ -379,6 +388,8 @@ export default {
           routesLink: routesLink.to,
           routesName: routesLink.name,
           handlingHours: handling.seconds === null ? null : handling.seconds / 3600,
+          handlingRows: handlingRows(handling.stops.map((stop, index) => ({ key: `${fleet.FleetID}-${index}`, label: `${stop.order.label}: ${stop.order.ActionName}`, breakdown: stop.breakdown }))),
+          estimate: handling.estimate,
           limiting: handling.limiting,
           blocked: handling.blocked,
           blockedText: handling.blocked.map((problem) => problem.text).join('; '),
@@ -651,7 +662,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_Ship.FleetID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, ${SHUTTLE_STRENGTH_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
+        return await this.database.query(`select FCT_Ship.FleetID, FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_ShipClass.CargoCapacity, FCT_ShipClass.ColonistCapacity, FCT_ShipClass.Size, FCT_Ship.CurrentCrew, FCT_ShipClass.Crew as ClassCrew, FCT_Fleet.ParentCommandID as NavalAdminCommandID, ${SHUTTLE_STRENGTH_COLUMNS} from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID and FCT_Fleet.CycleMoves = 1 and FCT_Fleet.ShippingLine = 0 inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID where FCT_Ship.GameID = ${this.GameID} and FCT_Ship.RaceID = ${this.RaceID}`).then(([items]) => items)
       }),
       default: [],
     },
@@ -733,6 +744,22 @@ export default {
         }
 
         return await loadFormulaVersion(this.database)
+      }),
+      default: null,
+    },
+    // The officers' Logistics bonuses that multiply a ship's loading strength (`loadHandlingSupport`): optional, so the page renders without them and counts each as unknown until they are in. Null when the race row is not selected.
+    handlingSupport: {
+      get: tracked('handlingSupport', async function () {
+        const { database, GameID, RaceID } = this
+        const gates = this.capabilityGates('/hauling')
+
+        if (!database || !GameID || !RaceID) {
+          return null
+        }
+
+        const { ranks, blocked } = await gates
+
+        return await loadHandlingSupport(database, { GameID, RaceID, ranks, blocked })
       }),
       default: null,
     },

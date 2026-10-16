@@ -2,7 +2,7 @@
 
 import { crewFraction } from './crew'
 import { roundToDecimal } from './math'
-import { navalAdminChain } from './minerals'
+import { fleetCommandChain } from './minerals'
 import { MINING_BONUS, MINING_WITHHELD } from './mining-data'
 import { combine, envelope, getRule, isAvailable, ofRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 import { totalOf } from './production'
@@ -226,11 +226,7 @@ export const fullPowerBurn = (shipClass) => shipClass.EnginePower * shipClass.Fu
 export const gateHarvesterRows = (rows, blocked) => (blocked.has(MINING_BONUS) ? rows.map((row) => ({ ...row, MiningBonus: null, BonusWithheld: MINING_WITHHELD })) : rows)
 
 // The naval admin Mining multiplier a harvester earns: its fleet's command up the chain, and for a fleet with no command the race's root command. `admins`: as `loadNavalAdmins` gives them; `ship`: { SystemID, NavalAdminCommandID }.
-const harvesterChain = (admins, ship) => {
-  const root = Object.values(admins).find((admin) => !admin.ParentCommandID)
-
-  return navalAdminChain(admins, ship.SystemID, ship.NavalAdminCommandID || (root ? root.NavalAdminCommandID : 0))
-}
+const harvesterChain = (admins, ship) => fleetCommandChain(admins, ship.SystemID, ship.NavalAdminCommandID)
 
 // The multiplier, null while the chain is not known (`harvesterAdminGap` says why).
 export const harvesterAdminBonus = (admins, ship) => harvesterChain(admins, ship).bonus

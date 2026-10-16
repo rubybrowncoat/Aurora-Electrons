@@ -1,5 +1,6 @@
 // Hauling maths for the Hauling Planner: repeating routes walked from their orders, and what they move in a year. Sources and checks: docs/plans/aurcalcs/build-3.md § Hauling Planner.
 
+import { bonusProvenance, mergeFactors } from './handling-bonuses'
 import { ofRule, registerRule, unavailable } from './provenance'
 import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, landingThreshold, missingInputsOf, stopHandling } from './transport'
 
@@ -28,7 +29,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
-  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays. Loading leaves the Logistics bonuses out, so a cycle comes out long when they apply; refuelling and overhauls are not counted.',
+  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays. Loading counts the officers\' Logistics bonuses as `transport.logisticsBonuses` gives them, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
   assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops'],
 })
 
@@ -84,14 +85,15 @@ registerRule({
 
 // How far a repeating route's figures can be trusted, as provenance results { cycle, freight, colonists, fuel }: the rules' own status when the route has a year, unavailable naming what is missing when a ship's eligibility or a timing input isn't known (`handling.unknown`), and null otherwise (a route that can't be traced, can't load or isn't moving says why in its own note).
 export const routeResults = (route, year, handling) => {
-  const assumptions = handling.versionSupported ? [] : [UNVERIFIED_VERSION]
+  const { inputs, assumptions: bonusAssumptions } = bonusProvenance({ known: handling.known || [], unknown: handling.unsettled || [] })
+  const assumptions = [...(handling.versionSupported ? [] : [UNVERIFIED_VERSION]), ...bonusAssumptions]
 
   if (year) {
     return {
-      cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, assumptions }),
-      freight: ofRule({ rule: 'hauling.freightMoved', value: year.minerals + year.installations, assumptions }),
-      colonists: ofRule({ rule: 'hauling.colonistsMoved', value: year.colonists, assumptions }),
-      fuel: ofRule({ rule: 'hauling.fuelPerYear', value: year.fuel, assumptions }),
+      cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, inputs, assumptions }),
+      freight: ofRule({ rule: 'hauling.freightMoved', value: year.minerals + year.installations, inputs, assumptions }),
+      colonists: ofRule({ rule: 'hauling.colonistsMoved', value: year.colonists, inputs, assumptions }),
+      fuel: ofRule({ rule: 'hauling.fuelPerYear', value: year.fuel, inputs, assumptions }),
     }
   } else if (route.km !== null && handling.unknown.length && !handling.blocked.length) {
     const missing = missingInputsOf(handling.unknown)
@@ -202,12 +204,12 @@ export const cycleCargo = (orders, fleet) => {
   return { moves, perTrip, deliveries, holdShare }
 }
 
-// Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`), as that part of every ship's capacity, counting the cargo points a tonne of mineral takes, and takes the slowest ship's time (`stopHandling`). An order's `endpoint` (`colonyEndpoint` or `bareEndpoint`) is where it loads or unloads; `version` the formula version (`loadFormulaVersion`). Returns the total `seconds` (null when a stop can't be timed), the `stops` (each with the `limiting` ship that sets its time, that ship's `strength` and its `eligibility`), `limiting` (the longest stop's { place, ship, strength }, null when nothing is moved), the places where a ship can't load, `blocked`: [{ place, status, code, text }] with the responsible ship or colony named in `text`, and the places where it isn't known whether one can (a missing input, or a landing size not verified for the version), `unknown`, in the same form. Only cargo orders count: loading troops is no cargo rule's business.
-export const cycleHandling = (orders, cargo, fleet, ships, version = null) => {
+// Handling over one cycle: each stop is charged for the cargo its own order moves (`cargo.moves`), as that part of every ship's capacity, counting the cargo points a tonne of mineral takes, and takes the slowest ship's time (`stopHandling`). An order's `endpoint` (`colonyEndpoint` or `bareEndpoint`) is where it loads or unloads; `version` the formula version (`loadFormulaVersion`) and `support` the officers' Logistics bonuses (`loadHandlingSupport`, null when not read, so every officer is unknown). Returns the total `seconds` (null when a stop can't be timed), the `stops` (each with the `limiting` ship that sets its time, that ship's `strength`, its `breakdown` and its `eligibility`), `limiting` (the longest stop's { place, ship, strength, breakdown }, null when nothing is moved), the places where a ship can't load, `blocked`: [{ place, status, code, text }] with the responsible ship or colony named in `text`, the places where it isn't known whether one can (a missing input, or a landing size not verified for the version), `unknown`, in the same form, and the officers whose Logistics bonus `known` applies and is `unsettled` (`estimate`: the time counts an unsettled bonus as 1 and errs long). Only cargo orders count: loading troops is no cargo rule's business.
+export const cycleHandling = (orders, cargo, fleet, ships, { version = null, support = null } = {}) => {
   const stops = orders.map((order, index) => {
     const move = cargo.moves[index]
     const capacity = move ? (move.kind === 'colonists' ? fleet.ColonistCapacity : fleet.CargoCapacity) : 0
-    const handled = stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version })
+    const handled = stopHandling(order, ships, fleet.ShuttleTechnology, capacity > 0 ? (move.amount * (CARGO_POINTS[move.kind] || 1)) / capacity : 0, { version, support })
 
     if (!move || Number.isFinite(capacity)) {
       return { order, ...handled }
@@ -219,13 +221,17 @@ export const cycleHandling = (orders, cargo, fleet, ships, version = null) => {
   })
   const longest = stops.reduce((slowest, stop) => (stop.limiting && (!slowest || stop.seconds > slowest.seconds) ? stop : slowest), null)
   const problems = stops.flatMap((stop) => stop.eligibility.reasons.map((reason) => ({ place: stop.order.label, status: reason.status, code: reason.code, text: reason.text }))).filter((problem, index, all) => all.findIndex((other) => other.text === problem.text) === index)
+  const merged = mergeFactors(stops.flatMap((stop) => [stop.known, stop.unknown]))
 
   return {
     seconds: problems.length ? null : stops.reduce((sum, stop) => sum + stop.seconds, 0),
     stops,
-    limiting: longest ? { place: longest.order.label, ship: longest.limiting, strength: longest.strength } : null,
+    limiting: longest ? { place: longest.order.label, ship: longest.limiting, strength: longest.strength, breakdown: longest.breakdown } : null,
     blocked: problems.filter((problem) => problem.status === 'blocked'),
     unknown: problems.filter((problem) => problem.status === 'unsupported'),
+    estimate: merged.some((factor) => factor.state === 'unknown'),
+    known: merged.filter((factor) => factor.state === 'applies'),
+    unsettled: merged.filter((factor) => factor.state === 'unknown'),
     versionSupported: landingThreshold(version) !== null,
   }
 }

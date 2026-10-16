@@ -36,15 +36,15 @@ registerRule({
   note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them) and the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it) and the officers' Logistics bonuses there (the handling times count an unread officer as no bonus and say so). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
   '/warnings': (key) => key.startsWith('check:'),
   '/lagrange': (key) => key === 'ships',
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/information': (key) => key === 'avoidSystems',
-  '/hauling': (key) => key === 'avoidSystems',
+  '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport',
+  '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport',
 })
 
 export const isOptional = (route, key) => Boolean(OPTIONAL[route] && OPTIONAL[route](key))
@@ -63,6 +63,8 @@ export const SOFT = Object.freeze({
   '/habitability': Object.freeze([navalRank('the mining outlook of the mass-driver colonies, which rests on the ranks of the naval admin commanders')]),
   '/logistics': Object.freeze([navalRank('the fuel output of the Sorium harvesters, which rests on the ranks of the naval admin commanders')]),
   '/survey-progress': Object.freeze([navalRank('the survey rates of the fleets, which rest on the ranks of the naval admin commanders')]),
+  '/hauling': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
+  '/information': Object.freeze([navalRank('the naval admin term of the cargo handling rates, which rests on the ranks of the naval admin commanders')]),
 })
 
 const MINERAL_NAMES = Object.freeze(['Duranium', 'Neutronium', 'Corbomite', 'Tritanium', 'Boronide', 'Mercassium', 'Vendarite', 'Sorium', 'Uridium', 'Corundium', 'Gallicite'])
@@ -80,12 +82,14 @@ export const MARKER_COLUMNS = Object.freeze({
   DIM_NavalAdminCommandType: SHARE_NAMES,
 })
 
-// The columns an input uses of a table whose bare `*` marker stands for more than the page needs: { [route]: { [input]: { [table]: [column] } } }, which replace that marker's list in `MARKER_COLUMNS`. Each page loads the naval admin commands of one share (`loadNavalAdmins(..., { share })`), the Colonization Planner through utilities/colonization-data.js.
+// The columns an input uses of a table whose bare `*` marker stands for more than the page needs: { [route]: { [input]: { [table]: [column] } } }, which replace that marker's list in `MARKER_COLUMNS`. Each page loads the naval admin commands of one share (`loadNavalAdmins(..., { share })`), the Colonization Planner through utilities/colonization-data.js and the handling times of Transport and Hauling through utilities/handling-support.js.
 export const MARKER_USES = Object.freeze({
   '/production': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/mineral-outlook': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/habitability': Object.freeze({ outlook: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }), navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
   '/logistics': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Industrial']) }) }),
+  '/hauling': Object.freeze({ handlingSupport: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Logistics']) }) }),
+  '/information': Object.freeze({ handlingSupport: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Logistics']) }) }),
   '/survey-progress': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Survey']) }) }),
 })
 
@@ -155,6 +159,7 @@ export const BONUS_NAMES = Object.freeze({
   8: Object.freeze({ name: 'Population Growth', percentage: true, routes: Object.freeze(['/colony-outlook', '/commanders']), effect: Object.freeze({ default: 'the growth rates of the colonies', '/commanders': OFFICERS }) }),
   9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze(['/production', '/habitability', '/commanders']), effect: Object.freeze({ default: 'the terraforming capacity and rates of the colonies, with the commanders and naval admin chain behind them', '/commanders': OFFICERS }) }),
   11: Object.freeze({ name: 'Ground Construction', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the ground unit construction rates of the colonies' }),
+  24: Object.freeze({ name: 'Logistics', percentage: true, routes: Object.freeze(['/hauling', '/information']), effect: 'the commander, naval admin, governor and sector terms of the cargo handling times' }),
   25: Object.freeze({ name: 'Colony Administration', percentage: false, routes: Object.freeze(['/commanders']), effect: OFFICERS }),
   27: Object.freeze({ name: 'Research Admin', percentage: false, routes: Object.freeze(['/technologies', '/commanders']), effect: Object.freeze({ '/technologies': 'the labs the scientists may run', '/commanders': OFFICERS }) }),
 })

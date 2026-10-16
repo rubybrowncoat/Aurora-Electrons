@@ -146,9 +146,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances and the avoid settings\' systems read of /information and /hauling, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances and the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   Object.entries(capabilities.INPUTS).forEach(([route, inputs]) => inputs.forEach((input) => {
     Object.entries(input.resolved).forEach(([table, resolved]) => {
@@ -241,8 +241,8 @@ const alteredChecks = async (capabilities, source) => {
   const unrelated = (result, ...routes) => Object.values(result.reports).filter((report) => !routes.includes(report.route)).every((report) => report.status === 'supported')
   // The reports other than `route` that are not supported, each only degraded and by an input that names `field` (a report that reads the field for another purpose, such as the naval commands' captains' ranks).
   const alsoReading = (result, route, field) => Object.values(result.reports).filter((report) => report.route !== route && !NAVAL_ADMIN_ROUTES.includes(report.route) && report.status !== 'supported').every((report) => report.status === 'unsupported' && report.missing.every((entry) => entry.fields.includes(field)))
-  const NAVAL_ADMIN_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress']
-  const SEPARATE = ['/finances', '/routes', '/log', '/propulsion', '/map', '/lagrange', '/technologies', '/designed-tech', '/history', '/hauling', '/information', '/intelligence', '/minerals']
+  const NAVAL_ADMIN_ROUTES = ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress', '/hauling', '/information']
+  const SEPARATE = ['/finances', '/routes', '/log', '/propulsion', '/map', '/lagrange', '/technologies', '/designed-tech', '/history', '/intelligence', '/minerals']
 
   try {
     const rankless = await alteredCopy(source, 'rank', ['alter table FCT_Commander drop column RankID'])
@@ -282,7 +282,7 @@ const alteredChecks = async (capabilities, source) => {
     const rankReport = rank.reports['/commanders']
 
     check('altered: FCT_Commander.RankID dropped degrades /commanders, naming the field and the rank group', rankReport.status === 'degraded' && rankReport.missing.length === 0 && rankReport.groups.rank === false && rankReport.groups.age === true && rankReport.degraded.some((entry) => entry.group && entry.key === 'rank' && entry.fields.includes('FCT_Commander.RankID')), JSON.stringify(rankReport))
-    check('altered: FCT_Commander.RankID dropped degrades the five reports that read the naval admin ranks by the shared group, naming the field and what is left out, and leaves them in service', NAVAL_ADMIN_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false && rank.reports[route].degraded.some((entry) => entry.group && entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))), NAVAL_ADMIN_ROUTES.map((route) => rank.reports[route].status).join())
+    check('altered: FCT_Commander.RankID dropped degrades the reports that read the naval admin ranks by the shared group, naming the field and what is left out, and leaves them in service', NAVAL_ADMIN_ROUTES.every((route) => rank.reports[route].status === 'degraded' && rank.reports[route].missing.length === 0 && rank.reports[route].groups.navalRank === false && rank.reports[route].degraded.some((entry) => entry.group && entry.key === 'navalRank' && entry.fields.includes('FCT_Commander.RankID') && /rates|outlook|output/.test(entry.affects))), NAVAL_ADMIN_ROUTES.map((route) => rank.reports[route].status).join())
     check('altered: FCT_Commander.RankID dropped leaves the reports that do not read it supported, and makes the others unsupported only by that read', SEPARATE.every((route) => rank.reports[route].status === 'supported') && alsoReading(rank, '/commanders', 'FCT_Commander.RankID'), notSupported(rank).map((report) => report.route).join(', '))
     check('altered: the formula version and the lookups are unaffected by a rank column', rank.formula.status === 'assumed' && failedGates(rank).length === 0)
 
@@ -341,13 +341,15 @@ const CONSUMER_MODULES = ['capabilities', 'commanders', '../mixins/production-mo
 
 const rendererDirectory = path.join(repo, 'src', 'renderer')
 
-// The pages that load the naval admin commands of one share, with the file that names the share (`loadNavalAdmins(..., { share })`): the Colonization Planner's read is in utilities/colonization-data.js. `MARKER_USES` gives each of them the share it loads.
+// The pages that load the naval admin commands of one share, with the file that names the share (`loadNavalAdmins(..., { share })`): the Colonization Planner's read is in utilities/colonization-data.js, the handling times' of Transport and Hauling in utilities/handling-support.js. `MARKER_USES` gives each of them the share it loads.
 const SHARE_SOURCES = {
   '/production': 'pages/production.vue',
   '/mineral-outlook': 'pages/mineral-outlook.vue',
   '/habitability': 'utilities/colonization-data.js',
   '/logistics': 'pages/logistics.vue',
   '/survey-progress': 'pages/survey-progress.vue',
+  '/hauling': 'utilities/handling-support.js',
+  '/information': 'utilities/handling-support.js',
 }
 
 const sharesOf = (route) => [...new Set([...fs.readFileSync(path.join(rendererDirectory, SHARE_SOURCES[route]), 'utf8').matchAll(/\bshare: '(\w+)'/g)].map((match) => match[1]))].sort()
@@ -715,6 +717,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/hauling', '/survey-progress', '/production'], unsupported: ['/logistics'] },
     { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/minerals', '/hauling'], unsupported: sharing('Industrial') },
     { label: 'DIM_NavalAdminCommandType.Survey dropped', table: 'DIM_NavalAdminCommandType', column: 'Survey', readers: shared('Survey'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics'], unsupported: ['/survey-progress'] },
+    { label: 'DIM_NavalAdminCommandType.Logistics dropped', table: 'DIM_NavalAdminCommandType', column: 'Logistics', readers: shared('Logistics'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress'] },
     { label: 'DIM_NavalAdminCommandType.Tactical dropped', table: 'DIM_NavalAdminCommandType', column: 'Tactical', readers: shared('Tactical'), none: true },
   ]
 
@@ -727,7 +730,7 @@ const dependencyChecks = async (capabilities, source, scan) => {
     const results = await dependencyResults(capabilities, cases)
 
     results.forEach(([statement, held, detail]) => check(`dependencies: ${statement}`, held, detail))
-    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, and the Survey page reads Survey', sharing('Industrial').sort().join() === ['/habitability', '/logistics', '/mineral-outlook', '/production'].join() && sharing('Survey').join() === '/survey-progress')
+    check('dependencies: the pages that read the Industrial share are the ones MARKER_USES names, the Survey page reads Survey, and Transport and Hauling read Logistics (their optional handling read only, so the report is degraded)', sharing('Industrial').sort().join() === ['/habitability', '/logistics', '/mineral-outlook', '/production'].join() && sharing('Survey').join() === '/survey-progress' && sharing('Logistics').sort().join() === ['/hauling', '/information'].join() && shared('Logistics').every(([route, key]) => capabilities.isOptional(route, key)))
 
     const [label, file, from, to] = UNION
     const directory = mutatedCopy(file, from, to)
