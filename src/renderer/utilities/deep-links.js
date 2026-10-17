@@ -22,7 +22,7 @@
 // | `/sensors`         | `mode=active`, `passive` or `beam`, `sensor=<SDComponentID>` (an existing sensor or fire control design), or in Active mode a missile as the target (the missile target keys below) |
 // | `/missile-designer` | `missile=<MissileID>` (a saved missile of the race, pinned as the baseline) and `name=<its name>` (a link from another page names it, so a missile that changed is told) |
 // | `/designed-tech`   | `design=<SDComponentID>` (a component design: its category opens with the design picked) or `missile=<MissileID>` (a missile design: the Missiles category opens with it picked) |
-// | `/shipyards`       | `from=<ShipClassID>` and `to=<ShipClassID>` (the refit from one saved class to another) |
+// | `/shipyards`       | `view=yards`, `growth`, `refits` or `classes` (a link with none opens Yards for `yard` or `colony`, else Refits); `yard=<ShipyardID>` (the yard picked: expanded in Yards, priced in Growth), `colony=<PopulationID>` (the yards of one colony); `from=<ShipClassID>` and `to=<ShipClassID>` (the refit from one saved class to another), or in the Class to yards view `operation=build`, `refit` or `repair` with `to=<ShipClassID>` (`from` for a refit) |
 //
 // The missile target of `/sensors` is what the Missile Designer hands over (`linkTo.sensors({ target })`): `msp=<size in MSP>` and `range=<evaluated range in km>` (the missile is the target and the range the wanted range), `src=saved`, `researched`, `hypothetical` or `manual` (where the figures come from), `missile=<MissileID>` (for `src=saved` only: a candidate is never a saved ID), `name=<the missile's name>`, `sig=<HS>` (the target signature the missile was evaluated against), `res=best` or one of the sensor resolutions in HS (design-rules.js `SENSOR_RESOLUTIONS_HS`) and `jam=<level>` (the resolution and the target's sensor jammer the sizing starts from) and `tech=<type>:<TechSystemID>:<r or h>,…` (the tech levels the design is built on, by line, id and kind: `r` researched, `h` hypothetical; a line is named once). `msp`, `range` and `src` are required; a missile target with a missing or unreadable part, a resolution the window does not offer or a line named twice is refused whole, with the reason shown on the page, and never applied in part.
 //
@@ -250,5 +250,5 @@ export const linkTo = Object.freeze({
   designedTech: ({ design, missile } = {}) => link('/designed-tech', { design, missile }),
   sensors: ({ mode, sensor, target } = {}) => link('/sensors', { mode: target && !mode ? 'active' : mode, sensor, ...missileTargetValues(target) }),
   missileDesigner: ({ missile, name } = {}) => link('/missile-designer', { missile, name: missile ? name : undefined }),
-  shipyards: ({ from, to } = {}) => link('/shipyards', { from, to }),
+  shipyards: ({ view, yard, colony, class: classId, operation, from, to } = {}) => link('/shipyards', classId ? { view: 'classes', operation, from, to: classId } : { view, yard, colony, operation, from, to }),
 })

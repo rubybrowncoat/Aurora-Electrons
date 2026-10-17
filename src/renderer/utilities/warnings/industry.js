@@ -351,7 +351,7 @@ export const checks = checksOf([
             capacity: figure(ctx, shipyard.Capacity, 'the shipyard\'s capacity', (known) => `${ctx.count(known)} t`),
           },
           caption: [colonyText(shipyard), SHIPYARD_ACTIVITIES[shipyard.TaskType]].filter(Boolean).join(' · '),
-          link: linkTo.production(shipyard.PopulationID),
+          link: linkTo.shipyards({ yard: shipyard.ShipyardID }),
           signature: signatureOf(bandOf(isKnownNumber(shipyard.Slipways) && shipyard.Slipways > 0 ? (shipyard.Slipways - shipyard.Tasks) / shipyard.Slipways : null, [QUARTER])),
         }),
       })
@@ -392,7 +392,7 @@ export const checks = checksOf([
             capacity: figure(ctx, shipyard.Capacity, 'the shipyard\'s capacity', (known) => `${ctx.count(known)} t`),
           },
           caption: shipyard.PopName || undefined,
-          link: shipyard.PopulationID ? linkTo.production(shipyard.PopulationID) : undefined,
+          link: linkTo.shipyards({ yard: shipyard.ShipyardID }),
         }),
       })
     },

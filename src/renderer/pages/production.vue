@@ -68,7 +68,7 @@
             </template>
             <template #[`item.name`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /></div>
+                <div class="font-weight-medium"><span class="dot" :style="{ background: typeColors[item.type] }" />{{ item.name }}<page-link v-if="item.TechSystemID" class="ml-1" :to="linkTo.techTree({ tech: item.TechSystemID })" :name="item.name" /><page-link v-if="item.ShipyardID" class="ml-1" :to="linkTo.shipyards({ yard: item.ShipyardID })" :name="item.yardName" /></div>
                 <div class="caption text--secondary">{{ typeLabels[item.type] }}<span v-if="item.detail"> · {{ item.detail }}</span></div>
                 <div v-if="item.note" class="caption warning--text">{{ item.note }}</div>
               </div>
@@ -199,7 +199,7 @@
                     <span v-else-if="!item[`${column.key}Total`]" class="text--disabled">none<provenance-mark :result="item.results[column.key].total" /></span>
                     <template v-else>
                       <div :class="{ 'text--secondary': item[`${column.key}Free`] < IDLE_MINIMUM }">{{ column.bp ? bp(item[`${column.key}Free`]) : count(item[`${column.key}Free`]) }}<provenance-mark :result="item.results[column.key].free" /></div>
-                      <div class="caption text--secondary">of {{ column.bp ? bp(item[`${column.key}Total`]) : count(item[`${column.key}Total`]) }}</div>
+                      <div class="caption text--secondary">of {{ column.bp ? bp(item[`${column.key}Total`]) : count(item[`${column.key}Total`]) }}<page-link v-if="column.key === 'slipways'" class="ml-1" :to="linkTo.shipyards({ colony: item.PopulationID })" :name="item.colonyName" /></div>
                     </template>
                   </div>
                 </template>
@@ -247,6 +247,7 @@ import { MINERALS } from '../utilities/minerals'
 import { loadNavalAdmins } from '../utilities/naval-admins'
 import { categoryOf, completionBins, finishDays, flagOf, freeCapacity, idleFacilities, industryFigures, industryUsage, jobStatus, prepareForecast, queuedResearch, researchRate, shipRate, shipyardFinish, shipyardUpgradeRate, shortageOf, sortNullLast, terraformFinish, totalOf, trainingCapacity, trainingRate, trainingUsage, undecidedStarts, unknownKindCapacity } from '../utilities/production'
 import { describeResult, describeRule, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
+import { SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES } from '../utilities/shipyard-growth'
 import { NO_TERRAFORM_SOURCES, hasTerraformers, loadTerraformSources, terraformBreakdown } from '../utilities/terraform-capacity'
 import { NO_PROCUREMENT_SOURCES, loadProcurementSources } from '../utilities/procurement-data'
 
@@ -320,26 +321,6 @@ const PRODUCTION_TYPES = {
   2: 'Fighter',
   3: 'Component',
   4: 'Space station',
-}
-
-const SHIPYARD_TASK_TYPES = {
-  0: 'Construction',
-  1: 'Repair',
-  2: 'Refit',
-  3: 'Scrap',
-  4: 'Auto refit',
-}
-
-const SHIPYARD_UPGRADE_TYPES = {
-  1: 'Add slipway',
-  2: 'Add 500 ton capacity',
-  3: 'Add 1,000 ton capacity',
-  4: 'Add 2,000 ton capacity',
-  5: 'Add 5,000 ton capacity',
-  6: 'Add 10,000 ton capacity',
-  7: 'Retool',
-  8: 'Continual capacity upgrade',
-  9: 'Spacemaster modification',
 }
 
 // Idle capacity columns; `bp` ones are build points a year, the others counts.
@@ -635,6 +616,8 @@ export default {
           key: `ship-${ship.ID}`,
           type: 'ship',
           PopulationID: ship.PopulationID,
+          ShipyardID: ship.ShipyardID,
+          yardName: ship.ShipyardName,
           name: ship.Name,
           detail: [SHIPYARD_TASK_TYPES[ship.ShipyardTaskType], ship.ClassName].filter(Boolean).join(' · '),
           rate,
@@ -657,6 +640,8 @@ export default {
           key: `shipyard-${shipyard.ID}`,
           type: 'shipyard',
           PopulationID: shipyard.PopulationID,
+          ShipyardID: shipyard.ID,
+          yardName: shipyard.ShipyardName,
           name: shipyard.ShipyardName,
           detail: `${SHIPYARD_UPGRADE_TYPES[shipyard.UpgradeTaskType] || 'Activity'}${target}`,
           rate,
@@ -1148,7 +1133,7 @@ export default {
           return []
         }
 
-        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
+        const [rows] = await this.database.query(`select FCT_ShipyardTask.TaskID as ID, FCT_ShipyardTask.TaskTypeID as ShipyardTaskType, FCT_ShipyardTask.PopulationID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.UnitName as Name, FCT_Shipyard.ShipyardName, FCT_ShipClass.ClassName, FCT_ShipClass.Size, FCT_ShipyardTask.TotalBP - FCT_ShipyardTask.CompletedBP as RemainingProduction, FCT_ShipyardTask.Paused, (case when FCT_Shipyard.SYType = 1 then 1.0 when FCT_Shipyard.SYType is null then null else 0.25 end) as CommercialModifier from FCT_ShipyardTask left join FCT_Shipyard on FCT_Shipyard.ShipyardID = FCT_ShipyardTask.ShipyardID left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = ${this.GameID} and FCT_ShipyardTask.RaceID = ${this.RaceID}`)
 
         return rows
       }),

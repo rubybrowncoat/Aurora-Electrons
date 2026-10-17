@@ -15,7 +15,7 @@
       </div>
       <div v-for="line in group.lines" :key="line.typeId" class="line">
         <div class="line-name">
-          <div class="font-weight-medium">{{ line.name }}</div>
+          <div class="font-weight-medium">{{ line.name }}<page-link v-if="techViews[line.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[line.typeId] })" :name="line.name" /></div>
           <div class="caption text--secondary">{{ line.done }} of {{ line.total }}<span v-if="line.best"> · now {{ line.best.name }}</span></div>
         </div>
         <div class="pips">
@@ -36,18 +36,24 @@
 
 <script>
 import countFormat from '../../mixins/count-format'
+import { linkTo } from '../../utilities/deep-links'
 import { isKnownNumber } from '../../utilities/math'
 import { ACTIVE, AVAILABLE, BLOCKED, DONE, LOCKED, pathRpResult, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { SHIPYARD_TECH_VIEWS } from '../../utilities/shipyard-growth'
+import PageLink from '../page/PageLink.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 export default {
   name: 'LinesView',
-  components: { ProvenanceMark },
+  components: { PageLink, ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
     search: { type: String, default: '' },
     hideFinished: { type: Boolean, default: true },
+  },
+  data() {
+    return { linkTo, techViews: SHIPYARD_TECH_VIEWS }
   },
   computed: {
     legend() {

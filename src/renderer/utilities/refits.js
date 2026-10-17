@@ -2,7 +2,7 @@
 
 import { roundHalfEven } from './design-rules'
 import { MINERALS } from './minerals'
-import { finishDays, shipRate, shipyardFinish, shipyardUpgradeRate } from './production'
+import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate } from './production'
 import { combine, envelope, getRule, registerRule, ruleSupports, unavailable, valueOrNull } from './provenance'
 
 const REFIT_VERSIONS = ['2.7.x']
@@ -97,7 +97,7 @@ const numberOf = (value) => (isNumber(value) ? value : null)
 export const inBand = (source, target) => (isNumber(source.sizeHS) && isNumber(target.sizeHS) ? target.sizeHS >= source.sizeHS * (1 - NO_RETOOL_SIZE_BAND) && target.sizeHS <= source.sizeHS * (1 + NO_RETOOL_SIZE_BAND) : null)
 
 // A figure of `rule` as a result: the rule's own verification where the save's version is shown to be covered, estimated where a confirmed rule meets a save that is not, with the standing note.
-const figure = ({ rule, value, present = [], units, assumptions = [], version = null }) => {
+export const figure = ({ rule, value, present = [], units, assumptions = [], version = null }) => {
   const registered = getRule(rule)
   const supported = ruleSupports(rule, version) === true
   const status = supported || registered.verification !== 'confirmed' ? registered.verification : 'estimated'
@@ -171,11 +171,36 @@ export const loadShipCounts = async (database, { GameID, RaceID }) => {
   return Object.freeze(Object.fromEntries(rows.map((row) => [row.ShipClassID, row.Ships])))
 }
 
-// The race's shipyards as { id, populationId, colony, name, type, slipways, capacity, tooledId (the class it is tooled for, null for none, undefined when the save does not say), retoolId (the class a retool in progress is for, null for none), taskType, tasks (the tasks at the yard, a real 0 for none, null when the save has no task table), shipBased }.
+const TASK_SQL = 'select FCT_ShipyardTask.TaskID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.TaskTypeID, FCT_ShipyardTask.ClassID, FCT_ShipyardTask.RefitID, FCT_ShipyardTask.UnitName, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.CompletedBP, FCT_ShipyardTask.Paused, FCT_ShipClass.ClassName, FCT_ShipClass.Size from FCT_ShipyardTask left join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_ShipyardTask.ClassID where FCT_ShipyardTask.GameID = :GameID and FCT_ShipyardTask.RaceID = :RaceID order by FCT_ShipyardTask.TaskID'
+
+const taskOf = (row) => Object.freeze({
+  id: row.TaskID,
+  taskType: numberOf(row.TaskTypeID),
+  classId: numberOf(row.ClassID),
+  className: row.ClassName || null,
+  refitId: isNumber(row.RefitID) && row.RefitID > 0 ? row.RefitID : null,
+  name: row.UnitName || null,
+  totalBP: numberOf(row.TotalBP),
+  completedBP: numberOf(row.CompletedBP),
+  remaining: isNumber(row.TotalBP) && isNumber(row.CompletedBP) ? row.TotalBP - row.CompletedBP : null,
+  paused: flagOf(row.Paused),
+  size: numberOf(row.Size),
+})
+
+// The race's shipyards as { id, populationId, colony, name, type, slipways, capacity, tooledId (the class it is tooled for, null for none, undefined when the save does not say), retoolId (the class a retool in progress is for, null for none), taskType (what the yard is modifying, 0 for nothing), requiredBP, completedBP, paused (true, false or null) and capacityTarget (the yard's own activity, null where the save has no figure), tasks (the tasks at the yard, a real 0 for none, null when the save has no task table), taskRows (those tasks as the Production Recap reads one: { id, taskType, classId, className, refitId, name, totalBP, completedBP, remaining, paused, size }, a real [] for none and null when the save has no task table), shipBased }.
 export const loadYards = async (database, { GameID, RaceID }) => {
   const [columns, taskColumns] = await Promise.all([columnsOf(database, 'FCT_Shipyard'), columnsOf(database, 'FCT_ShipyardTask')])
-  const tasks = taskColumns.has('ShipyardID') ? '(select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID)' : 'null'
-  const [rows] = await database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.PopulationID, FCT_Population.PopName, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.BuildClassID, ${columns.has('RetoolClassID') ? 'FCT_Shipyard.RetoolClassID' : 'null as RetoolClassID'}, FCT_Shipyard.TaskType, ${tasks} as Tasks, ${columns.has('ParentShipID') ? 'FCT_Shipyard.ParentShipID' : 'null as ParentShipID'} from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID where FCT_Shipyard.GameID = :GameID and FCT_Shipyard.RaceID = :RaceID order by FCT_Shipyard.ShipyardName`, { replacements: { GameID, RaceID } })
+  const hasTasks = taskColumns.has('ShipyardID')
+  const tasks = hasTasks ? '(select count(*) from FCT_ShipyardTask where FCT_ShipyardTask.ShipyardID = FCT_Shipyard.ShipyardID)' : 'null'
+  const own = (name, alias = name) => (columns.has(name) ? `FCT_Shipyard.${name} as ${alias}` : `null as ${alias}`)
+  const [rows] = await database.query(`select FCT_Shipyard.ShipyardID, FCT_Shipyard.PopulationID, FCT_Population.PopName, FCT_Shipyard.ShipyardName, FCT_Shipyard.SYType, FCT_Shipyard.Slipways, FCT_Shipyard.Capacity, FCT_Shipyard.BuildClassID, ${own('RetoolClassID')}, FCT_Shipyard.TaskType, ${own('RequiredBP')}, ${own('CompletedBP')}, ${own('PauseActivity')}, ${own('CapacityTarget')}, ${tasks} as Tasks, ${own('ParentShipID')} from FCT_Shipyard left join FCT_Population on FCT_Population.PopulationID = FCT_Shipyard.PopulationID where FCT_Shipyard.GameID = :GameID and FCT_Shipyard.RaceID = :RaceID order by FCT_Shipyard.ShipyardName`, { replacements: { GameID, RaceID } })
+  const taskRows = {}
+
+  if (hasTasks) {
+    const [stored] = await database.query(TASK_SQL, { replacements: { GameID, RaceID } })
+
+    stored.forEach((row) => (taskRows[row.ShipyardID] = taskRows[row.ShipyardID] || []).push(taskOf(row)))
+  }
 
   return Object.freeze(rows.map((row) => Object.freeze({
     id: row.ShipyardID,
@@ -188,7 +213,12 @@ export const loadYards = async (database, { GameID, RaceID }) => {
     tooledId: isNumber(row.BuildClassID) ? (row.BuildClassID > 0 ? row.BuildClassID : null) : undefined,
     retoolId: isNumber(row.RetoolClassID) && row.RetoolClassID > 0 ? row.RetoolClassID : null,
     taskType: numberOf(row.TaskType),
+    requiredBP: numberOf(row.RequiredBP),
+    completedBP: numberOf(row.CompletedBP),
+    paused: flagOf(row.PauseActivity),
+    capacityTarget: numberOf(row.CapacityTarget),
     tasks: numberOf(row.Tasks),
+    taskRows: hasTasks ? Object.freeze(taskRows[row.ShipyardID] || []) : null,
     shipBased: isNumber(row.ParentShipID) ? row.ParentShipID > 0 : null,
   })))
 }

@@ -349,6 +349,15 @@ const runSave = async (utilities, save, label) => {
 
     check(`${label}: every yard carries the count of its stored tasks (0 for none)`, wrongTasks.length === 0, wrongTasks.slice(0, 3).map((yard) => `yard ${yard.id}: ${yard.tasks} against ${tasksOf[yard.id] || 0}`).join('; '))
 
+    const [taskRowsStored] = await database.query('select FCT_ShipyardTask.TaskID, FCT_ShipyardTask.ShipyardID, FCT_ShipyardTask.TaskTypeID, FCT_ShipyardTask.TotalBP, FCT_ShipyardTask.CompletedBP from FCT_ShipyardTask where FCT_ShipyardTask.GameID = :GameID and FCT_ShipyardTask.RaceID = :RaceID', { replacements: scope }).catch(() => [[]])
+    const rowsOf = yards.flatMap((yard) => (yard.taskRows || []).map((row) => ({ yardId: yard.id, row })))
+    const storedById = Object.fromEntries(taskRowsStored.map((row) => [row.TaskID, row]))
+    const wrongRows = rowsOf.filter(({ yardId, row }) => { const stored = storedById[row.id]; return !stored || stored.ShipyardID !== yardId || stored.TaskTypeID !== row.taskType || stored.TotalBP !== row.totalBP || stored.CompletedBP !== row.completedBP || row.remaining !== row.totalBP - row.completedBP })
+    const inconsistent = yards.filter((yard) => !Array.isArray(yard.taskRows) || yard.taskRows.length !== yard.tasks)
+
+    check(`${label}: every stored task of the race is one task row of its yard, with its type, build points and what is left`, rowsOf.length === taskRowsStored.length && wrongRows.length === 0, `${rowsOf.length} rows against ${taskRowsStored.length} stored; ${wrongRows.slice(0, 3).map(({ row }) => row.id).join(', ')}`)
+    check(`${label}: every yard's task rows are as many as its task count`, inconsistent.length === 0, inconsistent.slice(0, 3).map((yard) => `yard ${yard.id}`).join(', '))
+
     const context = { classesById, components, version, cache: new Map() }
     const tally = Object.fromEntries(['build', 'repair'].map((operation) => [operation, Object.fromEntries(refits.YARD_STATES.map((state) => [state, 0]))]))
     const odd = []

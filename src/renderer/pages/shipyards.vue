@@ -12,6 +12,168 @@
           </v-btn-toggle>
         </div>
 
+        <v-card v-if="view === 'yards'" class="panel" data-summary="Every shipyard of the race once, with the tasks it is working, the upgrade or retool in progress and the price to add a slipway. Use it to find idle yards and to see what keeps each one busy." elevation="1">
+          <div class="panel-head">
+            <span>Shipyards<provenance-mark rule="production.shipyardUpgradeFinish" label /></span>
+            <span class="d-flex align-center flex-wrap controls">
+              <v-chip v-if="colonyId" small close @click:close="colonyId = null">{{ colonyName }}</v-chip>
+              <v-switch v-model="idleOnly" label="Free slipway only" dense hide-details class="mt-0" />
+              <v-text-field v-model="yardSearch" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
+            </span>
+          </div>
+          <div v-if="!inventoryRows.length" class="panel-body caption text--secondary">{{ inventoryHint }}</div>
+          <v-data-table v-else :headers="inventoryHeaders" :items="inventoryRows" item-key="id" :custom-sort="sortNullLast" :sort-by.sync="yardsList.sortBy" :sort-desc.sync="yardsList.sortDesc" :expanded.sync="expanded" :item-class="yardRowClass" show-expand disable-pagination hide-default-footer>
+            <template #[`item.name`]="{ item }">
+              <div class="py-2 d-flex align-center">
+                <div class="flex-grow-1">
+                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div class="caption text--secondary">{{ item.colony || '—' }}<v-chip v-if="item.shipBased === true" x-small class="ml-1" title="The yard belongs to a ship and cannot be modified">Ship-based</v-chip></div>
+                </div>
+                <page-link v-if="item.populationId" :to="linkTo.production(item.populationId)" :name="item.colony || ''" />
+              </div>
+            </template>
+            <template #[`item.freeSlipways`]="{ item }">
+              <span v-if="item.slipwaysText" class="text-no-wrap">{{ item.slipwaysText }}</span>
+              <span v-else class="text-no-wrap">—<provenance-mark :result="item.slipwaysGap" /></span>
+              <div v-if="item.retooling" class="caption text--secondary">A retool holds no slipway</div>
+            </template>
+            <template #[`item.capacity`]="{ item }">{{ count(item.capacity) }}</template>
+            <template #[`item.tooledName`]="{ item }">
+              <span v-if="item.tooled === undefined" class="text-no-wrap">—<provenance-mark :result="item.tooledGap" /></span>
+              <span v-else-if="item.tooled === null" class="text--secondary">None</span>
+              <span v-else class="d-flex align-center flex-wrap">
+                {{ item.tooledName }}
+                <v-chip v-if="item.tooled.obsolete === true" x-small class="ml-1" title="The class is marked obsolete">Obsolete</v-chip>
+                <page-link :to="linkTo.propulsion({ class: item.tooled.id })" :name="item.tooledName" />
+              </span>
+            </template>
+            <template #[`item.taskCount`]="{ item }">
+              <span v-if="item.taskCount === null" class="text-no-wrap">—<provenance-mark :result="item.taskGap" /></span>
+              <span v-else-if="!item.taskCount" class="text--secondary">None</span>
+              <div v-else class="py-1">
+                <div class="font-weight-medium">{{ count(item.taskCount) }}</div>
+                <div v-for="line in item.taskLines.slice(0, 3)" :key="line.id" class="caption text--secondary">{{ line.label }} · {{ line.subject }} · <span class="text-no-wrap">{{ taskTime(line) }}<provenance-mark :result="line.result" /></span></div>
+                <div v-if="item.taskLines.length > 3" class="caption text--secondary">and {{ count(item.taskLines.length - 3) }} more</div>
+              </div>
+            </template>
+            <template #[`item.activitySort`]="{ item }">
+              <span v-if="!item.activity" class="text--secondary">None</span>
+              <div v-else class="py-1">
+                <div class="font-weight-medium">{{ item.activity.label }}<v-chip v-if="item.activity.paused" x-small class="ml-1">Paused</v-chip></div>
+                <div v-if="item.activity.detail" class="caption text--secondary">{{ item.activity.detail }}</div>
+                <div class="caption text--secondary text-no-wrap">{{ activityTime(item.activity) }}<provenance-mark :result="item.activity.result" /></div>
+              </div>
+            </template>
+            <template #[`item.slipwayBP`]="{ item }">
+              <span v-if="item.slipwayBP !== null" class="text-no-wrap">{{ count(item.slipwayBP, 1) }} BP<provenance-mark :result="item.slipwayResult" /></span>
+              <span v-else class="text-no-wrap">—<provenance-mark :result="item.slipwayResult" /></span>
+            </template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="yard-detail">
+                <v-row dense>
+                  <v-col cols="12" md="6">
+                    <div class="font-weight-medium mb-1">Tasks</div>
+                    <div v-if="item.taskLines === null" class="caption text--secondary">The save does not list the tasks at the yard.</div>
+                    <div v-else-if="!item.taskLines.length" class="caption text--secondary">No task at the yard.</div>
+                    <v-simple-table v-else dense>
+                      <thead>
+                        <tr>
+                          <th>Task</th>
+                          <th>Subject</th>
+                          <th class="text-right">Left (BP)</th>
+                          <th class="text-right">Rate (BP/yr)</th>
+                          <th class="text-right">Time left</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="line in item.taskLines" :key="line.id">
+                          <td>{{ line.label }}</td>
+                          <td>{{ line.subject }}</td>
+                          <td class="text-right">{{ count(line.remaining, 1) }}</td>
+                          <td class="text-right text-no-wrap">{{ line.rate === null ? '—' : count(line.rate, 1) }}<provenance-mark :result="line.rateResult" /></td>
+                          <td class="text-right text-no-wrap">{{ taskTime(line) }}<provenance-mark :result="line.result" /></td>
+                        </tr>
+                      </tbody>
+                    </v-simple-table>
+                  </v-col>
+                  <v-col cols="12" md="6">
+                    <div class="d-flex align-center mb-1">
+                      <span class="font-weight-medium">Upgrade prices</span>
+                      <v-spacer />
+                      <v-btn x-small text color="primary" @click="openGrowth(item.id)">Growth view</v-btn>
+                    </div>
+                    <div v-if="item.shipBased === true" class="caption text--secondary mb-1">The yard belongs to a ship, which the game does not let be modified: no upgrade is priced.</div>
+                    <v-simple-table dense>
+                      <thead>
+                        <tr>
+                          <th>Upgrade</th>
+                          <th class="text-right">Price (BP)</th>
+                          <th class="text-right">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="step in growthOf(item.yard).rows" :key="step.key">
+                          <td>{{ step.label }}</td>
+                          <td class="text-right text-no-wrap">{{ count(figureOf(step.price), 1) }}<provenance-mark :result="step.price" /></td>
+                          <td class="text-right text-no-wrap">{{ growthTime(step) }}<provenance-mark :result="step.time" /></td>
+                        </tr>
+                      </tbody>
+                    </v-simple-table>
+                  </v-col>
+                </v-row>
+              </td>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            A yard appears once, with every task it works. A task's time left is the Production Recap's: the build points not yet done over the colony's shipyard rate for the task's class. The activity is the yard's own upgrade or retool; a continual upgrade's time is approximate. A retool holds no slipway, so the free slipways are the slipways less the tasks. The add-slipway price is the yard's capacity over 500 tons times 120 times the race's shipyard operations, a tenth of it at a commercial or repair yard. Obsolete marks a yard tooled for a class that is marked obsolete.<provenance-mark rule="shipyardGrowth.slipwayPrice" />
+          </div>
+        </v-card>
+
+        <v-card v-if="view === 'growth'" class="panel" data-summary="What it costs, in build points and in time, to add a slipway or capacity to one shipyard, and how the yard's own modification rate sets that time. Use it to compare the upgrades and to size a continual target." elevation="1">
+          <div class="panel-head">
+            <span>Yard growth<provenance-mark rule="shipyardGrowth.capacityStep" label /></span>
+            <span class="d-flex align-center flex-wrap controls">
+              <v-autocomplete :value="growthYard ? growthYard.id : null" :items="yardOptions" item-text="name" item-value="id" label="Shipyard" dense outlined hide-details clearable class="yard-picker" @change="yardId = $event || null" />
+              <v-text-field :value="growthTarget === null ? '' : String(growthTarget)" label="Continual target (t)" :placeholder="targetPlaceholder" persistent-placeholder type="number" min="0" dense outlined hide-details clearable class="target-field" @input="setTarget" />
+            </span>
+          </div>
+          <div v-if="!growth" class="panel-body caption text--secondary">{{ growthHint }}</div>
+          <div v-else class="panel-body">
+            <div class="d-flex align-center flex-wrap pair-title">
+              <span class="font-weight-medium">{{ growthYard.name }}</span>
+              <page-link v-if="growthYard.populationId" :to="linkTo.production(growthYard.populationId)" :name="growthYard.colony || ''" />
+              <span class="caption text--secondary">{{ growthSummary }}</span>
+            </div>
+            <div class="caption text--secondary mb-2">
+              Modification rate {{ count(figureOf(growth.rate), 1) }} BP a year<provenance-mark :result="growth.rate" /> · Shipyard operations {{ count(figureOf(operations), 2) }}<provenance-mark :result="operations" />
+            </div>
+            <div v-if="growthYard.shipBased === true" class="caption text--secondary mb-2">The yard belongs to a ship, which the game does not let be modified: no upgrade is priced.</div>
+            <v-simple-table dense class="growth-table">
+              <thead>
+                <tr>
+                  <th>Upgrade</th>
+                  <th class="text-right">Adds</th>
+                  <th class="text-right">Price (BP)</th>
+                  <th class="text-right">Time</th>
+                  <th class="bar-head">Time against the longest</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="step in growth.rows" :key="step.key">
+                  <td>{{ step.label }}</td>
+                  <td class="text-right text-no-wrap">{{ addsText(step) }}</td>
+                  <td class="text-right text-no-wrap">{{ count(figureOf(step.price), 1) }}<provenance-mark :result="step.price" /></td>
+                  <td class="text-right text-no-wrap">{{ growthTime(step) }}<provenance-mark :result="step.time" /></td>
+                  <td class="bar-cell"><span class="days-bar" :title="growthTime(step)"><span :style="{ width: `${barWidth(step.days, growth.longest)}%` }" /></span></td>
+                </tr>
+              </tbody>
+            </v-simple-table>
+          </div>
+          <div class="panel-foot caption text--secondary">
+            A slipway costs the yard's capacity over 500 tons times 120 times the race's shipyard operations; a capacity step costs the yard's slipways times 120 times the operations times its multiple of 500 tons (1, 2, 4, 10 or 20). A commercial or repair yard pays a tenth. The operations factor is the lowest multiplier among the Shipyard Operations levels the race holds. The time is the price over the yard's modification rate, which rises with its capacity. The 500 and 2,000 ton steps are marked estimated: no save checked stores one, so their price follows the pattern of the others. A continual upgrade is priced per ton at the steps' rate and stepped each construction period, so its time is approximate and the last period may overshoot the target; the game stores no price for it to compare with.<provenance-mark rule="shipyardGrowth.operations" />
+          </div>
+        </v-card>
+
         <v-card v-if="view === 'refits'" class="panel" data-summary="Every refit between the race's ship classes, one direction at a time: its time, its cost against each class and how many yards can take it or be retooled for it. Use it to find upgrades worth refitting and to avoid needless tooling changes." elevation="1">
           <div class="panel-head">
             <span>Refit matrix<provenance-mark rule="refit.cost" label /></span>
@@ -175,7 +337,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" :data-summary="yardsSummary" elevation="1">
+        <v-card v-if="view === 'refits' || view === 'classes'" class="panel" :data-summary="yardsSummary" elevation="1">
           <div class="panel-head">
             <span>{{ yardsTitle }}<provenance-mark rule="refit.yardEligibility" label /></span>
             <span v-if="view === 'classes'" class="d-flex align-center flex-wrap controls">
@@ -237,7 +399,7 @@
 
         <platform-paths v-if="view === 'classes'" :classes="classes" :extras="platformSources.extras" :components="components" :yards="yards" :colonies="platformColonies" :context="eligibilityContext" :version="formulaVersion" :researched="platformSources.researched" />
 
-        <v-card v-if="runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, each with the cost the save stores beside the cost the rules give. Use it to check the rules against the game and to see when the work ends." elevation="1">
+        <v-card v-if="(view === 'refits' || view === 'classes') && runningRows.length" class="panel" data-summary="Refits and retools the yards are working on now, each with the cost the save stores beside the cost the rules give. Use it to check the rules against the game and to see when the work ends." elevation="1">
           <div class="panel-head">
             <span>Running refits and retools<provenance-mark rule="production.shipFinish" label /></span>
           </div>
@@ -308,6 +470,7 @@ import { loadPlatformSources } from '../utilities/platform-paths'
 import { finishDays, flagOf, shipRate, shipyardFinish, shipyardUpgradeRate, sortNullLast } from '../utilities/production'
 import { describeResult, isAvailable, unavailable, valueOrNull } from '../utilities/provenance'
 import { REFIT_TASK_TYPES, SHIPYARD_TYPE, YARD_OPERATIONS, checkRefitTask, checkRetoolTask, costShare, inBand, loadRefitClasses, loadRefitTasks, loadRetoolTasks, loadShipCounts, loadYards, noRetoolCheck, refitCost, refitRate, refitTime, refitTotal, retoolCost, retoolTime, tooledClassOf, yardEligibility } from '../utilities/refits'
+import { CONTINUAL_ACTIVITY, RETOOL_ACTIVITY, SHIPYARD_TASK_TYPES, SHIPYARD_UPGRADE_TYPES, activityFinish, continualPrice, continualTime, loadShipyardOperations, modificationRate, shipyardOperations, slipwayPrice, taskFinish, upgradePrices, upgradeTime } from '../utilities/shipyard-growth'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
@@ -318,9 +481,22 @@ const INPUT_LABELS = {
   refitTasks: 'the running refits',
   retoolTasks: 'the running retools',
   populationProductionModifiers: 'the colonies\' production rates',
+  shipyardOperationsHeld: 'the race\'s Shipyard Operations levels',
   formulaVersion: 'the save\'s schema',
 }
-const VIEW_OPTIONS = [{ value: 'refits', label: 'Refits' }, { value: 'classes', label: 'Class to yards' }]
+const VIEW_OPTIONS = [{ value: 'yards', label: 'Yards' }, { value: 'growth', label: 'Growth' }, { value: 'refits', label: 'Refits' }, { value: 'classes', label: 'Class to yards' }]
+// The tons the Growth view's continual target starts above the yard's capacity until a target is typed.
+const DEFAULT_GROWTH_TONS = 10000
+const INVENTORY_HEADERS = [
+  { text: 'Yard', value: 'name' },
+  { text: 'Type', value: 'type' },
+  { text: 'Free slipways', value: 'freeSlipways', align: 'end' },
+  { text: 'Capacity (t)', value: 'capacity', align: 'end' },
+  { text: 'Tooled for', value: 'tooledName' },
+  { text: 'Tasks', value: 'taskCount' },
+  { text: 'Activity', value: 'activitySort' },
+  { text: 'Add slipway', value: 'slipwayBP', align: 'end' },
+]
 const OPERATION_OPTIONS = [{ value: 'build', label: 'Build' }, { value: 'refit', label: 'Refit to' }, { value: 'repair', label: 'Repair' }]
 const OPERATION_VERBS = { build: 'build', refit: 'refit to', repair: 'repair' }
 // What each eligibility state reads as: a label, an icon and a colour, and `rank` for sorting (the yards that can do the work first, those not known last).
@@ -360,20 +536,30 @@ export default {
     loadState(INPUT_LABELS),
     productionModifiers,
     persistedView({
-      view: { key: 'shipyardsView', default: 'refits', valid: oneOf(VIEW_OPTIONS.map((option) => option.value)) },
+      view: { key: 'shipyardsView', default: 'yards', valid: oneOf(VIEW_OPTIONS.map((option) => option.value)) },
       operation: { key: 'shipyardsOperation', default: 'build', valid: oneOf(YARD_OPERATIONS) },
       sizeWindow: { key: 'shipyardsSizeWindow', default: true },
       shipsOnly: { key: 'shipyardsShipsOnly', default: true },
       hideObsolete: { key: 'shipyardsHideObsolete', default: true },
       search: { key: 'shipyardsSearch', default: '', scope: 'race' },
+      yardId: { key: 'shipyardsYard', default: null, scope: 'race', valid: (value) => value === null || (Number.isInteger(value) && value > 0) },
+      fromId: { key: 'shipyardsFromClass', default: null, scope: 'race', valid: (value) => value === null || (Number.isInteger(value) && value > 0) },
+      toId: { key: 'shipyardsToClass', default: null, scope: 'race', valid: (value) => value === null || (Number.isInteger(value) && value > 0) },
+      growthTarget: { key: 'shipyardsGrowthTarget', default: null, scope: 'race', valid: (value) => value === null || (isNumber(value) && value > 0) },
+      yardSearch: { key: 'shipyardsYardSearch', default: '', scope: 'race' },
+      idleOnly: { key: 'shipyardsIdleOnly', default: false },
+      yardsList: tableView('shipyardsYardsList', { sortBy: ['name'], sortDesc: false }),
       yardsTable: yardsTableSort,
       runningTable: tableView('shipyardsRunningTable', { sortBy: ['daysSort'], sortDesc: false }),
     }),
   ],
   data() {
     return {
-      fromId: null,
-      toId: null,
+      colonyId: null,
+      linkedYardId: null,
+      expanded: [],
+      inventoryHeaders: INVENTORY_HEADERS,
+      linkedClassIds: [],
       viewOptions: VIEW_OPTIONS,
       operationOptions: OPERATION_OPTIONS,
       matrixLimit: MATRIX_PAIR_LIMIT,
@@ -716,8 +902,173 @@ export default {
       return [...refits, ...retools]
     },
 
+    yardOptions() {
+      return this.yards.map((yard) => ({ id: yard.id, name: yard.colony ? `${yard.name} · ${yard.colony}` : yard.name }))
+    },
+
+    // The yard the page is open on, null for none or one the race does not have.
+    pickedYard() {
+      const { yards, yardId } = this
+
+      return yards.find((yard) => yard.id === yardId) || null
+    },
+
+    // The yard the Growth view prices: the one picked, or the first yard while none is picked.
+    growthYard() {
+      const { pickedYard, yardId, yards } = this
+
+      return pickedYard || (yardId === null && yards.length ? yards[0] : null)
+    },
+
+    // The race's shipyard operations as a result of its held levels.
+    operations() {
+      return shipyardOperations(this.shipyardOperationsHeld, this.formulaVersion)
+    },
+
+    colonyName() {
+      const { colonyId, yards } = this
+      const yard = yards.find((candidate) => candidate.populationId === colonyId)
+
+      return yard && yard.colony ? yard.colony : `Colony #${colonyId}`
+    },
+
+    // The upgrades of a yard priced and timed, kept for each yard and target: { rate, rows, longest }, `rows` being { key, taskType, label, tons, price, time, days, idle, approx } with a continual upgrade to `target` tons last when a target is given.
+    growthOf() {
+      const { modifiersOf, operations, formulaVersion } = this
+      const kept = new Map()
+
+      return (yard, target = null) => {
+        const key = `${yard.id}>${target}`
+
+        if (!kept.has(key)) {
+          const modifiers = modifiersOf[yard.populationId]
+          const rows = upgradePrices({ yard, operations, version: formulaVersion }).map((step) => {
+            const time = upgradeTime(modifiers, yard, step.taskType, step.price)
+
+            return { ...step, time: time.result, days: valueOrNull(time.result), idle: time.idle, approx: false }
+          })
+
+          if (target !== null) {
+            const price = continualPrice({ yard, target, operations, version: formulaVersion })
+            const time = continualTime(modifiers, yard, target, price)
+
+            rows.push({ key: 'continual', taskType: CONTINUAL_ACTIVITY, label: `Continual to ${this.count(target)} t`, tons: isNumber(yard.capacity) ? target - yard.capacity : null, price, time: time.result, days: valueOrNull(time.result), idle: time.idle, approx: true })
+          }
+
+          kept.set(key, Object.freeze({ rate: modificationRate(modifiers, yard), rows, longest: Math.max(0, ...rows.map((row) => row.days).filter(isNumber)) }))
+        }
+
+        return kept.get(key)
+      }
+    },
+
+    growth() {
+      const { growthYard } = this
+
+      return growthYard ? this.growthOf(growthYard, this.growthTargetFor(growthYard)) : null
+    },
+
+    growthHint() {
+      if (!this.yards.length) {
+        return 'The race has no shipyard.'
+      } else if (this.yardId !== null && !this.pickedYard) {
+        return 'The yard named by the link is not one of the race\'s yards.'
+      }
+
+      return 'Pick a shipyard to price its growth.'
+    },
+
+    growthSummary() {
+      const yard = this.growthYard
+
+      return yard ? `${this.typeLabel(yard)} yard · ${this.count(yard.capacity)} t · ${this.count(yard.slipways)} slipways` : ''
+    },
+
+    targetPlaceholder() {
+      const yard = this.growthYard
+      const target = yard ? this.growthTargetFor(yard) : null
+
+      return target === null ? '' : this.count(target)
+    },
+
+    // One row for each shipyard of the race: its slipways, tooling, tasks (each timed as the Production Recap times a task), its own activity, and the price to add a slipway. The colony, search and free-slipway filters leave a yard out, except the yard a link named on this visit, which the saved filters never hide; a yard with no task stays in.
+    inventoryRows() {
+      const { yards, classById, modifiersOf, colonyId, idleOnly, linkedYardId, operations, formulaVersion } = this
+      const search = (this.yardSearch || '').trim().toLowerCase()
+      const matches = (yard) => (colonyId === null || yard.populationId === colonyId) && (yard.id === linkedYardId || !search || yard.name.toLowerCase().includes(search) || (yard.colony || '').toLowerCase().includes(search))
+      const full = (yard) => isNumber(yard.slipways) && isNumber(yard.tasks) && yard.slipways - yard.tasks <= 0
+
+      return yards.filter((yard) => matches(yard) && !(idleOnly && yard.id !== linkedYardId && full(yard))).map((yard) => {
+        const modifiers = modifiersOf[yard.populationId]
+        const slipwayResult = slipwayPrice({ yard, operations, version: formulaVersion })
+        const tooled = tooledClassOf(yard, classById)
+        const taskLines = yard.taskRows === null ? null : yard.taskRows.map((task) => this.taskLineOf(yard, task, modifiers))
+        const free = isNumber(yard.slipways) && isNumber(yard.tasks) ? yard.slipways - yard.tasks : null
+        const activity = isNumber(yard.taskType) && yard.taskType > 0 ? this.activityOf(yard, modifiers) : null
+
+        return {
+          id: yard.id,
+          yard,
+          shipBased: yard.shipBased,
+          name: yard.name,
+          colony: yard.colony,
+          populationId: yard.populationId,
+          type: this.typeLabel(yard),
+          capacity: yard.capacity,
+          freeSlipways: free,
+          slipwaysText: free === null ? '' : `${this.count(free)} of ${this.count(yard.slipways)}`,
+          slipwaysGap: unavailable({ rule: 'refit.yardEligibility', missing: [...(isNumber(yard.slipways) ? [] : ['the yard\'s slipways']), ...(isNumber(yard.tasks) ? [] : ['the tasks at the yard'])], units: '' }),
+          retooling: yard.taskType === RETOOL_ACTIVITY,
+          tooled,
+          tooledName: tooled ? tooled.name : null,
+          tooledGap: unavailable({ rule: 'refit.yardEligibility', missing: ['the class the yard is tooled for'], units: '' }),
+          taskCount: isNumber(yard.tasks) ? yard.tasks : null,
+          taskLines,
+          taskGap: unavailable({ rule: 'production.shipFinish', missing: ['the tasks at the yard'], units: '' }),
+          activity,
+          activitySort: activity ? activity.days : null,
+          slipwayResult,
+          slipwayBP: valueOrNull(slipwayResult),
+        }
+      })
+    },
+
+    inventoryHint() {
+      const { yards, colonyId } = this
+
+      if (!yards.length) {
+        return 'The race has no shipyard.'
+      } else if (colonyId !== null && !yards.some((yard) => yard.populationId === colonyId)) {
+        return 'The colony named by the link has no shipyard of the race.'
+      }
+
+      return 'No shipyard matches the filters.'
+    },
+
+    // The Yards and Growth views' tiles: the yards by type, the slipways free of all, the work running and the race's shipyard operations.
+    yardTiles() {
+      const { yards, operations } = this
+      const typed = (type) => yards.filter((yard) => yard.type === type).length
+      const others = yards.filter((yard) => !isNumber(yard.type) || ![SHIPYARD_TYPE.NAVAL, SHIPYARD_TYPE.COMMERCIAL, SHIPYARD_TYPE.REPAIR].includes(yard.type)).length
+      const known = yards.filter((yard) => isNumber(yard.slipways) && isNumber(yard.tasks))
+      const slipways = known.reduce((total, yard) => total + yard.slipways, 0)
+      const free = known.reduce((total, yard) => total + yard.slipways - yard.tasks, 0)
+      const tasks = yards.reduce((total, yard) => total + (isNumber(yard.tasks) ? yard.tasks : 0), 0)
+      const activities = yards.filter((yard) => isNumber(yard.taskType) && yard.taskType > 0).length
+      const operationsValue = valueOrNull(operations)
+
+      return [
+        { label: 'Shipyards', value: this.count(yards.length), rule: 'refit.yardEligibility', note: `${this.count(typed(SHIPYARD_TYPE.NAVAL))} naval, ${this.count(typed(SHIPYARD_TYPE.COMMERCIAL))} commercial, ${this.count(typed(SHIPYARD_TYPE.REPAIR))} repair${others ? `, ${this.count(others)} of no type the rules cover` : ''}` },
+        { label: 'Free slipways', value: `${this.count(free)} of ${this.count(slipways)}`, rule: 'refit.yardEligibility', note: known.length < yards.length ? `${this.count(yards.length - known.length)} ${yards.length - known.length === 1 ? 'yard' : 'yards'} with a slipway or task count not known, not counted` : 'Slipways with no task working' },
+        { label: 'Work running', value: `${this.count(tasks)} ${tasks === 1 ? 'task' : 'tasks'}`, rule: 'production.shipFinish', note: `${this.count(activities)} yard ${activities === 1 ? 'activity' : 'activities'} (upgrades and retools)` },
+        { label: 'Shipyard operations', value: operationsValue === null ? UNKNOWN_TEXT : this.count(operationsValue, 2), rule: 'shipyardGrowth.operations', result: operations, note: 'Multiplier on the price of every upgrade and retool' },
+      ]
+    },
+
     tiles() {
-      if (this.view === 'classes') {
+      if (this.view === 'yards' || this.view === 'growth') {
+        return this.yardTiles
+      } else if (this.view === 'classes') {
         return this.classTiles
       }
 
@@ -802,9 +1153,13 @@ export default {
       ]
     },
 
-    // The Refits view's focus is its pair, as a link to the page writes it. The Class to yards view writes `view=classes` beside its work and class, so a history entry left in that view is not mistaken for a link to a refit.
+    // The Refits view's focus is its pair, as a link to the page writes it. The Class to yards view writes `view=classes` beside its work and class, so a history entry left in that view is not mistaken for a link to a refit; the Yards and Growth views write their own `view` beside the yard (and the colony the yards are limited to).
     linkQuery() {
-      if (this.view === 'classes') {
+      if (this.view === 'yards') {
+        return { view: 'yards', yard: this.yardId, colony: this.colonyId }
+      } else if (this.view === 'growth') {
+        return { view: 'growth', yard: this.growthYard ? this.growthYard.id : this.yardId }
+      } else if (this.view === 'classes') {
         return { view: 'classes', operation: this.operation, from: this.operation === 'refit' ? this.fromId : null, to: this.toId }
       }
 
@@ -812,7 +1167,11 @@ export default {
     },
 
     linkLabel() {
-      if (this.view === 'classes') {
+      if (this.view === 'yards' || this.view === 'growth') {
+        const yard = this.view === 'growth' ? this.growthYard : this.pickedYard
+
+        return yard ? (this.view === 'growth' ? `Growth of ${yard.name}` : yard.name) : null
+      } else if (this.view === 'classes') {
         const target = this.classById[this.toId]
 
         return target ? `${OPERATION_VERBS[this.operation]} ${target.name}` : null
@@ -822,10 +1181,30 @@ export default {
     },
   },
   watch: {
-    // A pair picked belongs to the race that was showing.
+    // The picks and the colony belong to the race that was showing; the picks of the race now showing are restored with its other settings.
     RaceID() {
-      this.fromId = null
-      this.toId = null
+      this.colonyId = null
+      this.linkedYardId = null
+      this.linkedClassIds = []
+      this.expanded = []
+    },
+    // A pick that is no longer one of the race's classes (a class deleted since, or one the race never had) is dropped once the classes are known, unless a link named it: the page then says so.
+    classes(list) {
+      if (list.length) {
+        for (const name of ['fromId', 'toId']) {
+          const id = this[name]
+
+          if (id && !this.classById[id] && !this.linkedClassIds.includes(id)) {
+            this[name] = null
+          }
+        }
+      }
+    },
+    // The yard opened last in the Yards view is the one the page is open on.
+    expanded(rows) {
+      if (rows.length) {
+        this.yardId = rows[rows.length - 1].id
+      }
     },
   },
   methods: {
@@ -833,19 +1212,116 @@ export default {
     isAvailable,
     describeResult,
 
-    // A query with `view=classes` is the Class to yards view (with its work and class); any other, a link to a refit or the Refits view's own entry, is the Refits view.
+    // A query with `view=classes` is the Class to yards view (with its work and class), `view=growth` the Growth view and `view=yards` or a yard or colony alone the Yards view; any other, a link to a refit or the Refits view's own entry, is the Refits view.
     applyLink(query) {
-      this.fromId = queryId(query.from)
-      this.toId = queryId(query.to)
+      const single = (value) => (Array.isArray(value) ? value[0] : value)
+      const view = single(query.view)
+      const yardId = queryId(query.yard)
 
-      if (query.view === 'classes') {
-        const operation = Array.isArray(query.operation) ? query.operation[0] : query.operation
+      this.colonyId = queryId(query.colony)
+      this.linkedYardId = yardId
+      this.expanded = yardId ? [{ id: yardId }] : []
+
+      if (view === 'classes') {
+        const operation = single(query.operation)
 
         this.view = 'classes'
         this.operation = YARD_OPERATIONS.includes(operation) ? operation : 'build'
       } else {
-        this.view = 'refits'
+        this.view = ['yards', 'growth', 'refits'].includes(view) ? view : yardId || this.colonyId ? 'yards' : 'refits'
       }
+
+      // The classes of a link are the visit's: the stored picks are left as they were, and a link to the Yards or Growth view does not touch them.
+      if (this.view === 'refits' || this.view === 'classes') {
+        const fromId = queryId(query.from)
+        const toId = queryId(query.to)
+
+        this.linkedClassIds = [fromId, toId].filter((id) => id)
+        this.setUnsaved('fromId', fromId)
+        this.setUnsaved('toId', toId)
+      } else {
+        this.linkedClassIds = []
+      }
+
+      if (yardId || this.view === 'yards') {
+        this.setUnsaved('yardId', yardId)
+      }
+    },
+
+    typeLabel(yard) {
+      return YARD_TYPES[yard.type] || (isNumber(yard.type) ? `Type ${yard.type}` : UNKNOWN_TEXT)
+    },
+
+    // The tons the Growth view's continual upgrade of a yard aims at: the one typed, else the yard's capacity and DEFAULT_GROWTH_TONS; null while the capacity is not known.
+    growthTargetFor(yard) {
+      return this.growthTarget !== null ? this.growthTarget : isNumber(yard.capacity) ? yard.capacity + DEFAULT_GROWTH_TONS : null
+    },
+
+    openGrowth(yardId) {
+      this.yardId = yardId
+      this.view = 'growth'
+    },
+
+    // The continual target typed: the tons, or none (the default) for a blank or a value that is not a number above 0.
+    setTarget(text) {
+      const number = Number(text)
+
+      this.growthTarget = text !== null && text !== undefined && String(text).trim() !== '' && Number.isFinite(number) && number > 0 ? number : null
+    },
+
+    yardRowClass(item) {
+      return item.id === this.yardId ? 'is-picked' : ''
+    },
+
+    // A shipyard task as a line: what it is, what it is for, and its time left as the Production Recap times it.
+    taskLineOf(yard, task, modifiers) {
+      const { classById } = this
+      const finish = taskFinish(modifiers, yard, task)
+      const target = task.refitId && classById[task.refitId] ? ` to ${classById[task.refitId].name}` : ''
+
+      return { id: task.id, label: SHIPYARD_TASK_TYPES[task.taskType] || `Task ${task.taskType}`, subject: `${task.className || task.name || '—'}${target}`, remaining: task.remaining, paused: task.paused === true, rate: valueOrNull(finish.rate), rateResult: finish.rate, days: valueOrNull(finish.result), result: finish.result, idle: finish.idle }
+    },
+
+    // A yard's own activity as { label, detail, paused, approx, days, result, idle }: an upgrade or a retool, timed as the Production Recap times it.
+    activityOf(yard, modifiers) {
+      const finish = activityFinish(modifiers, yard)
+      const parts = []
+
+      if (yard.taskType === RETOOL_ACTIVITY) {
+        parts.push(`to ${yard.retoolId && this.classById[yard.retoolId] ? this.classById[yard.retoolId].name : 'no class'}`)
+      } else if (yard.taskType === CONTINUAL_ACTIVITY) {
+        parts.push(`to ${this.count(yard.capacityTarget)} t`)
+      }
+
+      if (isNumber(yard.requiredBP) && yard.requiredBP > 0 && isNumber(yard.completedBP)) {
+        parts.push(`${this.count((yard.completedBP / yard.requiredBP) * 100)}% done`)
+      }
+
+      return { label: SHIPYARD_UPGRADE_TYPES[yard.taskType] || `Activity ${yard.taskType}`, detail: parts.join(' · '), paused: yard.paused === true, approx: yard.taskType === CONTINUAL_ACTIVITY, days: valueOrNull(finish.result), result: finish.result, idle: finish.idle }
+    },
+
+    daysText(days, approx = false) {
+      return days === null ? '—' : `${approx ? '~' : ''}${this.duration(days)}`
+    },
+
+    taskTime(line) {
+      return line.paused ? 'Paused' : line.idle ? 'No capacity' : this.daysText(line.days)
+    },
+
+    activityTime(activity) {
+      return activity.paused ? 'Paused' : activity.idle ? 'No capacity' : this.daysText(activity.days, activity.approx)
+    },
+
+    growthTime(step) {
+      return step.idle ? 'No capacity' : this.daysText(step.days, step.approx)
+    },
+
+    addsText(step) {
+      return step.tons === null ? '1 slipway' : isNumber(step.tons) ? `${step.tons > 0 ? '+' : ''}${this.count(step.tons)} t` : '—'
+    },
+
+    barWidth(days, longest) {
+      return days === null || !(longest > 0) ? 0 : Math.max(2, Math.round((days / longest) * 100))
     },
 
     selectPair(source, target) {
@@ -1008,6 +1484,17 @@ export default {
       }),
       default: [],
     },
+    // The Shipyard Operations levels the race holds: the multiplier on the price of every yard upgrade.
+    shipyardOperationsHeld: {
+      get: tracked('shipyardOperationsHeld', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return await loadShipyardOperations(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: null,
+    },
     refitTasks: {
       get: tracked('refitTasks', async function () {
         if (!this.database || !this.GameID || !this.RaceID) {
@@ -1077,6 +1564,46 @@ export default {
   .matrix-scroll {
     max-height: 70vh;
     overflow: auto;
+  }
+
+  .yard-picker {
+    min-width: 240px;
+    max-width: 360px;
+  }
+
+  .target-field {
+    min-width: 180px;
+    max-width: 220px;
+  }
+
+  .yard-detail {
+    padding: 8px 16px 14px !important;
+  }
+
+  tr.is-picked {
+    background: var(--ae-row-selected);
+  }
+
+  .growth-table {
+    .bar-head,
+    .bar-cell {
+      min-width: 160px;
+      width: 30%;
+    }
+  }
+
+  .days-bar {
+    display: block;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--ae-track-soft);
+    overflow: hidden;
+
+    span {
+      display: block;
+      height: 100%;
+      background: var(--ae-primary);
+    }
   }
 
   .refit-matrix {

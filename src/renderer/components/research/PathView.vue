@@ -19,7 +19,7 @@
         <div class="d-flex align-center flex-wrap mb-1">
           <span class="text-h6 mr-3">{{ tech.name }}</span>
           <span class="status-chip mr-3"><v-icon small :color="colors[entry.status]">{{ icons[entry.status] }}</v-icon> {{ labels[entry.status] }}</span>
-          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}</span>
+          <span class="caption text--secondary">{{ fieldName }} · {{ tech.typeName }}</span><page-link v-if="techViews[tech.typeId]" class="ml-1" :to="linkTo.shipyards({ view: techViews[tech.typeId] })" :name="tech.typeName" />
         </div>
         <div v-if="tech.description" class="description mb-3">{{ tech.description }}</div>
         <div v-if="entry.status === 'blocked'" class="text--secondary mb-3">{{ blockText }}</div>
@@ -87,9 +87,12 @@ import cytoscape from 'cytoscape'
 
 import countFormat from '../../mixins/count-format'
 import { activeAppearance } from '../../utilities/appearance'
+import { linkTo } from '../../utilities/deep-links'
 import { isKnownNumber, UNKNOWN_TEXT } from '../../utilities/math'
 import { ACTIVE, AVAILABLE, BLOCK_REASONS, BLOCKED, DONE, durationLabel, LOCKED, pathRpResult, prerequisiteChain, QUEUED, remainingResult, STATUS_LABELS } from '../../utilities/research'
+import { SHIPYARD_TECH_VIEWS } from '../../utilities/shipyard-growth'
 import { chartTheme, mapFont, withAlpha } from '../charts/theme'
+import PageLink from '../page/PageLink.vue'
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 
 import { STATUS_ICONS, statusColors } from './status-style'
@@ -103,7 +106,7 @@ const truncate = (text, length) => (text.length > length ? `${text.slice(0, leng
 
 export default {
   name: 'PathView',
-  components: { ProvenanceMark },
+  components: { PageLink, ProvenanceMark },
   mixins: [countFormat],
   props: {
     research: { type: Object, required: true },
@@ -111,6 +114,8 @@ export default {
   },
   data() {
     return {
+      linkTo,
+      techViews: SHIPYARD_TECH_VIEWS,
       icons: STATUS_ICONS,
       labels: STATUS_LABELS,
       legend: [DONE, ACTIVE, AVAILABLE, LOCKED, BLOCKED].map((status) => ({ status, label: STATUS_LABELS[status] })),
