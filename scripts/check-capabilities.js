@@ -146,9 +146,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/information fleetShips', '/logistics mspSupply', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/map groundFormations', '/survey-progress formations']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/information fleetShips', '/logistics mspSupply', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/survey-progress formations']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the fleet profile\'s ships of /information, the incoming minerals and the fleet stations\' reads of /logistics, the position facts of /routes, /information and /hauling, and the ground formations of /map and /survey-progress, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the fleet profile\'s ships of /information, the incoming minerals and the fleet stations\' reads of /logistics, the position facts and orbit facts of /routes, /information and /hauling, and the ground formations of /map and /survey-progress, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   Object.entries(capabilities.INPUTS).forEach(([route, inputs]) => inputs.forEach((input) => {
     Object.entries(input.resolved).forEach(([table, resolved]) => {
@@ -263,9 +263,10 @@ const alteredChecks = async (capabilities, source) => {
     const noFormationReads = await alteredCopy(source, 'formationreads', ['alter table FCT_GroundUnitFormation drop column ReplacementTemplateID'])
     const noTechType = await alteredCopy(source, 'techtype', ['alter table DIM_TechType drop column Description'])
     const noObsolete = await alteredCopy(source, 'obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
+    const noOrbit = await alteredCopy(source, 'orbit', ['alter table FCT_SystemBody drop column Bearing'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, twoRenamed)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, twoRenamed)
 
     const baseline = (await preflightOf(capabilities, source)).result
     const rank = (await preflightOf(capabilities, rankless)).result
@@ -279,6 +280,7 @@ const alteredChecks = async (capabilities, source) => {
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
     const formula = (await preflightOf(capabilities, noFormula)).result
     const finance = (await preflightOf(capabilities, noFinance)).result
+    const orbit = (await preflightOf(capabilities, noOrbit)).result
 
     check('altered: the unaltered copy supports every report', notSupported(baseline).length === 0 && failedGates(baseline).length === 0)
 
@@ -324,6 +326,26 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: the same column dropped makes no other report unsupported', Object.values(formationReads.reports).filter((report) => report.status === 'unsupported').length === 0, notSupported(formationReads).map((report) => `${report.route} ${report.status}`).join(', '))
     check('altered: FCT_GroundUnitFormationTemplate.Obsolete dropped (a column the loader goes without) degrades /map and /survey-progress by their formation inputs only, and neither is unsupported', onlyFormations(obsolete, '/map', 'groundFormations') && onlyFormations(obsolete, '/survey-progress', 'formations') && Object.values(obsolete.reports).every((report) => report.status !== 'unsupported'), notSupported(obsolete).map((report) => `${report.route} ${report.status}`).join(', '))
     check('altered: two renamed bonuses (5, 25) block those IDs, and the mixin pages and /commanders name what is left out while /minerals is not degraded by them', [...capabilities.blockedBonuses(two.gates)].sort((a, b) => a - b).join() === '5,25' && ['/production', '/colony-outlook', '/logistics', '/mineral-outlook', '/shipyards', '/lagrange', '/commanders'].every((route) => two.reports[route].degraded.some((entry) => entry.gate && /capacity|stabilisation|officer/.test(entry.affects))) && two.reports['/minerals'].status === 'supported', notSupported(two).map((report) => report.route).join(', '))
+    const ROUTE_PAGES = ['/routes', '/information', '/hauling']
+    const byOrbitOnly = (result) => ROUTE_PAGES.every((route) => result.reports[route].status === 'degraded' && result.reports[route].missing.length === 0 && result.reports[route].degraded.length === 1 && result.reports[route].degraded[0].key === 'orbitFacts' && result.reports[route].degraded[0].fields.includes('FCT_SystemBody.Bearing'))
+
+    check('altered: FCT_SystemBody.Bearing dropped degrades /routes, /information and /hauling by their orbit facts alone, and leaves none unsupported', byOrbitOnly(orbit), JSON.stringify(ROUTE_PAGES.map((route) => orbit.reports[route])))
+    check('altered: FCT_SystemBody.Bearing dropped makes no other report unsupported', Object.values(orbit.reports).filter((report) => !ROUTE_PAGES.includes(report.route)).every((report) => report.status !== 'unsupported' || report.missing.some((entry) => entry.fields.includes('FCT_SystemBody.Bearing'))), notSupported(orbit).map((report) => report.route + ' ' + report.status).join(', '))
+
+    for (const route of ROUTE_PAGES) {
+      const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts',\n  '/map'"
+      const plain = entry.replace(" || key === 'orbitFacts'", '')
+      const directory = mutatedCopy('utilities/capabilities.js', entry, plain)
+
+      try {
+        const mutant = (await loadUtilities(['capabilities'], { directory: path.join(directory, 'utilities') })).capabilities
+
+        check('altered: a copy of the code in which ' + route + ' does not go on without its orbit facts makes it unsupported, as the check of the optional read must notice', (await preflightOf(mutant, noOrbit)).result.reports[route].status === 'unsupported')
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true })
+      }
+    }
+
     check('altered: FCT_WealthData dropped makes /finances unsupported', finance.reports['/finances'].status === 'unsupported' && finance.reports['/finances'].missing.some((entry) => entry.fields.includes('FCT_WealthData (table)')) && finance.reports['/commanders'].status === 'supported', notSupported(finance).map((report) => report.route).join(', '))
 
     // The Notebook reads the tech type names; the map only reads its tags' bodies, so a save without them leaves /map supported. The planted fault gives /map a required read of that column, as a scan that followed the tags' mixin into the notes' tech query did.

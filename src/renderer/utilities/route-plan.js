@@ -1,8 +1,9 @@
 // A route through several stops, as Route Finder plans it: each leg is the route from one stop to the next over the explored jump points (utilities/jump-graph.js `searchRoutes`), and a cycle adds one back to the first stop.
 
-import { routeLegs, routeResults, searchRoutes } from './jump-graph'
+import { flyRoute, routeLegs, routeRecords, routeResults, searchRoutes } from './jump-graph'
+import { REASONS } from './orbit-propagation'
 import { combine, envelope, ofRule, registerRule, unavailable } from './provenance'
-import { jumpEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
+import { NO_ADAPTERS, POSITION_BASIS, ROUTE_MODE, jumpEndpoint, lagrangeEndpoint, placeEndpoint, positionRecord, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
 
 // A system's own place is its centre, (0, 0); any other place is where the save has it, and a place with no position there reaches nothing (`searchRoutes`).
 const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.SystemID, Xcor: 0, Ycor: 0 } : { SystemID: place.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
@@ -11,8 +12,73 @@ const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.Syste
 // - `legs`: one per leg, { index, from, to, start, route, steps, unavailable, closing }, `index` being that of the stop it leaves, `start` the position it is flown from (null out of an unavailable stop), `route` { jumps, km, from, end } or null when no explored route joins them, and `steps` its `routeLegs`.
 // - `jumps` and `km`: the totals of the legs that have a route; `missing` counts the ones that haven't, those of unavailable stops too.
 // - `systems`: the SystemIDs the route passes through in order, for the map.
-// - `positions`: the positions the plan's figures rest on (utilities/route-position.js `routePositions`), one summary for the whole plan and, on each leg, its own (null for a leg with no endpoints to state). A leg's endpoints are where it is flown from (the stop before it, or the jump point a system stop was reached at, or where the fleet already was when the system is the one it is in) and where it goes, with the Lagrange points it jumps between. `facts` is `loadPositionFacts`' read (null while it is not in); with none the age of a moving endpoint is unknown. The search and the distances use the positions the save stores, so the plan takes no adapters and is always static: arrival-position propagation has to put its positions into the search before a plan can state them.
-export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }) => {
+// - `positions`: the positions the plan's figures rest on (utilities/route-position.js `routePositions`), one summary for the whole plan and, on each leg, its own (null for a leg with no endpoints to state). A leg's endpoints are where it is flown from (the stop before it, or the jump point a system stop was reached at, or where the fleet already was when the system is the one it is in) and where it goes, with the Lagrange points it jumps between. `facts` is `loadPositionFacts`' read (null while it is not in); with none the age of a moving endpoint is unknown.
+// With no `adapters` the search and the distances use the positions the save stores, so the plan is static. With `adapters` (route-position.js `ADAPTERS`), the read clock and a `speed` (km/s) the plan is flown: each leg leaves at the time the one before arrives, the places that move are where they are when the fleet reaches them (`searchRoutes`' `motion`), a stop that moves is left from the position the fleet met it at, and the legs, the totals and the positions are those of that flight. The plan then also has `static` ({ jumps, km, missing, positions }, the same plan on the saved positions) and each leg its `staticKm`, so both read side by side; an endpoint no adapter moves keeps its saved position and states why in `positions`. Nothing changes without adapters or a read clock.
+export const planRoute = (stops, { cycle, jumpPoints, facts = null, adapters = NO_ADAPTERS, speed = null, ...options }) => {
+  const held = walkPlan(stops, { cycle, jumpPoints, facts, options, flight: null })
+  const flight = flightOf({ facts, adapters, speed })
+
+  if (!flight) {
+    return held
+  }
+
+  const moved = walkPlan(stops, { cycle, jumpPoints, facts, options, flight })
+
+  return { ...moved, legs: moved.legs.map((leg, index) => ({ ...leg, staticKm: held.legs[index].route ? held.legs[index].route.km : null })), static: { jumps: held.jumps, km: held.km, missing: held.missing, positions: held.positions } }
+}
+
+const isPositive = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
+
+// What the flight of a plan needs: the adapters (at least one), the facts with the read body clock and the speed, which may be missing (the adapters then give no arrival and say 'speed-unknown'). Null when the plan is the static one.
+export const flightOf = ({ facts, adapters = NO_ADAPTERS, speed = null }) => {
+  const clock = facts && facts.clock
+
+  if (!Object.values(adapters).some((adapter) => typeof adapter === 'function') || !clock || !Number.isFinite(clock.gameTime)) {
+    return null
+  }
+
+  return { facts, adapters, speed: isPositive(speed) ? speed : null, gameTime: clock.gameTime }
+}
+
+const endpointCache = new WeakMap()
+
+// The endpoint of a point a search flies to: an endpoint as it is, a Lagrange point row, a place; a jump point has none (it never moves).
+const endpointOf = (point) => {
+  if (point.family) {
+    return point
+  } else if (point.WarpPointID !== undefined) {
+    return null
+  }
+
+  if (!endpointCache.has(point)) {
+    endpointCache.set(point, point.kind ? placeEndpoint(point) : point.LagrangePointID !== undefined ? lagrangeEndpoint(point) : null)
+  }
+
+  return endpointCache.get(point)
+}
+
+// Where the fleet meets `point`, as `searchRoutes`' `motion` and `flyRoute` take it: { Xcor, Ycor, time, record }. A point no adapter serves is where the save has it (and has no record); one that is served is the position record of its endpoint (propagated or, with the reasons on it, static), and the time is the arrival at the flight's speed from `from`.
+export const reachPoint = (flight, point, from, time) => {
+  const endpoint = endpointOf(point)
+  const seconds = (position) => (from && flight.speed ? Math.hypot(position.Xcor - from.Xcor, position.Ycor - from.Ycor) / flight.speed : 0)
+
+  if (!endpoint || typeof flight.adapters[endpoint.family] !== 'function') {
+    return { Xcor: point.Xcor, Ycor: point.Ycor, time: time + seconds(point), record: null }
+  }
+
+  const record = positionRecord(endpoint, { facts: flight.facts, adapters: flight.adapters, at: time, from, speed: flight.speed })
+
+  if (record.basis === POSITION_BASIS.PROPAGATED) {
+    return { Xcor: record.position.Xcor, Ycor: record.position.Ycor, time: from ? record.observedAt : time, record }
+  }
+
+  return { Xcor: point.Xcor, Ycor: point.Ycor, time: time + seconds(point), record }
+}
+
+// The `motion` of a flight started at `start` (game seconds), or null for the static plan. Without a speed a flight takes no time, and the adapters then decline each arrival.
+export const motionOf = (flight, start) => (flight ? { speed: flight.speed || Infinity, start, reach: (point, from, time) => reachPoint(flight, point, from, time) } : null)
+
+const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
   const targets = stops.slice(1)
 
   if (cycle && stops.length > 1) {
@@ -20,11 +86,11 @@ export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }
   }
 
   const searches = new Map()
-  const searchFrom = (start) => {
-    const id = `${start.SystemID}:${start.Xcor}:${start.Ycor}`
+  const searchFrom = (start, time) => {
+    const id = `${start.SystemID}:${start.Xcor}:${start.Ycor}@${time}`
 
     if (!searches.has(id)) {
-      searches.set(id, searchRoutes(jumpPoints, [start], options))
+      searches.set(id, searchRoutes(jumpPoints, [start], flight ? { ...options, motion: motionOf(flight, time) } : options))
     }
 
     return searches.get(id)
@@ -32,8 +98,11 @@ export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }
   const legs = []
   const systems = []
   const first = stops[0]
+  const recordOf = (endpoint, at) => positionRecord(endpoint, { facts, adapters: flight.adapters, at })
+  let time = flight ? flight.gameTime : 0
   let start = first && !first.unavailable ? positionOf(first) : null
   let origin = first && !first.unavailable ? placeEndpoint(first) : null
+  let originRecord = flight && origin ? recordOf(origin, time) : null
   let jumps = 0
   let km = 0
   let missing = 0
@@ -51,21 +120,23 @@ export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }
 
       start = to.unavailable ? null : positionOf(to)
       origin = to.unavailable ? null : placeEndpoint(to)
+      originRecord = flight && origin ? recordOf(origin, time) : null
 
       return
     }
 
-    const search = searchFrom(start)
+    const search = searchFrom(start, time)
     const route = to.kind === 'system' ? search.toSystem(to.SystemID) : search.toPlace(to)
     const steps = route ? routeLegs(route) : []
+    const flown = flight ? summarisePositions([originRecord, ...routeRecords(route)].filter(Boolean), { merge: true }) : null
+    const positions = flight ? summarisePositions([...flown.records, positionRecord(placeEndpoint(to), { facts })]) : routePositions([origin, placeEndpoint(to), ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })
 
-    const positions = routePositions([origin, placeEndpoint(to), ...viaEndpoints(route)], { facts, adapters: {} })
-
-    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing, positions })
+    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing, positions, ...(flight && route ? { seconds: flight.speed ? route.km / flight.speed : null, departs: time } : {}) })
 
     if (route) {
       jumps += route.jumps
       km += route.km
+      time = flight && flight.speed ? time + route.km / flight.speed : time
       steps.forEach((step) => systems.push(step.kind === 'jump' ? step.to.SystemID : step.SystemID))
 
       if (!steps.length) {
@@ -83,10 +154,15 @@ export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }
       if (arrival) {
         start = { SystemID: to.SystemID, Xcor: arrival.Xcor, Ycor: arrival.Ycor }
         origin = jumpEndpoint(arrival)
+        originRecord = flight ? positionRecord(origin, { facts }) : null
       }
     } else {
-      start = positionOf(to)
+      const reached = route && route.arrival && route.arrival.record ? route.arrival : null
+      const met = reached && reached.record.basis === POSITION_BASIS.PROPAGATED ? reached : null
+
+      start = met ? { SystemID: to.SystemID, Xcor: met.Xcor, Ycor: met.Ycor } : positionOf(to)
       origin = placeEndpoint(to)
+      originRecord = flight ? (reached ? reached.record : positionRecord(origin, { facts })) : null
     }
   })
 
@@ -98,9 +174,118 @@ export const planRoute = (stops, { cycle, jumpPoints, facts = null, ...options }
     systems.push(first.SystemID)
   }
 
-  const positions = summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])))
+  const positions = summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })
 
   return { legs, jumps, km, missing, systems: systems.filter((id, index) => id !== systems[index - 1]), positions }
+}
+
+const YEAR_SECONDS = 31536000
+const MAX_CYCLES = 1000
+
+// The last flight of `steps` made to `to` (the endpoint itself, which moves), so a route walked back arrives at the place it left and not at a bare position.
+const retarget = (steps, to) => {
+  const last = steps.map((step) => step.kind).lastIndexOf('fly')
+
+  return steps.map((step, index) => (index === last ? { ...step, to } : step))
+}
+
+// A record that kept the saved position where an arrival was to be worked out. The departure, validated at the game time, is where a flight sets out from and refuses nothing, and a place that never moves has no arrival to work out.
+const refused = (record) => record.basis !== POSITION_BASIS.PROPAGATED && !record.departure && record.moves !== false
+
+// A repeated trip flown cycle after cycle for `horizon` seconds (a year): `hops` is the cycle, [{ steps (a found route's `routeLegs`, or `reverseSteps` of one), from, to (endpoints or places with a position, the saved one), wait (seconds spent at `to` before the next hop), leave (optional: the endpoint the fleet leaves from after the wait, when an order exits somewhere other than where it arrived; `to` by default) }], the last hop's `to` being the first hop's `from`. The fleet leaves the first stop at the game time, and each hop is flown (`flyRoute`) from where the fleet is when it starts and at the time it starts: it arrives at the body where it will be, waits there, carried by the body, and leaves from where the body is by then, so the next hop starts from the arrival position and not from the saved one. `flightOf`'s `facts`, `adapters` and `speed` are the same as a plan's. Returns null for a static plan (no adapters, or the clock unread), else:
+// - `first`: the first cycle, { km (per hop), kmTotal, seconds (the cycle's time, flights and waits), positions }.
+// - `annual`: the cycles within the horizon, { status ('propagated' when a moving endpoint was moved on to its arrival and none that moves was refused, else 'static': the status follows the mode of the year's positions, so a year in which nothing moves is static), reasons (the condition codes behind a static one; none for a year in which nothing moves), compared (whether the year says anything about propagation: it flew on moved positions, or it states why the saved ones stand; false when no endpoint moves, and a figure beside it has no comparison to show), cycles, hops, meanKm (the mean flight of a hop: the propagated mean, or the static when the status is static), covered (seconds simulated), positions }. One endpoint that no adapter moves, in any hop of any cycle, makes the annual figure static and says why; the first cycle states its own.
+// - `static`: { km (per hop), meanKm }, the same cycle on the saved positions.
+export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, speed = null, lagrangePoints = [], horizon = YEAR_SECONDS }) => {
+  const flight = flightOf({ facts, adapters, speed })
+
+  if (!flight || !hops.length) {
+    return null
+  }
+
+  const walks = hops.map((hop) => ({ ...hop, steps: retarget(hop.steps, hop.to) }))
+  const heldRuns = walks.map((hop) => flyRoute(hop.steps, { from: hop.from, time: 0, lagrangePoints }))
+  const held = heldRuns.map((run) => run.km)
+  const staticMean = held.reduce((sum, value) => sum + value, 0) / held.length
+  const records = []
+  const cycles = []
+  let time = flight.gameTime
+  let at = { Xcor: hops[0].from.Xcor, Ycor: hops[0].from.Ycor }
+  let firstSeconds = 0
+
+  const start = endpointOf(hops[0].from)
+  const departure = start && typeof adapters[start.family] === 'function' ? [positionRecord(start, { facts, adapters, at: time })] : []
+  const unserved = [...new Map(walks.flatMap((hop) => [hop.from, hop.to, hop.leave]).map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && typeof adapters[endpoint.family] !== 'function').map((endpoint) => [endpoint.key, endpoint])).values()].map((endpoint) => positionRecord(endpoint, { facts }))
+
+  for (let cycle = 0; cycle < MAX_CYCLES && (!cycle || time - flight.gameTime < horizon); cycle += 1) {
+    const kms = []
+    const mark = records.length
+
+    const carries = (point) => (endpointOf(point) || {}).family !== 'lagrange-point'
+
+    walks.forEach((hop) => {
+      // An order's delay is spent before its flight, where the fleet is: a body or colony carries it on, a Lagrange point does not.
+      if (hop.delay > 0) {
+        time += hop.delay
+
+        const waited = carries(hop.from) && typeof adapters[(endpointOf(hop.from) || {}).family] === 'function' ? reachPoint(flight, hop.from, null, time) : null
+
+        if (waited) {
+          at = { Xcor: waited.Xcor, Ycor: waited.Ycor }
+
+          if (waited.record) {
+            records.push(waited.record)
+          }
+        }
+      }
+
+      const run = flyRoute(hop.steps, { from: at, time, lagrangePoints, motion: motionOf(flight, time) })
+
+      kms.push(run.km)
+      records.push(...run.records)
+      time = run.end.time + (hop.wait || 0)
+
+      // A body carries a fleet that waits at it; a Lagrange point does not, so a fleet that reached one stays where it arrived, and a point left through is where it is when the fleet arrives.
+      const target = hop.leave || hop.to
+      const stay = hop.wait > 0 && carries(target) ? reachPoint(flight, target, null, time) : hop.leave ? reachPoint(flight, hop.leave, null, run.end.time) : run.end
+
+      at = { Xcor: stay.Xcor, Ycor: stay.Ycor }
+
+      if (stay.record) {
+        records.push(stay.record)
+      }
+    })
+
+    cycles.push({ km: kms, records: records.slice(mark) })
+
+    if (cycle === 0) {
+      firstSeconds = time - flight.gameTime
+    }
+
+    // A cycle that kept a saved position makes the year static (its mean is the saved one), so the cycles after it add no figure.
+    if (cycles[cycles.length - 1].records.some(refused)) {
+      break
+    }
+  }
+
+  const unmovedFirst = (list) => [...list.filter((record) => record.basis !== POSITION_BASIS.PROPAGATED), ...list.filter((record) => record.basis === POSITION_BASIS.PROPAGATED)]
+  const everything = [...departure, ...records]
+  const capped = everything.some((record) => record.moves !== false) && cycles.length >= MAX_CYCLES && time - flight.gameTime < horizon
+  const unmoved = capped || everything.some(refused)
+  const reasons = [...new Set([...(capped ? ['cycles-capped'] : []), ...everything.filter(refused).flatMap((record) => record.conditions).filter((code) => code === 'propagation-unavailable' || REASONS.includes(code))])].sort()
+  const served = [...new Map([...walks.flatMap((hop) => [hop.from, hop.to, hop.leave]), ...heldRuns.flatMap((run) => run.points)].map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && typeof adapters[endpoint.family] === 'function').map((endpoint) => [endpoint.key, endpoint])).values()]
+  const kept = served.map((endpoint) => { const base = positionRecord(endpoint, { facts }); return Object.freeze({ ...base, conditions: [...new Set([...base.conditions, ...(unmoved ? ['propagation-unavailable', ...reasons.filter((code) => code !== 'propagation-unavailable')] : [])])], unknown: true }) })
+  const all = cycles.flatMap((cycle) => cycle.km)
+  const flownPositions = summarisePositions(unmoved ? [...unserved, ...kept] : [...unserved, ...unmovedFirst(everything)], { merge: true })
+  const status = unmoved || flownPositions.mode === ROUTE_MODE.STATIC ? 'static' : 'propagated'
+  const firstKm = cycles[0].km
+
+  return {
+    speed: flight.speed,
+    first: { km: firstKm, kmTotal: firstKm.reduce((sum, value) => sum + value, 0), seconds: firstSeconds, positions: summarisePositions([...unserved, ...unmovedFirst([...departure, ...cycles[0].records])], { merge: true }) },
+    annual: { status, reasons: unmoved ? (reasons.length ? reasons : ['propagation-unavailable']) : [], compared: status === 'propagated' || unmoved, cycles: cycles.length, hops: all.length, meanKm: status === 'static' ? staticMean : all.reduce((sum, value) => sum + value, 0) / all.length, covered: time - flight.gameTime, positions: flownPositions },
+    static: { km: held, meanKm: staticMean },
+  }
 }
 
 // The rules of a planned route: its totals, the speed and time it is flown at, the stops' options and the figures drawn from them. The rules of one route's jumps and distance are in utilities/jump-graph.js.

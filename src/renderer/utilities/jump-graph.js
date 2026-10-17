@@ -130,12 +130,45 @@ const inSystem = (a, b, lagrangePoints = []) => {
   return best
 }
 
+// The way from `a` to `b` inside one system for a fleet that leaves `a` at `time` (game seconds), when the places move: `motion` is { speed (km/s), reach(point, from, time) }. `reach` gives where the fleet meets `point` as { Xcor, Ycor, time, record }: flown to from `from` ({ Xcor, Ycor }) at `time`, or, with no `from`, where `point` is at `time`; `time` of the result is the arrival, and `record` is the position record the figure rests on (null for a place that does not move). The straight flight and every entry Lagrange point are each flown at `time`; a point's exit is where it is when the fleet arrives at its entry (the jump takes no time), and the last leg is flown from there at that time, so the way depends on the time, and on the direction since the entry and exit swap. Gives { km, via, end (where the fleet meets `b`), records } with `via` the chosen [entry, exit] points, or null.
+export const flightInSystem = (a, b, lagrangePoints = [], motion = null, time = 0) => {
+  if (!motion) {
+    return inSystem(a, b, lagrangePoints)
+  }
+
+  const direct = motion.reach(b, a, time)
+  const records = (...reached) => reached.map((item) => item.record).filter(Boolean)
+  let best = { km: hypot(a, direct), via: null, end: direct, records: records(direct) }
+
+  lagrangePoints.forEach((entry) => {
+    const entered = motion.reach(entry, a, time)
+
+    lagrangePoints.forEach((exit) => {
+      if (entry === exit) {
+        return
+      }
+
+      const left = motion.reach(exit, null, entered.time)
+      const arrived = motion.reach(b, left, entered.time)
+      const km = hypot(a, entered) + hypot(left, arrived)
+
+      if (km < best.km) {
+        best = { km, via: [entry, exit], end: arrived, records: records(entered, left, arrived) }
+      }
+    })
+  })
+
+  return best
+}
+
 // Single-source shortest routes from the nearest of `origins` ([{ SystemID, Xcor, Ycor }], a system's centre is 0, 0) over `jumpPoints` (loadJumpPoints rows). Options:
 // - `order`: 'jumps' (fewest transits, then distance) or 'km' (shortest distance, then transits).
 // - `canTransit(jumpPoint)`: whether the route may jump out through it (a gate for ships without a jump drive).
 // - `canEnter(SystemID)`: whether the route may jump into the system; the game's avoid rules apply to the destination too. The origins' own systems are always left freely.
-// - `lagrangePoints`: [{ SystemID, Xcor, Ycor }] to jump between inside a system, or none. Returns `toSystem(SystemID)` (arrival at the system's jump point) and `toPlace({ SystemID, Xcor, Ycor })`, each giving { jumps, km, from, end } or null when nothing reaches it. `from` is the origin the route starts at, and `routeLegs(route)` spells out `end`.
-export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [] } = {}) => {
+// - `lagrangePoints`: [{ SystemID, Xcor, Ycor }] to jump between inside a system, or none.
+// - `motion`: { speed, start, reach } to fly the places that move at the time the fleet leaves the previous point (`start` is the game time the route starts at, the time at a state is `start` plus its km over `speed`, a jump taking none; `reach` is `flightInSystem`'s): the flights inside the system of each leg, the Lagrange points and the destination, are then the positions at those times. Without it every place is where the save stores it.
+// Returns `toSystem(SystemID)` (arrival at the system's jump point) and `toPlace({ SystemID, Xcor, Ycor })`, each giving { jumps, km, from, end } or null when nothing reaches it. `from` is the origin the route starts at, and `routeLegs(route)` spells out `end`; with `motion` the route also has `arrival` (where the fleet meets the destination place, { Xcor, Ycor, time, record }) and `routeRecords(route)` gives the records its figures rest on.
+export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [], motion = null } = {}) => {
   const before = BEFORE[order]
   const origins = allOrigins.filter(hasPosition)
   const byId = {}
@@ -153,10 +186,11 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
   // A state is the route standing at a jump point: arrived through it (`jump`), or flown to it (`fly`) from the previous state's jump point, or from the origin when there is none.
   const reached = {}
   const pending = queue(before)
+  const timeAt = (km) => (motion ? motion.start + km / motion.speed : 0)
   const fly = (previous, origin, from, to, jumps, km) => {
-    const leg = inSystem(from, to, lagrangeBySystem[to.SystemID])
+    const leg = flightInSystem(from, to, lagrangeBySystem[to.SystemID], motion, timeAt(km))
 
-    return { kind: 'fly', at: to, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via }
+    return { kind: 'fly', at: to, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
   }
 
   origins.forEach((origin) => (bySystem[origin.SystemID] || []).forEach((jumpPoint) => pending.push(fly(null, origin, origin, jumpPoint, 0, 0))))
@@ -188,7 +222,7 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
 
   const arrivals = (systemId) => (bySystem[systemId] || []).map((jumpPoint) => reached[jumpPoint.WarpPointID]).filter((state) => state && state.kind === 'jump')
   const nearest = (states) => states.reduce((best, state) => (!best || before(state, best) < 0 ? state : best), null)
-  const route = (end) => end && { jumps: end.jumps, km: end.km, from: end.origin, end }
+  const route = (end) => end && { jumps: end.jumps, km: end.km, from: end.origin, end, ...(motion ? { arrival: end.arrival || null } : {}) }
 
   return {
     toSystem(systemId) {
@@ -204,9 +238,9 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
       const lagrange = lagrangeBySystem[place.SystemID]
       const local = origins.filter((origin) => origin.SystemID === place.SystemID).map((origin) => ({ origin, previous: null, from: origin, jumps: 0, km: 0 }))
       const ends = [...local, ...arrivals(place.SystemID).map((state) => ({ origin: state.origin, previous: state, from: state.at, jumps: state.jumps, km: state.km }))].map(({ origin, previous, from, jumps, km }) => {
-        const leg = inSystem(from, place, lagrange)
+        const leg = flightInSystem(from, place, lagrange, motion, timeAt(km))
 
-        return { kind: 'fly', at: place, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via }
+        return { kind: 'fly', at: place, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
       })
 
       return route(nearest(ends))
@@ -214,7 +248,7 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
   }
 }
 
-// The legs of a route, in order: { kind: 'fly', SystemID, from, to, km, via } inside a system (`from` is the origin or the jump point the route arrived through, `to` a jump point or the destination, `via` the Lagrange points it jumps between), and { kind: 'jump', from, to } through a jump point.
+// The legs of a route, in order: { kind: 'fly', SystemID, from, to, km, via } inside a system (`from` is the origin or the jump point the route arrived through, `to` a jump point or the destination, `via` the Lagrange points it jumps between), and { kind: 'jump', from, to } through a jump point. A route found with `motion` also has `records` on each flight, the position records its distance rests on.
 export const routeLegs = (route) => {
   const legs = []
 
@@ -222,12 +256,55 @@ export const routeLegs = (route) => {
     if (state.kind === 'jump') {
       legs.unshift({ kind: 'jump', from: state.previous.at, to: state.at })
     } else {
-      legs.unshift({ kind: 'fly', SystemID: state.at.SystemID, from: state.previous ? state.previous.at : state.origin, to: state.at, km: state.legKm, via: state.via })
+      legs.unshift({ kind: 'fly', SystemID: state.at.SystemID, from: state.previous ? state.previous.at : state.origin, to: state.at, km: state.legKm, via: state.via, ...(state.records ? { records: state.records } : {}) })
     }
   }
 
   return legs
 }
+
+// The legs of a route walked the other way: the last leg first, each flight from where it ended to where it began. The Lagrange points a flight jumps between are not carried over, since the way back picks them afresh.
+export const reverseSteps = (steps) => [...steps].reverse().map((step) => (step.kind === 'jump' ? { kind: 'jump', from: step.to, to: step.from } : { kind: 'fly', SystemID: step.SystemID, from: step.to, to: step.from, km: step.km, via: null, records: [] }))
+
+// A route's `steps` (`routeLegs`) flown again by a fleet that is at `from` ({ Xcor, Ycor }) at `time`: each flight inside a system by `flightInSystem` (Lagrange points of `lagrangePoints` by system, `motion` as `searchRoutes` takes it) from where the fleet is, a jump moving it to the far point at no time. Gives { km, seconds, end (where the fleet is at the end, { Xcor, Ycor, time }), records, flights }, `flights` being the km of each flight; the same steps flown at another time are another distance when a place on them moves.
+export const flyRoute = (steps, { from, time, lagrangePoints = [], motion = null }) => {
+  const bySystem = {}
+
+  lagrangePoints.filter(hasPosition).forEach((point) => {
+    ;(bySystem[point.SystemID] = bySystem[point.SystemID] || []).push(point)
+  })
+
+  let here = { Xcor: from.Xcor, Ycor: from.Ycor, time }
+  let km = 0
+  const records = []
+  const flights = []
+  const points = []
+
+  steps.forEach((step) => {
+    if (step.kind === 'jump') {
+      here = { Xcor: step.to.Xcor, Ycor: step.to.Ycor, time: here.time }
+
+      return
+    }
+
+    const leg = flightInSystem(here, step.to, bySystem[step.SystemID], motion, here.time)
+    const end = leg.end || { Xcor: step.to.Xcor, Ycor: step.to.Ycor }
+
+    km += leg.km
+    flights.push(leg.km)
+    points.push(...(leg.via || []))
+    records.push(...(leg.records || []))
+    here = { Xcor: end.Xcor, Ycor: end.Ycor, time: motion ? here.time + leg.km / motion.speed : here.time }
+  })
+
+  return { km, seconds: motion ? here.time - time : 0, end: here, records, flights, points }
+}
+
+// A route's steps as a string that names the path they take: the jump points it passes and the places and Lagrange points it flies to, so two routes of the same distance and jumps that go by other points differ. A cache of what is flown over a route keys on it.
+export const pathKey = (steps) => JSON.stringify(steps.map((step) => (step.kind === 'jump' ? ['jump', step.from.WarpPointID, step.to.WarpPointID] : ['fly', step.SystemID, step.to.WarpPointID || step.to.key || null, step.via ? step.via.map((point) => point.LagrangePointID) : null])))
+
+// The position records a route found with `motion` rests on, once each in the order of its flights.
+export const routeRecords = (route) => (route ? routeLegs(route).flatMap((leg) => leg.records || []) : [])
 
 // Travel distance from the nearest of `origins` (the capital, or every sizeable colony) to a body: `distanceTo({ SystemID, Xcor, Ycor })` gives { km, jumps, from } on the shortest route in kilometres, or null when no explored route from any origin reaches it. Jump points the race marked to ignore for distance are left out.
 export const buildDistanceMap = (jumpPoints, origins) => {

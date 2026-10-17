@@ -106,6 +106,7 @@
                 <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
                 <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
                 <div v-if="item.detourText" class="caption text--secondary route-detour" data-detour>{{ item.detourText }}</div>
+                <div v-if="item.propagation" class="caption text--secondary" data-propagation :title="propagationText(item)">{{ propagationText(item) }}</div>
               </div>
               <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
@@ -168,6 +169,7 @@
               <div v-if="item.status === 'ok' || item.status === 'range'" class="py-2 text-no-wrap" :title="tripTitle(item)">
                 <div>{{ duration(item.tripSeconds / SECONDS_PER_DAY) }}<provenance-mark v-if="item.provenance" :result="item.provenance" /></div>
                 <div class="caption text--secondary">{{ item.jumps }} {{ item.jumps === 1 ? 'jump' : 'jumps' }} · {{ distance(item.km) }}<provenance-mark v-if="item.pathResult" :result="item.pathResult" /></div>
+                <div v-if="item.propagation" class="caption text--secondary" data-propagation :title="propagationText(item)">{{ propagationText(item) }}</div>
               </div>
               <span v-else class="text--secondary text-no-wrap">—<provenance-mark v-if="item.provenance" :result="item.provenance" /></span>
             </template>
@@ -259,7 +261,7 @@ import persistedView, { tableView } from '../mixins/persisted-view'
 import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route-position'
 import { loadHandlingSupport } from '../utilities/handling-support'
 import { linkTo, queryPlaceKeys } from '../utilities/deep-links'
-import { loadJumpPoints, searchRoutes } from '../utilities/jump-graph'
+import { loadJumpPoints, pathKey, reverseSteps, routeLegs, searchRoutes } from '../utilities/jump-graph'
 import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { colonyPlaces, filterPlace, searchable, systemPlaces } from '../utilities/places'
 import { isAvailable } from '../utilities/provenance'
@@ -268,8 +270,9 @@ import { amountText, describeTariffVersion, payoutRows } from '../utilities/civi
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, colonyEndpoint, describeFormulaVersion, fleetCanTransit, handlingRows, roundTrip, routeBlockers, shuttleServiceJoin, transitRule, tripResult } from '../utilities/transport'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
-import { distanceResult } from '../utilities/route-plan'
-import { figureOf, placeEndpoint, routePositions, viaEndpoints, withPositions } from '../utilities/route-position'
+import { distanceResult, simulateCycles } from '../utilities/route-plan'
+import { cachedPropagation } from '../utilities/orbit-propagation'
+import { ADAPTERS, CONDITIONS, figureOf, lagrangeEndpoint, placeEndpoint, routePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
 
 const INPUT_LABELS = {
   systems: 'the known systems',
@@ -404,9 +407,25 @@ export default {
       return place && this.origin && place.key !== this.origin.key ? place : null
     },
 
-    // The positions the origin and the destination are held at, for the strip above the figures: null until there is a destination. The Lagrange points a route may jump between are stated on the run's own figures.
+    // The endpoints whose orbits are read: the two ends of the run and the Lagrange points a route may jump between.
+    orbitEndpoints() {
+      const ends = [this.origin, this.destination].filter(Boolean).map(placeEndpoint).filter((endpoint) => ['body', 'colony', 'lagrange-point'].includes(endpoint.family))
+
+      return [...ends, ...(this.useLagrange ? this.lagrangePoints.map(lagrangeEndpoint) : [])]
+    },
+
+    // The positions the run's figures rest on, for the strip above them: those of every run's simulated year (utilities/route-plan.js `simulateCycles`) with the saved positions the displayed distances are measured on (each run's own, its Lagrange points included) and the endpoints at departure behind them, and the ends alone when no run has been flown. The saved ones stay observations of their own (`withSavedComparison`): a place that a distance takes at its saved position is stated as saved beside the one the year moved, so the strip reads mixed and never lets one replace the other. Null until there is a destination. A figure that kept the saved positions says why. The Lagrange points a route may jump between are stated on the run's own figures.
     endpointPositions() {
-      return this.origin && this.destination ? routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination)], { facts: this.positionRead }) : null
+      if (!this.origin || !this.destination) {
+        return null
+      }
+
+      const ends = routePositions([placeEndpoint(this.origin), placeEndpoint(this.destination)], { facts: this.positionRead })
+      const runs = [...this.runs, ...this.fleetRuns]
+      const flown = runs.filter((run) => run.simulation).flatMap((run) => run.simulation.annual.positions.records)
+      const saved = runs.filter((run) => run.savedPositions).flatMap((run) => run.savedPositions.records)
+
+      return withSavedComparison(flown, [...ends.records, ...saved])
     },
 
     // The run as a link names it: the origin, and the destination once there is one. Not known until the places are read.
@@ -875,12 +894,16 @@ export default {
         return { ...base, note: this.reachNote(group, reach) }
       }
 
-      const trip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const heldTrip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const simulation = this.simulate(reach, first.MaxSpeed, heldTrip)
+      const trip = simulation && simulation.annual.status === 'propagated' ? roundTrip(shipClass.ships, simulation.annual.meanKm, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport }) : heldTrip
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
-      const positions = this.positionsOf(reach)
-      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(tripResult(trip), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), statusSort: works ? 0 : 1 }
+      const timed = works || status === 'range'
+      const positions = simulation ? simulation.annual.positions : this.positionsOf(reach)
+      const yearly = (value) => ({ days: value.tripSeconds / SECONDS_PER_DAY, trips: value.trips, tons: base.cargo === null ? null : base.cargo * value.trips, colonists: base.colonists === null ? null : base.colonists * value.trips })
+      const run = { ...base, status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(tripResult(trip), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
       const problems = trip.problems.map((problem) => `${problem.text.charAt(0).toUpperCase()}${problem.text.slice(1)}`).join('; ')
 
       if (works) {
@@ -903,7 +926,7 @@ export default {
     safeFields(reach) {
       const detour = reach.safe && reach.safe.detour
 
-      return { detourText: detour ? detourText(detour, this.distance) : '', pathResult: this.pathOf(reach) }
+      return { detourText: detour ? detourText(detour, this.distance) : '', pathResult: this.pathOf(reach), savedPositions: reach.route ? this.positionsOf(reach) : null }
     },
 
     // The positions a run's endpoints and the Lagrange points of its route are held at (utilities/route-position.js).
@@ -992,11 +1015,15 @@ export default {
         return { ...base, note: this.reachNote(fleet, reach) }
       }
 
-      const trip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
-      const positions = this.positionsOf(reach)
+      const heldTrip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const simulation = this.simulate(reach, profile.cruise, heldTrip)
+      const trip = simulation && simulation.annual.status === 'propagated' ? fleetTrip(profile, simulation.annual.meanKm, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport }) : heldTrip
+      const positions = simulation ? simulation.annual.positions : this.positionsOf(reach)
+      const yearly = (value) => ({ days: value.tripSeconds / SECONDS_PER_DAY, trips: value.trips, tons: value.tonsYear, colonists: value.colonistsYear })
       const works = trip.status === 'ok'
+      const timed = works || trip.status === 'range'
       const left = profile.cargo.left.ships.length
-      const run = { ...base, ...this.safeFields(reach), pathResult: withPositions(pathResult(reach.route, this.avoid), positions), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1 }
+      const run = { ...base, ...this.safeFields(reach), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
       const problems = trip.problems.map((problem) => capital(problem.text)).join('; ')
 
       if (works) {
@@ -1011,6 +1038,49 @@ export default {
       }
 
       return { ...run, note: problems ? `${problems}.` : '' }
+    },
+
+    // The round trip sailed cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): the run out and back, loading at the origin and unloading at the destination as waits, the way back flown on the same jump points with its Lagrange points chosen afresh. Null while the positions are not read, or for a run with no speed or no handling time. Kept per save, speed and run.
+    simulate(reach, speed, trip) {
+      const { origin, destination, positionRead } = this
+
+      if (!positionRead || !reach.route || !(speed > 0) || trip.handlingSeconds === null) {
+        return null
+      }
+
+      const wait = (where) => trip.stops.filter((stop) => stop.where === where).reduce((sum, stop) => sum + stop.seconds, 0)
+      const steps = routeLegs(reach.route)
+      const hops = [{ steps, from: origin, to: destination, wait: wait('destination') }, { steps: reverseSteps(steps), from: destination, to: origin, wait: wait('origin') }]
+      const lagrangePoints = this.useLagrange ? this.lagrangePoints : []
+      const path = pathKey(steps)
+      const scenario = JSON.stringify([origin.key, destination.key, reach.route.jumps, reach.route.km, path, this.useLagrange, wait('origin'), wait('destination')])
+
+      return cachedPropagation(this.database, 'transport', { facts: positionRead, profile: speed, scenario }, () => simulateCycles({ hops, facts: positionRead, adapters: ADAPTERS, speed, lagrangePoints }))
+    },
+
+    // What the simulated year changed against the saved positions, for a row: { moved (the figures are the propagated ones), reasons (the texts of why the saved positions stand), held, used } with each of `held` and `used` as { days, trips, tons, colonists }.
+    propagationOf(simulation, held, used, operational) {
+      const moved = simulation.annual.status === 'propagated'
+      const codes = simulation.annual.reasons.filter((code) => code !== 'propagation-unavailable' || simulation.annual.reasons.length === 1)
+
+      return { moved, reasons: moved ? [] : codes.map((code) => CONDITIONS[code]), held, used, operational }
+    },
+
+    // A row's propagated and static trip side by side with the throughput between them, or the reason the saved positions stand.
+    propagationText(run) {
+      const found = run.propagation
+
+      if (!found) {
+        return ''
+      } else if (!found.moved) {
+        return `Static: ${found.reasons.join('; ')}.`
+      }
+
+      const { held, used } = found
+      const signed = (value, digits = 0) => `${value < 0 ? '−' : '+'}${this.count(Math.abs(value), digits)}`
+      const throughput = !found.operational ? '' : [`${signed(used.trips - held.trips, 2)} trips/yr`, used.tons === null ? '' : `${signed(used.tons - held.tons)} t/yr`, used.colonists === null ? '' : `${signed(used.colonists - held.colonists)} colonists/yr`].filter(Boolean).join(', ')
+
+      return `Propagated ${this.duration(used.days)} against ${this.duration(held.days)} on the saved positions${throughput ? `; ${throughput}` : ''}.`
     },
 
     tripTitle(run) {
@@ -1070,7 +1140,7 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
+        return await this.database.query(`select FCT_LagrangePoint.LagrangePointID, FCT_LagrangePoint.SystemID, FCT_LagrangePoint.Xcor, FCT_LagrangePoint.Ycor from FCT_LagrangePoint inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_LagrangePoint.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} where FCT_LagrangePoint.GameID = ${this.GameID}`).then(([items]) => Object.freeze(items))
       }),
       default: [],
     },
@@ -1180,6 +1250,15 @@ export default {
     gap: 8px 16px;
   }
 
+  [data-propagation] {
+    display: -webkit-box;
+    width: 0;
+    min-width: 100%;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   .tool {
     min-width: 0;
   }

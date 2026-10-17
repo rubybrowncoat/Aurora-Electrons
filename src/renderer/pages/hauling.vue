@@ -52,6 +52,7 @@
                       <th>Class</th>
                       <th class="text-right" title="A tonne of mineral takes two tonnes of a ship's cargo capacity, so a hold carries half the class's cargo in minerals">Holds</th>
                       <th class="text-right">Round trip<provenance-mark rule="hauling.haulDays" /></th>
+                      <th class="text-right" title="The round trip on the positions the save stores, beside the one flown with the bodies moved on to each arrival">Saved positions</th>
                       <th class="text-right">One ship</th>
                       <th class="text-right">All its ships</th>
                       <th />
@@ -62,6 +63,11 @@
                       <td class="caption">{{ estimate.shipClass.ClassName }}</td>
                       <td class="caption text-right">{{ count(estimate.holds) }}</td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.tripDays, 1)} d` : '—' }}<provenance-mark v-if="estimate.result" :result="estimate.result" /></td>
+                      <td class="caption text-right">
+                        <div v-if="estimate.heldDays !== null" class="text-no-wrap">{{ fixed(estimate.heldDays, 1) }} d</div>
+                        <div v-if="estimate.propagationText" class="text--secondary propagation-note" data-propagation>{{ estimate.propagationText }}</div>
+                        <span v-else-if="estimate.heldDays === null" class="text--secondary">—</span>
+                      </td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.oneShipDays, 1)} d` : '—' }}<provenance-mark v-if="estimate.oneShipResult" :result="estimate.oneShipResult" /></td>
                       <td class="caption text-right text-no-wrap">{{ estimate.timed ? `${fixed(estimate.classDays, 1)} d with ${count(estimate.shipClass.Ships)}` : '—' }}<provenance-mark v-if="estimate.classResult" :result="estimate.classResult" /></td>
                       <td class="caption warning--text">{{ estimate.note }}</td>
@@ -78,6 +84,9 @@
           </div>
           <div class="panel-foot caption text--secondary">
             A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged; a class has no commander, governor or sector, so its Logistics bonuses count as 1 and a real ship may load faster; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
+          </div>
+          <div class="panel-foot caption text--secondary" data-propagation-basis>
+            A class's round trip is flown cycle after cycle for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading as waits; the round trip on the saved positions stands beside it with the throughput between them. A haul to anything else, to a system with no survey, to a body whose orbit does not rebuild to within a kilometre, or by a class that is not faster than the body, keeps the saved positions and says why.
           </div>
         </v-card>
 
@@ -116,6 +125,7 @@
               <div v-if="item.blocked.length" class="caption warning--text">Can't load: {{ item.blockedText }}. Left out of the totals.</div>
               <div v-if="item.unknown.length" class="caption warning--text">Not known whether the ships can load: {{ item.unknownText }}. Left out of the totals.</div>
               <div v-if="item.profileText && item.route.km !== null" class="caption warning--text" data-fleet-profile-reason>{{ item.profileText }}. Left out of the totals.</div>
+              <div v-if="item.propagationText" class="caption text--secondary route-cell" data-propagation>{{ item.propagationText }}</div>
             </template>
             <template #[`item.tripsSort`]="{ item }">
               <template v-if="item.year">
@@ -172,6 +182,9 @@
           </div>
           <div class="panel-foot caption text--secondary" data-fleet-basis>
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
+          </div>
+          <div class="panel-foot caption text--secondary" data-propagation-basis>
+            A cycle is flown for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading and order delays as waits, so the next leg leaves from where the fleet arrived. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them; an order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
           </div>
         </v-card>
 
@@ -231,9 +244,9 @@ import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
-import { classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
+import { CARGO_POINTS, classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { fleetProfile, hauledFleet, loadFleetShips, participantRows } from '../utilities/fleet-profile'
-import { loadJumpPoints, routeResults as routeFigures } from '../utilities/jump-graph'
+import { loadJumpPoints, pathKey, reverseSteps, routeLegs, routeResults as routeFigures, searchRoutes } from '../utilities/jump-graph'
 import { loadHandlingSupport } from '../utilities/handling-support'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
 import { ofRule } from '../utilities/provenance'
@@ -241,8 +254,9 @@ import { allLoaded, tracked } from '../utilities/load-tracking'
 import { roundToDecimal, separatedNumber } from '../utilities/math'
 import { orderPlaceKey } from '../utilities/places'
 import { loadFormulaVersion } from '../utilities/capabilities'
-import { distanceResult } from '../utilities/route-plan'
-import { colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions } from '../utilities/route-position'
+import { distanceResult, simulateCycles } from '../utilities/route-plan'
+import { cachedPropagation } from '../utilities/orbit-propagation'
+import { ADAPTERS, CONDITIONS, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
 import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, handlingRows, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -267,6 +281,12 @@ const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.i
 const MOVE_TO_LOCATION = 2
 const ROUTE_PAGE_SIZES = [15, 30, -1]
 const SUMMARY_PAGE_SIZES = [10, 25, -1]
+// The families whose orbits are read for the page (`loadOrbitFacts`): a place of any other family keeps the position the save stores.
+const ORBIT_FAMILIES = ['body', 'colony', 'lagrange-point']
+
+// A colony's place as a route search takes it.
+const colonyPlace = (colony) => ({ SystemID: colony.SystemID, Xcor: colony.Xcor, Ycor: colony.Ycor })
+
 // The tables an order's destination sits in, each joined only for its own DestinationType (body, survey location, waypoint, contact, life pod, wreck, fleet, aether gate), so at most one of them gives the point. Jump points and Lagrange points come first in `orderPoint`: they are the only ones whose far side can differ from where the fleet went.
 const DESTINATIONS = ['FCT_SystemBody', 'VIR_Survey', 'VIR_Waypoint', 'VIR_Contact', 'VIR_Lifepod', 'VIR_Wreck', 'VIR_Destination', 'VIR_AetherGate']
 const orderPoint = (crossings, column) => `coalesce(${[...crossings, ...DESTINATIONS].map((table) => `${table}.${column}`).join(', ')})`
@@ -386,11 +406,15 @@ export default {
         const sailing = hauledFleet(fleet, profile)
         const cargo = cycleCargo(orders, sailing)
         const handling = cycleHandling(orders, cargo, sailing, profile.cargo.ships, { version: this.formulaVersion, support: this.officerSupport })
-        const year = routeYear(sailing, route, cargo, handling, orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0))
+        const delay = orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0)
+        const held = routeYear(sailing, route, cargo, handling, delay)
+        const simulation = this.simulateRoute(orders, sailing, handling, held)
+        const year = simulation && simulation.annual.status === 'propagated' ? routeYear(sailing, { ...route, km: simulation.annual.meanKm * orders.length }, cargo, handling, delay) : held
         const speedText = profile.status === 'ok' ? `${this.count(profile.cruise)} km/s` : 'no speed'
         const savedText = profile.status === 'ok' && Number.isFinite(profile.savedSpeed) && profile.savedSpeed !== profile.cruise ? `(saved ${this.count(profile.savedSpeed)})` : ''
         const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
-        const positions = routePositions(orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)]), { facts: this.positionRead })
+        const savedPositions = routePositions(orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)]), { facts: this.positionRead })
+        const positions = simulation ? simulation.annual.positions : savedPositions
         const legPositions = route.legs.map((_leg, index) => routePositions([orderExitEndpoint(orders[index]), orderEndpoint(orders[(index + 1) % orders.length])], { facts: this.positionRead }))
         const found = routeResults(route, year, handling)
         const results = found && Object.fromEntries(Object.entries(found).map(([name, result]) => [name, withPositions(result, positions)]))
@@ -415,6 +439,7 @@ export default {
           cargo,
           tripText,
           year,
+          propagationText: simulation ? this.routeNote(simulation, year, held) : '',
           stopsText: stops.join(' → '),
           routesLink: routesLink.to,
           routesName: routesLink.name,
@@ -430,7 +455,8 @@ export default {
           positions,
           legPositions,
           legResults: route.legs.map((leg, index) => withPositions(distanceResult(leg.km), legPositions[index])),
-          distanceResult: route.km !== null && positions.caveat ? withPositions(distanceResult(route.km), positions) : null,
+          savedPositions,
+          distanceResult: route.km !== null && savedPositions.caveat ? withPositions(distanceResult(route.km), savedPositions) : null,
           freightText,
           colonistsText,
           kmSort: route.km ?? Infinity,
@@ -460,7 +486,7 @@ export default {
         })
       })
 
-      return Object.values(totals).map(({ records, ...total }) => ({ ...total, fleetCount: total.fleets.size, fleetNames: [...total.fleets].join(', '), result: withPositions(ofRule({ rule: 'hauling.deliveries', value: total.amount, units: total.kind === 'colonists' ? 'colonists/yr' : 't/yr', inputs: { present: ['the saved orders of the fleets'] } }), summarisePositions(records)) })).sort((a, b) => b.amount - a.amount)
+      return Object.values(totals).map(({ records, ...total }) => ({ ...total, fleetCount: total.fleets.size, fleetNames: [...total.fleets].join(', '), result: withPositions(ofRule({ rule: 'hauling.deliveries', value: total.amount, units: total.kind === 'colonists' ? 'colonists/yr' : 't/yr', inputs: { present: ['the saved orders of the fleets'] } }), summarisePositions(records, { merge: true })) })).sort((a, b) => b.amount - a.amount)
     },
 
     classRows() {
@@ -479,14 +505,22 @@ export default {
       return this.avoidPending ? { hauls: [], unmet: [] } : planHauls(this.colonyStocks, { jumpPoints: this.jumpPoints, reserves: this.planReserves, avoid: this.avoid })
     },
 
-    // The positions the planned hauls rest on: every colony they draw from or deliver to.
-    planPositions() {
-      return summarisePositions(this.plan.hauls.flatMap((haul) => routePositions([colonyPlaceEndpoint(haul.from), colonyPlaceEndpoint(haul.to)], { facts: this.positionRead }).records))
+    // The places whose orbits are read: the colonies of the planned hauls and every order's destination and exit.
+    orbitEndpoints() {
+      const colonies = this.plan.hauls.flatMap((haul) => [colonyPlaceEndpoint(haul.from), colonyPlaceEndpoint(haul.to)])
+      const orders = this.orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)])
+
+      return [...colonies, ...orders].filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))
     },
 
-    // The positions the repeating routes rest on: every order's destination.
+    // The positions the planned hauls rest on: every colony they draw from or deliver to, as the freighter classes' flights moved them and, beside them, as the saved distance of the haul takes them (`withSavedComparison`). Each class and each route is its own simulation, so a colony one of them kept at its saved position says so whichever comes first.
+    planPositions() {
+      return withSavedComparison(this.planRows.flatMap((row) => row.positionRecords), this.planRows.flatMap((row) => row.savedRecords))
+    },
+
+    // The positions the repeating routes rest on: every order's destination as the fleet's simulated year left it, and, beside it, as the saved distances (the route's and each leg's, whose ends the saved summary holds) take it (`withSavedComparison`), so a stop the year moved on that a distance still takes at its saved position says so without replacing it.
     fleetPositions() {
-      return summarisePositions(this.routeRows.flatMap((row) => row.positions.records))
+      return withSavedComparison(this.routeRows.flatMap((row) => row.positions.records), this.routeRows.flatMap((row) => row.savedPositions.records))
     },
 
     freighters() {
@@ -502,23 +536,37 @@ export default {
     planRows() {
       const { freighters, shuttleTechnology, mineralDeliveries, formulaVersion } = this
       const reasons = (item) => Object.keys(HAUL_REASONS).filter((reason) => item[reason] >= 1).map((reason) => `${this.tons(item[reason])} ${HAUL_REASONS[reason].label}`).join(', ')
+      const searches = new Map()
+      // The haul's route searched from the giving colony, the way the cargo sails, once per colony.
+      const routeOf = (haul) => {
+        if (!searches.has(haul.from.PopulationID)) {
+          searches.set(haul.from.PopulationID, searchRoutes(this.jumpPoints, [colonyPlace(haul.from)], this.avoid.active ? { order: 'km', canEnter: this.avoid.canEnter } : { order: 'km' }))
+        }
+
+        return searches.get(haul.from.PopulationID).toPlace(colonyPlace(haul.to))
+      }
 
       return this.plan.hauls.map((haul) => {
         const positions = routePositions([colonyPlaceEndpoint(haul.from), colonyPlaceEndpoint(haul.to)], { facts: this.positionRead })
+        const route = this.positionRead ? routeOf(haul) : null
         const estimates = freighters.map((shipClass) => {
-          const estimate = haulByClass(haul, shipClass, shuttleTechnology, formulaVersion)
+          const held = haulByClass(haul, shipClass, shuttleTechnology, formulaVersion)
+          const flown = this.flyHaul(haul, route, shipClass, held)
+          const estimate = flown && flown.annual.status === 'propagated' ? haulByClass({ ...haul, km: flown.annual.meanKm }, shipClass, shuttleTechnology, formulaVersion) : held
           const problems = estimate.problems.map((problem) => problem.text).join('; ')
           const note = estimate.status === 'range' ? 'A round trip needs more fuel than its tanks hold' : estimate.status === 'blocked' ? `Can't load or unload: ${problems}` : estimate.status === 'unknown' ? `Not known: ${problems}` : estimate.status === 'immobile' ? 'The class has no speed' : ''
 
           const timed = estimate.status === 'ok' || estimate.status === 'range'
-          const result = withPositions(tripResult(estimate), positions)
+          const result = withPositions(tripResult(estimate), flown ? flown.annual.positions : positions)
           const days = (value) => (timed ? figureOf({ rule: 'hauling.haulDays', results: [result], value, units: 'days' }) : result)
 
-          return { ...estimate, timed, note, result, oneShipResult: days(estimate.oneShipDays), classResult: days(estimate.classDays) }
+          return { ...estimate, timed, note, result, oneShipResult: days(estimate.oneShipDays), classResult: days(estimate.classDays), flown, heldDays: flown && flown.annual.status === 'propagated' ? held.tripDays : null, propagationText: this.haulNote(shipClass, held, estimate, flown, timed) }
         }).sort((a, b) => Number(b.status === 'ok') - Number(a.status === 'ok') || Number(b.timed) - Number(a.timed) || (a.oneShipDays ?? 0) - (b.oneShipDays ?? 0))
         const best = estimates.find((estimate) => estimate.status === 'ok') || null
         const delivered = mineralDeliveries[haul.to.PopulationID]
         const ends = { from: place.colony(haul.from.PopulationID), to: place.colony(haul.to.PopulationID) }
+        const flights = estimates.filter((estimate) => estimate.flown)
+        const positionRecords = flights.length ? flights.flatMap((estimate) => estimate.flown.annual.positions.records) : positions.records
 
         return {
           ...haul,
@@ -526,6 +574,8 @@ export default {
           estimates,
           best,
           bestSort: best ? best.oneShipDays : Infinity,
+          positionRecords,
+          savedRecords: positions.records,
           linkName: `${haul.from.PopName} to ${haul.to.PopName}`,
           mineralsText: haul.minerals.map((mineral) => `${mineral.name} ${this.tons(mineral.tonnes)}`).join(', '),
           reasonText: reasons({ queue: haul.queue, reserve: haul.tonnes - haul.queue }),
@@ -682,6 +732,87 @@ export default {
     },
     gkm(km) {
       return km >= 1e9 ? `${roundToDecimal(km / 1e9, 2)} bn km` : `${roundToDecimal(km / 1e6, 1)} M km`
+    },
+
+    // A route's cycle flown cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): from each order's exit to the next order's destination, the stop's loading and unloading as the wait there and its delay before the flight to it, the next leg leaving from the arrival position. Null while the positions are not read, for a route that is not timed, or one that reaches no body, colony or Lagrange point. Kept per save, speed and route.
+    simulateRoute(orders, sailing, handling, held) {
+      const { positionRead } = this
+
+      if (!positionRead || !held || !(sailing.Speed > 0) || !orders.length) {
+        return null
+      }
+
+      const hops = orders.map((order, index) => {
+        const from = orderExitEndpoint(orders[(index + orders.length - 1) % orders.length])
+        const to = orderEndpoint(order)
+
+        return { steps: [{ kind: 'fly', SystemID: order.SystemID, from, to, via: null }], from, to, leave: orderExitEndpoint(order), delay: order.OrderDelay || 0, wait: handling.stops[index].seconds }
+      })
+      const cycle = [...hops.slice(1), hops[0]]
+
+      if (!cycle.some((hop) => ORBIT_FAMILIES.includes(hop.to.family) || ORBIT_FAMILIES.includes(hop.leave.family) || ORBIT_FAMILIES.includes(hop.from.family))) {
+        return null
+      }
+
+      const scenario = JSON.stringify(cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.delay, hop.wait]))
+
+      return cachedPropagation(this.database, 'hauling-route', { facts: positionRead, profile: sailing.Speed, scenario }, () => simulateCycles({ hops: cycle, facts: positionRead, adapters: ADAPTERS, speed: sailing.Speed }))
+    },
+
+    // A haul's round trip flown cycle after cycle for a year by one freighter class (`simulateCycles`): out loaded, back empty on the same jump points, loading at the giving colony and unloading at the short one as waits. Null while the positions are not read, when the route searched from the giving colony is not the planned haul's, or for a class that is not timed.
+    flyHaul(haul, route, shipClass, trip) {
+      const { positionRead } = this
+
+      if (!positionRead || !route || Math.abs(route.km - haul.km) > 1 || !(shipClass.MaxSpeed > 0) || trip.tripSeconds === null) {
+        return null
+      }
+
+      const wait = (where) => trip.stops.filter((stop) => stop.where === where).reduce((sum, stop) => sum + stop.seconds, 0)
+      const origin = colonyPlaceEndpoint(haul.from)
+      const destination = colonyPlaceEndpoint(haul.to)
+      const steps = routeLegs(route)
+      const hops = [{ steps, from: origin, to: destination, wait: wait('destination') }, { steps: reverseSteps(steps), from: destination, to: origin, wait: wait('origin') }]
+      const scenario = JSON.stringify([origin.key, destination.key, route.jumps, route.km, pathKey(steps), wait('origin'), wait('destination')])
+
+      return cachedPropagation(this.database, 'hauling-haul', { facts: positionRead, profile: shipClass.MaxSpeed, scenario }, () => simulateCycles({ hops, facts: positionRead, adapters: ADAPTERS, speed: shipClass.MaxSpeed }))
+    },
+
+    // What the flight changed against the saved positions for one class on a haul, or why they stand: the propagated and saved round trip with the throughput of one ship between them.
+    haulNote(shipClass, held, used, flown, timed) {
+      const { positionRead } = this
+
+      if (!positionRead || !timed || (flown && !flown.annual.compared)) {
+        return ''
+      } else if (!flown) {
+        return `Static: ${positionRead.clock && Number.isFinite(positionRead.clock.gameTime) ? 'the haul searched again from the giving colony does not match the planned route' : CONDITIONS['clock-unread']}.`
+      } else if (flown.annual.status !== 'propagated') {
+        const codes = flown.annual.reasons.filter((code) => code !== 'propagation-unavailable' || flown.annual.reasons.length === 1)
+
+        return `Static: ${codes.map((code) => CONDITIONS[code]).join('; ')}.`
+      }
+
+      const signed = (value, text) => `${value < 0 ? '−' : '+'}${text(Math.abs(value))}`
+      const tonnes = (trips) => (trips * shipClass.CargoCapacity) / CARGO_POINTS.minerals
+
+      const throughput = used.status === 'ok' ? `; ${signed(used.trips - held.trips, (value) => this.fixed(value, 2))} trips/yr, ${signed(tonnes(used.trips) - tonnes(held.trips), compact)} t/yr per ship` : ''
+
+      return `Propagated ${this.fixed(used.tripDays, 1)} d against ${this.fixed(held.tripDays, 1)} d${throughput}.`
+    },
+
+    // A route's propagated cycle beside the saved one, with the yearly moves between them, or why the saved positions stand.
+    routeNote(simulation, year, held) {
+      if (!simulation.annual.compared) {
+        return ''
+      } else if (simulation.annual.status !== 'propagated') {
+        const codes = simulation.annual.reasons.filter((code) => code !== 'propagation-unavailable' || simulation.annual.reasons.length === 1)
+
+        return `Static: ${codes.map((code) => CONDITIONS[code]).join('; ')}.`
+      }
+
+      const signed = (value, text) => `${value < 0 ? '−' : '+'}${text(Math.abs(value))}`
+      const moved = (value) => value.minerals + value.installations
+
+      return `Propagated ${this.fixed(year.cycleDays, 2)} d against ${this.fixed(held.cycleDays, 2)} d on the saved positions; ${signed(year.trips - held.trips, (value) => this.fixed(value, 2))} trips/yr, ${signed(moved(year) - moved(held), compact)} t/yr.`
     },
   },
   asyncComputed: {
@@ -843,6 +974,12 @@ export default {
   .route-cell {
     max-width: 520px;
     padding: 4px 0;
+  }
+
+  .propagation-note {
+    max-width: 280px;
+    margin-left: auto;
+    white-space: normal;
   }
 
   .legs-table {

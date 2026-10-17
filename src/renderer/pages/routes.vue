@@ -68,7 +68,7 @@
         <v-row>
           <v-col cols="12" lg="5" xl="4">
             <stop-list :rows="stopRows" :cycle="cycle" :groups="pickerGroups" @insert="insertStop" @replace="replaceStop" @remove="removeStop" @move="moveStop" @need="ensureLarge" @update:cycle="(value) => (cycle = value)">
-              <template #foot>Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. The positions the distances rest on, and how old they are, are listed under the figures above.</template>
+              <template #foot>Each leg is routed on its own over the jump points the race has explored, by the order chosen above. A system is reached at the jump point it is entered through and left from there; a first stop that is a system starts at its centre. Return to start adds the leg back to the first stop. Each leg leaves when the one before arrives, and a body it reaches (an independent asteroid, a moon, a trojan, or an eccentric orbit within one orbit of the last body update) is where it will be on arrival, so a later leg leaves from that position; the static figure beside it holds every body where the save has it. Every other place is held at its saved position, and the positions listed above say why. The positions the distances rest on, and how old they are, are listed under the figures above.</template>
             </stop-list>
           </v-col>
           <v-col cols="12" lg="7" xl="8">
@@ -178,7 +178,7 @@ import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, lo
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
 import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime } from '../utilities/route-plan'
-import { placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions } from '../utilities/route-position'
+import { ADAPTERS, lagrangeEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
 import { AVOID_OPTIONS, loadAvoidSystems } from '../utilities/safe-routes'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
@@ -397,8 +397,17 @@ export default {
       }
     },
 
+    // The endpoints whose orbits the page reads: the stops that sit on a body and the Lagrange points a route may jump between.
+    orbitEndpoints() {
+      const stops = this.routeStops.map(placeEndpoint).filter((endpoint) => ['body', 'colony', 'lagrange-point'].includes(endpoint.family))
+      const points = this.options.useLagrange ? this.lagrangePoints.map(lagrangeEndpoint) : []
+
+      return [...stops, ...points]
+    },
+
+    // The plan flown at the chosen speed: bodies are where they will be on arrival where the orbits are known (utilities/orbit-propagation.js), and each leg also has its figure on the saved positions.
     plan() {
-      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, facts: this.positionRead, ...this.searchOptions })
+      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, facts: this.positionRead, adapters: ADAPTERS, speed: this.effectiveSpeed, ...this.searchOptions })
     },
 
     // The plan's jumps and distance as results, null for a plan with no leg. Flags the save lacks that the options read are stated as assumptions on them.
@@ -544,7 +553,7 @@ export default {
       this.plan.legs.forEach((leg) => {
         flown.push(...(leg.positions ? leg.positions.records : []))
 
-        const passed = summarisePositions(flown)
+        const passed = summarisePositions(flown, { merge: true })
         const row = (id, fields) => {
           const found = { id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, kmResult: distanceResult(0, undefined, leg.positions), totalResult: detailTotal(total, skipped, passed), ...fields }
 
@@ -626,7 +635,7 @@ export default {
 
     // The positions the page's figures rest on: the planned legs' and those of the routes the distance table lists (the first stop and the Lagrange points), which are all there is to state with no stop to plan.
     shownPositions() {
-      return summarisePositions([...this.plan.positions.records, ...this.distanceRows.flatMap((row) => (row.positions ? row.positions.records : []))])
+      return withSavedComparison(this.plan.positions.records, this.distanceRows.flatMap((row) => (row.positions ? row.positions.records : [])))
     },
 
     mapNodes() {
@@ -691,13 +700,13 @@ export default {
           label: 'Distance',
           value: km && km.value !== null ? this.distance(km.value) : '—',
           title: km ? describeResult(km) : describeRule('route.distanceKm'),
-          note: km && km.value !== null ? `${this.count(km.value / KM_PER_AU, 1)} AU${warn ? ', without the legs that have no route' : ''}` : '',
+          note: km && km.value !== null ? `${this.count(km.value / KM_PER_AU, 1)} AU${warn ? ', without the legs that have no route' : ''}${plan.static ? `; ${this.distance(plan.static.km)} on the saved positions` : ''}` : '',
         },
         {
           label: 'Travel time',
           value: time && time.value !== null ? this.flyTime(time.value) : '—',
           title: time ? describeResult(time) : describeRule('route.travelTime'),
-          note: this.effectiveSpeed === null ? 'No speed known: enter one' : `At ${this.count(this.effectiveSpeed)} km/s`,
+          note: this.effectiveSpeed === null ? 'No speed known: enter one' : `At ${this.count(this.effectiveSpeed)} km/s${plan.static ? `; ${this.timeText(plan.static.km)} static` : ''}`,
         },
         {
           label: 'Reachable systems',
@@ -1023,7 +1032,9 @@ export default {
         return ''
       }
 
-      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.timeText(leg.route.km)}`
+      const held = Number.isFinite(leg.staticKm) ? ` (${this.timeText(leg.staticKm)} static)` : ''
+
+      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.timeText(leg.route.km)}${held}`
     },
 
     legTitle(index) {
