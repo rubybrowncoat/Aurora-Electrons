@@ -11,6 +11,7 @@
   - copies of a 2.7 save in the temp folder, each altered one way: a commander rank column dropped (only /commanders degrades, naming it), a core column dropped (only that report is unsupported), the rank table dropped, a bonus renamed or turned from a rating to a multiplier (the gate fails, the reports it feeds degrade, others stay supported), the component type renamed;
   - the consumers of the result, on the real modules (utilities/commanders.js, mixins/production-modifiers.js, store/capabilities.js, utilities/capabilities.js): a renamed bonus leaves the officer bonuses, the colony capacities and the governor review unknown, no assessment blocks every lookup ID, a failed retry keeps the result of the same copy and a result of another copy is dropped. Each of those checks is run again on a copy of the code with one gate taken out, and must fail there;
   - the Commanders page's own roster queries (taken from its source) run on copies without a rank or age column, on the parts the preflight chose, and fail on the parts of a complete save;
+  - the resource reserves panel's reads, which the scan of its component does not follow (`EXTRA_READS`, an optional input of /logistics and /hauling): a copy without FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction degrades /hauling by the panel alone and names both fields on /logistics beside the page's own required read, and the copies without FuelStockpile or MaintenanceStockpile count the panel among the readers; and the Production bonus (5) its production rates rest on, which a copy with the bonus renamed leaves /hauling degraded by, naming the reserve production;
   - what a built-by-name read depends on: each marker of an input stands for its own columns (`Reserve*` for the reserves, a bare `*` for the minerals, and the share its page loads for the command types, `MARKER_USES`, which is compared with the page's own `share: '<name>'`). Copies without FCT_Population.ReserveDuranium, FuelStockpile or MaintenanceStockpile, or without the Industrial, Survey or Tactical share, leave supported every report that does not read the column by name (the readers are derived from the generated reads) and make the others unsupported, naming it; a copy of the code that stands every marker for the whole list of its table must fail those checks. On the copy without ReserveDuranium the Mineral Outlook page's own stockpile read runs and the Minerals page's colony read (which names the reserves) fails;
   - the pages' own wiring (scripts/lib/capability-pages.js): the real script of /lagrange, /commanders and /production run on the capability results of real copies (the unverified lookup rows and missing ship columns withhold the stabilisation ships, the roster's blocked bonuses are unknown and its queries wait for the check, the research read and the colony capacities leave a blocked bonus unknown). Each page is run again with one gate cut out of its script, and a page check must fail there;
   - the file's SHA-256 before and after a preflight on a copy, and that every query the preflight sent was a select.
@@ -146,9 +147,9 @@ const registryChecks = (capabilities, scan, navigation) => {
   PLANNED_ROUTES.forEach((route) => check(`registry: ${route} reads nothing of the save and is never gated`, !capabilities.INPUTS[route]))
 
   const optional = Object.entries(capabilities.INPUTS).flatMap(([route, inputs]) => inputs.filter((input) => input.optional).map((input) => `${route} ${input.key}`))
-  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/information fleetShips', '/logistics mspSupply', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/survey-progress formations', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/commanders navalTree', '/commanders groundTree']
+  const expectedOptional = [...(capabilities.INPUTS['/warnings'] || []).filter((input) => input.key.startsWith('check:')).map((input) => `/warnings ${input.key}`), '/lagrange ships', '/colony-outlook bootstrapSources', '/colony-outlook colonistSources', '/mineral-outlook siteDeposits', '/mineral-outlook deploymentSources', '/finances shippingTax', '/information avoidSystems', '/hauling avoidSystems', '/information handlingSupport', '/hauling handlingSupport', '/information fleetShips', '/logistics mspSupply', '/logistics stationObjects', '/logistics stationBodies', '/logistics stationOrders', '/logistics ResourceReserves', '/hauling ResourceReserves', '/routes positionFacts', '/information positionFacts', '/hauling positionFacts', '/routes orbitFacts', '/information orbitFacts', '/hauling orbitFacts', '/map groundFormations', '/survey-progress formations', '/survey-progress ruinSites', '/survey-progress constructSites', '/survey-progress troopBays', '/commanders navalTree', '/commanders groundTree']
 
-  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the fleet profile\'s ships of /information, the incoming minerals and the fleet stations\' reads of /logistics, the position facts and orbit facts of /routes, /information and /hauling, the ground formations of /map and /survey-progress, and the ruins, the ancient constructs and the troop ships of /survey-progress, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
+  check('registry: the optional inputs are the checks of /warnings, the ships of /lagrange, the mine bootstrap and colonist source reads of /colony-outlook, the sites reads of /mineral-outlook, the shipping-line tax read of /finances, the avoid settings\' systems read and the officers\' Logistics read of /information and /hauling, the fleet profile\'s ships of /information, the incoming minerals and the fleet stations\' reads of /logistics, the resource reserves panel of /logistics and /hauling, the position facts and orbit facts of /routes, /information and /hauling, the ground formations of /map and /survey-progress, and the ruins, the ancient constructs and the troop ships of /survey-progress, and the naval and ground command structures of /commanders, every other input is required', optional.length === expectedOptional.length && expectedOptional.every((name) => optional.includes(name)), optional.join(', '))
 
   Object.entries(capabilities.INPUTS).forEach(([route, inputs]) => inputs.forEach((input) => {
     Object.entries(input.resolved).forEach(([table, resolved]) => {
@@ -197,6 +198,7 @@ const registryChecks = (capabilities, scan, navigation) => {
   const gated = new Set([...Object.values(capabilities.BONUS_NAMES), ...Object.values(capabilities.COMPONENT_TYPES)].flatMap((gate) => gate.routes))
 
   check('registry: every route a lookup gate names is a report', [...gated].every((route) => capabilities.REPORT_ROUTES.includes(route)), [...gated].filter((route) => !capabilities.REPORT_ROUTES.includes(route)).join(', '))
+  check('registry: Hauling rests on the Production bonus (5, the colonies\' production rates of the reserve panel) and the cargo handling bonus (24) and on no other lookup, so the Shipbuilding and Ground Construction bonuses leave it supported', Object.entries(capabilities.BONUS_NAMES).filter(([, bonus]) => bonus.routes.includes('/hauling')).map(([id]) => id).join() === '5,24')
   check('registry: every route of the scan with inputs is a report (or the shell)', Object.keys(scan).filter((route) => scan[route] && Object.keys(scan[route]).length).every((route) => route === 'shell' || capabilities.REPORT_ROUTES.includes(route) || Object.values(scan[route]).every((input) => !Object.keys(input.reads).length)))
 }
 
@@ -251,6 +253,7 @@ const alteredChecks = async (capabilities, source) => {
     const ageless = await alteredCopy(source, 'age', ['alter table FCT_Species drop column GraduationAge'])
     const renamed = await alteredCopy(source, 'renamed', ["update DIM_CommanderBonusType set Description = 'Mineral Extraction' where BonusID = 6"])
     const terraformRenamed = await alteredCopy(source, 'terraforming', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 9"])
+    const productionRenamed = await alteredCopy(source, 'production', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5"])
     const flipped = await alteredCopy(source, 'flipped', ['update DIM_CommanderBonusType set Percentage = 1 where BonusID = 27'])
     const retyped = await alteredCopy(source, 'component', ["update DIM_ComponentType set TypeDescription = 'Jump Gate Construction' where ComponentTypeID = 29"])
     const noBonusTable = await alteredCopy(source, 'nobonus', ['drop table DIM_CommanderBonusType'])
@@ -268,9 +271,10 @@ const alteredChecks = async (capabilities, source) => {
     const noConstructTable = await alteredCopy(source, 'constructtable', ['drop table FCT_AncientConstruct'])
     const noRuinTable = await alteredCopy(source, 'ruintable', ['drop table FCT_KnownRuinRace'])
     const noTroopColumn = await alteredCopy(source, 'troopcolumn', ['alter table FCT_ShipClass drop column TroopCapacity'])
+    const noPanelReads = await alteredCopy(source, 'panel', ['alter table FCT_ShipClass drop column MinimumFuel', 'alter table FCT_Race drop column MSPProduction'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, noOrbit, noPanelReads, twoRenamed, noConstructColumn, noConstructTable, noRuinTable, noTroopColumn, productionRenamed)
 
     const baseline = (await preflightOf(capabilities, source)).result
     const rank = (await preflightOf(capabilities, rankless)).result
@@ -279,6 +283,22 @@ const alteredChecks = async (capabilities, source) => {
     const age = (await preflightOf(capabilities, ageless)).result
     const rename = (await preflightOf(capabilities, renamed)).result
     const terraform = (await preflightOf(capabilities, terraformRenamed)).result
+    const production = (await preflightOf(capabilities, productionRenamed)).result
+    // The Production bonus (5) renamed: the gate, the routes it blocks and the effect the registry declares for /hauling, which the report must carry as it is declared (read from the module, not written here). A rewrite of the effect's prose alone must keep this passing; a module that does not carry the route's own effect must fail it.
+    const productionRead = (registry, result) => failedGates(result).join() === 'bonus 5' && [...registry.blockedBonuses(result.gates)].join() === '5' && Object.values(result.reports).filter((report) => report.status !== 'supported').map((report) => report.route).sort().join() === [...registry.BONUS_NAMES[5].routes].sort().join() && result.reports['/hauling'].status === 'degraded' && result.reports['/hauling'].degraded.every((entry) => entry.gate) && typeof registry.BONUS_NAMES[5].effect['/hauling'] === 'string' && registry.BONUS_NAMES[5].effect['/hauling'] !== '' && registry.BONUS_NAMES[5].effect['/hauling'] !== registry.BONUS_NAMES[5].effect.default && result.reports['/hauling'].degraded.some((entry) => entry.gate && entry.affects === registry.BONUS_NAMES[5].effect['/hauling'])
+    const registryText = fs.readFileSync(path.join(repo, 'src', 'renderer', 'utilities', 'capabilities.js'), 'utf8')
+    const withRegistryText = async (name, rewrite) => {
+      const text = rewrite(registryText)
+
+      return { text, registry: (await loadUtilities(['capabilities'], { sources: { capabilities: text } })).capabilities, name }
+    }
+    // The prose control restates the effect the loaded registry declares now (found in the text by its own quoted form), so it still rewrites whatever the effect says.
+    const quoted = (value) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+    const declared = capabilities.BONUS_NAMES[5].effect['/hauling']
+    const reworded = await withRegistryText('reworded', (text) => text.replace(quoted(declared), () => quoted(`${declared}, as the reserve ledger counts them`)))
+    const defaulted = await withRegistryText('defaulted', (text) => text.replace('entry.gate.effect[route] || entry.gate.effect.default', 'entry.gate.effect.default'))
+    const rewordedProduction = (await preflightOf(reworded.registry, productionRenamed)).result
+    const defaultedProduction = (await preflightOf(defaulted.registry, productionRenamed)).result
     const flip = (await preflightOf(capabilities, flipped)).result
     const retype = (await preflightOf(capabilities, retyped)).result
     const noBonus = (await preflightOf(capabilities, noBonusTable)).result
@@ -309,6 +329,9 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: a renamed Terraforming bonus (9) fails its lookup and degrades exactly /production, /habitability and /commanders', failedGates(terraform).join() === 'bonus 9' && [...capabilities.blockedBonuses(terraform.gates)].join() === '9' && Object.values(terraform.reports).filter((report) => report.status !== 'supported').map((report) => report.route).sort().join() === ['/commanders', '/habitability', '/production'].join(), notSupported(terraform).map((report) => report.route).join(', '))
     check('altered: a renamed Terraforming bonus (9) is named by /habitability with what it leaves out', terraform.reports['/habitability'].degraded.some((entry) => entry.gate && /terraforming/.test(entry.affects)), JSON.stringify(terraform.reports['/habitability'].degraded))
     check('altered: a renamed bonus does not disable /finances', rename.reports['/finances'].status === 'supported')
+    check('altered: a renamed Production bonus (5) fails its lookup and degrades exactly the reports that read it, /hauling among them, by the lookup alone and carrying the effect the registry declares for it', productionRead(capabilities, production), JSON.stringify(production.reports['/hauling'].degraded))
+    check('altered: the effect of /hauling for the Production bonus rewritten in prose alone (an equivalent rewrite) leaves that read passing', reworded.text !== registryText && reworded.registry.BONUS_NAMES[5].effect['/hauling'] !== capabilities.BONUS_NAMES[5].effect['/hauling'] && productionRead(reworded.registry, rewordedProduction), JSON.stringify(rewordedProduction.reports['/hauling'].degraded))
+    check('altered: a registry that reports the default effect and not the one of the route fails that read', defaulted.text !== registryText && !productionRead(defaulted.registry, defaultedProduction), JSON.stringify(defaultedProduction.reports['/hauling'].degraded))
     check('altered: a rating (27) turned into a multiplier fails its lookup', failedGates(flip).join() === 'bonus 27' && /rating/.test(flip.gates.bonuses[27].inputs.missing.join()), failedGates(flip).join())
     check('altered: a renamed component type (29) degrades /lagrange only', failedGates(retype).join() === 'component type 29' && retype.reports['/lagrange'].status === 'degraded' && unrelated(retype, '/lagrange'), notSupported(retype).map((report) => report.route).join(', '))
     check('altered: DIM_CommanderBonusType dropped fails every bonus lookup, and /commanders (which reads it) is unsupported', failedGates(noBonus).length === Object.keys(capabilities.BONUS_NAMES).length && noBonus.reports['/commanders'].status === 'unsupported')
@@ -317,6 +340,7 @@ const alteredChecks = async (capabilities, source) => {
     const crew = (await preflightOf(capabilities, noCrew)).result
     const message = (await preflightOf(capabilities, noMessage)).result
     const mineral = (await preflightOf(capabilities, noMineral)).result
+    const panel = (await preflightOf(capabilities, noPanelReads)).result
     const two = (await preflightOf(capabilities, twoRenamed)).result
     const formationReads = (await preflightOf(capabilities, noFormationReads)).result
     const obsolete = (await preflightOf(capabilities, noObsolete)).result
@@ -361,6 +385,10 @@ const alteredChecks = async (capabilities, source) => {
       }
     }
 
+    const panelFields = (report) => report.degraded.filter((entry) => entry.key === 'ResourceReserves').flatMap((entry) => entry.fields)
+
+    check('altered: FCT_ShipClass.MinimumFuel and FCT_Race.MSPProduction dropped (the class and supply reads of the resource reserves panel) degrade /hauling by the panel alone, naming both fields, and name them on /logistics beside its own required read of the rate', panel.reports['/hauling'].status === 'degraded' && panel.reports['/hauling'].missing.length === 0 && panel.reports['/hauling'].degraded.every((entry) => entry.key === 'ResourceReserves') && ['FCT_ShipClass.MinimumFuel', 'FCT_Race.MSPProduction'].every((field) => panelFields(panel.reports['/hauling']).includes(field) && panelFields(panel.reports['/logistics']).includes(field)) && panel.reports['/logistics'].missing.every((entry) => entry.key !== 'ResourceReserves'), JSON.stringify([panel.reports['/hauling'], panel.reports['/logistics']]))
+    check('altered: the same copy leaves unsupported only the reports whose own required inputs read the rate (/logistics, /mineral-outlook) and degrades only /hauling and /warnings (its tanker class check)', notSupported(panel).map((report) => `${report.route} ${report.status}`).sort().join() === ['/hauling degraded', '/logistics unsupported', '/mineral-outlook unsupported', '/warnings degraded'].join(), notSupported(panel).map((report) => `${report.route} ${report.status}`).join(', '))
     check('altered: two renamed bonuses (5, 25) block those IDs, and the mixin pages and /commanders name what is left out while /minerals is not degraded by them', [...capabilities.blockedBonuses(two.gates)].sort((a, b) => a - b).join() === '5,25' && ['/production', '/colony-outlook', '/logistics', '/mineral-outlook', '/shipyards', '/lagrange', '/commanders'].every((route) => two.reports[route].degraded.some((entry) => entry.gate && /capacity|stabilisation|officer/.test(entry.affects))) && two.reports['/minerals'].status === 'supported', notSupported(two).map((report) => report.route).join(', '))
     const ROUTE_PAGES = ['/routes', '/information', '/hauling']
     const byOrbitOnly = (result) => ROUTE_PAGES.every((route) => result.reports[route].status === 'degraded' && result.reports[route].missing.length === 0 && result.reports[route].degraded.length === 1 && result.reports[route].degraded[0].key === 'orbitFacts' && result.reports[route].degraded[0].fields.includes('FCT_SystemBody.Bearing'))
@@ -369,7 +397,7 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_SystemBody.Bearing dropped makes no other report unsupported', Object.values(orbit.reports).filter((report) => !ROUTE_PAGES.includes(report.route)).every((report) => report.status !== 'unsupported' || report.missing.some((entry) => entry.fields.includes('FCT_SystemBody.Bearing'))), notSupported(orbit).map((report) => report.route + ' ' + report.status).join(', '))
 
     for (const route of ROUTE_PAGES) {
-      const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts',\n  '/map'"
+      const entry = route === '/routes' ? "'/routes': (key) => key === 'positionFacts' || key === 'orbitFacts'," : route === '/information' ? "key === 'positionFacts' || key === 'orbitFacts',\n  '/hauling'" : "key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',\n  '/map'"
       const plain = entry.replace(" || key === 'orbitFacts'", '')
       const directory = mutatedCopy('utilities/capabilities.js', entry, plain)
 
@@ -790,13 +818,15 @@ const UNION = ['markers resolved as the whole list of their table', 'utilities/c
 // Copies of a save that each lack one column read by name, and what the preflight makes of each: the reports that do not read it stay supported, and a report that does read it only when the page builds the column by name (a mineral stock, a command-type share) is not made unsupported by a column the page does not use.
 const dependencyChecks = async (capabilities, source, scan) => {
   const copies = []
+  // The resource reserves panel reads through mixins the scan of its component does not follow, so its reads are in `EXTRA_READS`: the registry says which of its inputs read a column.
+  const panelReaders = (table, column) => ['/logistics', '/hauling'].filter((route) => capabilities.INPUTS[route].some((input) => input.key === 'ResourceReserves' && (input.reads[table] || []).includes(column))).map((route) => [route, 'ResourceReserves'])
   const unaffected = ['/mineral-outlook', '/logistics', '/habitability', '/production', '/colony-outlook', '/survey-progress']
   const shared = (share) => shareReaders(scan, share)
   const sharing = (share) => Object.keys(SHARE_SOURCES).filter((route) => sharesOf(route).includes(share))
   const cases = [
     { label: 'FCT_Population.ReserveDuranium dropped', table: 'FCT_Population', column: 'ReserveDuranium', readers: readersOf(scan, 'FCT_Population', 'ReserveDuranium'), supported: unaffected, unsupported: ['/minerals', '/hauling'] },
-    { label: 'FCT_Population.FuelStockpile dropped', table: 'FCT_Population', column: 'FuelStockpile', readers: [...readersOf(scan, 'FCT_Population', 'FuelStockpile'), ...riftReaders('FuelStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/hauling', '/survey-progress'], unsupported: ['/logistics', '/production'] },
-    { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/hauling', '/survey-progress', '/production'], unsupported: ['/logistics'] },
+    { label: 'FCT_Population.FuelStockpile dropped', table: 'FCT_Population', column: 'FuelStockpile', readers: [...readersOf(scan, 'FCT_Population', 'FuelStockpile'), ...riftReaders('FuelStockpile'), ...panelReaders('FCT_Population', 'FuelStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress'], unsupported: ['/logistics', '/production'] },
+    { label: 'FCT_Population.MaintenanceStockpile dropped', table: 'FCT_Population', column: 'MaintenanceStockpile', readers: [...readersOf(scan, 'FCT_Population', 'MaintenanceStockpile'), ...riftReaders('MaintenanceStockpile'), ...panelReaders('FCT_Population', 'MaintenanceStockpile')], supported: ['/mineral-outlook', '/habitability', '/minerals', '/survey-progress', '/production'], unsupported: ['/logistics'] },
     { label: 'DIM_NavalAdminCommandType.Industrial dropped', table: 'DIM_NavalAdminCommandType', column: 'Industrial', readers: shared('Industrial'), supported: ['/survey-progress', '/minerals', '/hauling'], unsupported: sharing('Industrial') },
     { label: 'DIM_NavalAdminCommandType.Survey dropped', table: 'DIM_NavalAdminCommandType', column: 'Survey', readers: shared('Survey'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics'], unsupported: ['/survey-progress'] },
     { label: 'DIM_NavalAdminCommandType.Logistics dropped', table: 'DIM_NavalAdminCommandType', column: 'Logistics', readers: shared('Logistics'), supported: ['/production', '/mineral-outlook', '/habitability', '/logistics', '/survey-progress'] },

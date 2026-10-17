@@ -16,7 +16,8 @@ const { urlOfSource } = require('./module-files')
 
 const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-const VUE_STUB = 'export default {}'
+// A component a page imports is a stub: an empty one, or with `namedComponents` one that carries the name of its file, so a check can tell which component a page registered under a tag.
+const VUE_STUB = (specifier, named) => (named ? `export default { name: '${path.posix.basename(specifier, '.vue')}' }` : 'export default {}')
 
 // What a page imports from the packages, besides what the utilities need (the caller's `stubs`).
 const PACKAGE_STUBS = {
@@ -47,7 +48,7 @@ const MODULE_STUBS = {
 const pageScript = (text) => require(path.join(rendererDirectory, '..', '..', 'node_modules', 'vue', 'compiler-sfc')).parse({ source: text }).script.content
 
 const moduleUrl = (name, context) => {
-  const { urls, directory, stubs, modules, mutate, sources, texts } = context
+  const { urls, directory, stubs, modules, mutate, sources, texts, namedComponents, dynamicImports } = context
 
   if (!urls.has(name)) {
     if (modules[name] !== undefined && modules[name] !== null) {
@@ -66,8 +67,8 @@ const moduleUrl = (name, context) => {
     const text = sources[name] !== undefined ? sources[name] : texts.get(file)
     const source = isPage ? pageScript(text) : text
     const mutated = isPage && mutate ? mutate(source) : source
-    const components = mutated.replace(/from '([^']+\.vue)'/g, () => `from '${urlOfSource(VUE_STUB)}'`)
-    const relative = components.replace(/from '(\.\.?\/[\w\-/.]+)'/g, (_match, specifier) => `from '${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), context)}'`)
+    const components = mutated.replace(/from '([^']+\.vue)'/g, (_match, specifier) => `from '${urlOfSource(VUE_STUB(specifier, namedComponents))}'`)
+    const relative = components.replace(dynamicImports ? /(from |import\()'(\.\.?\/[\w\-/.]+)'/g : /(from )'(\.\.?\/[\w\-/.]+)'/g, (_match, lead, specifier) => `${lead}'${moduleUrl(path.posix.join(path.posix.dirname(name), specifier), context)}'`)
     const stubbed = Object.entries({ ...PACKAGE_STUBS, ...stubs }).reduce((result, [specifier, stub]) => result.replace(new RegExp(`from '${escaped(specifier)}'`, 'g'), `from '${urlOfSource(stub)}'`), relative)
 
     urls.set(name, urlOfSource(stubbed))
@@ -76,12 +77,15 @@ const moduleUrl = (name, context) => {
   return urls.get(name)
 }
 
-// The component options of a page, 'pages/lagrange'. `sources` is { [module name]: source text } for modules (or the page itself, as the text of its .vue file) whose text is given instead of read from the folder, for a check that plants a fault in one of them; `texts` is a Map the caller keeps from call to call, so each file is read once: give it only where the files do not change between the calls.
-const loadPage = async (name, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map() } = {}) => {
-  const context = { urls: new Map(), directory, stubs, modules: { ...MODULE_STUBS, ...modules }, mutate, sources, texts }
+// A page's module, 'pages/lagrange', or any other module of the renderer folder, with its named exports. `sources` is { [module name]: source text } for modules (or the page itself, as the text of its .vue file) whose text is given instead of read from the folder, for a check that plants a fault in one of them; `texts` is a Map the caller keeps from call to call, so each file is read once: give it only where the files do not change between the calls.
+const loadModule = async (name, { directory = rendererDirectory, stubs = {}, modules = {}, mutate = null, sources = {}, texts = new Map(), namedComponents = false, dynamicImports = false } = {}) => {
+  const context = { urls: new Map(), directory, stubs, modules: { ...MODULE_STUBS, ...modules }, mutate, sources, texts, namedComponents, dynamicImports }
 
-  return (await import(moduleUrl(name, context))).default
+  return import(moduleUrl(name, context))
 }
+
+// The component options of a page: the default export of its module.
+const loadPage = async (name, options) => (await loadModule(name, options)).default
 
 // A `mutate` that replaces `from` by `to` in the script text, and fails when `from` is not there: a mutation that does not apply is an error.
 const replacing = (from, to) => (text) => {
@@ -165,4 +169,4 @@ const instantiate = (options, { $store, database = null, GameID = null, RaceID =
   return vm
 }
 
-module.exports = { loadPage, replacing, instantiate }
+module.exports = { loadPage, loadModule, replacing, instantiate }

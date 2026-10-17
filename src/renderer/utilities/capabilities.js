@@ -36,17 +36,17 @@ registerRule({
   note: 'Component type 29 is Jump Point Stabilisation in the 2.6, 2.7 and 2.7.1 saves examined, and Jump Gate Construction in the pre-2.6 ones, so a save whose type differs is not mapped.',
 })
 
-// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
+// The inputs a page really goes on without, which only degrade its report when a table or column is missing: the checks of the Warnings page (each shows its own failure in place), the ships of the Lagrange page (its map and saved points do not read them), the mine bootstrap and colonist source reads of the Colony Outlook page (each panel names what it could not read; the outlook itself does not rest on them), the surveyed deposits and the routes for new sites of the Mineral Outlook (the sites panel names what it could not read; the runway and the supply do not rest on them), the shipping-line tax rate and race kind of the Finances page (the shipping scenarios name what they could not read; the treasury runway does not rest on them), the incoming minerals and the fleet stations' fleets, bodies and orders of the Logistics page (each panel names what it could not read, with its own Retry; the fuel and stock-only maintenance figures do not rest on them), the resource reserves panel of Logistics and Hauling (every read of it names its failure in the panel, with its own Retry, and the rest of the page does not rest on it), the danger and control of the known systems on Transport and Hauling (read only for the avoid settings, which plan nothing while it is not in; the baseline routes do not rest on it), the officers' Logistics bonuses there (the handling times count an unread officer as unknown and say so), the ships of the participating fleets on Transport (the fleet profile names what it could not read; the class figures do not rest on them), the position facts and the orbit facts of Route Finder, Transport and Hauling (the position strip names what it could not read, and every route figure stays an estimate with its age unknown until it is in, and a save that lacks an orbit column keeps the saved positions with the reason stated), the ground formations of the Galaxy Map and Survey Progress (the loader checks its own columns and the remote formations mark and the formations table say what could not be read; the rest of either page does not rest on them, and the template Obsolete column is one the loader goes without) and the ruins, the ancient constructs and the troop ships of Survey Progress (a formation whose work cannot be told because its ruins or constructs are unread shows "Activity not known", and an unread troop ship read leaves the lifts unknown; the surveys do not rest on any of them). Every other input is required, as the page holds its content back while one fails.
 const OPTIONAL = Object.freeze({
   '/warnings': (key) => key.startsWith('check:'),
   '/lagrange': (key) => key === 'ships',
   '/colony-outlook': (key) => key === 'bootstrapSources' || key === 'colonistSources',
   '/mineral-outlook': (key) => key === 'siteDeposits' || key === 'deploymentSources',
   '/finances': (key) => key === 'shippingTax',
-  '/logistics': (key) => key === 'mspSupply' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders',
+  '/logistics': (key) => key === 'mspSupply' || key === 'stationObjects' || key === 'stationBodies' || key === 'stationOrders' || key === 'ResourceReserves',
   '/routes': (key) => key === 'positionFacts' || key === 'orbitFacts',
   '/information': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'fleetShips' || key === 'positionFacts' || key === 'orbitFacts',
-  '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'positionFacts' || key === 'orbitFacts',
+  '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'positionFacts' || key === 'orbitFacts' || key === 'ResourceReserves',
   '/map': (key) => key === 'groundFormations',
   '/survey-progress': (key) => ['formations', 'ruinSites', 'constructSites', 'troopBays'].includes(key),
   // The command structure panel of the Commanders page reads the naval admin commands, fleets and ships and the ground formations with their commanders, each loader checking its own columns; the roster does not rest on them, and the panel names what could not be read.
@@ -99,6 +99,29 @@ export const MARKER_USES = Object.freeze({
   '/survey-progress': Object.freeze({ navalAdmins: Object.freeze({ DIM_NavalAdminCommandType: Object.freeze(['Survey']) }) }),
 })
 
+// What the resource reserves panel reads through the mixins and helpers the scan of its component does not follow (`reserveClasses`, `reservePackets` and `reserveSupply` of mixins/resource-reserves.js, the production modifiers of mixins/production-modifiers.js): the ship classes with ships (`loadClassMinimums`), the supply state of the colonies (`loadSupplyState`: the stockpiles, the production switches, the racial rates, the refineries and the maintenance facilities), the packets in flight (`loadPacketRows`, whose mineral columns are built by name) and the colonies' production rates.
+const RESERVE_PANEL_READS = [
+  'DIM_PlanetaryInstallation(ConstructionValue FighterProductionValue MaintenanceValue OrdnanceProductionValue PlanetaryInstallationID RefineryProductionValue)',
+  'DIM_PopPoliticalStatus(ProductionMod StatusID)',
+  'FCT_Commander(CommandID CommandType CommanderID CommanderType)',
+  'FCT_CommanderBonuses(BonusID BonusValue CommanderID)',
+  'FCT_Game(GameID MinConstructionPeriod ResearchSpeed)',
+  'FCT_GroundUnitClass(ConstructionRating GroundUnitClassID)',
+  'FCT_GroundUnitFormation(FormationID PopulationID)',
+  'FCT_GroundUnitFormationElement(ClassID FormationID Units)',
+  'FCT_MassDriverPackets(* DestID GameID PacketID RaceID Speed Xcor Ycor)',
+  'FCT_Population(Duranium Efficiency FuelProdStatus FuelStockpile Gallicite GameID MaintProdStatus MaintenanceStockpile PoliticalStatus PopName PopulationID RaceID Sorium SpeciesID SystemBodyID SystemID UnrestPoints Uridium)',
+  'FCT_PopulationInstallations(Amount GameID PlanetaryInstallationID PopID)',
+  'FCT_Race(ConstructionProduction EconomicProdModifier FighterProduction FuelProduction GroundFormationConstructionRate MSPProduction OrdnanceProduction RaceID Research ShipBuilding ShipyardOperations)',
+  'FCT_RaceSysSurvey(Name RaceID SectorID SystemID)',
+  'FCT_Ship(GameID ShipClassID ShipID)',
+  'FCT_ShipClass(ClassName GameID MinimumFuel MinimumSupplies RaceID ShipClassID)',
+  'FCT_Species(ProductionRateModifier ResearchRateModifier SpeciesID)',
+  'FCT_Star(Component StarID)',
+  'FCT_SystemBody(BodyClass OrbitNumber PlanetNumber RadiationLevel StarID SystemBodyID Xcor Ycor)',
+  'FCT_SystemBodyName(Name RaceID SystemBodyID)',
+].join(' ')
+
 // Reads the scan of the pages cannot see, as 'Table(Column Column)', added to the generated ones: a query that names its columns without the table, a column built by name through a helper, a column named by a value (`DIM_PlanetaryInstallation.${value}`). An input whose scan finds a table and no column of it needs an entry here, or one in `TOLERATED`.
 const EXTRA_READS = Object.freeze({
   shell: Object.freeze({ probe: 'FCT_Game(GameID StartYear GameTime)' }),
@@ -117,7 +140,8 @@ const EXTRA_READS = Object.freeze({
     gases: 'DIM_Gases(GasID Name BoilingPoint GHGas AntiGHGas Dangerous DangerousLevel)',
     outlook: `FCT_MassDriverPackets(GameID RaceID ${MINERAL_LIST})`,
   }),
-  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)' }),
+  '/logistics': Object.freeze({ colonies: 'FCT_MineralDeposit(SystemBodyID MaterialID Amount GameID)', ResourceReserves: RESERVE_PANEL_READS }),
+  '/hauling': Object.freeze({ ResourceReserves: RESERVE_PANEL_READS }),
   '/information': Object.freeze({ shipments: 'FCT_MoveOrders(FleetID DestinationItemID DestinationItemType PopulationID GameID MoveActionID)' }),
   '/designed-tech': Object.freeze({
     categories: 'DIM_ResearchCategories(CategoryID Name)',
@@ -160,7 +184,7 @@ export const BONUS_NAMES = Object.freeze({
   2: Object.freeze({ name: 'Survey', percentage: true, routes: Object.freeze(['/survey-progress', '/commanders']), effect: Object.freeze({ default: 'the survey rates of the fleets', '/commanders': OFFICERS }) }),
   3: Object.freeze({ name: 'Research', percentage: true, routes: Object.freeze(['/production', '/technologies', '/commanders']), effect: Object.freeze({ '/production': 'the research rates of projects with a scientist', '/technologies': 'the research bonus of the scientists', '/commanders': OFFICERS }) }),
   4: Object.freeze({ name: 'Shipbuilding', percentage: true, routes: Object.freeze(MIXIN_REPORTS), effect: 'the shipyard build rates of the colonies' }),
-  5: Object.freeze({ name: 'Production', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/lagrange']), effect: Object.freeze({ default: 'the construction, ordnance and fighter capacity of the colonies', '/lagrange': 'the stabilisation ships and the stabilisation times' }) }),
+  5: Object.freeze({ name: 'Production', percentage: true, routes: Object.freeze([...MIXIN_REPORTS, '/hauling', '/lagrange']), effect: Object.freeze({ default: 'the construction, ordnance and fighter capacity of the colonies', '/hauling': 'the maintenance supplies and fuel the colonies make in the reserve ledger', '/lagrange': 'the stabilisation ships and the stabilisation times' }) }),
   6: Object.freeze({ name: 'Mining', percentage: true, routes: Object.freeze(['/commanders', '/mineral-outlook', '/habitability', '/logistics', '/minerals']), effect: Object.freeze({ '/commanders': OFFICERS, '/mineral-outlook': 'the mining rates of the colonies and the orbital miners', '/habitability': 'the mineral runway that sets the plan\'s mineral weights', '/logistics': 'the fuel output of the Sorium harvesters', '/minerals': 'the output of the civilian mining policy' }) }),
   8: Object.freeze({ name: 'Population Growth', percentage: true, routes: Object.freeze(['/colony-outlook', '/commanders']), effect: Object.freeze({ default: 'the growth rates of the colonies', '/commanders': OFFICERS }) }),
   9: Object.freeze({ name: 'Terraforming', percentage: true, routes: Object.freeze(['/production', '/habitability', '/commanders']), effect: Object.freeze({ default: 'the terraforming capacity and rates of the colonies, with the commanders and naval admin chain behind them', '/commanders': OFFICERS }) }),

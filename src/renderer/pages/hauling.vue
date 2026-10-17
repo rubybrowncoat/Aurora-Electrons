@@ -6,12 +6,12 @@
       <template v-if="ready">
         <stat-tiles :tiles="tiles" />
 
-        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, from the nearest colony with stock to spare, and what each freighter class takes to carry them." elevation="1">
+        <v-card class="panel" data-summary="The hauls that would cover what the colonies lack of each mineral, from the nearest colony with stock to spare, and what each freighter class takes to carry them." elevation="1" data-hauling-plan>
           <div class="panel-head">
             <span>Hauling plan<provenance-mark rule="hauling.planTonnes" label /></span>
             <span class="d-flex align-center flex-wrap plan-tools">
               <avoid-options :options="avoidOptionList" :settings="avoidSettings" :count="avoidCount" @change="setAvoid" />
-              <v-switch v-model="planReserves" label="Fill reserves" dense hide-details class="mt-0" />
+              <v-switch v-model="planReserves" label="Fill reserves" dense hide-details class="mt-0" data-hauling-fill-reserves />
             </span>
           </div>
           <div v-if="avoidNote" class="panel-body py-2 caption" :class="avoidNote.tone" data-avoid-note>{{ avoidNote.text }}<v-btn v-if="avoidState.failed" x-small text class="ml-2" @click="retryAvoid">Retry</v-btn></div>
@@ -82,6 +82,7 @@
             <div class="caption warning--text">No colony on a charted route has stock to spare for:</div>
             <div v-for="row in unmetRows" :key="row.key" class="caption">{{ row.name }}: {{ row.text }}<div v-for="cutText in row.cutTexts" :key="cutText" class="text--secondary" data-cut-off>{{ cutText }}</div></div>
           </div>
+          <resource-reserves :key="`${GameID}-${RaceID}`" embedded kind="minerals" :colonies="colonies" :plan="plan" :timed="plannedDays" />
           <div class="panel-foot caption text--secondary">
             A colony is short of a mineral when its build queue (industrial projects and shipyard tasks that build, repair or refit, paused and queued ones too; a scrap task needs no minerals) needs more than it holds with the mass-driver packets on their way to it, and, with Fill reserves on, when it then holds less than its reserve. A colony gives what it holds above both its reserve and what its own queue needs. Queue shortfalls are planned first, the larger first, each from the colony with stock to spare nearest on the charted routes, then the next nearest. Minerals already in a freighter's hold aren't counted. A class's figures are full holds and round trips at top speed with loading and unloading as Transport times them, fully crewed and undamaged; a class has no commander, governor or sector, so its Logistics bonuses count as 1 and a real ship may load faster; a tonne of mineral takes two tonnes of cargo space, so a hold carries half the class's cargo capacity in minerals; the best class is the one a single ship of which finishes soonest. A class over 500 t with no cargo shuttle bays can load and unload only at a colony with a spaceport or cargo shuttle station, and a class that can't is named with the reason; one whose ability isn't known has no time. {{ versionNote }} A jump point not stabilised on both sides needs a jump-capable ship with freighters that have no jump drive. With an avoid setting on, a haul keeps out of the systems the race knows to be dangerous or alien-held (as the Route Finder reads them), so its distance, and the times and fuel counted from it, follow the way round; each haul is searched the way it sails, from the colony that gives to the one that is short, so the giving colony's own system is left freely and the short colony's system is kept out of like any other. A colony that the settings cut off is named with the systems that bar the way. The repeating routes below follow their orders and ignore the settings.
           </div>
@@ -234,6 +235,7 @@ import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import RoutePositions from '../components/page/RoutePositions.vue'
+import ResourceReserves from '../components/logistics/ResourceReserves.vue'
 import StatTiles from '../components/page/StatTiles.vue'
 import avoidRoutes from '../mixins/avoid-routes'
 import capabilityGates from '../mixins/capability-gates'
@@ -248,6 +250,7 @@ import { CARGO_POINTS, classYear, cycleCargo, cycleHandling, routeResults, route
 import { fleetProfile, hauledFleet, loadFleetShips, participantRows } from '../utilities/fleet-profile'
 import { loadJumpPoints, pathKey, reverseSteps, routeLegs, routeResults as routeFigures, searchRoutes } from '../utilities/jump-graph'
 import { loadHandlingSupport } from '../utilities/handling-support'
+import { timeHauls } from '../utilities/msp-supply'
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, unreadResult } from '../utilities/safe-routes'
 import { ofRule } from '../utilities/provenance'
 import { allLoaded, tracked } from '../utilities/load-tracking'
@@ -325,7 +328,7 @@ const cycleStops = (orders, raceId) => {
 
 export default {
   name: 'HaulingPage',
-  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, RoutePositions, StatTiles },
+  components: { AvoidOptions, FleetProfile, HandlingBreakdown, LoadState, PageLink, ProvenanceMark, ResourceReserves, RoutePositions, StatTiles },
   mixins: [
     avoidRoutes,
     capabilityGates,
@@ -511,6 +514,13 @@ export default {
       const orders = this.orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)])
 
       return [...colonies, ...orders].filter((endpoint) => ORBIT_FAMILIES.includes(endpoint.family))
+    },
+
+    // The days each planned haul takes with the freighters it is given, for the reserve ledger.
+    plannedDays() {
+      const { plan, freighters, shuttleTechnology, formulaVersion } = this
+
+      return plan.hauls.length ? timeHauls({ plan, freighters, shuttleTechnology, formulaVersion }) : []
     },
 
     // The positions the planned hauls rest on: every colony they draw from or deliver to, as the freighter classes' flights moved them and, beside them, as the saved distance of the haul takes them (`withSavedComparison`). Each class and each route is its own simulation, so a colony one of them kept at its saved position says so whichever comes first.
