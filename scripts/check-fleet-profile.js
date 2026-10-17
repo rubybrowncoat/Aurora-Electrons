@@ -194,11 +194,12 @@ const worldOf = (edits = []) => {
   }
   const labelsOf = 'export default (labels) => ({ computed: { inputLabels: () => labels } })'
   const modules = memo(() => loadUtilities(['fleet-profile', 'transport', 'hauling', 'provenance'], { sources: utilitySources }))
+  const capabilities = memo(() => loadUtilities(['capabilities']))
   const component = memo(() => loadPage('components/page/FleetProfile', { sources: pageSources }))
   const hauling = memo(() => loadPage('pages/hauling', { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
   const transport = memo(() => loadPage('pages/information', { sources: pageSources, modules: { 'mixins/load-state': labelsOf } }))
 
-  return { text, modules, component, hauling, transport }
+  return { text, modules, capabilities, component, hauling, transport }
 }
 
 // What a trip of the fleet takes from the origin colony to the destination colony, for the ships `ships` read as `basis` says.
@@ -654,7 +655,7 @@ check('loader', 'the loader reads the engines, links and towed mass from the tab
 
   const [oldShip] = oldRows
 
-  ;['MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'OverhaulFactor', 'Fuel', 'MaintenanceState', 'FleetSpeed', 'UseMaximumSpeed'].forEach((key) => assert.equal(oldShip[key], null, key))
+  ;['MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'OverhaulFactor', 'Fuel', 'MaintenanceState', 'FleetSpeed', 'UseMaximumSpeed', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies', 'PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip', 'CarrierCommercialHangar'].forEach((key) => assert.equal(oldShip[key], null, key))
   near(oldShip.UndamagedEnginePower, 20)
   assert.equal(fp.fleetProfile(oldRows).status, 'unknown')
   assert.ok(codesOf(fp.fleetProfile(oldRows)).includes('links'))
@@ -790,6 +791,88 @@ check('loader-storage', 'the holds, colonist berths and tanks a ship has left af
   assert.equal(unknownTank.trip.status, 'unknown')
   assert.ok(unknownTank.trip.problems.some((problem) => problem.code === 'fuel-capacity'))
   assert.equal(unknownTank.trip.fuelPerTrip, null)
+})
+
+// The columns the runtime state of a ship reads, added to the tables after their rows as a save that has them holds them.
+const RUNTIME_ROWS = `
+  alter table FCT_Ship add column LastOverhaul real;
+  alter table FCT_Ship add column LastShoreLeave real;
+  alter table FCT_Ship add column GradePoints real;
+  alter table FCT_Ship add column CrewMorale real;
+  alter table FCT_Ship add column CurrentMaintSupplies real;
+  alter table FCT_ShipClass add column PlannedDeployment real;
+  alter table FCT_ShipClass add column MaintSupplies real;
+  alter table FCT_ShipClass add column BaseFailureChance real;
+  alter table FCT_ShipClass add column MaxDACRoll integer;
+  alter table FCT_ShipClass add column Commercial integer;
+  alter table FCT_ShipClass add column MoraleCheckRequired integer;
+  alter table FCT_ShipClass add column CommercialHangar integer;
+  alter table FCT_ShipClass add column SupplyShip integer;
+  update FCT_Ship set LastOverhaul = 1000 + ShipID, LastShoreLeave = 2000 + ShipID, GradePoints = 150, CrewMorale = 0.9, CurrentMaintSupplies = 40 + ShipID;
+  update FCT_ShipClass set PlannedDeployment = 12, MaintSupplies = 300, BaseFailureChance = 2, MaxDACRoll = 10, Commercial = 0, MoraleCheckRequired = 1, CommercialHangar = 1, SupplyShip = 0;
+  update FCT_ShipClass set CommercialHangar = 0 where ShipClassID = 3;
+  insert into FCT_ShipDesignComponents values (200, 31, 1, 0);
+  insert into FCT_DamagedComponent values (1, 1, 200, 2), (1, 1, 200, 1), (1, 2, 200, 5), (2, 1, 200, null), (3, 1, 100, 1);
+`
+
+check('loader-runtime', 'the loader reads the clocks, stocks, grade, morale, class flags and the engineering a ship has damaged from the tables, the carrier\'s hangar kind through the carrier link, and keeps to the race', async (w) => {
+  const { 'fleet-profile': fp } = await w.modules()
+  const ids = (rows) => Object.keys(rows).map(Number).sort((a, b) => a - b)
+  const read = async (statements = '') => {
+    const database = await databaseOf(SCHEMA, `${ROWS}${RUNTIME_ROWS}${statements}`)
+    const rows = await fp.loadFleetShips(database, { GameID: 1, RaceID: 2 })
+
+    database.close()
+
+    return Object.fromEntries(rows.map((row) => [row.ShipID, row]))
+  }
+  const rows = await read()
+  const pick = (row, keys) => Object.fromEntries(keys.map((key) => [key, row[key]]))
+
+  assert.deepEqual(ids(rows), [1, 2, 3, 4, 5, 6, 8], 'the race\'s own ships only')
+  assert.deepEqual(pick(rows[1], ['LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies']), { LastOverhaul: 1001, LastShoreLeave: 2001, GradePoints: 150, CrewMorale: 0.9, CurrentMaintSupplies: 41 })
+  assert.deepEqual(pick(rows[1], ['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip']), { PlannedDeployment: 12, MaintSupplies: 300, BaseFailureChance: 2, MaxDACRoll: 10, Commercial: 0, MoraleCheckRequired: 1, CommercialHangar: 1, SupplyShip: 0 })
+  assert.equal(rows[1].DamagedEngineering, 3, 'the damaged engineering rows of this ship and game are summed')
+  assert.equal(rows[3].DamagedEngineering, 0, 'a damaged engine is not damaged engineering, and a ship with no row has none')
+  assert.equal(rows[2].DamagedEngineering, null, 'an engineering damage row with no number leaves the count unknown')
+  assert.equal(rows[4].DamagedEngineering, 0)
+  assert.equal(rows[6].CarrierCommercialHangar, 1, 'the carrier\'s class has a commercial hangar')
+  assert.equal(rows[8].CarrierCommercialHangar, 1, 'a ship in a hangar of a hangared carrier reads that carrier\'s kind')
+  assert.equal(rows[1].CarrierCommercialHangar, null, 'a ship in no hangar has no carrier')
+  assert.equal((await read('update FCT_ShipClass set CommercialHangar = 0 where ShipClassID = 1;'))[6].CarrierCommercialHangar, 0, 'a military hangar reads as 0')
+  assert.equal((await read('update FCT_ShipClass set CommercialHangar = null where ShipClassID = 1;'))[6].CarrierCommercialHangar, null, 'an unstated hangar kind stays unknown')
+
+  const lacking = await read('alter table FCT_ShipClass drop column CommercialHangar;')
+
+  assert.deepEqual(ids(lacking), ids(rows), 'a save whose classes have no hangar column still gives every ship')
+  assert.ok(Object.values(lacking).every((row) => row.CarrierCommercialHangar === null && row.CommercialHangar === null), 'the hangar kind of a carrier is not known, never 0')
+  assert.equal(lacking[6].MothershipID, 1, 'the carrier link itself is read')
+  assert.equal(lacking[6].CarrierFleetID, rows[6].CarrierFleetID, 'the carrier\'s fleet is still read')
+})
+
+check('guarded-column', 'the carrier\'s hangar kind is a column built by name, so the page scan does not list it as one the reports require: a save without it leaves /hauling and /information as they are, while a class column they do read still fails them', async (w) => {
+  const capabilities = (await w.capabilities()).capabilities
+  const schemaRows = (without = []) => Object.values(capabilities.INPUTS).flat().flatMap((input) => Object.entries(input.reads).flatMap(([table, columns]) => [{ tbl: table, name: 'ROWID_' }, ...columns.filter((column) => !column.includes('*') && !without.includes(`${table}.${column}`)).map((column) => ({ tbl: table, name: column }))]))
+  const report = (route, without) => capabilities.evaluate(capabilities.schemaOf(schemaRows(without))).reports[route]
+
+  ;['/hauling', '/information'].forEach((route) => {
+    const input = capabilities.INPUTS[route].find((one) => one.key === 'fleetShips')
+
+    assert.ok(!input.reads.FCT_ShipClass.includes('CommercialHangar'), `${route} does not require the carrier's hangar column`)
+    assert.ok(input.markers.FCT_ShipClass.includes('*'), `${route} reads the class columns the loader builds by name`)
+    assert.ok(input.reads.FCT_ShipClass.includes('MaxSpeed'), `${route} still requires the class columns it reads by name`)
+
+    const full = report(route, [])
+    const lacking = report(route, ['FCT_ShipClass.CommercialHangar'])
+
+    assert.equal(lacking.status, full.status, `${route} is as supported as it was`)
+    assert.deepEqual(lacking.missing, full.missing)
+    assert.deepEqual(lacking.degraded, full.degraded)
+    assert.ok(!JSON.stringify(lacking).includes('CommercialHangar'), `${route} names no hangar column as missing`)
+    assert.ok([...report(route, ['FCT_ShipClass.MaxSpeed']).missing, ...report(route, ['FCT_ShipClass.MaxSpeed']).degraded].some((entry) => entry.key === 'fleetShips'), `${route} fails on a class column it requires`)
+  })
+
+  assert.ok(!/\b\w+\.CommercialHangar\b/.test(w.text.profile), 'the loader names no table\'s carrier column outright')
 })
 
 const loadErrorsOf = (state) => new Proxy({}, { get: (_target, key) => (key === 'fleetShips' ? state : null), has: () => true })
@@ -1332,6 +1415,15 @@ const FAULTS = [
   ['a damage row with no number is no damage', 'profile', ' or exists (select 1 ${DAMAGE_ROWS} and FCT_DamagedComponent.Number is null)', '', ['loader-null']],
   ['an installed count with no number is none', 'profile', 'FCT_ClassComponent.NumComponent is null or FCT_ShipDesignComponents.ComponentValue is null or exists (', 'FCT_ShipDesignComponents.ComponentValue is null or exists (', ['loader-null']],
   ['an engine with no power is none', 'profile', 'FCT_ShipDesignComponents.ComponentValue is null or exists (', 'exists (', ['loader-null']],
+  ['the damaged engineering is counted from another component type', 'profile', 'const ENGINEERING = 31', 'const ENGINEERING = 30', ['loader-runtime']],
+  ['an engineering damage row with no number takes nothing', 'profile', 'Number is null) then null else coalesce(', 'Number is null) then 0 else coalesce(', ['loader-runtime']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the carrier\'s hangar kind is left out', 'profile', 'through(\'MothershipID\', `OTHER_CLASS.${CARRIER_CLASS_COLUMN}`)', 'through(\'MothershipID\', \'0\')', ['loader-runtime']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['the carrier\'s hangar kind is read as a named column of the class table', 'profile', 'through(\'MothershipID\', `OTHER_CLASS.${CARRIER_CLASS_COLUMN}`)', 'through(\'MothershipID\', \'OTHER_CLASS.CommercialHangar\')', ['guarded-column']],
+  ['a save without the carrier\'s hangar column drops its ships', 'profile', 'const carrierHangar = hasClassColumn(CARRIER_CLASS_COLUMN) ?', 'const carrierHangar = true ?', ['loader-runtime']],
+  // eslint-disable-next-line no-template-curly-in-string
+  ['a class column the save lacks reads as 0', 'profile', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `null as ${name}`)', '(hasClassColumn(name) ? `FCT_ShipClass.${name}` : `0 as ${name}`)', ['loader']],
 ]
 
 // ---- Benign edits ----------------------------------------------------------------------------------------------------

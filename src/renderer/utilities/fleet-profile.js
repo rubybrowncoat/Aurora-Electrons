@@ -13,6 +13,8 @@ const FUEL_STORAGE = 3
 const CARGO_HOLD = 4
 const COLONIST_TRANSPORT = 17
 const PASSENGER_MODULE = 50
+// DIM_ComponentType Engineering Spaces: the components whose damage raises a ship's own failure rate.
+const ENGINEERING = 31
 // The slowest speed the game gives a ship, in km/s.
 const MIN_SPEED = 1
 
@@ -59,7 +61,13 @@ registerRule({
 })
 
 // The columns of FCT_Ship the profile reads that an older save may lack: such a column reads as null (not known), never as 0.
-const OPTIONAL_SHIP_COLUMNS = ['Fuel', 'OverhaulFactor', 'MaintenanceState', 'MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID']
+const OPTIONAL_SHIP_COLUMNS = ['Fuel', 'OverhaulFactor', 'MaintenanceState', 'MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies']
+
+// The columns of FCT_ShipClass the ship's runtime state reads that an older save may lack: the planned deployment, the stored maintenance supplies and failure rate, and the flags that decide how a ship's clocks run. Each reads as null (not known) when the save lacks it.
+const OPTIONAL_CLASS_COLUMNS = ['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip']
+
+// The class column that tells a commercial hangar from a military one. It is named through this constant so the page scan sees a column built by name (a bare marker, not a required column): a save without it still loads every ship, the carrier's hangar kind reading null.
+const CARRIER_CLASS_COLUMN = 'CommercialHangar'
 
 // A ship's engines as the game counts them, an undamaged engine power: each engine component the class has (DIM_ComponentType Engine) less the ship's damaged ones, times the engine's power. The class's `EnginePower` is the same sum with none damaged. A component row with no count or no power, or a damaged-component row with no number, leaves the sum unknown (null); only a ship with no damage row for a component has none of it damaged.
 const ENGINE_ROWS = `from FCT_ClassComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_ClassComponent.ComponentID where FCT_ClassComponent.ClassID = FCT_ShipClass.ShipClassID and FCT_ShipDesignComponents.ComponentTypeID = ${ENGINE}`
@@ -74,21 +82,28 @@ const storageSql = (column, types) => {
 }
 const STORAGE_SQL = [storageSql('CargoCapacity', [CARGO_HOLD]), storageSql('ColonistCapacity', [COLONIST_TRANSPORT, PASSENGER_MODULE]), storageSql('FuelCapacity', [FUEL_STORAGE])].join(', ')
 
+// The engineering components a ship has damaged (DIM_ComponentType Engineering Spaces): their damage raises the ship's own failure rate above the class's stored one. A damaged row with no number leaves it unknown (null); a ship with no damage row for engineering has 0.
+const ENGINEERING_DAMAGE_ROWS = `from FCT_DamagedComponent inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_DamagedComponent.ComponentID where FCT_DamagedComponent.ShipID = FCT_Ship.ShipID and FCT_DamagedComponent.GameID = FCT_Ship.GameID and FCT_ShipDesignComponents.ComponentTypeID = ${ENGINEERING}`
+const ENGINEERING_DAMAGE_SQL = `case when exists (select 1 ${ENGINEERING_DAMAGE_ROWS} and FCT_DamagedComponent.Number is null) then null else coalesce((select sum(FCT_DamagedComponent.Number) ${ENGINEERING_DAMAGE_ROWS}), 0) end`
+
 // The size of the class of the ship `idColumn` points at, and what that ship itself points at, in the fleet and the carrier or tug it names.
 const otherShip = (idColumn, what) => `(select ${what} from FCT_Ship as OTHER inner join FCT_ShipClass as OTHER_CLASS on OTHER_CLASS.ShipClassID = OTHER.ShipClassID where OTHER.ShipID = ${idColumn} and OTHER.GameID = FCT_Ship.GameID)`
 
-// What a profile needs of every ship of the fleets it is read for: the ship and its class (speed, fuel, holds and the loading strength `stopHandling` reads), the engines it has undamaged, how it is carried or towed and by what. `fleetWhere` selects the fleets (a condition over FCT_Fleet). A column an old save lacks reads as null, so the ship is not known to be free or carried rather than assumed free. The race's own ships only.
+// What a profile needs of every ship of the fleets it is read for: the ship and its class (speed, fuel, holds and the loading strength `stopHandling` reads), the engines it has undamaged, how it is carried or towed and by what, and the clocks, stocks, crew state and class flags the ship's runtime state (utilities/ship-runtime.js) is worked out from. `fleetWhere` selects the fleets and ships (a condition over FCT_Fleet and the joined FCT_ShipClass). A column an old save lacks reads as null, so the ship is not known to be free or carried rather than assumed free. The race's own ships only.
 export const loadFleetShips = async (database, { GameID, RaceID, fleetWhere = '1 = 1' }) => {
-  const [shipColumns, fleetColumns] = await Promise.all([columnsOf(database, 'FCT_Ship'), columnsOf(database, 'FCT_Fleet')])
+  const [shipColumns, fleetColumns, classColumns] = await Promise.all([columnsOf(database, 'FCT_Ship'), columnsOf(database, 'FCT_Fleet'), columnsOf(database, 'FCT_ShipClass')])
   const hasShipColumn = (name) => shipColumns.size === 0 || shipColumns.has(name)
+  const hasClassColumn = (name) => classColumns.size === 0 || classColumns.has(name)
   const optional = OPTIONAL_SHIP_COLUMNS.map((name) => (hasShipColumn(name) ? `FCT_Ship.${name}` : `null as ${name}`))
+  const classOptional = OPTIONAL_CLASS_COLUMNS.map((name) => (hasClassColumn(name) ? `FCT_ShipClass.${name}` : `null as ${name}`))
   const fleetColumn = (name) => (fleetColumns.size === 0 || fleetColumns.has(name) ? `FCT_Fleet.${name}` : 'null')
   const through = (column, what) => (hasShipColumn(column) ? otherShip(`FCT_Ship.${column}`, what) : 'null')
   const mass = through('TractorTargetShipID', 'OTHER_CLASS.Size')
   const towedTarget = through('TractorTargetShipID', 'OTHER.TractorTargetShipID')
   const carrierOfCarrier = through('MothershipID', 'OTHER.MothershipID')
   const carrierFleet = through('MothershipID', 'OTHER.FleetID')
-  const sql = `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, ${optional.join(', ')}, FCT_Fleet.FleetName, ${fleetColumn('Speed')} as FleetSpeed, ${fleetColumn('UseMaximumSpeed')} as UseMaximumSpeed, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_ShipClass.ClassName, ${STORAGE_SQL}, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS}, ${ENGINE_SQL} as UndamagedEnginePower, ${mass} as TowedSize, ${towedTarget} as TowedTargetShipID, ${carrierOfCarrier} as CarrierMothershipID, ${carrierFleet} as CarrierFleetID from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and (${fleetWhere}) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName, FCT_Ship.ShipName`
+  const carrierHangar = hasClassColumn(CARRIER_CLASS_COLUMN) ? through('MothershipID', `OTHER_CLASS.${CARRIER_CLASS_COLUMN}`) : 'null'
+  const sql = `select FCT_Ship.ShipID, FCT_Ship.ShipName, FCT_Ship.FleetID, FCT_Ship.ShipClassID, FCT_Ship.CurrentCrew, ${optional.join(', ')}, FCT_Fleet.FleetName, ${fleetColumn('Speed')} as FleetSpeed, ${fleetColumn('UseMaximumSpeed')} as UseMaximumSpeed, FCT_Fleet.ParentCommandID as NavalAdminCommandID, FCT_ShipClass.ClassName, ${classOptional.join(', ')}, ${STORAGE_SQL}, FCT_ShipClass.Size, FCT_ShipClass.Crew as ClassCrew, FCT_ShipClass.MaxSpeed, FCT_ShipClass.EnginePower, FCT_ShipClass.FuelEfficiency, FCT_ShipClass.MilitaryEngines, FCT_Race.CargoShuttleLoadModifier as ShuttleTechnology, ${SHUTTLE_STRENGTH_COLUMNS}, ${JUMP_DRIVE_COLUMNS}, ${ENGINE_SQL} as UndamagedEnginePower, ${ENGINEERING_DAMAGE_SQL} as DamagedEngineering, ${mass} as TowedSize, ${towedTarget} as TowedTargetShipID, ${carrierOfCarrier} as CarrierMothershipID, ${carrierFleet} as CarrierFleetID, ${carrierHangar} as CarrierCommercialHangar from FCT_Ship inner join FCT_Fleet on FCT_Fleet.FleetID = FCT_Ship.FleetID inner join FCT_ShipClass on FCT_ShipClass.ShipClassID = FCT_Ship.ShipClassID inner join FCT_Race on FCT_Race.RaceID = FCT_Ship.RaceID where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and (${fleetWhere}) order by FCT_Fleet.FleetName, FCT_ShipClass.ClassName, FCT_Ship.ShipName`
   const [rows] = await database.query(sql)
 
   return Object.freeze(rows)
