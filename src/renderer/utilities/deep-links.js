@@ -8,7 +8,7 @@
 // | `/mineral-outlook` | `mineral=<mineral id>`                                                   |
 // | `/routes`          | `from=<place>`, `via=<place,…>`, `to=<place>`, `cycle=1`, `fleet=<FleetID>` |
 // | `/information`     | `from=<place>`, `to=<place>` (a colony or a system)                      |
-// | `/survey-progress` | `system=<SystemID>`                                                      |
+// | `/survey-progress` | `system=<SystemID>` (a system's survey row), or `formations=<SystemID>` (the ground formations table, of one system) |
 // | `/lagrange`        | `system=<SystemID>`                                                      |
 // | `/intelligence`    | `race=<AlienRaceID>`                                                     |
 // | `/technologies`    | `tech=<TechSystemID>` (Path view), `field=<ResearchFieldID>` (Fields view) or `view=lines` |
@@ -237,6 +237,7 @@ export const linkTo = Object.freeze({
   },
   transport: ({ from, to } = {}) => link('/information', { from, to }),
   survey: (systemId) => link('/survey-progress', { system: systemId }),
+  formations: (systemId) => link('/survey-progress', { formations: systemId }),
   lagrange: (systemId) => link('/lagrange', { system: systemId }),
   intelligence: (alienRaceId) => link('/intelligence', { race: alienRaceId }),
   techTree: ({ tech, field, view } = {}) => link('/technologies', { tech, field, view }),

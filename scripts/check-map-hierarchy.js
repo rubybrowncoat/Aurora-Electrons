@@ -204,6 +204,7 @@ const OVERLAYS = [
   { mark: 'flags', systems: (index) => ({ NoAutoRoute: index % 3 === 0 ? 1 : 0 }) },
   { mark: 'discovered', systems: (index, system) => ({ DiscoveredTime: index % 3 === 0 ? system.DiscoveredTime : 0 }) },
   { mark: 'danger', systems: (index) => ({ DangerRating: index % 3 === 0 ? 40 : 0 }) },
+  { mark: 'remote', state: (systems) => ({ remoteBySystem: Object.fromEntries(systems.filter((_system, index) => index % 3 === 0).map((system) => [String(system.SystemID), { id: system.SystemID, name: system.Name, formations: [1], roles: { geo: 0, xeno: 0, other: 1, unknown: 0 }, sets: { other: 1 } }])) }) },
 ]
 
 // The scene with one overlay selected: the page's markers of every system and its theme.
@@ -213,7 +214,7 @@ const overlayScene = (ctx, id, level, overlay) => {
 
   globalThis.__appearance = ctx.appearances[id]
 
-  const vm = instantiate(ctx.options, { $store: storeOf(), GameID: 1, RaceID: 7, data: sceneData(level, { marks: [overlay.mark], systems, features }) })
+  const vm = instantiate(ctx.options, { $store: storeOf(), GameID: 1, RaceID: 7, data: sceneData(level, { marks: [overlay.mark], systems, features, ...(overlay.state ? overlay.state(systems) : {}) }) })
 
   return { theme: vm.theme, entries: vm.systemRows.map((row) => ({ index: Number(row.id) - 1, node: vm.markerData(row) })) }
 }
@@ -775,6 +776,22 @@ check('E11', 'essential: the system view dims the names of bodies only; stars an
   return problems.length ? problems.join('; ') : true
 })
 
+check('E13', 'essential: the glyph of remote ground formations is the race\'s own colour and clears 3:1 on the card and the background of every preset', (ctx) => everywhere(ctx, (_id, _level, scene) => {
+  const { GRAPHIC } = ctx.m['appearance-contrast']
+  const style = scene.vm.glyphStyles.remote
+  const problems = []
+
+  if (!style || style.color !== scene.colors.yours) problems.push(`the glyph is ${style ? style.color : 'missing'}, not ${scene.colors.yours}`)
+
+  ;['card', 'background'].forEach((surface) => {
+    const value = style ? contrast(ctx, style.color, scene.appearance.surfaces[surface]) : 0
+
+    if (value < GRAPHIC) problems.push(`the glyph is ${value.toFixed(2)}:1 on ${surface}, under ${GRAPHIC}`)
+  })
+
+  return problems
+}))
+
 check('E12', 'essential: the zero line of the flow charts of Finances and Mineral Outlook keeps the muted ink at both levels, and their other gridlines stay apart from the chart', (ctx) => everywhere(ctx, (id, level) => {
   const { FLOORS } = ctx.m['map-hierarchy']
   const appearance = ctx.appearances[id]
@@ -1178,12 +1195,17 @@ check('U1', 'unchanged: the label collision of the system view is the source of 
   return different.length ? `changed: ${different.join(', ')}` : true
 })
 
+// The glyph of remote ground formations is added to glyphsOf after the commit before; the rest of the method must still be the source of that commit.
+const REMOTE_GLYPH = "      if (marks.has('remote') && this.remoteBySystem[row.id]) {\n        names.push('remote')\n      }\n\n"
+
 check('U2', 'unchanged: the overlay controls, the dimming, the wheel and the right-click menu are the source of the commit before', (ctx) => {
   const names = ['toggleMark', 'toggleDim', 'fades', 'shiftWheel', 'createMenu', 'glyphsOf', 'markText']
   const before = atBase(FILES.map)
-  const different = names.filter((name) => methodSource(ctx.texts.map, name) !== methodSource(before, name) || !methodSource(before, name))
+  const current = (name) => methodSource(ctx.texts.map, name).replace(REMOTE_GLYPH, '')
+  const different = names.filter((name) => current(name) !== methodSource(before, name) || !methodSource(before, name))
+  const wanted = methodSource(ctx.texts.map, 'glyphsOf').includes(REMOTE_GLYPH) ? [] : ['glyphsOf has no remote ground formations branch']
 
-  return different.length ? `changed: ${different.join(', ')}` : true
+  return different.length || wanted.length ? [...different.map((name) => `changed: ${name}`), ...wanted].join('; ') : true
 })
 
 check('U3', 'unchanged: the borders\' label placement and the overview are byte-identical to the commit before', () => {
@@ -1296,6 +1318,9 @@ const MUTANTS = [
   { name: 'the dimming changes with the level', patches: [['map', 'return (this.dimUnmarked && this.marks.length > 0 && !marked)', "return (this.hierarchy === 'restrained' && this.dimUnmarked && this.marks.length > 0 && !marked)"]], fails: ['U2'] },
   { name: 'the level changes a system\'s dimming', patches: [['map', 'dim: this.fades(row, marked),', "dim: this.fades(row, marked) || (this.hierarchy === 'restrained' && marked),"]], fails: ['U4', 'U5'] },
   { name: 'the level changes a system\'s glyphs', patches: [['map', 'marked,\n        dim: this.fades(row, marked),', "marked: marked && this.hierarchy !== 'restrained',\n        dim: this.fades(row, marked),"]], fails: ['U4'] },
+  { name: 'the remote ground formations glyph is drawn in the surface colour', patches: [['map', 'remote: { path: SHIELD_PATH, color: colors.yours,', 'remote: { path: SHIELD_PATH, color: colors.surface,']], fails: ['E13'] },
+  { name: 'a system with remote ground formations does not count as marked', patches: [['map', 'const marked = glyphs.length > 0 || label !== row.Name', "const marked = glyphs.some((glyph) => glyph.name !== 'remote') || label !== row.Name"]], fails: ['E10'] },
+  { name: 'the remote ground formations glyph is dropped', patches: [['map', "        names.push('remote')\n", '        void 0\n']], fails: ['E10', 'U2'] },
   { name: 'the quieter ink ignores what Show marks', patches: [['map', 'labelInk: labelInk(this.hierarchy, this.theme, marked),', 'labelInk: labelInk(this.hierarchy, this.theme, false),']], fails: ['E3', 'E10'] },
   { name: 'the smaller size ignores what Show marks', patches: [['map', 'labelMinPx: labelMinPx(this.hierarchy, marked),', 'labelMinPx: labelMinPx(this.hierarchy, false),']], fails: ['E3', 'E10'] },
   { name: 'only contacts and rifts keep their names, a ship or a flag is quiet like the rest', patches: [['map', 'labelInk: labelInk(this.hierarchy, this.theme, marked),', 'labelInk: labelInk(this.hierarchy, this.theme, glyphs.some((glyph) => /^(contacts|rifts)/.test(glyph.name)) || label !== row.Name),']], fails: ['E3', 'E10'] },

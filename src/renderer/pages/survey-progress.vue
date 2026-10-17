@@ -146,6 +146,54 @@
             A ground survey needs a colony on the body and geosurvey formations there: each unit adds its equipment's points a day, times its commander's Survey bonus and the game's survey speed. It can raise the body's mineral deposits; the potential is what the geological survey found.
           </div>
         </v-card>
+
+        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map." elevation="1">
+          <div class="panel-head">
+            <span>Ground formations</span>
+            <span v-if="formationModel" class="d-flex align-center">
+              <v-chip v-if="formationSystem" small close class="mr-4" @click:close="formationSystem = null">{{ formationSystemName }}</v-chip>
+              <v-switch v-model="remoteOnly" label="Remote only" dense hide-details class="mt-0 mr-4" />
+              <v-chip small>{{ count(formationList.length) }} of {{ count(formationTotals.formations) }} {{ formationTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
+            </span>
+          </div>
+          <div v-if="!formationModel" class="panel-body text--secondary">The save lacks {{ formations.missing.join(', ') }}, so the race's ground formations cannot be listed.</div>
+          <template v-else>
+            <div class="panel-body pb-0">
+              <v-chip-group v-model="remoteRoles" multiple column aria-label="Roles shown">
+                <v-chip v-for="option in roleOptions" :key="option.value" :value="option.value" filter outlined small>{{ option.text }} ({{ count(formationTotals[option.value]) }})</v-chip>
+              </v-chip-group>
+            </div>
+            <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="openFormation">
+              <template #[`item.name`]="{ item }">
+                <div class="py-2">
+                  <div class="font-weight-medium">{{ item.name }}</div>
+                  <div v-if="item.abbreviation" class="caption text--secondary">{{ item.abbreviation }}</div>
+                </div>
+              </template>
+              <template #[`item.systemName`]="{ item }">
+                <template v-if="item.system">
+                  <span class="font-weight-medium">{{ item.system.name }}</span>
+                  <page-link class="ml-1" :to="linkTo.map(item.system.id)" :name="item.system.name" />
+                </template>
+                <div v-else class="caption text--secondary">
+                  <div v-for="reason in item.reasons" :key="reason.kind">{{ reason.message }}</div>
+                </div>
+              </template>
+              <template #[`item.where`]="{ item }">
+                <span :class="{ 'text--secondary': item.remote !== true }">{{ item.where }}</span>
+              </template>
+              <template #[`item.roleLabel`]="{ item }">
+                <span :class="['text-no-wrap', { 'text--secondary': item.roles.undetermined }]">{{ item.roleLabel }}</span>
+              </template>
+              <template #[`item.geo`]="{ item }"><span :class="{ 'text--secondary': !item.geo }">{{ ratingText(item.geo) }}</span></template>
+              <template #[`item.xeno`]="{ item }"><span :class="{ 'text--secondary': !item.xeno }">{{ ratingText(item.xeno) }}</span></template>
+            </v-data-table>
+            <div class="panel-foot caption text--secondary">
+              {{ remoteDefinition }}
+              Of {{ count(formationTotals.formations) }} {{ remoteOnly ? (formationTotals.formations === 1 ? 'formation in scope (remote, or at a colony the save does not hold)' : 'formations in scope (remote, or at a colony the save does not hold)') : (formationTotals.formations === 1 ? 'formation' : 'formations') }}, {{ count(formationTotals.placed) }} {{ formationTotals.placed === 1 ? 'is' : 'are' }} in a system the race has named and {{ count(formationTotals.unplaced) }} {{ formationTotals.unplaced === 1 ? 'has' : 'have' }} none (the row says why; no place is guessed). {{ count(formationTotals.geo) }} geological and {{ count(formationTotals.xeno) }} xenoarchaeology, {{ count(formationTotals.both) }} of them both and listed once, {{ count(formationTotals.other) }} other{{ formationTotals.unknown ? `, ${count(formationTotals.unknown)} with a role not known` : '' }}. In the whole race {{ count(formationTotals.remote) }} {{ formationTotals.remote === 1 ? 'is' : 'are' }} remote, {{ count(formationTotals.atColonies) }} at colonies{{ formationTotals.remoteUnknown ? ` and ${count(formationTotals.remoteUnknown)} at a colony the save does not hold` : '' }}.
+            </div>
+          </template>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -167,7 +215,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { tableView } from '../mixins/persisted-view'
 import { systemBodyName } from '../utilities/aurora'
-import { linkTo, place, queryId } from '../utilities/deep-links'
+import { cleanQuery, linkTo, place, queryId } from '../utilities/deep-links'
 import { tracked } from '../utilities/load-tracking'
 import { roundToDecimal } from '../utilities/math'
 import { navalAdminChain } from '../utilities/minerals'
@@ -175,6 +223,8 @@ import { loadNavalAdmins } from '../utilities/naval-admins'
 import { sumResults, unavailable, valueOrNull } from '../utilities/provenance'
 import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surveyShipSql } from '../utilities/survey'
 import { surveyDays } from '../utilities/survey-eta'
+import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
+import { loadGroundFormations } from '../utilities/ground-formations'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
@@ -186,6 +236,7 @@ const INPUT_LABELS = {
   orders: 'fleet orders',
   standingOrders: 'standing orders',
   groundSurveys: 'ground surveys',
+  formations: 'the ground formations',
   navalAdmins: 'naval admin commands',
   formulaVersion: 'the save\'s schema',
 }
@@ -208,6 +259,9 @@ export default {
       systemsTable: tableView('surveySystemsTable', { sortBy: ['remaining'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
       fleetsTable: tableView('surveyFleetsTable', {}),
       groundTable: tableView('surveyGroundTable', {}),
+      remoteRoles: rolesView,
+      remoteOnly: remoteOnlyView,
+      formationsTable: tableView('surveyFormationsTable', { sortBy: ['systemName'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
     }),
   ],
   data() {
@@ -216,6 +270,8 @@ export default {
       expanded: [],
       page: 1,
       selectedSystemId: null,
+      formationSystem: null,
+      formationsPending: false,
       revealPending: false,
       linkTo,
       place,
@@ -371,6 +427,54 @@ export default {
       })
     },
 
+    // The model of the race's ground formations when the save has what it needs, else null.
+    formationModel() {
+      return this.formations && this.formations.supported ? this.formations : null
+    },
+
+    // Every formation once (`formationRows`), whatever the table shows.
+    formationAll() {
+      return this.formationModel ? Object.freeze(formationRows(this.formationModel)) : []
+    },
+
+    // The rows in the scope chosen: the roles on, the remote ones only if asked, and the system a link named.
+    formationList() {
+      const rows = selectRows(this.formationAll, { roles: this.remoteRoles, remoteOnly: this.remoteOnly })
+
+      return this.formationSystem === null ? rows : rows.filter((row) => row.system && row.system.id === this.formationSystem)
+    },
+
+    formationTotals() {
+      return this.formationModel ? rowTotals(this.formationModel, { remoteOnly: this.remoteOnly }) : null
+    },
+
+    formationSystemName() {
+      const row = this.formationAll.find((item) => item.system && item.system.id === this.formationSystem)
+
+      return `System ${row ? row.system.name : this.formationSystem}`
+    },
+
+    // The roles the chips offer: one for formations with no role to count them under only where there are some.
+    roleOptions() {
+      return ROLE_OPTIONS.filter((option) => option.value !== 'unknown' || this.formationTotals.unknown > 0)
+    },
+
+    remoteDefinition() {
+      return REMOTE_DEFINITION
+    },
+
+    formationHeaders() {
+      return [
+        { text: 'Formation', value: 'name' },
+        { text: 'System', value: 'systemName' },
+        { text: 'Held by', value: 'heldBy' },
+        { text: 'Where', value: 'where' },
+        { text: 'Role', value: 'roleLabel' },
+        { text: 'Geological', value: 'geo', align: 'end' },
+        { text: 'Xenoarchaeology', value: 'xeno', align: 'end' },
+      ]
+    },
+
     tiles() {
       const systems = this.systemRows
       const done = systems.filter((system) => !system.remaining).length
@@ -449,7 +553,7 @@ export default {
     },
 
     linkQuery() {
-      return linkTo.survey(this.selectedSystemId).query
+      return cleanQuery({ system: this.selectedSystemId, formations: this.formationSystem })
     },
 
     linkLabel() {
@@ -461,6 +565,13 @@ export default {
     systemRows() {
       this.revealLinked()
     },
+    formationAll() {
+      this.revealFormations()
+    },
+    // The panel is drawn only once every input has arrived: a link that named a system's formations is retried then.
+    ready() {
+      this.revealFormations()
+    },
   },
   methods: {
     withheldRate(rule) {
@@ -469,6 +580,8 @@ export default {
 
     applyLink(query) {
       this.selectedSystemId = queryId(query.system)
+      this.formationSystem = queryId(query.formations)
+      this.formationsPending = this.formationSystem !== null
       this.revealPending = this.selectedSystemId !== null
 
       if (this.revealPending) {
@@ -476,6 +589,33 @@ export default {
       } else {
         this.expanded = []
       }
+
+      this.revealFormations()
+    },
+
+    // Brings the formations table into view once it has rows and the page draws it, for a link that named a system's formations, with its title and filters below the fixed app bar. The link stays pending until the panel exists, and then scrolls once.
+    revealFormations() {
+      if (this.formationsPending && this.formationAll.length && this.ready) {
+        this.$nextTick(() => {
+          const panel = this.$refs.formationsPanel
+
+          if (this.formationsPending && panel && panel.$el) {
+            this.formationsPending = false
+            this.$vuetify.goTo(panel.$el)
+          }
+        })
+      }
+    },
+
+    // A formation's row opens its system on the map; one with no known system has none to open.
+    openFormation(item) {
+      if (item.system) {
+        this.$router.push(linkTo.map(item.system.id))
+      }
+    },
+
+    ratingText(value) {
+      return value === null ? 'Unknown' : value > 0 ? this.fixed(value, 2) : '—'
     },
 
     revealLinked() {
@@ -637,6 +777,17 @@ export default {
         return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.GroundMineralSurvey as Potential, ${bodyPointsSql()} as PointsRequired, FCT_Population.PopulationID, FCT_Population.PopName, coalesce(FCT_Population.GroundGeoSurvey, 0) as PointsDone, coalesce(VIR_Teams.Units, 0) as Units, coalesce(VIR_Teams.PointsPerDay, 0) as PointsPerDay from FCT_SystemBody inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.GameID = ${this.GameID} left join (select FCT_GroundUnitFormation.PopulationID, sum(FCT_GroundUnitFormationElement.Units) as Units, sum(FCT_GroundUnitFormationElement.Units * VIR_Class.Geosurvey * coalesce(VIR_Commander.BonusValue, 1)) as PointsPerDay from FCT_GroundUnitFormation inner join FCT_GroundUnitFormationElement on FCT_GroundUnitFormationElement.FormationID = FCT_GroundUnitFormation.FormationID inner join (select FCT_GroundUnitClass.GroundUnitClassID, coalesce(VIR_A.Geosurvey, 0) + coalesce(VIR_B.Geosurvey, 0) + coalesce(VIR_C.Geosurvey, 0) + coalesce(VIR_D.Geosurvey, 0) as Geosurvey from FCT_GroundUnitClass left join DIM_GroundComponentType as VIR_A on VIR_A.ComponentTypeID = FCT_GroundUnitClass.ComponentA left join DIM_GroundComponentType as VIR_B on VIR_B.ComponentTypeID = FCT_GroundUnitClass.ComponentB left join DIM_GroundComponentType as VIR_C on VIR_C.ComponentTypeID = FCT_GroundUnitClass.ComponentC left join DIM_GroundComponentType as VIR_D on VIR_D.ComponentTypeID = FCT_GroundUnitClass.ComponentD where FCT_GroundUnitClass.GameID = ${this.GameID}) as VIR_Class on VIR_Class.GroundUnitClassID = FCT_GroundUnitFormationElement.ClassID and VIR_Class.Geosurvey > 0 left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5) as VIR_Commander on VIR_Commander.CommandID = FCT_GroundUnitFormation.FormationID where FCT_GroundUnitFormation.GameID = ${this.GameID} and FCT_GroundUnitFormation.RaceID = ${this.RaceID} group by FCT_GroundUnitFormation.PopulationID) as VIR_Teams on VIR_Teams.PopulationID = FCT_Population.PopulationID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.GroundMineralSurvey > 0 order by FCT_SystemBody.GroundMineralSurvey desc, FCT_Population.PopulationID desc`).then(([items]) => items)
       }),
       default: [],
+    },
+    // The race's ground formations as one model (`loadGroundFormations`), or { supported: false, missing } for a save without what it reads.
+    formations: {
+      get: tracked('formations', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return Object.freeze(await loadGroundFormations(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
     },
     // Naval admin commands with their Survey bonus.
     navalAdmins: {

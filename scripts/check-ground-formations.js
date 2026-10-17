@@ -4,7 +4,7 @@
   Run: node scripts/check-ground-formations.js [--no-mutations] [--no-breadth]
 
   The groups, each check a PASS or FAIL line:
-  - A constructed race of 24 formations, fed as deep-frozen rows to the pure builder: orphan and foreign parents, loops, templates, locations, unknown figures, totals and the tree, with the figures worked out by hand.
+  - A constructed race of 24 formations, fed as deep-frozen rows to the pure builder: orphan and foreign parents, loops, templates, locations, unknown figures, totals and the tree, with the figures worked out by hand; then five formations more for the roles (geo, xeno, both, unknown), whether a formation is remote and in which system it is shown, and the grouping by system with the totals per role.
   - The SELECT statements, and the loader on an in-memory SQLite database that holds rows of another race, another game and another race's survey names (never a save).
   - The named saves, opened read-only: every figure of the model is compared with SQL written separately here, and a reader with one table hidden must make that comparison fail.
   - Every other AuroraDB*.db that can be found (the repository, its saves folder, and the artifacts folders), one check per game and race. A save without the tables is reported UNSUPPORTED and a save without formation rows EMPTY: neither counts as agreement.
@@ -244,6 +244,22 @@ const countKinds = (problems) => problems.reduce((counts, problem) => ({ ...coun
 
 const reversedRows = (rows) => Object.fromEntries(Object.entries(rows).map(([key, list]) => [key, [...list].reverse()]))
 
+// The constructed race with five formations more, for where a formation is and what role it has: 25 holds both ratings and 26 geo with the xeno rating unstored, both aboard the ship at system 9; 27 is at a colony in a system the race has no name for, 28 aboard a ship in one, and 29 at a colony of another race in a system it names.
+const extendedRows = () => {
+  const rows = syntheticRows()
+
+  return {
+    ...rows,
+    formations: [...rows.formations, formation(25, { ShipID: 100, PopulationID: 0 }), formation(26, { ShipID: 100, PopulationID: 0 }), formation(27, { PopulationID: 2 }), formation(28, { ShipID: 105, PopulationID: 0 }), formation(29, { PopulationID: 3 })],
+    elements: [...rows.elements, element(25, 11, 1), element(25, 12, 1), element(26, 17, 2), infantry(27), infantry(28), infantry(29)],
+    classes: [...rows.classes, groundClass(17, 'Half rated', 3, 27)],
+    components: [...rows.components, { ComponentTypeID: 27, ComponentName: 'Half', Geosurvey: 0.2, Xenoarchaeology: null }],
+    ships: [...rows.ships, { ShipID: 105, ShipName: 'Far', FleetID: 501, MothershipID: 0 }],
+    fleets: [...rows.fleets, { FleetID: 501, FleetName: 'Dark', RaceID: 7, SystemID: 71, OrbitBodyID: 0, SystemName: null }],
+    populations: [...rows.populations, { PopulationID: 2, PopName: 'Outpost', RaceID: 7, SystemID: 70, SystemBodyID: 6, SystemName: null }, { PopulationID: 3, PopName: 'Captured', RaceID: 8, SystemID: 80, SystemBodyID: 7, SystemName: 'Beta' }],
+  }
+}
+
 // The results of the builder checks on a module: [{ id, name, ok }]. A check that throws fails.
 const builderResults = async (mod) => {
   const results = []
@@ -304,6 +320,22 @@ const builderResults = async (mod) => {
 
     return unknown.summary.unknownParents === 1 && unknown.byId.get(1).parent.state === 'unknown' && unknown.byId.get(2).anchor.kind === 'unknown' && unknown.byId.get(2).resolved === false && unknown.summary.unresolved === 2 && partitioned(unknown)
   })
+
+  const extended = mod.buildGroundFormations(frozen(extendedRows()), { GameID: GAME, RaceID: RACE })
+  const xNode = (id) => extended.byId.get(id)
+  const placeOf = (id) => mod.formationPlace(xNode(id), extended)
+  const placeText = (id) => `${placeOf(id).remote}|${placeOf(id).system ? placeOf(id).system.id : 'none'}|${placeOf(id).reasons.map((reason) => reason.kind).join(',')}`
+  const remoteGroups = mod.groupBySystem(extended, (_node, place) => place.remote === true)
+  const allGroups = mod.groupBySystem(extended)
+  const adds = (totals) => totals.geo + totals.xeno - totals.both + totals.other + totals.unknown === totals.formations
+
+  await add('roles', 'a formation is geo or xeno above a rating of 0, other at 0 for both, in both roles with both ratings, and in none while a rating is unknown', () => same(mod.formationRoles(xNode(2)).list, ['geo']) && same(mod.formationRoles(xNode(3)).list, ['xeno']) && same(mod.formationRoles(xNode(1)).list, ['other']) && same(mod.formationRoles(xNode(25)).list, ['geo', 'xeno']) && mod.formationRoles(xNode(25)).other === false && same(mod.formationRoles(xNode(26)).list, ['geo']) && same(mod.formationRoles(xNode(26)).unknownRoles, ['xeno']) && mod.formationRoles(xNode(26)).other === false && mod.formationRoles(xNode(11)).undetermined === true && same(mod.formationRoles(xNode(21)).unknownRoles, ['geo', 'xeno', 'other']) && mod.formationRoles(xNode(21)).list.length === 0 && same(mod.GROUND_ROLES, ['geo', 'xeno', 'other']))
+  await add('role-totals', 'the role totals add up to the formations, a formation with both ratings once, and an unknown rating is its own count', () => same(mod.roleTotals(extended), { formations: 29, geo: 4, xeno: 2, other: 20, both: 1, unknown: 4 }) && adds(mod.roleTotals(extended)) && same(mod.roleTotals(m), { formations: 24, geo: 2, xeno: 1, other: 17, both: 0, unknown: 4 }) && adds(mod.roleTotals(m)) && same(mod.roleTotals(extended, (_node, place) => place.remote === true), { formations: 9, geo: 2, xeno: 2, other: 6, both: 1, unknown: 0 }) && adds(mod.roleTotals(extended, (_node, place) => place.remote === true)))
+  await add('place', 'a formation is remote when it is aboard a ship, stored with no place or at a colony of another race, not remote at a colony of the race (a ship in its system changes nothing), and not known where its colony is missing', () => [1, 20, 27].every((id) => placeOf(id).remote === false) && [3, 15, 16, 17, 19, 25, 26, 28, 29].every((id) => placeOf(id).remote === true) && placeOf(18).remote === null && placeOf(3).kind === 'ship' && placeOf(1).kind === 'colony' && placeOf(19).kind === 'unlocated')
+  await add('place-system', 'a system is given only where the race stores its survey name, never taken from a colony or fleet whose system has none', () => ['1|50', '20|50', '3|9', '17|9', '25|9', '26|9', '29|80'].every((text) => { const [id, system] = text.split('|'); return placeText(Number(id)).split('|')[1] === system }) && [15, 16, 18, 19, 27, 28].every((id) => placeOf(id).system === null))
+  await add('place-unresolved', 'a formation with no known system says why, with the reason the model gave, and a system with no stored survey name is named as that', () => same([15, 16, 18, 19, 27, 28].map(placeText), ['true|none|ship-missing', 'true|none|fleet-missing', 'null|none|population-missing', 'true|none|unlocated', 'false|none|system-not-surveyed', 'true|none|system-not-surveyed']) && placeOf(15).reasons[0].message.includes('404'))
+  await add('group-system', 'the remote formations group by system, a formation with both ratings once and in each of its roles, and those with no known system are left unplaced with their reasons', () => same(Object.keys(remoteGroups.systems).sort(), ['80', '9']) && same(remoteGroups.systems['9'].formations, [3, 17, 25, 26]) && same(remoteGroups.systems['9'].roles, { geo: 2, xeno: 2, other: 1, unknown: 0 }) && same(remoteGroups.systems['9'].sets, { xeno: 1, other: 1, 'geo+xeno': 1, geo: 1 }) && remoteGroups.systems['9'].name === 'Alpha' && same(remoteGroups.systems['80'].formations, [29]) && same(remoteGroups.unplaced, [{ id: 15, reasons: ['ship-missing'] }, { id: 16, reasons: ['fleet-missing'] }, { id: 19, reasons: ['unlocated'] }, { id: 28, reasons: ['system-not-surveyed'] }]) && remoteGroups.formations === 9)
+  await add('group-reconcile', 'every kept formation is in exactly one system or unplaced, whatever is kept, and no system carries more than an id, a name, formations, roles and sets', () => allGroups.formations === 29 && Object.values(allGroups.systems).reduce((sum, entry) => sum + entry.formations.length, 0) + allGroups.unplaced.length === 29 && same(sorted([...Object.values(allGroups.systems).flatMap((entry) => entry.formations), ...allGroups.unplaced.map((entry) => entry.id)]), sorted(extended.formations.map((item) => item.id))) && same(allGroups.unplaced.map((entry) => entry.id), [15, 16, 18, 19, 27, 28]) && Object.values(allGroups.systems).every((entry) => same(Object.keys(entry).sort(), ['formations', 'id', 'name', 'roles', 'sets'])) && mod.groupBySystem(extended, () => false).formations === 0)
 
   return results
 }
@@ -502,14 +534,14 @@ const databaseResults = async (mod) => {
   await add('memory-null-slots', 'a component slot that is not stored makes geosurvey and xenoarchaeology unknown, names the slot and keeps the mass; slots recorded empty add nothing', () => nullModel.supported === true && nullNode(1).mass.value === 500 && nullNode(1).geo.value === null && nullNode(1).xeno.value === null && nullNode(1).geo.unknown.length === 1 && nullKinds(1).includes('component-unknown') && nullNode(1).problems.find((problem) => problem.kind === 'component-unknown').slot === 'ComponentA' && nullNode(2).mass.value === 20 && nullNode(2).geo.value === null && nullNode(2).problems.find((problem) => problem.kind === 'component-unknown').slot === 'ComponentB' && near(nullNode(3).geo.value, 0.4) && nullNode(3).xeno.value === 0 && !nullKinds(3).includes('component-unknown') && near(nullModel.summary.geo.value, 0.4) && nullModel.summary.geo.unknownFormations === 2 && nullModel.summary.xeno.value === 0 && nullModel.summary.xeno.unknownFormations === 2 && nullModel.summary.mass.value === 565 && nullModel.summary.mass.unknownFormations === 0)
   await add('memory-null-templates', 'a template id that is not stored is unknown with a problem and its own count, apart from the recorded 0, which stays none', () => nullNode(1).templates.original.state === 'unknown' && nullNode(1).templates.replacement.state === 'none' && nullNode(2).templates.replacement.state === 'unknown' && nullNode(2).templates.replacement.id === -1 && nullNode(4).templates.original.state === 'unknown' && nullNode(3).templates.original.state === 'none' && nullNode(3).templates.original.id === 0 && nullKinds(1).includes('template-unknown') && !nullKinds(3).some((kind) => kind.startsWith('template-')) && same(nullModel.summary.templates.unknown, { original: 2, replacement: 1 }) && same(nullModel.summary.templates.none, { original: 2, replacement: 3 }) && same(nullModel.summary.templates.found, { original: 0, replacement: 0 }) && same(nullModel.summary.templates.missing, { original: 0, replacement: 0 }))
   await add('oracle-null-inputs', 'the direct comparison agrees with the loader on a slot or template id that is not stored, and fails when the loader reads the slot as empty or the id as none', async () => {
-    const honest = await reconcile(nulls.database, nullModel, [], 1, 7)
+    const honest = await reconcile(nulls.database, nullModel, [], 1, 7, mod)
     const templates = nullModel.summary.templates
     const asNone = { ...tamperModel, summary: { ...tamperModel.summary, templates: { ...templates, none: { original: templates.none.original + templates.unknown.original, replacement: templates.none.replacement + templates.unknown.replacement }, unknown: { original: 0, replacement: 0 } } } }
-    const noneResults = await reconcile(nulls.database, asNone, [], 1, 7)
+    const noneResults = await reconcile(nulls.database, asNone, [], 1, 7, mod)
 
     tamperModel.byId.get(1).geo = { value: 0, from: [], unknown: [] }
 
-    const emptyResults = await reconcile(nulls.database, tamperModel, [], 1, 7)
+    const emptyResults = await reconcile(nulls.database, tamperModel, [], 1, 7, mod)
 
     return honest.every((result) => result.ok) && noneResults.some((result) => !result.ok && result.name.includes('template states')) && emptyResults.some((result) => !result.ok && result.name.includes('geosurvey'))
   })
@@ -548,7 +580,7 @@ const firstDifference = (ids, agrees) => {
 }
 
 // The model of a game and race compared with the save in SQL written here: [{ name, ok, detail }].
-const reconcile = async (database, model, statements, GameID, RaceID) => {
+const reconcile = async (database, model, statements, GameID, RaceID, mod) => {
   const q = async (sql) => (await database.query(sql))[0]
   const own = `select FormationID from FCT_GroundUnitFormation where GameID = ${GameID} and RaceID = ${RaceID}`
   const rows = await q(`select FormationID, ParentFormationID, OriginalTemplateID, ReplacementTemplateID, PopulationID, ShipID from FCT_GroundUnitFormation where GameID = ${GameID} and RaceID = ${RaceID}`)
@@ -654,6 +686,44 @@ const reconcile = async (database, model, statements, GameID, RaceID) => {
   const resolvedShips = ids.filter((id) => !colonies.has(id) && ships.has(id) && systemOf(id) !== null).length
 
   add('the system of each formation is that of its colony, or of the fleet of its ship', ids.every(locationAgrees) && s.locations.colony === resolvedColonies && s.locations.ship === resolvedShips && s.locations.unresolved === ids.length - resolvedColonies - resolvedShips, `${firstDifference(ids, locationAgrees)}; model ${JSON.stringify(s.locations)}, save ${resolvedColonies}/${resolvedShips}`)
+
+  const named = new Set((await q(`select SystemID from FCT_RaceSysSurvey where GameID = ${GameID} and RaceID = ${RaceID} and Name is not null and Name != ''`)).map((row) => row.SystemID))
+  const colonyRaces = new Map((await q(`select f.FormationID as id, p.RaceID as raceId from FCT_GroundUnitFormation f join FCT_Population p on p.PopulationID = f.PopulationID where f.GameID = ${GameID} and f.RaceID = ${RaceID} and f.PopulationID > 0`)).map((row) => [row.id, row.raceId]))
+  const stored = new Map(rows.map((row) => [row.FormationID, row]))
+  const remoteOf = (id) => (stored.get(id).PopulationID > 0 ? (colonyRaces.has(id) ? colonyRaces.get(id) !== RaceID : null) : true)
+  const namedSystem = (id) => (systemOf(id) !== null && named.has(systemOf(id)) ? systemOf(id) : null)
+  const placeOf = (id) => mod.formationPlace(node(id), model)
+  const remoteIds = ids.filter((id) => remoteOf(id) === true)
+  const remoteAgrees = (id) => placeOf(id).remote === remoteOf(id)
+  const systemAgrees = (id) => (placeOf(id).system ? placeOf(id).system.id : null) === namedSystem(id)
+
+  add('a formation is remote when no colony of the race holds it, and not known to be when its colony is not in the save', ids.every(remoteAgrees), firstDifference(ids, remoteAgrees))
+  add('a formation has a system only where the race stores its survey name', ids.every(systemAgrees), firstDifference(ids, systemAgrees))
+
+  const grouped = mod.groupBySystem(model, (_node, place) => place.remote === true)
+  const wantSystems = new Map()
+
+  remoteIds.filter((id) => namedSystem(id) !== null).forEach((id) => wantSystems.set(namedSystem(id), [...(wantSystems.get(namedSystem(id)) || []), id]))
+
+  const wantUnplaced = remoteIds.filter((id) => namedSystem(id) === null)
+  const groupedSystems = Object.values(grouped.systems)
+
+  add('the remote formations by system are those the rows give, each once, with none in a system the race does not name', same(sorted(groupedSystems.map((entry) => entry.id)), sorted(Array.from(wantSystems.keys()))) && groupedSystems.every((entry) => same(sorted(entry.formations), sorted(wantSystems.get(entry.id)))) && same(sorted(grouped.unplaced.map((entry) => entry.id)), sorted(wantUnplaced)) && grouped.formations === remoteIds.length && groupedSystems.reduce((sum, entry) => sum + entry.formations.length, 0) + grouped.unplaced.length === remoteIds.length, `${groupedSystems.length} systems and ${grouped.unplaced.length} unplaced, save ${wantSystems.size} and ${wantUnplaced.length}`)
+
+  const totalsOf = (list) => {
+    const pairs = list.map((id) => [expected(id, 'geo'), expected(id, 'xeno')])
+    const geo = (pair) => pair[0] > 0
+    const xeno = (pair) => pair[1] > 0
+    const other = (pair) => pair[0] === 0 && pair[1] === 0
+
+    return { formations: list.length, geo: pairs.filter(geo).length, xeno: pairs.filter(xeno).length, other: pairs.filter(other).length, both: pairs.filter((pair) => geo(pair) && xeno(pair)).length, unknown: pairs.filter((pair) => !geo(pair) && !xeno(pair) && !other(pair)).length }
+  }
+  const adds = (totals) => totals.geo + totals.xeno - totals.both + totals.other + totals.unknown === totals.formations
+  const allTotals = mod.roleTotals(model)
+  const remoteTotals = mod.roleTotals(model, (_node, place) => place.remote === true)
+
+  add('the role totals are those of the ratings and add up to the formations, a formation with both ratings once', same(allTotals, totalsOf(ids)) && adds(allTotals), `model ${JSON.stringify(allTotals)}, save ${JSON.stringify(totalsOf(ids))}`)
+  add('the role totals of the remote formations are those of the ratings and add up to them', same(remoteTotals, totalsOf(remoteIds)) && adds(remoteTotals), `model ${JSON.stringify(remoteTotals)}, save ${JSON.stringify(totalsOf(remoteIds))}`)
   add('every statement the loader ran is a SELECT', statements.every((text) => /^select /.test(text) && !WRITES.test(text)))
 
   return results
@@ -716,7 +786,7 @@ const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {
 
     infoLine(label, model)
 
-    const results = await reconcile(database, model, logged.statements, GameID, RaceID)
+    const results = await reconcile(database, model, logged.statements, GameID, RaceID, mod)
 
     if (selfChecks) {
       results.forEach((result) => check(`${file}: ${result.name}`, result.ok, result.detail))
@@ -730,7 +800,7 @@ const ownerSave = async (mod, [file, GameID, RaceID, selfChecks]) => {
       for (const [what, hide, applies] of BLIND_READERS) {
         if (applies(model)) {
           const blind = await mod.loadGroundFormations(logging(database, hide), { GameID, RaceID })
-          const results = await reconcile(database, blind, [], GameID, RaceID)
+          const results = await reconcile(database, blind, [], GameID, RaceID, mod)
 
           check(`${file}: self-check: with ${what} hidden the comparison fails`, results.some((result) => !result.ok))
         }
@@ -786,7 +856,7 @@ const breadthSave = async (mod, file, covered) => {
 
       const logged = logging(database)
       const model = await mod.loadGroundFormations(logged, { GameID, RaceID })
-      const results = await reconcile(database, model, logged.statements, GameID, RaceID)
+      const results = await reconcile(database, model, logged.statements, GameID, RaceID, mod)
       const failed = results.filter((result) => !result.ok)
 
       const s = model.summary
@@ -858,6 +928,16 @@ const MUTANTS = [
   ['an unstored template id is none', 'state: \'unknown\', name: null, abbreviation: null, obsolete: null, elements: null }', 'state: \'none\', name: null, abbreviation: null, obsolete: null, elements: null }', ['memory-null-templates']],
   ['an unstored template id raises no problem', '} else if (refs[which].state === \'unknown\') {', '} else if (false) {', ['memory-null-templates']],
   ['a template id of 0 is not none', 'if (id === 0) {', 'if (false) {', ['templates', 'memory-null-templates']],
+  ['a formation is placed in a system the race has no name for', 'const named = Boolean(location.system) && typeof location.system.name === \'string\' && location.system.name !== \'\'', 'const named = Boolean(location.system)', ['place-system', 'place-unresolved', 'group-system', 'group-reconcile']],
+  ['every formation is remote', 'location.kind === \'colony\' ? (Number.isInteger(owner) ? owner !== RaceID : null) : true', 'true', ['place']],
+  ['a formation aboard a ship is not remote', 'location.kind === \'colony\' ? (Number.isInteger(owner) ? owner !== RaceID : null) : true', 'location.kind === \'ship\' ? false : location.kind === \'colony\' ? (Number.isInteger(owner) ? owner !== RaceID : null) : true', ['place']],
+  ['a formation of a colony with an unstored race is remote', 'Number.isInteger(owner) ? owner !== RaceID : null', 'Number.isInteger(owner) ? owner !== RaceID : true', ['place']],
+  ['a formation with two roles is grouped once per role', 'entry.formations.push(node.id)', 'roles.list.forEach(() => entry.formations.push(node.id))', ['group-system', 'group-reconcile']],
+  ['a formation with no known system is dropped', 'unplaced.push({ id: node.id, reasons: place.reasons.map((reason) => reason.kind) })', 'void 0', ['group-system', 'group-reconcile']],
+  ['an unknown rating counts as no rating', 'const rated = (figure) => (figure.value === null ? null : figure.value > 0)', 'const rated = (figure) => (figure.value === null ? false : figure.value > 0)', ['roles', 'role-totals']],
+  ['a rating of 0 is a role', 'const rated = (figure) => (figure.value === null ? null : figure.value > 0)', 'const rated = (figure) => (figure.value === null ? null : figure.value >= 0)', ['roles', 'role-totals']],
+  ['the formations with both ratings are not counted', 'totals.both += roles.geo === true && roles.xeno === true ? 1 : 0', 'totals.both += 0', ['role-totals']],
+  ['a formation with no role to count is not counted', 'totals.unknown += roles.undetermined ? 1 : 0', 'totals.unknown += 0', ['role-totals']],
 ]
 
 const runMutant = async ([name, from, to, ids]) => {

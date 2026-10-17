@@ -504,6 +504,102 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
   return { GameID, RaceID, formations: list, byId: nodes, roots: topLevel.map((node) => node.id), cycles, problems, summary }
 }
 
+// The roles a formation is told apart by, from the model's own ratings: `geo` and `xeno` when the rating of that kind is above 0, `other` when both are 0. A formation with both ratings is in both roles. A role is null where an unknown rating leaves it undecided (a formation with no proven role and an unknown rating is `undetermined`, with no role to count under).
+export const GROUND_ROLES = ['geo', 'xeno', 'other']
+
+const rated = (figure) => (figure.value === null ? null : figure.value > 0)
+
+export const formationRoles = (node) => {
+  const geo = rated(node.geo)
+  const xeno = rated(node.xeno)
+  const states = { geo, xeno, other: geo === true || xeno === true ? false : geo === false && xeno === false ? true : null }
+  const list = GROUND_ROLES.filter((role) => states[role] === true)
+
+  return { ...states, list, unknownRoles: GROUND_ROLES.filter((role) => states[role] === null), undetermined: list.length === 0 }
+}
+
+// The problems of `locate` that leave a location unresolved.
+const UNRESOLVED_LOCATIONS = new Set(['unlocated', 'ship-missing', 'fleet-missing', 'population-missing', 'system-unknown'])
+
+// Where a formation is and whether it is remote: stationed at no colony of the race. The game keeps a formation's colony (its population record, which exists with or without residents) apart from the ship it is embarked on; supply from logistics units, fortification, morale recovery and the survey and recovery work all need the colony, and a ship's presence in a colony's system does not give one. So a formation aboard a ship, or stored with neither, is remote; one at a colony of the race is not; one at a colony of another race is remote; and one whose colony the save does not hold, or does not say the race of, is null (not known). `system` is { id, name } only when the race's survey name for the system is stored (the system the race can open on its map), else null with the reasons in `reasons` ({ kind, message }, the model's own locate problems and `system-not-surveyed`).
+export const formationPlace = (node, { RaceID }) => {
+  const { location } = node
+  const reasons = node.problems.filter((problem) => UNRESOLVED_LOCATIONS.has(problem.kind)).map(({ kind, message }) => ({ kind, message }))
+  const named = Boolean(location.system) && typeof location.system.name === 'string' && location.system.name !== ''
+
+  if (location.system && !named) {
+    reasons.push({ kind: 'system-not-surveyed', message: `The race holds no survey name for system ${location.system.id}` })
+  }
+
+  const owner = location.population ? location.population.raceId : null
+  const remote = location.kind === 'colony' ? (Number.isInteger(owner) ? owner !== RaceID : null) : true
+
+  return { kind: location.kind, remote, system: named ? { id: location.system.id, name: location.system.name } : null, reasons }
+}
+
+// The formations `include(node, place, roles)` keeps (all by default), grouped by system: { formations, systems, unplaced }. `systems` is keyed by SystemID as a string, each { id, name, formations (ids), roles (formations in each role, undetermined as `unknown`), sets (formations by the roles they hold, '+'-joined, `unknown` for none) }; a formation in two roles is one entry of `formations` and counts once under each role. `unplaced` lists { id, reasons (kinds) } for kept formations with no known system, which are never given a system. Every kept formation is in exactly one place: formations = the systems' formations + unplaced.
+export const groupBySystem = (model, include = () => true) => {
+  const systems = {}
+  const unplaced = []
+  let formations = 0
+
+  model.formations.forEach((node) => {
+    const place = formationPlace(node, model)
+    const roles = formationRoles(node)
+
+    if (!include(node, place, roles)) {
+      return
+    }
+
+    formations++
+
+    if (!place.system) {
+      unplaced.push({ id: node.id, reasons: place.reasons.map((reason) => reason.kind) })
+
+      return
+    }
+
+    const key = String(place.system.id)
+    const entry = systems[key] || (systems[key] = { id: place.system.id, name: place.system.name, formations: [], roles: { geo: 0, xeno: 0, other: 0, unknown: 0 }, sets: {} })
+    const set = roles.list.join('+') || 'unknown'
+
+    entry.formations.push(node.id)
+    entry.sets[set] = (entry.sets[set] || 0) + 1
+
+    if (roles.undetermined) {
+      entry.roles.unknown++
+    }
+
+    roles.list.forEach((role) => {
+      entry.roles[role]++
+    })
+  })
+
+  return { formations, systems, unplaced }
+}
+
+// The roles of the formations `include(node, place, roles)` keeps (all by default): { formations, geo, xeno, other, both, unknown } where `both` is the formations in both geo and xeno (counted in each), `unknown` those with no role to count under, and formations = geo + xeno - both + other + unknown.
+export const roleTotals = (model, include = () => true) => {
+  const totals = { formations: 0, geo: 0, xeno: 0, other: 0, both: 0, unknown: 0 }
+
+  model.formations.forEach((node) => {
+    const roles = formationRoles(node)
+
+    if (!include(node, formationPlace(node, model), roles)) {
+      return
+    }
+
+    totals.formations++
+    totals.both += roles.geo === true && roles.xeno === true ? 1 : 0
+    totals.unknown += roles.undetermined ? 1 : 0
+    roles.list.forEach((role) => {
+      totals[role]++
+    })
+  })
+
+  return totals
+}
+
 const columnsOf = async (database, table) => {
   const [rows] = await database.query(`select name from pragma_table_info('${table}')`)
 

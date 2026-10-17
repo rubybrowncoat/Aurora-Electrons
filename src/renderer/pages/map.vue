@@ -155,6 +155,7 @@
               <v-btn small outlined :to="mineralsLink([panelSystem.id])">Minerals</v-btn>
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
               <v-btn small outlined :to="linkTo.survey(panelSystem.SystemID)">Survey progress</v-btn>
+              <v-btn v-if="remoteBySystem[panelSystem.id]" small outlined :to="linkTo.formations(panelSystem.SystemID)">Ground formations</v-btn>
               <v-btn small outlined :to="linkTo.lagrange(panelSystem.SystemID)">Lagrange points</v-btn>
               <v-btn small outlined :to="linkTo.routes({ to: place.system(panelSystem.SystemID) })">Route here</v-btn>
               <v-btn small outlined :to="linkTo.log({ system: panelSystem.SystemID })">Game log</v-btn>
@@ -201,6 +202,13 @@
                     <v-icon class="mr-3" :color="marksSet.has(mark.value) ? 'primary' : undefined">{{ marksSet.has(mark.value) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
                     <v-list-item-title>{{ mark.text }}</v-list-item-title>
                     <map-glyph class="ml-3" v-bind="markDiscs[mark.value]" :surface="colors.surface" />
+                  </v-list-item>
+                </template>
+                <template v-if="remoteModel">
+                  <v-subheader>Remote ground formations by role</v-subheader>
+                  <v-list-item v-for="option in remoteRoleOptions" :key="option.value" role="menuitemcheckbox" :aria-checked="String(remoteRoles.includes(option.value))" @click="toggleRole(option.value)">
+                    <v-icon class="mr-3" :color="remoteRoles.includes(option.value) ? 'primary' : undefined">{{ remoteRoles.includes(option.value) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline' }}</v-icon>
+                    <v-list-item-title>{{ option.text }} ({{ count(remoteTotals[option.value]) }})</v-list-item-title>
                   </v-list-item>
                 </template>
                 <v-divider />
@@ -279,12 +287,14 @@ import { tracked } from '../utilities/load-tracking'
 import { bordersBox, drawBorders, groupBorders, placeLabels, showsLabels, TINT } from '../utilities/map-borders'
 import { drawGrid, drawLegend, exportComposition, legendLayout, LEGEND_MIN_WIDTH } from '../utilities/map-export'
 import { bestBandIndex, bodiesByCost, COLONY_COST_BANDS, constructBonus, CONTACT_ORDER, dangerFlag, legendCounts, loadHabitability, loadMapFeatures, NO_FEATURES, ruinState } from '../utilities/map-features'
+import { loadGroundFormations, roleTotals } from '../utilities/ground-formations'
 import { COLONY_FULL_MILLIONS, colonyFillPercent, colonyPopulation, discoveredAtStart, discoveredDate, discoveryAsOf, discoveryRange, discoveryShade, discoveryUnknown, discoveryYearText, farthestOf, galacticDistance, galacticPosition, jumpsFromOrigin, jumpsTo, kmFromOrigin, linkDistance, markerSize, populationText, straightShare, surveyPercent, surveyShare, travelLength, weakestResult } from '../utilities/map-figures'
 import { gridDotColor, hierarchyView, HIERARCHY_LEVELS, labelInk, labelMinPx, linkStyle } from '../utilities/map-hierarchy'
 import { createMinimap, wheelZoom } from '../utilities/map-minimap'
 import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
+import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 cytoscape.use(cxtmenu)
@@ -297,6 +307,7 @@ const INPUT_LABELS = {
   sectors: 'the sectors',
   aliens: 'the known alien races',
   features: 'what the map can mark',
+  groundFormations: 'the ground formations',
   formulaVersion: 'the save\'s schema',
 }
 
@@ -391,6 +402,7 @@ const SKULL_CROSSBONES_PATH = 'M15.8,18.5L21.8,20.1L21.4,22L12,19.5L2.6,22L2.1,2
 const ALERT_PATH = 'M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16'
 const CALENDAR_PATH = 'M12 12H17V17H12V12M19 3H18V1H16V3H8V1H6V3H5C3.9 3 3 3.9 3 5V19C3 20.1 3.9 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3M19 5V7H5V5H19M5 19V9H19V19H5Z'
 const EARTH_PATH = 'M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z'
+const SHIELD_PATH = 'M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1Z'
 const ROCKET_PATH = 'M20 22L16.14 20.45C16.84 18.92 17.34 17.34 17.65 15.73L20 22M7.86 20.45L4 22L6.35 15.73C6.66 17.34 7.16 18.92 7.86 20.45M12 2C12 2 17 4 17 12C17 15.1 16.25 17.75 15.33 19.83C15 20.55 14.29 21 13.5 21H10.5C9.71 21 9 20.55 8.67 19.83C7.76 17.75 7 15.1 7 12C7 4 12 2 12 2M12 12C13.1 12 14 11.1 14 10C14 8.9 13.1 8 12 8C10.9 8 10 8.9 10 10C10 11.1 10.9 12 12 12Z'
 const CRANE_PATH = 'M20,6V5A1,1 0 0,0 19,4H9V3H6V4H5V6H6V15H5V13H3V15H2V17H3V21H5V17H10V21H12V19.92L12,17H13V15H12V13H10V15H9V6H17V10.62C16.53,10.79 16.19,11.23 16.19,11.76C16.19,12.2 16.43,12.6 16.8,12.82V14H17.42C17.76,14 18.03,14.28 18.03,14.62C18.03,14.96 17.76,15.24 17.42,15.24C17.2,15.24 17,15.12 16.89,14.93C16.71,14.64 16.34,14.54 16.05,14.71C15.75,14.87 15.65,15.25 15.82,15.55C16.15,16.11 16.76,16.47 17.42,16.47C18.43,16.47 19.26,15.64 19.26,14.62C19.26,13.84 18.76,13.14 18.03,12.88V12.82C18.41,12.6 18.65,12.2 18.65,11.76C18.65,11.3 18.38,10.91 18,10.7V6H20M8,13.66L7,14.66V13.24L8,12.24V13.66M8,10.71L7,11.71V10.29L8,9.29V10.71M7,8.71V7.29L8,6.29V7.71L7,8.71Z'
 const MAP_MARKER_PATH = 'M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z'
@@ -420,6 +432,7 @@ const MARKS = [
   { value: 'ships', text: 'Ships', short: 'ships', place: 'glyph', path: ROCKET_PATH, color: 'yours' },
   { value: 'shipyards', text: 'Shipyards', short: 'shipyards', place: 'glyph', path: CRANE_PATH, color: 'yours', offset: CRANE_OFFSET },
   { value: 'waypoints', text: 'Waypoints', short: 'waypoints', place: 'glyph', path: MAP_MARKER_PATH, color: 'yours' },
+  { value: 'remote', text: 'Remote ground formations', short: 'remote formations', place: 'glyph', path: SHIELD_PATH, color: 'yours' },
   { value: 'contacts', text: 'Alien contacts now', short: 'contacts', place: 'glyph', path: RADAR_PATH, color: 'danger' },
   { value: 'flags', text: 'System flags', short: 'flags', place: 'glyph', path: FLAG_PATH, color: 'ring', offset: FLAG_OFFSET },
   { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
@@ -447,7 +460,7 @@ const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
 // Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below; only a system with every kind takes the last, at the lower left. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
-const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210]
+const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210, 150]
 const BADGE_ANGLE = 30
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes in a hidden or minimised window, so an Arrange carries on there.
@@ -619,6 +632,8 @@ export default {
       dimUnmarked: { key: 'mapDim', default: false, scope: 'race' },
       // How strongly the secondary marks are drawn (utilities/map-hierarchy.js), shared with the system view and the charts.
       hierarchy: hierarchyView,
+      // The roles of the remote ground formations the map marks (utilities/remote-formations.js), shared with Survey Progress.
+      remoteRoles: rolesView,
     }),
   ],
   data() {
@@ -1128,6 +1143,7 @@ export default {
         'ships-commercial': { path: ROCKET_PATH, color: colors.yours, hollow: true, label: 'Commercial ships only' },
         shipyards: { path: CRANE_PATH, offset: CRANE_OFFSET, color: colors.yours, label: 'Shipyards' },
         waypoints: { path: MAP_MARKER_PATH, color: colors.yours, label: 'Waypoints' },
+        remote: { path: SHIELD_PATH, color: colors.yours, label: 'Systems with remote ground formations' },
         // The most threatening contacts there decide the glyph; a race not yet identified is drawn hollow.
         ...Object.fromEntries(CONTACT_ORDER.map((status) => [`contacts-${status}`, {
           path: CONTACT_PATHS[status],
@@ -1137,6 +1153,29 @@ export default {
         }])),
         flags: { path: FLAG_PATH, offset: FLAG_OFFSET, color: colors.ring, label: 'Flagged system' },
       }
+    },
+
+    // The race's ground formations as one model while the map marks them, else null (also null for a save without what the model reads: `groundFormations.supported` is then false).
+    remoteModel() {
+      return this.groundFormations && this.groundFormations.supported ? this.groundFormations : null
+    },
+
+    // The systems that hold remote formations of the selected roles, and the ones with no known system (`remoteSystems`).
+    remoteGrouping() {
+      return this.remoteModel ? remoteSystems(this.remoteModel, this.remoteRoles) : null
+    },
+
+    remoteBySystem() {
+      return this.remoteGrouping ? this.remoteGrouping.systems : {}
+    },
+
+    // The remote formations of the race by role, whatever roles are selected.
+    remoteTotals() {
+      return this.remoteModel ? roleTotals(this.remoteModel, (_node, place) => place.remote === true) : null
+    },
+
+    remoteRoleOptions() {
+      return ROLE_OPTIONS.filter((option) => option.value !== 'unknown' || this.remoteTotals.unknown > 0)
     },
 
     // The first and last time the race found a system after the game began, in seconds of game time.
@@ -1189,6 +1228,8 @@ export default {
           items.push({ kind: 'note', label: `${mark.text}: ${this.habitabilityNote.charAt(0).toLowerCase()}${this.habitabilityNote.slice(1)}`, result: this.habitabilityCounts })
         } else if (mark.value === 'discovered' && !isAvailable(this.gameStart)) {
           items.push({ kind: 'note', label: `${mark.text}: unknown, the game's start year is not read`, result: this.gameStart })
+        } else if (mark.value === 'remote' && !this.remoteModel) {
+          items.push({ kind: 'note', label: this.groundFormations ? `${mark.text}: unknown, the save lacks ${this.groundFormations.missing.join(', ')}` : `${mark.text}: reading the ground formations` })
         } else if (mark.place === 'glyph') {
           const names = Object.keys(this.glyphStyles).filter((name) => name === mark.value || name.startsWith(`${mark.value}-`))
           const shown = names.filter((name) => counts[name])
@@ -1197,6 +1238,12 @@ export default {
 
           if (!shown.length) {
             items.push({ kind: 'note', label: `${mark.text}: none known` })
+          }
+
+          if (mark.value === 'remote') {
+            const { unplaced } = this.remoteGrouping
+
+            items.push({ kind: 'note', label: `${REMOTE_LEGEND}${unplaced.length ? `; ${this.count(unplaced.length)} remote ${unplaced.length === 1 ? 'formation has' : 'formations have'} no known system and no mark` : ''}` })
           }
         } else {
           const systems = this.systemRows.filter((row) => this.markText(mark.value, row)).length
@@ -1427,6 +1474,7 @@ export default {
         features.ships && { label: 'Ships', value: `${this.count(features.ships)}${features.military ? `, ${this.count(features.military)} of them military` : ''}` },
         features.shipyards && { label: 'Shipyards', value: this.count(features.shipyards) },
         features.waypoints && { label: 'Waypoints', value: this.count(features.waypoints) },
+        this.remoteBySystem[system.id] && { label: 'Remote ground formations', value: systemText(this.remoteBySystem[system.id], this.count), title: 'Open them in Survey Progress', action: () => this.$router.push(linkTo.formations(system.SystemID)) },
         features.contacts.length && { label: 'Alien contacts now', value: features.contacts.map((contact) => `${this.count(contact.count)} ${contact.status === 'unknown' ? 'unidentified' : contact.status}`).join(', ') },
         system.flags.length && { label: 'Flags', value: system.flags.join(', ') },
       ].filter(Boolean)
@@ -1747,6 +1795,14 @@ export default {
       this.restyle()
     },
 
+    remoteRoles() {
+      this.restyle()
+    },
+
+    groundFormations() {
+      this.restyle()
+    },
+
     habitableBands() {
       this.restyle()
     },
@@ -1877,6 +1933,10 @@ export default {
 
     toggleMark(value) {
       this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]
+    },
+
+    toggleRole(value) {
+      this.remoteRoles = this.remoteRoles.includes(value) ? this.remoteRoles.filter((role) => role !== value) : [...this.remoteRoles, value]
     },
 
     toggleDim() {
@@ -2226,6 +2286,10 @@ export default {
 
       if (marks.has('waypoints') && features.waypoints) {
         names.push('waypoints')
+      }
+
+      if (marks.has('remote') && this.remoteBySystem[row.id]) {
+        names.push('remote')
       }
 
       if (marks.has('contacts') && features.contacts.length) {
@@ -3222,6 +3286,17 @@ export default {
         return await loadMapFeatures(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: {},
+    },
+    // The race's ground formations, read only while the map marks the remote ones (`loadGroundFormations`): the model, or { supported: false, missing } for a save without what it reads.
+    groundFormations: {
+      get: tracked('groundFormations', async function () {
+        if (!this.database || !this.GameID || !this.RaceID || !this.marksSet.has('remote')) {
+          return null
+        }
+
+        return Object.freeze(await loadGroundFormations(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
     },
     // The formula version the save's schema stands for (`loadFormulaVersion`, utilities/capabilities.js): the stated one for a 2.7-shaped save, null for any other shape. The colony costs are checked for that version only.
     formulaVersion: {
