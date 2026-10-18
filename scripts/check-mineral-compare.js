@@ -19,6 +19,7 @@ const sqlite3 = require('sqlite3')
 const Vue = require('vue')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, replacing } = require('./lib/page-loader')
+const { strictRecords } = require('./lib/csv-records')
 const { jobs } = require('./lib/check-pool')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
@@ -300,6 +301,13 @@ const pure = (m, themes) => {
       const table = csvOf(compareMinerals(SNAPSHOTS.slice(8), [1]), 'absolute', themes.light, () => 'a,b "c"\nd')
 
       return table.rows.length === 1 && table.rows[0].Date === 'a,b "c"\nd' && table.rows[0]['Baseline date'] === 'a,b "c"\nd' && table.rows[0]['Stock (t)'] === '500' ? true : short(table.rows)
+    }],
+    ['the CSV writes a carriage return and a formula start as the shared writer does: in a quoted cell, as text', () => {
+      const text = comparisonCsv({ comparison: compareMinerals(SNAPSHOTS.slice(8), [1]), scale: 'absolute', palette: themes.light, date: (seconds) => (seconds === SNAPSHOTS[8].t ? 'a\rb' : '=HYPERLINK("x")'), retention: '-note' })
+      const records = strictRecords(text)
+      const row = records[1]
+
+      return records.length === 2 && row.includes('a\rb') && row.some((cell) => cell.includes('-note') && !/^[=+\-@\t\r]/.test(cell)) && row.length === records[0].length ? true : short(records)
     }],
     ['the change is registered as a rule of the provenance registry, in percent', () => {
       const rule = m.provenance.getRule('history.mineralChange')
@@ -923,13 +931,15 @@ const MUTATIONS = [
   { name: 'the unit left off the game time of the CSV', find: '\'Game time (s)\', \'Date\'', replace: '\'Game time\', \'Date\'', fails: ['the CSV names a unit on every value column'] },
   { name: 'the baseline left out of the rows of the CSV', find: 'baseline.stock, baseline.t, date(baseline.t), series.percent[position]', replace: 'null, null, \'\', series.percent[position]', fails: ['the CSV gives each mineral\'s baseline stock and game time'] },
   { name: 'the baseline date left out of the rows of the CSV', find: 'baseline.t, date(baseline.t), series.percent[position]', replace: 'baseline.t, \'\', series.percent[position]', fails: ['the CSV gives each mineral\'s baseline stock and game time'] },
-  { name: 'an unknown figure written as 0 in the CSV', find: 'value === null || value === undefined ? \'\' : value', replace: 'value === null || value === undefined ? 0 : value', fails: ['the CSV leaves an unknown figure as an empty cell', 'the CSV says why a change is undefined, and leaves it empty'] },
+  { name: 'an unknown figure written as 0 in the CSV', find: 'row.map((value) => csvCell(value))', replace: 'row.map((value) => csvCell(value ?? 0))', fails: ['the CSV leaves an unknown figure as an empty cell', 'the CSV says why a change is undefined, and leaves it empty'] },
   { name: 'the reason a change is undefined left out of the CSV', find: 'series.normalisation.defined ? \'\' :', replace: 'true ? \'\' :', fails: ['the CSV says why a change is undefined'] },
   { name: 'a stock that is not recorded left unexplained in the CSV', find: '\'stock not recorded\'', replace: '\'\'', fails: ['the CSV leaves an unknown figure as an empty cell, never 0, and says so'] },
   { name: 'the scale left out of the CSV', find: 'named.label, sample.t', replace: '\'\', sample.t', fails: ['the CSV states the scale on every row'] },
   { name: 'the scale of the CSV always the first', find: 'const named = MINERAL_SCALES.find((entry) => entry.value === scale) || MINERAL_SCALES[0]', replace: 'const named = MINERAL_SCALES[0]', fails: ['the CSV states the scale on every row'] },
   { name: 'the colour of the CSV taken from the position', find: 'style.slot + 1, style.color', replace: 'series.id, palette[series.id % 9]', fails: ['the CSV ties each row to the mineral ID, and the palette slot and colour of that ID'] },
-  { name: 'the cells of the CSV not quoted', find: 'value.replace(/"/g, \'""\')', replace: 'value', fails: ['the CSV quotes a cell that holds a comma, a quote or a newline'] },
+  { name: 'the cells of the CSV not written by the shared writer', find: 'row.map((value) => csvCell(value))', replace: 'row.map((value) => value)', fails: ['the CSV quotes a cell that holds a comma, a quote or a newline', 'the CSV writes a carriage return'] },
+  { name: 'a carriage return does not quote a cell', file: 'csv-cell.js', find: '/[",\\r\\n]/.test(text)', replace: '/[",\\n]/.test(text)', fails: ['the CSV writes a carriage return'] },
+  { name: 'a text that starts like a formula is not guarded', file: 'csv-cell.js', find: 'guard && typeof value === \'string\' && FORMULA_START.test(value)', replace: 'false', fails: ['the CSV writes a carriage return'] },
   { name: 'the change not registered in percent', find: 'units: \'%\',', replace: 'units: \'\',', fails: ['the change is registered as a rule'] },
   { name: 'the axis of the percent scale without its unit', find: 'axis: \'Change from baseline (%)\'', replace: 'axis: \'Change from baseline\'', fails: ['the scales are the stock in tonnes and the change in percent, each with its axis title and unit'] },
   { name: 'the gap of the CSV taken from the first row', find: 'position ? sample.t - series.samples[position - 1].t : null', replace: 'position ? sample.t - series.samples[0].t : null', fails: ['the CSV gives the seconds since each mineral'] },
@@ -1047,12 +1057,12 @@ const checkHead = async (campaignFile) => {
   check('the page raises no Vue warning', warnings.length === 0 ? true : warnings.slice(0, 3).join(' | '))
 }
 
-const checkUtilityMutation = async ({ name, find, replace, fails, campaign: campaignFails = [] }, campaignFile) => {
+const checkUtilityMutation = async ({ name, find, replace, fails, campaign: campaignFails = [], file = UTILITY }, campaignFile) => {
   const appearance = await loadAppearance()
   const themes = themesOf(appearance)
   const campaign = campaignOf(campaignFile)
   const synthetic = (loaded) => [...pure(loaded, themes), ...(campaign ? campaignStatements(loaded, campaign) : [])]
-  const directory = mutatedCopy(UTILITY, find, replace)
+  const directory = mutatedCopy(file, find, replace)
   const began = Date.now()
 
   try {

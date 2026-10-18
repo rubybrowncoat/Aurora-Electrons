@@ -634,7 +634,7 @@ const main = async () => {
       survey: await loadPage('pages/survey-progress', { sources: { ...text, 'pages/survey-progress': given.survey }, stubs: SURVEY_STUBS, modules: { 'mixins/load-state': null } }),
     }
   }
-  const loaded = await loadUtilities(['remote-formations', 'ground-formations', 'deep-links'])
+  const loaded = await loadUtilities(['remote-formations', 'ground-formations', 'deep-links'], { stubs: { dayjs: real('dayjs'), 'dayjs/plugin/utc.js': real('dayjs/plugin/utc.js'), romanum: 'export default { toNumeral: String }' } })
   const ground = loaded['ground-formations']
   const models = { constructed: ground.buildGroundFormations(frozen(constructedRows()), { GameID: GAME, RaceID: RACE }) }
   models.supportedConstructed = { supported: true, ...models.constructed }

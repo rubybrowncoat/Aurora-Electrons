@@ -6,6 +6,7 @@
 // - the series is classified: no observation, one observation, a baseline of 0, a stock already at 0, too few observations, flat or rising, a step (a transfer or spending) far larger than the other changes, a decline too slow to end within the horizon, or an ordinary decline; only the last has a depletion estimate, and it is an estimate: a window's average rate carried forward, not a prediction that the stock will run out.
 
 import { COLONY_COLUMNS, COLONY_STATE_TEXT, COLONY_STATES } from './colony-series'
+import { csvCell } from './csv-cell'
 import { durationText, mineralResult, snapshotResult } from './history'
 import { UNKNOWN_TEXT, countText, isKnownNumber } from './math'
 import { MINERALS } from './minerals'
@@ -295,16 +296,7 @@ export const chartPoints = (analysis) => ({
 
 export const CSV_COLUMNS = ['Record', 'Item', 'Game time (s)', 'Date', 'Value', 'Unit', 'Status', 'Rule', 'Versions', 'Assumptions', 'Missing inputs', 'Seconds since previous observation', 'Change since previous observation', 'Rate per game year', 'Step', 'Note']
 
-const FORMULA_START = /^[=+\-@\t\r]/
-
-// A cell of text that starts with a character a spreadsheet reads as a formula is written with a leading apostrophe (a number is not text and is never touched), and an unknown figure is an empty cell, never 0.
-const cell = (value) => {
-  const text = typeof value === 'string' && FORMULA_START.test(value) ? `'${value}` : value
-
-  return typeof text === 'string' && /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text === null || text === undefined ? '' : text
-}
-
-const rowOf = (fields) => CSV_COLUMNS.map((column) => cell(fields[column]))
+const rowOf = (fields) => CSV_COLUMNS.map((column) => csvCell(fields[column]))
 
 // Where the observations come from, in one line: the campaign and the shown branch, the game, the race and its ID and, for a colony, the colony and its PopulationID. `scope` is { kind, name, raceName, RaceID, colonyId, campaignId, branchId, GameID }; an ID not known is said so, never left out, so two exports of the same name from different branches differ.
 const unsettled = (value) => (value === null || value === undefined || value === '' ? 'not settled' : String(value))
@@ -355,7 +347,7 @@ export const exportModel = (analysis, { date = defaultDate, retention = '' } = {
 export const ratesCsv = (analysis, options = {}) => {
   const { columns, rows } = exportModel(analysis, options)
 
-  return [columns.map((column) => cell(column)), ...rows].map((row) => row.join(',')).join('\n')
+  return [columns.map((column) => csvCell(column)), ...rows].map((row) => row.join(',')).join('\n')
 }
 
 // The analysis as plain text for a clipboard: the notes the chart shows, then the observations one a line.

@@ -24,6 +24,7 @@ const { patched } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { startPageServer } = require('./lib/page-server')
 const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError } = require('./lib/browser-observe')
+const { assert, through, harnessOwn, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
 const { runChild, lastJson } = require('./lib/check-pool')
 const pageLoading = require('./page-loading')
 
@@ -84,92 +85,7 @@ const near = (actual, expected, message = '') => assert.ok(typeof actual === 'nu
 const results = []
 const add = (id, name, run) => results.push({ id, name, run })
 
-// Who failed. A check fails by an assertion of its own: the helper below marks what it throws with a symbol that only this file holds, and a fault is credited only when a check named for it failed with a marked assertion. Nothing the code under test throws carries the mark, an AssertionError included. The code under test (the utility module, the normalisers of the views, and the page's computed values, methods, reads, data and hooks) is run only through `through`, which turns what it throws or rejects into a marked failure that names the call: the contract of a call is that it returns, and a call that throws has broken it. Any other exception is the harness's own, and stops the run (`run` and `judge`): a lookup the harness gets wrong, a callback of the harness that throws (`harnessOwn`) or a fixture it cannot build.
-const MARK = Symbol('the failure of a check')
-
-const marked = (error) => {
-  if (error instanceof rawAssert.AssertionError) {
-    error[MARK] = true
-  }
-
-  return error
-}
-
-const settled = (result) => (result && typeof result.then === 'function' ? result.then((value) => value, (error) => { throw marked(error) }) : result)
-
-// The assertion helper of the checks: every failure of one of its functions carries the mark.
-const assert = Object.fromEntries(Object.entries(rawAssert).map(([name, member]) => [name, typeof member === 'function' && name !== 'AssertionError' ? (...args) => {
-  try {
-    return settled(member(...args))
-  } catch (error) {
-    throw marked(error)
-  }
-} : member]))
-
-// What the code under test returned is read through here, the getters of what it returned included, so that a getter that throws is its failure and not the check's.
-const readAll = (value, seen = new WeakSet()) => {
-  if (value === null || typeof value !== 'object' || seen.has(value)) {
-    return value
-  }
-
-  seen.add(value)
-
-  if (value instanceof Map) {
-    value.forEach((item, key) => { readAll(key, seen); readAll(item, seen) })
-  } else if (value instanceof Set) {
-    value.forEach((item) => readAll(item, seen))
-  } else {
-    Object.keys(value).forEach((key) => readAll(value[key], seen))
-  }
-
-  return value
-}
-
-let entered = 0
-
-// A call of the code under test: its result (read whole, when it is the outermost call), or a marked failure naming it.
-const through = (label, call) => {
-  const fail = (error) => {
-    if (error instanceof HarnessError || (error && error[MARK])) {
-      throw error
-    }
-
-    throw marked(new rawAssert.AssertionError({ message: `${label} threw ${error && error.name ? error.name : 'a value that is no error'}: ${error && error.message ? error.message : error}` }))
-  }
-
-  entered++
-
-  try {
-    const result = call()
-
-    return result && typeof result.then === 'function' ? Promise.resolve(result).then((value) => readAll(value)).catch(fail) : entered === 1 ? readAll(result) : result
-  } catch (error) {
-    return fail(error)
-  } finally {
-    entered--
-  }
-}
-
-// A piece of the harness that the code under test calls back into: what it throws is the harness's, never the code's.
-const harnessOwn = (piece) => (...args) => {
-  const own = (error) => {
-    throw error instanceof HarnessError ? error : new HarnessError(`a callback of the harness threw: ${error && error.message ? error.message : error}`)
-  }
-
-  try {
-    const result = piece(...args)
-
-    return result && typeof result.then === 'function' ? result.then((value) => value, own) : result
-  } catch (error) {
-    return own(error)
-  }
-}
-
-// The pieces of an instance of the page that are the harness's (the store it is given).
-const boundary = { subject: through, harness: (call) => harnessOwn(call)() }
-
-// The functions of a module of the code under test, each behind `through`; the rest as it is.
-const subjectModule = (mod) => Object.fromEntries(Object.keys(mod).map((name) => [name, typeof mod[name] === 'function' ? (...args) => through(`the utility ${name}`, () => mod[name](...args)) : mod[name]]))
+// Who failed: scripts/lib/fault-credit.js. A check fails by an assertion of its own (`assert` marks what it throws), and a fault is credited only when a check named for it failed with a marked assertion. The code under test (the utility module, the normalisers of the views, and the page's computed values, methods, reads, data and hooks) is run only through `through` and the `boundary`; any other exception is the harness's own, and stops the run (`runChecks` and `judge`): a lookup the harness gets wrong, a callback of the harness that throws (`harnessOwn`) or a fixture it cannot build.
 
 // The view fields of the page, the normaliser of each behind `through`.
 const subjectFields = (fields) => Object.fromEntries(Object.entries(fields).map(([name, field]) => [name, Object.fromEntries(Object.entries(field).map(([key, member]) => [key, typeof member === 'function' ? (...args) => through(`the ${key} of the view ${name}`, () => member(...args)) : member]))]))
@@ -985,40 +901,8 @@ FIXTURES.forEach((fixture, index) => {
 
 // ---------- running ----------
 
-const run = async (list, ctx) => {
-  const out = []
-
-  for (const item of list) {
-    try {
-      await item.run(ctx)
-      out.push({ id: item.id, name: item.name, ok: true, kind: null, detail: '' })
-    } catch (error) {
-      // A check handed a record that is not whole is itself broken: that stops the run, and is never a fault that was caught.
-      if (error instanceof HarnessError) {
-        throw error
-      }
-
-      out.push({ id: item.id, name: item.name, ok: false, kind: error && error[MARK] === true ? 'assertion' : 'error', detail: process.env.CHECK_VERBOSE ? String(error && error.message).slice(0, 1500) : String(error && error.message).split('\n')[0] })
-    }
-  }
-
-  return out
-}
-
-// A fault is caught when a check named for it failed with an assertion of its own (one that carries the mark, the failure of a call of the code under test that names the call included). Any other exception says nothing about what the fault changed, and credits nothing.
-const caughtBy = (failed, ids) => failed.some((result) => ids.includes(result.id) && result.kind === 'assertion')
-
-// The failed results of the checks over the context of a fault or a rewrite. An exception that is not a marked assertion (`error`) is a defect of the harness, told as one: it stops the run, and nothing is credited with it.
-const judge = async (ctx, list = results) => {
-  const done = await run(list, ctx)
-  const broken = done.filter((result) => result.kind === 'error')
-
-  if (broken.length) {
-    throw new HarnessError(`a check ended in an exception of its own while a fault or a rewrite was judged: ${broken.map((result) => `${result.id}: ${result.detail}`).join('; ')}`)
-  }
-
-  return done.filter((result) => !result.ok)
-}
+// The failed results of the checks over the context of a fault or a rewrite; a check that ended in an exception of its own stops the run (scripts/lib/fault-credit.js).
+const judge = async (ctx, list = results) => judged(await runChecks(list, ctx))
 
 // ---------- the page in a browser ----------
 
@@ -1240,16 +1124,16 @@ const expectedScreen = (ctx) => {
 }
 
 const shown = (screen) => ({ formations: screen.formations, targets: screen.targets, roles: screen.roles, states: screen.states, unstaffed: screen.unstaffed })
-// The value of the observation of the page, or the failure: a record of another shape is a defect of the harness (HarnessError). A page that raised an error nothing named fails the check on an assertion, what the renderer does being behaviour (a fault in the page's template is caught that way). An observation that did not get through for another reason (a timeout, a server that did not start) fails the check with an error of its own, which no fault is credited for.
+// The value of the observation of the page, or the failure: a record of another shape is a defect of the harness (HarnessError). An observation that failed in itself (the context did not open or close, the work threw, a server that did not start) fails the check with an error of its own, which no fault is credited for, even where a screen was kept and the page raised errors besides. A page that raised an error nothing named fails the check on an assertion, what the renderer does being behaviour (a fault in the page's template is caught that way).
 const observed = (ctx) => {
   validate(ctx.browser, 'the observation of the page')
 
-  if (ctx.browser.unexpected.length) {
-    assert.fail(`the page raised an error nothing named ${failureLine(ctx.browser)}`)
+  if (infrastructureFailure(ctx.browser)) {
+    throw new Error(`the browser did not get through the page ${failureLine(ctx.browser)}`)
   }
 
-  if (ctx.browser.error) {
-    throw new Error(`the browser did not get through the page ${failureLine(ctx.browser)}`)
+  if (ctx.browser.unexpected.length) {
+    assert.fail(`the page raised an error nothing named ${failureLine(ctx.browser)}`)
   }
 
   return ctx.browser.value
@@ -1840,7 +1724,7 @@ const main = async () => {
     baselineContext.expected = expected
   }
 
-  const baseline = await run(results, baselineContext)
+  const baseline = await runChecks(results, baselineContext)
 
   baseline.forEach((result) => check(result.name, result.ok, result.detail))
 
@@ -1856,7 +1740,7 @@ const main = async () => {
     const construct = UNREAD.find((item) => item.kind === 'construct-table')
     const withCase = (kind, seen) => ({ ...baselineUnread, [kind]: seen })
     // The outcome of browser-unread for the records given: the one result, or a HarnessError when a record is not whole.
-    const outcome = async (given) => (await run(unreadChecks, await contextOf(sources, baselineSeen, given)))[0]
+    const outcome = async (given) => (await runChecks(unreadChecks, await contextOf(sources, baselineSeen, given)))[0]
     // The records with the cases of one input changed, the others as they are.
     const adapted = (input, change) => Object.fromEntries(UNREAD.map((entry) => [entry.kind, entry.input === input ? change(baselineUnread[entry.kind]) : baselineUnread[entry.kind]]))
     // The sources with the one change of a fault or a rewrite ([name, from, to, file, ...]).
@@ -1902,7 +1786,7 @@ const main = async () => {
       console.log('\nControls of the harness')
 
       // Who failed. A failure is credited only when it is an assertion of a check: marked by the helper of the checks, or the failure of a call of the code under test that an adapter (`through`) names. An error that is anything else, an AssertionError that the code under test threw included, stops the run when a fault is judged.
-      const probe = async (body) => (await run([{ id: 'probe', name: 'probe', run: body }], {}))[0]
+      const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
       const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
       const own = await probe(() => assert.equal(1, 2))
       const ordinary = await probe(() => assert.equal(1, 1))
@@ -1955,6 +1839,19 @@ const main = async () => {
       const storeWhole = await judge(busyContext, storeChecks({})).then((failed) => failed.length, (error) => error)
 
       check('control: a store whose getters are malformed, read by the page, stops the run, and a whole store gives the page its getters', storeBroken instanceof HarnessError && storeWhole === 0, `${storeBroken} ${storeWhole}`)
+
+      // An observation whose context did not close fails the check with an error of its own, in the baseline and under a fault, whether or not a screen was kept and the page raised errors besides; an error the page raised that nothing named is still an assertion, and a closed context passes.
+      const closed = completedObservation({ initial: {} })
+      const closeFailed = { ...closed, error: 'the context did not close: planted' }
+      const closeFailedRaising = { ...closeFailed, errors: ['planted'], unexpected: ['page error: planted'] }
+      const raisedOnly = { ...closed, error: 'the page raised 1 unexpected error, the first: page error: planted', errors: ['planted'], unexpected: ['page error: planted'] }
+      const seeing = [{ id: 'seen', name: 'seen', run: (ctx) => { observed(ctx) } }]
+      const seenAs = (browser) => judge({ browser }, seeing).then((failed) => failed, (error) => error)
+      const baselineOf = async (browser) => (await runChecks(seeing, { browser }))[0]
+
+      check('control: a context that did not close fails the check with an error of its own at the baseline, whether or not the page raised errors besides, and a context that closed passes', !(await baselineOf(closeFailed)).ok && (await baselineOf(closeFailed)).kind === 'error' && (await baselineOf(closeFailedRaising)).kind === 'error' && (await baselineOf(closed)).ok, JSON.stringify([await baselineOf(closeFailed), await baselineOf(closeFailedRaising)]))
+      check('control: a context that did not close stops the run when a fault is judged, whether or not the page raised errors besides, and a context that closed does not', (await seenAs(closeFailed)) instanceof HarnessError && (await seenAs(closeFailedRaising)) instanceof HarnessError && (await seenAs(closed)).length === 0, `${await seenAs(closeFailed)} ${await seenAs(closeFailedRaising)}`)
+      check('control: an error the page raised that nothing named is an assertion that credits a fault', caughtBy(await seenAs(raisedOnly), ['seen']), JSON.stringify(await seenAs(raisedOnly)))
 
       // A normaliser of a view that throws is a failure of the page's contract, caught by views; one rewritten in an equivalent way, and the code as it is, pass.
       const normaliser = (name, to) => [name, '(stored) => (Array.isArray(stored) ?', to, SPEC_FILE]

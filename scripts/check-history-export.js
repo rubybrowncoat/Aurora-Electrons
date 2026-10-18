@@ -23,6 +23,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate, replacing } = require('./lib/page-loader')
 const { inParallel, runChild, lastJson } = require('./lib/check-pool')
 const { chunksOf, spread } = require('./lib/mutant-chunks')
+const { strictRecords } = require('./lib/csv-records')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -574,7 +575,7 @@ const FIXTURE_SNAPSHOTS = TIMES.map((t, index) => snapshotAt(t, index === 5 ? { 
 
 const RIVAL = { raceName: 'Rival Empire', npr: true, snapshots: [0.5, 12 * YEAR, 29 * YEAR].map((t) => snapshotAt(t, { wealth: 987654.5, population: 555.5 })) }
 
-const csvOf = (vm, key) => {
+const csvOf = (vm, key, method = 'downloadChartCsv') => {
   const saved = { document: globalThis.document, Blob: globalThis.Blob, create: URL.createObjectURL, revoke: URL.revokeObjectURL }
   const files = []
   let text = null
@@ -586,7 +587,7 @@ const csvOf = (vm, key) => {
   URL.revokeObjectURL = () => {}
 
   try {
-    vm.downloadChartCsv(key)
+    vm[method](key)
   } finally {
     globalThis.document = saved.document
     globalThis.Blob = saved.Blob
@@ -597,8 +598,8 @@ const csvOf = (vm, key) => {
   return files.length ? { name: files[0].name, text: files[0].text, ...tableOf(files[0].text) } : null
 }
 
-const pageSuite = async (m, { mutate = null, saves = null } = {}) => {
-  const options = await loadPage('pages/history', { stubs: STUBS, modules: PAGE_MODULES, mutate })
+const pageSuite = async (m, { mutate = null, saves = null, sources = {} } = {}) => {
+  const options = await loadPage('pages/history', { stubs: STUBS, modules: PAGE_MODULES, mutate, sources })
   const checks = []
   const check = (name, run) => checks.push({ group: 'page', name, run })
   const saveCheck = (name, run) => checks.push({ group: 'saves', name, run })
@@ -645,6 +646,21 @@ const pageSuite = async (m, { mutate = null, saves = null } = {}) => {
         assert.deepEqual(rows.map((row) => row.Value), dataset.data.map((point) => numberOr(point.y)), `${key} ${dataset.label}`)
       })
     })
+  })
+
+  check('the table download writes the name of an installation with a carriage return, and one that starts like a formula, as the shared writer does', () => {
+    const { vm } = mounted({ data: { installationNames: { 1: '=HYPERLINK("x")', 2: 'Wharf\r-two' } } })
+    const file = csvOf(vm, null, 'downloadCsv')
+
+    assert.ok(file)
+
+    const records = strictRecords(file.text)
+
+    assert.equal(records.length, vm.allSnapshots.length + 1)
+    assert.ok(records.every((row) => row.length === records[0].length))
+    assert.ok(records[0].includes('Wharf\r-two'))
+    assert.ok(records[0].includes('\'=HYPERLINK("x")'))
+    assert.equal(records[0].some((cell) => /^[=+\-@\t\r]/.test(cell)), false)
   })
 
   check('a series the chart does not draw is not exported: a mineral that is not picked, a change that is undefined, a type that is not chosen', () => {
@@ -1290,11 +1306,21 @@ const UTILITY_MUTATIONS = [
   { name: 'the caption is not wrapped to the picture', file: 'history-export.js', find: 'rows: wrapped(measure, line.text.replace(/\\s+/g, \' \'), limit - (style.indent || 0))', replace: 'rows: [line.text.replace(/\\s+/g, \' \')]', fails: ['picture: no line of the caption is wider than the picture'] },
   { name: 'the picture has no surface colour behind the chart', file: 'history-export.js', find: '  context.fillRect(0, 0, width, height)\n', replace: '', fails: ['picture: the chart canvas is drawn once'] },
   { name: 'the annotations are left out of the caption', file: 'history-export.js', find: '  if (model.annotations.length) {\n    lines.push(', replace: '  if (false) {\n    lines.push(', fails: ['caption: the caption lists the annotations'] },
-  { name: 'a text cell that starts like a formula is written as it is', file: 'history-export.js', find: "typeof value === 'string' && !NUMBER_COLUMNS.has(column) && FORMULA_START.test(value) ? ", replace: 'false ? ', fails: ['csv: a text cell that starts like a formula'] },
-  { name: 'a number that is negative is guarded like a text cell', file: 'history-export.js', find: "typeof value === 'string' && !NUMBER_COLUMNS.has(column) && FORMULA_START.test(value) ? ", replace: 'FORMULA_START.test(String(value)) ? ', fails: ['csv: a text cell that starts like a formula'] },
+  { name: 'a text cell that starts like a formula is written as it is', file: 'history-export.js', find: 'csvCell(value, { guard: !NUMBER_COLUMNS.has(column) })', replace: 'csvCell(value, { guard: false })', fails: ['csv: a text cell that starts like a formula'] },
+  { name: 'a number that is negative is guarded like a text cell', file: 'history-export.js', find: 'csvCell(value, { guard: !NUMBER_COLUMNS.has(column) })', replace: "csvCell(/^[=+\\-@\\t\\r]/.test(String(value)) ? `'#{value}` : value)", fails: ['csv: a text cell that starts like a formula'] },
   { name: 'the sampling of every race is the first race\'s', file: 'history-export.js', find: "races.map((race) => `#{race.label}: #{race.retention}`).join(' ')", replace: "races.map((race) => `#{race.label}: #{races[0].retention}`).join(' ')", fails: ['csv: a view of several races'] },
   { name: 'the window of every race is the first race\'s', file: 'history-export.js', find: '`#{race.label}: #{spanText(race.window, date)}`', replace: '`#{race.label}: #{spanText(races[0].window, date)}`', fails: ['csv: a view of several races'] },
 ]
+
+const csvCellFaulted = (find, replace) => {
+  const text = fs.readFileSync(path.join(utilitiesDirectory, 'csv-cell.js'), 'utf8').replace(/\r\n/g, '\n')
+
+  if (text.split(find).length !== 2) {
+    throw new Error(`The mutation must apply exactly once to csv-cell.js: ${find}`)
+  }
+
+  return text.replace(find, () => replace)
+}
 
 const PAGE_MUTATIONS = [
   { name: 'a series the chart does not draw is exported', mutate: (text) => replacing('      const datasets = view.data.datasets\n', "      const datasets = view.key === 'minerals' ? this.mineralComparison.series.map((entry) => ({ label: entry.name, data: entry.samples.map((sample, position) => ({ y: this.mineralScale === 'percent' ? entry.percent[position] : sample.stock })) })) : view.data.datasets\n")(replacing('series: drawn.map((entry) => ({ unit: percent', 'series: series.map((entry) => ({ unit: percent')(text)), fails: ['page: a series the chart does not draw is not exported'] },
@@ -1314,6 +1340,9 @@ const PAGE_MUTATIONS = [
   { name: 'the Rivals export states the window and the sampling of the selected race alone', mutate: replacing('        races,\n        date: (t) => this.date(t),', '        date: (t) => this.date(t),'), fails: ['page: the Rivals export states the window'] },
   { name: 'each race of the Rivals export takes the first and last sample of the selected race', mutate: replacing('from: race.times[0], to: race.times[race.times.length - 1] }', 'from: times[0], to: times[times.length - 1] }'), fails: ['page: the Rivals export states the window'] },
   { name: 'each race of the Rivals export takes the sampling of the selected race', mutate: replacing('retention: retentionNote(race.record, (t) => this.date(t)) }))', 'retention: retentionNote(this.record, (t) => this.date(t)) }))'), fails: ['page: the Rivals export states the window'] },
+  { name: 'the table download is not written by the shared writer', mutate: replacing('row.map((value) => csvCell(value)).join(\',\')).join(\'\\n\')', 'row.map((value) => value).join(\',\')).join(\'\\n\')'), fails: ['page: the table download writes the name of an installation'] },
+  { name: 'the table download does not quote a carriage return', sources: () => ({ 'utilities/csv-cell': csvCellFaulted('/[",\\r\\n]/.test(text)', '/[",\\n]/.test(text)') }), fails: ['page: the table download writes the name of an installation'] },
+  { name: 'the table download does not guard a text that starts like a formula', sources: () => ({ 'utilities/csv-cell': csvCellFaulted('guard && typeof value === \'string\' && FORMULA_START.test(value)', 'false') }), fails: ['page: the table download writes the name of an installation'] },
 ]
 
 const mutatedCopy = ({ file, find, replace }) => {
@@ -1428,7 +1457,7 @@ const mutantEntries = async ({ mutant, page }) => {
     let results = null
 
     if (page) {
-      results = await runChecks(await pageSuite(await loadModules(utilitiesDirectory), { mutate: mutant.mutate }), mutant.fails)
+      results = await runChecks(await pageSuite(await loadModules(utilitiesDirectory), { mutate: mutant.mutate, sources: mutant.sources ? mutant.sources() : {} }), mutant.fails)
     } else {
       directory = mutatedCopy(mutant)
       results = await runChecks(suite(await loadModules(directory)), mutant.fails)

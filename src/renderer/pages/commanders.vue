@@ -149,13 +149,26 @@
             <v-col v-if="typeId === 3" cols="12" sm="3">
               <v-select v-model="fieldId" :items="fieldItems" item-text="text" item-value="value" label="Research field" dense outlined hide-details clearable :disabled="!!focusCommanderId" />
             </v-col>
+            <v-col cols="12" sm="3">
+              <v-select v-model="postFilter" :items="postItems" item-text="text" item-value="value" label="Post" dense outlined hide-details clearable :disabled="!!focusCommanderId" data-roster-post />
+            </v-col>
+            <v-col v-if="rankItems.length" cols="12" sm="3">
+              <v-select v-model="rankFilter" :items="rankItems" item-text="text" item-value="value" label="Rank" dense outlined hide-details clearable :disabled="!!focusCommanderId" data-roster-rank />
+            </v-col>
+            <v-col cols="6" sm="2">
+              <v-text-field :value="ageMin" label="Age from" type="number" min="0" step="0.1" dense outlined hide-details clearable :disabled="!!focusCommanderId || !ageAvailable" data-roster-age-min @input="setAge('ageMin', $event)" />
+            </v-col>
+            <v-col cols="6" sm="2">
+              <v-text-field :value="ageMax" label="Age to" type="number" min="0" step="0.1" dense outlined hide-details clearable :disabled="!!focusCommanderId || !ageAvailable" data-roster-age-max @input="setAge('ageMax', $event)" />
+            </v-col>
           </v-row>
-          <v-data-table :headers="rosterHeaders" :items="rosterRows" item-key="CommanderID" :custom-sort="sortRows" :sort-by.sync="rosterTable.sortBy" :sort-desc.sync="rosterTable.sortDesc" :items-per-page.sync="rosterTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: rosterPageSizes }" class="roster-table">
+          <div v-if="!ageAvailable" class="px-6 pb-2 caption text--secondary" data-age-unavailable>This save lacks the species data the ages rest on, so the age range is off and any stored bound is kept for a save that has it.</div>
+          <v-data-table :headers="rosterHeaders" :items="rosterRows" item-key="CommanderID" :custom-sort="sortRows" :sort-by.sync="rosterTable.sortBy" :sort-desc.sync="rosterTable.sortDesc" :items-per-page.sync="rosterTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: rosterPageSizes }" class="roster-table" data-roster-table>
             <template #[`header.Age`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.age" /></span></template>
             <template #[`header.selectedBonus`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.bonusValue" /></span></template>
             <template #[`header.bonusList`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.bonusValue" /></span></template>
             <template #[`item.Name`]="{ item }">
-              <span class="font-weight-medium">{{ item.Name }}</span>
+              <span class="font-weight-medium" data-roster-name>{{ item.Name }}</span>
               <v-icon v-if="item.StoryCharacter" small class="ml-1" title="Story character: never retires">mdi-book-open-variant</v-icon>
             </template>
             <template #[`item.rankSort`]="{ item }">
@@ -190,8 +203,9 @@
             </template>
           </v-data-table>
           <div v-if="unassignedOnly && counts.noPost" class="panel-body caption text--secondary">{{ count(counts.noPost) }} commanders with no stored post are not shown: whether they are unassigned is not known.<provenance-mark :result="counts.idleResult" /></div>
+          <div v-if="rosterNotRated" class="panel-body caption text--secondary" data-roster-not-rated>{{ rosterNotRated }}</div>
           <div class="panel-foot caption text--secondary">
-            Age is the species' graduation age plus the years since the commander's career began. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
+            Age is the species' graduation age plus the years since the commander's career began, to one decimal; the age range is inclusive. Health risk is the game's own figure (1 is the healthiest); its scale isn't documented.
           </div>
         </v-card>
 
@@ -262,6 +276,37 @@
             The game deletes a commander who retires or dies when the game is saved, unless Retain is pressed for them in the Commanders window; prisoners are always kept. A prisoner's captor is the race owning the ship or colony that holds them, as the race knows it. Age at death counts to the commander's last career record. Expand a row for the full career.
           </div>
         </v-card>
+
+        <v-card class="panel" data-summary="The naval admin commands with their fleets and ships, or the ground formations, each with the commander serving in its post. Use it to see who commands what, where a link in the structure is broken, and to export the structure as CSV or Markdown." elevation="1" data-structure>
+          <div class="panel-head">
+            <span>Command structure</span>
+            <span class="d-flex align-center flex-wrap controls">
+              <v-switch v-if="structureView === 'naval'" v-model="shippingLines" label="Shipping lines" dense hide-details class="mt-0 mr-4" data-structure-shipping-lines />
+              <v-btn-toggle v-model="structureView" mandatory dense>
+                <v-btn v-for="view in structureViews" :key="view.value" :value="view.value" small>{{ view.text }}</v-btn>
+              </v-btn-toggle>
+              <v-btn small text :disabled="!structureExportable" class="ml-2" aria-label="Download the command structure as CSV" data-structure-csv @click="downloadStructure('csv')"><v-icon small left>mdi-download</v-icon>CSV</v-btn>
+              <v-btn small text :disabled="!structureExportable" aria-label="Download the command structure as Markdown" data-structure-markdown @click="downloadStructure('markdown')"><v-icon small left>mdi-download</v-icon>Markdown</v-btn>
+            </span>
+          </div>
+          <load-state :failed="structureState.failed" :error="structureState.error" :loading="structureState.loading" class="px-6" @retry="retryStructure" />
+          <div v-if="structureNotice" class="panel-body caption text--secondary" data-structure-notice>{{ structureNotice }}</div>
+          <template v-if="structureExportable">
+            <div class="panel-body caption text--secondary" data-structure-summary>{{ structureSummary }}</div>
+            <v-data-table :headers="structureHeaders" :items="structureRows" item-key="key" :items-per-page.sync="structureTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: structurePageSizes }" class="roster-table" data-structure-table>
+              <template #[`item.Name`]="{ item }">
+                <span :style="{ paddingLeft: `${Math.min(item.Depth, 12) * 16}px` }" data-structure-name>{{ item.Name === null || item.Name === '' ? '—' : item.Name }}</span>
+              </template>
+              <template #[`item.Holder`]="{ item }">
+                <span v-if="item.Holder" data-structure-holder>{{ item.Holder }}</span>
+                <span v-else class="text--secondary" data-structure-holder>—</span>
+              </template>
+            </v-data-table>
+          </template>
+          <div class="panel-foot caption text--secondary">
+            The naval structure leaves out the shipping lines' fleets and ships unless Shipping lines is on, which lists them marked in their own column and in both exports. A fleet is not a post. A link to a parent that is missing, belongs to another race or loops is listed as its own top-level entry with a note, and a post whose holders cannot be told is not shown as vacant. The exports hold one row per entry, with its path from the top.
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -277,10 +322,13 @@ import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
-import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterParts, shipSuggestions } from '../utilities/commanders'
+import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
-import { tracked } from '../utilities/load-tracking'
+import { loadGroundFormationPosts } from '../utilities/ground-formations'
+import { hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
+import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { UNKNOWN_TEXT, countText, isKnownNumber, roundToDecimal } from '../utilities/math'
+import { loadNavalHierarchy } from '../utilities/naval-hierarchy'
 import { describeResult, isAvailable, valueOrNull } from '../utilities/provenance'
 
 const INPUT_LABELS = {
@@ -294,7 +342,12 @@ const INPUT_LABELS = {
   formerHistory: 'their careers',
   held: 'the prisoners held',
   unsettled: 'the commanders with no stored status',
+  navalTree: 'the naval command structure',
+  groundTree: 'the ground command structure',
 }
+// The reads of the command structure panel alone: the roster and the rest of the page never wait for them, and a failure of one is shown on that panel.
+const OPTIONAL_INPUTS = ['navalTree', 'groundTree']
+const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 // Chips shown per commander in the roster; the rest are in the tooltip-free count.
 const ROSTER_BONUSES = 6
 // Unavailable assignments named under a suggestion table; the rest are counted.
@@ -308,6 +361,23 @@ const FORMER_GROUPS = [
 const ROSTER_PAGE_SIZES = [25, 50, 100]
 const SHIP_PAGE_SIZES = [15, 30, -1]
 const FORMER_PAGE_SIZES = [15, 50, -1]
+const STRUCTURE_PAGE_SIZES = [25, 50, 100]
+const STRUCTURE_VIEWS = [
+  { value: 'naval', text: 'Naval' },
+  { value: 'ground', text: 'Ground' },
+]
+const STRUCTURE_HEADERS = [
+  { text: 'Name', value: 'Name', sortable: false },
+  { text: 'Kind', value: 'Kind', sortable: false },
+  { text: 'ID', value: 'ID', sortable: false, align: 'end' },
+  { text: 'Post', value: 'Post', sortable: false },
+  { text: 'Holder', value: 'Holder', sortable: false },
+  { text: 'Vacancy', value: 'Vacancy', sortable: false },
+  { text: 'Note', value: 'Note', sortable: false },
+]
+const SHIPPING_LINE_HEADER = { text: 'Shipping line', value: 'Shipping line', sortable: false }
+// An age bound that is stored: a number of years from 0, or null when the bound is off.
+const validBound = (value) => value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
 
 export default {
   name: 'CommandersPage',
@@ -323,6 +393,13 @@ export default {
       search: { key: 'commandersSearch', default: '', scope: 'race' },
       bonusId: { key: 'commandersBonus', default: null },
       fieldId: { key: 'commandersField', default: null },
+      postFilter: { key: 'commandersPost', default: null },
+      rankFilter: { key: 'commandersRank', default: null },
+      ageMin: { key: 'commandersAgeMin', default: null, valid: validBound },
+      ageMax: { key: 'commandersAgeMax', default: null, valid: validBound },
+      structureView: { key: 'commandersStructureView', default: 'naval', valid: oneOf(STRUCTURE_VIEWS.map((view) => view.value)) },
+      shippingLines: { key: 'commandersShippingLines', default: false, valid: (value) => typeof value === 'boolean' },
+      structureTable: tableView('commandersStructureTable', { itemsPerPage: 25, itemsPerPageOptions: STRUCTURE_PAGE_SIZES }),
       rosterTable: tableView('commandersRosterTable', { sortDesc: [], itemsPerPage: 25, itemsPerPageOptions: ROSTER_PAGE_SIZES }),
       formerView: { key: 'commandersFormerView', default: 'prisoner', valid: oneOf(FORMER_GROUPS.map((group) => group.value)) },
       formerOwnTable: tableView('commandersFormerOwnTable', { sortBy: ['lastTime'], sortDesc: [true], itemsPerPage: 15, itemsPerPageOptions: FORMER_PAGE_SIZES }),
@@ -334,6 +411,8 @@ export default {
       rosterPageSizes: ROSTER_PAGE_SIZES,
       shipPageSizes: SHIP_PAGE_SIZES,
       formerPageSizes: FORMER_PAGE_SIZES,
+      structurePageSizes: STRUCTURE_PAGE_SIZES,
+      structureViews: STRUCTURE_VIEWS,
       focusCommanderId: null,
       focusColonyId: null,
     }
@@ -476,12 +555,17 @@ export default {
       return Object.entries(fields).map(([value, text]) => ({ text, value: Number(value) })).sort((a, b) => a.text.localeCompare(b.text))
     },
 
-    rosterRows() {
-      const search = (this.search || '').toLowerCase()
-      const people = this.focusCommanderId ? this.people.filter((person) => person.CommanderID === this.focusCommanderId) : this.byType[this.typeId].filter((person) => (!this.unassignedOnly || person.CommandType === 0) && (this.fieldId === null || this.typeId !== 3 || person.ResSpecID === this.fieldId) && (!search || `${person.Name} ${person.AssignmentName || ''}`.toLowerCase().includes(search)) && (this.bonusId === null || person.bonuses[this.bonusId] !== undefined))
+    // The roster after its filters: { kept: [{ person, age }], notRated }. A linked commander is shown whatever the filters say. The rank filter applies only to a type whose commanders have ranks.
+    rosterFiltered() {
+      if (this.focusCommanderId) {
+        return { kept: this.people.filter((person) => person.CommanderID === this.focusCommanderId).map((person) => ({ person, age: ageResult(person, person.GameTime) })), notRated: { post: 0, rank: 0, age: 0 } }
+      }
 
-      return people.map((person) => {
-        const age = ageResult(person, person.GameTime)
+      return rosterFilter(this.byType[this.typeId], { search: this.search, unassignedOnly: this.unassignedOnly, fieldId: this.fieldId, typeId: this.typeId, bonusId: this.bonusId, post: this.postFilter, rank: this.rankItems.length ? this.rankFilter : null, ageMin: this.ageAvailable ? this.ageMin : null, ageMax: this.ageAvailable ? this.ageMax : null })
+    },
+
+    rosterRows() {
+      return this.rosterFiltered.kept.map(({ person, age }) => {
         const known = isKnownNumber(person.CommandType)
 
         return {
@@ -500,6 +584,80 @@ export default {
           traitCount: person.traitIds.length,
         }
       })
+    },
+
+    // The posts and ranks the chosen type holds, as the choices of the post and rank filters.
+    filterChoices() {
+      return rosterChoices(this.byType[this.typeId])
+    },
+
+    postItems() {
+      return this.filterChoices.posts
+    },
+
+    rankItems() {
+      return this.rankAvailable ? this.filterChoices.ranks : []
+    },
+
+    // Whether the save has the column groups the rank and age filters rest on: with a group missing its filter is inert, whatever bound is stored. Unknown (no report yet) counts as present, since the roster waits for the report.
+    rankAvailable() {
+      return !this.rosterGroups || this.rosterGroups.rank !== false
+    },
+
+    ageAvailable() {
+      return !this.rosterGroups || this.rosterGroups.age !== false
+    },
+
+    // The commanders an active filter could not rate for a value the save does not store, in words; empty when none.
+    rosterNotRated() {
+      const { post, rank, age } = this.rosterFiltered.notRated
+
+      return [post ? `${this.count(post)} commanders with no stored post are not shown by the post filter.` : '', rank ? `${this.count(rank)} commanders with no stored rank are not shown by the rank filter.` : '', age ? `${this.count(age)} commanders whose age cannot be worked out are not shown by the age range.` : ''].filter(Boolean).join(' ')
+    },
+
+    // The reads that hold the page back: every one but the command structure's, which have their own note.
+    failedInputs() {
+      return CORE_INPUTS.filter((key) => this.loadErrors[key])
+    },
+
+    inputsLoaded() {
+      return allLoaded(this.loadErrors, CORE_INPUTS)
+    },
+
+    // The command structure panel's reads: loading until each has settled, else the words naming the failed ones with the first message. The panel lists nothing from a read that is in flight or failed.
+    structureState() {
+      const failed = OPTIONAL_INPUTS.filter((key) => this.loadErrors[key])
+
+      return { loading: failed.length === 0 && !allLoaded(this.loadErrors, OPTIONAL_INPUTS), failed: joinLabels(failed.map((key) => INPUT_LABELS[key])), error: failed.length ? this.loadErrors[failed[0]] : '' }
+    },
+
+    // The model of the chosen structure, null until its read is in, while it is read again for changed inputs (the plugin keeps the earlier value until then) and after it failed.
+    structureModel() {
+      const model = this.structureView === 'naval' ? this.navalTree : this.groundTree
+
+      return this.structureState.failed || this.loadErrors[this.structureView === 'naval' ? 'navalTree' : 'groundTree'] !== null || !model ? null : model
+    },
+
+    structureExportable() {
+      return Boolean(this.structureModel && this.structureModel.supported)
+    },
+
+    // What the panel says instead of, or beside, the table: the save lacks what the structure reads, or the serving commanders.
+    structureNotice() {
+      return this.structureModel ? hierarchyNotice(this.structureModel, this.structureView) : null
+    },
+
+    structureSummary() {
+      return this.structureExportable ? hierarchySummary(this.structureModel, this.structureView) : ''
+    },
+
+    // The structure table's columns: the shipping-line mark only where the listed model holds the shipping lines.
+    structureHeaders() {
+      return this.structureExportable && this.structureModel.shippingLines ? STRUCTURE_HEADERS.flatMap((header) => (header.value === 'Kind' ? [header, SHIPPING_LINE_HEADER] : [header])) : STRUCTURE_HEADERS
+    },
+
+    structureRows() {
+      return this.structureExportable ? hierarchyRows(this.structureModel, this.structureView).map((row) => ({ ...row, key: row['Path IDs'] })) : []
     },
 
     // The race's former commanders with their status, captor, last career record and age; the dead age only to their last record.
@@ -783,7 +941,7 @@ export default {
       }
     },
     typeId() {
-      ['bonusId', 'fieldId'].forEach((name) => (this.focusCommanderId ? this.setUnsaved(name, null) : (this[name] = null)))
+      ['bonusId', 'fieldId', 'postFilter', 'rankFilter'].forEach((name) => (this.focusCommanderId ? this.setUnsaved(name, null) : (this[name] = null)))
     },
     // A focused commander's roster is the one shown, so the type toggle follows them.
     focusPerson(person) {
@@ -906,6 +1064,31 @@ export default {
     },
     unratedMore(list) {
       return Math.max(0, list.length - UNRATED_SHOWN)
+    },
+    // The age range's bound as typed: a number, or null when the field is empty or not a number.
+    setAge(name, value) {
+      this[name] = ageBound(value)
+    },
+    retryStructure() {
+      OPTIONAL_INPUTS.filter((key) => this.loadErrors[key]).forEach((key) => this.$asyncComputed[key].update())
+    },
+    // The text, file name and type of the chosen structure in a format ('csv' or 'markdown'), or null while there is nothing to export.
+    structureExport(format) {
+      return this.structureExportable ? hierarchyExport(this.structureModel, this.structureView, format) : null
+    },
+    downloadStructure(format) {
+      const file = this.structureExport(format)
+
+      if (!file) {
+        return
+      }
+
+      const link = document.createElement('a')
+
+      link.href = URL.createObjectURL(new Blob([file.text], { type: file.type }))
+      link.download = file.fileName
+      link.click()
+      URL.revokeObjectURL(link.href)
     },
   },
   asyncComputed: {
@@ -1049,6 +1232,28 @@ export default {
         return rows[0].Unsettled
       }),
       default: 0,
+    },
+    // The race's naval administration as one model (`loadNavalHierarchy`), or { supported: false, missing } for a save without what it reads. Read for the command structure panel alone: the roster never waits for it.
+    navalTree: {
+      get: tracked('navalTree', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return Object.freeze(await loadNavalHierarchy(this.database, { GameID: this.GameID, RaceID: this.RaceID, shippingLines: this.shippingLines }))
+      }),
+      default: null,
+    },
+    // The race's ground formations as one model (`loadGroundFormationPosts`), with the commander of each formation, or { supported: false, missing } for a save without what it reads. Read for the command structure panel alone.
+    groundTree: {
+      get: tracked('groundTree', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return Object.freeze(await loadGroundFormationPosts(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
     },
   },
 }

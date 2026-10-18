@@ -1,5 +1,6 @@
 // The mineral comparison of the Empire History page: the stockpiles of the minerals picked, as tonnes or as the percent change from a baseline, with each mineral's colour fixed by its mineral ID, and the comparison as CSV. Pure: it reads the snapshots it is given (utilities/history.js) and draws nothing.
 
+import { csvCell } from './csv-cell'
 import { mineralResult } from './history'
 import { MINERALS } from './minerals'
 import { registerRule, valueOrNull } from './provenance'
@@ -66,8 +67,6 @@ export const compareMinerals = (snapshots, ids) => ({
   }),
 })
 
-const cell = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value === null || value === undefined ? '' : value)
-
 // The CSV of a comparison as the page shows it: a row for each mineral at each snapshot of the window, the mineral's ID and the slot and colour it is drawn in, the scale, the stock in tonnes, the baseline's stock and game time (and its date), the change from it in percent, the seconds since the mineral's previous row and the retention note of the history (how sparsely it is sampled and what is known of its thinning), on the first row. A figure that is not recorded or not defined is an empty cell, and the note says why. `palette` is the categorical colours in force, `date(seconds)` the date of a game time and `retention` the retention note.
 export const comparisonCsv = ({ comparison, scale, palette, date, retention }) => {
   const named = MINERAL_SCALES.find((entry) => entry.value === scale) || MINERAL_SCALES[0]
@@ -83,5 +82,5 @@ export const comparisonCsv = ({ comparison, scale, palette, date, retention }) =
     })
   })
 
-  return [header, ...rows].map((row) => row.map(cell).join(',')).join('\n')
+  return [header, ...rows].map((row) => row.map((value) => csvCell(value)).join(',')).join('\n')
 }

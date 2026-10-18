@@ -20,6 +20,15 @@ const { endSection, runSections, printSection } = require('./lib/check-sections'
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
 const MODULE = 'ground-formations'
+
+const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
+
+// The packages the utilities import: the commanders module, which the post holders take the serving test from, reads dates with dayjs.
+const STUBS = {
+  dayjs: `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs')}`,
+  'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default ${requireOf('dayjs/plugin/utc.js')}`,
+  romanum: 'export default { toNumeral: String }',
+}
 const FILE = `${MODULE}.js`
 
 let checks = 0
@@ -944,7 +953,7 @@ const runMutant = async ([name, from, to, ids]) => {
   const directory = mutatedCopy(from, to)
 
   try {
-    const mutant = (await loadUtilities([MODULE], { directory }))[MODULE]
+    const mutant = (await loadUtilities([MODULE], { directory, stubs: STUBS }))[MODULE]
     const failed = await failedIds(mutant)
 
     check(`mutant: ${name}: caught by ${failed.join(', ') || 'nothing'}`, ids.some((id) => failed.includes(id)), `expected one of ${ids.join(', ')}`)
@@ -960,7 +969,7 @@ const coveredSaves = () => new Set(OWNER_SAVES.map((owner) => `${path.resolve(ro
 // One part, in this process: `constructed`, `owner:<index>`, `breadth:<index>`, `control` or `mutant:<index>`.
 const runPart = async (part) => {
   const [kind, index] = part.split(':')
-  const mod = (await loadUtilities([MODULE]))[MODULE]
+  const mod = (await loadUtilities([MODULE], { stubs: STUBS }))[MODULE]
 
   if (part === 'constructed') {
     console.log('Constructed race and loader')

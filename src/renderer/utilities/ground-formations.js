@@ -10,6 +10,11 @@
 //
 // The game keeps a formation's parent link when it embarks or moves, so a formation may sit at another place than its parent. The game counts a formation's size as the sum of its classes' size times units; the model reports that sum as `mass` without rounding.
 
+import { HOLDER_COLUMNS, holderIndex, holderSql, postCounts, postOf, postProblems, strayHolders } from './post-holders'
+
+// The post type of a commander who serves in a ground formation (FCT_Commander.CommandType).
+const GROUND_POST = 5
+
 // The columns each table must have for the model to be read from a save; a save that lacks one is unsupported and the loader says which. The template's Obsolete column is not required (an earlier save lacks it) and reads as unknown.
 export const GROUND_FORMATION_COLUMNS = {
   FCT_GroundUnitFormation: ['FormationID', 'Name', 'Abbreviation', 'RaceID', 'GameID', 'OriginalTemplateID', 'ReplacementTemplateID', 'PopulationID', 'ShipID', 'ParentFormationID'],
@@ -243,7 +248,7 @@ const locate = (row, { populations, ships, fleets }) => {
 }
 
 // The loops of the parent links: `parentOf` maps a formation to its parent when that parent is one of the race's formations. A formation has one parent, so each loop is simple. Each is the list of its members starting at the lowest id and following the parent links.
-const findCycles = (parentOf) => {
+export const findCycles = (parentOf) => {
   const seen = new Map()
   const cycles = []
 
@@ -281,13 +286,13 @@ const emptyTree = () => ({ formations: 0, mass: { value: 0, unknownFormations: 0
 
 const noElements = () => ({ value: null, from: [], unknown: [{ elementId: null, classId: null, reason: 'the formation has no element rows' }] })
 
-// The model of a race's ground formations from the rows of `groundFormationSql` (the arrays `formations`, `outsideParents`, `elements`, `classes`, `components`, `templates`, `templateElements`, `ships`, `fleets` and `populations`; one that is left out is empty). Gives { GameID, RaceID, formations, byId, roots, cycles, problems, summary }:
-// - `formations` is one entry per row of the race, by id: { id, name, abbreviation, parent: { id, state, ... }, children (ids), anchor: { kind, id } (the top-level entry it hangs from: 'root', 'orphan', 'foreign', 'unknown' or 'cycle'), resolved (whether that top is a formation with no parent), depth, location, elements, mass, geo, xeno (each { value, from, unknown }), tree (the formation with everything below it: { formations, mass, geo, xeno }, each figure { value, unknownFormations } where value adds the known formations and unknownFormations counts those whose figure is unknown), templates: { original, replacement } (each { id, state: 'none' | 'found' | 'missing' | 'foreign' | 'unknown', name, abbreviation, obsolete, elements }), problems }.
+// The model of a race's ground formations from the rows of `groundFormationSql` (the arrays `formations`, `outsideParents`, `elements`, `classes`, `components`, `templates`, `templateElements`, `ships`, `fleets` and `populations`; one that is left out is empty) and, optionally, the `commanders` of `holderSql` for the ground formation post (left out, the posts are unread). Gives { GameID, RaceID, formations, byId, roots, cycles, problems, summary, holders }:
+// - `formations` is one entry per row of the race, by id: { id, name, abbreviation, parent: { id, state, ... }, children (ids), anchor: { kind, id } (the top-level entry it hangs from: 'root', 'orphan', 'foreign', 'unknown' or 'cycle'), resolved (whether that top is a formation with no parent), depth, location, post (the commander who serves in the formation: { state: 'held' | 'shared' | 'vacant' | 'unknown' | 'unread', holders: [{ id, name }], unsettled }, from the rows `commanders` of `holderSql`; without them every post is `unread`), elements, mass, geo, xeno (each { value, from, unknown }), tree (the formation with everything below it: { formations, mass, geo, xeno }, each figure { value, unknownFormations } where value adds the known formations and unknownFormations counts those whose figure is unknown), templates: { original, replacement } (each { id, state: 'none' | 'found' | 'missing' | 'foreign' | 'unknown', name, abbreviation, obsolete, elements }), problems }.
 // - `roots` are the ids of the top-level entries: formations with no parent, then orphans, then the rest by id, each once. Every formation is under exactly one of them.
 // - `cycles` are { id, members, cutAt }. `problems` is every problem of every formation, each { formationId, kind, message, ... }.
-// - `summary` reconciles with the rows: `formations` is the number of rows kept, `excluded` the rows given that are not the race's, and the totals of the race only.
+// - `summary` reconciles with the rows: `formations` is the number of rows kept, `excluded` the rows given that are not the race's, and the totals of the race only. `summary.posts` counts the formations by the state of their post and `summary.strayHolders` the serving commanders whose formation is not one of the race's.
 export const buildGroundFormations = (rows, { GameID, RaceID }) => {
-  const { formations: formationRows = [], outsideParents = [], elements: elementRows = [], classes: classRows = [], components: componentRows = [], templates: templateRows = [], templateElements: templateElementRows = [], ships: shipRows = [], fleets: fleetRows = [], populations: populationRows = [] } = rows
+  const { formations: formationRows = [], outsideParents = [], elements: elementRows = [], classes: classRows = [], components: componentRows = [], templates: templateRows = [], templateElements: templateElementRows = [], ships: shipRows = [], fleets: fleetRows = [], populations: populationRows = [], commanders: commanderRows } = rows
   const owned = []
   const duplicates = []
   const seenIds = new Set()
@@ -329,6 +334,7 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
     }
   })
 
+  const holders = holderIndex(commanderRows, GROUND_POST)
   const parentOf = new Map()
   const nodes = new Map()
 
@@ -400,8 +406,9 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
     })
 
     const { location, problems: placed } = locate(row, lookups)
+    const post = postOf(holders, row.FormationID)
 
-    nodes.set(row.FormationID, { id: row.FormationID, name: row.Name ?? null, abbreviation: row.Abbreviation ?? null, parent, children: [], anchor: null, resolved: false, depth: 0, location, elements: items, mass: sized.mass, geo: sized.geo, xeno: sized.xeno, tree: emptyTree(), templates: refs, problems: [...problems, ...placed] })
+    nodes.set(row.FormationID, { id: row.FormationID, name: row.Name ?? null, abbreviation: row.Abbreviation ?? null, parent, children: [], anchor: null, resolved: false, depth: 0, location, post, elements: items, mass: sized.mass, geo: sized.geo, xeno: sized.xeno, tree: emptyTree(), templates: refs, problems: [...problems, ...placed, ...postProblems(post)] })
   })
 
   const cycles = findCycles(parentOf).map((members) => ({ id: `cycle:${members[0]}`, members, cutAt: members[0] }))
@@ -479,6 +486,8 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
   const templateCount = (state) => ['original', 'replacement'].reduce((sums, which) => ({ ...sums, [which]: list.filter((node) => node.templates[which].state === state).length }), {})
 
   const summary = {
+    posts: postCounts(list),
+    strayHolders: strayHolders(holders, seenIds),
     formations: list.length,
     excluded,
     duplicateRows: duplicates.length,
@@ -501,7 +510,7 @@ export const buildGroundFormations = (rows, { GameID, RaceID }) => {
     xeno: total('xeno'),
   }
 
-  return { GameID, RaceID, formations: list, byId: nodes, roots: topLevel.map((node) => node.id), cycles, problems, summary }
+  return { GameID, RaceID, formations: list, byId: nodes, roots: topLevel.map((node) => node.id), cycles, problems, summary, holders: { read: holders !== null, missing: [] } }
 }
 
 // The roles a formation is told apart by, from the model's own ratings: `geo` and `xeno` when the rating of that kind is above 0, `other` when both are 0. A formation with both ratings is in both roles. A role is null where an unknown rating leaves it undecided (a formation with no proven role and an unknown rating is `undetermined`, with no role to count under).
@@ -606,11 +615,11 @@ const columnsOf = async (database, table) => {
   return new Set(rows.map((row) => row.name))
 }
 
-// The columns of GROUND_FORMATION_COLUMNS that a save lacks, as 'Table.Column' (or the table alone when it is not there).
-const missingColumns = async (database) => {
+// The columns of `wanted` ({ [table]: [column] }, GROUND_FORMATION_COLUMNS by default) that a save lacks, as 'Table.Column' (or the table alone when it is not there).
+export const missingColumns = async (database, wanted = GROUND_FORMATION_COLUMNS) => {
   const missing = []
 
-  for (const [table, columns] of Object.entries(GROUND_FORMATION_COLUMNS)) {
+  for (const [table, columns] of Object.entries(wanted)) {
     const present = await columnsOf(database, table)
 
     if (!present.size) {
@@ -623,14 +632,14 @@ const missingColumns = async (database) => {
   return missing
 }
 
-// Reads the model for a game and a race from the open save, with SELECT statements only. A save that lacks a table or column of GROUND_FORMATION_COLUMNS gives { supported: false, missing } and no figures; otherwise { supported: true, ...model } (see `buildGroundFormations`). The template's Obsolete column is read when the save has it and is null otherwise.
-export const loadGroundFormations = async (database, { GameID, RaceID }) => {
+// The rows of the formations of a game and a race, with SELECT statements only: { rows } or, for a save that lacks a table or column of GROUND_FORMATION_COLUMNS, { missing }. The template's Obsolete column is read when the save has it and is null otherwise.
+const readRows = async (database, { GameID, RaceID }) => {
   requireIds({ GameID, RaceID })
 
   const missing = await missingColumns(database)
 
   if (missing.length) {
-    return { supported: false, missing, GameID, RaceID }
+    return { missing }
   }
 
   const obsolete = (await columnsOf(database, 'FCT_GroundUnitFormationTemplate')).has('Obsolete')
@@ -641,5 +650,33 @@ export const loadGroundFormations = async (database, { GameID, RaceID }) => {
     ;[rows[name]] = await database.query(sql)
   }
 
+  return { rows }
+}
+
+// Reads the model for a game and a race from the open save. A save that lacks a table or column of GROUND_FORMATION_COLUMNS gives { supported: false, missing } and no figures; otherwise { supported: true, ...model } (see `buildGroundFormations`). No commander is read: every post is `unread` and `holders` is { read: false, missing: [] }.
+export const loadGroundFormations = async (database, { GameID, RaceID }) => {
+  const { rows, missing } = await readRows(database, { GameID, RaceID })
+
+  if (missing) {
+    return { supported: false, missing, GameID, RaceID }
+  }
+
   return { supported: true, ...buildGroundFormations(rows, { GameID, RaceID }) }
+}
+
+// The model of `loadGroundFormations` with the serving commander of each formation, read when the save has the columns of HOLDER_COLUMNS. `holders` says what the save lacks; the posts are `unread` when it lacks any.
+export const loadGroundFormationPosts = async (database, { GameID, RaceID }) => {
+  const { rows, missing } = await readRows(database, { GameID, RaceID })
+
+  if (missing) {
+    return { supported: false, missing, GameID, RaceID }
+  }
+
+  const holderGaps = await missingColumns(database, HOLDER_COLUMNS)
+
+  if (!holderGaps.length) {
+    ;[rows.commanders] = await database.query(holderSql({ GameID, RaceID }, [GROUND_POST]))
+  }
+
+  return { supported: true, ...buildGroundFormations(rows, { GameID, RaceID }), holders: { read: !holderGaps.length, missing: holderGaps } }
 }

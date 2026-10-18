@@ -712,6 +712,72 @@ export const ageResult = (person, until, untilName = 'the game time') => {
   return missing.length ? unavailable({ rule: AGE, missing }) : ofRule({ rule: AGE, value: roundToDecimal(Number(person.GraduationAge) + (Number(until) - Number(person.CareerStart)) / SECONDS_PER_YEAR, 1), inputs: { present: ['graduation age', 'CareerStart', untilName] } })
 }
 
+// A bound of the age range as a number, or null when it is off: a field left empty, text that is not a number and a negative figure are no bound.
+export const ageBound = (value) => {
+  const number = typeof value === 'string' && value.trim() === '' ? NaN : Number(value)
+
+  return value !== null && value !== undefined && Number.isFinite(number) && number >= 0 ? number : null
+}
+
+// The posts and ranks the commanders of one type hold, as the choices of the roster's filters: `posts` are { value (CommandType), text } by post, `ranks` { value (RankLevel), text } by level. A commander with no stored post or rank adds no choice.
+export const rosterChoices = (people) => {
+  const posts = new Map()
+  const ranks = new Map()
+
+  people.forEach((person) => {
+    if (isKnownNumber(person.CommandType) && !posts.has(person.CommandType)) {
+      posts.set(person.CommandType, POSTS[person.CommandType] || `Post ${person.CommandType}`)
+    }
+
+    if (isKnownNumber(person.RankLevel) && !ranks.has(person.RankLevel)) {
+      ranks.set(person.RankLevel, person.RankName || person.RankAbbrev || `Rank ${person.RankLevel}`)
+    }
+  })
+
+  return {
+    posts: Array.from(posts.entries()).map(([value, text]) => ({ value, text })).sort((a, b) => a.value - b.value),
+    ranks: Array.from(ranks.entries()).map(([value, text]) => ({ value, text })).sort((a, b) => b.value - a.value),
+  }
+}
+
+// The commanders of the roster that pass its filters. `people` are the commanders of the chosen type; the filters are the search over names and assignments, the unassigned-only switch, the research field (scientists), a bonus held, the post (CommandType), the rank (RankLevel) and the age range (both bounds inclusive, on the age as the roster shows it to one decimal). A filter that is off passes everyone.
+// A commander whose value is not stored for an active filter (no post, no rank, an age that cannot be worked out) is neither inside nor outside it: left out of the rows and counted, never read as 0 or as another post. Gives { kept: [{ person, age }] (age the result of `ageResult`), notRated: { post, rank, age } }. A commander who falls outside another filter on a stored value is not counted: `notRated` is of those who would otherwise show.
+export const rosterFilter = (people, { search = '', unassignedOnly = false, fieldId = null, typeId = null, bonusId = null, post = null, rank = null, ageMin = null, ageMax = null }) => {
+  const text = (search || '').toLowerCase()
+  const low = ageBound(ageMin)
+  const high = ageBound(ageMax)
+  const notRated = { post: 0, rank: 0, age: 0 }
+  const kept = []
+
+  people.forEach((person) => {
+    if ((unassignedOnly && person.CommandType !== 0) || (fieldId !== null && typeId === 3 && person.ResSpecID !== fieldId) || (text && !`${person.Name} ${person.AssignmentName || ''}`.toLowerCase().includes(text)) || (bonusId !== null && person.bonuses[bonusId] === undefined)) {
+      return
+    }
+
+    const age = ageResult(person, person.GameTime)
+    const value = isAvailable(age) ? age.value : null
+    const verdicts = {
+      post: post === null ? true : isKnownNumber(person.CommandType) ? person.CommandType === post : null,
+      rank: rank === null ? true : isKnownNumber(person.RankLevel) ? person.RankLevel === rank : null,
+      age: low === null && high === null ? true : value === null ? null : (low === null || value >= low) && (high === null || value <= high),
+    }
+
+    if (Object.values(verdicts).includes(false)) {
+      return
+    }
+
+    if (Object.values(verdicts).includes(null)) {
+      Object.keys(verdicts).filter((name) => verdicts[name] === null).forEach((name) => notRated[name]++)
+
+      return
+    }
+
+    kept.push({ person, age })
+  })
+
+  return { kept, notRated }
+}
+
 // The calendar date of a career record, as a result of 'commanders.recordDate' ('YYYY-MM-DD'): unavailable without a stored time or a game start year (a positive year; the store holds 0 until the clock is read).
 export const recordDate = (startYear, seconds) => {
   const missing = [...(isKnownNumber(seconds) ? [] : ['the time of the record']), ...(isKnownNumber(startYear) && startYear > 0 ? [] : ['the game\'s start year'])]

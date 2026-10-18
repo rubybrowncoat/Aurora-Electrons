@@ -456,6 +456,7 @@ import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
 import { activeAppearance } from '../utilities/appearance'
+import { csvCell } from '../utilities/csv-cell'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadClassParts, loadClasses, loadRaceEngines, loadStockTanks, splitClasses } from '../utilities/design-data'
 import { DEFAULT_SQUADRON_RADIUS_TECH, DEFAULT_SQUADRON_SIZE_TECH, MAX_SPEED, TONS_PER_HS, burnPerHour, classSpeed, enduranceHours, fullPowerRangeKm, selfJumpDrive, tankPackageResult, thermalSignature } from '../utilities/design-rules'
@@ -1752,8 +1753,6 @@ export default {
     downloadCsv() {
       const header = ['Row', 'Engine', 'Count', 'Thrust', 'Power (EP)', 'L / EP hour', 'Propulsion HS', 'Share (%)', ...BASIS_COLUMNS.flatMap(([label]) => [label, `${label} status`]), 'Crew', 'Type', 'Tank package', 'Rules', 'Game versions', 'Assumptions', 'Missing inputs', 'Search']
       const search = !this.result ? '' : `${this.result.run.incomplete ? `incomplete (${this.result.run.termination})` : 'complete'}: ${countText(this.result.counts)}`
-      const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-
       const lines = this.rows.map((row) => {
         const basis = BASIS_COLUMNS.map(([, key]) => row.provenance[key])
         const fields = basis.map(exportFields)
@@ -1762,7 +1761,7 @@ export default {
         return [row.pinned ? 'Saved class' : row.rank, row.name, row.count, row.thrust === null ? '' : row.thrust, row.power, row.fuelPerEph, row.propulsionHS, roundToDecimal(row.share * 100, 4), ...fields.flatMap((field) => [field.value, field.status]), row.crew, row.type, this.tankPackageCell(row), unique(results.map((result) => [result.rule.id])).join('; '), unique(results.map((result) => result.rule.versions)).join(', '), unique(results.map((result) => result.assumptions)).join('; '), unique(results.map((result) => result.inputs.missing)).join('; '), row.pinned ? '' : search]
       })
 
-      const csv = [header, ...lines].map((line) => line.map(quote).join(',')).join('\n')
+      const csv = [header, ...lines].map((line) => line.map((value) => csvCell(value)).join(',')).join('\n')
       const link = document.createElement('a')
 
       link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))

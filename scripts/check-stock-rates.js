@@ -1094,7 +1094,7 @@ const MUTATIONS = [
   { name: 'the assumptions left out of the CSV', file: U, find: '...analysis.assumptions.map((line) => fact(\'Assumption\', line)),', replace: '', fails: ['csv'] },
   { name: 'the retention note left out of the CSV', file: U, find: '...(retention ? [fact(\'Retention\', retention)] : []),', replace: '', fails: ['csv'] },
   { name: 'an unknown figure exported as 0', file: U, find: 'Value: fields.value,', replace: 'Value: fields.value === \'\' ? 0 : fields.value,', fails: ['csv-unknown'] },
-  { name: 'the formula guard off', file: U, find: 'typeof value === \'string\' && FORMULA_START.test(value)', replace: 'typeof value === \'string\' && false', fails: ['csv-safe'] },
+  { name: 'the formula guard off', file: U, find: 'csvCell(fields[column])', replace: 'csvCell(fields[column], { guard: false })', fails: ['csv-safe'] },
   { name: 'the status and rule left out of the CSV', file: U, find: 'Status: fields.status, Rule: fields.rule,', replace: 'Status: \'\', Rule: \'\',', fails: ['csv', 'csv-unknown'] },
   { name: 'the game time of the CSV rounded', file: U, find: '\'Game time (s)\': row.t, Date: date(row.t)', replace: '\'Game time (s)\': Math.round(row.t / 1e6) * 1e6, Date: date(row.t)', fails: ['csv'] },
   { name: 'the notes left out of the copied text', file: U, find: '...analysis.notes, \'\', \'Observations:\'', replace: '\'\', \'Observations:\'', fails: ['text'] },

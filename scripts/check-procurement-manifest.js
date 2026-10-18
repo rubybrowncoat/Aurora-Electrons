@@ -26,7 +26,7 @@ const C = 'src/renderer/components/production/ProcurementManifest.vue'
 const P = 'src/renderer/pages/production.vue'
 const K = 'src/renderer/utilities/capabilities.js'
 const FILES = { [U]: 'procurement-manifest', [D]: 'procurement-data', [K]: 'capabilities' }
-const NAMES = ['procurement-manifest', 'procurement-data', 'component-calc', 'design-data', 'provenance', 'production', 'minerals', 'capabilities']
+const NAMES = ['csv-cell', 'procurement-manifest', 'procurement-data', 'component-calc', 'design-data', 'provenance', 'production', 'minerals', 'capabilities']
 const NO_SAVES = process.argv.includes('--no-saves')
 const SAVES = [
   { file: 'AuroraDB.db', game: 140, race: 784 },
@@ -746,6 +746,18 @@ const pure = (ctx) => {
     assert.equal(transport.Colony, 'Near, "the" one')
     assert.equal(transport['Tons to move'], '')
     assert.ok(records.every((record) => Object.values(record).length === pm.CSV_COLUMNS.length))
+
+    return true
+  })
+
+  add('csv: a name that starts like a formula is written so that a spreadsheet does not run it, and loses nothing', () => {
+    const colonies = { ...COLONIES, 3: { ...COLONIES[3], name: '=HYPERLINK("x")' } }
+    const records = recordsOf(pm.manifestCsv(run({ colonies })))
+    const cells = records.map((record) => record.Colony).filter((value) => value.includes('HYPERLINK'))
+
+    assert.ok(cells.length > 0)
+    assert.ok(cells.every((value) => !/^[=+\-@\t\r]/.test(value) && value.includes('=HYPERLINK("x")')))
+    assert.ok(records.every((record) => Object.values(record).every((value) => !/^[=+\-@\t\r]/.test(value))))
 
     return true
   })
@@ -1589,6 +1601,7 @@ const saveStatements = async (ctx, save) => {
 // ---------- the planted faults ----------
 
 const MUTATIONS = [
+  { name: 'a text cell that starts like a formula is written as it is', file: U, find: "{ guard: typeof value !== 'number' }", replace: '{ guard: false }', fails: ['csv'] },
   // the manifest
   { name: 'every plan counts all of the stock again', file: U, find: 'need.perPlan.forEach((entry) => {\n        let left = entry.needed', replace: 'need.perPlan.forEach((entry) => {\n        supply.forEach((lot) => { lot.left = lot.units })\n        let left = entry.needed', fails: ['once', 'save-manifest'] },
   { name: 'the need counted for one hull, not the hulls', file: U, find: 'part.count * plan.hulls', replace: 'part.count', fails: ['once'] },
@@ -1623,7 +1636,7 @@ const MUTATIONS = [
   { name: 'no colony needed accepted', file: U, find: 'if (targetId === null || targetId === undefined) {', replace: 'if (false) {', fails: ['invalid'] },
   { name: 'the default colony without a shipyard first', file: U, find: 'const yards = Number(isNumber(colony.yards) && colony.yards > 0)', replace: 'const yards = 0', fails: ['target'] },
   { name: 'the rule of the claims not for 2.7', file: U, find: 'id: \'production.procurementReservations\',\n  versions: [\'2.7.x\']', replace: 'id: \'production.procurementReservations\',\n  versions: [\'2.6.x\']', fails: ['rules'] },
-  { name: 'an unknown figure exported as 0', file: U, find: 'if (value === null || value === undefined) {\n    return \'\'', replace: 'if (value === null || value === undefined) {\n    return \'0\'', fails: ['csv'] },
+  { name: 'an unknown figure exported as 0', file: U, find: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value, {', replace: 'const cell = (value) => csvCell(typeof value === \'number\' ? rounded(value) : value ?? 0, {', fails: ['csv'] },
   { name: 'the held back and the proven claim run into one column', file: U, find: '\'Reserved (proven)\': row.reserved.proven, \'Held back (claim not known)\': row.reserved.unknown', replace: '\'Reserved (proven)\': row.reserved.proven + row.reserved.unknown, \'Held back (claim not known)\': row.reserved.unknown', fails: ['csv'] },
   { name: 'the stock here and elsewhere not told apart', file: U, find: '\'Stock here\': row.stock.local, \'Stock elsewhere\': row.stock.remote', replace: '\'Stock here\': row.stock.local + row.stock.remote, \'Stock elsewhere\': row.stock.remote', fails: ['csv'] },
   { name: 'the queue and the stock not told apart', file: U, find: '\'Queued here\': row.queued.local, \'Queued elsewhere\': row.queued.remote', replace: '\'Queued here\': row.stock.local, \'Queued elsewhere\': row.stock.remote', fails: ['csv'] },

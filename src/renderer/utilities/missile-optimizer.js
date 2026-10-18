@@ -8,6 +8,7 @@
 //
 // The result count (`keep`) changes only the list a result carries. The counts, the front, the status and the termination do not read it.
 
+import { csvCell } from './csv-cell'
 import { MISSILE_RULES, admitMissiles, agrees, evaluateMissile, missileAccounting, missileEngineDesign, missileSensorRange, missileSignature, normaliseMissileCandidate, sensorEffectiveRange } from './design-rules'
 import { missileStageOf } from './design-data'
 import { HIT_CAP, HIT_RULES, cappedHitChance, entered, rawHitChance } from './missile-hit'
@@ -1093,8 +1094,6 @@ export const cellOf = (input, entry, column) => {
   }
 }
 
-const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-
 // What a run explored, as the one line a row of an export and a caption carry: 'complete: ...' for a run that explored its whole domain, else 'incomplete (<why it stopped>): ...' with the counts of what was explored.
 export const searchLine = (outcome, format = defaultFormat) => `${outcome.incomplete ? `incomplete (${outcome.termination || outcome.status})` : 'complete'}: ${countText(outcome.counts, format)}`
 
@@ -1180,7 +1179,7 @@ export const exportOutcome = (outcome, format = defaultFormat) => {
   const line = (row) => [...COLUMNS.map((column) => cell(row.cells[column.id])), basisCell(row), assumptionCell(row), goal.label, status]
 
   const empty = [...COLUMNS.map((_column, at) => (at === 1 ? (outcome.incomplete ? 'none found so far' : 'none meets the limits') : '')), '', '', goal.label, status]
-  const csv = [[...table.header, 'Basis', 'Assumptions', 'Goal', 'Search'], ...(table.rows.length ? table.rows.map(line) : [empty])].map((row) => row.map(quote).join(',')).join('\n')
+  const csv = [[...table.header, 'Basis', 'Assumptions', 'Goal', 'Search'], ...(table.rows.length ? table.rows.map(line) : [empty])].map((row) => row.map((value) => csvCell(value)).join(',')).join('\n')
   const first = `Missile optimisation, ${goal.label}. ${goal.objective} ${goal.ties}`
   const shown = (row) => unconfirmed(row).filter(({ result: figure }) => figure.status !== STATUS.UNAVAILABLE)
   const marked = (row, column) => (shown(row).some((item) => item.column === column) ? ` (${row.results[column.id].status})` : '')

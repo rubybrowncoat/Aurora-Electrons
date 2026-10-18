@@ -22,6 +22,7 @@ const os = require('os')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { strictRecords } = require('./lib/csv-records')
 const { jobs, inParallel, runChild } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
@@ -1203,6 +1204,16 @@ const provenanceChecks = (m) => [
 
     return rows[0].at(-1) === 'Search' && rows[0].slice(-4).join() === 'Basis,Assumptions,Goal,Search' && rows.every((row) => row.length === rows[0].length) ? true : short(rows[0])
   }],
+  ['provenance: the CSV writes a text with a carriage return as the shared writer does', () => {
+    const unsafe = 'raised\r-tail'
+    const input = inputOf(m, { goal: 'warhead', hitChance: '40', keep: '5' }, { techNotes: [unsafe] })
+    const outcome = finish(m, input)
+    const records = strictRecords(m.opt.exportOutcome(outcome).csv)
+    const assumptionsAt = records[0].indexOf('Assumptions')
+    const cells = records.slice(1).map((row) => row[assumptionsAt])
+
+    return records.length === outcome.result.entries.length + 1 && records.every((row) => row.length === records[0].length) && cells.length > 0 && cells.every((cell) => cell.includes(unsafe)) ? true : short(cells)
+  }],
   ['provenance: the tech levels a request assumes are a part of it and are named in the table, the CSV and the copied text, every figure at most assumed', () => {
     const plain = inputOf(m, { goal: 'warhead', hitChance: '40', keep: '5' })
     const noted = inputOf(m, { goal: 'warhead', hitChance: '40', keep: '5' }, { techNotes: [NOTE] })
@@ -1540,6 +1551,7 @@ const MUTATIONS = [
   { name: 'the copied text does not mark a figure the save does not confirm', file: 'missile-optimizer.js', find: 'shown(row).some((item) => item.column === column) ?', replace: 'false ?', fails: ['provenance: a cost the rules extrapolate is estimated', 'provenance: the tech levels a request assumes are a part of it'] },
   { name: 'a warhead tech level is read by a search that sweeps no warhead', file: 'missile-optimizer.js', find: 'if (reads(fields.warheadMsp.max) && !carried.shipDecoy) {', replace: 'if (true) {', fails: ['provenance: the lines a search reads decide which hypothetical levels it assumes'] },
   { name: 'the rows of the efficient front carry no results of their figures', file: 'missile-optimizer.js', find: '(FRONT_RESULT[key] ? resultsOf(input, member.set)[FRONT_RESULT[key]] : null)', replace: 'null', fails: ['provenance: a member of the efficient front outside the listed candidates carries the results of its figures'] },
+  { name: 'the CSV of an export is not written by the shared writer', file: 'missile-optimizer.js', find: 'row.map((value) => csvCell(value))', replace: 'row.map((value) => value)', fails: ['provenance: the CSV writes a text with a carriage return', 'provenance: the CSV keeps its Search column last'] },
 ]
 
 const mutatedCopy = (file, from, to) => {

@@ -497,6 +497,7 @@ import { gameTime } from '../utilities/aurora'
 import { readRegistry } from '../utilities/campaign'
 import { attach, keepSeparate, previewAttach } from '../utilities/campaign-attach'
 import { COLONY_BYTES, chosenNow, colonyEstimate, colonyWish } from '../utilities/colony-series'
+import { csvCell } from '../utilities/csv-cell'
 import { registerEconomyNotes } from '../utilities/economy-notes'
 import { EVENT_BYTES, EVENT_CAP, EVENT_CAPS, archiveOn, capRecord, eventEstimate, eventFileProblem, gapsOf, recordEvents } from '../utilities/event-archive'
 import { DEFAULT_RETENTION, RETENTION_PROFILES, SNAPSHOT_FIELDS, branchStore, bytesText, campaignStorage, changeResult, clearRaceHistory, colonyStore, durationText, eventStore, installationResult, measuredBytes, mineralResult, predictRetention, recordedSpan, retentionNote, retentionProfile, retentionStats, samplingText, seriesOverCap, shownBranch, snapshotResult, sparseColumns, thinningStatus, thinningText, totalResult } from '../utilities/history'
@@ -1863,14 +1864,13 @@ export default {
       // The seconds since the previous row and the retention note, so an export of thinned or sparse history says so.
       const sparse = sparseColumns(this.allSnapshots, retentionNote(this.record, (t) => this.date(t)))
       const header = ['GameTime', 'Date', 'Population (M)', 'Colonies', 'Treasury', 'Annual income', 'Fuel (L)', 'MSP', ...MINERALS.map((mineral) => `${mineral.name} (t)`), 'Military ships', 'Military tons', 'Commercial ships', 'Commercial tons', 'Research (RP)', 'Known systems', 'Commanders', ...installationIds.map((id) => names[id]), 'Figures not recorded', ...sparse.header]
-      const quote = (value) => (typeof value === 'string' && /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
       // A figure that was not recorded is an empty cell, never 0; the last column names every one of them, the stockpiles and installations included.
       const rows = this.allSnapshots.map((snapshot, index) => {
         const results = [...['population', 'colonies', 'wealth', 'income', 'fuel', 'msp'].map((key) => snapshotResult(snapshot, key)), ...MINERALS.map((mineral) => mineralResult(snapshot, mineral.id, mineral.name)), ...['militaryShips', 'militaryTons', 'commercialShips', 'commercialTons', 'research', 'systems', 'commanders'].map((key) => snapshotResult(snapshot, key)), ...installationIds.map((id) => installationResult(snapshot, id, names[id]))]
 
         return [snapshot.t, this.date(snapshot.t), ...results.map(valueOrNull), results.filter((result) => !isAvailable(result)).flatMap((result) => result.inputs.missing).join('; '), ...sparse.rows[index]]
       })
-      const csv = [header, ...rows].map((row) => row.map(quote).join(',')).join('\n')
+      const csv = [header, ...rows].map((row) => row.map((value) => csvCell(value)).join(',')).join('\n')
 
       this.saveCsv(csv, `${(this.record.raceName || 'race').replace(/[^\w-]+/g, '_')}-history.csv`)
     },

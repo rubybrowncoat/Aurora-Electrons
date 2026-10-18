@@ -1,5 +1,6 @@
 // The net component procurement manifest of a shipbuilding goal: for one or more hull plans (a class and a hull count each) and the colony the hulls are to be built at, what each component the classes mount is needed in total, what the colonies' stock and the queued component projects supply, and what is still short, kept apart as available stock, held-back stock, queued manufacture and net shortage. Pure functions on plain rows in and out. The components are identified by the component's own ID (the ID the class mounts, the stock and the project name), never by name. A unit of stock or of a queued project is given to one plan only: the plans are served in the order they are listed, each from the stock at the build colony first, then the stock elsewhere (the colonies in the build colony's system first), then the projects queued at the build colony and then those elsewhere, so two plans that mount the same component divide what exists between them and never each count all of it.
 
+import { csvCell } from './csv-cell'
 import { buildableOf } from './component-calc'
 import { registerRule } from './provenance'
 
@@ -460,15 +461,7 @@ export const defaultTarget = ({ plans, parts, stock, colonies }) => {
   }, null)
 }
 
-const cell = (value) => {
-  if (value === null || value === undefined) {
-    return ''
-  }
-
-  const text = typeof value === 'number' ? String(rounded(value)) : String(value)
-
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
-}
+const cell = (value) => csvCell(typeof value === 'number' ? rounded(value) : value, { guard: typeof value !== 'number' })
 
 export const CSV_COLUMNS = Object.freeze(['Record', 'Component ID', 'Component', 'Route', 'Colony ID', 'Colony', 'System', 'Plan', 'Hulls', 'Needed', 'Stock here', 'Stock elsewhere', 'Reserved (proven)', 'Held back (claim not known)', 'Available here', 'Available elsewhere', 'Used here', 'Used elsewhere', 'Queued here', 'Queued elsewhere', 'Queued paused', 'Used from queue here', 'Used from queue elsewhere', 'Spare stock', 'Net shortage', 'Net shortage basis', 'Shortage BP', 'Units to move', 'Tons to move', 'Manufacture state', 'Manufactured units', 'Used by plans', 'Not used by plans', 'Note', 'Rule'])
 

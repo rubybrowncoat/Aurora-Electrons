@@ -49,6 +49,8 @@ const OPTIONAL = Object.freeze({
   '/hauling': (key) => key === 'avoidSystems' || key === 'handlingSupport' || key === 'positionFacts' || key === 'orbitFacts',
   '/map': (key) => key === 'groundFormations',
   '/survey-progress': (key) => ['formations', 'ruinSites', 'constructSites', 'troopBays'].includes(key),
+  // The command structure panel of the Commanders page reads the naval admin commands, fleets and ships and the ground formations with their commanders, each loader checking its own columns; the roster does not rest on them, and the panel names what could not be read.
+  '/commanders': (key) => key === 'navalTree' || key === 'groundTree',
 })
 
 export const isOptional = (route, key) => Boolean(OPTIONAL[route] && OPTIONAL[route](key))

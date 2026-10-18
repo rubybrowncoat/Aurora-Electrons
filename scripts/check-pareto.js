@@ -14,6 +14,7 @@ const fs = require('fs')
 const path = require('path')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
+const { strictRecords } = require('./lib/csv-records')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 
 const root = path.resolve(__dirname, '..')
@@ -804,8 +805,8 @@ const attempt = (statement) => () => {
   }
 }
 
-const pageStatements = async (mutate, mods) => {
-  const options = await loadPage('pages/propulsion', { stubs: PAGE_STUBS, mutate })
+const pageStatements = async (mutate, mods, sources = {}) => {
+  const options = await loadPage('pages/propulsion', { stubs: PAGE_STUBS, mutate, sources })
   const page = (data = {}) => instantiate(options, { $store: { getters: {}, state: {} }, database: {}, GameID: 1, RaceID: 2, data })
   const [, input] = CASES[0]
   const pairs = [['tons', 'min'], ['speed', 'max']]
@@ -885,6 +886,33 @@ const pageStatements = async (mutate, mods) => {
       return words[0] === 'No set meets the targets.' && /stopped before it found a set/.test(words[1]) && words[2] === 'None of the 3 sets that meet the targets has endurance to compare.' && words[3] === '' ? true : short(words)
     })],
     ['no result has no rows', attempt(() => page({ result: null }).efficientRows.length === 0)],
+    ['the CSV of the sets writes a name with a carriage return and an assumption that starts like a formula as the shared writer does', attempt(() => {
+      const figure = (assumptions) => ({ status: 'confirmed', value: 1, rule: { id: 'rule', versions: ['1'] }, assumptions, inputs: { missing: [] } })
+      const provenance = { speed: figure(['=HYPERLINK("x")']), burn: figure([]), rangeBn: figure([]), enduranceDays: figure([]), cost: figure([]), tanks: null }
+      const row = { pinned: false, rank: 1, name: 'a\rb', count: 2, thrust: 1, power: 10, fuelPerEph: 1, propulsionHS: 5, share: 0.5, provenance, crew: 3, type: 'Commercial', tankPackage: null }
+      const vm = page({ rows: [row] })
+      const saved = { document: globalThis.document, Blob: globalThis.Blob, create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+      let text = null
+
+      globalThis.document = { createElement: () => ({ click() {} }) }
+      globalThis.Blob = class { constructor (parts) { text = parts.join('') } }
+      URL.createObjectURL = () => 'blob:test'
+      URL.revokeObjectURL = () => {}
+
+      try {
+        vm.downloadCsv()
+      } finally {
+        globalThis.document = saved.document
+        globalThis.Blob = saved.Blob
+        URL.createObjectURL = saved.create
+        URL.revokeObjectURL = saved.revoke
+      }
+
+      const records = strictRecords(text)
+      const [header, cells] = records
+
+      return records.length === 2 && header.length === cells.length && cells[1] === 'a\rb' && cells[header.indexOf('Assumptions')] === '\'=HYPERLINK("x")' ? true : short(records)
+    })],
   ]
 }
 
@@ -898,6 +926,9 @@ const PAGE_MUTATIONS = [
   { name: 'the sets alike a member not counted in its row', find: 'alternativeCount: member.alternativeCount, alternatives: named', replace: 'alternativeCount: 0, alternatives: named', fails: ['a set has a row for each member'] },
   { name: 'the table not saying why it is empty', find: "return this.efficient ? describeEmpty(this.efficient, (value) => this.count(value)) : ''", replace: "return this.efficient ? 'No set meets the targets.' : ''", fails: ['the table says why it is empty'] },
   { name: 'the candidate ids of the sets alike a set left off its row', find: 'alternativeIds: member.identities.slice(named.length, named.length + ALTERNATIVE_IDS_SHOWN)', replace: 'alternativeIds: EMPTY_LIST', fails: ['a set has a row for each member'] },
+  { name: 'the CSV of the sets not written by the shared writer', find: 'line.map((value) => csvCell(value)).join(\',\')', replace: 'line.join(\',\')', fails: ['the CSV of the sets writes a name with a carriage return'] },
+  { name: 'the CSV of the sets does not quote a carriage return', file: 'csv-cell.js', find: '/[",\\r\\n]/.test(text)', replace: '/[",\\n]/.test(text)', fails: ['the CSV of the sets writes a name with a carriage return'] },
+  { name: 'the CSV of the sets does not guard a text that starts like a formula', file: 'csv-cell.js', find: 'guard && typeof value === \'string\' && FORMULA_START.test(value)', replace: 'false', fails: ['the CSV of the sets writes a name with a carriage return'] },
   { name: 'the axes offered not in the order of the registry', find: 'return Object.entries(PARETO_AXES).map(([key, axis]) => ({ key, label: axis.label, pick: this.paretoAxes[key] || \'off\' }))', replace: 'return Object.entries(PARETO_AXES).reverse().map(([key, axis]) => ({ key, label: axis.label, pick: this.paretoAxes[key] || \'off\' }))', fails: ['each axis offered shows whether it is off, least or most'] },
 ]
 
@@ -1073,13 +1104,14 @@ const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
   check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
 }
 
-const checkPageMutation = async ({ name, find, replace, fails }, mods) => {
+const checkPageMutation = async ({ name, file = null, find, replace, fails }, mods) => {
   const began = Date.now()
   let failed = null
   let absent = []
 
   try {
-    const named = (await pageStatements(replacing(find, replace), mods)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
+    const faulted = file ? await pageStatements(null, mods, { 'utilities/csv-cell': Object.values(mutatedSources(file, find, replace))[0] }) : await pageStatements(replacing(find, replace), mods)
+    const named = faulted.filter(([statement]) => fails.some((start) => statement.startsWith(start)))
 
     absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
     failed = named.filter(([, held]) => held() !== true).map(([statement]) => statement)

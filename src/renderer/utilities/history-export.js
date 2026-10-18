@@ -6,6 +6,7 @@
 // - `annotation`: one row per annotation the chart draws, at its own exact game time, with its ID, type, text and link. The time of an annotation is never a sample's: it is in `Annotation game time (s)`, a column no sample row fills, and the sample nearest to it is named apart.
 // A column that does not apply to a row is empty. A text cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is written with a leading apostrophe, so a spreadsheet shows it as text and never runs it; the columns of numbers are not touched.
 
+import { csvCell } from './csv-cell'
 import { getRule } from './provenance'
 
 export const CSV_COLUMNS = [
@@ -40,16 +41,10 @@ export const NOT_RECORDED = 'not recorded'
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
-// A text cell (a name, a note, an annotation's text) that starts with a character a spreadsheet reads as the start of a formula is written with a leading apostrophe, so it is shown as text. The columns of numbers are never touched: a negative figure stays a number.
+// The columns of numbers are never guarded as text cells: a negative figure stays a number.
 const NUMBER_COLUMNS = new Set(['Sample game time (s)', 'Value', 'Stock behind the change (t)', 'Baseline game time (s)', 'Baseline stock (t)', 'Gap since previous sample (s)', 'Annotation game time (s)', 'Nearest sample game time (s)', 'Offset to nearest sample (s)'])
 
-const FORMULA_START = /^[=+\-@\t\r]/
-
-const cell = (value, column) => {
-  const text = typeof value === 'string' && !NUMBER_COLUMNS.has(column) && FORMULA_START.test(value) ? `'${value}` : value
-
-  return typeof text === 'string' && /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text === null || text === undefined ? '' : text
-}
+const cell = (value, column) => csvCell(value, { guard: !NUMBER_COLUMNS.has(column) })
 
 const rowOf = (fields) => {
   const unknown = Object.keys(fields).filter((name) => !CSV_COLUMNS.includes(name))
