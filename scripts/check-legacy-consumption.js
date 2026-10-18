@@ -22,11 +22,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const v8 = require('v8')
-const { spawn } = require('child_process')
 const sqlite3 = require('sqlite3')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
-const { inParallel } = require('./lib/check-pool')
+const { inParallel, runChild } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -1730,24 +1729,16 @@ const mutatedCopy = (file, from, to) => {
 }
 
 // The checks `only` names (every check when null) of one tree, run in a Node process of their own as [[id, true or what is wrong]]: the rule registry is module state, so a mutant's rules would stay for every tree run after it.
-const checksInChild = (tree, only) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename, ...process.argv.slice(2)], { env: { ...process.env, LEGACY_TREE: tree, LEGACY_ONLY: JSON.stringify(only) }, stdio: ['ignore', 'pipe', 'pipe'] })
-  let out = ''
-  let errors = ''
+const checksInChild = async (tree, only) => {
+  const { code, stdout, stderr } = await runChild(__filename, process.argv.slice(2), { env: { LEGACY_TREE: tree, LEGACY_ONLY: JSON.stringify(only) } })
+  const line = stdout.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
 
-  child.stdout.on('data', (chunk) => { out += chunk })
-  child.stderr.on('data', (chunk) => { errors += chunk })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    const line = out.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
+  if (code !== 0 || !line) {
+    throw new Error(`The checks of ${tree} ended with ${code}: ${stderr.trim().slice(0, 400)}`)
+  }
 
-    if (code !== 0 || !line) {
-      reject(new Error(`The checks of ${tree} ended with ${code}: ${errors.trim().slice(0, 400)}`))
-    } else {
-      resolve(JSON.parse(line.slice(RESULT_PREFIX.length)))
-    }
-  })
-})
+  return JSON.parse(line.slice(RESULT_PREFIX.length))
+}
 
 const runList = async (list, only) => {
   const results = []

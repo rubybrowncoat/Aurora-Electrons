@@ -33,9 +33,9 @@ const inParallel = async (items, work, limit = jobs()) => {
   return results
 }
 
-// Runs `script` again with `args` in a process of its own (the runtime this one runs on) and resolves { code, stdout, stderr }. A child gets CHECK_JOBS=1, so its own pools do not multiply the processes.
+// Runs `script` again with `args` in a process of its own (the runtime this one runs on) and resolves { code, stdout, stderr }. A child gets CHECK_JOBS=1, so its own pools do not multiply the processes, and BUN_RUNTIME_TRANSPILER_CACHE_PATH=0, so Bun keeps no transpiled copy of what it loads: a child loads the modules of one mutant (or one script of a run) once, Bun keeps every copy in its cache folder for good and never removes one, and the mutants of a few days of checks filled it with 485 GiB. The variable only counts in the environment a process starts with (Bun reads it neither from process.env set later nor from a .env file), so it is set here, where the child starts; `env` cannot turn the cache back on.
 const runChild = (script, args = [], { env = {}, maxBuffer = 1 << 28 } = {}) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, CHECK_JOBS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, CHECK_JOBS: '1', ...env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' }, stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''
   let stderr = ''
 

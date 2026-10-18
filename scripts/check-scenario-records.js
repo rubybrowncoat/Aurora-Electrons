@@ -19,10 +19,9 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { spawn } = require('child_process')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { inParallel } = require('./lib/check-pool')
+const { inParallel, runChild } = require('./lib/check-pool')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -1873,24 +1872,16 @@ const mutatedTree = (mutant) => {
 }
 
 // The checks `only` names of one tree, run in a Node process of its own (the repository's registry of adapters is module state, and a mutant must not leak into the next tree).
-const checksInChild = (tree, only) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename], { env: { ...process.env, SCENARIO_TREE: tree, SCENARIO_ONLY: JSON.stringify(only) }, stdio: ['ignore', 'pipe', 'pipe'] })
-  let out = ''
-  let errors = ''
+const checksInChild = async (tree, only) => {
+  const { code, stdout, stderr } = await runChild(__filename, [], { env: { SCENARIO_TREE: tree, SCENARIO_ONLY: JSON.stringify(only) } })
+  const line = stdout.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
 
-  child.stdout.on('data', (chunk) => { out += chunk })
-  child.stderr.on('data', (chunk) => { errors += chunk })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    const line = out.split('\n').find((row) => row.startsWith(RESULT_PREFIX))
+  if (code !== 0 || !line) {
+    throw new Error(`The checks of ${tree} ended with ${code}: ${stderr.trim().slice(0, 400)}`)
+  }
 
-    if (code !== 0 || !line) {
-      reject(new Error(`The checks of ${tree} ended with ${code}: ${errors.trim().slice(0, 400)}`))
-    } else {
-      resolve(JSON.parse(line.slice(RESULT_PREFIX.length)))
-    }
-  })
-})
+  return JSON.parse(line.slice(RESULT_PREFIX.length))
+}
 
 const tryMutant = async (mutant) => {
   let directory

@@ -20,10 +20,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
-const { spawn } = require('child_process')
 const assert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
-const { inParallel } = require('./lib/check-pool')
+const { inParallel, runChild } = require('./lib/check-pool')
 
 const repo = path.resolve(__dirname, '..')
 const src = path.join(repo, 'src')
@@ -3232,25 +3231,17 @@ const plantedSource = (mutant) => {
 const moduleNameOf = (file) => file.replace(/^src\//, '').replace(/\.js$/, '')
 
 // The checks `only` names (all of them for null) of the sources with the mutant at `index` of MUTANTS planted, or as they stand for no mutant, run in a Node process of its own (the modules hold state, and a mutant must not leak into the next one): { results, lines } where `lines` is what the process printed besides its results.
-const checksInChild = (only, index = null) => new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [__filename], { env: { ...process.env, HISTORY_BACKUP_ONLY: JSON.stringify(only), HISTORY_BACKUP_MUTANT: index === null ? '' : String(index) }, stdio: ['ignore', 'pipe', 'pipe'] })
-  let out = ''
-  let errors = ''
+const checksInChild = async (only, index = null) => {
+  const { code, stdout, stderr } = await runChild(__filename, [], { env: { HISTORY_BACKUP_ONLY: JSON.stringify(only), HISTORY_BACKUP_MUTANT: index === null ? '' : String(index) } })
+  const rows = stdout.split('\n')
+  const line = rows.find((row) => row.startsWith(RESULT_PREFIX))
 
-  child.stdout.on('data', (chunk) => { out += chunk })
-  child.stderr.on('data', (chunk) => { errors += chunk })
-  child.on('error', reject)
-  child.on('close', (code) => {
-    const rows = out.split('\n')
-    const line = rows.find((row) => row.startsWith(RESULT_PREFIX))
+  if (code !== 0 || !line) {
+    throw new Error(`The checks ${index === null ? 'of the sources' : `of the mutant ${index}`} ended with ${code}: ${stderr.trim().slice(0, 400)}`)
+  }
 
-    if (code !== 0 || !line) {
-      reject(new Error(`The checks ${index === null ? 'of the sources' : `of the mutant ${index}`} ended with ${code}: ${errors.trim().slice(0, 400)}`))
-    } else {
-      resolve({ results: JSON.parse(line.slice(RESULT_PREFIX.length)), lines: rows.filter((row) => row !== line && row !== '') })
-    }
-  })
-})
+  return { results: JSON.parse(line.slice(RESULT_PREFIX.length)), lines: rows.filter((row) => row !== line && row !== '') }
+}
 
 const tryMutant = async (mutant, index) => {
   try {

@@ -36,7 +36,7 @@ const folderOfProcess = () => {
   return folder
 }
 
-// The URL of an ES module made of `source`: a data URL while it stays short, else a file written the first time its text is seen.
+// The URL of an ES module made of `source`: a data URL while it stays short, else a file written the first time its text is seen. A file's text names the other files of the folder by relative specifiers ('./<hash>.mjs') instead of the folder's URL, which changes with every process: Bun keeps a transpiled copy of each file text it loads, found by the text alone and never removed, so a text that held the folder's name was new in every process and left a copy of megabytes behind each run, while the same sources now give the same text and reuse the one copy.
 const urlOfSource = (source) => {
   if (!source.includes(FILE_SCHEME)) {
     const data = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
@@ -46,12 +46,13 @@ const urlOfSource = (source) => {
     }
   }
 
-  const key = crypto.createHash('sha1').update(source).digest('hex')
+  const text = folder === null ? source : source.split(`${pathToFileURL(folder).href}/`).join('./')
+  const key = crypto.createHash('sha1').update(text).digest('hex')
 
   if (!written.has(key)) {
     const file = path.join(folderOfProcess(), `${key}.mjs`)
 
-    fs.writeFileSync(file, source)
+    fs.writeFileSync(file, text)
     written.set(key, pathToFileURL(file).href)
   }
 
