@@ -200,10 +200,10 @@ export const fleetSurveyRate = (ships, kind, { speed, admin = 1, adminGap = null
   })
 }
 
-// The points a day of a colony's geosurvey units, as a provenance result of 'survey.groundRate': `perDay`, the units' rating times their commander's Survey bonus, times the game's survey speed (`speed`, percent). Unavailable without the speed.
+// The points a day of a colony's geosurvey units, as a provenance result of 'survey.groundRate': `perDay`, the units' rating times their commander's Survey bonus, times the game's survey speed (`speed`, percent). Unavailable without the speed, and without the units' rating (null when a formation at the colony has a geosurvey rating the save does not give).
 export const groundSurveyRate = (perDay, speed) => {
-  if (!Number.isFinite(speed)) {
-    return unavailable({ rule: 'survey.groundRate', missing: ['the game\'s survey speed'], present: ['the geosurvey units'] })
+  if (!Number.isFinite(speed) || !Number.isFinite(perDay)) {
+    return unavailable({ rule: 'survey.groundRate', missing: [...(Number.isFinite(speed) ? [] : ['the game\'s survey speed']), ...(Number.isFinite(perDay) ? [] : ['the geosurvey rating of the formations at the colony'])], present: ['the geosurvey units'] })
   }
 
   return envelope({ value: perDay * (speed / 100), status: 'estimated', rule: 'survey.groundRate', inputs: { present: ['the geosurvey units', 'the formation commander', 'the survey speed'] }, assumptions: ['Estimate: the commander\'s Survey bonus is taken as it is, not as the game scales it up the chain.'] })

@@ -147,6 +147,94 @@
           </div>
         </v-card>
 
+        <v-card v-if="deployment" class="panel" data-deploy="panel" data-summary="The race's geological survey and xenoarchaeology formations, each once, with whether it is idle, busy, embarked, at a place that is not resolved or at work that is not known, the known targets it could serve and the troop lifts it needs. It shows which specialists are free to redeploy and where known work waits; no order is issued." elevation="1">
+          <div class="panel-head">
+            <span>Specialist deployments</span>
+            <v-chip small>{{ count(deployTotals.formations) }} {{ deployTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
+          </div>
+          <div class="panel-body pb-0">
+            <v-chip-group v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">
+              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>
+            </v-chip-group>
+            <v-chip-group v-model="deployStates" multiple column aria-label="States shown" data-deploy="states">
+              <v-chip v-for="choice in stateChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals.states[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals.states[choice.value]) }})</v-chip>
+            </v-chip-group>
+          </div>
+          <v-data-table :headers="deployHeaders" :items="deployList" item-key="id" show-expand single-expand :expanded.sync="deployExpanded" :sort-by.sync="deployTable.sortBy" :sort-desc.sync="deployTable.sortDesc" :items-per-page.sync="deployTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and states chosen" @click:row="toggleDeployment">
+            <template #[`item.name`]="{ item }">
+              <div class="py-2" :data-deploy-formation="item.id">
+                <div class="font-weight-medium" data-deploy-name>{{ item.name }}</div>
+                <div v-if="item.abbreviation" class="caption text--secondary">{{ item.abbreviation }}</div>
+              </div>
+            </template>
+            <template #[`item.stateOrder`]="{ item }">
+              <div class="py-2" :data-deploy-state="item.state">
+                <span class="text-no-wrap" data-deploy-state-label>
+                  <v-icon small :color="stateStyle(item.state).color">{{ stateStyle(item.state).icon }}</v-icon>
+                  {{ item.stateLabel }}
+                </span>
+                <div v-if="item.workLabel" class="caption text--secondary" data-deploy-work>{{ item.workLabel }}</div>
+                <div v-for="reason in item.stateReasons" :key="reason.kind" class="caption text--secondary">{{ reason.message }}</div>
+              </div>
+            </template>
+            <template #[`item.systemName`]="{ item }">
+              <template v-if="item.system">
+                <span class="font-weight-medium">{{ item.system.name }}</span>
+                <page-link class="ml-1" :to="linkTo.map(item.system.id)" :name="item.system.name" />
+              </template>
+              <span v-else class="text--secondary">{{ item.heldBy }}</span>
+            </template>
+            <template #[`item.geo`]="{ item }"><span :class="{ 'text--secondary': !item.geo }">{{ ratingText(item.geo) }}</span></template>
+            <template #[`item.xeno`]="{ item }"><span :class="{ 'text--secondary': !item.xeno }">{{ ratingText(item.xeno) }}</span></template>
+            <template #[`item.mass`]="{ item }">{{ item.mass === null ? 'Unknown' : count(item.mass) }}</template>
+            <template #[`item.candidateSort`]="{ item }">{{ candidateLabel(item.candidates) }}</template>
+            <template #[`item.liftSort`]="{ item }">
+              <span :class="{ 'text--secondary': item.lift.kind !== 'one' && item.lift.kind !== 'several' }">{{ liftLabel(item.lift) }}</span>
+            </template>
+            <template #expanded-item="{ headers, item }">
+              <td :colspan="headers.length" class="py-3">
+                <div v-if="candidateList(item).length">
+                  <div class="caption text--secondary mb-2">Known targets for {{ item.name }}, colonies of the race first and the nearest first</div>
+                  <div v-for="candidate in candidateList(item)" :key="candidate.target.key" class="caption">
+                    <span class="font-weight-medium">{{ candidate.target.name }}</span>
+                    · {{ candidate.target.role === 'geo' ? 'Ground survey' : 'Ruins' }}
+                    · {{ colonyText(candidate.target.colony) }}
+                    · {{ leftText({ role: candidate.target.role, left: candidate.target.left }) }}
+                    <span v-if="candidate.sameSystem"> · In its system</span>
+                    <span v-if="candidate.staffed"> · {{ count(candidate.staffed) }} {{ candidate.staffed === 1 ? 'formation works' : 'formations work' }} there</span>
+                  </div>
+                </div>
+                <div v-else class="caption text--secondary">No known target is left for the roles of {{ item.name }}.</div>
+              </td>
+            </template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            Each geological survey or xenoarchaeology formation is listed once, with the capability its actual elements give; a formation with both ratings is one row. A formation is busy when it is stationed at a colony on a body with work for its role: ground survey potential left, for a geological formation, or a ruin whose builders are not yet identified or an ancient construct that is not active, for a xenoarchaeology one (a construct is work but no listed target). The game puts such a formation to work by itself, with no order, and the save stores no task for a formation, so the state is read from the location; it was read against the game's rules for both surveys. The commander's multiplier is not applied, so a formation the game would give no rating through its commander may show busy without making progress. The game requires a body to be surveyed by the race for a geological survey, so a geological formation at a colony on a body the race has not surveyed shows idle. It does not for a ruin, so a xenoarchaeology formation at a colony on a ruin outside the known targets (a body the race has not surveyed, a system it does not know or a ruin with no installations count stored), or when the ruins or the constructs could not be read, shows an activity that is not known, and so does a formation with a rating the save leaves unknown where a target is; it counts as neither idle nor free to redeploy. A colony needs no minimum population: an outpost with no residents counts. An embarked formation is aboard a ship and does no survey work; a formation whose place is not stored or not found has no state to give. The idle formations are packed together into the troop ships' bays, the largest first, and each formation with an activity that is not known is judged alone; a formation no bay holds is shown as that, never as transportable, and where the troop ships stand is not read. {{ count(deployTotals.others) }} {{ deployTotals.others === 1 ? 'formation of the race is' : 'formations of the race are' }} no geological or xenoarchaeology specialist, or {{ deployTotals.others === 1 ? 'has' : 'have' }} a rating the save leaves unknown. No assignment is issued.
+          </div>
+        </v-card>
+
+        <v-card v-if="deployment" class="panel" data-targets="panel" data-summary="The known bodies where a geological survey or a xenoarchaeology formation has work, with the colony there, the work left and whether a formation is already at it. It shows where idle specialists would pay off; a body or ruin the race has not surveyed is never listed." elevation="1">
+          <div class="panel-head">
+            <span>Survey targets</span>
+            <span class="d-flex align-center">
+              <v-switch v-model="deployUnstaffed" label="Without a formation only" dense hide-details class="mt-0 mr-4" data-deploy="unstaffed" />
+              <v-chip small>{{ count(targetList.length) }} {{ targetList.length === 1 ? 'target' : 'targets' }}</v-chip>
+            </span>
+          </div>
+          <v-data-table :headers="targetHeaders" :items="targetList" item-key="key" :sort-by.sync="targetsTable.sortBy" :sort-desc.sync="targetsTable.sortDesc" :items-per-page.sync="targetsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No known target matches the roles and the scope chosen">
+            <template #[`item.name`]="{ item }">
+              <span class="font-weight-medium" :data-target-key="item.key">{{ item.name }}</span>
+              <page-link v-if="item.systemId" class="ml-1" :to="linkTo.map(item.systemId)" :name="item.systemName || item.name" />
+            </template>
+            <template #[`item.colonyName`]="{ item }"><span :class="{ 'text--secondary': !item.colony }">{{ colonyText(item.colony) }}</span></template>
+            <template #[`item.left`]="{ item }">{{ leftText(item) }}</template>
+            <template #[`item.status`]="{ item }"><span :class="{ 'text--secondary': item.status !== 'unstaffed' }">{{ targetStatus(item.status) }}</span></template>
+          </v-data-table>
+          <div class="panel-foot caption text--secondary">
+            Targets are the bodies the race has surveyed in systems it knows: bodies with ground survey potential left, the same as the Ground surveys table, for geological formations, and ruins whose builders the race has not identified, for xenoarchaeology ones. A body or ruin the race has not surveyed is not known and is never listed. A formation can only work at a colony of the race, so a body with no colony needs one first; a colony counts as a candidate whatever its population, an outpost with no residents included. {{ ruinSummary }}
+          </div>
+        </v-card>
+
         <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map." elevation="1">
           <div class="panel-head">
             <span>Ground formations</span>
@@ -225,6 +313,8 @@ import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surv
 import { surveyDays } from '../utilities/survey-eta'
 import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
 import { loadGroundFormations } from '../utilities/ground-formations'
+import { loadBootstrapFreight } from '../utilities/mine-bootstrap-data'
+import { candidatesOf, candidateText, colonyGeoTeams, constructBodies, deploymentTotals, liftText, loadConstructSites, loadRuinSites, rolesView as deployRolesView, ROLE_CHOICES, ruinTargets, selectDeployments, specialistRows, STATE_CHOICES, statesView as deployStatesView, targetRows, geoTargets } from '../utilities/specialist-deployments'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 const INPUT_LABELS = {
@@ -237,6 +327,10 @@ const INPUT_LABELS = {
   standingOrders: 'standing orders',
   groundSurveys: 'ground surveys',
   formations: 'the ground formations',
+  groundCommanders: 'the ground survey commanders',
+  ruinSites: 'the known ruins',
+  constructSites: 'the ancient constructs',
+  troopBays: 'the troop ships',
   navalAdmins: 'naval admin commands',
   formulaVersion: 'the save\'s schema',
 }
@@ -244,6 +338,10 @@ const INPUT_LABELS = {
 const POTENTIAL = { 1: 'Minimal', 2: 'Low', 3: 'Good', 4: 'High', 5: 'Excellent' }
 const SURVEY_ORDERS = new Set([9, 12])
 const PAGE_SIZES = [15, 30, -1]
+// The ground survey of a colony with no formation of the race.
+const NO_TEAM = Object.freeze({ units: 0, base: 0, perDay: 0, unknown: Object.freeze([]) })
+const STATE_STYLE = { idle: { icon: 'mdi-sleep', color: 'warning' }, busy: { icon: 'mdi-hammer-wrench', color: 'success' }, embarked: { icon: 'mdi-ferry', color: '' }, unresolved: { icon: 'mdi-help-circle-outline', color: '' }, unknown: { icon: 'mdi-help-rhombus-outline', color: '' } }
+const TARGET_STATUS = { worked: 'A formation is working here', unstaffed: 'No formation here', 'no-colony': 'No colony yet' }
 
 export default {
   name: 'SurveyProgressPage',
@@ -262,6 +360,11 @@ export default {
       remoteRoles: rolesView,
       remoteOnly: remoteOnlyView,
       formationsTable: tableView('surveyFormationsTable', { sortBy: ['systemName'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      deployRoles: deployRolesView,
+      deployStates: deployStatesView,
+      deployUnstaffed: { key: 'deployUnstaffedOnly', scope: 'race', default: false },
+      deployTable: { ...tableView('surveyDeployTable', { sortBy: ['stateOrder'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }), scope: 'race' },
+      targetsTable: { ...tableView('surveyTargetsTable', { sortBy: ['name'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }), scope: 'race' },
     }),
   ],
   data() {
@@ -272,6 +375,7 @@ export default {
       selectedSystemId: null,
       formationSystem: null,
       formationsPending: false,
+      deployExpanded: [],
       revealPending: false,
       linkTo,
       place,
@@ -406,18 +510,33 @@ export default {
       }).sort((a, b) => a.remaining - b.remaining)
     },
 
+    // The Survey bonus of each formation's commander as a map from the formation's id; a formation with no commander or no bonus has none, which counts as 1.
+    commanderBonuses() {
+      return new Map(this.groundCommanders.map((row) => [row.FormationID, row.BonusValue]))
+    },
+
+    // The geosurvey units, rating and rate of the formations at each colony, from the model's formations (`colonyGeoTeams`), so a colony's ground survey rate and the specialist list use the same ratings; null while the save lacks what the model reads.
+    colonyTeams() {
+      return this.formationModel ? colonyGeoTeams(this.formationModel, this.commanderBonuses) : null
+    },
+
     groundRows() {
+      const { colonyTeams: teams } = this
+
       return this.groundSurveys.map((row) => {
-        const rate = groundSurveyRate(row.PointsPerDay, this.surveySpeed)
+        const team = row.PopulationID ? (teams ? teams.get(row.PopulationID) || NO_TEAM : null) : NO_TEAM
+        const teamUnknown = team === null || team.unknown.length > 0
+        const rate = groundSurveyRate(teamUnknown ? null : team.perDay, this.surveySpeed)
         const perDay = valueOrNull(rate)
         const remaining = Math.max(0, row.PointsRequired - row.PointsDone)
         const eta = perDay > 0 ? remaining / perDay : null
 
         return {
           ...row,
+          Units: team ? team.units : 0,
           rate,
           PointsPerDay: perDay,
-          rateUnknown: rate.status === 'unavailable' && row.Units > 0,
+          rateUnknown: rate.status === 'unavailable' && ((team !== null && team.units > 0) || teamUnknown),
           name: row.SystemBodyName ? `${row.SystemName} · ${row.SystemBodyName}` : systemBodyName(row, { Name: row.SystemName }),
           progress: row.PointsRequired > 0 ? row.PointsDone / row.PointsRequired : 0,
           progressSort: row.PointsRequired > 0 ? row.PointsDone / row.PointsRequired : 0,
@@ -425,6 +544,81 @@ export default {
           etaSort: eta ?? Infinity,
         }
       })
+    },
+
+    // The specialist formations against the known targets (`specialistRows`): the geological targets are the ground survey rows above, the xenoarchaeology ones the known ruins whose builders are not identified; null while the save lacks what the formation model reads. The ruins the race has not surveyed but a colony stands on are carried as the places the game may work (`unseen`), and a ruin read that failed leaves every place open (null).
+    deployment() {
+      if (!this.formationModel) {
+        return null
+      }
+
+      const ruins = this.ruinSites && this.ruinSites.supported ? ruinTargets(this.ruinSites.rows) : { targets: [], states: null, unseen: null }
+      const constructs = this.constructSites && this.constructSites.supported ? constructBodies(this.constructSites.rows) : null
+
+      return Object.freeze({ ...specialistRows(this.formationModel, { geo: geoTargets(this.groundRows), xeno: ruins.targets, unseen: ruins.unseen, constructs }, this.troopBays.troops), ruinStates: ruins.states })
+    },
+
+    deployTotals() {
+      return this.deployment ? deploymentTotals(this.deployment.rows, this.deployment.others, this.deployment.index) : null
+    },
+
+    // The ruin counts the targets rest on, as a sentence, or that the ruins could not be read.
+    ruinSummary() {
+      const states = this.deployment ? this.deployment.ruinStates : null
+
+      if (!states) {
+        return 'The ruins of the race could not be read from this save, so no xenoarchaeology target is listed and the activity of a xenoarchaeology formation at a colony is not known.'
+      }
+
+      return `Of the ruins on the surveyed bodies, ${this.count(states.found)} await identification of their builders, ${this.count(states.identified)} have been identified, ${this.count(states.used)} have no installations left and ${this.count(states.unknown)} give no installations count.`
+    },
+
+    deployList() {
+      return this.deployment ? selectDeployments(this.deployment.rows, { roles: this.deployRoles, states: this.deployStates }) : []
+    },
+
+    // The targets in the roles on, with only those no formation works when asked.
+    targetList() {
+      if (!this.deployment) {
+        return []
+      }
+
+      return targetRows(this.deployment.index, this.deployment.rows).filter((row) => this.deployRoles.includes(row.role) && (!this.deployUnstaffed || row.status !== 'worked'))
+    },
+
+    roleChoices() {
+      return ROLE_CHOICES
+    },
+
+    stateChoices() {
+      return STATE_CHOICES
+    },
+
+    deployHeaders() {
+      return [
+        { text: 'Formation', value: 'name' },
+        { text: 'State', value: 'stateOrder' },
+        { text: 'System', value: 'systemName' },
+        { text: 'Role', value: 'roleLabel' },
+        { text: 'Geological', value: 'geo', align: 'end' },
+        { text: 'Xenoarchaeology', value: 'xeno', align: 'end' },
+        { text: 'Mass (t)', value: 'mass', align: 'end' },
+        { text: 'Candidates', value: 'candidateSort' },
+        { text: 'Troop lift', value: 'liftSort' },
+        { text: '', value: 'data-table-expand' },
+      ]
+    },
+
+    targetHeaders() {
+      return [
+        { text: 'Target', value: 'name' },
+        { text: 'Kind', value: 'roleLabel' },
+        { text: 'Colony', value: 'colonyName' },
+        { text: 'Work left', value: 'left', align: 'end' },
+        { text: 'Formations busy', value: 'busy', align: 'end' },
+        { text: 'Idle with the role', value: 'idle', align: 'end' },
+        { text: 'Status', value: 'status' },
+      ]
     },
 
     // The model of the race's ground formations when the save has what it needs, else null.
@@ -614,6 +808,40 @@ export default {
       }
     },
 
+    // The icon and colour of a state, the words of a target's status and of a colony, and the work left on a target.
+    stateStyle(state) {
+      return STATE_STYLE[state]
+    },
+
+    targetStatus(status) {
+      return TARGET_STATUS[status]
+    },
+
+    colonyText(colony) {
+      return colony ? `${colony.name || `Colony ${colony.id}`}${colony.population === 0 ? ' (no residents)' : ''}` : 'No colony'
+    },
+
+    leftText(target) {
+      return target.role === 'geo' ? `${this.count(target.left)} points` : `${this.count(target.left)} installations`
+    },
+
+    liftLabel(lift) {
+      return liftText(lift, this.count)
+    },
+
+    candidateLabel(candidates) {
+      return candidateText(candidates, this.count)
+    },
+
+    // The targets a formation could serve, nearest first (`candidatesOf`).
+    candidateList(item) {
+      return candidatesOf(item, this.deployment.index, this.deployment.rows)
+    },
+
+    toggleDeployment(_item, { expand, isExpanded }) {
+      expand(!isExpanded)
+    },
+
     ratingText(value) {
       return value === null ? 'Unknown' : value > 0 ? this.fixed(value, 2) : '—'
     },
@@ -774,9 +1002,55 @@ export default {
           return []
         }
 
-        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.GroundMineralSurvey as Potential, ${bodyPointsSql()} as PointsRequired, FCT_Population.PopulationID, FCT_Population.PopName, coalesce(FCT_Population.GroundGeoSurvey, 0) as PointsDone, coalesce(VIR_Teams.Units, 0) as Units, coalesce(VIR_Teams.PointsPerDay, 0) as PointsPerDay from FCT_SystemBody inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.GameID = ${this.GameID} left join (select FCT_GroundUnitFormation.PopulationID, sum(FCT_GroundUnitFormationElement.Units) as Units, sum(FCT_GroundUnitFormationElement.Units * VIR_Class.Geosurvey * coalesce(VIR_Commander.BonusValue, 1)) as PointsPerDay from FCT_GroundUnitFormation inner join FCT_GroundUnitFormationElement on FCT_GroundUnitFormationElement.FormationID = FCT_GroundUnitFormation.FormationID inner join (select FCT_GroundUnitClass.GroundUnitClassID, coalesce(VIR_A.Geosurvey, 0) + coalesce(VIR_B.Geosurvey, 0) + coalesce(VIR_C.Geosurvey, 0) + coalesce(VIR_D.Geosurvey, 0) as Geosurvey from FCT_GroundUnitClass left join DIM_GroundComponentType as VIR_A on VIR_A.ComponentTypeID = FCT_GroundUnitClass.ComponentA left join DIM_GroundComponentType as VIR_B on VIR_B.ComponentTypeID = FCT_GroundUnitClass.ComponentB left join DIM_GroundComponentType as VIR_C on VIR_C.ComponentTypeID = FCT_GroundUnitClass.ComponentC left join DIM_GroundComponentType as VIR_D on VIR_D.ComponentTypeID = FCT_GroundUnitClass.ComponentD where FCT_GroundUnitClass.GameID = ${this.GameID}) as VIR_Class on VIR_Class.GroundUnitClassID = FCT_GroundUnitFormationElement.ClassID and VIR_Class.Geosurvey > 0 left join (select FCT_Commander.CommandID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5) as VIR_Commander on VIR_Commander.CommandID = FCT_GroundUnitFormation.FormationID where FCT_GroundUnitFormation.GameID = ${this.GameID} and FCT_GroundUnitFormation.RaceID = ${this.RaceID} group by FCT_GroundUnitFormation.PopulationID) as VIR_Teams on VIR_Teams.PopulationID = FCT_Population.PopulationID where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.GroundMineralSurvey > 0 order by FCT_SystemBody.GroundMineralSurvey desc, FCT_Population.PopulationID desc`).then(([items]) => items)
+        return await this.database.query(`select FCT_SystemBody.SystemBodyID, FCT_SystemBody.SystemID, FCT_SystemBody.BodyClass, FCT_SystemBody.PlanetNumber, FCT_SystemBody.OrbitNumber, FCT_SystemBodyName.Name as SystemBodyName, FCT_Star.Component, FCT_RaceSysSurvey.Name as SystemName, FCT_SystemBody.GroundMineralSurvey as Potential, ${bodyPointsSql()} as PointsRequired, FCT_Population.PopulationID, FCT_Population.PopName, FCT_Population.Population as ColonyPopulation, coalesce(FCT_Population.GroundGeoSurvey, 0) as PointsDone from FCT_SystemBody inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population on FCT_Population.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_Population.RaceID = ${this.RaceID} and FCT_Population.GameID = ${this.GameID} where FCT_SystemBody.GameID = ${this.GameID} and FCT_SystemBody.GroundMineralSurvey > 0 order by FCT_SystemBody.GroundMineralSurvey desc, FCT_Population.PopulationID desc`).then(([items]) => items)
       }),
       default: [],
+    },
+    // The Survey bonus of each ground formation's commander (formation id and bonus), which the ground survey rate of a colony multiplies the formations' rating by.
+    groundCommanders: {
+      get: tracked('groundCommanders', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return []
+        }
+
+        return await this.database.query(`select FCT_Commander.CommandID as FormationID, FCT_CommanderBonuses.BonusValue from FCT_Commander inner join FCT_CommanderBonuses on FCT_CommanderBonuses.CommanderID = FCT_Commander.CommanderID and FCT_CommanderBonuses.BonusID = 2 where FCT_Commander.GameID = ${this.GameID} and FCT_Commander.RaceID = ${this.RaceID} and FCT_Commander.CommandType = 5`).then(([items]) => Object.freeze(items))
+      }),
+      default: [],
+    },
+    // The ruins on the bodies the race has surveyed (`loadRuinSites`), or { supported: false, missing } for a save without what it reads.
+    ruinSites: {
+      get: tracked('ruinSites', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return Object.freeze(await loadRuinSites(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
+    },
+    // The ancient constructs on the bodies the race has a colony on (`loadConstructSites`), or { supported: false, missing } for a save without what it reads.
+    constructSites: {
+      get: tracked('constructSites', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return null
+        }
+
+        return Object.freeze(await loadConstructSites(this.database, { GameID: this.GameID, RaceID: this.RaceID }))
+      }),
+      default: null,
+    },
+    // The race's troop ships by class (`loadBootstrapFreight`), whose bays the formations are carried in: { troops: { classes } } or { troops: null } when the save does not give them.
+    troopBays: {
+      get: tracked('troopBays', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return { troops: null }
+        }
+
+        const { troops } = await loadBootstrapFreight(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+
+        return Object.freeze({ troops })
+      }),
+      default: { troops: null },
     },
     // The race's ground formations as one model (`loadGroundFormations`), or { supported: false, missing } for a save without what it reads.
     formations: {
