@@ -135,7 +135,7 @@
               </td>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength and by its crew share (a crew short of the class's applies once, more crew is no faster, and no crew aboard stops loading). The strength is that of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess, plus the technology once more if the colony has a spaceport or cargo shuttle station, which no bonus multiplies. A bonus the save cannot settle counts as 1, so the time errs long; a system stands in as a colony site with no governor or sector. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. Fuel burns at engine power times fuel consumption per hour at full speed.</div>
+          <div class="panel-foot caption text--secondary">Each class in a fleet is timed as if it sailed alone: the round trip is twice the route at its top speed, plus loading cargo and colonists at the origin and unloading them at the destination, each stop taking its slowest ship. Loading takes 20 s per ton and 10 s per colonist, divided by each ship's loading strength and by its crew share (a crew short of the class's applies once, more crew is no faster, and no crew aboard stops loading). The strength is that of its undamaged cargo shuttle bays (1 for a craft of 500 t or less, which lands, whatever bays it has) times the race's shuttle technology and the Logistics bonuses of its commander, of the naval administration over the system where it loads, of the colony's governor and a quarter of the sector commander's excess, plus the technology once more if the colony has a spaceport or cargo shuttle station, which no bonus multiplies. A bonus the save cannot settle counts as 1, so the time errs long; a system stands in as a colony site with no governor or sector. A ship over 500 t with no undamaged bays can load or unload only at a colony with a spaceport or cargo shuttle station, a class with such a ship is marked Can't load and names the ship and the stop, and a class whose ability to load is not known has no time, trips or fuel. {{ versionNote }} Ships without a jump drive that covers their size use only jump points stabilised on both sides; the rest use any jump point the race has explored. The route is the fewest jumps, with Lagrange jumps unless turned off, and does not avoid dangerous or alien systems. Jump shock and nebula speed limits are left out. The cargo is assumed ready at the origin and accepted at the destination. The run must fit in one tank: refuelling needs an order and a refuelling station, so no time for it is counted. Shipping line ships, in the Civilian tile, are timed the same way but without that fuel limit. Fuel burns at engine power times fuel consumption per hour at full speed. The wait for the jump shock after each jump is not added: a class has no crew read, so a run with jumps takes at least the time shown, which the mark beside it says.</div>
           <div v-if="payoutNote" class="panel-foot caption text--secondary"><span class="font-weight-medium">Shipping-line payout</span><provenance-mark :result="payoutNote.result" label /> {{ payoutNote.text }}</div>
         </v-card>
 
@@ -151,7 +151,7 @@
           <v-data-table v-else :headers="fleetHeaders" :items="fleetRuns" item-key="key" :expanded.sync="fleetsExpanded" show-expand single-expand :sort-by.sync="fleetsTable.sortBy" :sort-desc.sync="fleetsTable.sortDesc" :items-per-page.sync="fleetsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" :no-data-text="destination ? 'No fleet carries cargo or colonists' : 'Pick a destination above'" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}</div>
+                <div class="font-weight-medium" data-fleet-name>{{ item.FleetName }}</div>
                 <div class="caption text--secondary">{{ item.independent }} of {{ item.ships }} under their own power<provenance-mark rule="transport.fleetSpeed" /></div>
               </div>
             </template>
@@ -194,11 +194,22 @@
             </template>
             <template #expanded-item="{ headers, item }">
               <td :colspan="headers.length" class="py-3">
+                <div v-if="item.cycleRows.length" class="mb-3" data-fleet-cycle>
+                  <div class="text-subtitle-2">Round trip</div>
+                  <v-simple-table dense>
+                    <tbody>
+                      <tr v-for="row in item.cycleRows" :key="row.key" :data-cycle-row="row.key">
+                        <td>{{ row.label }}</td>
+                        <td class="text-right text-no-wrap" :data-cycle-value="row.key">{{ row.text }}<provenance-mark v-if="row.result" :result="row.result" /></td>
+                      </tr>
+                    </tbody>
+                  </v-simple-table>
+                </div>
                 <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="item.reasons" :conditions="item.conditions" :handling-rows="item.handlingRows" />
               </td>
             </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">A fleet sails at one speed: that of its slowest ship under its own power, from the engines it has undamaged, its overhaul and the mass of a ship it tows, which can be lower than the speed saved for the fleet and than the class's rating. Every ship shares that one travel time and burns fuel at its own engine power, scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none of its own and its holds are not counted, as loading by such a craft is not validated for this game version; a fleet with every hold in tow is not supported. A ship with no working engines that nothing carries or tows keeps the fleet from moving. Loading and unloading are timed as for the classes above, each stop taking its slowest counted ship. The classes above are each timed alone, as if every ship of it had its own engines. {{ versionNote }}</div>
+          <div class="panel-foot caption text--secondary">A fleet sails at one speed: that of its slowest ship under its own power, from the engines it has undamaged, its overhaul and the mass of a ship it tows, which can be lower than the speed saved for the fleet and than the class's rating. Every ship shares that one travel time and burns fuel at its own engine power, scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none of its own and its holds are not counted, as loading by such a craft is not validated for this game version; a fleet with every hold in tow is not supported. A ship with no working engines that nothing carries or tows keeps the fleet from moving. Loading and unloading are timed as for the classes above, each stop taking its slowest counted ship. The classes above are each timed alone, as if every ship of it had its own engines. {{ versionNote }} Every jump is followed by a delay each ship draws from its own crew, the longest of them holding the fleet back; the fleet waits at a jump point only for what the flight and the loading since the last jump have not already used, as a range from the lowest to the highest draws, and the round trip is the upper case. The game retries a blocked transit at the start of each subpulse and the length of the subpulses ahead is not known, so the upper case takes a wait up to two subpulses past the second the delay clears (12 hours at the longest subpulse the game runs, 6 hours) and the lower case the second it clears. A transit takes no time. A jump gives the delay again, so the wait is counted for every jump of the way there and back. Where a ship's crew is not in the save the round trip is not given.</div>
         </v-card>
 
         <v-card class="panel" data-summary="The installations the colonies offer and ask for, and how much of each is already on its way. Use it to see what civilian shipping lines are carrying." elevation="1">
@@ -271,6 +282,7 @@ import { JUMP_DRIVE_COLUMNS, SHUTTLE_SERVICE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, 
 import { avoidFields, cutOffText, detourText, loadPlannedAvoidSystems, pathResult, planRun, unreadResult } from '../utilities/safe-routes'
 import { fleetProfile, fleetTrip, fleetTripResult, loadFleetShips, participantRows } from '../utilities/fleet-profile'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
+import { fleetTimingOf, flightOnly, loadSystemDust, waitResult } from '../utilities/route-time'
 import { cachedPropagation } from '../utilities/orbit-propagation'
 import { ADAPTERS, CONDITIONS, figureOf, lagrangeEndpoint, placeEndpoint, routePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
 
@@ -286,6 +298,7 @@ const INPUT_LABELS = {
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   fleetShips: 'the ships of the fleets',
+  systemDust: 'the nebula density of the systems',
   ...POSITION_LABELS,
 }
 // The reads that feed one optional feature alone: the page never waits for them, and each has its own note when it is not in (the officers' Logistics bonuses, the danger and control the avoid settings read, the ships of the fleets sailing together).
@@ -894,9 +907,9 @@ export default {
         return { ...base, note: this.reachNote(group, reach) }
       }
 
-      const heldTrip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
+      const heldTrip = roundTrip(shipClass.ships, reach.route.km, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport, jumps: reach.route.jumps })
       const simulation = this.simulate(reach, first.MaxSpeed, heldTrip)
-      const trip = simulation && simulation.annual.status === 'propagated' ? roundTrip(shipClass.ships, simulation.annual.meanKm, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport }) : heldTrip
+      const trip = simulation && simulation.annual.status === 'propagated' ? roundTrip(shipClass.ships, simulation.annual.meanKm, endpoints, first.ShuttleTechnology, { colonists: true, version: this.formulaVersion, support: this.officerSupport, jumps: reach.route.jumps }) : heldTrip
       // Shipping line ships are timed without the fuel limit.
       const status = group.civilian && trip.status === 'range' ? 'ok' : trip.status
       const works = status === 'ok'
@@ -998,6 +1011,7 @@ export default {
         provenance: null,
         results: null,
         handlingRows: [],
+        cycleRows: [],
         participantRows: participantRows(profile),
         speeds: { cruise: profile.cruise, cruiseSource: profile.cruiseSource, saved: profile.savedSpeed, useMaximum: profile.useMaximumSpeed, effectiveMax: profile.effectiveMax, designMax: profile.designMax, limiting: profile.limiting ? profile.limiting.name : '' },
         reasons: profile.reasons.map((reason) => capital(reason.text)),
@@ -1015,15 +1029,19 @@ export default {
         return { ...base, note: this.reachNote(fleet, reach) }
       }
 
-      const heldTrip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport })
-      const simulation = this.simulate(reach, profile.cruise, heldTrip)
-      const trip = simulation && simulation.annual.status === 'propagated' ? fleetTrip(profile, simulation.annual.meanKm, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport }) : heldTrip
+      const timing = { ...fleetTimingOf(profile.participants, this.systemDust), steps: routeLegs(reach.route) }
+      const heldTrip = fleetTrip(profile, reach.route.km, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing })
+      const first = this.simulate(reach, profile.cruise, heldTrip)
+      const flownTrip = first && first.annual.status === 'propagated' ? fleetTrip(profile, first.annual.meanKm, endpoints, { colonists: true, version: this.formulaVersion, support: this.officerSupport, timing: { ...timing, flights: { out: first.annual.flights[0], back: first.annual.flights[1] } } }) : null
+      // The bodies moved on can bring an end of the run nearer, so that a flight no longer runs the delay down: that round trip's time is a range, and it keeps the saved positions (`timed-clock`).
+      const simulation = flownTrip && !flightOnly(flownTrip.cycle, profile.cruise) ? this.simulate(reach, profile.cruise, flownTrip) : first
+      const trip = flownTrip && simulation === first ? flownTrip : heldTrip
       const positions = simulation ? simulation.annual.positions : this.positionsOf(reach)
       const yearly = (value) => ({ days: value.tripSeconds / SECONDS_PER_DAY, trips: value.trips, tons: value.tonsYear, colonists: value.colonistsYear })
       const works = trip.status === 'ok'
       const timed = works || trip.status === 'range'
       const left = profile.cargo.left.ships.length
-      const run = { ...base, ...this.safeFields(reach), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
+      const run = { ...base, ...this.safeFields(reach), status: trip.status, jumps: reach.route.jumps, km: reach.route.km, tripSeconds: trip.tripSeconds, travelSeconds: trip.travelSeconds, handlingSeconds: trip.handlingSeconds, limiting: trip.limiting, cycleRows: timed ? this.cycleRows(trip) : [], provenance: withPositions(fleetTripResult(trip, profile), positions), estimate: trip.estimate, handlingRows: handlingRows(trip.stops.map((stop, index) => ({ key: `${base.key}-${index}`, label: `${stop.where === 'origin' ? 'Loading' : 'Unloading'} ${stop.kind} at ${endpoints[stop.where].place}`, breakdown: stop.breakdown }))), participantRows: participantRows(profile, trip), statusSort: works ? 0 : 1, simulation, propagation: timed && simulation && simulation.annual.compared ? this.propagationOf(simulation, yearly(heldTrip), yearly(trip), works) : null }
       const problems = trip.problems.map((problem) => capital(problem.text)).join('; ')
 
       if (works) {
@@ -1040,7 +1058,21 @@ export default {
       return { ...run, note: problems ? `${problems}.` : '' }
     },
 
-    // The round trip sailed cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): the run out and back, loading at the origin and unloading at the destination as waits, the way back flown on the same jump points with its Lagrange points chosen afresh. Null while the positions are not read, or for a run with no speed or no handling time. Kept per save, speed and run.
+    // The parts of a fleet's round trip that add up to its time, for the expanded row: flying, loading and unloading, the transits (which take none), the wait for the jump shock as a range, the total at the upper case of that wait with the lower case beside it, and the round trips a year that total gives.
+    cycleRows(trip) {
+      const range = (low, high) => (low === high ? this.span(low) : `${this.span(low)} to ${this.span(high)}`)
+
+      return [
+        { key: 'flight', label: 'Flying', text: this.span(trip.travelSeconds) },
+        { key: 'handling', label: 'Loading and unloading', text: this.span(trip.handlingSeconds) },
+        { key: 'transit', label: 'Transits', text: this.span(trip.transitSeconds) },
+        { key: 'wait', label: 'Waiting for the jump shock', text: range(trip.waitSeconds.lo, trip.waitSeconds.hi), result: waitResult(trip.waitSeconds, []) },
+        { key: 'total', label: 'Round trip', text: range(trip.tripSecondsLow, trip.tripSeconds) },
+        { key: 'year', label: 'Round trips a year', text: this.count(trip.trips, 1) },
+      ]
+    },
+
+    // The round trip sailed cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): the run out and back, loading at the origin and unloading at the destination as waits, the way back flown on the same jump points with its Lagrange points chosen afresh. Null while the positions are not read, or for a run with no speed or no handling time. A round trip whose walk is not the flight's own clock (`flightOnly`: a jump shock to wait for, a nebula cap) states the saved positions and why. Kept per save, speed and run.
     simulate(reach, speed, trip) {
       const { origin, destination, positionRead } = this
 
@@ -1053,9 +1085,10 @@ export default {
       const hops = [{ steps, from: origin, to: destination, wait: wait('destination') }, { steps: reverseSteps(steps), from: destination, to: origin, wait: wait('origin') }]
       const lagrangePoints = this.useLagrange ? this.lagrangePoints : []
       const path = pathKey(steps)
-      const scenario = JSON.stringify([origin.key, destination.key, reach.route.jumps, reach.route.km, path, this.useLagrange, wait('origin'), wait('destination')])
+      const timed = !flightOnly(trip.cycle, speed)
+      const scenario = JSON.stringify([origin.key, destination.key, reach.route.jumps, reach.route.km, path, this.useLagrange, wait('origin'), wait('destination'), timed])
 
-      return cachedPropagation(this.database, 'transport', { facts: positionRead, profile: speed, scenario }, () => simulateCycles({ hops, facts: positionRead, adapters: ADAPTERS, speed, lagrangePoints }))
+      return cachedPropagation(this.database, 'transport', { facts: positionRead, profile: speed, scenario }, () => simulateCycles({ hops, facts: positionRead, adapters: ADAPTERS, speed, lagrangePoints, timed }))
     },
 
     // What the simulated year changed against the saved positions, for a row: { moved (the figures are the propagated ones), reasons (the texts of why the saved positions stand), held, used } with each of `held` and `used` as { days, trips, tons, colonists }.
@@ -1176,6 +1209,17 @@ export default {
         return await loadFleetShips(this.database, { GameID: this.GameID, RaceID: this.RaceID, fleetWhere: `FCT_Fleet.ShippingLine = 0 and FCT_Fleet.FleetID in (select carrier.FleetID from FCT_Ship as carrier inner join FCT_ShipClass as carrierClass on carrierClass.ShipClassID = carrier.ShipClassID where carrier.GameID = ${this.GameID} and carrier.RaceID = ${this.RaceID} and (carrierClass.CargoCapacity > 0 or carrierClass.ColonistCapacity > 0 or carrierClass.CargoCapacity is null or carrierClass.ColonistCapacity is null))` })
       }),
       default: [],
+    },
+    // The nebula density of the systems the race has surveyed that have dust (`loadSystemDust`): what caps a fleet's speed in a system. Few saves have any.
+    systemDust: {
+      get: tracked('systemDust', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadSystemDust(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: () => ({}),
     },
     // What colonies supply and demand of each installation, while shipping lines run.
     requests: {

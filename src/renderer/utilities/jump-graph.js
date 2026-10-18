@@ -1,6 +1,7 @@
 // Routes over the jump points a race has explored, as its fleets fly them: a straight line inside a system, no distance through a jump point. The game's auto-route takes the fewest transits and breaks ties by whichever path it meets first; here ties go to the shorter distance. The galactic map's distance is the shortest in kilometres, centre to centre.
 
 import { ofRule, registerRule, unavailable } from './provenance'
+import { aged, carriedFlight, flyEvent, leaving } from './route-time'
 
 export const KM_PER_AU = 149600000
 
@@ -61,6 +62,8 @@ export const jumpLinks = (jumpPoints) => {
 const BEFORE = {
   jumps: (a, b) => a.jumps - b.jumps || a.km - b.km,
   km: (a, b) => a.km - b.km || a.jumps - b.jumps,
+  // Seconds that are not known are Infinity, which never ranks before a known time; two of them tie and fall to the distance.
+  time: (a, b) => (a.seconds === b.seconds ? 0 : a.seconds < b.seconds ? -1 : 1) || a.jumps - b.jumps || a.km - b.km,
 }
 
 // A binary heap of states, the one `before` puts first on top.
@@ -162,13 +165,18 @@ export const flightInSystem = (a, b, lagrangePoints = [], motion = null, time = 
 }
 
 // Single-source shortest routes from the nearest of `origins` ([{ SystemID, Xcor, Ycor }], a system's centre is 0, 0) over `jumpPoints` (loadJumpPoints rows). Options:
-// - `order`: 'jumps' (fewest transits, then distance) or 'km' (shortest distance, then transits).
+// - `order`: 'jumps' (fewest transits, then distance), 'km' (shortest distance, then transits) or 'time' (the least elapsed time, then transits, then distance; it needs `timing`).
+// - `timing`: { speed, speedIn, holdsSpeed, shock, startDelay, slow } (`searchTiming` of utilities/route-time.js): the fleet's speed (`speedIn(SystemID)` where a system caps it), whether it holds a speed of its own, the upper case of the jump shock in seconds, the delay it starts with and the caps it starts with (`aged` of utilities/route-time.js, none when absent). Each flight is priced as `walkEvents` prices it at the upper case (`carriedFlight` and `leaving`: a fleet set to its maximum speed flies at the lowest cap of the systems it was in during the last longest subpulse, and a nebula whose cap the armour cannot weigh, crossed even at no distance, leaves a cap of no known speed that gives every flight under it no known time), a flight after a transit takes the longer of its own time and the shock still running, the first one the longer of its time and the start delay, and the wait runs the caps down; a transit takes none. A flight, shock or start delay that is not known prices the route at Infinity seconds. Every route found with it has `seconds`; the clock of `motion` stays distance over speed.
 // - `canTransit(jumpPoint)`: whether the route may jump out through it (a gate for ships without a jump drive).
 // - `canEnter(SystemID)`: whether the route may jump into the system; the game's avoid rules apply to the destination too. The origins' own systems are always left freely.
 // - `lagrangePoints`: [{ SystemID, Xcor, Ycor }] to jump between inside a system, or none.
 // - `motion`: { speed, start, reach } to fly the places that move at the time the fleet leaves the previous point (`start` is the game time the route starts at, the time at a state is `start` plus its km over `speed`, a jump taking none; `reach` is `flightInSystem`'s): the flights inside the system of each leg, the Lagrange points and the destination, are then the positions at those times. Without it every place is where the save stores it.
 // Returns `toSystem(SystemID)` (arrival at the system's jump point) and `toPlace({ SystemID, Xcor, Ycor })`, each giving { jumps, km, from, end } or null when nothing reaches it. `from` is the origin the route starts at, and `routeLegs(route)` spells out `end`; with `motion` the route also has `arrival` (where the fleet meets the destination place, { Xcor, Ycor, time, record }) and `routeRecords(route)` gives the records its figures rest on.
-export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [], motion = null } = {}) => {
+export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTransit = () => true, canEnter = () => true, lagrangePoints = [], motion = null, timing = null } = {}) => {
+  if (order === 'time' && !timing) {
+    throw new Error('The time order needs the fleet\'s timing')
+  }
+
   const before = BEFORE[order]
   const origins = allOrigins.filter(hasPosition)
   const byId = {}
@@ -183,14 +191,38 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
     ;(lagrangeBySystem[point.SystemID] = lagrangeBySystem[point.SystemID] || []).push(point)
   })
 
-  // A state is the route standing at a jump point: arrived through it (`jump`), or flown to it (`fly`) from the previous state's jump point, or from the origin when there is none.
+  // A state is the route standing at a jump point: arrived through it (`jump`), or flown to it (`fly`) from the previous state's jump point, or from the origin when there is none. A jump point keeps the states no other one there covers (`covered`). In every other order the first state at a jump point is its only one. In the time order the queue gives the states no earlier than the ones kept, and a kept state covers a later one when every cap it still holds once the later one stands there is matched by a cap of the later one that is no faster and holds no shorter (`covers`; a state with no cap covers every later one, and a cap of no known speed, 0, is matched only by another one). The highest case flies at a speed that only the caps of the last longest subpulse lower, so the kept state is never the slower of the two at the same instant wherever they go, its delay runs from an earlier transit, and it reaches every place no later: the rule drops no faster route, whatever the delay. A state's caps run out within one longest subpulse, so the states a jump point keeps are less than that apart; where nothing caps the fleet the first one is the only one.
   const reached = {}
   const pending = queue(before)
   const timeAt = (km) => (motion ? motion.start + km / motion.speed : 0)
+  const firstOnly = order !== 'time'
+  const startCaps = (timing && timing.slow) || []
+  const covers = (a, b) => a.slow.every((cap) => a.seconds + cap.budget <= b.seconds || b.slow.some((other) => other.speed <= cap.speed && b.seconds + other.budget >= a.seconds + cap.budget))
+  const covered = (state) => (reached[state.at.WarpPointID] || []).some((kept) => firstOnly || covers(kept, state))
+  // The upper case of a flight of `km` in a system from the cap state `slow`: { seconds (Infinity when no speed is known), slow, cap (the system's, `flyEvent`'s `capSpeed`) }.
+  const flown = (km, systemId, slow) => {
+    const event = flyEvent(km, systemId, timing)
+    const leg = carriedFlight(event, slow)
+
+    return leg.seconds === null ? { seconds: Infinity, slow: [], cap: null } : { ...leg, cap: event.capSpeed }
+  }
+  // When the fleet can transit from a jump point after flying to it, and the caps it then holds: the flight, then what is left of the delay (the shock after the transit before, or the start delay), which runs the caps down, and the cap of the system it leaves (`leaving`).
+  const readyAt = (previous, km, systemId) => {
+    const delay = previous ? timing.shock : timing.startDelay
+    const flight = flown(km, systemId, previous ? previous.slow : startCaps)
+
+    if (delay === null || flight.seconds === Infinity) {
+      return { seconds: Infinity, slow: [] }
+    }
+
+    const waited = Math.max(0, delay - flight.seconds)
+
+    return { seconds: (previous ? previous.seconds : 0) + flight.seconds + waited, slow: leaving(aged(flight.slow, waited), flight.cap) }
+  }
   const fly = (previous, origin, from, to, jumps, km) => {
     const leg = flightInSystem(from, to, lagrangeBySystem[to.SystemID], motion, timeAt(km))
 
-    return { kind: 'fly', at: to, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
+    return { kind: 'fly', at: to, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(timing ? readyAt(previous, leg.km, to.SystemID) : {}), ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
   }
 
   origins.forEach((origin) => (bySystem[origin.SystemID] || []).forEach((jumpPoint) => pending.push(fly(null, origin, origin, jumpPoint, 0, 0))))
@@ -198,37 +230,45 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
   while (pending.size) {
     const state = pending.pop()
 
-    if (reached[state.at.WarpPointID]) {
+    if (covered(state)) {
       continue
     }
 
-    reached[state.at.WarpPointID] = state
+    ;(reached[state.at.WarpPointID] = reached[state.at.WarpPointID] || []).push(state)
 
     if (state.kind === 'fly') {
       const partner = byId[state.at.WPLink]
 
-      if (state.at.Explored && partner && !reached[partner.WarpPointID] && canTransit(state.at) && canEnter(partner.SystemID)) {
-        pending.push({ kind: 'jump', at: partner, previous: state, origin: state.origin, jumps: state.jumps + 1, km: state.km })
+      if (state.at.Explored && partner && canTransit(state.at) && canEnter(partner.SystemID)) {
+        const next = { kind: 'jump', at: partner, previous: state, origin: state.origin, jumps: state.jumps + 1, km: state.km, ...(timing ? { seconds: state.seconds, slow: state.slow } : {}) }
+
+        if (!covered(next)) {
+          pending.push(next)
+        }
       }
     } else {
       // On across the system: one leg per system, as the game queues a route.
       bySystem[state.at.SystemID].forEach((other) => {
-        if (other !== state.at && !reached[other.WarpPointID]) {
-          pending.push(fly(state, state.origin, state.at, other, state.jumps, state.km))
+        if (other !== state.at && !(reached[other.WarpPointID] || []).some((kept) => firstOnly || kept.slow.length === 0)) {
+          const next = fly(state, state.origin, state.at, other, state.jumps, state.km)
+
+          if (!covered(next)) {
+            pending.push(next)
+          }
         }
       })
     }
   }
 
-  const arrivals = (systemId) => (bySystem[systemId] || []).map((jumpPoint) => reached[jumpPoint.WarpPointID]).filter((state) => state && state.kind === 'jump')
+  const arrivals = (systemId) => (bySystem[systemId] || []).flatMap((jumpPoint) => reached[jumpPoint.WarpPointID] || []).filter((state) => state.kind === 'jump')
   const nearest = (states) => states.reduce((best, state) => (!best || before(state, best) < 0 ? state : best), null)
-  const route = (end) => end && { jumps: end.jumps, km: end.km, from: end.origin, end, ...(motion ? { arrival: end.arrival || null } : {}) }
+  const route = (end) => end && { jumps: end.jumps, km: end.km, from: end.origin, end, ...(timing ? { seconds: end.seconds } : {}), ...(motion ? { arrival: end.arrival || null } : {}) }
 
   return {
     toSystem(systemId) {
       const origin = origins.find((candidate) => candidate.SystemID === systemId)
 
-      return origin ? { jumps: 0, km: 0, from: origin, end: null } : route(nearest(arrivals(systemId)))
+      return origin ? { jumps: 0, km: 0, from: origin, end: null, ...(timing ? { seconds: 0 } : {}) } : route(nearest(arrivals(systemId)))
     },
     toPlace(place) {
       if (!hasPosition(place)) {
@@ -236,11 +276,11 @@ export const searchRoutes = (jumpPoints, allOrigins, { order = 'jumps', canTrans
       }
 
       const lagrange = lagrangeBySystem[place.SystemID]
-      const local = origins.filter((origin) => origin.SystemID === place.SystemID).map((origin) => ({ origin, previous: null, from: origin, jumps: 0, km: 0 }))
-      const ends = [...local, ...arrivals(place.SystemID).map((state) => ({ origin: state.origin, previous: state, from: state.at, jumps: state.jumps, km: state.km }))].map(({ origin, previous, from, jumps, km }) => {
+      const local = origins.filter((origin) => origin.SystemID === place.SystemID).map((origin) => ({ origin, previous: null, from: origin, jumps: 0, km: 0, seconds: 0, slow: startCaps }))
+      const ends = [...local, ...arrivals(place.SystemID).map((state) => ({ origin: state.origin, previous: state, from: state.at, jumps: state.jumps, km: state.km, seconds: state.seconds, slow: state.slow }))].map(({ origin, previous, from, jumps, km, seconds, slow }) => {
         const leg = flightInSystem(from, place, lagrange, motion, timeAt(km))
 
-        return { kind: 'fly', at: place, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
+        return { kind: 'fly', at: place, previous, origin, jumps, km: km + leg.km, legKm: leg.km, via: leg.via, ...(timing ? { seconds: seconds + flown(leg.km, place.SystemID, slow).seconds } : {}), ...(motion ? { records: leg.records, arrival: leg.end } : {}) }
       })
 
       return route(nearest(ends))

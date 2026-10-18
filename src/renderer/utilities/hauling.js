@@ -2,6 +2,7 @@
 
 import { bonusProvenance, mergeFactors } from './handling-bonuses'
 import { ofRule, registerRule, unavailable } from './provenance'
+import { RETRY_ASSUMPTION, SQUADRON_ASSUMPTION, flyEvent, handleEvent, heldSpeedIn, nebulaGapOf, speedIn, timingGaps, transitModeOf, unsupportedGaps, waitResult, walkEvents } from './route-time'
 import { LOADS, SECONDS_PER_YEAR, UNLOADS, UNVERIFIED_VERSION, landingThreshold, missingInputsOf, stopHandling } from './transport'
 
 // Orders that move up to MaxItems tonnes of one mineral (Load Mineral Type, Unload Mineral Type, Load Mineral when X available); "Load All Minerals" (62) and "...Until Full" (223) take whatever the colony has, up to a full hold.
@@ -29,7 +30,7 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['FCT_Fleet.Speed', 'FCT_MoveOrders.OrderDelay', 'FCT_ShipClass.CargoCapacity, ColonistCapacity'],
-  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays. Loading counts the officers\' Logistics bonuses as `transport.logisticsBonuses` gives them, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
+  note: 'Moving time at the fleet\'s set speed plus loading and unloading as `transport.handlingTime` gives them plus the orders\' own delays plus, for each transit through a jump point, the wait for the jump shock the fleet\'s ships draw (`route.jumpWait`) where the fleet\'s crew is read, counted at its upper case. Loading counts the officers\' Logistics bonuses as `transport.logisticsBonuses` gives them, and a cycle comes out long when a bonus is not known; refuelling and overhauls are not counted.',
   assumptions: ['full loads, or the amounts set on the orders', 'the fleet\'s set speed all the way', 'no refuelling or overhaul stops'],
 })
 
@@ -84,26 +85,28 @@ registerRule({
 })
 
 // How far a repeating route's figures can be trusted, as provenance results { cycle, freight, colonists, fuel }: the rules' own status when the route has a year, unavailable naming what is missing when a ship's eligibility or a timing input isn't known (`handling.unknown`), and null otherwise (a route that can't be traced, can't load or isn't moving says why in its own note).
-export const routeResults = (route, year, handling) => {
+export const routeResults = (route, year, handling, walk = null) => {
   const { inputs, assumptions: bonusAssumptions } = bonusProvenance({ known: handling.known || [], unknown: handling.unsettled || [] })
   const assumptions = [...(handling.versionSupported ? [] : [UNVERIFIED_VERSION]), ...bonusAssumptions]
+  const unknown = (missing) => ({
+    cycle: unavailable({ rule: 'hauling.cycleTime', missing }),
+    freight: unavailable({ rule: 'hauling.freightMoved', missing }),
+    colonists: unavailable({ rule: 'hauling.colonistsMoved', missing }),
+    fuel: unavailable({ rule: 'hauling.fleetFuelPerYear', missing }),
+  })
 
   if (year) {
     return {
-      cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, inputs, assumptions }),
+      ...(walk ? { wait: waitResult(walk.wait, walk.missing) } : {}),
+      cycle: ofRule({ rule: 'hauling.cycleTime', value: year.cycleDays, inputs, assumptions: [...assumptions, ...(year.waitDays > 0 ? [RETRY_ASSUMPTION] : []), ...(walk && walk.assumptions ? walk.assumptions : [])] }),
       freight: ofRule({ rule: 'hauling.freightMoved', value: year.minerals + year.installations, inputs, assumptions }),
       colonists: ofRule({ rule: 'hauling.colonistsMoved', value: year.colonists, inputs, assumptions }),
       fuel: ofRule({ rule: 'hauling.fleetFuelPerYear', value: year.fuel, inputs, assumptions }),
     }
   } else if (route.km !== null && handling.unknown.length && !handling.blocked.length) {
-    const missing = missingInputsOf(handling.unknown)
-
-    return {
-      cycle: unavailable({ rule: 'hauling.cycleTime', missing }),
-      freight: unavailable({ rule: 'hauling.freightMoved', missing }),
-      colonists: unavailable({ rule: 'hauling.colonistsMoved', missing }),
-      fuel: unavailable({ rule: 'hauling.fleetFuelPerYear', missing }),
-    }
+    return unknown(missingInputsOf(handling.unknown))
+  } else if (route.km !== null && walk && !walk.total && !handling.blocked.length) {
+    return { wait: waitResult(null, walk.missing), ...unknown(walk.missing) }
   }
 
   return null
@@ -236,25 +239,58 @@ export const cycleHandling = (orders, cargo, fleet, ships, { version = null, sup
   }
 }
 
-// A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order delays), what it moves, and the fuel its engines burn while moving (litres per hour x hours under way). Refuelling and overhauls aren't counted. A route that can't be traced, a fleet with no speed, or a route where a ship can't load or isn't known to (`handling.blocked`, `handling.unknown`), has no year: it would never move its cargo, or it can't be told.
-export const routeYear = (fleet, route, cargo, handling, delaySeconds = 0) => {
-  if (route.km === null || !(fleet.Speed > 0) || handling.blocked.length || handling.unknown.length) {
+// A cycling fleet's year: trips at its set speed plus the time stopped (cargo handling and any order delays), what it moves, and the fuel its engines burn while moving (litres per hour x hours under way). Under a walk the hours under way are the distance over the set speed: a nebula that holds the fleet to a lower speed lowers the engine power in step (the game charges the fleet's speed over its maximum of the engine power), so a longer flight at a lower speed burns the same fuel for the same distance. Refuelling and overhauls aren't counted. A route that can't be traced, a fleet with no speed, or a route where a ship can't load or isn't known to (`handling.blocked`, `handling.unknown`), has no year: it would never move its cargo, or it can't be told.
+export const routeYear = (fleet, route, cargo, handling, delaySeconds = 0, walk = null) => {
+  if (route.km === null || !(fleet.Speed > 0) || handling.blocked.length || handling.unknown.length || (walk && !walk.total)) {
     return null
   }
 
-  const movingSeconds = route.km / fleet.Speed
-  const cycleSeconds = movingSeconds + handling.seconds + delaySeconds
+  const movingSeconds = walk ? walk.flightHi : route.km / fleet.Speed
+  const cycleSeconds = walk ? walk.total.hi : movingSeconds + handling.seconds + delaySeconds
   const trips = cycleSeconds > 0 ? SECONDS_PER_YEAR / cycleSeconds : 0
 
   return {
     cycleDays: cycleSeconds / 86400,
+    cycleLowDays: walk ? walk.total.lo / 86400 : cycleSeconds / 86400,
     movingDays: movingSeconds / 86400,
+    handlingDays: (handling.seconds + delaySeconds) / 86400,
+    waitDays: walk ? walk.wait.hi / 86400 : null,
+    waitLowDays: walk ? walk.wait.lo / 86400 : null,
+    transitDays: walk ? walk.transit / 86400 : null,
     trips,
     minerals: trips * cargo.perTrip.minerals,
     installations: trips * cargo.perTrip.installations,
     colonists: trips * cargo.perTrip.colonists,
-    fuel: fleet.FuelPerHour * (movingSeconds / 3600) * trips,
+    fuel: fleet.FuelPerHour * ((walk ? walk.km / fleet.Speed : movingSeconds) / 3600) * trips,
   }
+}
+
+// A route with each leg at the distance the year's simulation flew it (`annual.flights` of `simulateCycles`, one flight for each order's hop, the hops in the order of the legs): a body that moved changes the legs that end at it, and a leg between two jump points keeps its saved distance. The route's distance is the legs' sum.
+export const propagatedRoute = (route, flights) => {
+  const legs = route.legs.map((leg, index) => ({ ...leg, km: flights[index][0] }))
+
+  return { ...route, legs, km: legs.reduce((total, leg) => total + leg.km, 0) }
+}
+
+// One cycle of a fleet's orders as the walk of what it goes through, for `routeYear`: at each order the stop (its loading or unloading and its own delay), then the transit when the order leaves the system (a jump point; a Lagrange jump stays in it and gives no shock), then the flight to the next order. `timing` is { shock ({ lo, hi } or null), squadronShock, shockMissing, dust, armour, holdsSpeed } (`fleetTimingOf` of utilities/route-time.js). `route` as `walkRoute` gives it, each leg at the distance it is flown now: for a cycle flown on the moved bodies, the legs the simulation gives (`annual.flights`), so the legs between two jump points keep their distance. Each transit is timed by its order's `MoveActionID` (`transitModeOf`): a standard transit by the standard shock, a squadron transit by its own with an assumption about the scatter, any other not at all. Null with no timing or no cycle to walk; else `walkEvents`' result with `missing` (what the cycle lacks, empty when it is timed) and `assumptions` (what a timed cycle assumes).
+export const cycleWalk = (orders, fleet, route, handling, timing) => {
+  if (!timing || route.km === null || !(fleet.Speed > 0) || handling.seconds === null) {
+    return null
+  }
+
+  const clock = { speed: fleet.Speed, holdsSpeed: timing.holdsSpeed, speedIn: timing.holdsSpeed ? heldSpeedIn({ speed: fleet.Speed, dust: timing.dust, armour: timing.armour, systems: orders.map((order) => order.ExitSystemID) }) : speedIn({ speed: fleet.Speed, dust: timing.dust, armour: timing.armour }) }
+  const events = orders.flatMap((order, index) => {
+    const km = route.legs[index].km
+    const mode = transitModeOf(order.MoveActionID)
+    const transit = { kind: 'jump', order, label: order.label, ...(mode === 'squadron' ? { shock: timing.squadronShock } : {}), ...(mode === 'unsupported' ? { unsupported: true } : {}) }
+
+    return [handleEvent(order.label, handling.stops[index].seconds + (order.OrderDelay || 0)), ...(order.ExitSystemID !== order.SystemID ? [transit] : []), flyEvent(km, order.ExitSystemID, clock)]
+  })
+  const walk = walkEvents(events, timing.shock, { cyclic: true, retry: timing.retry })
+  const squadron = walk.events.some((event) => event.kind === 'jump' && event.shock !== undefined)
+  const missing = walk.total ? [] : walk.unsupported.length ? unsupportedGaps(walk) : walk.flightHi === null ? [nebulaGapOf(timing)] : timingGaps({ speed: fleet.Speed, shock: timing.shock, shockMissing: timing.shockMissing }, { cyclic: true })
+
+  return { ...walk, missing, assumptions: squadron ? [SQUADRON_ASSUMPTION] : [] }
 }
 
 // A freighter class's reach in a year at top speed: billion km, and cargo x billion km.

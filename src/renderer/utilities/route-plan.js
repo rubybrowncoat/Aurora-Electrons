@@ -2,8 +2,9 @@
 
 import { flyRoute, routeLegs, routeRecords, routeResults, searchRoutes } from './jump-graph'
 import { REASONS } from './orbit-propagation'
-import { combine, envelope, ofRule, registerRule, unavailable } from './provenance'
+import { combine, envelope, ofRule, registerRule, unavailable, weakestStatus } from './provenance'
 import { NO_ADAPTERS, POSITION_BASIS, ROUTE_MODE, jumpEndpoint, lagrangeEndpoint, placeEndpoint, positionRecord, routePositions, summarisePositions, viaEndpoints, withPositions } from './route-position'
+import { NEBULA_GAP, carriedDelay, elapsedResult, routeEvents, searchTiming, timingGaps, waitResult, walkEvents } from './route-time'
 
 // A system's own place is its centre, (0, 0); any other place is where the save has it, and a place with no position there reaches nothing (`searchRoutes`).
 const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.SystemID, Xcor: 0, Ycor: 0 } : { SystemID: place.SystemID, Xcor: place.Xcor, Ycor: place.Ycor })
@@ -14,18 +15,27 @@ const positionOf = (place) => (place.kind === 'system' ? { SystemID: place.Syste
 // - `systems`: the SystemIDs the route passes through in order, for the map.
 // - `positions`: the positions the plan's figures rest on (utilities/route-position.js `routePositions`), one summary for the whole plan and, on each leg, its own (null for a leg with no endpoints to state). A leg's endpoints are where it is flown from (the stop before it, or the jump point a system stop was reached at, or where the fleet already was when the system is the one it is in) and where it goes, with the Lagrange points it jumps between. `facts` is `loadPositionFacts`' read (null while it is not in); with none the age of a moving endpoint is unknown.
 // With no `adapters` the search and the distances use the positions the save stores, so the plan is static. With `adapters` (route-position.js `ADAPTERS`), the read clock and a `speed` (km/s) the plan is flown: each leg leaves at the time the one before arrives, the places that move are where they are when the fleet reaches them (`searchRoutes`' `motion`), a stop that moves is left from the position the fleet met it at, and the legs, the totals and the positions are those of that flight. The plan then also has `static` ({ jumps, km, missing, positions }, the same plan on the saved positions) and each leg its `staticKm`, so both read side by side; an endpoint no adapter moves keeps its saved position and states why in `positions`. Nothing changes without adapters or a read clock.
-export const planRoute = (stops, { cycle, jumpPoints, facts = null, adapters = NO_ADAPTERS, speed = null, ...options }) => {
-  const held = walkPlan(stops, { cycle, jumpPoints, facts, options, flight: null })
-  const flight = flightOf({ facts, adapters, speed })
+export const planRoute = (stops, { cycle, jumpPoints, facts = null, adapters = NO_ADAPTERS, speed = null, timing = null, ...options }) => {
+  const timed = options.order === 'time'
+  const held = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight: null })
+  const flight = timed || !flightClock(held, speed) ? null : flightOf({ facts, adapters, speed })
 
   if (!flight) {
     return held
   }
 
-  const moved = walkPlan(stops, { cycle, jumpPoints, facts, options, flight })
+  const moved = walkPlan(stops, { cycle, jumpPoints, facts, options, timing, flight })
+
+  // The bodies moved on can bring a jump point nearer, so that a flight no longer runs the delay down: the plan flown then has a wait, its time is a range again, and it keeps the saved positions.
+  if (!flightClock(moved, speed)) {
+    return held
+  }
 
   return { ...moved, legs: moved.legs.map((leg, index) => ({ ...leg, staticKm: held.legs[index].route ? held.legs[index].route.km : null })), static: { jumps: held.jumps, km: held.km, missing: held.missing, positions: held.positions } }
 }
+
+// Whether the elapsed time of a plan is the flight's own clock: it has none (nothing is claimed as time), or its flights are all at `speed` and no jump waits, so the arrival at a body is the one instant `km / speed` gives. A plan whose elapsed time is a range (a wait for the jump shock, a nebula cap or the cap a fleet keeps) stays on the saved positions: a body cannot be moved on to the arrival of a range, and the distances and the time would otherwise rest on different instants.
+const flightClock = (plan, speed) => !plan.time || !plan.time.total || (plan.time.wait.hi === 0 && plan.time.flightHi === plan.time.flight && Math.abs(plan.time.flight * speed - plan.km) <= 1e-9 * plan.km)
 
 const isPositive = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
 
@@ -78,7 +88,7 @@ export const reachPoint = (flight, point, from, time) => {
 // The `motion` of a flight started at `start` (game seconds), or null for the static plan. Without a speed a flight takes no time, and the adapters then decline each arrival.
 export const motionOf = (flight, start) => (flight ? { speed: flight.speed || Infinity, start, reach: (point, from, time) => reachPoint(flight, point, from, time) } : null)
 
-const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
+const walkPlan = (stops, { cycle, jumpPoints, facts, options, timing, flight }) => {
   const targets = stops.slice(1)
 
   if (cycle && stops.length > 1) {
@@ -86,11 +96,15 @@ const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
   }
 
   const searches = new Map()
-  const searchFrom = (start, time) => {
-    const id = `${start.SystemID}:${start.Xcor}:${start.Ycor}@${time}`
+  // The fastest-time order searches with the fleet's timing, the delay it carries into the leg (the retry's allowance on it once, `searchTiming`) and the cap it carries; every other order searches without it, and the waits are worked out over the route it finds.
+  const searchFrom = (start, time, delay, slow) => {
+    const priced = options.order === 'time' ? searchTiming({ ...timing, startDelay: delay, slow }) : null
+    const id = `${start.SystemID}:${start.Xcor}:${start.Ycor}@${time}#${priced ? `${priced.startDelay}~${priced.slow.map((cap) => `${cap.speed}/${cap.budget}`).join(',')}` : ''}`
 
     if (!searches.has(id)) {
-      searches.set(id, searchRoutes(jumpPoints, [start], flight ? { ...options, motion: motionOf(flight, time) } : options))
+      const searched = priced ? { ...options, timing: priced } : options
+
+      searches.set(id, searchRoutes(jumpPoints, [start], flight ? { ...searched, motion: motionOf(flight, time) } : searched))
     }
 
     return searches.get(id)
@@ -106,6 +120,9 @@ const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
   let jumps = 0
   let km = 0
   let missing = 0
+  let delay = timing ? timing.startDelay : null
+  let slow = []
+  const timeLegs = []
 
   targets.forEach((to, index) => {
     const closing = Boolean(cycle) && index === targets.length - 1
@@ -121,17 +138,27 @@ const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
       start = to.unavailable ? null : positionOf(to)
       origin = to.unavailable ? null : placeEndpoint(to)
       originRecord = flight && origin ? recordOf(origin, time) : null
+      delay = null
+      slow = []
 
       return
     }
 
-    const search = searchFrom(start, time)
+    const search = searchFrom(start, time, delay, slow)
     const route = to.kind === 'system' ? search.toSystem(to.SystemID) : search.toPlace(to)
     const steps = route ? routeLegs(route) : []
+    const walk = timing && route ? walkEvents(routeEvents(steps, timing), timing.shock, { startDelay: delay, retry: timing.retry, slow }) : null
+
+    delay = walk ? carriedDelay(walk) : null
+    slow = walk ? walk.slow : []
+
+    if (walk) {
+      timeLegs.push(walk)
+    }
     const flown = flight ? summarisePositions([originRecord, ...routeRecords(route)].filter(Boolean), { merge: true }) : null
     const positions = flight ? summarisePositions([...flown.records, positionRecord(placeEndpoint(to), { facts })]) : routePositions([origin, placeEndpoint(to), ...viaEndpoints(route)], { facts, adapters: NO_ADAPTERS })
 
-    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing, positions, ...(flight && route ? { seconds: flight.speed ? route.km / flight.speed : null, departs: time } : {}) })
+    legs.push({ index, from: stops[index], to, start, route, steps, unavailable: false, closing, positions, ...(flight && route ? { seconds: flight.speed ? route.km / flight.speed : null, departs: time } : {}), ...(timing ? { time: walk } : {}) })
 
     if (route) {
       jumps += route.jumps
@@ -176,7 +203,18 @@ const walkPlan = (stops, { cycle, jumpPoints, facts, options, flight }) => {
 
   const positions = summarisePositions(legs.flatMap((leg) => (leg.positions ? leg.positions.records : [])), { merge: true })
 
-  return { legs, jumps, km, missing, systems: systems.filter((id, index) => id !== systems[index - 1]), positions }
+  return { legs, jumps, km, missing, systems: systems.filter((id, index) => id !== systems[index - 1]), positions, ...(timing ? { time: timeTotals(timeLegs, timing, delay) } : {}) }
+}
+
+// The time of a whole plan from the walks of its routed legs: { flight (at the lowest case), flightHi (at the highest), handling, transit, wait, total } as `walkEvents` gives them summed (null when a leg's is), `startDelay` what the fleet carried into the plan and `remaining` ({ lo, hi, ready }) what it still carries at the end. `missing` is what the total lacks: the nebula's cap where a flight has no highest case (a nebula the armour cannot weigh caps it, or holds it after it), else `timingGaps`.
+const timeTotals = (walks, timing, remaining) => {
+  const summed = (read) => walks.reduce((total, walk) => (total === null || read(walk) === null ? null : total + read(walk)), 0)
+  const range = (key) => (summed((walk) => (walk.total ? walk.total[key] : null)))
+  const waits = (key) => summed((walk) => (walk.wait ? walk.wait[key] : null))
+  const total = range('lo') === null ? null : { lo: range('lo'), hi: range('hi') }
+  const flightHi = summed((walk) => walk.flightHi)
+
+  return { flight: summed((walk) => walk.flight), flightHi, handling: summed((walk) => walk.handling), transit: summed((walk) => walk.transit), wait: waits('lo') === null ? null : { lo: waits('lo'), hi: waits('hi') }, total, startDelay: timing.startDelay, remaining, missing: flightHi === null ? [NEBULA_GAP] : timingGaps(timing) }
 }
 
 const YEAR_SECONDS = 31536000
@@ -196,7 +234,9 @@ const refused = (record) => record.basis !== POSITION_BASIS.PROPAGATED && !recor
 // - `first`: the first cycle, { km (per hop), kmTotal, seconds (the cycle's time, flights and waits), positions }.
 // - `annual`: the cycles within the horizon, { status ('propagated' when a moving endpoint was moved on to its arrival and none that moves was refused, else 'static': the status follows the mode of the year's positions, so a year in which nothing moves is static), reasons (the condition codes behind a static one; none for a year in which nothing moves), compared (whether the year says anything about propagation: it flew on moved positions, or it states why the saved ones stand; false when no endpoint moves, and a figure beside it has no comparison to show), cycles, hops, meanKm (the mean flight of a hop: the propagated mean, or the static when the status is static), covered (seconds simulated), positions }. One endpoint that no adapter moves, in any hop of any cycle, makes the annual figure static and says why; the first cycle states its own.
 // - `static`: { km (per hop), meanKm }, the same cycle on the saved positions.
-export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, speed = null, lagrangePoints = [], horizon = YEAR_SECONDS }) => {
+// `annual.flights` and `static.flights` give, for each hop, the km of each flight inside it in the order of its steps (the mean over the cycles of the year for the first): a body that moved changes the flights that end at it and never a flight between two jump points.
+// `timed`: the elapsed time of the cycle is a range (a wait for the jump shock, a nebula cap, `flightOnly` of utilities/route-time.js) and not the flight's own clock, so a body that moves is not moved on to an arrival: the year states the saved positions and the reason `timed-clock` (the first cycle too). The same year is flown when it is not, with the bodies where the flights reach them.
+export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, speed = null, lagrangePoints = [], horizon = YEAR_SECONDS, timed = false }) => {
   const flight = flightOf({ facts, adapters, speed })
 
   if (!flight || !hops.length) {
@@ -219,6 +259,7 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
 
   for (let cycle = 0; cycle < MAX_CYCLES && (!cycle || time - flight.gameTime < horizon); cycle += 1) {
     const kms = []
+    const flown = []
     const mark = records.length
 
     const carries = (point) => (endpointOf(point) || {}).family !== 'lagrange-point'
@@ -242,6 +283,7 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
       const run = flyRoute(hop.steps, { from: at, time, lagrangePoints, motion: motionOf(flight, time) })
 
       kms.push(run.km)
+      flown.push(run.flights)
       records.push(...run.records)
       time = run.end.time + (hop.wait || 0)
 
@@ -256,7 +298,7 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
       }
     })
 
-    cycles.push({ km: kms, records: records.slice(mark) })
+    cycles.push({ km: kms, flights: flown, records: records.slice(mark) })
 
     if (cycle === 0) {
       firstSeconds = time - flight.gameTime
@@ -271,20 +313,23 @@ export const simulateCycles = ({ hops, facts = null, adapters = NO_ADAPTERS, spe
   const unmovedFirst = (list) => [...list.filter((record) => record.basis !== POSITION_BASIS.PROPAGATED), ...list.filter((record) => record.basis === POSITION_BASIS.PROPAGATED)]
   const everything = [...departure, ...records]
   const capped = everything.some((record) => record.moves !== false) && cycles.length >= MAX_CYCLES && time - flight.gameTime < horizon
-  const unmoved = capped || everything.some(refused)
-  const reasons = [...new Set([...(capped ? ['cycles-capped'] : []), ...everything.filter(refused).flatMap((record) => record.conditions).filter((code) => code === 'propagation-unavailable' || REASONS.includes(code))])].sort()
+  const clockHeld = timed && everything.some((record) => record.moves !== false)
+  const unmoved = capped || clockHeld || everything.some(refused)
+  const reasons = [...new Set([...(capped ? ['cycles-capped'] : []), ...(clockHeld ? ['timed-clock'] : []), ...everything.filter(refused).flatMap((record) => record.conditions).filter((code) => code === 'propagation-unavailable' || REASONS.includes(code))])].sort()
   const served = [...new Map([...walks.flatMap((hop) => [hop.from, hop.to, hop.leave]), ...heldRuns.flatMap((run) => run.points)].map((point) => (point ? endpointOf(point) : null)).filter((endpoint) => endpoint && typeof adapters[endpoint.family] === 'function').map((endpoint) => [endpoint.key, endpoint])).values()]
   const kept = served.map((endpoint) => { const base = positionRecord(endpoint, { facts }); return Object.freeze({ ...base, conditions: [...new Set([...base.conditions, ...(unmoved ? ['propagation-unavailable', ...reasons.filter((code) => code !== 'propagation-unavailable')] : [])])], unknown: true }) })
   const all = cycles.flatMap((cycle) => cycle.km)
   const flownPositions = summarisePositions(unmoved ? [...unserved, ...kept] : [...unserved, ...unmovedFirst(everything)], { merge: true })
   const status = unmoved || flownPositions.mode === ROUTE_MODE.STATIC ? 'static' : 'propagated'
-  const firstKm = cycles[0].km
+  const firstKm = clockHeld ? held : cycles[0].km
+  const heldFlights = heldRuns.map((run) => run.flights)
+  const meanFlights = heldFlights.map((flights, hop) => flights.map((_km, flight) => cycles.reduce((total, cycle) => total + cycle.flights[hop][flight], 0) / cycles.length))
 
   return {
     speed: flight.speed,
-    first: { km: firstKm, kmTotal: firstKm.reduce((sum, value) => sum + value, 0), seconds: firstSeconds, positions: summarisePositions([...unserved, ...unmovedFirst([...departure, ...cycles[0].records])], { merge: true }) },
-    annual: { status, reasons: unmoved ? (reasons.length ? reasons : ['propagation-unavailable']) : [], compared: status === 'propagated' || unmoved, cycles: cycles.length, hops: all.length, meanKm: status === 'static' ? staticMean : all.reduce((sum, value) => sum + value, 0) / all.length, covered: time - flight.gameTime, positions: flownPositions },
-    static: { km: held, meanKm: staticMean },
+    first: { km: firstKm, kmTotal: firstKm.reduce((sum, value) => sum + value, 0), seconds: firstSeconds, positions: clockHeld ? flownPositions : summarisePositions([...unserved, ...unmovedFirst([...departure, ...cycles[0].records])], { merge: true }) },
+    annual: { status, reasons: unmoved ? (reasons.length ? reasons : ['propagation-unavailable']) : [], compared: status === 'propagated' || unmoved, cycles: cycles.length, hops: all.length, meanKm: status === 'static' ? staticMean : all.reduce((sum, value) => sum + value, 0) / all.length, flights: status === 'static' ? heldFlights : meanFlights, covered: time - flight.gameTime, positions: flownPositions },
+    static: { km: held, flights: heldFlights, meanKm: staticMean },
   }
 }
 
@@ -299,8 +344,8 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['route.distanceKm', 'route.effectiveSpeed'],
-  note: 'The route\'s distance divided by one speed, in the unit that reads best. Jumps take no time here; the jump shock after each, nebula speed limits, acceleration and refuelling are left out, so the figure is not compared with times the game stores.',
-  assumptions: ['one speed all the way', 'no jump shock, nebula limits or refuelling stops'],
+  note: 'The route\'s distance divided by one speed, in the unit that reads best. A transit takes no time, and the jump shock a fleet waits out after each and the nebula speed caps are not in this figure: `route.jumpWait` and `route.elapsedTime` count them where the fleet\'s crew is read. Acceleration and refuelling are left out, so the figure is not compared with times the game stores.',
+  assumptions: ['one speed all the way', 'no nebula limits or refuelling stops'],
 })
 
 registerRule({
@@ -486,7 +531,19 @@ export const planResults = (plan, assumptions = []) => {
 
   const made = (rule, value) => (plan.missing ? envelope({ value, status: 'estimated', rule, inputs: { present: ROUTE_INPUTS, missing: [`an explored route for ${plan.missing} of ${legs} legs`] }, assumptions: [...assumptions, 'only the legs with a route are counted'] }) : ofRule({ rule, value, inputs: { present: ROUTE_INPUTS }, assumptions }))
 
-  return { jumps: made('route.jumps', plan.jumps), km: withPositions(made('route.distanceKm', plan.km), plan.positions) }
+  return { jumps: made('route.jumps', plan.jumps), km: withPositions(made('route.distanceKm', plan.km), plan.positions), ...(plan.time ? { time: timeResults(plan) } : {}) }
+}
+
+// A flight time that a wait for the jump shock was meant to join but could not (the crew is not known): the figure stays, as an estimate that names what it lacks and says the waits are not counted. An unavailable result stays so.
+export const withoutWaits = (result, missing) => (!result || result.status === 'unavailable' ? result : envelope({ value: result.value, status: weakestStatus([result.status, 'estimated']), rule: result.rule.id, inputs: { present: result.inputs.present, missing: [...result.inputs.missing, ...missing] }, units: result.units, assumptions: [...result.assumptions, 'the waits for the jump shock are not counted'] }))
+
+// The waits and the elapsed time of a timed plan as results, each on the plan's positions (the timed order is on the saved ones): { wait (the longest, seconds), elapsed (days at the upper case) }. A plan with a leg that has no route counts only the legs that have one, as an estimate that says so.
+const timeResults = (plan) => {
+  const { time } = plan
+  const partial = (result) => (plan.missing && result.status !== 'unavailable' ? envelope({ value: result.value, status: 'estimated', rule: result.rule.id, inputs: { present: result.inputs.present, missing: [`an explored route for ${plan.missing} of ${plan.legs.length} legs`] }, units: result.units, assumptions: [...result.assumptions, 'only the legs with a route are counted'] }) : result)
+  const made = (result) => withPositions(partial(result), plan.positions)
+
+  return { wait: made(waitResult(time.wait, time.missing)), elapsed: made(elapsedResult(time.total, time.missing)) }
 }
 
 // The route's stabilised jumps and Lagrange steps as results: `steps` are the plan's steps. A jump point with no gate strength in the save is not counted as stabilised, which the result of the count says.

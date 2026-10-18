@@ -563,6 +563,101 @@ check('same-gate', 'every dependent route output states the same positions: the 
   assert.equal(new Set(three.positions.records.map((record) => record.identity.key)).size, three.positions.records.length, 'the union lists each endpoint once')
 })
 
+check('timed-basis', 'the fastest-time order stays on the positions the save stores: a plan timed with adapters and a speed states the saved positions, carries no second figure, and its waits and elapsed time say the same positions as its distance', async (w) => {
+  const m = await w.modules()
+  const plan = m['route-plan']
+  const bodies = [stop('body', 3), stop('body', 4, { SystemID: 2, Xcor: 1, Ycor: 1 })]
+  const ahead = (endpoint) => ({ position: { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor + 1, Ycor: endpoint.Ycor }, observedAt: GAME_TIME + 1, conditions: [] })
+  const timing = { speed: 1000, speedIn: null, shock: { lo: 10, hi: 20 }, startDelay: 0, retry: 5 }
+  const base = { cycle: false, jumpPoints: LINKS, facts: FACTS, order: 'time', timing }
+  const timed = plan.planRoute(bodies, base)
+  const flown = plan.planRoute(bodies, { ...base, adapters: { body: ahead }, speed: 1000 })
+  const figures = plan.planResults(flown)
+
+  assert.ok(timed.time && timed.time.total, 'the plan is timed')
+  assert.equal(flown.positions.mode, 'static', 'adapters and a speed leave the timed order on the saved positions')
+  assert.equal(flown.static, undefined, 'and give no second figure to state')
+  assert.equal(flown.km, timed.km, 'the distance is the one of the saved positions')
+  assert.deepEqual(asJson(flown.positions), asJson(timed.positions), 'the positions are those of the plan with no adapters')
+  assert.equal(figures.km.status, 'estimated')
+  ;['elapsed', 'wait'].forEach((name) => {
+    assert.equal(figures.time[name].status, 'estimated', name + ' rests on positions that move')
+    flown.positions.missing.forEach((missing) => assert.ok(figures.time[name].inputs.missing.includes(missing), name + ' names what the positions lack'))
+    flown.positions.assumptions.forEach((held) => assert.ok(figures.time[name].assumptions.includes(held), name + ' states the positions held'))
+  })
+})
+
+check('timed-clock', 'a plan or a cycle whose elapsed time is a range stays on the positions the save stores and says so, and one whose time is the flight alone is still flown to the bodies where they are on arrival', async (w) => {
+  const m = await w.modules()
+  const plan = m['route-plan']
+  const rp = m['route-position']
+  const ahead = (endpoint) => ({ position: { SystemID: endpoint.SystemID, Xcor: endpoint.Xcor + 1, Ycor: endpoint.Ycor }, observedAt: GAME_TIME + 1, conditions: [] })
+  const timing = { speed: 1000, speedIn: null, shock: { lo: 10, hi: 20 }, startDelay: 0, retry: 5 }
+  const flown = (stops, extra = {}) => plan.planRoute(stops, { cycle: false, jumpPoints: LINKS, facts: FACTS, adapters: { body: ahead }, speed: 1000, timing, ...extra })
+
+  // A plan with a jump waits for the shock, and a plan in a nebula flies at a lower speed in a system: each has an elapsed time that is a range or is not the distance over the speed, so each stays on the saved positions with no second figure.
+  const jumped = flown([stop('body', 3), stop('body', 4, { SystemID: 2, Xcor: 1, Ycor: 1 }), stop('body', 5, { Xcor: 20 })])
+  const capped = flown([stop('body', 3), stop('body', 4, { Xcor: 20 })], { timing: { ...timing, speedIn: () => 500 } })
+  const lone = flown([stop('body', 3), stop('body', 4, { Xcor: 20 })])
+
+  assert.ok(jumped.time && jumped.time.total && jumped.time.wait.hi > 0, 'the plan back across a jump waits for the shock')
+  assert.equal(jumped.positions.mode, 'static', 'a wait that is a range leaves the bodies on the saved positions')
+  assert.equal(jumped.static, undefined, 'with no second figure')
+  assert.ok(capped.time && capped.time.total && capped.time.flightHi !== undefined, 'the plan in a nebula is timed')
+  assert.equal(capped.positions.mode, 'static', 'a flight held to a lower speed leaves the bodies on the saved positions')
+  assert.equal(capped.static, undefined)
+  assert.ok(lone.time && lone.time.total && lone.time.wait.hi === 0, 'the plan in one system has no wait')
+  assert.equal(lone.positions.mode, 'propagated', 'a flight alone is the clock the bodies are moved on')
+  assert.ok(lone.static, 'and the saved positions are stated beside it')
+
+  // A plan whose flights on the saved positions run the shock down has no wait; a body moved nearer to the jump point shortens the flights since the transit and gives it one. The plan flown on the moved bodies is a range again, so it keeps the saved positions.
+  const nearer = (endpoint) => ({ position: { SystemID: endpoint.SystemID, Xcor: endpoint.key === 'body:4' ? 1000 : endpoint.Xcor, Ycor: endpoint.Ycor }, observedAt: GAME_TIME + 1, conditions: [] })
+  const across = [stop('body', 3), stop('body', 4, { SystemID: 2, Xcor: 13000, Ycor: 0 }), stop('body', 5, { Xcor: 20 })]
+  const unmoved = plan.planRoute(across, { cycle: false, jumpPoints: LINKS, facts: FACTS, timing })
+  const gained = flown(across, { adapters: { body: nearer } })
+
+  assert.deepEqual(unmoved.time.wait, { lo: 0, hi: 0 }, 'on the saved positions the flights run the shock down')
+  assert.equal(gained.positions.mode, 'static', 'a plan that gains a wait on the moved bodies keeps the saved positions')
+  assert.equal(gained.static, undefined, 'with no second figure')
+  assert.deepEqual(gained.time.total, unmoved.time.total, 'and the time of the saved positions')
+  assert.equal(gained.km, unmoved.km)
+
+  // The other way round, a plan that waits on the saved positions keeps them even where the moved bodies would run the shock down: its time on the positions the save stores is a range, so no body is moved on to an arrival.
+  const farther = (endpoint) => ({ position: { SystemID: endpoint.SystemID, Xcor: endpoint.key === 'body:4' ? 13000 : endpoint.Xcor, Ycor: endpoint.Ycor }, observedAt: GAME_TIME + 1, conditions: [] })
+  const lost = flown([stop('body', 3), stop('body', 4, { SystemID: 2, Xcor: 1000, Ycor: 0 }), stop('body', 5, { Xcor: 20 })], { adapters: { body: farther } })
+
+  assert.ok(lost.time && lost.time.total && lost.time.wait.hi > 0, 'on the saved positions the plan waits')
+  assert.equal(lost.positions.mode, 'static', 'so it keeps the saved positions though the moved bodies would not wait')
+
+  // A cycle that waits or flies at a cap gives the saved positions for the first pass and the year.
+  const AU = 149600000
+  const rock = (id, distance, bearing, year) => Object.freeze({ id, systemId: 1, starId: 1, bodyClass: 3, trojan: 0, distance, bearing, year, eccentricity: 0, direction: 0, parentId: 0, parentType: 0, fixed: 0, xcor: distance * AU * Math.cos(((bearing - 90) * Math.PI) / 180), ycor: distance * AU * Math.sin(((bearing - 90) * Math.PI) / 180) })
+  const rocks = [rock(1, 1, 90, 8760), rock(2, 2, 0, 17520)]
+  const orbitFacts = { bodies: Object.fromEntries(rocks.map((one) => [one.id, one])), stars: { 1: { id: 1, component: 1, xcor: 0, ycor: 0 } }, points: {}, hidden: {}, hiddenPoints: {}, bodyOf: {}, problems: [] }
+  const toRock = (id) => ({ PopulationID: 0, DestinationType: 2, DestinationID: id, SystemID: 1, Jumps: 0, label: `Rock ${id}`, Description: `Rock ${id}`, X: rocks[id - 1].xcor, Y: rocks[id - 1].ycor, ExitX: rocks[id - 1].xcor, ExitY: rocks[id - 1].ycor, ExitSystemID: 1 })
+  const [one, two] = [1, 2].map((id) => [rp.orderEndpoint(toRock(id)), rp.orderExitEndpoint(toRock(id))])
+  const hop = (from, to, extra) => ({ steps: [{ kind: 'fly', SystemID: 1, from, to, via: null }], from, to, leave: to, wait: 0, ...extra })
+  const cycles = (extra = {}) => plan.simulateCycles({ hops: [hop(one[1], two[0], { delay: 0, wait: 0 }), hop(two[1], one[0], {})], facts: { ...FACTS, orbits: orbitFacts }, adapters: rp.ADAPTERS, speed: 300, ...extra })
+  const free = cycles()
+  const waits = cycles({ timed: true })
+
+  assert.equal(free.annual.status, 'propagated', 'the bodies are moved on when the time is the flight')
+  assert.notDeepEqual(free.first.km, free.static.km, 'and the first pass is not the saved distance')
+  assert.deepEqual(cycles({ timed: false }), free, 'a cycle that is not timed is the one with no option')
+  assert.equal(waits.annual.status, 'static', 'a timed cycle keeps the saved positions')
+  assert.deepEqual(waits.annual.reasons, ['timed-clock'], 'and gives the reason')
+  assert.equal(waits.annual.compared, true)
+  assert.deepEqual(waits.first.km, waits.static.km, 'its first pass is the saved distance')
+  assert.deepEqual(waits.annual.flights, waits.static.flights)
+  assert.equal(waits.annual.meanKm, waits.static.meanKm)
+  assert.ok(rp.CONDITIONS['timed-clock'], 'the reason is one the strip words')
+
+  const fixed = cycles({ timed: true, hops: [hop({ ...one[1], family: 'jump-point' }, { ...two[0], family: 'jump-point' }, { delay: 0, wait: 0 })] })
+
+  assert.equal(fixed.annual.status, 'static')
+  assert.ok(!fixed.annual.reasons.includes('timed-clock'), 'a cycle of places that do not move is unaffected by the clock')
+})
+
 check('result-caveat', 'a result that rests on positions is an estimate that names what is held and unknown, an unavailable one stays so, the jumps are left alone and a route of fixed places stays as it was', async (w) => {
   const m = await w.modules()
   const rp = m['route-position']
@@ -1523,7 +1618,7 @@ check('pages-routes-mixed', 'Route Finder states what every leg states: a return
   assert.equal(round.shownPositions.mode, 'mixed')
 })
 
-const HAULER = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', FleetID: 5, FleetName: 'Convoy', ClassName: 'Freighter', Size: 20, ShuttleStrength: 2, DesignedShuttleStrength: 2, CurrentCrew: 100, ClassCrew: 100, CargoCapacity: 1000, ColonistCapacity: 200, NavalAdminCommandID: 10, MaxSpeed: 1000, EnginePower: 20, UndamagedEnginePower: 20, OverhaulFactor: 1, FuelEfficiency: 0.5, FuelCapacity: 1e9, Fuel: 1e9, MaintenanceState: 0, MothershipID: 0, TractorTargetShipID: 0, TractorParentShipID: 0, TractorTargetShipyardID: 0, TowedSize: null, TowedTargetShipID: null, CarrierMothershipID: null, CarrierFleetID: null, ShuttleTechnology: 1.5, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, FleetSpeed: 1000, UseMaximumSpeed: 1, ...extra })
+const HAULER = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', FleetID: 5, FleetName: 'Convoy', ClassName: 'Freighter', Size: 20, ShuttleStrength: 2, DesignedShuttleStrength: 2, CurrentCrew: 100, ClassCrew: 100, CargoCapacity: 1000, ColonistCapacity: 200, NavalAdminCommandID: 10, MaxSpeed: 1000, EnginePower: 20, UndamagedEnginePower: 20, OverhaulFactor: 1, GradePoints: 100, CrewMorale: 1, SensorDelay: 0, FuelEfficiency: 0.5, FuelCapacity: 1e9, Fuel: 1e9, MaintenanceState: 0, MothershipID: 0, TractorTargetShipID: 0, TractorParentShipID: 0, TractorTargetShipyardID: 0, TowedSize: null, TowedTargetShipID: null, CarrierMothershipID: null, CarrierFleetID: null, ShuttleTechnology: 1.5, MilitaryEngines: 0, Drive: 0, AnyDrive: 0, FleetSpeed: 1000, UseMaximumSpeed: 1, ...extra })
 
 const COLONY = (extra = {}) => ({ PopName: 'Mars', PopulationID: 7, SystemID: 1, Xcor: 10, Ycor: 5, ShuttleCapacity: 1, ServiceNames: 'Spaceport', ...extra })
 
@@ -1658,6 +1753,34 @@ check('pages-transport', 'Transport states a run\'s time and distance with the s
   assert.notEqual(kept.simulate(viaB, 1000, trip), flownA, 'another path is not the one kept')
   assert.deepEqual(asJson(kept.simulate(viaB, 1000, trip)), asJson(vm.simulate(viaB, 1000, trip)), 'and is what it is with nothing kept')
   assert.notDeepEqual(asJson(vm.simulate(viaA, 1000, trip)), asJson(vm.simulate(viaB, 1000, trip)), 'the two paths are not one flight')
+
+  // A cycle whose elapsed time is a range (a wait for the jump shock) is not moved on to arrival instants: Transport hands its walk to the cycles and the year states the saved positions.
+  const shocked = { total: { lo: 1, hi: 2 }, wait: { lo: 5, hi: 9 }, events: [] }
+  const timedA = vm.simulate(viaA, 1000, { ...trip, cycle: shocked })
+
+  assert.ok(!flownA.annual.reasons.includes('timed-clock'), 'a cycle with no walk is the flight alone')
+  assert.equal(timedA.annual.status, 'static', 'a cycle with a wait keeps the saved positions')
+  assert.ok(timedA.annual.reasons.includes('timed-clock'), 'and says the clock is the reason')
+  assert.deepEqual(asJson(vm.simulate(viaA, 1000, { ...trip, cycle: { ...shocked, wait: { lo: 0, hi: 0 } } })), asJson(vm.simulate(viaA, 1000, trip)), 'a walk with no wait and no flights is the flight alone again')
+
+  // A round trip whose flights on the saved positions run the shock down is flown on the moved bodies. When they bring its ends nearer, so that the flights no longer run the shock down, the round trip is simulated again on the walk that waits: it keeps the saved positions and the trip it has on them.
+  const farHere = place('colony', 7, { Xcor: -20 * KM, Ycor: 0 })
+  const farThere = place('fleet', 7, { SystemID: 2, Xcor: 20 * KM, Ycor: 0 })
+  const farReach = { ...reach, route: modules['jump-graph'].searchRoutes(LINKS, [{ SystemID: 1, Xcor: -20 * KM, Ycor: 0 }], { order: 'jumps' }).toPlace(farThere) }
+  const farPositions = rp.routePositions([rp.placeEndpoint(farHere), rp.placeEndpoint(farThere)], { facts: UNSURE })
+  const runWith = (simulate) => make(UNSURE, { origin: farHere, destination: farThere, reachOf: () => farReach, simulate }).fleetRuns[0]
+  const savedRun = runWith(() => null)
+  const tripCycles = []
+  const nearerRun = runWith((_reach, _speed, flownTrip) => {
+    tripCycles.push(flownTrip.cycle)
+
+    return { annual: flownTrip.cycle.wait.hi > 0 ? { status: 'static', compared: true, reasons: ['timed-clock'], positions: farPositions } : { status: 'propagated', compared: true, reasons: [], flights: [[1000, 1000], [1000, 1000]], meanKm: 2000, positions: farPositions } }
+  })
+
+  assert.equal(savedRun.status, 'ok', 'the round trip across the jump works')
+  assert.deepEqual(tripCycles.map((cycle) => cycle.wait.hi > 0), [false, true], 'the round trip is simulated again on the walk the moved bodies give it, which waits')
+  assert.deepEqual([nearerRun.tripSeconds, nearerRun.trips, nearerRun.km], [savedRun.tripSeconds, savedRun.trips, savedRun.km], 'and keeps the trip it has on the saved positions')
+  assert.equal(nearerRun.propagation.moved, false, 'and says the saved positions stand')
 
   const expected = rp.routePositions([rp.placeEndpoint(here), rp.placeEndpoint(there), ...rp.viaEndpoints(route)], { facts: UNSURE })
   const stated = vm.positionsOf(reach)
@@ -2200,6 +2323,13 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   const toRock = (id, extra = {}) => ({ PopulationID: 0, DestinationType: 2, DestinationID: id, PopName: null, Description: `Rock ${id}`, ActionName: 'Move', MoveActionID: 2, X: rocks[id - 1].xcor, Y: rocks[id - 1].ycor, ExitX: rocks[id - 1].xcor, ExitY: rocks[id - 1].ycor, ...extra })
   const bodies = (delay) => [order(5, 1, toRock(1)), order(5, 2, toRock(2, { OrderDelay: delay }))]
   const delayed = flying.simulateRoute(bodies(864000), sailing, handling, {})
+  const shocked = { total: { lo: 1, hi: 2 }, wait: { lo: 5, hi: 9 }, events: [] }
+  const timedRoute = flying.simulateRoute(bodies(864000), sailing, handling, {}, shocked)
+
+  assert.equal(timedRoute.annual.status, 'static', 'a route whose cycle waits for the jump shock keeps the saved positions')
+  assert.ok(timedRoute.annual.reasons.includes('timed-clock'), 'and says the clock is the reason')
+  assert.ok(!delayed.annual.reasons.includes('timed-clock'), 'a cycle with no walk is the flight alone')
+
   const engine = (delay, wait) => {
     const [one, two] = bodies(0).map((o) => [rp.orderEndpoint({ ...o, label: o.Description }), rp.orderExitEndpoint({ ...o, label: o.Description })])
     const hop = (from, to, extra) => ({ steps: [{ kind: 'fly', SystemID: 1, from, to, via: null }], from, to, leave: to, wait: 0, ...extra })
@@ -2210,6 +2340,24 @@ check('pages-hauling', 'Hauling states a repeating route and a planned haul with
   assert.equal(delayed.annual.status, 'propagated', 'the bodies are moved on')
   assert.deepEqual(delayed.first.km, engine(864000, 0).first.km, 'the delay is spent before the flight')
   assert.notDeepEqual(delayed.first.km, engine(0, 864000).first.km, 'and not as the stop\'s handling after the arrival')
+
+  // A cycle whose flights on the saved positions run the shock down is flown on the moved bodies. When they bring the stop in the other system nearer, so that the flights since the transit no longer run the shock down, the cycle is simulated again on the walk that waits: it keeps the saved positions and the year it has on them.
+  const transitOrder = (id, extra) => order(5, id, { ActionName: 'Transit', MoveActionID: 1, Jumps: 1, DestinationType: 1, DestinationID: id, PopulationID: 0, PopName: null, Description: `Jump ${id}`, Y: 0, ExitY: 0, ...extra })
+  const across = [order(5, 1), transitOrder(2, { X: 20 * KM, ExitX: 0, ExitSystemID: 2 }), order(5, 3, { SystemID: 2, ExitSystemID: 2, X: 10 * KM, Y: 0, ExitX: 10 * KM, ExitY: 0, DestinationType: 6, DestinationID: 11, PopulationID: 0, PopName: null, Description: 'Far', ActionName: 'Move', MoveActionID: 2 }), transitOrder(4, { SystemID: 2, X: 0, ExitX: 20 * KM, ExitSystemID: 1 }), order(5, 5, { ActionName: 'Unload', MoveActionID: 63, Description: 'Venus: Unload', PopName: 'Venus', PopulationID: 8, ShuttleCapacity: 0, X: 3 * KM, ExitX: 3 * KM })]
+  const cycleRowWith = (simulateRoute) => make(UNSURE, { orders: across, fleets: [fleet(5)], simulateRoute }).routeRows[0]
+  const savedCycle = cycleRowWith(() => null)
+  const nearerFlights = savedCycle.route.legs.map((leg, index) => [index === 1 || index === 2 ? 1000 : leg.km])
+  const cycleWalks = []
+  const nearerCycle = cycleRowWith((_orders, _sailing, _handling, _held, walk) => {
+    cycleWalks.push(walk)
+
+    return { annual: walk.wait.hi > 0 ? { status: 'static', compared: true, reasons: ['timed-clock'], positions: savedCycle.positions } : { status: 'propagated', compared: true, reasons: [], flights: nearerFlights, positions: savedCycle.positions } }
+  })
+
+  assert.deepEqual(savedCycle.year && [savedCycle.year.waitLowDays, savedCycle.year.waitDays], [0, 0], 'on the saved positions the cycle does not wait')
+  assert.deepEqual(cycleWalks.map((walk) => walk.wait.hi > 0), [false, true], 'the cycle is simulated again on the walk the moved bodies give it, which waits')
+  assert.deepEqual(asJson(nearerCycle.year), asJson(savedCycle.year), 'and keeps the year it has on the saved positions')
+  assert.equal(nearerCycle.propagationText, `Static: ${rp.CONDITIONS['timed-clock']}.`, 'and says why')
 
   const moved = haul(7, 8)
   const trip = { tripSeconds: 100, stops: [] }
@@ -2467,7 +2615,7 @@ const FAULTS = [
   ['Hauling waits for the read', 'haulingPage', '...POSITION_INPUTS', '', ['optional-read']],
   ['Route Finder plans without the facts', 'routesPage', 'facts: this.positionRead, ', '', ['pages-routes']],
   ['Route Finder states a stop row\'s leg time without its positions', 'routesPage', 'result: leg.route ? this.travelResult(leg.route.km, leg.positions) :', 'result: leg.route ? this.travelResult(leg.route.km) :', ['pages-routes']],
-  ['Route Finder states a leg\'s detail time without its positions', 'routesPage', 'return leg && leg.route ? this.travelResult(leg.route.km, leg.positions) : null', 'return leg && leg.route ? this.travelResult(leg.route.km) : null', ['pages-routes']],
+  ['Route Finder states a leg\'s detail time without its positions', 'routesPage', 'withoutWaits(this.travelResult(leg.route.km, leg.positions), this.plan.time.missing)', 'withoutWaits(this.travelResult(leg.route.km), this.plan.time.missing)', ['pages-routes']],
   ['Route Finder states a running distance without the legs flown', 'routesPage', 'totalResult: detailTotal(total, skipped, passed)', 'totalResult: detailTotal(total, skipped)', ['pages-routes']],
   ['Route Finder states a distance flown in a system without its positions', 'routesPage', 'kmResult: distanceResult(step.km, undefined, leg.positions)', 'kmResult: distanceResult(step.km)', ['pages-routes']],
   ['Route Finder counts only the leg flown for the running distance', 'routesPage', 'flown.push(...(leg.positions ? leg.positions.records : []))', 'flown.splice(0, flown.length, ...(leg.positions ? leg.positions.records : []))', ['pages-routes']],
@@ -2569,6 +2717,22 @@ const FAULTS = [
   ['an unavailable stop leaves the start as it was', 'plan', 'origin = to.unavailable ? null : placeEndpoint(to)', 'origin = to.unavailable ? null : origin', ['effective-start']],
   ['a panel\'s summary is empty while the read is in flight', 'haulingPage', /(<v-card class="panel")(?=[^>]*data-summary=)([^>]*?)>(?=(?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, (m) => `${m[1]}${m[2].replace(/\s*data-summary="[^"]*"/, ' :data-summary="positionState.loading ? \'\' : \'text\'"')}>`, ['strip-bound']],
   ['a panel\'s summary is bound to a name the page has not got', 'haulingPage', /(<v-card class="panel")(?=[^>]*data-summary=)([^>]*?)>(?=(?:(?!<v-card class="panel")[\s\S])*?:items="planRows")/, (m) => `${m[1]}${m[2].replace(/\s*data-summary="[^"]*"/, ' :data-summary="unboundSummary"')}>`, ['strip-bound']],
+  ['the timed order is flown on adapters', 'plan', /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : flightOf\(\{ facts, adapters, speed \}\)|!timed && flightClock\(held, speed\) \? flightOf\(\{ facts, adapters, speed \}\) : null)/, () => 'const flight = flightOf({ facts, adapters, speed })', ['timed-basis', 'timed-clock']],
+  ['a plan that waits for the jump shock is flown on adapters', 'plan', '(plan.time.wait.hi === 0 && plan.time.flightHi', '(plan.time.flightHi', ['timed-clock']],
+  ['a plan flown at a cap is flown on adapters', 'plan', ' && plan.time.flightHi === plan.time.flight && Math.abs(plan.time.flight * speed - plan.km) <= 1e-9 * plan.km)', ')', ['timed-clock']],
+  ['a plan that is the flight alone is not flown on adapters', 'plan', /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : flightOf\(\{ facts, adapters, speed \}\)|!timed && flightClock\(held, speed\) \? flightOf\(\{ facts, adapters, speed \}\) : null)/, () => 'const flight = true ? null : flightOf({ facts, adapters, speed })', ['timed-clock']],
+  ['a cycle that waits is flown on the bodies\' arrivals', 'plan', 'const clockHeld = timed && everything', 'const clockHeld = false && everything', ['timed-clock', 'pages-transport', 'pages-hauling']],
+  ['a cycle on the saved positions does not say so', 'plan', '...(clockHeld ? [\'timed-clock\'] : [])', '...[]', ['timed-clock']],
+  ['the first pass of a cycle on the saved positions is the flown one', 'plan', 'const firstKm = clockHeld ? held : cycles[0].km', 'const firstKm = cycles[0].km', ['timed-clock']],
+  ['a cycle that does not wait is held on the saved positions', 'plan', 'const clockHeld = timed && everything.some(', 'const clockHeld = everything.some(', ['timed-clock', 'pages-hauling']],
+  ['Hauling does not hand the elapsed time of the cycle to the year', 'haulingPage', 'adapters: ADAPTERS, speed: sailing.Speed, timed }', 'adapters: ADAPTERS, speed: sailing.Speed }', ['pages-hauling']],
+  ['Hauling takes every cycle for the flight alone', 'haulingPage', 'const timed = !flightOnly(walk, sailing.Speed)', 'const timed = false', ['pages-hauling']],
+  ['Transport does not hand the elapsed time of the cycle to the year', 'transportPage', 'speed, lagrangePoints, timed }', 'speed, lagrangePoints }', ['pages-transport']],
+  ['Transport takes every cycle for the flight alone', 'transportPage', 'const timed = !flightOnly(trip.cycle, speed)', 'const timed = false', ['pages-transport']],
+  ['the elapsed time leaves out the positions', 'plan', 'const made = (result) => withPositions(partial(result), plan.positions)', 'const made = (result) => partial(result)', ['timed-basis']],
+  ['a plan that gains a wait on the moved bodies is flown on them', 'plan', 'if (!flightClock(moved, speed)) {', 'if (false) {', ['timed-clock']],
+  ['Hauling flies a cycle that gains a wait on the moved bodies on them', 'haulingPage', 'const simulation = flownWalk && !flightOnly(flownWalk, sailing.Speed) ? this.simulateRoute(orders, sailing, handling, held, flownWalk) : first', 'const simulation = first', ['pages-hauling']],
+  ['Transport flies a round trip that gains a wait on the moved bodies on them', 'transportPage', 'const simulation = flownTrip && !flightOnly(flownTrip.cycle, profile.cruise) ? this.simulate(reach, profile.cruise, flownTrip) : first', 'const simulation = first', ['pages-transport']],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -2593,6 +2757,7 @@ const BENIGN = [
   { label: 'the label of an age the strip does not read reworded', target: 'component', at: /(this\.age && this\.age\.status !== 'unavailable' \? ageText\(this\.age\.value\) : )'[^'\n]*'/, to: (m) => `${m[1]}'not recorded'` },
   { label: 'the comment on a group that needs both switches reworded', target: 'position', at: /(and an 'unknown' one needs )both\./, to: (m) => `${m[1]}both switches on.` },
   { label: 'the fixed-parent condition parenthesised with its conjuncts reordered', target: 'orbit', at: /\} else if \(fixed && body\.fixedParentId > 0\) \{/, to: () => '} else if ((body.fixedParentId > 0) && fixed) {' },
+  { label: 'the timed test of a plan written as its negation', target: 'plan', at: /const flight = (?:timed \|\| !flightClock\(held, speed\) \? null : (flightOf\(\{ facts, adapters, speed \}\))|!timed && flightClock\(held, speed\) \? (flightOf\(\{ facts, adapters, speed \}\)) : null)/, to: (m) => `const flight = !timed && flightClock(held, speed) ? ${m[1] || m[2]} : null` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 const STANDALONE = new Set([
@@ -2704,6 +2869,11 @@ const COMPOSED = new Set([
   225,
   226,
   227,
+  228,
+  232,
+  236,
+  238,
+  240,
 ])
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
@@ -2720,6 +2890,9 @@ const run = async (checks, world) => {
 
   return failures
 }
+
+// The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
+const BY_VALUE = new Set(['timed-basis', 'timed-clock'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
@@ -2796,7 +2969,7 @@ const main = async () => {
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed) {
+        if (!failed || (BY_VALUE.has(name) && !(failed.error instanceof assert.AssertionError))) {
           missed.push(name)
         }
 

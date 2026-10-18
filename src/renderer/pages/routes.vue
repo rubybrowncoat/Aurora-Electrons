@@ -5,6 +5,7 @@
 
       <template v-if="ready">
         <v-alert v-if="largeProblem" type="warning" dense text class="mb-2">{{ largeProblem }}</v-alert>
+        <v-alert v-if="timeNotice" type="info" dense text class="mb-2" data-time-notice>{{ timeNotice }}</v-alert>
 
         <div class="toolbar">
           <div class="tool">
@@ -12,7 +13,7 @@
             <v-btn-toggle v-model="order" mandatory dense>
               <v-tooltip v-for="option in orders" :key="option.value" bottom max-width="320">
                 <template #activator="{ on }">
-                  <v-btn :value="option.value" small v-on="on">{{ option.label }}</v-btn>
+                  <v-btn :value="option.value" small :data-order="option.value" v-on="on">{{ option.label }}</v-btn>
                 </template>
                 <span>{{ option.hint }}</span>
               </v-tooltip>
@@ -20,7 +21,7 @@
           </div>
           <div class="tool tool--speed">
             <div class="tool__label caption text--secondary">Speed</div>
-            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="speedPlaceholder" suffix="km/s" aria-label="Speed in km/s" dense outlined hide-details>
+            <v-text-field v-model.number="speed" type="number" min="1" :placeholder="speedPlaceholder" suffix="km/s" aria-label="Speed in km/s" data-speed dense outlined hide-details>
               <template #append>
                 <v-menu offset-y left max-height="420">
                   <template #activator="{ on, attrs }">
@@ -91,7 +92,7 @@
           </v-col>
         </v-row>
 
-        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way. It shows how long the whole journey will take." elevation="1">
+        <v-card v-if="detailRows.length" class="panel" data-summary="The route leg by leg, with the jump points passed and the distance and time along the way. It shows how long the whole journey will take." data-leg-detail elevation="1">
           <div class="panel-head">
             <span>Route detail<provenance-mark rule="route.detailTotal" label /></span>
           </div>
@@ -104,7 +105,7 @@
               </td>
             </template>
             <template #[`item.SystemName`]="{ item }">
-              <span class="font-weight-medium">{{ item.SystemName }}</span>
+              <span class="font-weight-medium" data-leg="system">{{ item.SystemName }}</span>
               <page-link v-if="item.SystemID" class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.SystemName" />
             </template>
             <template #[`item.way`]="{ item }">
@@ -121,24 +122,34 @@
             </template>
             <template #[`item.km`]="{ item }"><span class="text-no-wrap">{{ distance(item.km) }}</span><provenance-mark v-if="item.kmResult.status !== 'confirmed'" :result="item.kmResult" /></template>
             <template #[`item.total`]="{ item }"><span class="text-no-wrap">{{ distance(item.total) }}</span><provenance-mark v-if="item.totalResult.status !== 'confirmed'" :result="item.totalResult" /></template>
-            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ timeText(item.total) }}</span><provenance-mark :result="item.timeResult" /></template>
+            <template #[`item.flight`]="{ item }"><span class="text-no-wrap" data-leg="flight">{{ flightText(item.flight, item.flightHi) }}</span></template>
+            <template #[`item.transit`]="{ item }"><span class="text-no-wrap" data-leg="transit">{{ item.transit === undefined ? '—' : span(item.transit) }}</span></template>
+            <template #[`item.wait`]="{ item }"><span class="text-no-wrap" data-leg="wait">{{ waitText(item.wait) }}</span><provenance-mark v-if="item.waitResult" :result="item.waitResult" /></template>
+            <template #[`item.time`]="{ item }">
+              <template v-if="plan.time"><span class="text-no-wrap" data-leg="elapsed">{{ item.elapsed ? span(item.elapsed.hi) : '—' }}</span><span v-if="item.elapsed && item.elapsed.lo !== item.elapsed.hi" class="caption text--secondary ml-1 text-no-wrap">(from <span data-leg="elapsed-lo">{{ span(item.elapsed.lo) }}</span>)</span></template>
+              <span v-else class="text-no-wrap">{{ timeText(item.total) }}</span><provenance-mark :result="item.timeResult" />
+            </template>
           </v-data-table>
-          <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. Jumps take no time here; the jump shock after each and nebula speed limits are left out.<provenance-mark :result="speedResult" /></div>
+          <div v-if="plan.time && plan.time.startDelay > 0" class="panel-foot caption text--secondary" data-start-offset>The fleet starts with <span data-part="offset">{{ span(plan.time.startDelay) }}</span> of jump shock left from a jump just made, which the first jump waits out.</div>
+          <div class="panel-foot caption text--secondary">Times are flying {{ speedText }}, counted from the first stop. {{ shockFoot }}<provenance-mark :result="speedResult" /></div>
         </v-card>
 
-        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time. Click a row to add it as a stop." elevation="1">
+        <v-card class="panel" data-summary="How far every known system is from the first stop by explored routes, with jumps and travel time. Click a row to add it as a stop." elevation="1" data-distance-panel>
           <div class="panel-head">
             <span>Distances from {{ origin ? origin.name : '—' }}<provenance-mark rule="route.reachableCount" label /></span>
             <v-text-field v-model="search" label="Search" prepend-inner-icon="mdi-magnify" dense outlined hide-details clearable class="search-field" />
           </div>
           <v-data-table :headers="distanceHeaders" :items="distanceRows" item-key="SystemID" :search="search" :custom-filter="filterSystem" :custom-sort="sortNullLast" :sort-by.sync="distanceTable.sortBy" :sort-desc.sync="distanceTable.sortDesc" :items-per-page.sync="distanceTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: distancePageSizes }" class="clickable-rows" @click:row="(row) => insertStop(stopKeys.length, { key: `system:${row.SystemID}`, kind: 'system' })">
             <template #[`item.Name`]="{ item }">
-              <span class="font-weight-medium">{{ item.Name }}</span>
+              <span class="font-weight-medium" data-distance="name">{{ item.Name }}</span>
               <page-link class="ml-1" :to="linkTo.map(item.SystemID)" :name="item.Name" />
             </template>
             <template #[`item.jumpsSort`]="{ item }"><span v-if="item.route">{{ item.route.jumps }}</span><span v-else class="text--secondary">—<provenance-mark :result="item.jumpsResult" /></span></template>
             <template #[`item.kmSort`]="{ item }"><span v-if="item.route" class="text-no-wrap">{{ distance(item.route.km) }}</span><span v-else class="text--secondary">—</span><provenance-mark v-if="!item.route || item.kmResult.status !== 'confirmed'" :result="item.kmResult" /></template>
-            <template #[`item.time`]="{ item }"><span class="text-no-wrap">{{ item.route ? timeText(item.route.km) : '—' }}</span><provenance-mark :result="item.timeResult" /></template>
+            <template #[`item.time`]="{ item }">
+              <template v-if="item.timed"><span class="text-no-wrap" data-distance="elapsed">{{ item.elapsed === null ? '—' : span(item.elapsed.hi) }}</span><span v-if="item.elapsed !== null && item.elapsed.lo !== item.elapsed.hi" class="caption text--secondary ml-1 text-no-wrap">(from <span data-distance="elapsed-lo">{{ span(item.elapsed.lo) }}</span>)</span></template>
+              <span v-else class="text-no-wrap">{{ item.route ? timeText(item.route.km) : '—' }}</span><provenance-mark :result="item.timeResult" />
+            </template>
             <template #[`item.status`]="{ item }">
               <span :class="{ 'text--secondary': !item.reason }">{{ item.status }}</span><provenance-mark v-if="item.assumedAvoid" rule="route.avoidance" />
             </template>
@@ -177,8 +188,10 @@ import { allLoaded, joinLabels, tracked } from '../utilities/load-tracking'
 import { countLargePlaces, loadBodyPlaces, loadPlacesByKeys, loadSmallPlaces, loadSurveyPlaces } from '../utilities/place-data'
 import { colonyPlaces, fleetPlaces, jumpPointPlaces, lagrangePlaces, PLACE_GROUPS, searchable, systemPlaces } from '../utilities/places'
 import { describeResult, describeRule, valueOrNull } from '../utilities/provenance'
-import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime } from '../utilities/route-plan'
+import { fleetProfile, loadFleetShips } from '../utilities/fleet-profile'
+import { avoidance, detailTotal, distanceResult, flightSpeed, planResults, planRoute, stepCounts, transitOptions, travelTime, withoutWaits } from '../utilities/route-plan'
 import { ADAPTERS, lagrangeEndpoint, placeEndpoint, routePositions, summarisePositions, viaEndpoints, withPositions, withSavedComparison } from '../utilities/route-position'
+import { NEBULA_GAP, elapsedResult, fleetTimingOf, loadSystemDust, routeEvents, searchTiming, speedIn, timingGaps, waitResult, walkEvents } from '../utilities/route-time'
 import { AVOID_OPTIONS, loadAvoidSystems } from '../utilities/safe-routes'
 import { fleetCanTransit, JUMP_DRIVE_COLUMNS } from '../utilities/transport'
 
@@ -191,10 +204,12 @@ const INPUT_LABELS = {
   lagrangePoints: 'the Lagrange points',
   smallPlaces: 'the waypoints, wrecks and contacts',
   placeCounts: 'the bodies and survey locations',
+  systemDust: 'the nebula density of the systems',
+  routeFleetShips: 'the ships of the route\'s fleet',
   ...POSITION_LABELS,
 }
 // The read that dates the positions alone: the page never waits for it, and the positions note says while it is in flight or failed that their age is unknown.
-const OPTIONAL_INPUTS = [...POSITION_INPUTS]
+const OPTIONAL_INPUTS = ['routeFleetShips', ...POSITION_INPUTS]
 const CORE_INPUTS = Object.keys(INPUT_LABELS).filter((key) => !OPTIONAL_INPUTS.includes(key))
 
 // A fleet's movement settings, as the game's auto-route applies them. None of them keeps a route from leaving its origin.
@@ -208,7 +223,9 @@ const OPTIONS = [
 const ORDERS = [
   { value: 'jumps', label: 'Fewest jumps', hint: 'The game\'s auto-route: the fewest transits, then the shorter way.' },
   { value: 'km', label: 'Shortest', hint: 'The fewest kilometres, as the galactic map\'s distances measure.' },
+  { value: 'time', label: 'Fastest time', hint: 'The least elapsed time for the fleet taken as the first stop: each leg flown and the jump shock waited out after each transit, as that fleet\'s crew draws it, on the saved positions. A longer way can win when a short flight would leave the fleet waiting. Without a fleet the crew is not known, so the route follows the shortest distance.' },
 ]
+const SECONDS_PER_DAY = 86400
 const DISTANCE_PAGE_SIZES = [15, 30, -1]
 // Each movement setting is kept on its own, for every game.
 const OPTION_FIELDS = Object.fromEntries(OPTIONS.map((option) => [option.key, { key: option.config, default: option.default }]))
@@ -385,12 +402,101 @@ export default {
       return transitOptions(this.options, this.jumpPoints)
     },
 
+    // The fleet the route is timed for, its ships read: the one the route took its speed from.
+    routeFleetRow() {
+      const place = this.routeFleet && this.placeByKey[this.routeFleet]
+
+      return place && place.fleet ? place.fleet : null
+    },
+
+    // What the route's fleet gives the timing (`fleetTimingOf`), null with no fleet, while its ships are being read again or the read failed (the page keeps the rows of the last read, which may be another save's), or when the rows belong to another fleet.
+    crewTiming() {
+      const fleet = this.routeFleetRow
+      const ships = this.routeFleetShips
+
+      if (!fleet || this.loadErrors.routeFleetShips !== null || !ships.length || ships.some((ship) => ship.FleetID !== fleet.FleetID)) {
+        return null
+      }
+
+      return fleetTimingOf(fleetProfile(ships, fleet, { basis: 'maximum' }).participants, this.systemDust)
+    },
+
+    // The timing of the plan: the speed, the nebula caps at the fleet's thinnest armour and the shock the crew draws; null with no speed. The shock is null (not known) with no fleet taken as the first stop.
+    timing() {
+      const speed = this.effectiveSpeed
+      const crew = this.crewTiming
+
+      if (!(speed > 0)) {
+        return null
+      }
+
+      return { speed, speedIn: speedIn({ speed, dust: this.systemDust, armour: crew ? crew.armour : null }), shock: crew ? crew.shock : null, shockMissing: crew ? crew.shockMissing : ['the crew of a fleet (take a fleet as the first stop)'], startDelay: crew ? crew.startDelay : null, retry: crew ? crew.retry : 0 }
+    },
+
+    // What the leg table's foot says about the waits: where they come from and what they rest on, or that they are left out.
+    shockFoot() {
+      if (!this.plan.time) {
+        return 'The jump shock after each jump and nebula speed limits are not counted without a speed.'
+      }
+
+      const crew = this.crewTiming
+      const basis = this.order === 'time' ? ' Fastest time ranks routes on this upper case and on the saved positions: bodies are not moved on to the arrival.' : ''
+
+      if (!crew || !crew.shock) {
+        return `A transit takes no time. The wait for the jump shock needs the crew of a fleet (${this.crewState}), so it is left out here and a route with jumps takes longer than shown. A system with dust caps the speed only with the fleet's armour known.${basis}`
+      }
+
+      const saved = this.order === 'time' || this.plan.static ? basis : ' The waits and the elapsed time are on the saved positions: bodies are not moved on to the arrival, which a range of times leaves no single instant for.'
+
+      return `A transit takes no time. After each jump every ship of the fleet that is not in a hangar draws a delay from its crew, and the fleet waits at the next jump point only for what the flight and stops since the jump have not used: a range from the lowest to the highest draw, the elapsed time being the upper case. The game retries a blocked transit at the start of each subpulse and the length of the subpulses ahead is not known, so the longest wait runs up to two subpulses past the second the delay clears (12 hours at the longest subpulse the game runs, 6 hours) while the shortest ends the second it clears. A system with dust caps the speed at the thinnest armour of the fleet times 2500 over the density; the game takes the maximum speed back at the next pass over the fleet and not at the jump, so the upper case flies at the lowest cap of the systems the fleet was in during the last longest subpulse (6 hours).${saved}`
+    },
+
+    // The order the routes are searched by: fastest time needs the shock a crew draws, so without it the route follows the distance and nothing is called fastest.
+    planOrder() {
+      return this.order === 'time' && !(this.timing && this.timing.shock) ? 'km' : this.order
+    },
+
+    // What fastest time lacks when it cannot rank by time, or an empty text.
+    timeNotice() {
+      if (this.order !== 'time' || this.planOrder === 'time') {
+        return ''
+      }
+
+      return this.timing ? `Fastest time needs the jump shock a fleet's crew draws: ${this.crewState}. The route follows the shortest distance until it is known, and no route is called the fastest.` : 'Fastest time needs a speed: enter one or take a fleet as the first stop. The route follows the shortest distance until then.'
+    },
+
+    // Why the crew is not in: no fleet taken, its ships still being read, or what the fleet lacks.
+    crewState() {
+      if (!this.routeFleetRow) {
+        return 'take a fleet as the first stop'
+      } else if (this.routeFleetShipsState.loading) {
+        return 'the ships of the fleet are being read'
+      } else if (this.routeFleetShipsState.failed) {
+        return `the ships of the fleet could not be read (${this.routeFleetShipsState.error})`
+      }
+
+      const crew = this.crewTiming
+
+      return crew && crew.shockMissing.length ? `not in the save: ${joinLabels(crew.shockMissing)}` : 'the crew of the fleet is not known'
+    },
+
+    routeFleetShipsState() {
+      const state = this.loadErrors.routeFleetShips
+
+      return { loading: state === undefined, failed: typeof state === 'string', error: state }
+    },
+
+    // The search's own timing for the fastest time order: the speed, the caps, the upper case of the shock and the start delay; null for the other orders.
+    searchClock() {
+      return this.planOrder === 'time' ? searchTiming(this.timing) : null
+    },
+
     // A route's search options: its order, which jump points it may transit and which systems it may enter, and whether it uses Lagrange points.
     searchOptions() {
       const { useLagrange } = this.options
 
       return {
-        order: this.order,
+        order: this.planOrder,
         canTransit: this.transit.canTransit,
         canEnter: (systemId) => !this.avoidReasons[systemId],
         lagrangePoints: useLagrange ? this.lagrangePoints : [],
@@ -407,7 +513,7 @@ export default {
 
     // The plan flown at the chosen speed: bodies are where they will be on arrival where the orbits are known (utilities/orbit-propagation.js), and each leg also has its figure on the saved positions.
     plan() {
-      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, facts: this.positionRead, adapters: ADAPTERS, speed: this.effectiveSpeed, ...this.searchOptions })
+      return planRoute(this.plannedStops, { cycle: this.cycle, jumpPoints: this.jumpPoints, facts: this.positionRead, adapters: ADAPTERS, speed: this.effectiveSpeed, ...this.searchOptions, timing: this.timing })
     },
 
     // The plan's jumps and distance as results, null for a plan with no leg. Flags the save lacks that the options read are stated as assumptions on them.
@@ -500,12 +606,12 @@ export default {
 
     // The search from the first stop, for the distance table and the map's shading.
     routes() {
-      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], this.searchOptions) : null
+      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], { ...this.searchOptions, timing: this.searchClock }) : null
     },
 
     // The same search with every option's limit lifted, to tell the systems the options cut off from the ones no explored route reaches at all.
     openRoutes() {
-      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] }) : null
+      return this.origin ? searchRoutes(this.jumpPoints, [this.origin], { order: this.planOrder, timing: this.searchClock, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] }) : null
     },
 
     // For each leg without a route, what keeps it out of reach.
@@ -546,9 +652,13 @@ export default {
       const rows = []
       const { speedResult } = this
       const none = routeResults(null)
+      const timed = this.plan.time || null
       let total = 0
       let skipped = 0
+      let clock = { lo: 0, hi: 0 }
       const flown = []
+      // The clock after a flight or a wait: null once a part of it is not known.
+      const plus = (amount) => (clock === null || amount === null || amount === undefined ? null : typeof amount === 'number' ? { lo: clock.lo + amount, hi: clock.hi + amount } : { lo: clock.lo + amount.lo, hi: clock.hi + amount.hi })
 
       this.plan.legs.forEach((leg) => {
         flown.push(...(leg.positions ? leg.positions.records : []))
@@ -558,6 +668,12 @@ export default {
           const found = { id: `${leg.index}:${id}`, leg: leg.index, km: 0, total, kmResult: distanceResult(0, undefined, leg.positions), totalResult: detailTotal(total, skipped, passed), ...fields }
 
           found.timeResult = travelTime(found.totalResult, speedResult)
+
+          if (timed && found.total !== null) {
+            found.elapsed = clock
+            found.timeResult = clock ? withPositions(elapsedResult(clock, timed.missing), passed) : withoutWaits(found.timeResult, timed.missing)
+          }
+
           rows.push(found)
         }
 
@@ -575,7 +691,18 @@ export default {
         leg.steps.forEach((step, number) => {
           if (step.kind === 'fly') {
             total += step.km
+
+            // A flight ends at the jump point it jumps through, where the fleet waits and transits; the wait follows the flight, so the row carries both.
+            const timing = timed ? this.stepTiming(leg, number) : {}
+
+            if (timed) {
+              clock = plus(timing.flight === null || timing.flightHi === null ? null : { lo: timing.flight, hi: timing.flightHi })
+              clock = timing.wait === undefined ? clock : plus(timing.wait)
+            }
+
             row(number, {
+              ...timing,
+              ...(timed && timing.transit === 0 ? { waitResult: withPositions(waitResult(timing.wait, timed.missing), leg.positions) } : {}),
               SystemID: step.SystemID,
               SystemName: this.systemNameOf(step.SystemID),
               from: this.pointName(step.from, leg, 'from'),
@@ -601,6 +728,8 @@ export default {
     // Computed values are read once, outside the loop: each read inside it would subscribe this property to every dependency of theirs again.
     distanceRows() {
       const { routes, openRoutes, origin, avoidDetails, speedResult, positionRead } = this
+      // Under fastest time a system's time is the elapsed time of the route the search chose: the flights, the waits and the nebula caps, as the leg table walks them.
+      const clock = this.planOrder === 'time' ? this.timing : null
 
       if (!routes) {
         return []
@@ -615,6 +744,8 @@ export default {
         const figures = routeResults(route, reason ? `a route into a system the options avoid (${reason})` : blocked ? 'a route the options allow' : 'an explored route from the first stop')
         const positions = route ? routePositions([placeEndpoint(origin), ...viaEndpoints(route)], { facts: positionRead }) : null
         const kmResult = withPositions(figures.km, positions)
+        const walk = clock && route ? walkEvents(routeEvents(routeLegs(route), clock), clock.shock, { startDelay: clock.startDelay, retry: clock.retry }) : null
+        const timeResult = walk ? withPositions(elapsedResult(walk.total, walk.flightHi === null ? [NEBULA_GAP] : timingGaps(clock)), positions) : travelTime(kmResult, speedResult)
 
         return {
           ...system,
@@ -625,7 +756,9 @@ export default {
           jumpsResult: figures.jumps,
           kmResult,
           positions,
-          timeResult: travelTime(kmResult, speedResult),
+          timeResult,
+          timed: Boolean(walk),
+          elapsed: walk ? walk.total : null,
           jumpsSort: route ? route.jumps : null,
           kmSort: route ? route.km : null,
           status: isOrigin ? 'First stop' : route ? 'Reachable' : reason ? `Avoided: ${reason}` : blocked ? 'Cut off by the options' : 'Out of reach',
@@ -664,7 +797,7 @@ export default {
           color: row.route ? withAlpha(colors.near, 1 - 0.65 * reach) : row.reason ? colors.avoided : colors.out,
           ring: stop ? theme.ink : null,
           label: Boolean(stop),
-          title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${this.timeText(row.route.km)}` : row.status}`,
+          title: `${row.Name}: ${row.route ? `${row.route.jumps} ${row.route.jumps === 1 ? 'jump' : 'jumps'}, ${this.distance(row.route.km)}, ${row.timed ? (row.elapsed ? this.span(row.elapsed.hi) : 'time not known') : this.timeText(row.route.km)}` : row.status}`,
         }
       }).sort((a, b) => a.rank - b.rank)
     },
@@ -683,13 +816,16 @@ export default {
       const warn = plan.missing > 0 && !this.readingStops
       const jumps = planFigures && planFigures.jumps
       const km = planFigures && planFigures.km
-      const time = km ? travelTime(km, this.speedResult) : null
+      const flying = km ? travelTime(km, this.speedResult) : null
+      const elapsed = planFigures && planFigures.time ? planFigures.time.elapsed : null
+      const time = elapsed && elapsed.value !== null ? elapsed : plan.time ? withoutWaits(flying, plan.time.missing) : flying
       const unrecorded = counts.stabilised.inputs.missing.length ? ` (${counts.stabilised.inputs.missing.join(', ')} not recorded)` : ''
       const stabilised = plan.missing === legs ? '' : `${counts.stabilised.value} through stabilised jump points${unrecorded}${lagrange ? `, Lagrange jumps in ${lagrange} ${lagrange === 1 ? 'system' : 'systems'}` : ''}`
 
       return [
         {
           label: 'Jumps',
+          hook: 'jumps',
           value: jumps && jumps.value !== null ? this.count(jumps.value) : '—',
           title: jumps ? describeResult(jumps) : describeRule('route.jumps'),
           note: legs ? [stabilised, unrouted].filter(Boolean).join('; ') : 'Add a second stop below, or click a system on the map',
@@ -704,9 +840,10 @@ export default {
         },
         {
           label: 'Travel time',
-          value: time && time.value !== null ? this.flyTime(time.value) : '—',
+          hook: 'time',
+          value: time && time.value !== null ? (time === elapsed ? this.span(time.value * SECONDS_PER_DAY) : this.flyTime(time.value)) : '—',
           title: time ? describeResult(time) : describeRule('route.travelTime'),
-          note: this.effectiveSpeed === null ? 'No speed known: enter one' : `At ${this.count(this.effectiveSpeed)} km/s${plan.static ? `; ${this.timeText(plan.static.km)} static` : ''}`,
+          note: this.timeNote(plan),
         },
         {
           label: 'Reachable systems',
@@ -723,6 +860,7 @@ export default {
         { text: 'Way', value: 'way' },
         { text: 'Distance', value: 'km', align: 'end' },
         { text: 'Total', value: 'total', align: 'end' },
+        ...(this.plan.time ? [{ text: 'Flight', value: 'flight', align: 'end' }, { text: 'Transit', value: 'transit', align: 'end' }, { text: 'Wait', value: 'wait', align: 'end' }] : []),
         { text: 'Elapsed', value: 'time', align: 'end' },
       ]
     },
@@ -983,6 +1121,59 @@ export default {
       return travelTime(distanceResult(km, undefined, positions), this.speedResult)
     },
 
+    // The note under the travel time, as the pieces the tile draws (each { text, part }, `part` the role a figure is drawn under): the speed, then what the figure holds, flight and waits where the crew is read, each as the range its total adds up from (the flight's highest case being the one the travel time counts), else flight alone and what it lacks, with the delay a fleet starts with and the propagated figure against the saved one.
+    timeNote(plan) {
+      if (this.effectiveSpeed === null) {
+        return [{ text: 'No speed known: enter one' }]
+      }
+
+      const groups = [[{ text: `At ${this.count(this.effectiveSpeed)} km/s` }]]
+
+      if (plan.time && plan.time.total) {
+        const { flight, flightHi, wait } = plan.time
+
+        groups.push([{ text: this.flightText(flight, flightHi), part: 'flight' }, { text: ' flying and ' }, { text: this.waitText(wait), part: 'wait' }, { text: ' waiting' }])
+      } else if (plan.time) {
+        groups.push([{ text: `flight alone, the waits need ${joinLabels(plan.time.missing)}` }])
+      }
+
+      if (plan.time && plan.time.startDelay > 0) {
+        groups.push([{ text: `starting with ${this.span(plan.time.startDelay)} of delay` }])
+      }
+
+      if (plan.static) {
+        groups.push([{ text: `${this.timeText(plan.static.km)} static` }])
+      }
+
+      return groups.flatMap((group, index) => (index ? [{ text: '; ' }, ...group] : group))
+    },
+
+    // What a flight of a leg takes and what follows it: { flight (seconds at the lowest case, null when not known), flightHi (at the highest, where a cap the fleet carries from a capped flight holds it at a lower speed longer), transit (0 when the flight ends at a jump point it transits through), wait ({ lo, hi } or null when not known; undefined with no jump) }. The leg's time walk lines up with its steps.
+    stepTiming(leg, number) {
+      const { events } = leg.time
+      const next = events[number + 1] && events[number + 1].kind === 'jump' ? events[number + 1] : null
+
+      return { flight: events[number].seconds, flightHi: events[number].secondsHi, transit: next ? 0 : undefined, wait: next ? next.wait : undefined }
+    },
+
+    // A flight as a range from the lowest to the highest case: one figure when they agree, a dash for no flight or one whose either case is not known (a cap the armour cannot weigh leaves the highest case unknown).
+    flightText(flight, flightHi) {
+      if (flight === undefined || flight === null || flightHi === null) {
+        return '—'
+      }
+
+      return flight === flightHi ? this.span(flight) : `${this.span(flight)} to ${this.span(flightHi)}`
+    },
+
+    // A wait as a range from the lowest to the highest draw of the jump shock: one figure when they agree, a dash for no jump.
+    waitText(wait) {
+      if (wait === undefined) {
+        return '—'
+      }
+
+      return wait === null ? 'Not known' : wait.lo === wait.hi ? this.span(wait.hi) : `${this.span(wait.lo)} to ${this.span(wait.hi)}`
+    },
+
     // Flying time in the unit that reads best; a real 0 is 0 h and an unknown time a dash.
     flyTime(days) {
       return days === 0 ? '0 h' : this.duration(days)
@@ -996,6 +1187,10 @@ export default {
 
     legTimeResult(index) {
       const leg = this.plan.legs[index]
+
+      if (leg && leg.route && leg.time) {
+        return leg.time.total ? withPositions(elapsedResult(leg.time.total, this.plan.time.missing), leg.positions) : withoutWaits(this.travelResult(leg.route.km, leg.positions), this.plan.time.missing)
+      }
 
       return leg && leg.route ? this.travelResult(leg.route.km, leg.positions) : null
     },
@@ -1034,7 +1229,9 @@ export default {
 
       const held = Number.isFinite(leg.staticKm) ? ` (${this.timeText(leg.staticKm)} static)` : ''
 
-      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${this.timeText(leg.route.km)}${held}`
+      const elapsed = leg.time && leg.time.total ? this.span(leg.time.total.hi) : this.timeText(leg.route.km)
+
+      return `${leg.route.jumps} ${leg.route.jumps === 1 ? 'jump' : 'jumps'} · ${this.distance(leg.route.km)} · ${elapsed}${held}`
     },
 
     legTitle(index) {
@@ -1096,7 +1293,7 @@ export default {
         return `${this.systemNameOf(to.SystemID)} is avoided: ${reason}`
       }
 
-      const open = searchRoutes(this.jumpPoints, [start], { order: this.order, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] })
+      const open = searchRoutes(this.jumpPoints, [start], { order: this.planOrder, timing: this.searchClock, lagrangePoints: this.options.useLagrange ? this.lagrangePoints : [] })
       const found = to.kind === 'system' ? open.toSystem(to.SystemID) : open.toPlace(to)
       const blockers = found ? this.blockers(found) : []
 
@@ -1220,6 +1417,30 @@ export default {
         return await countLargePlaces(this.database, this.context)
       }),
       default: {},
+    },
+    // The nebula density of the surveyed systems that have dust (`loadSystemDust`): it caps the speed a fleet flies at there.
+    systemDust: {
+      get: tracked('systemDust', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadSystemDust(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: {},
+    },
+    // The ships of the route's fleet, whole (`loadFleetShips`): the crew whose jump shock the route is timed with. Optional, so the page renders without it and the notes say while it is in flight or failed.
+    routeFleetShips: {
+      get: tracked('routeFleetShips', async function () {
+        const fleet = this.routeFleetRow
+
+        if (!this.database || !this.GameID || !this.RaceID || !fleet) {
+          return []
+        }
+
+        return await loadFleetShips(this.database, { GameID: this.GameID, RaceID: this.RaceID, fleetWhere: `FCT_Fleet.FleetID = ${Number(fleet.FleetID)}` })
+      }),
+      default: [],
     },
   },
 }

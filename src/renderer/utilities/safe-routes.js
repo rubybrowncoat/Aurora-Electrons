@@ -135,9 +135,9 @@ export const cutOffOf = ({ jumpPoints, origin, destination, transit = OPEN, avoi
 }
 
 // One run from `origin` to `destination` (places { SystemID, Xcor, Ycor }) as the preferences allow it. `transit` is the profile's { canTransit, canEnter } (transport.js `transitRule`) or open; `avoid` is `avoidRules`' result or null. Returns `baseline` (the route without the preferences), `route` (with them), `status` ('unreached' when not even the baseline reaches the destination, 'open' when the preferences change nothing, 'detour', or 'blocked'), `detour` and, for a blocked run, `cutOff`.
-export const planRun = ({ jumpPoints, origin, destination, order = 'jumps', lagrangePoints = [], transit = OPEN, avoid = null }) => {
+export const planRun = ({ jumpPoints, origin, destination, order = 'jumps', lagrangePoints = [], transit = OPEN, avoid = null, timing = null }) => {
   const guarded = Boolean(avoid && avoid.active)
-  const search = (limited) => searchRoutes(jumpPoints, [origin], { order, lagrangePoints, canTransit: transit.canTransit, canEnter: limited ? (systemId) => transit.canEnter(systemId) && avoid.canEnter(systemId) : transit.canEnter })
+  const search = (limited) => searchRoutes(jumpPoints, [origin], { order, timing, lagrangePoints, canTransit: transit.canTransit, canEnter: limited ? (systemId) => transit.canEnter(systemId) && avoid.canEnter(systemId) : transit.canEnter })
   const baseline = search(false).toPlace(destination)
   const route = guarded ? search(true).toPlace(destination) : baseline
   const detour = guarded ? detourOf(baseline, route, avoid) : null

@@ -169,6 +169,16 @@ const LOADER_FIXTURE = `
   insert into FCT_ClassComponent values (1, 13), (2, 10), (3, 11), (4, 12), (5, 10), (5, 14), (6, 10), (7, 10), (8, 10), (9, 10), (9, 11), (10, 15), (10, 11), (11, 16), (12, 18), (13, 10), (13, 16), (14, 17), (15, 16);
 `
 
+// An in-memory SQLite database of the tables `loadJumpPoints` reads, for race 2 in game 1, which knows systems 1, 9 and 10: 14 in system 1 is charted and explored, and its far side 91 in system 9 is in the save but the race has not charted it; 15 in system 1 and its far side 101 in system 10 are both charted and explored.
+const JUMP_LOADER_FIXTURE = `
+  create table FCT_JumpPoint (WarpPointID integer primary key, GameID integer, SystemID integer, WPLink integer, Distance real, Xcor real, Ycor real, JumpGateStrength integer);
+  create table FCT_RaceJumpPointSurvey (GameID integer, RaceID integer, WarpPointID integer, Charted integer, Explored integer, MilitaryRestricted integer, IgnoreForDistance integer);
+  create table FCT_RaceSysSurvey (GameID integer, RaceID integer, SystemID integer);
+  insert into FCT_JumpPoint values (14, 1, 1, 91, 0, ${0.5 * M}, ${0.5 * M}, 0), (91, 1, 9, 14, 0, 0, 0, 0), (15, 1, 1, 101, 0, 0, ${-30 * M}, 0), (101, 1, 10, 15, 0, 0, 0, 0);
+  insert into FCT_RaceJumpPointSurvey values (1, 2, 14, 1, 1, 0, 0), (1, 2, 91, 0, 0, 0, 0), (1, 2, 15, 1, 1, 0, 0), (1, 2, 101, 1, 1, 0, 0);
+  insert into FCT_RaceSysSurvey values (1, 2, 1), (1, 2, 9), (1, 2, 10);
+`
+
 const allRows = (raw, text) => new Promise((resolve, reject) => raw.all(text, (error, rows) => (error ? reject(error) : resolve([rows]))))
 
 const memory = (sql) => new Promise((resolve, reject) => {
@@ -467,6 +477,21 @@ const fixtures = (m) => {
 
     for (const speed of [null, 1, 1e9]) {
       assert.deepStrictEqual(routedBy({ ...base, speed }), drive)
+    }
+  })
+
+  add('hidden: the loader reads only the jump points the race has charted, so a link whose far side the race has not charted is never crossed and the system behind it is not reached, while a link charted on both sides is', async () => {
+    const database = await memory(JUMP_LOADER_FIXTURE)
+
+    try {
+      const rows = await m.graph.loadJumpPoints(database, { GameID: 1, RaceID: 2 })
+      const routes = m.graph.searchRoutes(rows, [{ SystemID: 1, Xcor: 0, Ycor: 0 }])
+
+      same(sorted(rows.map((row) => row.WarpPointID)), [14, 15, 101])
+      assert.strictEqual(routes.toSystem(9), null)
+      assert.strictEqual(routes.toSystem(10).jumps, 1)
+    } finally {
+      database.close()
     }
   })
 
@@ -978,7 +1003,7 @@ const MUTATIONS = [
   { name: 'a body in no known origin system read as reached', file: T, find: 'const hasOrigin = colonies.some(hasPosition)', replace: 'const hasOrigin = true', fails: ['unknown'] },
   { name: 'a body without a position read as routed from the origin', file: T, find: '} else if (!hasPosition(body)) {', replace: '} else if (false) {', fails: ['unknown'] },
   { name: 'the unexplored links crossed', file: J, find: 'if (state.at.Explored && partner &&', replace: 'if (partner &&', fails: ['hidden'] },
-  { name: 'a link whose far side is not charted crossed', file: J, find: 'if (state.at.Explored && partner && !reached[partner.WarpPointID]', replace: 'if (state.at.Explored && !reached[partner.WarpPointID]', fails: ['hidden', 'unknown'] },
+  { name: 'a link whose far side is not charted crossed', file: J, find: ' and FCT_RaceJumpPointSurvey.Charted = 1', replace: '', fails: ['hidden'] },
   { name: 'the speed change finds links by crossing more with a faster ship', file: T, find: 'const chosen = normaliseBasis(basis)', replace: 'const chosen = normaliseBasis(basis)\n  chosen.drive = chosen.speed > 1000 ? \'drive\' : chosen.drive', fails: ['hidden'] },
   { name: 'the route estimate stated as confirmed', file: T, find: 'verification: \'estimated\',\n  structure: [\'FCT_JumpPoint.Xcor, Ycor, WPLink, JumpGateStrength\'', replace: 'verification: \'confirmed\',\n  structure: [\'FCT_JumpPoint.Xcor, Ycor, WPLink, JumpGateStrength\'', fails: ['registry', 'speed'] },
   { name: 'the speed stated as estimated', file: T, find: 'verification: \'assumed\',\n  structure: [\'FCT_ShipClass.MaxSpeed\']', replace: 'verification: \'estimated\',\n  structure: [\'FCT_ShipClass.MaxSpeed\']', fails: ['registry', 'speed'] },

@@ -91,7 +91,7 @@
           </div>
         </v-card>
 
-        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1">
+        <v-card class="panel" data-summary="The fleets that run on repeat, with their stops, round trip, cycle time, yearly moves and fuel. Use it to see what each route carries and costs." elevation="1" data-hauling-routes>
           <div class="panel-head">
             <span>Repeating routes<provenance-mark rule="hauling.cycleTime" label /></span>
           </div>
@@ -100,7 +100,7 @@
           <v-data-table :headers="routeHeaders" :items="routeRows" item-key="FleetID" :expanded.sync="expanded" show-expand single-expand :sort-by.sync="routesTable.sortBy" :sort-desc.sync="routesTable.sortDesc" :items-per-page.sync="routesTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: routePageSizes }" @click:row="(item, { expand, isExpanded }) => expand(!isExpanded)">
             <template #[`item.FleetName`]="{ item }">
               <div class="py-2">
-                <div class="font-weight-medium">{{ item.FleetName }}<page-link :to="item.routesLink" :name="item.routesName" class="ml-1" /></div>
+                <div class="font-weight-medium" data-fleet-name>{{ item.FleetName }}<page-link :to="item.routesLink" :name="item.routesName" class="ml-1" /></div>
                 <div class="caption text--secondary">{{ item.Ships }} {{ item.Ships === 1 ? 'ship' : 'ships' }}<provenance-mark rule="transport.fleetSpeed" /> at {{ item.speedText }}<provenance-mark v-if="item.profile.status === 'ok'" rule="transport.fleetSpeed" /><template v-if="item.savedText"> {{ item.savedText }}<provenance-mark rule="transport.fleetSpeed" /></template></div>
               </div>
             </template>
@@ -108,7 +108,7 @@
               <div class="caption route-cell">{{ item.stopsText || 'No stops, only moves' }}</div>
             </template>
             <template #[`item.kmSort`]="{ item }">
-              <span v-if="item.route.km !== null" class="text-no-wrap">{{ gkm(item.route.km) }}<provenance-mark v-if="item.distanceResult" :result="item.distanceResult" /></span>
+              <span v-if="item.route.km !== null" class="text-no-wrap" data-haul="round-trip">{{ gkm(item.route.km) }}<provenance-mark v-if="item.distanceResult" :result="item.distanceResult" /></span>
               <v-tooltip v-else top>
                 <template #activator="{ on }">
                   <span class="warning--text" v-on="on">Can't trace</span>
@@ -118,7 +118,7 @@
             </template>
             <template #[`item.cycleSort`]="{ item }">
               <template v-if="item.year">
-                <span class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading`">{{ fixed(item.year.cycleDays, 1) }} d</span><provenance-mark :result="item.results.cycle" />
+                <span class="text-no-wrap" :title="`${fixed(item.year.movingDays, 1)} days moving, ${fixed(item.handlingHours, 1)} hours loading and unloading${item.waitText ? `, ${item.waitText} waiting for the jump shock` : ''}`" data-haul="cycle">{{ fixed(item.year.cycleDays, 1) }} d</span><span v-if="item.year.cycleLowDays !== item.year.cycleDays" class="caption text--secondary ml-1 text-no-wrap">(from <span data-haul="cycle-low">{{ fixed(item.year.cycleLowDays, 1) }} d</span>)</span><provenance-mark :result="item.results.cycle" />
               </template>
               <template v-else>
                 <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.cycle" />
@@ -130,7 +130,7 @@
             </template>
             <template #[`item.tripsSort`]="{ item }">
               <template v-if="item.year">
-                <span>{{ fixed(item.year.trips, 1) }}</span><provenance-mark :result="item.results.cycle" />
+                <span data-haul="trips">{{ fixed(item.year.trips, 1) }}</span><provenance-mark :result="item.results.cycle" />
               </template>
               <template v-else>
                 <span class="text--secondary">—</span><provenance-mark v-if="item.results" :result="item.results.cycle" />
@@ -138,7 +138,7 @@
             </template>
             <template #[`item.movedSort`]="{ item }">
               <template v-if="item.year">
-                <span v-if="item.freightText" class="text-no-wrap">{{ item.freightText }}</span><provenance-mark v-if="item.freightText" :result="item.results.freight" />
+                <span v-if="item.freightText" class="text-no-wrap" data-haul="moved">{{ item.freightText }}</span><provenance-mark v-if="item.freightText" :result="item.results.freight" />
                 <span v-if="item.freightText && item.colonistsText">, </span>
                 <span v-if="item.colonistsText" class="text-no-wrap">{{ item.colonistsText }}</span><provenance-mark v-if="item.colonistsText" :result="item.results.colonists" />
                 <span v-if="!item.freightText && !item.colonistsText" class="text--secondary">No cargo delivered</span>
@@ -171,7 +171,7 @@
                   </v-simple-table>
                 </div>
                 <div v-else class="caption warning--text">{{ item.route.problem }}</div>
-                <div v-if="item.year" class="caption text--secondary mt-2">Each cycle: {{ fixed(item.year.movingDays, 2) }} days moving and {{ fixed(item.handlingHours, 1) }} hours loading and unloading.<span v-if="item.limiting"> The slowest stop is {{ item.limiting.place }}, set by {{ item.limiting.ship.ShipName }} at a loading strength of {{ fixed(item.limiting.strength, 1) }}.</span></div>
+                <div v-if="item.year" class="caption text--secondary mt-2" data-cycle-parts>Each cycle: <span data-part="moving">{{ fixed(item.year.movingDays, 2) }}</span> days moving{{ item.waitText || item.delayHours > 0 ? ',' : ' and' }} <span data-part="handling">{{ fixed(item.handlingHours, 1) }}</span> hours loading and unloading<template v-if="item.delayHours > 0">{{ item.waitText ? ',' : ' and' }} <span data-part="delay">{{ fixed(item.delayHours, 1) }}</span> hours of order delays</template><template v-if="item.waitText"> and <span data-part="wait">{{ item.waitText }}</span> waiting for the jump shock<provenance-mark v-if="item.results.wait" :result="item.results.wait" /></template>.<span v-if="item.limiting"> The slowest stop is {{ item.limiting.place }}, set by {{ item.limiting.ship.ShipName }} at a loading strength of {{ fixed(item.limiting.strength, 1) }}.</span></div>
                 <handling-breakdown :rows="item.handlingRows" class="mt-2" />
                 <fleet-profile :participants="item.participantRows" :speeds="item.speeds" :reasons="[]" :conditions="item.profileNotes" class="mt-2" />
                 <div v-if="item.cargo.holdShare > 0 && item.cargo.holdShare < 1" class="caption text--secondary mt-2">The amounts set on its mineral orders fill {{ count(item.cargo.holdShare * 100) }}% of the hold (a tonne of mineral takes two tonnes of cargo space): {{ item.tripText }} a trip.</div>
@@ -183,6 +183,9 @@
           </div>
           <div class="panel-foot caption text--secondary" data-fleet-basis>
             A fleet sails at its set speed, held to the effective maximum of its slowest ship under its own power (from the undamaged engines, the overhaul and the mass of a ship it tows), and at that maximum when the fleet is set to it. Each ship burns fuel at its own engine power scaled by the share of its own maximum the fleet sails at. A ship in a hangar or under tow burns none and its holds are not counted. A fleet that can't be profiled, or whose every hold is in a hangar or under tow, is left out of the totals with the reason.
+          </div>
+          <div class="panel-foot caption text--secondary" data-cycle-basis>
+            A transit takes no time. After each jump every ship of the fleet that is not in a hangar draws a delay from its crew, and the fleet waits at the next jump point only for what the flight and stops since the jump have not used: a range from the lowest to the highest draw, the cycle being timed at the upper case with the lower case beside it. The cycle repeats, so the delay after the last jump carries into the first. The game retries a blocked transit at the start of each subpulse and the length of the subpulses ahead is not known, so the longest wait runs up to two subpulses (12 hours) past the second the delay clears. A fleet whose crew is not in the save has no cycle time and is left out of the totals.
           </div>
           <div class="panel-foot caption text--secondary" data-propagation-basis>
             A cycle is flown for a year with the bodies that move (independent asteroids, moons, trojans, and eccentric bodies within one orbit of their last update) where they will be on each arrival, loading and unloading and order delays as waits, so the next leg leaves from where the fleet arrived. The cycle and the yearly figures are the propagated ones, with the cycle on the saved positions beside them; an order to anything else keeps the saved positions and says why. The legs listed under a route are the saved ones.
@@ -246,7 +249,7 @@ import routePosition, { POSITION_INPUTS, POSITION_LABELS } from '../mixins/route
 import { STOCK_COLUMNS, colonyMinerals, loadPacketsInFlight, loadQueueNeeds } from '../utilities/colony-minerals'
 import { linkTo, place } from '../utilities/deep-links'
 import { HAUL_REASONS, haulByClass, planHauls } from '../utilities/haul-plan'
-import { CARGO_POINTS, classYear, cycleCargo, cycleHandling, routeResults, routeYear, walkRoute } from '../utilities/hauling'
+import { CARGO_POINTS, classYear, cycleCargo, cycleHandling, cycleWalk, propagatedRoute, routeResults, routeYear, walkRoute } from '../utilities/hauling'
 import { fleetProfile, hauledFleet, loadFleetShips, participantRows } from '../utilities/fleet-profile'
 import { loadJumpPoints, pathKey, reverseSteps, routeLegs, routeResults as routeFigures, searchRoutes } from '../utilities/jump-graph'
 import { loadHandlingSupport } from '../utilities/handling-support'
@@ -260,6 +263,7 @@ import { loadFormulaVersion } from '../utilities/capabilities'
 import { distanceResult, simulateCycles } from '../utilities/route-plan'
 import { cachedPropagation } from '../utilities/orbit-propagation'
 import { ADAPTERS, CONDITIONS, colonyPlaceEndpoint, figureOf, orderEndpoint, orderExitEndpoint, routePositions, summarisePositions, withPositions, withSavedComparison } from '../utilities/route-position'
+import { fleetTimingOf, flightOnly, loadSystemDust } from '../utilities/route-time'
 import { CLASS_SHUTTLE_STRENGTH_COLUMNS, SHUTTLE_SERVICE_COLUMNS, bareEndpoint, colonyEndpoint, describeFormulaVersion, handlingRows, shuttleServiceJoin, tripResult } from '../utilities/transport'
 
 const INPUT_LABELS = {
@@ -273,6 +277,7 @@ const INPUT_LABELS = {
   jumpPoints: 'the jump points',
   shuttleTechnology: 'the shuttle technology',
   formulaVersion: 'the save\'s schema',
+  systemDust: 'the nebula density of the systems',
   handlingSupport: 'the officers\' Logistics bonuses',
   avoidSystems: 'the danger and control of the systems',
   ...POSITION_LABELS,
@@ -410,16 +415,25 @@ export default {
         const cargo = cycleCargo(orders, sailing)
         const handling = cycleHandling(orders, cargo, sailing, profile.cargo.ships, { version: this.formulaVersion, support: this.officerSupport })
         const delay = orders.reduce((sum, order) => sum + (order.OrderDelay || 0), 0)
-        const held = routeYear(sailing, route, cargo, handling, delay)
-        const simulation = this.simulateRoute(orders, sailing, handling, held)
-        const year = simulation && simulation.annual.status === 'propagated' ? routeYear(sailing, { ...route, km: simulation.annual.meanKm * orders.length }, cargo, handling, delay) : held
+        const timing = fleetTimingOf(profile.participants, this.systemDust, { holdsSpeed: profile.useMaximumSpeed === false })
+        const heldWalk = cycleWalk(orders, sailing, route, handling, timing)
+        const held = routeYear(sailing, route, cargo, handling, delay, heldWalk)
+        const first = this.simulateRoute(orders, sailing, handling, held, heldWalk)
+        const flownRoute = first && first.annual.status === 'propagated' ? propagatedRoute(route, first.annual.flights) : null
+        const flownWalk = flownRoute ? cycleWalk(orders, sailing, flownRoute, handling, timing) : null
+        // The bodies moved on can bring a stop nearer, so that a flight no longer runs the delay down: that cycle's time is a range, and it keeps the saved positions (`timed-clock`).
+        const simulation = flownWalk && !flightOnly(flownWalk, sailing.Speed) ? this.simulateRoute(orders, sailing, handling, held, flownWalk) : first
+        const flown = simulation === first ? flownRoute : null
+        const walk = flown ? flownWalk : heldWalk
+        const year = flown ? routeYear(sailing, flown, cargo, handling, delay, walk) : held
+        const waitText = year && year.waitDays !== null ? (year.waitLowDays === year.waitDays ? `${this.fixed(year.waitDays * 24, 1)} hours` : `${this.fixed(year.waitLowDays * 24, 1)} to ${this.fixed(year.waitDays * 24, 1)} hours`) : ''
         const speedText = profile.status === 'ok' ? `${this.count(profile.cruise)} km/s` : 'no speed'
         const savedText = profile.status === 'ok' && Number.isFinite(profile.savedSpeed) && profile.savedSpeed !== profile.cruise ? `(saved ${this.count(profile.savedSpeed)})` : ''
         const capital = (text) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
         const savedPositions = routePositions(orders.flatMap((order) => [orderEndpoint(order), orderExitEndpoint(order)]), { facts: this.positionRead })
         const positions = simulation ? simulation.annual.positions : savedPositions
         const legPositions = route.legs.map((_leg, index) => routePositions([orderExitEndpoint(orders[index]), orderEndpoint(orders[(index + 1) % orders.length])], { facts: this.positionRead }))
-        const found = routeResults(route, year, handling)
+        const found = routeResults(route, year, handling, walk)
         const results = found && Object.fromEntries(Object.entries(found).map(([name, result]) => [name, withPositions(result, positions)]))
         // A stop does something where it goes: transits and plain moves only pass through.
         const stops = orders.filter((order) => !order.Jumps && order.MoveActionID !== MOVE_TO_LOCATION).map((order) => `${placeOf(order)}: ${order.ActionName}`)
@@ -442,6 +456,8 @@ export default {
           cargo,
           tripText,
           year,
+          waitText,
+          delayHours: delay / 3600,
           propagationText: simulation ? this.routeNote(simulation, year, held) : '',
           stopsText: stops.join(' → '),
           routesLink: routesLink.to,
@@ -744,8 +760,8 @@ export default {
       return km >= 1e9 ? `${roundToDecimal(km / 1e9, 2)} bn km` : `${roundToDecimal(km / 1e6, 1)} M km`
     },
 
-    // A route's cycle flown cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): from each order's exit to the next order's destination, the stop's loading and unloading as the wait there and its delay before the flight to it, the next leg leaving from the arrival position. Null while the positions are not read, for a route that is not timed, or one that reaches no body, colony or Lagrange point. Kept per save, speed and route.
-    simulateRoute(orders, sailing, handling, held) {
+    // A route's cycle flown cycle after cycle for a year with the bodies moved on to each arrival (utilities/route-plan.js `simulateCycles`): from each order's exit to the next order's destination, the stop's loading and unloading as the wait there and its delay before the flight to it, the next leg leaving from the arrival position. Null while the positions are not read, for a route that is not timed, or one that reaches no body, colony or Lagrange point. A cycle whose walk is not the flight's own clock (`flightOnly`: a jump shock to wait for, a nebula cap) states the saved positions and why. Kept per save, speed and route.
+    simulateRoute(orders, sailing, handling, held, walk) {
       const { positionRead } = this
 
       if (!positionRead || !held || !(sailing.Speed > 0) || !orders.length) {
@@ -764,9 +780,10 @@ export default {
         return null
       }
 
-      const scenario = JSON.stringify(cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.delay, hop.wait]))
+      const timed = !flightOnly(walk, sailing.Speed)
+      const scenario = JSON.stringify([...cycle.map((hop) => [hop.from.key, hop.to.key, hop.leave.key, hop.delay, hop.wait]), timed])
 
-      return cachedPropagation(this.database, 'hauling-route', { facts: positionRead, profile: sailing.Speed, scenario }, () => simulateCycles({ hops: cycle, facts: positionRead, adapters: ADAPTERS, speed: sailing.Speed }))
+      return cachedPropagation(this.database, 'hauling-route', { facts: positionRead, profile: sailing.Speed, scenario }, () => simulateCycles({ hops: cycle, facts: positionRead, adapters: ADAPTERS, speed: sailing.Speed, timed }))
     },
 
     // A haul's round trip flown cycle after cycle for a year by one freighter class (`simulateCycles`): out loaded, back empty on the same jump points, loading at the giving colony and unloading at the short one as waits. Null while the positions are not read, when the route searched from the giving colony is not the planned haul's, or for a class that is not timed.
@@ -966,6 +983,17 @@ export default {
         return await loadPlannedAvoidSystems(this.database, { GameID: this.GameID, RaceID: this.RaceID })
       }),
       default: [],
+    },
+    // The nebula density of the systems the race has surveyed that have dust (`loadSystemDust`): what caps a fleet's speed in a system, which the cycle's flights are timed with.
+    systemDust: {
+      get: tracked('systemDust', async function () {
+        if (!this.database || !this.GameID || !this.RaceID) {
+          return {}
+        }
+
+        return await loadSystemDust(this.database, { GameID: this.GameID, RaceID: this.RaceID })
+      }),
+      default: () => ({}),
     },
   },
 }

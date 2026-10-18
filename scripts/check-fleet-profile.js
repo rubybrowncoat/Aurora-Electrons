@@ -20,7 +20,7 @@ const fs = require('fs')
 const path = require('path')
 const compiler = require('vue/compiler-sfc')
 const sqlite3 = require('sqlite3')
-const assert = require('./lib/bounded-assert')
+const { assert, kindOf } = require('./lib/fault-credit')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
@@ -69,6 +69,9 @@ const ship = (extra = {}) => ({
   EnginePower: 20,
   UndamagedEnginePower: 20,
   OverhaulFactor: 1,
+  GradePoints: 100,
+  CrewMorale: 1,
+  SensorDelay: 0,
   FuelEfficiency: 0.5,
   FuelCapacity: 1e9,
   Fuel: 1e9,
@@ -253,6 +256,19 @@ check('shared-cycle', 'a fast and a slow ship share one travel cycle at the slow
   three.participants.forEach((participant) => near(participant.fraction, three.cruise / participant.engine.speed))
   near(three.participants[2].engine.speed, 800)
   near(three.participants[2].fraction, 500 / 800)
+})
+
+check('nebula-fuel', 'a nebula that holds the fleet to a lower speed lengthens the flight but not the fuel, which is the distance at the speed the fleet is set to', async (w) => {
+  const { fp, profile, endpoints } = await tripOf(w, [ship(), slowShip()])
+  const steps = [{ kind: 'fly', km: KM, SystemID: 1 }]
+  const timed = (dust) => fp.fleetTrip(profile, KM, endpoints, { version: VERSION, support: null, timing: { steps, dust, armour: 5, shock: { lo: 121, hi: 180 }, shockMissing: [], startDelay: 0 } })
+  const clear = timed({})
+  const capped = timed({ 1: 500 })
+
+  near(clear.travelSeconds, (2 * KM) / 500)
+  near(capped.travelSeconds, (2 * KM) / 25, 'the flight is at the cap of 25 km/s')
+  near(capped.fuelPerTrip, 15 * ((2 * KM) / 500 / 3600), 'the fuel is the distance at the set speed')
+  near(capped.fuelPerTrip, clear.fuelPerTrip)
 })
 
 check('saved-speed', 'the saved fleet speed and the recomputed effective maximum stay apart, and a saved speed above what the fleet can reach is held to it', async (w) => {
@@ -880,7 +896,18 @@ const loadErrorsOf = (state) => new Proxy({}, { get: (_target, key) => (key === 
 // The Transport page on a run from a colony to a site over one route, with the fleets `fleetShips` (a mixed set by default) and each read in the state `state` gives the optional fleets read (null ready, undefined loading, a text failed).
 const PLACE = { kind: 'colony', name: 'Mars', colony: colony() }
 const TARGET = { kind: 'system', name: 'Site', SystemID: 3 }
-const REACH = { route: { km: KM, jumps: 2 }, open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
+// A route of `km` over two jumps, in the shape of a search's result: three flights of a third each, joined by the two jumps.
+const routeOf = (km) => {
+  const point = (id, system) => ({ WarpPointID: id, SystemID: system, Xcor: 0, Ycor: 0 })
+  const origin = { SystemID: 1, Xcor: 0, Ycor: 0 }
+  const first = { kind: 'fly', at: point(1, 1), previous: null, origin, legKm: km / 3, via: null }
+  const arrived = { kind: 'jump', at: point(2, 2), previous: first, origin }
+  const second = { kind: 'fly', at: point(3, 2), previous: arrived, origin, legKm: km / 3, via: null }
+  const beyond = { kind: 'jump', at: point(4, 3), previous: second, origin }
+
+  return { km, jumps: 2, end: { kind: 'fly', at: point(5, 3), previous: beyond, origin, legKm: km / 3, via: null } }
+}
+const REACH = { route: routeOf(KM), open: null, profile: { gates: false, civilian: false }, blockers: [], safe: null, pending: false }
 const transportVmOf = (page, state, data = {}) => instantiate(page, { $store: STORE, database: null, GameID: 1, RaceID: 2, data: { loadErrors: loadErrorsOf(state), handlingSupport: FULL_OFFICERS, formulaVersion: VERSION, origin: PLACE, destination: TARGET, reachOf: () => REACH, fleetShips: [ship({ FleetSpeed: 300, UseMaximumSpeed: 0 }), slowShip({ FleetSpeed: 300, UseMaximumSpeed: 0 }), craft({ FleetSpeed: 300, UseMaximumSpeed: 0 })], ...data } })
 
 check('pages', 'the pages take speed, burn and counted cargo from the profile, say why a fleet is left out and track the optional read under the key they label it with', async (w) => {
@@ -1023,6 +1050,39 @@ check('pages', 'the pages take speed, burn and counted cargo from the profile, s
   assert.equal(unsureRun.cargo, null)
   assert.ok(unsureRun.note.length > 0)
   unsure.close()
+})
+
+// This pseudo-instance check covers the cycle data contract, but cannot establish what Chromium renders or whether a row is visible.
+check('cycle-rows', 'the rows of a fleet\'s round trip reconcile: flying, loading and unloading, transits and the longest wait add up to the round trip, the year is the round trips that total gives, and a wait or a total with a lower case shows both ends', async (w) => {
+  const transportPage = await w.transport()
+  const vm = transportVmOf(transportPage, null)
+  const [run] = vm.fleetRuns
+  const rowsOf = (rows) => Object.fromEntries(rows.map((row) => [row.key, row]))
+
+  assert.equal(run.status, 'ok')
+  assert.deepEqual(run.cycleRows.map((row) => row.key), ['flight', 'handling', 'transit', 'wait', 'total', 'year'], 'each part of the round trip has a row, in the order they happen')
+
+  const rows = rowsOf(run.cycleRows)
+  const waitHi = rows.wait.result.value
+
+  assert.ok(waitHi > 0, 'two jumps each way leave a wait')
+  assert.equal(rows.flight.text, vm.span(run.travelSeconds), 'the flying row is the flight of the trip')
+  assert.equal(rows.handling.text, vm.span(run.handlingSeconds), 'the loading row is the handling of the trip')
+  near(run.travelSeconds + run.handlingSeconds + waitHi, run.tripSeconds, 'flying, handling and the longest wait are the round trip (a transit takes none)')
+  near(run.trips, 31536000 / run.tripSeconds, 'the year is the round trips the total gives')
+
+  const trip = { travelSeconds: 100, handlingSeconds: 50, transitSeconds: 0, waitSeconds: { lo: 20, hi: 70 }, tripSecondsLow: 170, tripSeconds: 220, trips: 143345.45 }
+  const built = rowsOf(vm.cycleRows(trip))
+
+  assert.equal(built.wait.result.value, 70, 'the wait is stated at its longest')
+  assert.ok(built.wait.text.includes(vm.span(20)) && built.wait.text.includes(vm.span(70)), 'and shows both ends')
+  assert.ok(built.total.text.includes(vm.span(170)) && built.total.text.includes(vm.span(220)), 'the round trip shows both ends')
+  assert.equal(built.year.text, vm.count(trip.trips, 1), 'the year is the trips of the total')
+
+  const sure = rowsOf(vm.cycleRows({ ...trip, waitSeconds: { lo: 70, hi: 70 }, tripSecondsLow: 220 }))
+
+  assert.equal(sure.wait.text, vm.span(70), 'a wait with one end shows it once')
+  assert.equal(sure.total.text, vm.span(220), 'and so does the round trip')
 })
 
 // ---- Templates ------------------------------------------------------------------------------------------------------
@@ -1266,7 +1326,7 @@ check('template', 'the pages show the profile of each fleet bound to its row, wi
 
   // The rows the page itself makes, with no avoid setting on (its distance has the route finder's own result) and for each way a run can come out.
   const grown = (extra) => transportVmOf(transportOptions, null, extra).fleetRuns[0]
-  const made = [grown({}), grown({ reachOf: () => ({ ...REACH, route: { km: 1e14, jumps: 2 } }) }), grown({ reachOf: () => ({ ...REACH, route: null }) }), grown({ fleetShips: [barge()] }), grown({ fleetShips: [ship({ UndamagedEnginePower: 0 })] })]
+  const made = [grown({}), grown({ reachOf: () => ({ ...REACH, route: routeOf(1e14) }) }), grown({ reachOf: () => ({ ...REACH, route: null }) }), grown({ fleetShips: [barge()] }), grown({ fleetShips: [ship({ UndamagedEnginePower: 0 })] })]
   const items = [ready, bare, { ...ready, savedSpeed: 500, effectiveMax: 500 }, ...made]
 
   assert.ok(made.some((row) => row.status === 'ok') && made.some((row) => row.status === 'range') && made.some((row) => row.status === 'noroute') && made.some((row) => row.status === 'unsupported') && made.some((row) => row.status === 'immobile'), 'the pages\' own rows cover each way a run comes out')
@@ -1354,6 +1414,9 @@ const FAULTS = [
   ['a ship with no tank has no limit', 'profile', '(capacity > 0 ? perTrip / capacity : perTrip > 0 ? Infinity : 0)', '(capacity > 0 ? perTrip / capacity : 0)', ['fuel-range']],
   ['the stops are timed on the first ship alone', 'profile', 'const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }, ...rest]', 'const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }]', ['stop-bottleneck']],
   ['the trip flies at the speed of the first ship\'s class', 'profile', 'MaxSpeed: profile.cruise,', 'MaxSpeed: head.MaxSpeed,', ['shared-cycle']],
+  ['the wait row states the shortest wait', 'transportPage', 'result: waitResult(trip.waitSeconds, [])', 'result: waitResult({ lo: trip.waitSeconds.lo, hi: trip.waitSeconds.lo }, [])', ['cycle-rows']],
+  ['the round trip row shows the lower case alone', 'transportPage', 'text: range(trip.tripSecondsLow, trip.tripSeconds) }', 'text: this.span(trip.tripSecondsLow) }', ['cycle-rows']],
+  ['the flying row is the whole round trip', 'transportPage', 'text: this.span(trip.travelSeconds) }', 'text: this.span(trip.tripSeconds) }', ['cycle-rows']],
   ['Hauling moves a fleet that cannot be profiled', 'profile', 'Speed: profile.status === \'ok\' ? profile.cruise : 0,', 'Speed: profile.cruise,', ['unsupported', 'no-propulsion', 'hauling-fleet', 'pages']],
   ['Hauling burns fuel for a fleet that cannot be profiled', 'profile', 'FuelPerHour: profile.status === \'ok\' ? profile.fuelPerHour : 0,', 'FuelPerHour: profile.fuelPerHour,', ['hauling-fleet']],
   // eslint-disable-next-line no-template-curly-in-string
@@ -1413,6 +1476,7 @@ const FAULTS = [
   ['the maximum basis reads the speed setting', 'profile', 'const modeUnknown = basis === \'saved\' && ', 'const modeUnknown = ', ['unknown']],
   ['a tank the save leaves empty is a tank of 0', 'profile', 'share: known(capacity) ? (capacity > 0 ? perTrip / capacity : perTrip > 0 ? Infinity : 0) : null', 'share: capacity > 0 ? perTrip / capacity : perTrip > 0 ? Infinity : 0', ['unknown']],
   ['a trip with an unknown tank is run', 'profile', 'const status = trip.status === \'ok\' && tanks.length ? \'unknown\' : ranged', 'const status = ranged', ['unknown']],
+  ['the fuel of a trip follows the seconds under way', 'profile', 'trip.fuelSeconds / 3600', 'trip.travelSeconds / 3600', ['nebula-fuel']],
   // eslint-disable-next-line no-template-curly-in-string
   ['a damage row with no number is no damage', 'profile', ' or exists (select 1 ${DAMAGE_ROWS} and FCT_DamagedComponent.Number is null)', '', ['loader-null']],
   ['an installed count with no number is none', 'profile', 'FCT_ClassComponent.NumComponent is null or FCT_ShipDesignComponents.ComponentValue is null or exists (', 'FCT_ShipDesignComponents.ComponentValue is null or exists (', ['loader-null']],
@@ -1433,6 +1497,7 @@ const FAULTS = [
 const STRING = '\'[^\'\\n]*\''
 
 const BENIGN = [
+  { label: 'the hours of fuel tested as a finite number', target: 'profile', at: /trip\.fuelSeconds === null \? null/, to: () => '!Number.isFinite(trip.fuelSeconds) ? null' },
   { label: 'a role reworded', target: 'profile', at: new RegExp(`(towed: )${STRING}`), to: (m) => `${m[1]}'Pulled by a tractor beam'` },
   { label: 'a reason reworded', target: 'profile', at: new RegExp(`(code: 'no-independent', text: )${STRING}`), to: (m) => `${m[1]}'no ship of the fleet moves on its own power'` },
   { label: 'a hold label reworded', target: 'component', at: new RegExp(`(counted: )${STRING}`), to: (m) => `${m[1]}'Loads'` },
@@ -1443,6 +1508,8 @@ const BENIGN = [
   { label: 'the label of the fleets input reworded', target: 'transportPage', at: /^( {2}fleetShips: )'[^']*'/m, to: (m) => `${m[1]}'the membership of the fleets'` },
   { label: 'the optional inputs listed in the opposite order', target: 'transportPage', at: /(const OPTIONAL_INPUTS = )\[((?:'[^']*'|\.\.\.\w+)(?:, (?:'[^']*'|\.\.\.\w+))*)\]/, to: (m) => `${m[1]}[${m[2].split(', ').reverse().join(', ')}]` },
   { label: 'the fleet distance result is parenthesised', target: 'transportPage', at: DISTANCE_RESULT, to: (m) => `${m[1]}(this.pathOf(reach))` },
+  { label: 'the range test of the round trip rows written the other way round', target: 'transportPage', at: /const range = \(low, high\) => \(low === high \?/, to: () => 'const range = (low, high) => (high === low ?' },
+  { label: 'the label of the round trip row reworded', target: 'transportPage', at: /(key: 'total', label: )'[^'\n]*'/, to: (m) => `${m[1]}'Whole round trip'` },
 ].map((edit, index) => ({ ...edit, id: `benign:${index}` }))
 
 // ---- Run ----------------------------------------------------------------------------------------------------------------
@@ -1459,6 +1526,9 @@ const run = async (checks, world) => {
 
   return failures
 }
+
+// The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
+const BY_VALUE = new Set(['cycle-rows', 'nebula-fuel'])
 
 const describeFailure = ({ name, error }) => `${name}: ${(error && error.message ? error.message : String(error)).split('\n').slice(0, 6).join('\n  ')}`
 
@@ -1509,7 +1579,7 @@ const main = async () => {
       for (const name of fails) {
         const [failed] = await run(CHECKS.filter((one) => one.name === name), world)
 
-        if (!failed) {
+        if (!failed || (BY_VALUE.has(name) && kindOf(failed.error) !== 'assertion')) {
           missed.push(name)
         } else if (detail) {
           console.log(`CAUGHT ${label} by ${describeFailure(failed)}`)

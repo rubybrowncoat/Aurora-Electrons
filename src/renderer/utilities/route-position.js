@@ -48,6 +48,7 @@ export const CONDITIONS = Object.freeze({
   'contact-age-unread': 'the time the contact was last seen is not recorded',
   'stale-contact': 'the contact was last seen before the game time and is not carried forward',
   'cycles-capped': 'the year holds more cycles than the simulation takes, so no yearly figure is worked out and the saved positions stand',
+  'timed-clock': 'the elapsed time is a range (the wait for the jump shock, a nebula cap), so no single arrival is worked out and the saved positions stand',
   'propagation-unavailable': 'the position at arrival could not be worked out, so the saved position stands',
   'orbit-unread': 'the orbits of the bodies on the route are not read',
   'orbit-unsurveyed': 'the system is not surveyed, so its orbits are not read and the saved position stands',

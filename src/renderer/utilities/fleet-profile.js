@@ -4,6 +4,7 @@ import { burnPerHour, classSpeed } from './design-rules'
 import { bonusProvenance } from './handling-bonuses'
 import { columnsOf } from './mine-bootstrap-data'
 import { ofRule, registerRule, unavailable } from './provenance'
+import { RETRY_ASSUMPTION } from './route-time'
 import { JUMP_DRIVE_COLUMNS, SHUTTLE_STRENGTH_COLUMNS, UNVERIFIED_VERSION, missingInputsOf, roundTrip } from './transport'
 
 const SECONDS_PER_DAY = 86400
@@ -56,15 +57,15 @@ registerRule({
   units: 'days',
   verification: 'estimated',
   structure: ['transport.fleetSpeed', 'transport.fleetCargo', 'the explored jump points'],
-  note: 'One travel cycle for the whole fleet: twice the route at the fleet\'s one speed plus loading and unloading at both ends, each stop taking the slowest ship\'s time (`transport.handlingTime`). Ships work in parallel at a stop, so a fast ship waits for the slowest at the stop and sails at the fleet\'s speed.',
+  note: 'One travel cycle for the whole fleet: twice the route at the fleet\'s one speed plus loading and unloading at both ends, each stop taking the slowest ship\'s time (`transport.handlingTime`), and the wait for the jump shock the ships draw (`route.jumpWait`), counted at its upper case. Ships work in parallel at a stop, so a fast ship waits for the slowest at the stop and sails at the fleet\'s speed.',
   assumptions: ['one speed all the way and both ways', 'full holds', 'no refuelling or overhaul stops'],
 })
 
 // The columns of FCT_Ship the profile reads that an older save may lack: such a column reads as null (not known), never as 0.
-const OPTIONAL_SHIP_COLUMNS = ['Fuel', 'OverhaulFactor', 'MaintenanceState', 'MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies']
+const OPTIONAL_SHIP_COLUMNS = ['Fuel', 'OverhaulFactor', 'MaintenanceState', 'MothershipID', 'TractorTargetShipID', 'TractorParentShipID', 'TractorTargetShipyardID', 'LastOverhaul', 'LastShoreLeave', 'GradePoints', 'CrewMorale', 'CurrentMaintSupplies', 'SensorDelay']
 
 // The columns of FCT_ShipClass the ship's runtime state reads that an older save may lack: the planned deployment, the stored maintenance supplies and failure rate, and the flags that decide how a ship's clocks run. Each reads as null (not known) when the save lacks it.
-const OPTIONAL_CLASS_COLUMNS = ['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip']
+const OPTIONAL_CLASS_COLUMNS = ['PlannedDeployment', 'MaintSupplies', 'BaseFailureChance', 'MaxDACRoll', 'Commercial', 'MoraleCheckRequired', 'CommercialHangar', 'SupplyShip', 'ArmourThickness']
 
 // The class column that tells a commercial hangar from a military one. It is named through this constant so the page scan sees a column built by name (a bare marker, not a required column): a save without it still loads every ship, the carrier's hangar kind reading null.
 const CARRIER_CLASS_COLUMN = 'CommercialHangar'
@@ -309,8 +310,8 @@ export const fleetProfile = (ships, fleet = null, { basis = 'maximum' } = {}) =>
 }
 
 // What one round trip of the fleet takes: the shared travel cycle, the stops and the fuel of each burning ship. `profile` as `fleetProfile` gives it, `km` the route one way, `endpoints` { origin, destination } as roundTrip takes them; `colonists: false` times the cargo alone; `version` and `support` as roundTrip. Returns roundTrip's `status` and fields (the fleet's one speed is the travel speed, so `travelSeconds` is shared by every ship) with the profile's own status where it can't run (`unsupported`, `immobile`, `unknown`, `none`), `fuel` [{ ship, burn, perTrip, share }] for the ships that burn, `fuelPerTrip` (all of them), `fuelShare` (the highest, of the tank of `fuelLimiting`), the round trip's `cargo` and `colonists` per trip and `tonsYear`/`colonistsYear` (null unless the trip runs). A trip whose longest-range ship needs more fuel than its tank holds is 'range'.
-export const fleetTrip = (profile, km, endpoints, { colonists = true, version = null, support = null } = {}) => {
-  const empty = { problems: [], stops: [], limiting: null, estimate: false, known: [], unknown: [], versionSupported: false, travelSeconds: null, handlingSeconds: null, tripSeconds: null, trips: null, fuel: [], fuelPerTrip: null, fuelShare: null, fuelLimiting: null, cargo: 0, colonists: 0, tonsYear: null, colonistsYear: null }
+export const fleetTrip = (profile, km, endpoints, { colonists = true, version = null, support = null, timing = null } = {}) => {
+  const empty = { problems: [], stops: [], limiting: null, estimate: false, known: [], unknown: [], versionSupported: false, travelSeconds: null, handlingSeconds: null, waitSeconds: null, transitSeconds: null, cycle: null, tripSecondsLow: null, tripSeconds: null, trips: null, fuel: [], fuelPerTrip: null, fuelShare: null, fuelLimiting: null, cargo: 0, colonists: 0, tonsYear: null, colonistsYear: null }
 
   if (profile.status !== 'ok') {
     return { ...empty, status: profile.status, problems: profile.reasons.map((reason) => ({ where: 'fleet', status: reason.status, code: reason.code, text: reason.text })) }
@@ -323,8 +324,8 @@ export const fleetTrip = (profile, km, endpoints, { colonists = true, version = 
   }
 
   const [head, ...rest] = loaders
-  const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }, ...rest], km, endpoints, head.ShuttleTechnology, { colonists, version, support })
-  const hours = trip.travelSeconds === null ? null : trip.travelSeconds / 3600
+  const trip = roundTrip([{ ...head, MaxSpeed: profile.cruise, EnginePower: 0 }, ...rest], km, endpoints, head.ShuttleTechnology, { colonists, version, support, timing })
+  const hours = trip.fuelSeconds === null ? null : trip.fuelSeconds / 3600
   const fuel = profile.participants.filter((participant) => participant.role === 'independent').map((participant) => {
     const perTrip = participant.burn * hours
     const capacity = participant.ship.FuelCapacity
@@ -357,7 +358,7 @@ export const fleetTrip = (profile, km, endpoints, { colonists = true, version = 
 export const fleetTripResult = (trip, profile) => {
   if (trip.status === 'ok' || trip.status === 'range') {
     const { inputs, assumptions } = bonusProvenance(trip)
-    const notes = profile.cargo.left.ships.length ? ['the holds of carried or towed craft are not counted'] : []
+    const notes = [...(profile.cargo.left.ships.length ? ['the holds of carried or towed craft are not counted'] : []), ...(trip.waitSeconds && trip.waitSeconds.hi > 0 ? [RETRY_ASSUMPTION] : [])]
 
     return ofRule({ rule: 'transport.fleetTrip', value: trip.tripSeconds / SECONDS_PER_DAY, inputs, assumptions: [...(trip.versionSupported ? [] : [UNVERIFIED_VERSION]), ...assumptions, ...notes] })
   } else if (trip.status === 'unknown' || trip.status === 'unsupported' || trip.status === 'immobile') {

@@ -148,6 +148,20 @@ const KNOWN = new Set(ROWS.map((row) => row.SystemID))
 const KEYS = ['avoidDanger', 'avoidAlien', 'skipNoAutoRoute']
 const ON = (...keys) => Object.fromEntries(KEYS.map((key) => [key, keys.includes(key)]))
 
+// A small graph for the fastest-time objective, flown at 100,000 km/s with the jump shock a fleet draws at most (180 s): the way through the rough system 2 is two jumps with short flights (220 s), the direct way is one jump with a long flight (310 s), and the way round through 3 and 5 is three jumps (390 s), so the fastest way, the fewest jumps and the allowed way all differ. System 6 lies beyond the rough one alone.
+const TIMED_LINKS = [
+  [1, 4, [0, 30], [0, 0]],
+  [1, 2, [3, 0], [0, 0]],
+  [2, 4, [1, 0], [0, 0]],
+  [1, 3, [2, 0], [0, 0]],
+  [3, 5, [1, 0], [0, 0]],
+  [5, 4, [1, 0], [0, 0]],
+  [2, 6, [0, 1], [0, 0]],
+]
+const TIMED_POINTS = TIMED_LINKS.flatMap(([a, b, at, to]) => [jp(a * 100 + b, a, b * 100 + a, at[0], at[1]), jp(b * 100 + a, b, a * 100 + b, to[0], to[1])])
+const TIMED_ROWS = [system(1, 'Harbour'), system(2, 'Perilous', { DangerRating: 5 }), system(3, 'Quiet'), system(4, 'Goal'), system(5, 'Calm'), system(6, 'Cul-de-sac')]
+const TIMING = { speed: 1e5, speedIn: null, shock: 180, startDelay: 0 }
+
 // The fleet and ship the pages time: a freighter that every setting suits.
 const SHIP = (extra = {}) => ({ ShipID: 1, ShipName: 'Hauler', ClassName: 'Freighter', Size: 20, ShuttleStrength: 2, DesignedShuttleStrength: 2, CurrentCrew: 100, ClassCrew: 100, CargoCapacity: 1000, ColonistCapacity: 200, NavalAdminCommandID: 10, MaxSpeed: 1000, EnginePower: 10, FuelEfficiency: 1, FuelCapacity: 1e9, ShuttleTechnology: TECH, FleetID: 5, FleetName: 'Line', ShipClassID: 1, ShippingLine: 0, ...extra })
 const GROUP = (ships = [SHIP()]) => ({ FleetID: 5, FleetName: 'Line', civilian: false, canTransit: true, ships, classes: [{ ShipClassID: 1, ClassName: 'Freighter', ships }] })
@@ -344,6 +358,40 @@ const fixtures = (world) => {
     near(plan(6, ON()).route.km, pathKm([1, 2, 6]))
     near(plan(8, ON()).route.km, pathKm([1, 7, 8]))
     assert.equal(safe.planRun({ jumpPoints: JUMP_POINTS, origin: ORIGIN, destination: place(6), avoid: null }).status, 'open')
+  })
+
+  add('timed: the fastest-time objective enters through the avoid settings: the settings bar a system the fastest route crosses, the fastest allowed route enters none, and a run that only a barred system reaches is blocked', () => {
+    const run = (destination, settings, order = 'time') => safe.planRun({ jumpPoints: TIMED_POINTS, origin: ORIGIN, destination: place(destination), order, timing: order === 'time' ? TIMING : null, avoid: safe.avoidRules(TIMED_ROWS, settings) })
+    const open = run(4, ON())
+    const direct = graph.searchRoutes(TIMED_POINTS, [ORIGIN], { order: 'time', timing: TIMING }).toPlace(place(4))
+
+    assert.equal(open.status, 'open')
+    assert.deepEqual(entered(m, open.route), [2, 4], 'with nothing avoided the fastest route crosses the rough system')
+    assert.equal(open.route.seconds, direct.seconds, 'with nothing avoided a timed run is the search of the Route Finder')
+    near(open.route.seconds, 220)
+    assert.deepEqual(entered(m, run(4, ON(), 'jumps').route), [4], 'the fewest jumps is another route')
+
+    const guarded = run(4, ON('avoidDanger'))
+
+    assert.equal(guarded.status, 'detour')
+    assert.deepEqual(entered(m, guarded.route), [4], 'the fastest allowed route enters no system the setting bars')
+    assert.deepEqual(entered(m, guarded.baseline), [2, 4], 'the baseline stays the fastest route without the settings')
+    near(guarded.route.seconds, 310)
+    near(guarded.baseline.seconds, 220)
+    assert.deepEqual(idsOf(guarded.detour.barred), [2])
+    assert.equal(guarded.detour.extraJumps, -1, 'the way round is the direct jump, one jump fewer')
+
+    for (const destination of [3, 4, 5]) {
+      assert.ok(!entered(m, run(destination, ON('avoidDanger')).route).includes(2), `the route to ${destination}`)
+    }
+
+    const reaches = run(6, ON())
+    const cut = run(6, ON('avoidDanger'))
+
+    assert.deepEqual(entered(m, reaches.route), [2, 6])
+    assert.equal(cut.status, 'blocked')
+    assert.equal(cut.route, null, 'a run that only the barred system reaches has no timed route')
+    assert.deepEqual(idsOf(cut.cutOff), [2])
   })
 
   add('detour: a danger the race\'s ships do not outweigh sends the run the long way round, with the allowed path\'s jumps and kilometres, and the run names the system avoided and the setting responsible', () => {
@@ -1093,7 +1141,7 @@ const saveStatements = (world, held) => {
 
 // Each planted fault names the source to change, the text to find and its replacement (`find` and `replace`, or `at`, a pattern that matches it once, and `to`, what the match becomes), and the fixture checks, by key, that must fail. Anchors are code, keys and attributes, never wording, so a fault still applies after a benign edit.
 const MUTATIONS = [
-  { name: 'the settings are never applied to the search', target: 'safe-routes', find: 'canEnter: limited ? (systemId) => transit.canEnter(systemId) && avoid.canEnter(systemId) : transit.canEnter })', replace: 'canEnter: transit.canEnter })', fails: ['detour', 'blocked', 'figures'] },
+  { name: 'the settings are never applied to the search', target: 'safe-routes', find: 'canEnter: limited ? (systemId) => transit.canEnter(systemId) && avoid.canEnter(systemId) : transit.canEnter })', replace: 'canEnter: transit.canEnter })', fails: ['detour', 'blocked', 'figures', 'timed'] },
   { name: 'the destination is never avoided', target: 'safe-routes', find: 'canEnter: limited ? (systemId) => transit.canEnter(systemId) && avoid.canEnter(systemId) : transit.canEnter })', replace: 'canEnter: limited ? (systemId) => transit.canEnter(systemId) && (avoid.canEnter(systemId) || systemId === destination.SystemID) : transit.canEnter })', fails: ['origin'] },
   { name: 'no setting is ever active', target: 'safe-routes', find: 'const active = AVOID_OPTIONS.some((option) => options[option.key])', replace: 'const active = false', fails: ['detour', 'blocked', 'basis'] },
   { name: 'the detour reports the baseline kilometres', target: 'safe-routes', find: 'km: route.km, extraJumps', replace: 'km: baseline.km, extraJumps', fails: ['detour'] },
@@ -1126,6 +1174,9 @@ const MUTATIONS = [
   { name: 'the haul tile shows an empty plan while the systems are not read', target: 'hauling', at: /this\.avoidPending \? '[^']*' : (this\.tons\(planned\))/, to: (match) => match[1], fails: ['summary'] },
   { name: 'the haul tile drops its unavailable mark while the systems are not read', target: 'hauling', at: /\.\.\.\(this\.avoidPending \? \{ result: unreadResult\(\) \} : \{\}\),\n/, to: () => '', fails: ['summary'] },
   { name: 'the alerts leave out the shipping line fleets', target: 'information', at: /this\.runs(\.filter\(\(row\) => row\.status === 'noroute'\))/, to: (match) => `this.rows${match[1]}`, fails: ['civilian'] },
+  { name: 'a run is searched by the fewest jumps whatever its order', target: 'safe-routes', find: '{ order, timing, lagrangePoints, canTransit: transit.canTransit,', replace: '{ order: \'jumps\', timing, lagrangePoints, canTransit: transit.canTransit,', fails: ['timed'] },
+  { name: 'a run is searched at a tenth of the fleet speed', target: 'safe-routes', find: '{ order, timing, lagrangePoints, canTransit: transit.canTransit,', replace: '{ order, timing: timing && { ...timing, speed: timing.speed / 10 }, lagrangePoints, canTransit: transit.canTransit,', fails: ['timed'] },
+  { name: 'the baseline of a run is searched with the settings on', target: 'safe-routes', find: 'const baseline = search(false).toPlace(destination)', replace: 'const baseline = search(true).toPlace(destination)', fails: ['timed', 'detour'] },
 ]
 
 // Edits that change nothing the checks may pin: the words of a label, a hint, a reason and a summary, a comment. Each is located by its structure (a key, an attribute, the test the text belongs to), never by what it holds now.
@@ -1136,6 +1187,7 @@ const BENIGN = [
   { name: 'the unknown holder reason reworded', target: 'route-plan', at: /(ControlKnown === 0\) \{\s*return \{ reason: )'[^']*'/, to: (match) => `${match[1]}'Holder not stored in the save'` },
   { name: 'the summary of the first Hauling section reworded', target: 'hauling', at: /(<v-card class="panel" data-summary=)"[^"]*"/, first: true, to: (match) => `${match[1]}"Hauls that cover what the colonies lack, from the nearest colony with stock to spare."` },
   { name: 'the summary of the first Transport section reworded', target: 'information', at: /(<v-card class="panel" data-summary=)"[^"]*"/, first: true, to: (match) => `${match[1]}"The time each fleet takes over the chosen run and what it could carry."` },
+  { name: 'the conditions of a run written with parentheses', target: 'safe-routes', at: /const guarded = Boolean\((?:avoid && avoid\.active|\(avoid\) && \(avoid\.active\))\)/, to: () => 'const guarded = Boolean((avoid) && (avoid.active))' },
 ]
 
 const MUTANTS = [...MUTATIONS.map((mutation, index) => ({ id: `mutant:${index}`, ...mutation })), ...BENIGN.map((edit, index) => ({ id: `benign:${index}`, benign: true, ...edit }))]
@@ -1145,6 +1197,9 @@ const COMPOSED = MUTATIONS.map((mutation, index) => ({ id: `composed:${index}`, 
 // ---------- the parts ----------
 
 const keyOf = (name) => name.slice(0, name.indexOf(':'))
+
+// The checks a fault is credited to only when they fail on a value, not on the code under test throwing.
+const BY_VALUE = new Set(['timed'])
 
 const runStatements = async (statements, keys = null) => {
   const results = []
@@ -1220,7 +1275,7 @@ const checkMutant = async (mutant, composed = false) => {
   const missed = mutant.fails.filter((key) => {
     const ran = results.filter(([name]) => keyOf(name) === key)
 
-    return ran.length > 0 && !ran.some(([, result]) => result !== true)
+    return ran.length > 0 && !ran.some(([, result]) => result !== true && !(BY_VALUE.has(key) && String(result).startsWith('threw ')))
   })
 
   check(`${label}: ${mutant.name}`, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail: ${missed.join(', ')}` : true, `${results.filter(([, result]) => result !== true).length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
