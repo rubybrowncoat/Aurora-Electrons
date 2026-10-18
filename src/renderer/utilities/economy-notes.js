@@ -245,24 +245,29 @@ export const noteAdapter = Object.freeze({
   }),
 })
 
-const registered = new WeakSet()
+const registered = new WeakMap()
 
-// Registers the adapter with a repository's `registerAdapter`, once per function.
-export const registerEconomyNotes = (register) => {
-  if (registered.has(register)) {
+// Registers an adapter with a repository's `registerAdapter`, once per function and adapter. The other records kept in the same campaign file (utilities/world-tags.js) register theirs the same way.
+export const registerOnce = (register, adapter) => {
+  const done = registered.get(register) || new Set()
+
+  if (done.has(adapter)) {
     return
   }
 
   try {
-    register(noteAdapter)
+    register(adapter)
   } catch (error) {
     if (!/registered already/.test(String(error && error.message))) {
       throw error
     }
   }
 
-  registered.add(register)
+  registered.set(register, done.add(adapter))
 }
+
+// Registers the notes' adapter with a repository's `registerAdapter`, once per function.
+export const registerEconomyNotes = (register) => registerOnce(register, noteAdapter)
 
 const NOT_SHOWN = ['newer-schema', 'no-adapter', 'invalid-payload']
 

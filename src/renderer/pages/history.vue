@@ -508,6 +508,7 @@ import { MINERAL_SCALES, compareMinerals, comparisonCsv, mineralStyle } from '..
 import { MINERALS } from '../utilities/minerals'
 import { describeResult, isAvailable, ofRule, unavailable, valueOrNull } from '../utilities/provenance'
 import { withRegistry } from '../utilities/recording-owner'
+import { registerWorldTags } from '../utilities/world-tags'
 
 const SECONDS_PER_YEAR = 31536000
 // How far back the tiles, charts and table reach, in years before the latest snapshot; 0 is all.
@@ -2066,6 +2067,7 @@ export default {
         briefs.registerBriefs(records.registerAdapter)
         registerMilestones(records.registerAdapter)
         registerEconomyNotes(records.registerAdapter)
+        registerWorldTags(records.registerAdapter)
 
         return { adapter: annotationsOf(records.openScenarioRecords(), records.scenarioStorage()), error: null }
       } catch (error) {

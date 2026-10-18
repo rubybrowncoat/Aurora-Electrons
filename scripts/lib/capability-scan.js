@@ -343,6 +343,11 @@ const readsOfReference = (info, ref, seen, models) => {
     return new Map()
   }
 
+  // A mixin that declares `GUARDED_READS` goes on without what it reads (each read fails into a message the page shows), so what it refers to is not a read the page rests on.
+  if (imported.file.includes(`${path.sep}mixins${path.sep}`) && fileOf(imported.file, models).decls.has('GUARDED_READS')) {
+    return new Map()
+  }
+
   const target = fileOf(imported.file, models)
 
   if (imported.name !== '*') {

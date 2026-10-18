@@ -8,7 +8,7 @@
   Groups:
   - identity: two adapters keep records with equal local object IDs apart across campaigns and races; a record is never found for another race or campaign; a file kept under another campaign's name is refused; a branch-policy record shows only on its branch; a rewound save flags a record made later as ahead;
   - links: an object that is gone is missing, an ID reused by another object is changed, neither is ever rebound (by ID, by fingerprint or by a reload or rewind), and a link that cannot be resolved is unknown;
-  - edits: a stale edit is rejected with the stored record and an explicit reconcile works; two windows over one host keep both writes and never overwrite one another's edit; a clone has a new uuid and its source's provenance; a delete names the revision; only the editable fields change;
+  - edits: a stale edit is rejected with the stored record and an explicit reconcile works; two windows over one host keep both writes and never overwrite one another's edit; a create's precondition runs inside the write, again over what another window wrote; a clone has a new uuid and its source's provenance; a delete names the revision; only the editable fields change;
   - versions: a version-0 file is migrated with every payload and provenance exactly as it was, a newer or damaged file is refused and left untouched, an older adapter schema is migrated for the view and on an edit, an unknown kind or a newer schema is kept and not edited;
   - adapters: the adapter's refusal of a payload is the repository's, a payload that is not JSON is refused, registrations are checked, only the campaign's own file is written;
   - import: an export carries provenance, an import needs an explicit target and the preview of the same bundle and target, takes a new uuid, the target's campaign, race and branch, never rebinds a link and never takes a record its adapter rejects;
@@ -695,6 +695,60 @@ const defineSuite = (m) => {
     fire = () => repoB.update(where, first.uuid, 2, { assumptions: [{ key: 'B' }] })
     conflictOf(() => repoA.delete(where, first.uuid, 2))
     assert.equal(repoA.read(where, first.uuid).record.revision, 3)
+  })
+
+  check('edits', 'a precondition of a create runs inside the write over the records of its kind, again over what another window wrote, and a throw writes nothing and reaches the caller as it was (two store clients over one host)', () => {
+    const w = world(m)
+    const h = hosted(m)
+    const where = scope('c1', 7)
+    const repoB = overClient(m, h.client(), w.registry)
+    let fire = null
+    const repoA = overClient(m, h.client((request) => {
+      if (fire && (request.op === 'swap' || request.op === 'write')) {
+        const run = fire
+
+        fire = null
+        run()
+      }
+    }), w.registry)
+    const seen = []
+
+    design(repoA, where)
+    note(repoA, where)
+    design(repoA, where, { precondition: (entries) => seen.push(entries.map((entry) => entry.record.kind)) })
+    assert.deepEqual(seen, [['design-scenario']], 'the precondition reads the records of the kind made')
+
+    // another window makes a record of the kind between the read and the swap: the precondition runs again over the file as stored then
+    seen.length = 0
+    fire = () => design(repoB, where, { payload: { title: 'from B', techIds: [] } })
+    design(repoA, where, { payload: { title: 'from A', techIds: [] }, precondition: (entries) => seen.push(entries.length) })
+    assert.deepEqual(seen, [2, 3])
+
+    // a precondition that throws on that second run writes nothing and is thrown as it was
+    const before = repoA.list(where).length
+    const refusal = new Error('refused')
+    let thrown = null
+
+    fire = () => design(repoB, where, { payload: { title: 'B again', techIds: [] } })
+
+    try {
+      design(repoA, where, { precondition: (entries) => { if (entries.length > 4) { throw refusal } } })
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.equal(thrown, refusal)
+    assert.equal(repoA.list(where).length, before + 1, 'only the other window wrote')
+
+    let refused = null
+
+    try {
+      design(repoA, where, { precondition: 'not a function' })
+    } catch (error) {
+      refused = error
+    }
+
+    assert.equal(refused && refused.code, 'invalid-record')
   })
 
   check('edits', 'a clone has a new uuid, revision 1 and the provenance of its source, and is independent of it', () => {
@@ -1733,6 +1787,9 @@ const MUTANTS = [
   { name: 'a conflict carries no stored record', find: 'throw new RevisionConflict(copy(record), expectedRevision)\n    }\n\n    const keys', replace: 'throw new RevisionConflict({ revision: record.revision }, expectedRevision)\n    }\n\n    const keys', fails: ['a stale edit is rejected', 'an explicit reconcile'] },
   { name: 'a reconcile applies over the stale revision', find: 'applyEdit(file, s, conflict.stored.uuid, conflict.stored.revision, patch,', replace: 'applyEdit(file, s, conflict.stored.uuid, conflict.expectedRevision, patch,', fails: ['an explicit reconcile'] },
   { name: 'an edit does not bump the revision', find: 'next.revision = record.revision + 1', replace: 'next.revision = record.revision', fails: ['a stale edit is rejected', 'an edit changes only the editable fields'] },
+  { name: 'a precondition of a create is not run', find: 'if (precondition) {', replace: 'if (false) {', fails: ['a precondition of a create runs inside the write'] },
+  { name: 'a precondition of a create runs on the first attempt of the write only', find: 'if (precondition) {', replace: 'if (precondition && !precondition.ran && (precondition.ran = true)) {', fails: ['a precondition of a create runs inside the write'] },
+  { name: 'a precondition of a create reads the records of every kind', find: 'precondition(entriesOf(file, s, { kind: adapter.kind, context }))', replace: 'precondition(entriesOf(file, s, { context }))', fails: ['a precondition of a create runs inside the write'] },
   { name: 'the whole file is written without the compare-and-swap', find: 'storeOf(campaignId).update((stored) => {\n      const file = prepared(stored, campaignId)\n\n      outcome = work(file)\n\n      return file\n    })', replace: 'const file = prepared(storeOf(campaignId).store, campaignId)\n\n    outcome = work(file)\n    storeOf(campaignId).store = file', fails: ['an edit that another window wrote under', 'two store clients over one host'] },
   { name: 'a clone keeps its source\'s uuid', find: "uuid: freshId(file),\n          createdAt: stamp,\n          updatedAt: stamp,\n          revision: 1,\n          provenance: { via: 'clone'", replace: "uuid: source.uuid,\n          createdAt: stamp,\n          updatedAt: stamp,\n          revision: 1,\n          provenance: { via: 'clone'", fails: ['a clone has a new uuid'] },
   { name: 'a delete ignores the revision', find: 'if (record.revision !== expectedRevision) {\n          throw new RevisionConflict(copy(record), expectedRevision)', replace: 'if (false) {\n          throw new RevisionConflict(copy(record), expectedRevision)', fails: ['a delete names the revision', 'two store clients over one host'] },

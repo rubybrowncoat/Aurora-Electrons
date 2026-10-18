@@ -1537,7 +1537,7 @@ const pageSuite = async (m, { mutate = null } = {}) => {
     const text = pageSource()
     const starts = [...text.matchAll(/<v-card class="panel[^"]*"/g)].map((match) => match.index)
 
-    assert.equal(starts.length, 2)
+    assert.equal(starts.length, 3)
     starts.forEach((start) => {
       const tag = text.slice(start, text.indexOf('>', start))
       const summary = /data-summary="([^"]+)"/.exec(tag)

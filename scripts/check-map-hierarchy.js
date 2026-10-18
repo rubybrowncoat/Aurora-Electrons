@@ -191,7 +191,7 @@ const FEATURES = Object.fromEntries(SYSTEMS.map((system, index) => [String(syste
 
 const sceneData = (level, extra = {}) => ({ systems: SYSTEMS, jumpPoints: JUMP_POINTS, sectors: [], aliens: [], features: FEATURES, habitability: null, formulaVersion: null, marks: ['contacts', 'rifts', 'danger', 'ships', 'flags'], hierarchy: level, layer: 'geological', borders: 'none', activateSnackbar: () => {}, ...extra })
 
-const storeOf = () => ({ getters: { StartYear: 2050, GameTime: 12345, racePrefix: null, config: { get: (_key, fallback) => fallback } } })
+const storeOf = () => ({ getters: { StartYear: 2050, GameTime: 12345, racePrefix: null, config: { get: (_key, fallback) => fallback } }, state: { history: { revision: 0 } } })
 
 // What each overlay of Show marks in the scene: every third system, by a glyph from the features or a change to the systems.
 const OVERLAYS = [
@@ -1195,15 +1195,17 @@ check('U1', 'unchanged: the label collision of the system view is the source of 
   return different.length ? `changed: ${different.join(', ')}` : true
 })
 
-// The glyph of remote ground formations is added to glyphsOf after the commit before; the rest of the method must still be the source of that commit.
+// The glyph of remote ground formations and the body tags' glyph and dimming are added after the commit before; the rest of each method must still be the source of that commit.
 const REMOTE_GLYPH = "      if (marks.has('remote') && this.remoteBySystem[row.id]) {\n        names.push('remote')\n      }\n\n"
+const TAG_GLYPH = "      if (marks.has('tags') && this.tagSystems[row.id]) {\n        names.push(this.tagSystems[row.id].stale ? 'tags-stale' : 'tags')\n      }\n\n"
+const TAG_FADE = ' || (this.tagFilterValue !== ALL_TAGS && !this.tagSystems[row.id])'
 
 check('U2', 'unchanged: the overlay controls, the dimming, the wheel and the right-click menu are the source of the commit before', (ctx) => {
   const names = ['toggleMark', 'toggleDim', 'fades', 'shiftWheel', 'createMenu', 'glyphsOf', 'markText']
   const before = atBase(FILES.map)
-  const current = (name) => methodSource(ctx.texts.map, name).replace(REMOTE_GLYPH, '')
+  const current = (name) => methodSource(ctx.texts.map, name).replace(REMOTE_GLYPH, '').replace(TAG_GLYPH, '').replace(TAG_FADE, '')
   const different = names.filter((name) => current(name) !== methodSource(before, name) || !methodSource(before, name))
-  const wanted = methodSource(ctx.texts.map, 'glyphsOf').includes(REMOTE_GLYPH) ? [] : ['glyphsOf has no remote ground formations branch']
+  const wanted = [...(methodSource(ctx.texts.map, 'glyphsOf').includes(REMOTE_GLYPH) ? [] : ['glyphsOf has no remote ground formations branch']), ...(methodSource(ctx.texts.map, 'glyphsOf').includes(TAG_GLYPH) ? [] : ['glyphsOf has no body tags branch']), ...(methodSource(ctx.texts.map, 'fades').includes(TAG_FADE) ? [] : ['fades has no body tags filter'])]
 
   return different.length || wanted.length ? [...different.map((name) => `changed: ${name}`), ...wanted].join('; ') : true
 })
@@ -1235,6 +1237,36 @@ check('U4', 'unchanged: a system\'s data differs between the levels only in the 
 
   return problems.length ? `${problems.length}: ${problems.slice(0, 3).join('; ')}` : true
 })
+
+// The disc of a glyph on the ring reaches 18 units (GLYPH_RING + GLYPH_RADIUS, times the text scale) under the marker's edge; the name sits `labelGap` under it.
+const RING_REACH = 18
+const DENSE_GLYPHS = ['ruins-found', 'constructs-active', 'rifts', 'wrecks', 'ships-military', 'shipyards', 'waypoints', 'remote', 'contacts-hostile', 'flags', 'tags']
+
+check('D1', 'dense: a system with every kind of glyph, tagged bodies the last of them, keeps its name clear of the glyph under the marker at every preset and level, and a system with one fewer keeps the name where it was', (ctx) => everywhere(ctx, (_id, _level, scene) => {
+  const { vm, rows } = scene
+  const glyphsOf = vm.glyphsOf
+  const reach = RING_REACH * vm.roles.scale
+  const problems = []
+  const made = (names) => () => names.map((name) => ({ name, key: `${name}:x`, path: '', offset: [0, 0], color: vm.glyphStyles[name].color, hollow: false }))
+
+  try {
+    vm.glyphsOf = made(DENSE_GLYPHS)
+
+    const dense = vm.markerData(rows[0])
+
+    if (!(dense.labelGap > reach)) problems.push(`the name is ${dense.labelGap} under the marker, inside the glyph that reaches ${reach}`)
+
+    vm.glyphsOf = made(DENSE_GLYPHS.slice(0, -1))
+
+    const fewer = vm.markerData(rows[0])
+
+    if (fewer.labelGap !== 5) problems.push(`ten glyphs moved the name to ${fewer.labelGap}`)
+  } finally {
+    vm.glyphsOf = glyphsOf
+  }
+
+  return problems
+}))
 
 check('U5', 'unchanged: the overlay and dim preferences are declared as before, and the dimming still fades a system the overlay marks nothing at', (ctx) => {
   const declared = Object.fromEntries(ctx.declared.map((entry) => [entry.key, entry]))
@@ -1314,6 +1346,7 @@ const MUTANTS = [
   { name: 'the system view ignores the level', patches: [['system', 'skyStyle(this.hierarchy, this.appearance.space)', "skyStyle('emphasised', this.appearance.space)"]], fails: ['E11'] },
   { name: 'the system view dims the names of stars as well', patches: [['system', 'new PIXI.Text(labelText, this._textStyles.star)', 'new PIXI.Text(labelText, this._textStyles.secondary)']], fails: ['E11'] },
   { name: 'the label collision priority of the system view changes', patches: [['system', 'return 1000 // stars highest', 'return 100 // stars highest']], fails: ['U1'] },
+  { name: 'the name stays under a glyph in the last place', patches: [['map', 'LABEL_GAP + Math.ceil((GLYPH_RING + GLYPH_RADIUS) * unit) - 3 : LABEL_GAP)', 'LABEL_GAP : LABEL_GAP)']], fails: ['D1'] },
   { name: 'the overlay toggle changes', patches: [['map', 'this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]', 'this.marks = [value]']], fails: ['U2'] },
   { name: 'the dimming changes with the level', patches: [['map', 'return (this.dimUnmarked && this.marks.length > 0 && !marked)', "return (this.hierarchy === 'restrained' && this.dimUnmarked && this.marks.length > 0 && !marked)"]], fails: ['U2'] },
   { name: 'the level changes a system\'s dimming', patches: [['map', 'dim: this.fades(row, marked),', "dim: this.fades(row, marked) || (this.hierarchy === 'restrained' && marked),"]], fails: ['U4', 'U5'] },

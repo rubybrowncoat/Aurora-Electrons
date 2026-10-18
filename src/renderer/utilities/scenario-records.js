@@ -869,6 +869,9 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
     return Object.keys(campaigns).filter((id) => id !== campaignId && campaigns[id].mergedInto && endOf(id) === campaignId)
   }
 
+  // The records visible to the scope as entries (see `list`), oldest first, read from `file`: `kind` and `status` narrow them.
+  const entriesOf = (file, s, { kind, status, context } = {}) => Object.values(file.records).filter((record) => visible(record, s) && (kind === undefined || record.kind === kind)).sort(oldestFirst).map((record) => entryOf(record, s, context)).filter((entry) => status === undefined || entry.status === status)
+
   return {
     // Whether this window may write the records of `campaignId`, waiting up to `grace` ms for it: always in Electron (every window writes, through the main process), in a browser tab only while it holds the Web Lock of the file (storage.writable). A planner asks before its first write; a write before it is granted is refused with the code 'not-owner'.
     writable (campaignId, grace) {
@@ -877,8 +880,8 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
       return typeof storage.writable === 'function' ? storage.writable(campaignId, grace) : Promise.resolve(true)
     },
 
-    // A new record of `kind` made against the open save: { kind, payload, policy ('campaign' by default), links, assumptions, base (extra facts of the save) }.
-    create (scope, { kind, payload, policy = 'campaign', links = [], assumptions = [], base = {} } = {}) {
+    // A new record of `kind` made against the open save: { kind, payload, policy ('campaign' by default), links, assumptions, base (extra facts of the save) }. `precondition(entries)` is run inside the write over the entries of this kind visible to the scope (as `list` gives them, the links resolved against `context`), in the file as stored when the write is made and again when another window's write makes it run over the file as stored then: a throw writes nothing and reaches the caller as it was thrown.
+    create (scope, { kind, payload, policy = 'campaign', links = [], assumptions = [], base = {}, context, precondition } = {}) {
       const s = scopeOf(scope)
       const adapter = adapterOf(kind)
 
@@ -888,6 +891,10 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
 
       if (!Array.isArray(assumptions) || !isJson(assumptions) || !isObject(base) || !isJson(base)) {
         throw refuse('invalid-record', 'The assumptions are a list and the base facts an object, of plain JSON')
+      }
+
+      if (precondition !== undefined && typeof precondition !== 'function') {
+        throw refuse('invalid-record', 'A precondition is a function of the entries of the kind')
       }
 
       const checked = checkedPayload(adapter, payload)
@@ -910,6 +917,10 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
       }
 
       return transact(s.campaignId, (file) => {
+        if (precondition) {
+          precondition(entriesOf(file, s, { kind: adapter.kind, context }))
+        }
+
         const stamp = now()
         const stored = { ...copy(record), uuid: freshId(file), createdAt: stamp, updatedAt: stamp }
 
@@ -931,9 +942,8 @@ export const createRepository = ({ storage, adapters = defaultAdapters, newId = 
     // The records visible to the scope as entries `{ record, payload, status ('current' or 'ahead'), flags, links, unresolved }`, oldest first. `kind` and `status` narrow the list; `context` is what the adapters resolve the links against.
     list (scope, { kind, status, context } = {}) {
       const s = scopeOf(scope)
-      const file = readFile(s.campaignId)
 
-      return Object.values(file.records).filter((record) => visible(record, s) && (kind === undefined || record.kind === kind)).sort(oldestFirst).map((record) => entryOf(record, s, context)).filter((entry) => status === undefined || entry.status === status)
+      return entriesOf(readFile(s.campaignId), s, { kind, status, context })
     },
 
     // Changes a record made against `expectedRevision`: `patch` is { payload, links, assumptions, policy, rebase }; `rebase: true` moves the record's base to the open save. A stale revision throws a RevisionConflict and writes nothing.

@@ -82,6 +82,19 @@
             <div class="caption text--secondary mt-3" data-note-limits>A note is checked against this save each time and is never moved to another object by its name: a rename keeps the link and shows the new name, and an object that has gone leaves the note stale with the name and system it had when the note was last kept. A colony and a designed tech have no date in the save and an ID can be given again, so the link to one reads not checked and the note shows what holds that ID now, apart from the link. A body in a system found after the branches parted, or a fleet with no creation entry, reads not checked on another branch. A note is kept for this branch unless it is shared; another race or branch never lists it. Nothing here gives an order or writes the save.</div>
           </div>
         </v-card>
+
+        <v-card class="panel notebook-tags" data-summary="Short personal tags on single bodies of the systems the race knows, shared with the Galaxy Map. The filter lists the bodies with one tag, and a tag whose body has gone stays listed as stale." elevation="1">
+          <div class="panel-head">
+            <span>Body tags</span>
+            <v-select :value="tagFilterValue" :items="tagOptions" item-value="value" label="Tag" dense outlined hide-details class="notebook__filter" data-tag-filter @change="tagFilter = $event">
+              <template #selection="{ item }">{{ item.text }} ({{ item.count }})</template>
+              <template #item="{ item }">{{ item.text }} ({{ item.count }})</template>
+            </v-select>
+          </div>
+          <div class="panel-body">
+            <world-tags :entries="tagShown" :choices="tagChoices" :suggestions="tagSuggestions" :systems="systems" :system-id.sync="tagPickSystem" :hint="tagHint" :problem="tagProblem" :message="tagMessage" :message-type="tagMessageType" :busy="tagBusy" :scope-key="tagScopeKey" :start-year="StartYear" :empty="tagEmpty" show-system :expect="tagExpect" :save="tagSave" :retag="tagRetag" :clear="tagClear" />
+          </div>
+        </v-card>
       </template>
     </v-container>
   </div>
@@ -91,9 +104,12 @@
 import { mapGetters } from 'vuex'
 
 import ChangeDigest from '../components/notebook/ChangeDigest.vue'
+import WorldTags from '../components/notebook/WorldTags.vue'
 import LoadState from '../components/page/LoadState.vue'
 import PageLink from '../components/page/PageLink.vue'
 import loadState from '../mixins/load-state'
+import persistedView from '../mixins/persisted-view'
+import worldTags, { tagFilterView } from '../mixins/world-tags'
 import { readRegistry } from '../utilities/campaign'
 import { linkTo } from '../utilities/deep-links'
 import { recordingStateOf } from '../utilities/economy-digest'
@@ -118,8 +134,8 @@ const linkView = (link) => ({ ...link, color: link.status === 'linked' ? undefin
 
 export default {
   name: 'NotebookPage',
-  components: { ChangeDigest, LoadState, PageLink },
-  mixins: [loadState(INPUT_LABELS)],
+  components: { ChangeDigest, LoadState, PageLink, WorldTags },
+  mixins: [loadState(INPUT_LABELS), persistedView({ tagFilter: tagFilterView('notebookTagFilter') }), worldTags],
   data() {
     return {
       linkTo,
@@ -135,6 +151,8 @@ export default {
       messageType: 'info',
       conflict: null,
       busy: false,
+      // The system the tag form picks a body from.
+      tagPickSystem: null,
     }
   },
   computed: {
@@ -277,6 +295,15 @@ export default {
     // The systems the race knows, for the body picker.
     systems() {
       return this.objectsBundle ? this.objectsBundle.systems : []
+    },
+
+    // The system whose bodies the tag form offers (the tags' mixin reads them).
+    tagSystemId() {
+      return this.tagPickSystem
+    },
+
+    tagEmpty() {
+      return `${this.tagEntries.length ? 'No tag matches the filter' : 'No body is tagged yet'}${this.tagRead.notes.length ? `, apart from ${this.tagRead.notes.length} that this version cannot read` : ''}.`
     },
 
     kindItems() {

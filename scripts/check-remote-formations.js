@@ -441,7 +441,7 @@ const MAP_SYSTEMS = [[9, 'Alpha'], [80, 'Beta'], [50, 'Sol'], [7, 'Dark']].map((
 const mapView = (ctx, data = {}) => {
   globalThis.__appearance = ctx.appearance
 
-  return instantiate(ctx.pages.map, { $store: { getters: { StartYear: 2050, GameTime: 12345, racePrefix: null, config: { get: (_key, fallback) => fallback } } }, GameID: GAME, RaceID: RACE, data: { loadErrors: {}, systems: MAP_SYSTEMS, jumpPoints: [], sectors: [], aliens: [], features: Object.fromEntries(MAP_SYSTEMS.map((system) => [String(system.SystemID), NO_FEATURES])), habitability: null, formulaVersion: null, hierarchy: 'restrained', layer: 'geological', borders: 'none', activateSnackbar: () => {}, ...data } })
+  return instantiate(ctx.pages.map, { $store: { getters: { StartYear: 2050, GameTime: 12345, racePrefix: null, config: { get: (_key, fallback) => fallback } }, state: { history: { revision: 0 } } }, GameID: GAME, RaceID: RACE, data: { loadErrors: {}, systems: MAP_SYSTEMS, jumpPoints: [], sectors: [], aliens: [], features: Object.fromEntries(MAP_SYSTEMS.map((system) => [String(system.SystemID), NO_FEATURES])), habitability: null, formulaVersion: null, hierarchy: 'restrained', layer: 'geological', borders: 'none', activateSnackbar: () => {}, ...data } })
 }
 
 const marked = (vm) => vm.systemRows.filter((row) => vm.glyphsOf(row).some((glyph) => glyph.name === 'remote')).map((row) => row.SystemID).sort((a, b) => a - b)

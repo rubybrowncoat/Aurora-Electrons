@@ -16,6 +16,10 @@
           <div class="tool__label caption text--secondary">Borders</div>
           <v-select v-model="borders" :items="borderOptions" aria-label="Draw borders round" dense outlined hide-details />
         </div>
+        <div class="tool tool--tags">
+          <div class="tool__label caption text--secondary">Tag</div>
+          <v-select :value="tagFilterValue" :items="tagItems" aria-label="Show the systems that hold a body with a tag" dense outlined hide-details @change="chooseTag" />
+        </div>
         <div class="tool tool--actions">
           <v-menu v-model="arrangeMenu" offset-y left :close-on-content-click="false" max-width="400">
             <template #activator="{ on, attrs }">
@@ -80,7 +84,7 @@
         </div>
       </div>
 
-      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks. Use it to see the race's reach, plan where to go next and lay the map out." elevation="1">
+      <v-card class="panel map-card" data-summary="The known systems and their jump links, coloured by the measure chosen and marked with what Show picks, among them the personal tags on bodies. Use it to see the race's reach, plan where to go next and lay the map out." elevation="1">
         <div class="panel-head">
           <span class="legend">
             <span v-for="(row, index) in legendRows" :key="index" class="legend-row">
@@ -151,6 +155,8 @@
                 <v-chip v-for="neighbour in panelNeighbours" :key="neighbour.id" small outlined @click="focusSystem(neighbour.id)">{{ neighbour.Name }}</v-chip>
               </div>
             </template>
+            <div class="caption text--secondary mt-3 mb-1">Body tags</div>
+            <world-tags compact :entries="panelTags" :choices="tagChoices" :suggestions="tagSuggestions" :hint="tagHint" :problem="tagProblem" :message="tagMessage" :message-type="tagMessageType" :busy="tagBusy" :scope-key="tagScopeKey" :start-year="StartYear" empty="No body of this system is tagged." :expect="tagExpect" :save="tagSave" :retag="tagRetag" :clear="tagClear" />
             <div class="side-actions">
               <v-btn small outlined :to="mineralsLink([panelSystem.id])">Minerals</v-btn>
               <v-btn small outlined :to="plannerLink([panelSystem.id])">Colonization Planner</v-btn>
@@ -183,7 +189,7 @@
         </div>
         <div class="panel-foot caption text--secondary">
           <span class="panel-foot__text">
-            Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu.
+            Positions are the game's galactic map, in its units; markers grow with the people living there<provenance-mark rule="map.markerSize" />. Counts in brackets are systems on the map<provenance-mark rule="map.legendCount" />. Shift-click or shift-drag to select several systems; right-click one for a quick menu. A tag can be put on any body of a known system, surveyed or not (the ruins and constructs marked here also need the body surveyed). It stays on that body, never moves to another by its name, and never changes a cluster or a border.
             <template v-if="unplacedIds.length">{{ unplacedIds.length }} {{ unplacedIds.length === 1 ? 'system has' : 'systems have' }} no place on the save's map (the game left {{ unplacedIds.length === 1 ? 'it' : 'them' }} at its centre), so {{ unplacedIds.length === 1 ? 'it sits' : 'they sit' }} beside a linked system until the map is saved.</template>
           </span>
           <!-- What the map marks, as a game's minimap tracking button: a disc for each mark that is on, and a list to turn them on and off. -->
@@ -273,10 +279,12 @@ import MapGlyph from '../components/MapGlyph.vue'
 import LoadState from '../components/page/LoadState.vue'
 import ProvenanceMark from '../components/page/ProvenanceMark.vue'
 import SystemView from '../components/SystemView.vue'
+import WorldTags from '../components/notebook/WorldTags.vue'
 import countFormat from '../mixins/count-format'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf } from '../mixins/persisted-view'
+import worldTags, { tagFilterView } from '../mixins/world-tags'
 import { activeAppearance, MAP_MENU } from '../utilities/appearance'
 import { fontRoles, whenFontsReady } from '../utilities/appearance-font'
 import { glyphFace } from '../utilities/glyph-faces'
@@ -295,6 +303,7 @@ import { placeUnplaced } from '../utilities/map-placement'
 import { savePositions } from '../utilities/map-positions'
 import { isAvailable, valueOrNull } from '../utilities/provenance'
 import { REMOTE_LEGEND, remoteSystems, ROLE_OPTIONS, rolesView, systemText } from '../utilities/remote-formations'
+import { ALL_TAGS } from '../utilities/world-tags'
 import { loadFormulaVersion } from '../utilities/capabilities'
 
 cytoscape.use(cxtmenu)
@@ -408,6 +417,7 @@ const CRANE_PATH = 'M20,6V5A1,1 0 0,0 19,4H9V3H6V4H5V6H6V15H5V13H3V15H2V17H3V21H
 const MAP_MARKER_PATH = 'M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9A7,7 0 0,0 12,2Z'
 const RADAR_PATH = 'M19.07,4.93L17.66,6.34C19.1,7.79 20,9.79 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12C4,7.92 7.05,4.56 11,4.07V6.09C8.16,6.57 6,9.03 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12C18,10.34 17.33,8.84 16.24,7.76L14.83,9.17C15.55,9.9 16,10.9 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12C8,10.14 9.28,8.59 11,8.14V10.28C10.4,10.63 10,11.26 10,12A2,2 0 0,0 12,14A2,2 0 0,0 14,12C14,11.26 13.6,10.62 13,10.28V2H12A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,9.24 20.88,6.74 19.07,4.93Z'
 const FLAG_PATH = 'M14.4,6L14,4H5V21H7V14H12.6L13,16H20V6H14.4Z'
+const TAG_PATH = 'M3,3H11L21,13L13,21L3,11ZM7.5,6A1.5,1.5 0 1,0 7.5,9A1.5,1.5 0 1,0 7.5,6Z'
 // MDI draws these two off the middle of their square, the crane to the left and the flag to the lower right.
 const CRANE_OFFSET = [1, 0]
 const FLAG_OFFSET = [-0.5, -0.5]
@@ -435,6 +445,7 @@ const MARKS = [
   { value: 'remote', text: 'Remote ground formations', short: 'remote formations', place: 'glyph', path: SHIELD_PATH, color: 'yours' },
   { value: 'contacts', text: 'Alien contacts now', short: 'contacts', place: 'glyph', path: RADAR_PATH, color: 'danger' },
   { value: 'flags', text: 'System flags', short: 'flags', place: 'glyph', path: FLAG_PATH, color: 'ring', offset: FLAG_OFFSET },
+  { value: 'tags', text: 'Tagged bodies', short: 'tagged bodies', place: 'glyph', path: TAG_PATH, color: 'yours' },
   { value: 'danger', text: 'Danger and protection', short: 'danger', place: 'line', path: ALERT_PATH, offset: [0, 0.5] },
   { value: 'discovered', text: 'Discovery date', short: 'discovery', place: 'line', path: CALENDAR_PATH, offset: [0, 1] },
 ]
@@ -460,8 +471,11 @@ const GLYPH_RADIUS = 8
 const GLYPH_RING = 10
 const MARK_ROOM = 20
 // Where the glyphs go round the marker, a place for each kind, in degrees clockwise from the top: the left first, then over the top and down the right, clear of the name below; only a system with every kind takes the last, at the lower left. The count of habitable worlds has its own place at the top right, BADGE_ANGLE, which the others leave free.
-const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210, 150]
+const GLYPH_ANGLES = [300, 330, 270, 0, 240, 60, 90, 120, 210, 150, 180]
 const BADGE_ANGLE = 30
+// The name sits 5 units under the marker, where the last place of GLYPH_ANGLES (180 degrees, straight down) puts a glyph: a system that uses that place moves its name below the glyph.
+const LABEL_GAP = 5
+const labelGapOf = (glyphs, unit) => (glyphs.filter((glyph) => glyph.angle === undefined).length >= GLYPH_ANGLES.length ? LABEL_GAP + Math.ceil((GLYPH_RING + GLYPH_RADIUS) * unit) - 3 : LABEL_GAP)
 
 // A new task as soon as the browser has had its turn. Unlike an animation frame, it still comes in a hidden or minimised window, so an Arrange carries on there.
 const nextTask = () => new Promise((resolve) => {
@@ -605,7 +619,7 @@ const ARRANGE_DEFAULTS = { mode: GRID_LAYOUT_DEFAULTS.mode, spacing: GRID_LAYOUT
 
 export default {
   name: 'MapPage',
-  components: { LoadState, MapGlyph, ProvenanceMark, SystemView },
+  components: { LoadState, MapGlyph, ProvenanceMark, SystemView, WorldTags },
   mixins: [
     countFormat,
     deepLink,
@@ -634,7 +648,10 @@ export default {
       hierarchy: hierarchyView,
       // The roles of the remote ground formations the map marks (utilities/remote-formations.js), shared with Survey Progress.
       remoteRoles: rolesView,
+      // The tag the map is filtered to (mixins/world-tags.js), shared with the Notebook's tags but kept under a key of its own.
+      tagFilter: tagFilterView('mapTagFilter'),
     }),
+    worldTags,
   ],
   data() {
     return {
@@ -1152,6 +1169,8 @@ export default {
           label: status === 'unknown' ? 'Alien contacts now, of a race not yet identified' : `${status.charAt(0).toUpperCase()}${status.slice(1)} alien contacts now`,
         }])),
         flags: { path: FLAG_PATH, offset: FLAG_OFFSET, color: colors.ring, label: 'Flagged system' },
+        tags: { path: TAG_PATH, color: colors.yours, label: 'Systems with tagged bodies' },
+        'tags-stale': { path: TAG_PATH, color: colors.yours, hollow: true, label: 'Systems whose tagged bodies are all gone' },
       }
     },
 
@@ -1409,6 +1428,28 @@ export default {
 
     panelSystem() {
       return this.selectedRows.length === 1 ? this.selectedRows[0] : null
+    },
+
+    // The system whose bodies the tag form offers: the one in the panel.
+    tagSystemId() {
+      return this.panelSystem ? this.panelSystem.SystemID : null
+    },
+
+    // The tags of the body in the panel's system, whatever the filter says.
+    panelTags() {
+      const there = this.panelSystem ? this.tagAllSystems[this.panelSystem.id] : null
+
+      return there ? there.entries : []
+    },
+
+    // The tag filter's choices with the number of bodies each holds.
+    tagItems() {
+      return this.tagOptions.map((option) => ({ text: `${option.text} (${option.count})`, value: option.value }))
+    },
+
+    // What the markers show of the tags: the systems the filter lets through and whether each holds only stale tags, which is all the map redraws for.
+    tagSignature() {
+      return JSON.stringify([this.tagFilterValue, Object.entries(this.tagSystems).map(([id, there]) => [id, there.stale])])
     },
 
     linkQuery() {
@@ -1780,6 +1821,10 @@ export default {
       this.restyle()
     },
 
+    tagSignature() {
+      this.restyle()
+    },
+
     // Dim and As of change only what is faint, so they skip rebuilding the markers: As of follows its slider as it moves.
     dimUnmarked() {
       this.refade()
@@ -1935,6 +1980,15 @@ export default {
       this.marks = this.marksSet.has(value) ? this.marks.filter((mark) => mark !== value) : [...this.marks, value]
     },
 
+    // The tag filter: a tag picked also turns the tagged bodies' mark on, so the systems it finds show.
+    chooseTag(value) {
+      this.tagFilter = value
+
+      if (value !== ALL_TAGS && !this.marksSet.has('tags')) {
+        this.toggleMark('tags')
+      }
+    },
+
     toggleRole(value) {
       this.remoteRoles = this.remoteRoles.includes(value) ? this.remoteRoles.filter((role) => role !== value) : [...this.remoteRoles, value]
     },
@@ -2026,7 +2080,7 @@ export default {
             'font-family': this.typeface.family,
             'font-size': this.typeface.size(14),
             'text-valign': 'bottom',
-            'text-margin-y': 5,
+            'text-margin-y': (node) => node.data('labelGap'),
             'text-background-color': theme.surface,
             'text-background-opacity': 0.8,
             'text-background-padding': 2,
@@ -2229,6 +2283,7 @@ export default {
         label,
         labelInk: labelInk(this.hierarchy, this.theme, marked),
         labelMinPx: labelMinPx(this.hierarchy, marked),
+        labelGap: labelGapOf(glyphs, this.roles.scale),
         imageScale: glyphs.length ? (row.size + 2 * MARK_ROOM * this.roles.scale) / row.size : 1,
         image: markerImage(row.size, spots, spotColor, this.pinnedSet.has(row.id), glyphs, colors.surface, { family: this.roles.svg, scale: this.roles.scale, face: this.glyphFace && this.glyphFace.family === this.roles.family ? this.glyphFace.uri : null }),
         marked,
@@ -2238,7 +2293,7 @@ export default {
 
     // Whether a system is faint: Dim is on and Show marks nothing there, or the Discovery era's As of is set to a year before the race found it.
     fades(row, marked) {
-      return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
+      return (this.dimUnmarked && this.marks.length > 0 && !marked) || (this.tagFilterValue !== ALL_TAGS && !this.tagSystems[row.id]) || (this.layer === 'discovery' && this.discoveryCutoff !== null && row.DiscoveredTime >= this.discoveryCutoff)
     },
 
     // The fill for a system found at `time` (not null): palest for those known from the start, then from the first found after it to the last, the strongest.
@@ -2298,6 +2353,10 @@ export default {
 
       if (marks.has('flags') && row.flags.length) {
         names.push('flags')
+      }
+
+      if (marks.has('tags') && this.tagSystems[row.id]) {
+        names.push(this.tagSystems[row.id].stale ? 'tags-stale' : 'tags')
       }
 
       const glyphs = names.map((name) => {
@@ -3380,6 +3439,11 @@ export default {
   .tool--borders {
     flex: 0 1 140px;
     min-width: 120px;
+  }
+
+  .tool--tags {
+    flex: 0 1 170px;
+    min-width: 140px;
   }
 
   .tool--actions {

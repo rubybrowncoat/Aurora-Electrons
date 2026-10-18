@@ -261,10 +261,11 @@ const alteredChecks = async (capabilities, source) => {
     const noMessage = await alteredCopy(source, 'message', ['alter table FCT_GameLog drop column MessageText'])
     const noMineral = await alteredCopy(source, 'mineral', ['alter table FCT_Population drop column Duranium'])
     const noFormationReads = await alteredCopy(source, 'formationreads', ['alter table FCT_GroundUnitFormation drop column ReplacementTemplateID'])
+    const noTechType = await alteredCopy(source, 'techtype', ['alter table DIM_TechType drop column Description'])
     const noObsolete = await alteredCopy(source, 'obsolete', ['alter table FCT_GroundUnitFormationTemplate drop column Obsolete'])
     const twoRenamed = await alteredCopy(source, 'tworenamed', ["update DIM_CommanderBonusType set Description = 'Output' where BonusID = 5", "update DIM_CommanderBonusType set Description = 'Colonies' where BonusID = 25"])
 
-    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noObsolete, twoRenamed)
+    copies.push(rankless, coreless, rankTable, ageless, renamed, flipped, retyped, noBonusTable, noFormula, noFinance, noSpecies, noCrew, noMessage, noMineral, noFormationReads, noTechType, noObsolete, twoRenamed)
 
     const baseline = (await preflightOf(capabilities, source)).result
     const rank = (await preflightOf(capabilities, rankless)).result
@@ -324,6 +325,21 @@ const alteredChecks = async (capabilities, source) => {
     check('altered: FCT_GroundUnitFormationTemplate.Obsolete dropped (a column the loader goes without) degrades /map and /survey-progress by their formation inputs only, and neither is unsupported', onlyFormations(obsolete, '/map', 'groundFormations') && onlyFormations(obsolete, '/survey-progress', 'formations') && Object.values(obsolete.reports).every((report) => report.status !== 'unsupported'), notSupported(obsolete).map((report) => `${report.route} ${report.status}`).join(', '))
     check('altered: two renamed bonuses (5, 25) block those IDs, and the mixin pages and /commanders name what is left out while /minerals is not degraded by them', [...capabilities.blockedBonuses(two.gates)].sort((a, b) => a - b).join() === '5,25' && ['/production', '/colony-outlook', '/logistics', '/mineral-outlook', '/shipyards', '/lagrange', '/commanders'].every((route) => two.reports[route].degraded.some((entry) => entry.gate && /capacity|stabilisation|officer/.test(entry.affects))) && two.reports['/minerals'].status === 'supported', notSupported(two).map((report) => report.route).join(', '))
     check('altered: FCT_WealthData dropped makes /finances unsupported', finance.reports['/finances'].status === 'unsupported' && finance.reports['/finances'].missing.some((entry) => entry.fields.includes('FCT_WealthData (table)')) && finance.reports['/commanders'].status === 'supported', notSupported(finance).map((report) => report.route).join(', '))
+
+    // The Notebook reads the tech type names; the map only reads its tags' bodies, so a save without them leaves /map supported. The planted fault gives /map a required read of that column, as a scan that followed the tags' mixin into the notes' tech query did.
+    const techless = (await preflightOf(capabilities, noTechType)).result
+    const mapReads = (result) => result.reports['/map'].status === 'supported' && result.reports['/map'].missing.length === 0
+    const faulty = mutatedCopy('utilities/capability-reads.js', "  '/map': {\n", "  '/map': {\n    tagTech: { label: 'the tech type names', reads: 'DIM_TechType(Description TechTypeID)' },\n")
+
+    try {
+      const { capabilities: broken } = await loadUtilities(['capabilities'], { directory: path.join(faulty, 'utilities') })
+      const unsupported = (await preflightOf(broken, noTechType)).result
+
+      check('altered: DIM_TechType.Description dropped (a column only the Notebook reads) makes /notebook unsupported and leaves /map supported', techless.reports['/notebook'].status === 'unsupported' && mapReads(techless), JSON.stringify([techless.reports['/notebook'].status, techless.reports['/map'].status]))
+      check('altered: a /map that required the tech type names would be unsupported on that save (the planted fault the check above must fail)', !mapReads(unsupported), unsupported.reports['/map'].status)
+    } finally {
+      fs.rmSync(faulty, { recursive: true, force: true })
+    }
 
     // The preflight never writes: the copy's hash is the same afterwards, and every query was a select.
     const before = sha256(rankless)
