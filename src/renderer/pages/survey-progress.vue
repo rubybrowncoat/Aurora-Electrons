@@ -235,12 +235,12 @@
           </div>
         </v-card>
 
-        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map." elevation="1">
+        <v-card v-if="formations" ref="formationsPanel" class="panel" data-summary="The race's ground formations, each once with its system or the reason it has none, by role: geological survey, xenoarchaeology or other. It shows the forces stationed at no colony and where they are, and each row opens its system on the map. Each formation can also be compared, element by element, with its original or replacement template, which shows what it is short of or holds over, its mass and the troop bay it needs." elevation="1">
           <div class="panel-head">
             <span>Ground formations</span>
             <span v-if="formationModel" class="d-flex align-center">
               <v-chip v-if="formationSystem" small close class="mr-4" @click:close="formationSystem = null">{{ formationSystemName }}</v-chip>
-              <v-switch v-model="remoteOnly" label="Remote only" dense hide-details class="mt-0 mr-4" />
+              <v-switch v-model="remoteOnly" label="Remote only" dense hide-details class="mt-0 mr-4" data-formations="remote" />
               <v-chip small>{{ count(formationList.length) }} of {{ count(formationTotals.formations) }} {{ formationTotals.formations === 1 ? 'formation' : 'formations' }}</v-chip>
             </span>
           </div>
@@ -250,8 +250,11 @@
               <v-chip-group v-model="remoteRoles" multiple column aria-label="Roles shown">
                 <v-chip v-for="option in roleOptions" :key="option.value" :value="option.value" filter outlined small>{{ option.text }} ({{ count(formationTotals[option.value]) }})</v-chip>
               </v-chip-group>
+              <v-btn-toggle v-model="formationBasis" mandatory dense class="mb-2" aria-label="Template compared with" data-compare="basis">
+                <v-btn v-for="basis in bases" :key="basis.value" :value="basis.value" small :data-compare-basis="basis.value">{{ basis.text }}</v-btn>
+              </v-btn-toggle>
             </div>
-            <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="openFormation">
+            <v-data-table :headers="formationHeaders" :items="formationList" item-key="id" show-expand single-expand :expanded.sync="formationExpanded" :sort-by.sync="formationsTable.sortBy" :sort-desc.sync="formationsTable.sortDesc" :items-per-page.sync="formationsTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: pageSizes }" no-data-text="No formation matches the roles and the scope chosen" @click:row="openFormation">
               <template #[`item.name`]="{ item }">
                 <div class="py-2">
                   <div class="font-weight-medium">{{ item.name }}</div>
@@ -275,10 +278,53 @@
               </template>
               <template #[`item.geo`]="{ item }"><span :class="{ 'text--secondary': !item.geo }">{{ ratingText(item.geo) }}</span></template>
               <template #[`item.xeno`]="{ item }"><span :class="{ 'text--secondary': !item.xeno }">{{ ratingText(item.xeno) }}</span></template>
+              <template #[`item.gapOrder`]="{ item }">
+                <span :class="['text-no-wrap', { 'text--secondary': item.gapOrder >= 3 }]" :data-compare-gap="item.id" :data-compare-order="item.gapOrder"><span v-for="(part, index) in item.gapParts" :key="index" :data-figure="part.role">{{ part.text }}</span></span>
+              </template>
+              <template #expanded-item="{ headers, item }">
+                <td :colspan="headers.length" class="py-3" data-compare="detail" :data-compare-formation="item.id">
+                  <div class="font-weight-medium" data-compare-template :data-compare-template-id="compareOf(item).template.id">{{ basisText(compareOf(item).which) }}: <span v-for="(part, index) in templateOf(compareOf(item).template)" :key="index" :data-figure="part.role">{{ part.text }}</span></div>
+                  <div class="caption text--secondary mb-2" data-compare-identity :data-compare-same="String(compareOf(item).identity.sameTemplate)">{{ identityLabel(compareOf(item)) }}</div>
+                  <div v-if="compareOf(item).state !== 'compared'" class="mb-2" data-compare-none :data-compare-state="compareOf(item).state">{{ noComparison(compareOf(item)) }}</div>
+                  <v-simple-table v-else dense class="mb-2" data-compare-classes>
+                    <thead>
+                      <tr>
+                        <th>Class</th>
+                        <th class="text-right">Actual</th>
+                        <th class="text-right">Intended</th>
+                        <th class="text-right">Short</th>
+                        <th class="text-right">Over</th>
+                        <th class="text-right">Actual mass (t)</th>
+                        <th class="text-right">Intended mass (t)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in compareOf(item).classes" :key="row.classId" data-compare-class :data-compare-class-id="row.classId" :data-compare-status="row.status">
+                        <td>{{ row.className || `Class ${row.classId}` }}<span v-if="row.sto" class="caption text--secondary"> · STO</span></td>
+                        <td class="text-right" data-compare-cell="actual">{{ unitsText(row.actual) }}</td>
+                        <td class="text-right" data-compare-cell="intended">{{ unitsText(row.intended) }}</td>
+                        <td class="text-right" data-compare-cell="short">{{ unitsText(row.deficit) }}</td>
+                        <td class="text-right" data-compare-cell="over">{{ unitsText(row.excess) }}</td>
+                        <td class="text-right" data-compare-cell="mass-actual">{{ massText(row.actualMass) }}</td>
+                        <td class="text-right" data-compare-cell="mass-intended">{{ massText(row.intendedMass) }}</td>
+                      </tr>
+                    </tbody>
+                  </v-simple-table>
+                  <div class="caption">
+                    <span data-figure="mass-actual">{{ massText(compareOf(item).actualMass.value) }} t</span> actual<span v-if="compareOf(item).state === 'compared'">, <span data-figure="mass-intended">{{ massText(compareOf(item).intendedMass.value) }} t</span> intended</span>
+                  </div>
+                  <div class="caption" data-compare="carry">
+                    <div data-compare-carry="now" :data-compare-fit="compareOf(item).carry.now.kind">Now: <span v-for="(part, index) in carryOf(compareOf(item).carry.now)" :key="index" :data-figure="part.role">{{ part.text }}</span></div>
+                    <div v-if="compareOf(item).state === 'compared'" data-compare-carry="intended" :data-compare-fit="compareOf(item).carry.intended.kind">At the intended mass: <span v-for="(part, index) in carryOf(compareOf(item).carry.intended)" :key="index" :data-figure="part.role">{{ part.text }}</span></div>
+                  </div>
+                  <div v-if="compareOf(item).state === 'compared'" class="caption" data-compare="obsolete" :data-compare-flag="String(compareOf(item).obsolescence.flag)" :data-compare-review="String(compareOf(item).obsolescence.review)">{{ obsolescenceLabel(compareOf(item).obsolescence) }}</div>
+                </td>
+              </template>
             </v-data-table>
             <div class="panel-foot caption text--secondary">
               {{ remoteDefinition }}
               Of {{ count(formationTotals.formations) }} {{ remoteOnly ? (formationTotals.formations === 1 ? 'formation in scope (remote, or at a colony the save does not hold)' : 'formations in scope (remote, or at a colony the save does not hold)') : (formationTotals.formations === 1 ? 'formation' : 'formations') }}, {{ count(formationTotals.placed) }} {{ formationTotals.placed === 1 ? 'is' : 'are' }} in a system the race has named and {{ count(formationTotals.unplaced) }} {{ formationTotals.unplaced === 1 ? 'has' : 'have' }} none (the row says why; no place is guessed). {{ count(formationTotals.geo) }} geological and {{ count(formationTotals.xeno) }} xenoarchaeology, {{ count(formationTotals.both) }} of them both and listed once, {{ count(formationTotals.other) }} other{{ formationTotals.unknown ? `, ${count(formationTotals.unknown)} with a role not known` : '' }}. In the whole race {{ count(formationTotals.remote) }} {{ formationTotals.remote === 1 ? 'is' : 'are' }} remote, {{ count(formationTotals.atColonies) }} at colonies{{ formationTotals.remoteUnknown ? ` and ${count(formationTotals.remoteUnknown)} at a colony the save does not hold` : '' }}.
+              Each row expands to the formation's actual elements against the template chosen above, class by class: the units short and over, the mass actual and intended, and whether the formation fits one troop bay now and at the intended mass. A template's obsolescence is its own flag and is separate from whether the replacement template differs from the original; an obsolete template with an STO class is a replacement review, never a direct upgrade. A formation with no usable template, or with no element rows, is not compared and no deficit is worked out for it.
             </div>
           </template>
         </v-card>
@@ -313,6 +359,7 @@ import { bodyPointsSql, fleetSurveyRate, groundSurveyRate, loadSurveyShips, surv
 import { surveyDays } from '../utilities/survey-eta'
 import { formationRows, remoteOnlyView, REMOTE_DEFINITION, ROLE_OPTIONS, rolesView, rowTotals, selectRows } from '../utilities/remote-formations'
 import { loadGroundFormations } from '../utilities/ground-formations'
+import { BASES, basisView, carryParts, compareFormation, gapOf, identityText, noComparisonText, obsolescenceText, templateParts } from '../utilities/formation-composition'
 import { loadBootstrapFreight } from '../utilities/mine-bootstrap-data'
 import { candidatesOf, candidateText, colonyGeoTeams, constructBodies, deploymentTotals, liftText, loadConstructSites, loadRuinSites, rolesView as deployRolesView, ROLE_CHOICES, ruinTargets, selectDeployments, specialistRows, STATE_CHOICES, statesView as deployStatesView, targetRows, geoTargets } from '../utilities/specialist-deployments'
 import { loadFormulaVersion } from '../utilities/capabilities'
@@ -360,6 +407,7 @@ export default {
       remoteRoles: rolesView,
       remoteOnly: remoteOnlyView,
       formationsTable: tableView('surveyFormationsTable', { sortBy: ['systemName'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }),
+      formationBasis: basisView,
       deployRoles: deployRolesView,
       deployStates: deployStatesView,
       deployUnstaffed: { key: 'deployUnstaffedOnly', scope: 'race', default: false },
@@ -376,6 +424,8 @@ export default {
       formationSystem: null,
       formationsPending: false,
       deployExpanded: [],
+      formationExpanded: [],
+      bases: BASES,
       revealPending: false,
       linkTo,
       place,
@@ -635,7 +685,22 @@ export default {
     formationList() {
       const rows = selectRows(this.formationAll, { roles: this.remoteRoles, remoteOnly: this.remoteOnly })
 
-      return this.formationSystem === null ? rows : rows.filter((row) => row.system && row.system.id === this.formationSystem)
+      return (this.formationSystem === null ? rows : rows.filter((row) => row.system && row.system.id === this.formationSystem)).map((row) => ({ ...row, gapParts: this.formationCompared.get(row.id).gap.parts, gapOrder: this.formationCompared.get(row.id).gap.order }))
+    },
+
+    // Every formation's comparison with the template chosen (`formationBasis`) and the short statement the table gives it, by formation id.
+    formationCompared() {
+      const compared = new Map()
+
+      if (this.formationModel) {
+        this.formationModel.formations.forEach((node) => {
+          const comparison = compareFormation(node, this.formationBasis, this.troopBays.troops)
+
+          compared.set(node.id, { comparison, gap: gapOf(comparison) })
+        })
+      }
+
+      return compared
     },
 
     formationTotals() {
@@ -666,6 +731,8 @@ export default {
         { text: 'Role', value: 'roleLabel' },
         { text: 'Geological', value: 'geo', align: 'end' },
         { text: 'Xenoarchaeology', value: 'xeno', align: 'end' },
+        { text: 'Against template', value: 'gapOrder' },
+        { text: '', value: 'data-table-expand', sortable: false },
       ]
     },
 
@@ -806,6 +873,48 @@ export default {
       if (item.system) {
         this.$router.push(linkTo.map(item.system.id))
       }
+    },
+
+    // A formation's comparison with the template chosen as the intent (`formationCompared`).
+    compareOf(item) {
+      return this.formationCompared.get(item.id).comparison
+    },
+
+    // A mass in tonnes, with the decimals it has; a mass the save does not give is unknown.
+    massText(value) {
+      return value === null ? 'Unknown' : Number.isInteger(value) ? this.count(value) : this.count(value, 2)
+    },
+
+    // The words of a comparison that is not made, of a template's obsolescence and of a troop fit.
+    noComparison(comparison) {
+      return noComparisonText(comparison)
+    },
+
+    obsolescenceLabel(obsolescence) {
+      return obsolescenceText(obsolescence)
+    },
+
+    carryOf(fit) {
+      return carryParts(fit, this.count)
+    },
+
+    // The text of a count that may not be known.
+    unitsText(value) {
+      return value === null ? 'Unknown' : this.count(value)
+    },
+
+    // The template as the module names it.
+    templateOf(template) {
+      return templateParts(template)
+    },
+
+    // The name of a basis the comparison is made against.
+    basisText(which) {
+      return this.bases.find((basis) => basis.value === which).text
+    },
+
+    identityLabel(comparison) {
+      return identityText(comparison)
     },
 
     // The icon and colour of a state, the words of a target's status and of a colony, and the work left on a target.

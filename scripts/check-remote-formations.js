@@ -563,8 +563,9 @@ pageAdd('page-survey-sort', 'every column of the table sorts by a value its rows
   const vm = surveyView(ctx)
   const keys = vm.formationHeaders.filter((header) => header.sortable !== false).map((header) => header.value)
 
-  assert.deepEqual(keys, ['name', 'systemName', 'heldBy', 'where', 'roleLabel', 'geo', 'xeno'])
-  vm.formationAll.forEach((row) => keys.forEach((key) => assert.ok(row[key] !== undefined, `row ${row.id} has no ${key}`)))
+  assert.deepEqual(keys, ['name', 'systemName', 'heldBy', 'where', 'roleLabel', 'geo', 'xeno', 'gapOrder'])
+  assert.equal(vm.formationList.length, vm.formationAll.length)
+  vm.formationList.forEach((row) => keys.forEach((key) => assert.ok(row[key] !== undefined, `row ${row.id} has no ${key}`)))
   assert.deepEqual([...new Set(vm.formationAll.map((row) => row.where))].sort(), ['At a colony', 'Not known', 'Remote'])
   assert.deepEqual([...new Set(vm.formationAll.map((row) => row.roleLabel))].sort(), ['Geological', 'Geological · Xenoarchaeology', 'Not known', 'Other', 'Xenoarchaeology'])
 })

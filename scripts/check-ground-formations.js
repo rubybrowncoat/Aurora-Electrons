@@ -302,7 +302,7 @@ const builderResults = async (mod) => {
   await add('templates', 'a template is none, found with its composition, missing or foreign, and the states add up', () => {
     const t = m.summary.templates
 
-    return same(t.missing, { original: 1, replacement: 0 }) && same(t.foreign, { original: 1, replacement: 0 }) && same(t.found, { original: 0, replacement: 1 }) && same(t.none, { original: 22, replacement: 23 }) && node(13).templates.original.state === 'missing' && node(13).templates.original.id === 777 && node(13).templates.replacement.state === 'found' && node(13).templates.replacement.name === 'Battalion' && same(node(13).templates.replacement.elements, [{ classId: 10, className: 'Infantry', units: 10 }, { classId: 11, className: 'Geo Survey', units: 2 }]) && node(14).templates.original.state === 'foreign' && node(14).templates.original.raceId === 8 && node(14).templates.original.obsolete === true && node(14).templates.replacement.state === 'none' && problemKinds(13).includes('template-missing') && problemKinds(14).includes('template-foreign') && !problemKinds(1).includes('template-missing')
+    return same(t.missing, { original: 1, replacement: 0 }) && same(t.foreign, { original: 1, replacement: 0 }) && same(t.found, { original: 0, replacement: 1 }) && same(t.none, { original: 22, replacement: 23 }) && node(13).templates.original.state === 'missing' && node(13).templates.original.id === 777 && node(13).templates.replacement.state === 'found' && node(13).templates.replacement.name === 'Battalion' && same(node(13).templates.replacement.elements, [{ classId: 10, className: 'Infantry', units: 10, size: 5, mass: 50, sto: null }, { classId: 11, className: 'Geo Survey', units: 2, size: 100, mass: 200, sto: null }]) && node(13).templates.replacement.mass.value === 250 && node(13).templates.original.mass === null && node(14).templates.original.state === 'foreign' && node(14).templates.original.raceId === 8 && node(14).templates.original.obsolete === true && node(14).templates.replacement.state === 'none' && problemKinds(13).includes('template-missing') && problemKinds(14).includes('template-foreign') && !problemKinds(1).includes('template-missing')
   })
   await add('location-colony', 'a formation at a colony has the colony and its system, and the colony wins over a ship', () => same(node(1).location, { kind: 'colony', state: 'resolved', population: { id: 1, name: 'Alpha Prime', systemId: 50, systemName: 'Sol', bodyId: 5, raceId: 7 }, ship: null, fleet: null, system: { id: 50, name: 'Sol' } }) && node(20).location.kind === 'colony' && problemKinds(20).includes('both-locations'))
   await add('location-ship', 'an embarked formation takes the system of the carrying fleet', () => same(node(3).location.fleet, { id: 500, name: 'Convoy', systemId: 9, systemName: 'Alpha', bodyId: 77, raceId: 7, via: 'ship' }) && node(3).location.kind === 'ship' && node(3).location.state === 'resolved' && node(3).location.ship.name === 'Hauler' && same(node(3).location.system, { id: 9, name: 'Alpha' }))
@@ -393,7 +393,7 @@ const memoryDatabase = async (mod, data, omit = []) => {
     const created = new sqlite3.Database(':memory:', (error) => (error ? reject(error) : resolve(created)))
   })
 
-  const optional = { FCT_GroundUnitFormationTemplate: ['Obsolete'] }
+  const optional = { FCT_GroundUnitFormationTemplate: ['Obsolete'], FCT_GroundUnitClass: ['STOWeapon'], DIM_GroundComponentType: ['STO'] }
 
   for (const [table, required] of Object.entries(mod.GROUND_FORMATION_COLUMNS)) {
     const columns = [...required, ...(optional[table] || [])]
@@ -509,7 +509,7 @@ const databaseResults = async (mod) => {
   await add('memory-select-only', 'every statement the loader runs is a SELECT', () => logged.statements.length >= 20 && logged.statements.every((text) => /^select /.test(text) && !WRITES.test(text)))
   await add('memory-location', 'a ship formation takes the system name of the race, in the game, from the fleet or the carrying ship', () => same(node(2).location.system, { id: 9, name: 'Alpha' }) && node(2).location.fleet.via === 'ship' && same(node(7).location.system, { id: 9, name: 'Alpha' }) && node(7).location.fleet.via === 'mothership' && same(node(1).location.system, { id: 50, name: 'Sol' }))
   await add('memory-parents', 'a parent of another race is foreign, one that is nowhere is an orphan', () => node(4).parent.state === 'foreign' && node(4).parent.raceId === 8 && node(6).parent.state === 'orphan')
-  await add('memory-templates', 'the template is the one of the game with the composition of the game', () => node(1).templates.original.state === 'found' && node(1).templates.original.name === 'Infantry Battalion' && node(1).templates.original.obsolete === false && same(node(1).templates.original.elements, [{ classId: 10, className: 'Infantry', units: 4 }]) && node(1).templates.replacement.state === 'none')
+  await add('memory-templates', 'the template is the one of the game with the composition of the game', () => node(1).templates.original.state === 'found' && node(1).templates.original.name === 'Infantry Battalion' && node(1).templates.original.obsolete === false && same(node(1).templates.original.elements, [{ classId: 10, className: 'Infantry', units: 4, size: 5, mass: 20, sto: null }]) && node(1).templates.original.mass.value === 20 && node(1).templates.replacement.state === 'none')
   await add('memory-figures', 'the totals are those of the rows of the race', () => m.summary.mass.value === 235 && near(node(2).geo.value, 0.2) && m.summary.units.value === 9 && m.summary.elements === 5)
 
   await new Promise((resolve) => raw.close(() => resolve()))
@@ -920,7 +920,7 @@ const MUTANTS = [
   ['a carried ship does not follow its carrier', 'if (!fleet && mothership && isId(mothership.FleetID) && fleets.get(mothership.FleetID)) {', 'if (false) {', ['location-fallback', 'memory-location']],
   ['a missing template is none', 'return { id, state: \'missing\', name: null,', 'return { id, state: \'none\', name: null,', ['templates', 'problems']],
   ['a template of another race is found', 'if (row.RaceID !== RaceID) {', 'if (false) {', ['templates', 'problems']],
-  ['a template carries no composition', 'elements: (templateElements.get(id) || []).map(', 'elements: [].map(', ['templates', 'memory-templates']],
+  ['a template carries no composition', 'const items = (templateElements.get(id) || []).map(', 'const items = [].map(', ['templates', 'memory-templates']],
   ['geosurvey reads the xenoarchaeology rating', 'geo: figure(items, classes, figures, \'geo\')', 'geo: figure(items, classes, figures, \'xeno\')', ['geo-xeno', 'trace', 'unknown']],
   ['an equipment that is not catalogued rates 0', 'if (!component || !isNumber(component[key])) {', 'if (!component) {\n        return\n      }\n\n      if (!isNumber(component[key])) {', ['unknown', 'geo-xeno', 'problems']],
   ['the tree does not add its children', 'up[kind].value += node.tree[kind].value', 'up[kind].value += 0', ['tree']],
@@ -934,7 +934,7 @@ const MUTANTS = [
   ['a save without the Obsolete column is required to have it', 'const obsolete = (await columnsOf(database, \'FCT_GroundUnitFormationTemplate\')).has(\'Obsolete\')', 'const obsolete = true', ['obsolete-optional']],
   ['an unstored component slot counts as an empty slot', 'known = false\n        note({ kind: \'component-unknown\'', 'note({ kind: \'component-unknown\'', ['memory-null-slots']],
   ['an unstored component slot raises no problem', 'note({ kind: \'component-unknown\', slot, componentId: null, reason: \'the component of the slot is not stored\' })', 'void 0', ['memory-null-slots']],
-  ['an unstored template id is none', 'state: \'unknown\', name: null, abbreviation: null, obsolete: null, elements: null }', 'state: \'none\', name: null, abbreviation: null, obsolete: null, elements: null }', ['memory-null-templates']],
+  ['an unstored template id is none', 'state: \'unknown\', name: null, abbreviation: null, obsolete: null, elements: null, mass: null }', 'state: \'none\', name: null, abbreviation: null, obsolete: null, elements: null, mass: null }', ['memory-null-templates']],
   ['an unstored template id raises no problem', '} else if (refs[which].state === \'unknown\') {', '} else if (false) {', ['memory-null-templates']],
   ['a template id of 0 is not none', 'if (id === 0) {', 'if (false) {', ['templates', 'memory-null-templates']],
   ['a formation is placed in a system the race has no name for', 'const named = Boolean(location.system) && typeof location.system.name === \'string\' && location.system.name !== \'\'', 'const named = Boolean(location.system)', ['place-system', 'place-unresolved', 'group-system', 'group-reconcile']],
