@@ -65,7 +65,7 @@ export const READS = {
   },
   '/log': {
     logEvents: { label: 'the game log', reads: 'DIM_EventType(Description EventTypeID) FCT_EventColour(AlertColour EventTypeID GameID RaceID TextColour) FCT_GameLog(EventType GameID IDType IncrementID MessageText PopulationID RaceID SMOnly SystemID Time Xcor Ycor) FCT_Increments(GameID GameTime IncrementID Length) FCT_Population(GameID PopName PopulationID RaceID SystemBodyID SystemID) FCT_RaceSysSurvey(GameID Name RaceID SystemID) FCT_Star(Component GameID StarID) FCT_SystemBody(BodyClass GameID Name OrbitNumber PlanetNumber StarID SystemBodyID)' },
-    page: { label: 'the page\'s other reads', reads: 'DIM_EventType(Description EventTypeID) FCT_EventColour(AlertColour EventTypeID GameID RaceID TextColour) FCT_Population(GameID PopName PopulationID RaceID SystemID) FCT_RaceSysSurvey(GameID Name RaceID SystemID)' },
+    page: { label: 'the page\'s other reads', reads: 'DIM_EventType(Description EventTypeID) FCT_EventColour(AlertColour EventTypeID GameID RaceID TextColour) FCT_GameLog(* GameID IncrementID RaceID) FCT_HideEvents(EventID GameID RaceID) FCT_Increments(GameID GameTime IncrementID Length) FCT_Population(GameID PopName PopulationID RaceID SystemID) FCT_RaceSysSurvey(GameID Name RaceID SystemID)' },
   },
   '/minerals': {
     race: { label: 'the race\'s mining tech', reads: 'DIM_PlanetaryInstallation(CivilianInstallation MiningProductionValue) FCT_Game(GameID) FCT_Race(GameID MaximumOrbitalMiningDiameter MineProduction RaceID)' },

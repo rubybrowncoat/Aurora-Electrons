@@ -127,7 +127,7 @@ export const rowCounts = (rows) => {
 
 const sameIdentity = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
 
-const endOf = (increment) => increment[1] + increment[2]
+export const endOf = (increment) => increment[1] + increment[2]
 
 // The groups of an increment in their stored order: by their fields as JSON text. The text is made once per group, not twice per comparison (an increment of a large save holds thousands of groups).
 const sortGroups = (groups) => groups.map((group) => [JSON.stringify(group.slice(0, EVENT_FIELDS.length)), group]).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)).map(([, group]) => group)
@@ -500,6 +500,81 @@ export const archiveRows = (record) => {
   })
 
   return rows.sort((a, b) => b.Time - a.Time || b.IncrementID - a.IncrementID)
+}
+
+// ---- Reading a window ----------------------------------------------------------------------------------------------
+
+// Whether the stretch (start, end] meets the window (from, to]; a null `start` is unbounded, as the first gap's is.
+const meets = (start, end, from, to) => (start === null || start < to) && end > from
+
+// The stretches of a record that may still change: the oldest increment of each span (the load may have cut it) and the newest (later rows may still join it), as [{ kind: 'head' | 'tail', from, to, basis }] in game time. `basis` says what held the increment's identity: 1 a retained capture or the tip, 2 a retained increment, 3 neither (the increment held no retained event, so it ends no later than the next retained one starts, never at the length of the longest retained one).
+export const openStretchesOf = (record) => {
+  if (!record || !Array.isArray(record.spans)) {
+    return []
+  }
+
+  const tip = isIdentity(record.tip) ? record.tip : null
+  const stretches = []
+
+  record.spans.forEach(([start, end], index) => {
+    const capture = record.captures.find((entry) => entry.from[1] === start)
+    const retained = record.increments.find((increment) => increment[1] >= start)
+
+    if (capture) {
+      stretches.push({ kind: 'head', from: start, to: Math.min(end, start + capture.from[2]), basis: 1 })
+    } else if (retained && retained[1] === start) {
+      stretches.push({ kind: 'head', from: start, to: Math.min(end, endOf(retained)), basis: 2 })
+    } else {
+      stretches.push({ kind: 'head', from: start, to: retained ? Math.min(end, retained[1]) : end, basis: 3 })
+    }
+
+    const ending = record.increments.find((increment) => endOf(increment) === end)
+
+    if (tip && index === record.spans.length - 1) {
+      stretches.push({ kind: 'tail', from: Math.min(end, Math.max(start, tip[1])), to: end, basis: 1 })
+    } else if (ending) {
+      stretches.push({ kind: 'tail', from: Math.max(start, ending[1]), to: end, basis: 2 })
+    } else {
+      const inside = record.increments.filter((increment) => increment[1] >= start && endOf(increment) <= end)
+
+      stretches.push({ kind: 'tail', from: Math.max(start, inside.length ? endOf(inside[inside.length - 1]) : start), to: end, basis: 3 })
+    }
+  })
+
+  return stretches
+}
+
+// How far a record covers the window (from, to] of game time, without counting rows: { state, from, to, spans, gaps, openStretches, failures, cut, revision }. `state` is 'unavailable' when the record is missing or has no span, no span meets the window, or the window ends at or before the cap's cut; 'partial' when the window is not inside one span, meets a gap (the unobserved past before the first span included), an open stretch, a failed capture's time, or starts before the cut; else 'observed'. `stretches` are the record's open stretches when the caller has them already.
+export const coverageOf = (record, from, to, stretches = openStretchesOf(record)) => {
+  const spans = record && Array.isArray(record.spans) ? record.spans : []
+  const cut = record && isKnownNumber(record.cut) ? record.cut : null
+  const meeting = spans.filter(([start, end]) => meets(start, end, from, to))
+  const gaps = gapsOf(record).filter((gap) => meets(gap.from, gap.to, from, to)).map((gap) => ({ from: gap.from === null ? from : Math.max(gap.from, from), to: Math.min(gap.to, to) }))
+  const openStretches = stretches.filter((stretch) => meets(stretch.from, stretch.to, from, to))
+  const failures = record && Array.isArray(record.failures) ? record.failures.filter((failure) => failure.t > from && failure.t <= to) : []
+  const unavailable = !record || !meeting.length || (cut !== null && to <= cut)
+  const inside = meeting.length === 1 && meeting[0][0] <= from && meeting[0][1] >= to
+  const state = unavailable ? 'unavailable' : !inside || gaps.length || openStretches.length || failures.length || (cut !== null && from < cut) ? 'partial' : 'observed'
+
+  return {
+    state,
+    from,
+    to,
+    spans: meeting.map(([start, end]) => [Math.max(start, from), Math.min(end, to)]),
+    gaps,
+    openStretches,
+    failures,
+    cut: cut !== null && from < cut ? cut : null,
+    revision: record ? record.revision : null,
+  }
+}
+
+// The state of the window (from, to] of one race's record, with the rows in it: `coverageOf` and `observedRows`, the events whose `Time` lies in the window counted with their copies (null when the state is 'unavailable': an interval no capture covers is unknown, never 0 events). A fork reads `eventsUpTo(file, t)` first, so its window ends at `t`; two branches are never combined.
+export const windowState = (record, from, to) => {
+  const coverage = coverageOf(record, from, to)
+  const observedRows = coverage.state === 'unavailable' ? null : record.increments.reduce((sum, increment) => sum + increment[3].reduce((count, group) => count + (group[0] > from && group[0] <= to ? group[EVENT_FIELDS.length] : 0), 0), 0)
+
+  return { ...coverage, observedRows }
 }
 
 // ---- Size ----------------------------------------------------------------------------------------------------------

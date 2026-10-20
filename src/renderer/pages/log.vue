@@ -36,6 +36,8 @@
 
       <archive-panel v-if="archiveChoice && canArchive && archive" class="mb-3" :status="archive.status" :reason="archive.reason || ''" :record="archiveRecord" :cap="eventCap" :start-year="Number(StartYear)" :source="archiveListed ? 'archive' : 'save'" @source="(value) => listSource = value" />
 
+      <diagnostic-panel class="mb-3" :diagnosis="diagnosis" :pending="!diagnosisCurrent" :seconds="diagnosticWindow" :start-year="Number(StartYear)" @window="(value) => diagnosticWindow = value" />
+
       <v-card class="panel mb-3" data-summary="How many events the game log holds for each month, to find busy periods and narrow the list below to one." elevation="1">
         <div class="panel-head">
           <div class="subtitle-2">Timeline</div>
@@ -121,6 +123,7 @@
 import { mapGetters } from 'vuex'
 
 import ArchivePanel from '../components/log/ArchivePanel.vue'
+import DiagnosticPanel from '../components/log/DiagnosticPanel.vue'
 import LogPresets from '../components/log/LogPresets.vue'
 import LogTypeFilter from '../components/log/LogTypeFilter.vue'
 import PinnedPanel from '../components/log/PinnedPanel.vue'
@@ -146,6 +149,7 @@ import { bytesText, campaignStorage } from '../utilities/history'
 import { branchLineage, gameDateText } from '../utilities/history-milestones'
 import { tracked } from '../utilities/load-tracking'
 import { archiveEvents, pinnableRow, playerPins, readArchiveFile, readArchiveNames } from '../utilities/log-archive-view'
+import { DEFAULT_WINDOW, diagnose, readDiagnostic } from '../utilities/log-diagnostics'
 import { isNewEvent, newestEnd, readLook, withLook } from '../utilities/log-visit'
 
 const INPUT_LABELS = { logEvents: 'the game log' }
@@ -153,7 +157,7 @@ const INPUT_LABELS = { logEvents: 'the game log' }
 const NO_LOOK = Object.freeze({ key: null, t: null, settled: false })
 
 export default {
-  components: { ArchivePanel, ChartCanvas, LoadState, LogPresets, LogTypeFilter, PageLink, PinnedPanel, StatTiles, WindowVirtualScroll },
+  components: { ArchivePanel, ChartCanvas, DiagnosticPanel, LoadState, LogPresets, LogTypeFilter, PageLink, PinnedPanel, StatTiles, WindowVirtualScroll },
   mixins: [
     countFormat,
     deepLink,
@@ -177,11 +181,14 @@ export default {
       // The pins of the race: { key, store } with `store` null when what is stored cannot be read. Frozen, as one holds up to 500 pins.
       pinStore: Object.freeze({ key: null, store: null }),
       pinMessage: '',
-      // The event archive: the choice, what the branch's file holds for the race (null while it is off or not read), which list the page shows, and the last refusal.
+      // The event archive: the choice, which list the page shows and the last refusal (what the branch's file holds for the race is the computed `archive`).
       archiveChoice: false,
-      archive: null,
       listSource: 'save',
       archiveMessage: '',
+      // The short-interval checklist: what the open save, the archive and the game's tables said for the race and save open when it was read ({ key, database, inputs }, `inputs` null until read), the window chosen and the read in progress.
+      diagnostic: Object.freeze({ key: null, database: null, inputs: null }),
+      diagnosticWindow: DEFAULT_WINDOW,
+      diagnosticRun: 0,
       settledContext: null,
       expandedGroups: [],
       detail: null,
@@ -189,7 +196,7 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['config', 'database', 'GameID', 'RaceID', 'StartYear', 'racePrefix', 'campaignId']),
+    ...mapGetters(['config', 'database', 'GameID', 'GameTime', 'RaceID', 'StartYear', 'racePrefix', 'campaignId']),
 
     contextKey() {
       return this.racePrefix
@@ -272,6 +279,36 @@ export default {
     // What changes the archive the page reads: the choice, the branch, the race, and the recorder having written (its pass is asked for at the switch).
     archiveKey() {
       return this.canArchive && this.archiveChoice ? `${this.campaignId}|${this.branchId}|${this.RaceID}|${this.$store.state.history.revision}` : null
+    },
+
+    // What the branch's file holds for the race, read when the choice, the branch, the race or the recorder's pass changes (`archiveKey`): { status: 'ok', record } (record null while the race has none), { status: 'unavailable', reason }, or null while the archive is off. It is derived, not copied by a watcher, so whatever reads it after the recorder wrote (the list, the panel, the checklist's read) meets the file as it is now and never the snapshot before.
+    archive() {
+      return this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null
+    },
+
+    // What the archive's record says of the observed time: the captures that added rows, the failed captures, the spans, the tip and the cut. A failed capture or a span adds no row and leaves `revision` alone, so the revision alone is no key.
+    archiveSnapshot() {
+      const record = this.archiveRecord
+
+      return record ? JSON.stringify([record.revision, (record.failures || []).length, record.failures && record.failures.length ? record.failures[record.failures.length - 1].at : null, record.spans, record.tip || null, record.cut === undefined ? null : record.cut]) : ''
+    },
+
+    // What the checklist's read depends on: the race, the branch, the archive and what it holds, and the newest increment of the save. The save's own copy is compared apart (`diagnostic.database`).
+    diagnosticKey() {
+      if (!this.ready || this.logWindow === undefined) {
+        return null
+      }
+
+      return [this.contextKey, this.branchId || '', this.archiveKey || 'off', this.archive ? this.archive.status : 'off', this.archiveSnapshot, newestEnd(this.logWindow && this.logWindow.ledger), this.GameTime].join('|')
+    },
+
+    // Whether the checklist held was read for the race and save open now: evidence of another race or save is never shown.
+    diagnosisCurrent() {
+      return this.diagnosticKey !== null && this.diagnostic.key === this.diagnosticKey && this.diagnostic.database === this.database && this.diagnostic.inputs !== null
+    },
+
+    diagnosis() {
+      return this.diagnosisCurrent ? diagnose(this.diagnostic.inputs, this.diagnosticWindow) : null
     },
 
     pinsKey() {
@@ -572,11 +609,21 @@ export default {
     branchId() {
       this.seedPins()
     },
-    archiveKey: {
+    // The checklist is read again, with nothing kept of the earlier scope, when the race, the save or what the archive holds changes.
+    diagnosticKey: {
       immediate: true,
       handler() {
-        this.loadArchive()
+        this.loadDiagnostic()
       },
+    },
+    database() {
+      this.loadDiagnostic()
+    },
+    // The list goes back to the save when the archive stops holding the race.
+    archiveRecord(record) {
+      if (!record && this.listSource === 'archive') {
+        this.listSource = 'save'
+      }
     },
     filteredEvents() {
       this.expandedGroups = []
@@ -830,15 +877,27 @@ export default {
       this.pinMessage = this.commitPins((store) => withNote(store, this.branchId, id, note)) || ''
     },
 
-    // ---- Event archive ----
+    // ---- Short-interval checklist ----
 
-    loadArchive() {
-      this.archive = this.archiveKey ? readArchiveFile(this.campaignId, this.branchId, this.RaceID) : null
+    async loadDiagnostic() {
+      const key = this.diagnosticKey
+      const database = this.database
+      const run = ++this.diagnosticRun
 
-      if (!this.archiveRecord && this.listSource === 'archive') {
-        this.listSource = 'save'
+      this.diagnostic = Object.freeze({ key, database, inputs: null })
+
+      if (!key || !database) {
+        return
+      }
+
+      const inputs = await readDiagnostic(database, { GameID: this.GameID, RaceID: this.RaceID, GameTime: this.GameTime, window: this.logWindow || null, archive: this.archiveRecord })
+
+      if (run === this.diagnosticRun) {
+        this.diagnostic = Object.freeze({ key, database, inputs })
       }
     },
+
+    // ---- Event archive ----
 
     // The choice is kept per race and campaign; switching on asks the recorder for a pass on the open save, so what it holds is captured at once. Switching off keeps what was recorded.
     setArchive(on) {

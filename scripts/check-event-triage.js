@@ -3,7 +3,7 @@
 
   node scripts/check-event-triage.js
 
-  - categories: every type of the export is in exactly one category, every `AttackEvent` type is in Combat, no category lists a type the export lacks, and a type the export lacks falls into Other;
+  - categories: every type of the export is in exactly one category, every `AttackEvent` type is in Combat, every type the short-interval checklist watches is in the export under its name and in Combat, no category lists a type the export lacks, and a type the export lacks falls into Other;
   - groups: the selector's groups come in the categories' order with Other last and present when the log holds no unknown type; a group is chosen or cleared as a whole;
   - presets: what a stored value must hold to be a preset, names, a preset's types keep every unknown type visible, keywords match any, as a case-insensitive substring, and no keyword matches everything;
   - visit: the Game Log's last look by branch (a number from before the branches is read through the ledger, a branch with no entry takes the lesser of its parent's look and the fork, an event is new when later than the look).
@@ -37,6 +37,18 @@ check('every type of the export is in exactly one category', ({ triage }) => {
 
 check('every attack type is in Combat', ({ triage }) => {
   EXPORT.filter(({ attack }) => attack).forEach(({ id }) => assert.equal(triage.categoryOfType(id), 'combat', `type ${id}`))
+})
+
+check('the types the short-interval checklist watches are in the export, named as it names them, and all in Combat', async ({ triage }) => {
+  const { 'log-diagnostics': diagnostics } = await loadUtilities(['log-diagnostics'], { stubs: STUBS })
+  const names = new Map(rows.map(([id, name]) => [Number(id), name.trim()]))
+
+  assert.ok(diagnostics.WATCHED.length > 0)
+  diagnostics.WATCHED.forEach((entry) => {
+    assert.ok(names.has(entry.type), `type ${entry.type} is not in the export`)
+    assert.equal(entry.name, names.get(entry.type), `type ${entry.type}`)
+    assert.equal(triage.categoryOfType(entry.type), 'combat', `type ${entry.type}`)
+  })
 })
 
 check('a type the export lacks falls into Other', ({ triage }) => {

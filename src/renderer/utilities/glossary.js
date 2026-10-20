@@ -23,7 +23,7 @@ export const VERSION_STATUS_TEXT = Object.freeze({
 // Nothing written before this month can describe a 2.7 release, so a link dated earlier must be marked older.
 export const OLDER_THAN_GAME_BEFORE = '2024-01'
 
-const term = (id, name, definition, units = '') => Object.freeze({ id, term: name, units, definition, versions: GAME_VERSION, reviewed: REVIEWED })
+const term = (id, name, definition, units = '', reviewed = REVIEWED) => Object.freeze({ id, term: name, units, definition, versions: GAME_VERSION, reviewed })
 
 export const TERMS = Object.freeze([
   term('hull-space', 'Hull space (HS)', 'The volume unit of ships and components. One HS is 50 tons of displacement, so a ship\'s tonnage is its hull spaces times 50, and component, hull and tank sizes are quoted in HS.', 'HS'),
@@ -80,6 +80,10 @@ export const TERMS = Object.freeze([
   term('sensor-resolution', 'Sensor resolution', 'The size of target an active sensor is built to see. A target with a cross-section under the resolution is seen at its range cut by the square of the cross-section over the resolution, so a target half the resolution is seen at a quarter of the range. A larger resolution suits larger targets and needs a larger sensor to reach the same range against a small one.', 'HS'),
   term('sensor-jammer', 'Sensor jammer', 'A target\'s defence against active sensors. Each level of jammer above the sensor\'s ECCM cuts the sensor\'s range to 0.75 of it; ECCM at or above the jammer cuts nothing. It is a different figure from the jammer of a missile in the hit chance, which does not change a sensor\'s range.', ''),
   term('fire-control', 'Fire control', 'The sensor that guides weapons onto a target. A missile fire control reaches twice the range of a search sensor of the same size. A beam fire control has a range, capped at 1,400,000 km, and a tracking speed, each set by its own multiplier and sized apart; a single weapon control is restricted to one weapon.', 'km, km/s'),
+  term('cease-fire', 'Cease fire (tactical map)', 'A control of the game\'s tactical map, Cease Fire All Ships on its Miscellaneous tab, that closes the offensive fire controls of the race\'s ships other than commercial ones. It leaves each fire control\'s target in place, and nothing read shows it ending combat or stopping a boarding already under way. Read in release 2.7.1, and the release that introduced it is not known. The app gives the game no order, so use it in the game.', '', '2026-10-20'),
+  term('game-events-window', 'Events window (game)', 'The game\'s own list of logged events, which draws on the same log the Game Log page reads. Its Show All Events option brings back the event types the race hid there, so an event absent from that window can still be in the log. Read in release 2.7.1.', '', '2026-10-20'),
+  term('fleet-cease-fire', 'Cease fire fleet (Fleet window)', 'A control of the game\'s Fleet window, Cease Fire Fleet, that closes the fire controls of every ship of the selected fleet, ships carried by a mothership included; a selected ship stands for its fleet. It leaves each fire control\'s target in place, and nothing read shows it ending combat or stopping a boarding already under way. Read in release 2.7.1, and the release that introduced it is not known. The app gives the game no order, so use it in the game.', '', '2026-10-20'),
+  term('ship-open-fire', 'Open and cease fire toggles (Fleet window)', 'Two controls of the game\'s Fleet window for the selected ship. Open Fire All and Cease Fire All close every fire control of the ship, or open those that hold a target; Open Fire FC and Cease Fire FC flip the one fire control picked in the ship\'s combat list. Neither changes a target, and nothing read shows either ending combat or stopping a boarding already under way. Read in release 2.7.1, and the release that introduced them is not known. The app gives the game no order, so use them in the game.', '', '2026-10-20'),
   term('electronic-hardening', 'Hardening and ECCM', 'Protection a sensor or fire control is built with. Hardening sets its Uridium and ECCM adds Corbomite on top, each from the level of its tech and each changing the BP. ECCM lowers the jammer a sensor meets, so a higher level keeps more of its range against a jamming target.', 'BP'),
 ])
 
@@ -102,7 +106,7 @@ const RESOURCES = ['resources-list', 'community-forum', 'community-wiki']
 const PAGE_HELP = Object.freeze({
   '/production': { terms: ['build-points', 'research-points', 'production-capacity', 'mineral-shortage', 'slipway', 'estimated-output'], links: ['tutorial-gameplay', 'tutorial-survey-ship', ...RESOURCES] },
   '/warnings': { terms: ['warning-check', 'maintenance-supply', 'fuel-litres', 'mineral-shortage', 'estimated-output'], links: RESOURCES },
-  '/log': { terms: ['game-log', 'production-cycle'], links: RESOURCES },
+  '/log': { terms: ['game-log', 'production-cycle', 'cease-fire', 'fleet-cease-fire', 'ship-open-fire', 'game-events-window'], links: RESOURCES },
   '/minerals': { terms: ['deposit', 'accessibility', 'mining-rate', 'mineral-shortage', 'civilian-mining', 'mass-driver', 'ton', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/mineral-outlook': { terms: ['runway', 'mining-rate', 'deposit', 'accessibility', 'ton', 'estimated-output'], links: ['tutorial-surveying', ...RESOURCES] },
   '/finances': { terms: ['wealth', 'production-cycle', 'civilian-shipping', 'civilian-mining', 'runway', 'estimated-output'], links: RESOURCES },

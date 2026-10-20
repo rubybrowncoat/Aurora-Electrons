@@ -5,6 +5,8 @@ import { claimRecording } from '../utilities/recording-owner'
 export default ({ store, ownerGrace }) => {
   // The latest pass started: { generation, status } with status 'running' (reading, or waiting for the recording lock), 'refused' (ended because another tab records) or 'done'.
   let latest = null
+  // The requests for a pass that the store counted (`history.captures`, one for each `history/capture`) and the last one a pass has taken: a pass takes the requests made since the one before it (`from` to `to`, a range of several when requests of one tick are answered by one pass, empty when the pass was started by an opened save) and says so in `history/ended`, so a view that asked for a pass tells its end from the end of any other pass.
+  let taken = 0
 
   // Records the open save once this window owns the recording of its database.
   const own = () => {
@@ -13,14 +15,16 @@ export default ({ store, ownerGrace }) => {
     }
   }
 
-  const record = (database) => {
+  const record = (database, to = taken) => {
     // A pass belongs to the copy of the save it was started for. The store's freshness generation counts the copies opened: once a newer one replaces this, the pass writes nothing more (its migration, registry and history writes all ask), because two saves in quick succession start two passes that can finish in either order.
     const generation = store.state.freshness.generation
     const isCurrent = () => store.state.freshness.generation === generation && store.state.database === database
     const pass = { generation, status: 'running' }
+    const from = taken + 1
     // The games whose snapshot this pass wrote.
     const saved = new Set()
 
+    taken = Math.max(taken, to)
     // Once per database: the lock is asked for when the save is first recorded, when its path is known.
     claimRecording({ database: store.state.savePath || '', onOwner: own })
 
@@ -31,6 +35,7 @@ export default ({ store, ownerGrace }) => {
       // A pass that a newer copy replaced reports nothing: what it failed on belonged to the copy the app has left.
       if (superseded || !isCurrent()) {
         pass.status = 'done'
+        store.commit('history/ended', { from, to, generation, outcome: 'superseded' })
 
         return
       }
@@ -44,11 +49,14 @@ export default ({ store, ownerGrace }) => {
       store.commit('history/failures', failed.map(({ GameID, stage }) => ({ GameID, stage })))
       // Only the end of a pass confirms what it wrote, and a failure reported with it is read first (utilities/economy-digest.js `recordingStateOf`).
       store.commit('history/passed', { GameIDs: [...saved], generation })
+      store.commit('history/ended', { from, to, generation, outcome: failed.some(({ stage }) => stage === 'readonly') ? 'refused' : failed.length ? 'failed' : 'passed' })
     }).catch((error) => {
       pass.status = 'done'
 
       // A newer save replaced this one and stopped its reads.
       if (!isCurrent()) {
+        store.commit('history/ended', { from, to, generation, outcome: 'superseded' })
+
         return
       }
 
@@ -56,6 +64,7 @@ export default ({ store, ownerGrace }) => {
 
       // The save couldn't be read at all (the game may have been writing it): no game was recorded.
       store.commit('history/failures', [{ GameID: null, stage: 'read' }])
+      store.commit('history/ended', { from, to, generation, outcome: 'failed' })
     })
   }
 
@@ -66,9 +75,9 @@ export default ({ store, ownerGrace }) => {
   })
 
   // A colony was chosen on the History page: the open save is read once more, so the colony's first point is the save the player was looking at.
-  store.watch((state) => state.history.captures, () => {
+  store.watch((state) => state.history.captures, (captures) => {
     if (store.state.database) {
-      record(store.state.database)
+      record(store.state.database, captures)
     }
   })
 }
