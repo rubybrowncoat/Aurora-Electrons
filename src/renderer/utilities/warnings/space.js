@@ -1,6 +1,7 @@
 import _partition from 'lodash/partition'
 
 import { systemBodyName } from '../aurora'
+import { HELD_CONTACT } from '../contacts'
 import { linkTo } from '../deep-links'
 import { isKnownNumber, roundToDecimal } from '../math'
 import { amount, anyOf, bodyText, categoriesOf, checksOf, figure, lacking, listWords, rowsOf, signatureOf, systemText, tokenWords, unknownCell, verdictRows } from './common'
@@ -45,11 +46,40 @@ const podExpiration = (lifepod, gameTime) => {
   return [days && `${days}d`, hours && `${hours}h`, minutes && `${minutes}m`, remaining && `${remaining}s`].filter(Boolean).join(' ')
 }
 
-const UNKNOWN_STANDING = 'the standing of the empire a contact belongs to'
+// The inputs a contact can lack, keyed by the kind it is counted apart under, in that order: the standing of its empire, then whether it is held now (the time it was last detected, or the game time).
+export const OPEN_INPUTS = Object.freeze({ standing: 'the standing of the empire a contact belongs to', detection: 'the time the race last detected a contact', clock: 'the game time' })
+
+// The words after each count of a system's contacts, as [one, many]: a type of contact by the standing of its empire (keyed as the categories of the row's signature), then the contacts counted apart, by the first input each lacks.
+export const CONTACT_WORDS = Object.freeze({
+  'hostile Ship': ['Hostile Ship', 'Hostile Ships'],
+  'neutral Ship': ['Ship', 'Ships'],
+  'hostile Salvo': ['Hostile Salvo', 'Hostile Salvos'],
+  'neutral Salvo': ['Salvo', 'Salvos'],
+  'hostile Population': ['Hostile Population', 'Hostile Populations'],
+  'neutral Population': ['Population', 'Populations'],
+  'hostile GroundUnit': ['Hostile Ground Unit', 'Hostile Ground Units'],
+  'neutral GroundUnit': ['Ground Unit', 'Ground Units'],
+  'hostile Shipyard': ['Hostile Shipyard', 'Hostile Shipyards'],
+  'neutral Shipyard': ['Shipyard', 'Shipyards'],
+  'hostile Other': ['Hostile Other Contact', 'Hostile Other Contacts'],
+  'neutral Other': ['Other Contact', 'Other Contacts'],
+  standing: ['contact of unknown standing', 'contacts of unknown standing'],
+  detection: ['contact with no stored detection time', 'contacts with no stored detection time'],
+  clock: ['contact not known to be detected now', 'contacts not known to be detected now'],
+})
 
 const plural = (count, one, many) => (count === 1 ? `${count} ${one}` : `${count} ${many}`)
 
-// What a system's contacts add up to by type, hostile ones first; tone is `error` when any is hostile. Contacts whose empire's standing is not stored are counted apart, with the unavailable result.
+// `3 Hostile Ships`, the count with the page's separator.
+const contactCount = (ctx, count, kind) => `${ctx.count(count)} ${CONTACT_WORDS[kind][count === 1 ? 0 : 1]}`
+
+// What a contact lacks, as keys of OPEN_INPUTS: its empire's standing, and whether it is held now. `Held` is 1 when one of its tracks carries the game time; the query has already left out the contacts whose every track is older.
+const openInputs = (contact) => [...(isKnownNumber(contact.ContactStatus) ? [] : ['standing']), ...(contact.Held === 1 ? [] : [isKnownNumber(contact.GameTime) ? 'detection' : 'clock'])]
+
+// The names of every input the contacts counted apart lack.
+const openNames = (unknown) => [...new Set(unknown.flatMap((item) => item.open))].map((kind) => OPEN_INPUTS[kind])
+
+// What a system's contacts add up to by type, hostile ones first; tone is `error` when any is hostile. Contacts that lack an input are counted apart, by the first input each lacks, with the unavailable result naming every input missing.
 const intruderTotals = (ctx, { Totals, Unknown }) => {
   const parts = []
   let hostile = false
@@ -59,25 +89,33 @@ const intruderTotals = (ctx, { Totals, Unknown }) => {
 
     if (hostiles.length) {
       hostile = true
-      parts.push(`${hostiles.length} Hostile ${type}s`)
+      parts.push(contactCount(ctx, hostiles.length, `hostile ${type}`))
     }
 
     if (neutrals.length) {
-      parts.push(`${neutrals.length} ${type}s`)
+      parts.push(contactCount(ctx, neutrals.length, `neutral ${type}`))
     }
   })
 
-  if (Unknown.length) {
-    parts.push(`${plural(Unknown.length, 'contact', 'contacts')} of unknown standing`)
-  }
+  Object.keys(OPEN_INPUTS).forEach((kind) => {
+    const open = Unknown.filter((item) => item.open[0] === kind).length
 
-  return { text: parts.join(', '), tone: hostile ? 'error' : undefined, result: Unknown.length ? ctx.unknown([UNKNOWN_STANDING]) : undefined }
+    if (open) {
+      parts.push(contactCount(ctx, open, kind))
+    }
+  })
+
+  return { text: parts.join(', '), tone: hostile ? 'error' : undefined, result: Unknown.length ? ctx.unknown(openNames(Unknown)) : undefined }
 }
 
-const intruderRaces = (races) => Object.values(races).map(({ Alien, Types }) => {
-  const types = Object.entries(Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => `${contacts.length} ${type}s`).join(', ')
+// The words of the line under a system that names each empire with contacts there: the name shown for an empire whose name is not stored, and the mark of a hostile one.
+export const RACE_WORDS = Object.freeze({ unnamed: 'An unknown empire', hostile: 'Hostile' })
 
-  return `${Alien.AlienRaceName || 'An unknown empire'} — ${types}${Alien.ContactStatus === HOSTILE ? ' — Hostile' : ''}`
+// `Khanate — 4 Ships — Hostile; League — 1 Population`: each empire with contacts in the system, its contacts by type and the mark of a hostile one.
+const intruderRaces = (ctx, races) => Object.values(races).map(({ Alien, Types }) => {
+  const types = Object.entries(Types).filter(([, contacts]) => contacts.length).map(([type, contacts]) => contactCount(ctx, contacts.length, `neutral ${type}`)).join(', ')
+
+  return `${Alien.AlienRaceName || RACE_WORDS.unnamed} — ${types}${Alien.ContactStatus === HOSTILE ? ` — ${RACE_WORDS.hostile}` : ''}`
 }).join('; ')
 
 const joined = (parts) => parts.filter(Boolean).join(', ')
@@ -104,11 +142,11 @@ export const checks = checksOf([
     material: 'another kind of contact being there',
     captured: [listWords],
     title: (count) => `${amount(count, 'system')} with intruders`,
-    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected in a system the race has surveyed, unless the race is allied with it or it is marked friendly.',
+    rule: 'Another empire\'s ships, salvos, colonies, ground units or shipyards are detected now, on the last sensor pass before the save, in a system the race has surveyed, unless the race is allied with it or it is marked friendly; a contact lost earlier is left out, though the game keeps it for up to a year.',
     evidence: {
       verification: 'confirmed',
-      structure: ['FCT_Contacts.ContactType, ContactRaceID, SystemID', 'FCT_AlienRace.ContactStatus', 'FCT_RaceSysSurvey.Name'],
-      note: 'A presence check on stored contacts: detected contacts of another empire in a surveyed system, less the empires stored as allied or friendly. A system whose only contacts belong to an empire with no stored standing is listed apart, as not evaluated, and other systems name such contacts in their count.',
+      structure: ['FCT_Contacts.ContactType, ContactID, ContactRaceID, SystemID, LastUpdate', 'FCT_Game.GameTime', 'FCT_AlienRace.ContactStatus', 'FCT_RaceSysSurvey.Name'],
+      note: 'A presence check on the contacts the race holds now: a contact counts when one of its tracks (one for each way it is detected) carries the game time of the save, the time the game gives every track it still detects at each sensor pass. A lost contact keeps the time it was last detected and stays stored for up to a year; it is left out, whatever its type, colonies included. Each contact counts once, and empires stored as allied or friendly are left out. A contact whose empire has no stored standing, or whose detection time or the game time is not stored, is counted apart; a system whose only contacts are such is listed apart, as not evaluated.',
     },
     columns: [
       { key: 'system', text: 'System' },
@@ -117,9 +155,21 @@ export const checks = checksOf([
     async read(ctx) {
       const { GameID, RaceID } = ctx
 
-      const contacts = await rowsOf(ctx, `select FCT_Contacts.ContactID, FCT_Contacts.SystemID, FCT_Contacts.ContactRaceID, FCT_Contacts.ContactType, FCT_RaceSysSurvey.Name as SystemName, FCT_AlienRace.AlienRaceName, FCT_AlienRace.ContactStatus from FCT_Contacts inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Contacts.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID and FCT_AlienRace.ViewRaceID = ${RaceID} where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and FCT_Contacts.ContactType in (1, 3, 4, 12, 14, 16) group by FCT_Contacts.ContactID order by FCT_Contacts.LastUpdate desc`)
+      // The tracks of the contacts the race may hold now: those at the game time, and those whose time or the game time is not stored. A contact whose every track is older is lost and never read.
+      const tracks = await rowsOf(ctx, `select FCT_Contacts.ContactID, FCT_Contacts.SystemID, FCT_Contacts.ContactRaceID, FCT_Contacts.ContactType, (${HELD_CONTACT}) as Held, FCT_Game.GameTime, FCT_RaceSysSurvey.Name as SystemName, FCT_AlienRace.AlienRaceName, FCT_AlienRace.ContactStatus from FCT_Contacts inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Contacts.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} inner join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID and FCT_AlienRace.ViewRaceID = ${RaceID} left join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and FCT_Contacts.ContactType in (1, 3, 4, 12, 14, 16) and (${HELD_CONTACT}) is not 0`)
 
-      const systems = contacts.reduce((aggregate, contact) => {
+      // One contact for each type and subject in a system, held while one of its tracks is. A colony's ground units of both kinds are one contact.
+      const contacts = new Map()
+
+      tracks.forEach((track) => {
+        const type = CONTACT_TYPES[track.ContactType] || 'Other'
+        const key = `${track.SystemID}:${type}:${track.ContactID}`
+        const kept = contacts.get(key)
+
+        contacts.set(key, kept ? { ...kept, Held: anyOf(kept.Held, track.Held) } : { ...track, Type: type })
+      })
+
+      const systems = [...contacts.values()].reduce((aggregate, contact) => {
         if ([2, 3].includes(contact.ContactStatus)) {
           return aggregate
         }
@@ -136,7 +186,7 @@ export const checks = checksOf([
         }
 
         const system = aggregate[contact.SystemID]
-        const type = CONTACT_TYPES[contact.ContactType] || 'Other'
+        const open = openInputs(contact)
 
         if (!system.Races[contact.ContactRaceID]) {
           system.Races[contact.ContactRaceID] = {
@@ -146,12 +196,12 @@ export const checks = checksOf([
           }
         }
 
-        system.Races[contact.ContactRaceID].Types[type].push(contact)
+        system.Races[contact.ContactRaceID].Types[contact.Type].push(contact)
 
-        if (isKnownNumber(contact.ContactStatus)) {
-          system.Totals[type].push(contact)
+        if (open.length) {
+          system.Unknown.push({ contact, open })
         } else {
-          system.Unknown.push(contact)
+          system.Totals[contact.Type].push(contact)
         }
 
         return aggregate
@@ -159,14 +209,14 @@ export const checks = checksOf([
 
       return verdictRows(ctx, Object.values(systems), {
         verdict: (system) => (Object.values(system.Totals).some((totals) => totals.length) ? 1 : null),
-        missing: () => [UNKNOWN_STANDING],
+        missing: (system) => openNames(system.Unknown),
         build: (system) => ({
           id: `system:${system.SystemID}`,
           cells: {
             system: systemText(system),
             contacts: intruderTotals(ctx, system),
           },
-          caption: intruderRaces(system.Races),
+          caption: intruderRaces(ctx, system.Races),
           link: linkTo.map(system.SystemID),
           signature: system.Unknown.length ? null : signatureOf(categoriesOf(Object.entries(system.Totals).flatMap(([type, contacts]) => [...(contacts.some((contact) => contact.ContactStatus === HOSTILE) ? [`hostile ${type}`] : []), ...(contacts.some((contact) => contact.ContactStatus !== HOSTILE) ? [`neutral ${type}`] : [])]))),
         }),

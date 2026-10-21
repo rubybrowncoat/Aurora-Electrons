@@ -2,12 +2,16 @@
 
 import { gameTime } from './aurora'
 import { people } from './colonies'
+import { HELD_CONTACT } from './contacts'
 import { compact as compactLitres } from './logistics'
 import { MINERALS, compact as compactTons } from './minerals'
 import { isKnownNumber, roundToDecimal, separatedNumber } from './math'
 import { bodyPointsSql } from './survey'
 
 const PEEK_WINDOW_DAYS = 30
+
+// The words of the Warnings line: the noun after each figure, as [one, many], by what it counts, and the line when both are 0.
+export const WARNINGS_PEEK_WORDS = Object.freeze({ intruders: ['intruder system', 'intruder systems'], damaged: ['damaged ship', 'damaged ships'], none: 'No intruders or damage' })
 
 const row = async (database, sql) => {
   const [rows] = await database.query(sql)
@@ -80,23 +84,25 @@ export const peeks = {
     return `${counted(Jobs, separator, 'job', 'jobs')}${Paused > 0 ? `, ${Paused} paused` : ''}`
   },
 
+  // The systems the Warnings page lists with intruders (its `intruders` check): those with a contact the race holds now of an empire of known standing that is neither allied nor friendly. A system whose contacts lack their standing or their time is listed apart on the page and is not counted here.
   '/warnings': async ({ database, GameID, RaceID, separator }) => {
     const { IntruderSystems, DamagedShips } = await row(database, `select
       (select count(distinct FCT_Contacts.SystemID) from FCT_Contacts
+        inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
         inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_Contacts.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}
         inner join FCT_AlienRace on FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID and FCT_AlienRace.ViewRaceID = ${RaceID} and FCT_AlienRace.GameID = ${GameID}
-        where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactType in (1, 3, 4, 12, 14, 16) and FCT_Contacts.ContactRaceID <> ${RaceID} and FCT_AlienRace.ContactStatus not in (2, 3)) as IntruderSystems,
+        where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactType in (1, 3, 4, 12, 14, 16) and FCT_Contacts.ContactRaceID <> ${RaceID} and FCT_AlienRace.ContactStatus not in (2, 3) and ${HELD_CONTACT}) as IntruderSystems,
       (select count(distinct FCT_Ship.ShipID) from FCT_Ship
         inner join FCT_DamagedComponent on FCT_DamagedComponent.ShipID = FCT_Ship.ShipID
         inner join FCT_ShipDesignComponents on FCT_ShipDesignComponents.SDComponentID = FCT_DamagedComponent.ComponentID
         where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Ship.ShippingLineID = 0) as DamagedShips`)
 
     const named = [
-      IntruderSystems > 0 ? counted(IntruderSystems, separator, 'intruder system', 'intruder systems') : null,
-      DamagedShips > 0 ? counted(DamagedShips, separator, 'damaged ship', 'damaged ships') : null,
+      IntruderSystems > 0 ? counted(IntruderSystems, separator, ...WARNINGS_PEEK_WORDS.intruders) : null,
+      DamagedShips > 0 ? counted(DamagedShips, separator, ...WARNINGS_PEEK_WORDS.damaged) : null,
     ].filter(Boolean)
 
-    return named.length ? named.join(', ') : 'No intruders or damage'
+    return named.length ? named.join(', ') : WARNINGS_PEEK_WORDS.none
   },
 
   '/log': async ({ database, GameID, RaceID, separator }) => {

@@ -1,6 +1,7 @@
 // The reads behind the places Route Finder offers (utilities/places.js has the ones its page already holds). Every one is limited to the systems the race knows, and returns places with the `text` a search matches. The game lets a fleet move to a charted jump point, a Lagrange point, a body (planet, moon, asteroid or comet), a survey location, a wreck or life pod, one of the race's own waypoints, a colony, a fleet, or a contact the race holds now, each at a position the save stores. Aether gates are only ordered by the game's non-player races, but their place is stored too, so they are read as well.
 
 import { systemBodyName } from './aurora'
+import { HELD_CONTACT } from './contacts'
 import { place } from './deep-links'
 import { groupIcon } from './places'
 
@@ -202,7 +203,7 @@ from FCT_Contacts
 inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
 ${known('FCT_Contacts', context)}
 left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Contacts.GameID and FCT_AlienRace.ViewRaceID = ${context.RaceID} and FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID
-where FCT_Contacts.GameID = ${context.GameID} and FCT_Contacts.DetectRaceID = ${context.RaceID} and FCT_Contacts.ContactRaceID != ${context.RaceID} and FCT_Contacts.LastUpdate = FCT_Game.GameTime
+where FCT_Contacts.GameID = ${context.GameID} and FCT_Contacts.DetectRaceID = ${context.RaceID} and FCT_Contacts.ContactRaceID != ${context.RaceID} and ${HELD_CONTACT}
 group by FCT_Contacts.ContactType, FCT_Contacts.ContactID
 order by FCT_Contacts.ContactName`)).map((row) => ({
   key: place.contact(row.UniqueID),

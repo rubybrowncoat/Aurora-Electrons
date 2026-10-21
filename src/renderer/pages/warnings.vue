@@ -45,7 +45,7 @@
               <div class="subtitle-2">{{ panel.group.title }} <span class="caption text--secondary">{{ panelCaption(panel) }}<provenance-mark rule="warnings.summary" /></span></div>
             </div>
 
-            <section v-for="section in panel.sections" :key="section.check.key" class="check" :class="{ 'check--muted': section.checkMuted }">
+            <section v-for="section in panel.sections" :key="section.check.key" class="check" :class="{ 'check--muted': section.checkMuted }" :data-check="section.check.key">
               <div class="check-head">
                 <v-icon small :color="section.severity.color" :title="section.severity.label" :aria-label="section.severity.label">{{ section.severity.icon }}</v-icon>
                 <span class="check-title">{{ sectionTitle(section) }}</span><provenance-mark :rule="section.check.provenance" />
@@ -69,25 +69,25 @@
                   </thead>
                   <tbody>
                     <template v-for="row in listing(section)">
-                      <tr v-if="row.separator" :key="row.id" class="row-separator">
+                      <tr v-if="row.separator" :key="row.id" class="row-separator" :data-separator="row.separator">
                         <td :colspan="section.check.columns.length + 1" class="caption text--secondary"><template v-if="row.separator === 'snoozed'">{{ count(row.count) }} snoozed: out of the tiles until the snooze ends</template><template v-else>{{ count(row.count) }} not evaluated: a stored value the condition needs is missing<provenance-mark :rule="section.check.provenance" /></template></td>
                       </tr>
-                      <tr v-else :key="row.id" :class="{ 'row-muted': !row.unevaluated && section.mutedIds.has(row.id), 'row-snoozed': section.snoozedIds.has(row.id) }">
+                      <tr v-else :key="row.id" :class="{ 'row-muted': !row.unevaluated && section.mutedIds.has(row.id), 'row-snoozed': section.snoozedIds.has(row.id) }" :data-row="row.id">
                         <td v-for="(column, index) in section.check.columns" :key="column.key" :class="{ 'text-end': column.align === 'end' }">
                           <template v-if="index === 0">
                             <div class="row-name">
-                              <span :class="cellTone(row, column)">{{ cellText(row, column) }}</span>
+                              <span :class="cellTone(row, column)" :data-cell="column.key">{{ cellText(row, column) }}</span>
                               <provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
                               <provenance-mark v-if="row.unevaluated" :result="row.unevaluated" />
                               <span v-if="!row.unevaluated && isNew(section.check.key, row.id)" class="new-label">New</span>
                             </div>
-                            <div v-if="row.caption" class="caption text--secondary">{{ row.caption }}</div>
+                            <div v-if="row.caption" class="caption text--secondary" data-caption>{{ row.caption }}</div>
                             <div v-if="row.unevaluated" class="caption text--secondary">{{ missingText(row) }}</div>
                             <div v-if="section.snoozedIds.has(row.id)" class="caption text--secondary">{{ snoozeText(snoozeOf(section, row)) }}</div>
                             <div v-for="note in rowNotes(section, row)" :key="note" class="caption text--secondary">{{ note }}</div>
                           </template>
                           <template v-else>
-                            <span :class="cellTone(row, column)">{{ cellText(row, column) }}</span><provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
+                            <span :class="cellTone(row, column)" :data-cell="column.key">{{ cellText(row, column) }}</span><provenance-mark v-if="cellResult(row, column)" :result="cellResult(row, column)" />
                           </template>
                         </td>
                         <td class="row-actions">

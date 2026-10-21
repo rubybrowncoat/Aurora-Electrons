@@ -3,6 +3,7 @@
 import groupBy from 'lodash/groupBy'
 import { systemBodyName } from './aurora'
 import { loadSpecies } from './colonization-data'
+import { HELD_CONTACT } from './contacts'
 import { BODY_CLASS, BODY_TYPE, costFactors, speciesLimits } from './habitability'
 import { versionAssumptions } from './map-figures'
 import { ofRule, registerRule, unavailable } from './provenance'
@@ -111,7 +112,7 @@ group by FCT_Population.SystemID`),
 from FCT_Contacts
 inner join FCT_Game on FCT_Game.GameID = FCT_Contacts.GameID
 left join FCT_AlienRace on FCT_AlienRace.GameID = FCT_Contacts.GameID and FCT_AlienRace.ViewRaceID = ${RaceID} and FCT_AlienRace.AlienRaceID = FCT_Contacts.ContactRaceID
-where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and FCT_Contacts.LastUpdate = FCT_Game.GameTime
+where FCT_Contacts.GameID = ${GameID} and FCT_Contacts.DetectRaceID = ${RaceID} and FCT_Contacts.ContactRaceID != ${RaceID} and ${HELD_CONTACT}
 group by FCT_Contacts.SystemID, FCT_AlienRace.ContactStatus`),
   ])
 
