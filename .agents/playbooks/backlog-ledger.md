@@ -18,3 +18,24 @@ This repository has no CI and the owner lands commits on the working branch. Ope
 - **After** "Verify on the same surface." do the same: evidence file, then `in-review`, or `blocked` or `needs-decision`.
 - **After** "Apply the **unslop** skill to the reply." write the answer into the evidence file and log `in-review` with its path. The owner or a reviewer logs `complete`.
 - **After** "Run **Opening a PR**." end the commit summary with the item ID in parentheses. When the closing review has approved, log `complete` under the reviewer's name (`review:<name>`) with the commit hash as the ref. The CLI refuses `complete` from `impl:<name>`. Run `node docs/plans/backlog/ledger.mjs check` before you reply.
+
+## Lanes and review (FU-50, owner decisions of 2026-10-22)
+
+- Builder lanes get the lane brief `docs/plans/backlog/LANE-BRIEF.md` as their mandatory brief. Rules learnt in a lane go into that file, not into a session-local copy.
+- Open a lane only on files no lane in review owns, and order the queue by file ownership. When a hold cannot be avoided, the independent part may land as its own commit, and the item stays `in-progress` until the held part lands as a second commit.
+- Review loop:
+  - Spawn one `reviewer-interim` per change and wake that same agent with `write agent://<id>` for every recheck.
+  - When the interim round leaves no still-present P0-P2 and the landing run has passed, spawn one fresh `reviewer` for the closing round.
+  - If a closing round requests changes, the fixes go back to the interim reviewer, then a second fresh closing round runs.
+  - Interim rechecks are not capped. A third fresh closing round needs the owner's approval: ask, with the still-open findings.
+  - Keep each iteration short. The proof rules below keep it so.
+- Proof:
+  - A round runs only the head checks plus the faults and rewrites the round touched, focused.
+  - The full suites (and every dependent check whose faults anchor on a changed file) run once, as the landing run, before the closing round.
+  - Reviewers verify with their own probes and do not rerun whole suites.
+  - Every heavy run counts against the machine-wide slot limit, reviewers' runs included.
+- Research items: the closing review judges the contract, the open questions and reproducible figures. Unsettled parsing cases become open questions for the implementing item.
+- Record each review round with `node docs/plans/backlog/ledger.mjs log <id> <status> <by> [note] [ref] --payload <agent>`.
+  - The note is led by the payload's verdict, served model and finding ids, and the round is appended to the evidence file's `### Closing review record`.
+  - `complete` is refused for a payload that did not approve, or that was served outside OpenAI.
+  - One log line per round.
