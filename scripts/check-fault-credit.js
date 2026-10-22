@@ -319,7 +319,7 @@ const main = async () => {
         folders.push(folder)
         fs.writeFileSync(path.join(folder, 'fault-credit.js'), patched(MODULE, source, from, to))
 
-        for (const sibling of ['bounded-assert.js', 'browser-observe.js']) {
+        for (const sibling of ['bounded-assert.js', 'browser-observe.js', 'suite-runner.js', 'check-pool.js']) {
           fs.copyFileSync(path.join(DIRECTORY, sibling), path.join(folder, sibling))
         }
 

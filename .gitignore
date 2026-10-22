@@ -11,3 +11,4 @@ CLAUDE.md
 artifacts/
 saves/
 __pycache__/
+.check-runs/

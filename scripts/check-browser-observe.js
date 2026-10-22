@@ -158,7 +158,7 @@ const CASES = {
   quiet: async (lib, browser) => {
     const seen = await watching(lib, browser, '<p>fine</p>')
 
-    assert.deepEqual(seen, { value: { served: true }, error: null, phase: 'serving the page', errors: [], console: [], failed: [], unexpected: [] })
+    assert.deepEqual(seen, { value: { served: true }, error: null, phase: 'serving the page', scene: null, errors: [], console: [], failed: [], unexpected: [] })
     assert.equal(lib.validate(seen), seen)
   },
 
@@ -225,6 +225,7 @@ const CASES = {
     assert.equal(seen.phase, 'second')
     assert.equal(seen.value, null)
     assert.deepEqual(seen.console, ['before'])
+    assert.ok(typeof seen.scene === 'string' && seen.scene.includes(`address: ${HOST}/`) && seen.scene.includes('loaded 1 times') && seen.scene.includes('requests out: none') && seen.scene.includes('error: before') && seen.scene.includes('"readyState":"complete"'), String(seen.scene))
     lib.validate(seen)
   },
 
@@ -438,7 +439,7 @@ const WORDS = {
   'expected-named': 'an error named by its exact text is kept and does not fail the observation',
   'only-named': 'an error that is not named still fails the observation, and only that one is unexpected',
   late: 'an error raised just after the work ended is seen',
-  'work-throws': 'work that throws gives its whole message, the last step named, no value, and what the page raised before',
+  'work-throws': 'work that throws gives its whole message, the last step named, no value, what the page raised before, and what the page showed then: its address and loads, the requests out, its console and the state of the document',
   'failed-requests': 'a failed request and a response of 404 are kept',
   'close-failure': 'a context that does not close fails the observation',
   isolated: 'one observation never sees the errors of another',
@@ -467,7 +468,8 @@ const FAULTS = [
   ['an error that is named is unexpected all the same', 'record.errors.filter((text) => !named.has(text))', 'record.errors', 'expected-named'],
   ['an unexpected error does not fail the observation', 'if (!problems.length && unnamed.length) {', 'if (!problems.length && false) {', 'uncaught'],
   ['an error raised after the work ended is not waited for', 'await page.waitForTimeout(flush)', 'void flush', 'late'],
-  ['the last step is not kept', 'step: (phase) => { record.phase = phase }', 'step: () => {}', 'work-throws'],
+  ['the last step is not kept', 'step: (phase) => { record.phase = phase; at(record, phase) }', 'step: (phase) => { at(record, phase) }', 'work-throws'],
+  ['what the page showed when the work threw is not read', 'scene = page ? await sceneOf(page, seen)', 'scene = null && page ? await sceneOf(page, seen)', 'work-throws'],
   ['the message of a failed work is cut to its first line', 'problems.push(clip(thrown && thrown.message ? thrown.message : thrown, MESSAGE_LIMIT))', "problems.push(clip(thrown && thrown.message ? String(thrown.message).split('\\n')[0] : thrown, MESSAGE_LIMIT))", 'work-throws'],
   ['failed requests are not recorded', "page.on('requestfailed', (request) => record.failed.push(", "page.on('requestfailed', (request) => [].push(", 'failed-requests'],
   ['a context that does not close is not told', '(thrown) => `the context did not close: ${clip(thrown && thrown.message ? thrown.message : thrown, 500)}`', '() => null', 'close-failure'],
@@ -569,6 +571,11 @@ const main = async () => {
 
         folders.push(folder)
         fs.writeFileSync(file, patched(HELPER, source, from, to))
+
+        // The modules the helper loads, beside the copy as beside the helper.
+        for (const sibling of ['suite-runner.js', 'check-pool.js']) {
+          fs.copyFileSync(path.join(path.dirname(HELPER), sibling), path.join(folder, sibling))
+        }
 
         try {
           await CASES[name](require(file), browser)

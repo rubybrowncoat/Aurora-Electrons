@@ -7,9 +7,8 @@
 const pageLoading = require('../page-loading')
 const { observe, installScreen } = require('./browser-observe')
 
+// Every step of an observation (opening the app, picking the game and the race, the wait for the save of the race, each settling, each click and wait for a page) is bounded by TIMEOUT, below the deadline the runner gives a variant that reads the screen (DEADLINES in scripts/check-resource-ledger.js), so a step that does not end fails by its own timeout and is named by the step it was at. The page server is warmed before the first observation (`warm` of scripts/lib/page-server.js), so no step meets a cold start.
 const TIMEOUT = 120000
-// The first request of a server that was just started (Vite transforms and bundles the app for this process alone) may take minutes on a busy machine; what follows is bounded by TIMEOUT.
-const OPEN_TIMEOUT = 300000
 const LOADING_LIMIT = 45000
 const NAMES = { game: 'Aurelian Empire', race: 'Aurelian Empire' }
 // A control is pressed when it is on screen and enabled once the panel's own work is done (no write of the panel in progress); one that is not is not pressed, at once, and that is what is observed. Only the wait for that work and the click itself are bounded, by TIMEOUT, and either running out is a failure of the observation, never a control that was not pressed.
@@ -65,7 +64,7 @@ const defineHandle = () => {
   }
 }
 
-const boot = async (page, url) => {
+const boot = async (page, url, step) => {
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
   let inFlight = 0
   let last = Date.now()
@@ -107,36 +106,43 @@ const boot = async (page, url) => {
     await page.evaluate(async () => { await window.$app.$nextTick() })
   }
   const go = async (route) => {
+    step(`opening ${route}`)
     await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), route)
     await page.waitForFunction(pageLoading.arrived, route, { timeout: TIMEOUT })
     await settle()
   }
 
-  await page.goto(url, { timeout: OPEN_TIMEOUT })
+  step('opening the app')
+  await page.goto(url, { timeout: TIMEOUT })
 
   const picker = page.locator('.empire-list').first()
 
-  await picker.locator('.empire-list__game').filter({ hasText: `${NAMES.game} ·` }).first().click({ timeout: OPEN_TIMEOUT })
+  step('picking the game')
+  await picker.locator('.empire-list__game').filter({ hasText: `${NAMES.game} ·` }).first().click({ timeout: TIMEOUT })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-    await picker.getByText(NAMES.race, { exact: true }).last().click()
+    step('picking the race')
+    await picker.getByText(NAMES.race, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
-  await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: OPEN_TIMEOUT })
+  step('waiting for the save of the race')
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: TIMEOUT })
+  step('waiting for the app to settle')
   await settle()
   await installScreen(page)
   await page.evaluate(defineHandle)
 
-  return { page, settle, go }
+  return { page, settle, go, step }
 }
 
-const logisticsPart = async ({ page, settle, go }) => {
+const logisticsPart = async ({ page, settle, go, step }) => {
   await go('/logistics')
 
   const views = await page.evaluate(() => [...document.querySelectorAll('.v-btn-toggle .v-btn')].map((button) => button.getAttribute('value')))
   const byView = {}
 
   for (const view of [...views].reverse()) {
+    step(`showing the view ${view} of Logistics`)
     await page.locator(`.v-btn-toggle .v-btn[value="${view}"]`).first().click({ timeout: TIMEOUT })
     await page.waitForTimeout(300)
     await settle()
@@ -171,11 +177,12 @@ const haulingPart = async ({ page, settle, go }) => {
 }
 
 // The buttons of the panel on the Hauling page, pressed by a click in the browser in the states that show them. `press` is false for a control that is not on screen or not enabled; `shown` counts the controls on screen.
-const actionsPart = async ({ page, settle, go }) => {
+const actionsPart = async ({ page, settle, go, step }) => {
   await go('/hauling')
 
   const shown = (selector) => page.locator(selector).evaluateAll((elements) => elements.filter((element) => window.__screen.visible(element)).length)
   const press = async (selector) => {
+    step(`pressing ${selector}`)
     await idle(page)
 
     if (!(await page.evaluate((css) => [...document.querySelectorAll(css)].some((element) => window.__screen.visible(element) && !element.disabled), selector))) {
@@ -454,10 +461,12 @@ const unmountFixture = async (name) => {
 }
 
 // The fixtures of the panel, each mounted on the page of the app, read, with the rows given in `expand` opened by a click on their toggle, and taken away.
-const cellsPart = async ({ page }, specs) => {
+const cellsPart = async ({ page, step }, specs) => {
   const out = {}
 
   for (const spec of specs) {
+    step(`mounting the fixture ${spec.name}`)
+
     const opened = await page.evaluate(mountFixture, spec)
     const read = opened.ready ? await page.evaluate(readFixture, spec.name) : null
     const details = {}
@@ -471,10 +480,11 @@ const cellsPart = async ({ page }, specs) => {
         continue
       }
 
+      step(`opening the row ${key} of the fixture ${spec.name}`)
       await toggle.click({ timeout: TIMEOUT })
-
+      // The table's own expansion of the row (the panel's `expanded` holds it once the click is handled), then the render it schedules: the detail is read once both are done, never after a fixed pause that a loaded machine can outrun. Whether the detail is then drawn, and how, is what the read observes.
+      await page.waitForFunction(({ name, key }) => window.__fixtures[name].vm.expanded.some((item) => item.key === key), { name: spec.name, key }, { timeout: TIMEOUT })
       await page.evaluate(async () => { await window.$app.$nextTick() })
-      await page.waitForTimeout(150)
       details[key] = await page.evaluate(readDetail, { name: spec.name, key })
     }
 
@@ -486,9 +496,7 @@ const cellsPart = async ({ page }, specs) => {
 }
 
 const observeScreen = (browser, url, parts) => observe(browser, async ({ page, step }) => {
-  step('opening the app')
-
-  const session = await boot(page, url)
+  const session = await boot(page, url, step)
   const seen = {}
 
   if (parts.hauling) {

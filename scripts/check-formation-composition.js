@@ -1,7 +1,7 @@
 /*
   Checks the comparison of a ground formation's actual elements with the template chosen as its intent (src/renderer/utilities/formation-composition.js over the model of utilities/ground-formations.js, and the Ground formations panel of the Survey Progress page) against figures worked out by hand, against SQL written separately here and against the saves.
 
-  Run: bun scripts/check-formation-composition.js [--no-mutations] [--no-browser] [--only=<text>]
+  Run: bun scripts/check-formation-composition.js [--no-mutations] [--no-browser] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   The groups, each check a PASS or FAIL line:
   - A constructed race of 18 formations over 14 templates: exact deficits and excess by class, the two bases told apart, a complete formation, a template that is none, foreign, missing, not stored or empty (no comparison and no invented deficit), a formation with no element rows, units and sizes that are not stored, the mass of the elements reconciled with the units and sizes, the obsolete flag apart from the identity of the templates, an obsolete template with an STO class (a replacement review) and the cases that are none, and whether a formation fits one troop bay now and at the intended mass.
@@ -10,7 +10,7 @@
   - Planted faults in copies of the utility, the model and the page, each of which must make a named check fail on an assertion of its own, by a value it reads and not by a call of the code under test that threw (scripts/lib/fault-credit.js `caughtBy`; a fault in the page is served to the browser), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a qualifier moved from the front to the back, a synonym in generated prose, a parenthesised condition) that must make none fail.
   - Controls of the harness: an assertion of a check is told from an error of the code under test.
 
-  Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped.
+  Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. A save that is not there fails its checks: none is skipped. The head (`head`) and every fault, control and rewrite (`planted:N`, `controls`, `benign:N`) run through scripts/lib/suite-runner.js: one after another in a worker that opens the saves, plants the copy, starts one page server and one browser and warms them first, each with a deadline, with a record that --resume continues and the control `control:warm-reset`, which runs a planted fault and then the head on the same server. --only=<text> runs the head and the variants whose names hold the text (a focused run while working; the run that counts has none).
 */
 const fs = require('fs')
 const os = require('os')
@@ -22,6 +22,8 @@ const { patched } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { assert, through, subjectModule, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
+const { runSuite } = require('./lib/suite-runner')
+const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -1117,8 +1119,8 @@ const observePage = (browser, url, plan, { timeout = BROWSER_TIMEOUT, viewport =
   }
   const route = `/survey-progress?formations=${plan.system}`
   const go = async (target) => {
-    await page.evaluate((to) => window.$app.$router.push(to, () => {}, () => {}), target)
     step(`opening ${target}`)
+    await page.evaluate((to) => window.$app.$router.push(to, () => {}, () => {}), target)
     await page.waitForFunction(pageLoading.arrived, target, { timeout })
 
     if (target.startsWith('/survey-progress')) {
@@ -1163,6 +1165,7 @@ const observePage = (browser, url, plan, { timeout = BROWSER_TIMEOUT, viewport =
   }
   const basis = (value) => `[data-compare="basis"] [data-compare-basis="${value}"]`
 
+  step('opening the app')
   await installScreen(page)
   await page.goto(url, { timeout })
 
@@ -1172,6 +1175,7 @@ const observePage = (browser, url, plan, { timeout = BROWSER_TIMEOUT, viewport =
   await picker.locator('.empire-list__game').filter({ hasText: `${BROWSER_NAMES.game} ·` }).first().click({ timeout })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+    step('picking the race')
     await picker.getByText(BROWSER_NAMES.race, { exact: true }).last().click({ timeout })
   }
 
@@ -1766,9 +1770,10 @@ const finish = async (code) => {
 // The formations the table shows for the link of a system: those at a colony in it, and those aboard a ship whose fleet is in it.
 const rowsOfSystemSql = ({ GameID, RaceID }, system) => `select f.FormationID as id from FCT_GroundUnitFormation f where f.GameID = ${GameID} and f.RaceID = ${RaceID} and ((f.PopulationID > 0 and exists (select 1 from FCT_Population p where p.PopulationID = f.PopulationID and p.SystemID = ${system})) or (coalesce(f.PopulationID, 0) <= 0 and f.ShipID > 0 and (select coalesce(fl.SystemID, fm.SystemID) from FCT_Ship s left join FCT_Fleet fl on fl.FleetID = s.FleetID left join FCT_Ship ms on ms.ShipID = s.MothershipID left join FCT_Fleet fm on fm.FleetID = ms.FleetID where s.ShipID = f.ShipID) = ${system}))`
 
-const main = async () => {
-  const only = argument('--only').split(',').filter(Boolean)
-  const wanted = (kind, name = '') => only.length === 0 || (kind === 'control' ? only.includes('control') : only.some((text) => text !== 'control') && (name === '' || only.some((text) => name.includes(text))))
+// What a worker sets up once before its first variant (`setUp`, run by the runner): the saves and their oracle, and in the browser a changed copy of a save, served by one page server (warmed) to one Chromium, with what the oracle holds of it. Its functions judge a variant of the sources. A start of the browser that does not get through is kept as `startFailure`, and every observation of the worker is then one that did not happen; a copy of the save that does not hold the planted formations is a defect of the harness, which fails the worker's setup.
+let ENV = null
+
+const setUp = async () => {
   const sources = { composition: fs.readFileSync(COMPOSITION_FILE, 'utf8'), ground: fs.readFileSync(GROUND_FILE, 'utf8'), survey: fs.readFileSync(SURVEY_FILE, 'utf8') }
   const texts = new Map()
   const loadedOf = (given) => loadUtilities(['ground-formations', 'formation-composition'], { stubs: STUBS, sources: { 'formation-composition': given.composition, 'ground-formations': given.ground }, texts })
@@ -1782,6 +1787,8 @@ const main = async () => {
     databases.push(database)
     oracles.push(database ? await oracleOf(database, fixture.GameID, fixture.RaceID) : null)
   }
+
+  cleanups.push(() => Promise.all(databases.filter(Boolean).map((database) => database.close())))
 
   // The browser's save, changed as `plantedCopy` says, and what the oracle holds of it.
   let server = null
@@ -1811,6 +1818,10 @@ const main = async () => {
       cleanups.push(() => server.stop())
       chrome = await require('playwright').chromium.launch()
       cleanups.push(() => chrome.close())
+
+      const warmed = await server.warm(chrome, { routes: ['/survey-progress'] })
+
+      console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
     } catch (error) {
       if (error instanceof HarnessError) {
         throw error
@@ -1820,7 +1831,9 @@ const main = async () => {
     }
   }
 
-  const observeVariant = async (given, parts = null) => {
+  const env = { sources, server, chrome, planted, startFailure, baselineSeen: undefined }
+
+  env.observeVariant = async (given, parts = null) => {
     if (startFailure) {
       return failedObservation(startFailure)
     }
@@ -1841,11 +1854,19 @@ const main = async () => {
     }
   }
 
-  const modelCache = new Map()
-  let baselineSeen = null
+  // The page as it is, observed by the head or, in a worker that does not run it, the first time a variant needs it.
+  env.baseline = async () => {
+    if (env.baselineSeen === undefined) {
+      env.baselineSeen = options.browser ? await env.observeVariant(sources) : null
+    }
 
-  // The context of one variant of the sources: the modules as given (the constructed model built by the model as given, the saves read by it), the oracle, and what the browser showed (`seen`) in the grouping of the page's own setting. The code under test runs only through scripts/lib/fault-credit.js `subjectModule` and `through`: a call of it that throws fails the check that made it, marked as a throw, and a fault credited by such failures alone stops the run (`caughtBy`).
-  const contextOf = async (given, seen = baselineSeen) => {
+    return env.baselineSeen
+  }
+
+  const modelCache = new Map()
+
+  // The context of one variant of the sources: the modules as given (the constructed model built by the model as given, the saves read by it), the oracle, and what the browser showed (`seen`) in the grouping of the page's own setting. The code under test runs only through scripts/lib/fault-credit.js `subjectModule` and `through`: a call of it that throws fails the check that made it, marked as a throw, and a fault credited by such failures alone is a defect of the harness (`caughtBy`).
+  env.contextOf = async (given, seen) => {
     const loaded = await loadedOf(given)
     const comp = subjectModule(loaded['formation-composition'])
     const ground = loaded['ground-formations']
@@ -1878,9 +1899,11 @@ const main = async () => {
 
     return ctx
   }
-  const list = options.browser ? results : results.filter((item) => !item.id.startsWith('browser-'))
-  const judge = async (ctx, given = list) => judged(await runChecks(given, ctx))
-  const variantOf = ([, from, to, file]) => {
+  env.databases = databases
+  env.plantedRows = plantedRows
+  env.list = options.browser ? results : results.filter((item) => !item.id.startsWith('browser-'))
+  env.judge = async (ctx, given = env.list) => judged(await runChecks(given, ctx))
+  env.variantOf = ([, from, to, file]) => {
     const given = { ...sources }
 
     for (const [index, one] of [].concat(from).entries()) {
@@ -1893,9 +1916,17 @@ const main = async () => {
     return given
   }
 
+  return env
+}
+
+const checkHead = async () => {
+  const { sources, server, chrome, planted, startFailure, databases, list } = ENV
+
   console.log('Constructed race, saves and browser')
 
-  baselineSeen = options.browser ? await observeVariant(sources) : null
+  ENV.baselineSeen = options.browser ? await ENV.observeVariant(sources) : null
+
+  const baselineSeen = ENV.baselineSeen
 
   // --shots=<dir>: the Ground formations panel, its first planted formation expanded, as pictures at three window sizes.
   if (options.browser && !startFailure && argument('--shots')) {
@@ -1908,10 +1939,10 @@ const main = async () => {
   }
 
   if (process.env.CHECK_VERBOSE && baselineSeen) {
-    console.log(JSON.stringify({ error: baselineSeen.error, phase: baselineSeen.phase, steps: baselineSeen.value && baselineSeen.value.steps, gaps: baselineSeen.value && baselineSeen.value.initial.gaps, hidden: baselineSeen.value && baselineSeen.value.initial.hidden, plan: planted && planted.plan, rows: plantedRows }))
+    console.log(JSON.stringify({ error: baselineSeen.error, phase: baselineSeen.phase, steps: baselineSeen.value && baselineSeen.value.steps, gaps: baselineSeen.value && baselineSeen.value.initial.gaps, hidden: baselineSeen.value && baselineSeen.value.initial.hidden, plan: planted && planted.plan, rows: ENV.plantedRows }))
   }
 
-  const baselineContext = await contextOf(sources)
+  const baselineContext = await ENV.contextOf(sources, baselineSeen)
   const baseline = await runChecks(list, baselineContext)
 
   baseline.forEach((result) => check(result.name, result.ok, result.detail))
@@ -1925,80 +1956,101 @@ const main = async () => {
   const undriven = !options.browser || unobserved(baselineSeen) ? [] : [...planted.plan.ids.filter((id) => !(baselineSeen.value.rows[id] && ['replacement', 'original', 'back'].every((which) => baselineSeen.value.rows[id][which]))), ...(baselineSeen.value.restored === undefined ? ['restored'] : [])]
 
   check('the head drives every part of the page; a fault names parts only where its page is driven in the browser, only parts the page has, and for each browser check it is caught by a part that check reads; and no rewrite names any', narrowed.length === 0 && undriven.length === 0, [...narrowed, ...undriven].join(', '))
+}
 
-  if (options.mutations) {
-    if (wanted('planted')) {
-      console.log('\nPlanted faults')
+const checkPlanted = async ([name, from, to, file, caught, browser, parts]) => {
+  const given = ENV.variantOf([name, from, to, file])
+  const failed = await ENV.judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given, parts) : await ENV.baseline()))
+  const named = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
 
-      for (const [name, from, to, file, caught, browser, parts] of MUTANTS) {
-        if (!wanted('planted', name) || (browser && !options.browser)) {
-          continue
-        }
+  check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${named.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'}: ${result.detail.slice(0, 120)})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}${result.threw ? ', threw' : ''}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
+}
 
-        const given = variantOf([name, from, to, file])
-        const failed = await judge(await contextOf(given, browser ? await observeVariant(given, parts) : baselineSeen))
-        const named = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
+const checkControls = async () => {
+  const { sources, list, judge, contextOf, variantOf } = ENV
+  const baselineSeen = await ENV.baseline()
+  const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
+  const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
+  const own = await probe(() => assert.equal(1, 2))
+  const ordinary = await probe(() => assert.equal(1, 1))
 
-        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${named.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'}: ${result.detail.slice(0, 120)})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}${result.threw ? ', threw' : ''}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
-      }
-    }
+  check('control: a failed assertion of a check is an assertion and credits the fault it is named for, and an assertion that holds passes', own.kind === 'assertion' && caughtBy([own], ['probe']) && ordinary.ok, JSON.stringify([own, ordinary]))
 
-    if (wanted('control')) {
-      console.log('\nControls of the harness')
+  const bare = [await probe(() => { throw stranger() }), await probe(() => { throw new TypeError('crash') })]
+  const stopped = await judge({}, [{ id: 'probe', name: 'probe', run: async () => { throw stranger() } }]).then(() => null, (error) => error)
 
-      const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
-      const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
-      const own = await probe(() => assert.equal(1, 2))
-      const ordinary = await probe(() => assert.equal(1, 1))
+  check('control: an error that the code under test throws, where no adapter names it, is no assertion of a check, credits nothing and stops the run when a fault is judged', bare.every((result) => result.kind === 'error') && !caughtBy(bare, ['probe']) && stopped instanceof HarnessError, JSON.stringify([bare, String(stopped)]))
 
-      check('control: a failed assertion of a check is an assertion and credits the fault it is named for, and an assertion that holds passes', own.kind === 'assertion' && caughtBy([own], ['probe']) && ordinary.ok, JSON.stringify([own, ordinary]))
-
-      const bare = [await probe(() => { throw stranger() }), await probe(() => { throw new TypeError('crash') })]
-      const stopped = await judge({}, [{ id: 'probe', name: 'probe', run: async () => { throw stranger() } }]).then(() => null, (error) => error)
-
-      check('control: an error that the code under test throws, where no adapter names it, is no assertion of a check, credits nothing and stops the run when a fault is judged', bare.every((result) => result.kind === 'error') && !caughtBy(bare, ['probe']) && stopped instanceof HarnessError, JSON.stringify([bare, String(stopped)]))
-
-      const thrown = await contextOf(variantOf(['a model that throws', 'return { size: isNumber(row.Size)', 'throw new Error(\'planted\'); return { size: isNumber(row.Size)', GROUND_FILE]), baselineSeen)
-      const crashed = await runChecks(list.filter((item) => item.id === 'model-template'), thrown)
-      const credit = (fault) => {
-        try {
-          return caughtBy(crashed, ['model-template'], fault)
-        } catch (error) {
-          return error
-        }
-      }
-      const undeclared = credit({ name: 'a model that throws' })
-
-      check('control: a model that throws fails its check as a call of the code under test that threw, and that failure alone credits no fault: the run stops on it, unless the fault declares a throw as the way it is caught', crashed.length === 1 && crashed[0].kind === 'assertion' && crashed[0].threw === true && undeclared instanceof HarnessError && credit({ name: 'a model that throws', throws: true }) === true, JSON.stringify([crashed, String(undeclared)]))
-
-      if (options.browser) {
-        const lost = await contextOf(sources, failedObservation('planted: the browser did not start'))
-        const unseen = await runChecks(list.filter((item) => item.id === 'browser-detail'), lost)
-        const halted = await judge(lost, list.filter((item) => item.id === 'browser-detail')).then(() => null, (error) => error)
-
-        check('control: a page that did not get through is an error of the harness and no value a check read: the head fails on it, and a fault judged on it stops the run', unseen.length === 1 && unseen[0].kind === 'error' && halted instanceof HarnessError, JSON.stringify([unseen, String(halted)]))
-      }
-    }
-
-    if (wanted('benign')) {
-      console.log('\nBenign rewrites')
-
-      for (const [name, from, to, file, , browser] of BENIGN) {
-        if (!wanted('benign', name) || (browser && !options.browser)) {
-          continue
-        }
-
-        const given = variantOf([name, from, to, file])
-        const failed = (await judge(await contextOf(given, browser ? await observeVariant(given) : baselineSeen))).map((result) => result.id)
-
-        check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
-      }
+  const thrown = await contextOf(variantOf(['a model that throws', 'return { size: isNumber(row.Size)', 'throw new Error(\'planted\'); return { size: isNumber(row.Size)', GROUND_FILE]), baselineSeen)
+  const crashed = await runChecks(list.filter((item) => item.id === 'model-template'), thrown)
+  const credit = (fault) => {
+    try {
+      return caughtBy(crashed, ['model-template'], fault)
+    } catch (error) {
+      return error
     }
   }
+  const undeclared = credit({ name: 'a model that throws' })
 
-  await Promise.all(databases.filter(Boolean).map((database) => database.close()))
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  await finish(failures ? 1 : 0)
+  check('control: a model that throws fails its check as a call of the code under test that threw, and that failure alone credits no fault: the run stops on it, unless the fault declares a throw as the way it is caught', crashed.length === 1 && crashed[0].kind === 'assertion' && crashed[0].threw === true && undeclared instanceof HarnessError && credit({ name: 'a model that throws', throws: true }) === true, JSON.stringify([crashed, String(undeclared)]))
+
+  if (options.browser) {
+    const lost = await contextOf(sources, failedObservation('planted: the browser did not start'))
+    const unseen = await runChecks(list.filter((item) => item.id === 'browser-detail'), lost)
+    const halted = await judge(lost, list.filter((item) => item.id === 'browser-detail')).then(() => null, (error) => error)
+
+    check('control: a page that did not get through is an error of the harness and no value a check read: the head fails on it, and a fault judged on it stops the run', unseen.length === 1 && unseen[0].kind === 'error' && halted instanceof HarnessError, JSON.stringify([unseen, String(halted)]))
+  }
+
+  const navigation = await observePage(pretendBrowser(), 'http://pretend.test/', { system: 7, ids: [] })
+
+  check('control: an observation whose navigation does not end names the step of that navigation (a step is said before the call it names), so the deadline of the runner names it too', navigation.error === NAVIGATION_FAILED && navigation.phase === 'opening /survey-progress?formations=7', JSON.stringify({ error: navigation.error, phase: navigation.phase }))
+}
+
+const checkBenign = async ([name, from, to, file, , browser]) => {
+  const given = ENV.variantOf([name, from, to, file])
+  const failed = (await ENV.judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given) : await ENV.baseline()))).map((result) => result.id)
+
+  check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
+}
+
+// The deadlines, in seconds: five times the slowest time measured (the head 21 s, a variant served to the browser 21 s, one in memory 29 s), at least two minutes, and for what the browser reads at least a minute past its longest step (BROWSER_TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end fails by its own timeout, named, before the deadline runs out. The head drives every part of the page and reads every save; a variant served to the browser drives the parts it names, the others run in memory over the saves; the controls of the harness run in memory. The setup opens the saves, plants the copy and starts and warms the page server, the one cold start of the run.
+const DEADLINES = { head: 180, browser: 180, memory: 180, setup: 900 }
+// The planted fault the control runs before the head: one the head's reading of the page catches.
+const CONTROL_FAULT = 'the column of the units short shows the excess'
+
+const variantsOf = () => [
+  { key: 'head', name: 'the head: the constructed race, the saves and the browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkHead },
+  ...(options.mutations ? MUTANTS.filter(([, , , , , browser]) => !browser || options.browser).map((entry) => ({ key: `planted:${MUTANTS.indexOf(entry)}`, name: `planted: ${entry[0]}`, heading: '\nPlanted faults', pool: 'suite', deadline: entry[5] ? DEADLINES.browser : DEADLINES.memory, run: () => checkPlanted(entry) })) : []),
+  ...(options.mutations ? [{ key: 'controls', name: 'the controls of the harness', heading: '\nControls of the harness', pool: 'suite', deadline: DEADLINES.memory, run: checkControls }] : []),
+  ...(options.mutations ? BENIGN.filter(([, , , , , browser]) => !browser || options.browser).map((entry) => ({ key: `benign:${BENIGN.indexOf(entry)}`, name: `benign: ${entry[0]}`, heading: '\nBenign rewrites', pool: 'suite', deadline: entry[5] ? DEADLINES.browser : DEADLINES.memory, run: () => checkBenign(entry) })) : []),
+]
+
+const main = async () => {
+  const totals = await runSuite({
+    script: __filename,
+    inputs: FIXTURES.map((fixture) => fixture.file),
+    variants: variantsOf(),
+    counts: () => ({ checks, failures }),
+    prepare: async () => {
+      ENV = await setUp()
+    },
+    afterEach: async () => {
+      if (ENV && ENV.server) {
+        await ENV.server.reset()
+      }
+    },
+    close: async () => {
+      for (const cleanup of cleanups.splice(0).reverse()) {
+        await cleanup()
+      }
+    },
+    control: options.mutations && options.browser ? { fault: `planted:${MUTANTS.findIndex(([name]) => name === CONTROL_FAULT)}`, head: 'head', heading: '\nThe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
+
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  await finish(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 main().catch(async (error) => {

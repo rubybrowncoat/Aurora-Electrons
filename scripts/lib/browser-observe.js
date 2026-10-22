@@ -3,10 +3,11 @@
 // const { observe, validate, failureLine, report } = require('./lib/browser-observe')
 // const seen = await observe(browser, async ({ page, step }) => { step('opening the page'); await page.goto(url); return page.evaluate(read) }, { expected: ['the exact text of an error the check names'] })
 //
-// `observe` opens a context of its own, runs `work({ page, step })` (`step(name)` says where the work is, for the failure that is told afterwards), waits a moment for what the page raises late, closes the context, and returns { value, error, phase, errors, console, failed, unexpected }:
+// `observe` opens a context of its own, runs `work({ page, step })` (`step(name)` says where the work is, for the failure that is told afterwards, and to the runner of scripts/lib/suite-runner.js, whose deadline names, when it runs out, the step of every observation still open, so a step is said before the call it names), waits a moment for what the page raises late, closes the context, and returns { value, error, phase, scene, errors, console, failed, unexpected }:
 // - value: what `work` returned, or null when it threw;
 // - error: null, or why the observation failed: the context did not open or close, `work` threw (the whole message, the call log of a locator included), or the page raised an error the check did not name; when more than one of these happened they are all in it, each cut to its own limit, so that a long message of one never takes the place of another;
 // - phase: the last step named;
+// - scene: null, or, when `work` threw, what the page showed then, for diagnosis: its address and how often it loaded, the requests still out and for how long, the last messages of its console of every kind, and what the app holds (its route, its save, its race, the games it lists, the text on screen), read within SCENE_LIMIT;
 // - errors: every page error, an exception nothing caught or a rejection nothing handled;
 // - console: every console error. Vue catches the exceptions of a handler, a watcher or a render and logs them there, so they are never page errors, and a record without this list would call such a page clean;
 // - failed: the requests that failed and the responses with a status of 400 or more, for diagnosis (a failed load that matters is also a console error);
@@ -19,9 +20,13 @@
 // The screen as the player sees it, read the one way every page check reads it:
 // const { installScreen, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 // await installScreen(page) puts the readers at `window.__screen` in the page: `visible(element)`, `visibleText(element)` and `hooked(root, attribute)`, each told where it is defined. A check reads the elements its hooks name with `hooked`, brings back their text and whether each is on screen, and judges them in the check: `readFigure` reads a number drawn in the grouping of the setting, `rounded` is the oracle's number as the page rounds it, `labelKey` reads a word back through the component's own table of words, `rolesRead` compares a region by the role of each element and `pairedBy` a list by the identity of each line. Checked by scripts/check-browser-observe.js.
+const { step: reportStep } = require('./suite-runner')
+
 const MESSAGE_LIMIT = 4000
 const TEXT_LIMIT = 500
 const FLUSH = 250
+const SCENE_LIMIT = 5000
+const RECENT = 15
 
 class HarnessError extends Error {
   constructor (message) {
@@ -32,19 +37,66 @@ class HarnessError extends Error {
 
 const clip = (text, size) => String(text).slice(0, size)
 
-const listen = (page, record) => {
+const listen = (page, record, seen) => {
   page.on('pageerror', (error) => record.errors.push(String(error.message)))
   page.on('console', (message) => {
     if (message.type() === 'error') {
       record.console.push(message.text())
     }
+
+    seen.recent.push(`${message.type()}: ${clip(message.text(), 200)}`)
+    seen.recent.splice(0, seen.recent.length - RECENT)
   })
+  page.on('request', (request) => seen.out.set(request, Date.now()))
+  page.on('requestfinished', (request) => seen.out.delete(request))
+  page.on('requestfailed', (request) => seen.out.delete(request))
   page.on('requestfailed', (request) => record.failed.push(`${request.method()} ${clip(request.url(), 200)}: ${request.failure() ? request.failure().errorText : 'failed'}`))
   page.on('response', (response) => {
     if (response.status() >= 400) {
       record.failed.push(`${response.request().method()} ${clip(response.url(), 200)}: ${response.status()}`)
     }
   })
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      seen.loads++
+    }
+  })
+}
+
+// Run in the page: what the app holds, each read on its own so that one that throws leaves the others.
+const appState = () => {
+  const read = (get) => {
+    try {
+      return get()
+    } catch (error) {
+      return `unread: ${error.message}`
+    }
+  }
+  const store = () => window.$app.$store
+
+  return {
+    readyState: document.readyState,
+    app: Boolean(window.$app),
+    route: read(() => window.$app.$route.fullPath),
+    database: read(() => Boolean(store().state.database)),
+    databasePath: read(() => store().state.databasePath || null),
+    GameID: read(() => store().getters.GameID || null),
+    RaceID: read(() => store().getters.RaceID || null),
+    empires: read(() => ({ loaded: store().state.empires.loaded, error: store().state.empires.error, games: store().state.empires.games.map((game) => game.GameName) })),
+    text: read(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 300)),
+  }
+}
+
+// What the page showed when the work threw (see `scene` above), within SCENE_LIMIT: a page that does not answer says so.
+const sceneOf = async (page, seen) => {
+  const now = Date.now()
+  const out = [...seen.out].map(([request, began]) => `${request.method()} ${clip(request.url(), 160)} (${((now - began) / 1000).toFixed(1)} s)`)
+  let timer = null
+  const app = await Promise.race([page.evaluate(appState).then((state) => JSON.stringify(state), (error) => `unread: ${clip(error.message, 200)}`), new Promise((resolve) => { timer = setTimeout(() => resolve(`the page did not answer in ${SCENE_LIMIT / 1000} s`), SCENE_LIMIT) })])
+
+  clearTimeout(timer)
+
+  return [`address: ${page.url()}, loaded ${seen.loads} times`, `requests out: ${out.length ? out.join('; ') : 'none'}`, `console: ${seen.recent.length ? seen.recent.join(' | ') : 'nothing'}`, `the app: ${app}`].join('\n')
 }
 
 const namedList = (expected) => {
@@ -55,12 +107,24 @@ const namedList = (expected) => {
   return new Set(expected)
 }
 
+// The step of each observation open in this process, by its record, in the order they opened. The runner (scripts/lib/suite-runner.js) keeps the last step a worker says, so it is told where every open observation is, and once none is, that the last one is being judged: an observation that ends never leaves the runner naming its step while another is still at work.
+const open = new Map()
+const tell = () => reportStep(open.size ? [...open.values()].join('; ') : 'judging the observation')
+const at = (record, phase) => {
+  open.set(record, phase)
+  tell()
+}
+
 const observe = async (browser, work, { viewport = { width: 1920, height: 1080 }, expected = [], flush = FLUSH } = {}) => {
   const named = namedList(expected)
   const record = { phase: 'opening the page', errors: [], console: [], failed: [] }
+
+  at(record, record.phase)
+
   const problems = []
   let context = null
   let value = null
+  let scene = null
 
   try {
     context = await browser.newContext({ viewport })
@@ -69,15 +133,20 @@ const observe = async (browser, work, { viewport = { width: 1920, height: 1080 }
   }
 
   if (context) {
-    try {
-      const page = await context.newPage()
+    const seen = { recent: [], out: new Map(), loads: 0 }
+    let page = null
 
-      listen(page, record)
-      value = await work({ page, step: (phase) => { record.phase = phase } })
+    try {
+      page = await context.newPage()
+      listen(page, record, seen)
+      value = await work({ page, step: (phase) => { record.phase = phase; at(record, phase) } })
       await page.waitForTimeout(flush)
     } catch (thrown) {
       problems.push(clip(thrown && thrown.message ? thrown.message : thrown, MESSAGE_LIMIT))
+      scene = page ? await sceneOf(page, seen).catch((error) => `the scene was not read: ${clip(error && error.message ? error.message : error, 200)}`) : null
     }
+
+    at(record, 'closing the context of the observation')
 
     const closing = await context.close().then(() => null, (thrown) => `the context did not close: ${clip(thrown && thrown.message ? thrown.message : thrown, 500)}`)
 
@@ -86,20 +155,23 @@ const observe = async (browser, work, { viewport = { width: 1920, height: 1080 }
     }
   }
 
+  open.delete(record)
+  tell()
+
   const unnamed = [...record.errors.filter((text) => !named.has(text)).map((text) => `page error: ${clip(text, TEXT_LIMIT)}`), ...record.console.filter((text) => !named.has(text)).map((text) => `console error: ${clip(text, TEXT_LIMIT)}`)]
 
   if (!problems.length && unnamed.length) {
     problems.push(`the page raised ${unnamed.length} unexpected error${unnamed.length === 1 ? '' : 's'}, the first: ${unnamed[0]}`)
   }
 
-  return { value, error: problems.length ? problems.join('\n') : null, phase: record.phase, errors: record.errors.map((text) => clip(text, TEXT_LIMIT)), console: record.console.map((text) => clip(text, TEXT_LIMIT)), failed: record.failed, unexpected: unnamed }
+  return { value, error: problems.length ? problems.join('\n') : null, phase: record.phase, scene, errors: record.errors.map((text) => clip(text, TEXT_LIMIT)), console: record.console.map((text) => clip(text, TEXT_LIMIT)), failed: record.failed, unexpected: unnamed }
 }
 
 // An observation that did not happen, as the record of one: a server that did not start, a child that ended badly.
-const failedObservation = (message, phase = 'starting') => ({ value: null, error: clip(message, MESSAGE_LIMIT), phase, errors: [], console: [], failed: [], unexpected: [] })
+const failedObservation = (message, phase = 'starting') => ({ value: null, error: clip(message, MESSAGE_LIMIT), phase, scene: null, errors: [], console: [], failed: [], unexpected: [] })
 
 // An observation that went through and saw nothing wrong, with the value given.
-const completedObservation = (value) => ({ value, error: null, phase: 'finished', errors: [], console: [], failed: [], unexpected: [] })
+const completedObservation = (value) => ({ value, error: null, phase: 'finished', scene: null, errors: [], console: [], failed: [], unexpected: [] })
 
 const isStrings = (list) => Array.isArray(list) && list.every((item) => typeof item === 'string')
 
@@ -151,8 +223,8 @@ const list = (items) => {
   return counts.size ? [...counts].map(([item, count]) => `\n    ${count > 1 ? `(${count} times) ` : ''}${item.replace(/\n/g, '\n    ')}`).join('') : ' none'
 }
 
-// The whole record of a failed observation, printed where the failure is first met: the phase, the message with the call log, and what the page and the browser reported.
-const describe = (label, seen) => `BROWSER ${label} did not get through\n  phase: ${seen.phase}\n  error: ${String(seen.error).replace(/\n/g, '\n    ')}\n  page errors:${list(seen.errors)}\n  console errors:${list(seen.console)}\n  failed requests:${list(seen.failed)}`
+// The whole record of a failed observation, printed where the failure is first met: the phase, the message with the call log, what the page showed when the work stopped, and what the page and the browser reported.
+const describe = (label, seen) => `BROWSER ${label} did not get through\n  phase: ${seen.phase}\n  error: ${String(seen.error).replace(/\n/g, '\n    ')}${seen.scene ? `\n  the page then:\n    ${seen.scene.replace(/\n/g, '\n    ')}` : ''}\n  page errors:${list(seen.errors)}\n  console errors:${list(seen.console)}\n  failed requests:${list(seen.failed)}`
 
 const report = (label, seen) => {
   if (seen.error !== null) {

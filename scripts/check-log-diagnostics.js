@@ -1,7 +1,7 @@
 /*
   Checks the Game Log's short-interval checklist: the fire and boarding events one race's log holds for a recent window of game time, how far the log covers that window, and what the checklist could not read (src/renderer/utilities/log-diagnostics.js, the window states of src/renderer/utilities/event-archive.js, src/renderer/components/log/DiagnosticPanel.vue and its place on src/renderer/pages/log.vue).
 
-  Run: bun scripts/check-log-diagnostics.js [--no-mutations] [--no-browser]
+  Run: bun scripts/check-log-diagnostics.js [--no-mutations] [--no-browser] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   Two parts. The utilities run in memory over a database that answers the statements the checklist sends from rows written here (a game of eleven increments of five days, a race of fire and boarding events, noise, game-master-only rows, identical rows, another race); the page runs in Chromium (scripts/lib/page-server.js) over a copy of a save whose log is rewritten here and read back by SQL written here.
   - window states: observed, partial for a window that meets a gap, the oldest or newest increment of a span (each of the three bases the record can know them by), a failed read, the cap's cut, or reaches before or after what was read; unavailable for no record, no span that meets the window, or a window that ends at the cut. A count of rows is null, never 0, where nothing covers the window; a tip later than the window closes the increments before it;
@@ -11,17 +11,18 @@
   - page: the panel on a save whose log was rewritten shows what SQL says for four windows, the states per window and per event, the hidden flag, the inputs and the pointers to the game's own checks; a race switched while its read is held shows nothing of the race before; a failed read and an empty window are never worded as safe or as nothing having happened; an older archive leaves a gap, an archive ahead of the save leaves the window observed. The page is read through the shared readers of scripts/lib/browser-observe.js (`installScreen`): the states, verdict, counts, copies, statuses, reasons and marks are read from what the panel draws, a word turned back into its value by the label maps of src/renderer/utilities/log-diagnostics.js (`labelKey`) and a numeral read in the grouping of the setting (`readFigure`); the hooks name the elements and must agree with what is drawn, and the rows, types, inputs and reasons are paired by their identity, never by place.
   Every planted fault (in the utilities, in the panel, in the page) and every rewrite that says the same thing is run against the whole suite: a fault is credited only when a check named for it fails by an assertion of its own on a value it read, never because a call of the code under test threw (scripts/lib/fault-credit.js), and a rewrite must pass every check. Each credited fault prints the first line of what each named check said and whether it failed on a value or a throw.
 
-  Prints `N of N checks passed`; any failed check sets exit code 1. The page part needs Playwright's Chromium (`bunx playwright install chromium` once); Vite starts with a cold cache of its own, so a run takes minutes.
+  Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. The heads (`units`, `page`, `recorder`) and every fault and rewrite (`unit-fault:N`, `unit-rewrite:N`, `page-fault:N`, `page-rewrite:N`) run through scripts/lib/suite-runner.js: one after another in a worker that writes the save, starts one page server and one browser and warms them first, each with a deadline, with a record that --resume continues and the control `control:warm-reset`, which runs a page fault and then the page's head on the same server. --only=<text> runs the heads and the faults and rewrites whose names hold the text (a focused run while working; the run that counts has none). The page part needs Playwright's Chromium (`bunx playwright install chromium` once).
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { assert, subjectModule, runChecks, judged, caughtBy } = require('./lib/fault-credit')
-const { observe, validate, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, readFigure, labelKey, pairedBy } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const pageLoading = require('./page-loading')
+const { runSuite } = require('./lib/suite-runner')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -776,8 +777,8 @@ const waitFor = async ({ done, what, label, clock, sleep, timeout = TIMEOUT }) =
 
 const REAL_CLOCK = { now: () => Date.now(), sleep: null }
 
-// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. `clock` is the clock of the waits (a virtual one in the controls of the waits).
-const prepare = async (page, url, clock = REAL_CLOCK) => {
+// The page that `observe` opens, made ready for the Game Log of the player's race: the race picked on the Empires page, the log opened and settled, each step named through `step` and bounded by TIMEOUT. `rules.hold` makes the reads it names wait in `held` until they are let go, `rules.fail` answers the reads it names with an error. `clock` is the clock of the waits (a virtual one in the controls of the waits).
+const prepare = async (page, url, step, clock = REAL_CLOCK) => {
   await installScreen(page)
 
   const state = { held: [], pending: new Map(), last: clock.now(), hold: null, fail: null }
@@ -823,21 +824,28 @@ const prepare = async (page, url, clock = REAL_CLOCK) => {
 
   const settle = () => waitFor({ done: async () => !((state.pending.size > 0 && !state.held.length) || clock.now() - state.last < 1500 || await page.evaluate(pageLoading)), what: outstanding, label: 'the settling of the page', clock, sleep })
 
+  step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
 
   const picker = page.locator('.empire-list').first()
 
+  step('picking the game')
   await picker.locator('.empire-list__game').filter({ hasText: `${GAME_NAME} ·` }).first().click({ timeout: TIMEOUT })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-    await picker.getByText(GAME_NAME, { exact: true }).last().click()
+    step('picking the race')
+    await picker.getByText(GAME_NAME, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
+  step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
+  step('waiting for the reads that the picking of the race starts')
   await waitFor({ done: async () => state.pending.size === 0 && clock.now() - state.last >= 1500, what: outstanding, label: 'the database reads that the picking of the race starts', clock, sleep })
+  step('opening /log')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/log')
   await page.waitForFunction(pageLoading.arrived, '/log', { timeout: TIMEOUT })
   await page.waitForSelector('[data-diagnostic] [data-window-state]', { state: 'attached', timeout: TIMEOUT })
+  step('waiting for the page to settle')
   await settle()
 
   return { state, settle }
@@ -863,7 +871,7 @@ const failureOf = (work) => work.then(() => null, (error) => error)
 
 unit('wait-deadline', 'a database call that never finishes ends the initial wait and the settling at the suite\'s timeout, with a message that names the call', async () => {
   const initial = virtualClock()
-  const failed = await failureOf(prepare(pretendPage(), 'http://localhost/', initial))
+  const failed = await failureOf(prepare(pretendPage(), 'http://localhost/', () => {}, initial))
 
   assert.ok(failed instanceof Error)
   assert.ok(failed.message.includes('the database reads that the picking of the race starts did not finish within 120000 ms'), failed.message)
@@ -872,7 +880,7 @@ unit('wait-deadline', 'a database call that never finishes ends the initial wait
 
   const page = pretendPage()
   const clock = virtualClock((now) => { if (now.sleeps === 20 && page.handlers.requestfinished) { page.handlers.requestfinished(page.request) } })
-  const { settle } = await prepare(page, 'http://localhost/', clock)
+  const { settle } = await prepare(page, 'http://localhost/', () => {}, clock)
   const settleStart = clock.time
 
   page.handlers.request(page.request)
@@ -887,7 +895,7 @@ unit('wait-deadline', 'a database call that never finishes ends the initial wait
 unit('wait-completes', 'a database call that finishes before the deadline lets the initial wait and the settling return', async () => {
   const page = pretendPage()
   const clock = virtualClock((now) => { if (now.sleeps === 20) { page.handlers.requestfinished(page.request) } })
-  const outcome = await failureOf(prepare(page, 'http://localhost/', clock))
+  const outcome = await failureOf(prepare(page, 'http://localhost/', () => {}, clock))
 
   assert.equal(outcome, null)
   assert.ok(clock.sleeps >= 20 && clock.time < TIMEOUT, String(clock.time))
@@ -1000,7 +1008,7 @@ const isRaceLog = (race) => (sql) => new RegExp(`^select FCT_GameLog\\.Increment
 
 // What the player does on the save: every window of the race, the race switched while its read is held, a race whose read fails, and back. The value of the record is { windows: [4 screens], held, quiet, broken, back }.
 const observeSaved = (browser, url) => observe(browser, async ({ page, step }) => {
-  const { state, settle } = await prepare(page, url)
+  const { state, settle } = await prepare(page, url, step)
   const seen = { windows: [] }
 
   for (let index = 0; index < WINDOW_SECONDS.length; index++) {
@@ -1135,7 +1143,7 @@ const archiveOn = async (page, step, settle, file, timeout = TIMEOUT) => {
 
 // Controls of that wait on the real recorder and the real registry lock of the page. `normal` lets the pass run. `held` holds the registry lock so that the pass queues behind it: setup must not finish while it waits, and must when the lock is let go. `deadline` holds it and never lets go: the wait ends at its deadline as the observation's failure and names the lock. `overtaken` holds the read of the switch's pass and lets a later request's pass end first: setup must not return on that end, and must report the failure when the held read fails. `earlier` has an earlier request's pass active and a second lock queued before the switch's pass: the earlier pass ends while the switch's is still queued, and setup must not finish until the switch's own pass has. `renewed` renews the copy of the save while the pass is queued: setup fails, as the page has another save. `failed` makes the recorder's read of the save fail: setup fails, with no pass passed.
 const observeRecorder = (browser, url, file, mode) => observe(browser, async ({ page, step }) => {
-  const { settle, state: routes } = await prepare(page, url)
+  const { settle, state: routes } = await prepare(page, url, step)
   const seen = {}
   const hold = (name, slot, queuedOnly = false) => page.evaluate(async ({ lock, key, queuedOnly }) => {
     const granted = {}
@@ -1325,7 +1333,7 @@ const recorderControls = async (browser, url, file) => {
 }
 
 const observeArchived = (browser, url, file, windows) => observe(browser, async ({ page, step }) => {
-  const { settle } = await prepare(page, url)
+  const { settle } = await prepare(page, url, step)
 
   await archiveOn(page, step, settle, file)
 
@@ -1344,7 +1352,7 @@ const observeArchived = (browser, url, file, windows) => observe(browser, async 
 
 // The archive of the branch rewritten while the page shows the day, each rewrite followed by the recorder's notification and nothing else (no reload, no other action): `files` are the archive files to store in turn. The value is { windows: [], before, failure, restored, coverage }, the day as read before each store and after it.
 const observeRefreshed = (browser, url, file, files) => observe(browser, async ({ page, step }) => {
-  const { settle } = await prepare(page, url)
+  const { settle } = await prepare(page, url, step)
 
   await archiveOn(page, step, settle, file)
   step('the day is chosen')
@@ -1809,34 +1817,26 @@ const judgeUnits = async (variant) => {
   return judged(await resultsOfUnits(modules), `the ${variant.name}`)
 }
 
-const checkUnits = async (mutating) => {
+const checkUnitsHead = async () => {
   console.log('The checklist and the window states (in memory)')
 
   const real = await loadModules()
   const results = await resultsOfUnits(real)
 
   results.forEach(({ name, ok, kind, detail }) => report(name, ok ? true : `${kind === 'assertion' ? '' : 'an error: '}${detail}`))
+}
 
-  if (!mutating) {
-    return
-  }
+const checkUnitFault = async (fault) => {
+  const failed = await judgeUnits(fault)
+  const missed = fault.fails.filter((id) => !caughtBy(failed, [id], { name: fault.name, throws: fault.throws }))
 
-  console.log('\nplanted faults in the utilities')
+  report(`fault caught: ${fault.name}`, missed.length ? `these checks did not fail by an assertion: ${missed.join(', ')}` : true, detailsOf(failed, fault.fails))
+}
 
-  for (const fault of UNIT_FAULTS) {
-    const failed = await judgeUnits(fault)
-    const missed = fault.fails.filter((id) => !caughtBy(failed, [id], { name: fault.name, throws: fault.throws }))
+const checkUnitRewrite = async (rewrite) => {
+  const failed = await judgeUnits(rewrite)
 
-    report(`fault caught: ${fault.name}`, missed.length ? `these checks did not fail by an assertion: ${missed.join(', ')}` : true, detailsOf(failed, fault.fails))
-  }
-
-  console.log('\nrewrites of the utilities that say the same thing')
-
-  for (const rewrite of UNIT_REWRITES) {
-    const failed = await judgeUnits(rewrite)
-
-    report(`rewrite passes: ${rewrite.name}`, failed.length ? `fails ${failed.map(({ id }) => id).join(', ')}` : true)
-  }
+  report(`rewrite passes: ${rewrite.name}`, failed.length ? `fails ${failed.map(({ id }) => id).join(', ')}` : true)
 }
 
 // The results of the page checks over the record of an observation: the observation must have got through (a record that did not is the failure of the run, never a fault caught), a check that throws something that is no assertion stops the run.
@@ -1882,162 +1882,211 @@ const refreshOf = (modules, ahead) => {
   return { failure, restored: ahead.file, coverage }
 }
 
-const main = async () => {
-  const mutating = !process.argv.includes('--no-mutations')
+// The page in a browser, set up once for each worker (`openScreen`, run by the runner before the worker's first variant): the copy of the save with the log written here, what SQL says of it, the page server (warmed) and Chromium, the archive files the page is given, and the baselines: the page as it is, of each kind a rewrite of the worker's queue sets its screen against, read by the setup (`readBaselines`) before the first variant, whichever that is, so that a rewrite reads only its own page. A setup that does not get through is kept as `failure`, and every observation of the worker is then one that did not happen.
+const SCREEN = { failure: null, modules: null, truth: null, server: null, chrome: null, seeds: null, refreshes: null, baselines: {}, cleanups: [] }
+const KINDS = ['saved', 'older', 'ahead', 'refresh']
 
-  await checkUnits(mutating)
-
-  if (process.argv.includes('--no-browser')) {
-    console.log(`\n${checks - failures} of ${checks} checks passed`)
-    process.exit(failures ? 1 : 0)
-  }
-
-  console.log('\nThe Game Log page in a browser (scripts/lib/page-server.js over a copy of a save)')
-
-  const made = await makeSave()
-  const cleanups = [async () => fs.rmSync(made.folder, { recursive: true, force: true })]
-  const modules = await loadModules()
-
-  BASE_LABELS = labelsOf(modules.raw)
-  LABELS = BASE_LABELS
-  FORMAT = formatOf(modules.raw)
-
+const openScreen = async () => {
   try {
-    const truth = await truthOf(made.file)
+    const made = await makeSave()
 
-    cleanups.push(() => truth.close())
-    const { startPageServer } = require('./lib/page-server')
-    const server = await startPageServer({ save: made.file })
+    SCREEN.cleanups.push(async () => fs.rmSync(made.folder, { recursive: true, force: true }))
+    SCREEN.modules = await loadModules()
+    BASE_LABELS = labelsOf(SCREEN.modules.raw)
+    LABELS = BASE_LABELS
+    FORMAT = formatOf(SCREEN.modules.raw)
+    SCREEN.truth = await truthOf(made.file)
+    SCREEN.cleanups.push(() => SCREEN.truth.close())
+    assert.equal(SCREEN.truth.head, HEAD)
+    assert.equal(SCREEN.truth.tip, REAL_TIP)
+    assert.equal(SCREEN.truth.end, END)
+    SCREEN.seeds = { older: await seedOf(SCREEN.modules, SCREEN.truth, 'older'), ahead: await seedOf(SCREEN.modules, SCREEN.truth, 'ahead') }
+    SCREEN.refreshes = refreshOf(SCREEN.modules, SCREEN.seeds.ahead)
+    SCREEN.server = await require('./lib/page-server').startPageServer({ save: made.file })
+    SCREEN.cleanups.push(() => SCREEN.server.stop())
+    SCREEN.chrome = await require('playwright').chromium.launch()
+    SCREEN.cleanups.push(() => SCREEN.chrome.close())
 
-    cleanups.push(() => server.stop())
+    const warmed = await SCREEN.server.warm(SCREEN.chrome, { routes: ['/log'] })
 
-    const chrome = await require('playwright').chromium.launch()
-
-    cleanups.push(() => chrome.close())
-
-    assert.equal(truth.head, HEAD)
-    assert.equal(truth.tip, REAL_TIP)
-    assert.equal(truth.end, END)
-
-    const seeds = { older: await seedOf(modules, truth, 'older'), ahead: await seedOf(modules, truth, 'ahead') }
-    const refreshes = refreshOf(modules, seeds.ahead)
-    const originals = new Map()
-    const original = (file) => {
-      if (!originals.has(file)) {
-        originals.set(file, fs.readFileSync(path.join(root, file), 'utf8'))
-      }
-
-      return originals.get(file)
-    }
-    // The utilities the page was served: a variant of the glossary or of the checklist's utilities loads its own copy, so a reworded definition or verdict sentence is expected as drawn, while a pointer that shows another term's text, or a sentence that belongs to another verdict, is not.
-    const SOURCE_NAMES = { [DIAGNOSTICS]: 'log-diagnostics', [GLOSSARY]: 'glossary' }
-    const partsOf = (variant) => (!variant ? [] : variant.parts || [variant])
-    const servedBy = new Map()
-    const servedOf = async (variant) => {
-      const sources = Object.fromEntries(partsOf(variant).filter(({ file }) => SOURCE_NAMES[file]).map(({ file, change }) => [SOURCE_NAMES[file], change(original(file))]))
-
-      if (!Object.keys(sources).length) {
-        return { labels: BASE_LABELS, terms: FORMAT.terms }
-      }
-
-      if (!servedBy.has(variant)) {
-        const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources })
-
-        servedBy.set(variant, { labels: labelsOf(loaded), terms: loaded.glossary.termById })
-      }
-
-      return servedBy.get(variant)
-    }
-    const view = async (kind, variant) => {
-      LABELS = (await servedOf(variant)).labels
-
-      for (const { file, change } of partsOf(variant)) {
-        server.replace(file, change(original(file)))
-      }
-
-      try {
-        if (kind === 'saved') {
-          return await observeSaved(chrome, server.url)
-        }
-
-        return kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
-      } finally {
-        for (const { file } of partsOf(variant)) {
-          server.replace(file, null)
-        }
-      }
-    }
-    const contextOf = async (kind, variant = null) => ({ truth, seeded: seeds[kind === 'saved' ? 'older' : kind === 'refresh' ? 'ahead' : kind], ...(await servedOf(variant)) })
-    const baselines = {}
-
-    for (const kind of ['saved', 'older', 'ahead', 'refresh']) {
-      baselines[kind] = await view(kind, null)
-
-      if (baselines[kind].error !== null) {
-        console.error(describe(`the ${kind} page`, baselines[kind]))
-      }
-
-      const outcome = await resultsOfPage(baselines[kind], await contextOf(kind), { ids: PAGE_CHECKS.filter((item) => forKind(item, kind)).map((item) => item.id), label: `the ${kind} page` })
-
-      if (outcome.unobserved) {
-        PAGE_CHECKS.filter((item) => forKind(item, kind)).forEach((item) => report(item.name, `the page was not observed: ${outcome.unobserved}`))
-      } else {
-        outcome.results.forEach(({ name, ok, detail }) => report(name, ok ? true : detail))
-      }
-    }
-
-    console.log('\nthe wait for the recorder, on the real recorder and the real registry lock')
-    await recorderControls(chrome, server.url, seeds.ahead.file)
-
-    // CHECK_ONLY=<part of a name> runs only the faults and rewrites whose names hold it, and CHECK_ONLY=<part>|<part> those whose names hold any of them (a focused run while working; the run that counts has it unset).
-    const inFocus = ({ name }) => !process.env.CHECK_ONLY || process.env.CHECK_ONLY.split('|').some((part) => name.includes(part))
-
-    if (mutating) {
-      console.log('\nplanted faults in the page')
-
-      for (const fault of PAGE_FAULTS.filter(inFocus)) {
-        const seen = await view(fault.needs[0], fault)
-        const outcome = await resultsOfPage(seen, await contextOf(fault.needs[0], fault), { ids: null, label: `the page with the fault "${fault.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, fault.needs[0])) })
-
-        if (outcome.unobserved) {
-          throw new HarnessError(`the page with the fault "${fault.name}" did not get through: ${outcome.unobserved}`)
-        }
-
-        const failed = judged(outcome.results, `the fault "${fault.name}"`)
-        const missed = fault.fails.filter((id) => !caughtBy(failed, [id], { name: fault.name, throws: fault.throws }))
-
-        report(`fault caught: ${fault.name}`, missed.length ? `these checks did not fail by an assertion: ${missed.join(', ')}` : true, detailsOf(failed, fault.fails))
-      }
-
-      console.log('\nrewrites of the page that say the same thing')
-
-      for (const rewrite of PAGE_REWRITES.filter(inFocus)) {
-        const kind = rewrite.needs ? rewrite.needs[0] : 'saved'
-        const seen = await view(kind, rewrite)
-        const outcome = await resultsOfPage(seen, await contextOf(kind, rewrite), { ids: null, label: `the page rewritten as "${rewrite.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, kind)) })
-
-        if (outcome.unobserved) {
-          throw new HarnessError(`the page rewritten as "${rewrite.name}" did not get through: ${outcome.unobserved}`)
-        }
-
-        const failed = judged(outcome.results, `the rewrite "${rewrite.name}"`)
-        const ignored = (key, value) => (key === 'text' || key === 'verdictWords' || key === 'definition' ? undefined : value)
-        const sameScreen = JSON.stringify(seen.value, ignored) === JSON.stringify(baselines[kind].value, ignored)
-
-        report(`rewrite passes: ${rewrite.name}`, failed.length ? `fails ${failed.map(({ id }) => id).join(', ')}` : !sameScreen ? 'the screen it draws is not the page\'s' : true)
-      }
-    }
-  } finally {
-    for (const cleanup of cleanups.reverse()) {
-      await cleanup().catch(() => {})
-    }
+    console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
+  } catch (error) {
+    SCREEN.failure = String(error.message).split('\n')[0]
   }
-
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  process.exit(failures ? 1 : 0)
 }
 
-main().catch((error) => {
+const closeScreen = async () => {
+  for (const cleanup of SCREEN.cleanups.splice(0).reverse()) {
+    await cleanup().catch(() => {})
+  }
+}
+
+const originals = new Map()
+const original = (file) => {
+  if (!originals.has(file)) {
+    originals.set(file, fs.readFileSync(path.join(root, file), 'utf8'))
+  }
+
+  return originals.get(file)
+}
+// The utilities the page was served: a variant of the glossary or of the checklist's utilities loads its own copy, so a reworded definition or verdict sentence is expected as drawn, while a pointer that shows another term's text, or a sentence that belongs to another verdict, is not.
+const SOURCE_NAMES = { [DIAGNOSTICS]: 'log-diagnostics', [GLOSSARY]: 'glossary' }
+const partsOf = (variant) => (!variant ? [] : variant.parts || [variant])
+const servedBy = new Map()
+const servedOf = async (variant) => {
+  const sources = Object.fromEntries(partsOf(variant).filter(({ file }) => SOURCE_NAMES[file]).map(({ file, change }) => [SOURCE_NAMES[file], change(original(file))]))
+
+  if (!Object.keys(sources).length) {
+    return { labels: BASE_LABELS, terms: FORMAT && FORMAT.terms }
+  }
+
+  if (!servedBy.has(variant)) {
+    const loaded = await loadUtilities(NAMES, { stubs: STUBS, sources })
+
+    servedBy.set(variant, { labels: labelsOf(loaded), terms: loaded.glossary.termById })
+  }
+
+  return servedBy.get(variant)
+}
+const view = async (kind, variant) => {
+  if (SCREEN.failure) {
+    return failedObservation(SCREEN.failure)
+  }
+
+  const { server, chrome, seeds, refreshes } = SCREEN
+
+  LABELS = (await servedOf(variant)).labels
+
+  for (const { file, change } of partsOf(variant)) {
+    server.replace(file, change(original(file)))
+  }
+
+  try {
+    const seen = kind === 'saved' ? await observeSaved(chrome, server.url) : kind === 'refresh' ? await observeRefreshed(chrome, server.url, seeds.ahead.file, refreshes) : await observeArchived(chrome, server.url, seeds[kind].file, kind === 'older' ? [1, 3] : [0, 1, 2, 3])
+
+    // A page that did not get through is told whole where it is met, in the output of its variant: the step, the message with Playwright's call log, and what the page showed then. Its checks say it in one line.
+    if (seen.error !== null) {
+      console.error(describe(`the ${kind} page${variant ? ` with "${variant.name}"` : ''}`, seen))
+    }
+
+    return seen
+  } finally {
+    for (const { file } of partsOf(variant)) {
+      server.replace(file, null)
+    }
+  }
+}
+const contextOf = async (kind, variant = null) => ({ truth: SCREEN.truth, seeded: SCREEN.seeds && SCREEN.seeds[kind === 'saved' ? 'older' : kind === 'refresh' ? 'ahead' : kind], ...(await servedOf(variant)) })
+// The kind of page a rewrite is read on: the one it needs, or the saved window.
+const rewriteKind = (rewrite) => (rewrite.needs ? rewrite.needs[0] : 'saved')
+// The page as it is, of each kind a rewrite of `queue` sets its screen against.
+const readBaselines = async (queue) => {
+  for (const kind of new Set(queue.map((variant) => variant.baseline).filter(Boolean))) {
+    SCREEN.baselines[kind] = await view(kind, null)
+  }
+}
+
+const checkPageHead = async () => {
+  console.log('\nThe Game Log page in a browser (scripts/lib/page-server.js over a copy of a save)')
+
+  for (const kind of KINDS) {
+    const seen = await view(kind, null)
+    const outcome = await resultsOfPage(seen, await contextOf(kind), { ids: PAGE_CHECKS.filter((item) => forKind(item, kind)).map((item) => item.id), label: `the ${kind} page` })
+
+    if (outcome.unobserved) {
+      PAGE_CHECKS.filter((item) => forKind(item, kind)).forEach((item) => report(item.name, `the page was not observed: ${outcome.unobserved}`))
+    } else {
+      outcome.results.forEach(({ name, ok, detail }) => report(name, ok ? true : detail))
+    }
+  }
+}
+
+const checkRecorder = async () => {
+  console.log('\nthe wait for the recorder, on the real recorder and the real registry lock')
+
+  if (SCREEN.failure) {
+    throw new HarnessError(`the page was not set up: ${SCREEN.failure}`)
+  }
+
+  await recorderControls(SCREEN.chrome, SCREEN.server.url, SCREEN.seeds.ahead.file)
+}
+
+const checkPageFault = async (fault) => {
+  const seen = await view(fault.needs[0], fault)
+  const outcome = await resultsOfPage(seen, await contextOf(fault.needs[0], fault), { ids: null, label: `the page with the fault "${fault.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, fault.needs[0])) })
+
+  if (outcome.unobserved) {
+    throw new HarnessError(`the page with the fault "${fault.name}" did not get through: ${outcome.unobserved}`)
+  }
+
+  const failed = judged(outcome.results, `the fault "${fault.name}"`)
+  const missed = fault.fails.filter((id) => !caughtBy(failed, [id], { name: fault.name, throws: fault.throws }))
+
+  report(`fault caught: ${fault.name}`, missed.length ? `these checks did not fail by an assertion: ${missed.join(', ')}` : true, detailsOf(failed, fault.fails))
+}
+
+const checkPageRewrite = async (rewrite) => {
+  const kind = rewriteKind(rewrite)
+  const seen = await view(kind, rewrite)
+  const outcome = await resultsOfPage(seen, await contextOf(kind, rewrite), { ids: null, label: `the page rewritten as "${rewrite.name}"`, list: PAGE_CHECKS.filter((item) => forKind(item, kind)) })
+
+  if (outcome.unobserved) {
+    throw new HarnessError(`the page rewritten as "${rewrite.name}" did not get through: ${outcome.unobserved}`)
+  }
+
+  const failed = judged(outcome.results, `the rewrite "${rewrite.name}"`)
+  const ignored = (key, value) => (key === 'text' || key === 'verdictWords' || key === 'definition' ? undefined : value)
+  const sameScreen = JSON.stringify(seen.value, ignored) === JSON.stringify(SCREEN.baselines[kind].value, ignored)
+
+  report(`rewrite passes: ${rewrite.name}`, failed.length ? `fails ${failed.map(({ id }) => id).join(', ')}` : !sameScreen ? 'the screen it draws is not the page\'s' : true)
+}
+
+// The deadlines, in seconds: five times the slowest time measured (the utilities 0.4 s, the page's head 40 s, the recorder's 60 s, a fault or a rewrite of the page 29 s), at least two minutes, and for what reads the page at least a minute past its longest step (TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end fails by its own timeout, named, before the deadline runs out. The utilities run in memory; the page's head observes it four times and the recorder's controls several more; a fault or a rewrite observes it once. The setup writes the save, starts the page server and warms it, the one cold start of the run (900 s), and reads the page as it is for each kind a rewrite of its queue is set against (a page variant's 180 s for each kind).
+const DEADLINES = { memory: 120, head: 240, recorder: 300, page: 180, setup: 900 + KINDS.length * 180 }
+// The planted fault the control runs before the page's head: one the head's reading of the saved window catches.
+const CONTROL_FAULT = 'a type draws its count negative'
+
+// The utilities' head and variants, then the page's, one pool: a worker runs them one after another, the page's on its one page server and browser.
+const variantsOf = ({ mutations, browser }) => [
+  { key: 'units', name: 'the head: the checklist and the window states (in memory)', head: true, pool: 'suite', deadline: DEADLINES.memory, run: checkUnitsHead },
+  ...(mutations ? UNIT_FAULTS.map((fault, index) => ({ key: `unit-fault:${index}`, name: `unit fault: ${fault.name}`, heading: '\nplanted faults in the utilities', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitFault(fault) })) : []),
+  ...(mutations ? UNIT_REWRITES.map((rewrite, index) => ({ key: `unit-rewrite:${index}`, name: `unit rewrite: ${rewrite.name}`, heading: '\nrewrites of the utilities that say the same thing', pool: 'suite', deadline: DEADLINES.memory, run: () => checkUnitRewrite(rewrite) })) : []),
+  ...(browser ? [
+    { key: 'page', name: 'the head: the Game Log page in a browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkPageHead },
+    { key: 'recorder', name: 'the head: the wait for the recorder', head: true, pool: 'suite', deadline: DEADLINES.recorder, run: checkRecorder },
+  ] : []),
+  ...(browser && mutations ? PAGE_FAULTS.map((fault, index) => ({ key: `page-fault:${index}`, name: `page fault: ${fault.name}`, heading: '\nplanted faults in the page', pool: 'suite', deadline: DEADLINES.page, browser: true, run: () => checkPageFault(fault) })) : []),
+  ...(browser && mutations ? PAGE_REWRITES.map((rewrite, index) => ({ key: `page-rewrite:${index}`, name: `page rewrite: ${rewrite.name}`, heading: '\nrewrites of the page that say the same thing', pool: 'suite', deadline: DEADLINES.page, browser: true, baseline: rewriteKind(rewrite), run: () => checkPageRewrite(rewrite) })) : []),
+]
+
+const main = async () => {
+  const options = { mutations: !process.argv.includes('--no-mutations'), browser: !process.argv.includes('--no-browser') }
+  const totals = await runSuite({
+    script: __filename,
+    variants: variantsOf(options),
+    counts: () => ({ checks, failures }),
+    prepare: async (queue) => {
+      if (queue.some((variant) => variant.browser || ['page', 'recorder'].includes(variant.key) || variant.control)) {
+        await openScreen()
+        await readBaselines(queue)
+      }
+    },
+    afterEach: async () => {
+      if (SCREEN.server) {
+        await SCREEN.server.reset()
+      }
+    },
+    close: closeScreen,
+    control: options.browser && options.mutations ? { fault: `page-fault:${PAGE_FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'page', heading: '\nthe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
+
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
+}
+
+main().catch(async (error) => {
   console.error(error)
+  await closeScreen()
   process.exit(2)
 })

@@ -1,7 +1,7 @@
 /*
   Checks the specialist deployments of the Survey Progress page (src/renderer/utilities/specialist-deployments.js over the formation model of utilities/ground-formations.js, and the page's own reads) against figures worked out by hand, against SQL written separately here and against the saves.
 
-  Run: bun scripts/check-specialist-deployments.js [--no-mutations] [--only=<text>] [--detail]
+  Run: bun scripts/check-specialist-deployments.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   The groups, each check a PASS or FAIL line:
   - A constructed race of 27 formations (busy, idle, embarked, unresolved and of unknown activity; one, both or no rating; a template that names far more than the formation holds) against ground survey bodies and ruins held in a small database built here from the saves' own table definitions (a hidden body, a body in a system the race does not know, a completed body, colonies of 0, 0.9999, 1, 1.0001 and an unstored population, colonies on ruins the race has not surveyed, in a system it does not know, with no installations count, identified and used up): the states, the targets, the candidates, the troop lifts, the totals and the ground survey rates are worked out by hand.
@@ -12,7 +12,7 @@
   - Planted faults in a copy of the utility and of the page, each of which must make a named check fail on an assertion (a fault in the page's template is served to the browser, a figure or a label drawn wrong with its hook left as it is and a part drawn at opacity 0 among them), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a heading reworded, a qualifier moved from the front to the back, a synonym in generated prose, a parenthesised condition, a figure with its places named, a label looked up in the table, a part drawn at opacity 1) that must make none fail. A fault is caught only when a check named for it fails with an assertion of its own: the assertion helper of the checks marks what it throws, the code under test is run only through explicit adapters (the functions of the utility, the normalisers of the views, and the computed values, methods, reads, data and hooks of the page's pseudo instance) that turn a throw or a rejection into a marked failure naming the call, and any other exception, an AssertionError thrown by the code under test included, stops the run when a fault or a rewrite is judged. A fault credited only by such a call that threw stops the run too, unless it declares that a throw is how it is caught (`{ throws: true }`, scripts/lib/fault-credit.js `caughtBy`); each PASS line names the checks that credit it and whether each read a value or a throw.
   - Controls of the harness, each paired with the case that is as it should be: the mark of an assertion and the adapters (a throw, a rejection and a getter that throws, with an AssertionError and with any other error), a lookup and a callback of the harness that go wrong and a malformed store (each stops the run), a normaliser of a view that throws, a crash of the harness itself in the context handed to a check (on healthy code, a benign rewrite and a fault), a fault that makes a computed value throw, a failure of the page on the first start only, a child that prints a result and then fails, hangs or closes with a cleanup that fails, a result that cannot be read and one that is not two whole observations, an error raised only in the half read with an input required, the records handed to a check with an input required, whole or not, the status of the process when a cleanup fails after a failure of its own, and `--only` selecting the fault of one input in a child of its own (which judges the records of the page this run made, `--records`, and starts no browser). What the page raises (a page error, or a console error, where Vue logs what it catches) fails the observation that saw it; a cleanup that fails ends the process with a status other than 0; a record that is not whole stops the run.
 
-  Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped.
+  Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. A save that is not there fails its checks: none is skipped. The head (`head`) and every fault, control and rewrite (`planted:N`, `required:<input>`, `controls`, `benign:N`) run through scripts/lib/suite-runner.js: one after another in a worker that opens the saves, makes the copies of the browser's save, starts one page server and one browser and warms them first, each with a deadline, with a record that --resume continues and the control `control:warm-reset`, which runs a planted fault and then the head on the same server. The cases of the optional reads keep a page server of their own each, warmed in their process before they are read. --only=<text> runs the head and the variants whose names hold the text (a focused run while working; the run that counts has none).
 */
 const fs = require('fs')
 const os = require('os')
@@ -26,6 +26,8 @@ const { startPageServer } = require('./lib/page-server')
 const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError, installScreen, readFigure, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { assert, through, harnessOwn, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
 const { runChild, lastJson } = require('./lib/check-pool')
+const { runSuite, step: sayStep } = require('./lib/suite-runner')
+const { pretendBrowser, NAVIGATION_FAILED } = require('./lib/pretend-browser')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -915,6 +917,9 @@ const CAPABILITIES_FILE = path.join(utilitiesDirectory, 'capabilities.js')
 const RESULT = 'RESULT '
 const WITHHELD_TIMEOUT = 15000
 const UNREAD_LIMIT = 420000
+// The bounds of the other children the controls of the harness start (`checkControls`): a quick case or a probe of `finish`, which prints and ends before it starts a page server (a second or two), and the run of this script on the records of the page (`--only`, 7 s measured), each over five times its measured time, a minute for the quick ones and two for the run.
+const QUICK_LIMIT = 60000
+const NESTED_LIMIT = 120000
 
 // The formation of the browser's save that works the ruin there, and the colony it is put on in every copy below: one that holds no ruin and no ancient construct, so that the formation is idle when everything is read and only an unread ruin or construct read can leave its work in doubt.
 const MOVED_FORMATION = 557
@@ -986,8 +991,8 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
     return waitWhile(async () => isBusy() || await page.evaluate(pageLoading))
   }
   const go = async (route) => {
-    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), route)
     step(`opening ${route}`)
+    await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), route)
     await page.waitForFunction(pageLoading.arrived, route, { timeout })
 
     if (route === '/survey-progress') {
@@ -1010,6 +1015,7 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   const chip = (group, value) => `[data-deploy="${group}"] [data-deploy-chip="${value}"]`
 
   // Opening the page has the full deadline whatever `timeout` says: a page server that has just started compiles the app for its first page, and the waits `timeout` bounds are those of the case.
+  step('opening the app')
   await page.goto(url, { timeout: BROWSER_TIMEOUT })
   await installScreen(page)
 
@@ -1019,7 +1025,8 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   await picker.locator('.empire-list__game').filter({ hasText: `${BROWSER_NAMES.game} ·` }).first().click({ timeout })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-    await picker.getByText(BROWSER_NAMES.race, { exact: true }).last().click()
+    step('picking the race')
+    await picker.getByText(BROWSER_NAMES.race, { exact: true }).last().click({ timeout })
   }
 
   step('waiting for the race')
@@ -1030,6 +1037,7 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
     step('waiting for the capability report')
     await page.waitForFunction(() => Boolean(window.$app.$store.getters['capabilities/report']('/survey-progress')), null, { timeout })
     await waitWhile(async () => isBusy())
+    step('opening /survey-progress')
     await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/survey-progress')
 
     await page.waitForFunction(() => {
@@ -1381,7 +1389,8 @@ const CLEANUP_STATUS = 4
 const CLEANUP_RAN = 'the cleanup that comes second ran'
 const CLEANUP_PLANTED = 'a cleanup planted to fail'
 
-const finish = async (code) => {
+// Runs every cleanup, whichever fails before it, each failure told on stderr: how many failed.
+const runCleanups = async () => {
   let failed = 0
 
   for (const cleanup of cleanups.splice(0).reverse()) {
@@ -1392,6 +1401,12 @@ const finish = async (code) => {
       console.error(`cleanup failed: ${error && error.message ? error.message : error}`)
     }
   }
+
+  return failed
+}
+
+const finish = async (code) => {
+  const failed = await runCleanups()
 
   if (failed && code) {
     console.error(`the status ${code} is kept, and ${failed} cleanup${failed === 1 ? '' : 's'} also failed`)
@@ -1480,6 +1495,9 @@ const unreadChild = async (kind, file) => {
   const chrome = await require('playwright').chromium.launch()
 
   cleanups.push(() => chrome.close())
+  step = 'warming the page server'
+  // The first load of the app is the slow one (Vite transforms every module of it): it is made once here, retried within half the watchdog's time, before the case is read, so that the case's own waits meet a warm server.
+  await server.warm(chrome, { routes: ['/survey-progress'], limit: limit / 2 })
   step = 'reading the page'
 
   const marker = control.startsWith('page-failure:') ? control.slice('page-failure:'.length) : null
@@ -1511,27 +1529,10 @@ const unreadChild = async (kind, file) => {
   await finish(0)
 }
 
-const main = async () => {
-  const unreadAt = process.argv.indexOf('--unread')
-  const probeAt = process.argv.indexOf('--finish-probe')
+// What a worker sets up once before its first variant (`setUp`, run by the runner): the utility and the page as they are, the saves and what no planted fault reaches in them, the small database, the copies of the browser's save for the optional reads, the page in a browser (one page server over a copy of the browser's save, warmed, one Chromium, a new context for each variant of the page), and what every variant is judged against, read once for the page as it is (`baseline`): the page, the cases of the optional reads and the screen expected. A fault in the template is served to the browser in place of the page's file. The setup reads the baseline before the first variant, whichever variant that is (a fresh worker's, a resumed run's, one `--variants` names), so that no variant waits for the cases, each a child under a watchdog of minutes, within a deadline set for its own work.
+let ENV = null
 
-  if (unreadAt !== -1) {
-    return unreadChild(process.argv[unreadAt + 1], process.argv[unreadAt + 2])
-  }
-
-  if (probeAt !== -1) {
-    // `reject`, `resolve`, `reject-after:<status>` and `resolve-after:<status>`: the cleanups fail or not, and the process ends with the status given (0 when there is none).
-    const [mode, given] = String(process.argv[probeAt + 1]).split(':')
-
-    plantCleanups(mode.startsWith('reject'))
-
-    return finish(Number(given) || 0)
-  }
-
-  // `--only=<text>,<text>` runs the planted faults and the benign rewrites whose name has one of the texts, and the controls when one text is "control". The baseline always runs, and so does everything when there is no text.
-  const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
-  const named = only.filter((text) => text !== 'control')
-  const wanted = (kind, name = '') => only.length === 0 || (kind === 'control' ? only.includes('control') : named.length > 0 && (name === '' || named.some((text) => name.includes(text))))
+const setUp = async () => {
   // `--records=<file>`: the records another run of this script made of the page as it is ({ seen, unread }), judged here in place of observing the page again. The control of `--only` hands its child the records of its own run: which variants a run selects has no browser surface, so that child starts no page server and no browser, and a variant it would serve to the browser gets an observation that did not happen.
   const recordsFile = flagOf('records')
   const records = recordsFile ? JSON.parse(fs.readFileSync(recordsFile, 'utf8')) : null
@@ -1567,6 +1568,8 @@ const main = async () => {
   const schemaSource = databases.find(Boolean)
   const memoryDb = schemaSource ? await memoryDatabase(schemaSource, MEMORY) : null
 
+  cleanups.push(() => Promise.all([memoryDb, ...databases].filter(Boolean).map((database) => database.close())))
+
   // What the saves give that no planted fault reaches: the formation model, the systems, the commanders, the troop bays and the oracle.
   const saveBase = []
 
@@ -1588,7 +1591,6 @@ const main = async () => {
     saveBase.push({ formations: probe.formations, systems: probe.systems, groundCommanders: probe.groundCommanders, troopBays: probe.troopBays, truth: await oracle(database, fixture.GameID, fixture.RaceID) })
   }
 
-  // The page in a browser: one page server over a copy of the browser's save, one Chromium, a new context for each variant of the page. A fault in the template is served to the browser in place of the page's file; what the variant does not change is read once, for the page as it is.
   let server = null
   let chrome = null
   let startFailure = null
@@ -1601,6 +1603,10 @@ const main = async () => {
       cleanups.push(() => server.stop())
       chrome = await require('playwright').chromium.launch()
       cleanups.push(() => chrome.close())
+
+      const warmed = await server.warm(chrome, { routes: ['/survey-progress'] })
+
+      console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
     } catch (error) {
       startFailure = String(error.message).split('\n')[0]
     }
@@ -1624,16 +1630,16 @@ const main = async () => {
     }
   }
 
+  const env = { sources, server, observeVariant, baselineSeen: null, baselineUnread: {} }
+
   // The context of one variant of the sources: the page and the utility as given, the small database and the saves read through them, and what the browser showed (`seen`).
   const reads = new Map()
   let expected = () => {
     throw new Error('the expected screen is not worked out')
   }
-  let baselineSeen = null
-  const baselineUnread = {}
   const unreadFiles = {}
   const unreadDatabases = {}
-  const contextOf = async (given, seen = baselineSeen, unreadSeen = baselineUnread) => {
+  const contextOf = async (given, seen = env.baselineSeen, unreadSeen = env.baselineUnread) => {
     const { pages, fields } = await pagesOf(given)
     const mod = subjectModule((await utilitiesOf(given)).mod)
     const ctx = { mod, pages, fields: subjectFields(fields), models, browser: seen, expected, labels, memory: null, saves: [], unreadSeen, unreadRows: null }
@@ -1705,15 +1711,13 @@ const main = async () => {
     return ctx
   }
 
-  console.log('Constructed race, preferences, page, saves and browser')
-
-  baselineSeen = records ? records.seen : await observeVariant(sources.survey)
-
   // The copies of the browser's save for the optional reads, and each case in a process of its own: {real, fault}, the whole record of each observation (scripts/lib/browser-observe.js). A case is never run twice: a child that ends with a status other than 0 (the watchdog's 3 and a cleanup that failed included) or a browser that did not get through, or that saw the page raise an error, is a failed case, with what it reported (`report`).
   for (const name of ['moved', ...UNREAD.map((entry) => entry.kind)]) {
     unreadFiles[name] = await unreadCopy(name)
     unreadDatabases[name] = await openSave(unreadFiles[name])
   }
+
+  cleanups.push(() => Promise.all(Object.values(unreadDatabases).filter(Boolean).map((database) => database.close())))
 
   const unreadCase = async (entry, extra = [], quiet = false) => {
     let seen
@@ -1724,6 +1728,8 @@ const main = async () => {
       seen = { real: failedObservation(startFailure), fault: failedObservation(startFailure) }
     } else {
       try {
+        sayStep(`the case ${entry.kind} of the optional reads, in a child${extra.length ? ` (${extra.join(' ')})` : ''}`)
+
         const result = await runChild(__filename, ['--unread', entry.kind, unreadFiles[entry.kind], ...extra])
 
         if (result.code !== 0) {
@@ -1752,286 +1758,362 @@ const main = async () => {
     return seen
   }
 
-  for (const entry of UNREAD) {
-    baselineUnread[entry.kind] = await unreadCase(entry)
+  // What every variant is judged against, worked out from the page as it is: the page, the cases of the optional reads and the screen expected. The setup reads it before the first variant; the head reads the page again on the worker's server each time it runs, so that the head run after a fault (the control of the warm page server) reads the page anew. The cases of the optional reads are each read on a page server of their own, never the worker's, and are kept.
+  env.baseline = async () => {
+    env.baselineSeen = records ? records.seen : await observeVariant(sources.survey)
+
+    for (const entry of UNREAD.filter((item) => !env.baselineUnread[item.kind])) {
+      env.baselineUnread[entry.kind] = await unreadCase(entry)
+    }
+
+    const baselineContext = await contextOf(sources)
+
+    if (baselineContext.saves[BROWSER_SAVE]) {
+      expected = expectedScreen(baselineContext)
+      baselineContext.expected = expected
+    }
+
+    return baselineContext
   }
 
-  const baselineContext = await contextOf(sources)
+  const unreadChecks = results.filter((item) => item.id === 'browser-unread')
 
-  if (baselineContext.saves[BROWSER_SAVE]) {
-    expected = expectedScreen(baselineContext)
-    baselineContext.expected = expected
+  env.databases = databases
+  env.contextOf = contextOf
+  env.unreadCase = unreadCase
+  // The outcome of browser-unread for the records given: the one result, or a HarnessError when a record is not whole.
+  env.outcome = async (given) => (await runChecks(unreadChecks, await contextOf(sources, env.baselineSeen, given)))[0]
+  // The records with the cases of one input changed, the others as they are.
+  env.adapted = (input, change) => Object.fromEntries(UNREAD.map((entry) => [entry.kind, entry.input === input ? change(env.baselineUnread[entry.kind]) : env.baselineUnread[entry.kind]]))
+  env.withCase = (kind, seen) => ({ ...env.baselineUnread, [kind]: seen })
+  // The sources with the one change of a fault or a rewrite ([name, from, to, file, ...]).
+  env.variantOf = ([, from, to, file]) => {
+    const given = { ...sources }
+    const key = file === SPEC_FILE ? 'spec' : 'survey'
+
+    given[key] = patched(file, sources[key], from, to)
+
+    return given
   }
 
-  const baseline = await runChecks(results, baselineContext)
+  await env.baseline()
+
+  return env
+}
+
+// The checks of the head: one for each check of the list, and the two of the saves.
+const HEAD_CHECKS = results.length + 2
+
+const checkHead = async () => {
+  console.log('Constructed race, preferences, page, saves and browser')
+
+  const baseline = await runChecks(results, await ENV.baseline())
 
   baseline.forEach((result) => check(result.name, result.ok, result.detail))
 
-  const missing = FIXTURES.map((fixture, index) => (databases[index] ? null : fixture.file)).filter(Boolean)
+  const missing = FIXTURES.map((fixture, index) => (ENV.databases[index] ? null : fixture.file)).filter(Boolean)
 
   check('every named save is there', missing.length === 0, missing.join(', '))
   check('every save check ran', baseline.filter((result) => result.id.startsWith('save-')).length === FIXTURES.length * 8)
-
-  const baselineChecks = checks
-
-  if (options.mutations) {
-    const unreadChecks = results.filter((item) => item.id === 'browser-unread')
-    const construct = UNREAD.find((item) => item.kind === 'construct-table')
-    const withCase = (kind, seen) => ({ ...baselineUnread, [kind]: seen })
-    // The outcome of browser-unread for the records given: the one result, or a HarnessError when a record is not whole.
-    const outcome = async (given) => (await runChecks(unreadChecks, await contextOf(sources, baselineSeen, given)))[0]
-    // The records with the cases of one input changed, the others as they are.
-    const adapted = (input, change) => Object.fromEntries(UNREAD.map((entry) => [entry.kind, entry.input === input ? change(baselineUnread[entry.kind]) : baselineUnread[entry.kind]]))
-    // The sources with the one change of a fault or a rewrite ([name, from, to, file, ...]).
-    const variantOf = ([, from, to, file]) => {
-      const given = { ...sources }
-      const key = file === SPEC_FILE ? 'spec' : 'survey'
-
-      given[key] = patched(file, sources[key], from, to)
-
-      return given
-    }
-
-    if (wanted('planted')) {
-      console.log('\nPlanted faults')
-
-      for (const [name, from, to, file, caught, browser, { throws = false } = {}] of MUTANTS) {
-        if (!wanted('planted', name)) {
-          continue
-        }
-
-        const given = variantOf([name, from, to, file])
-        const failed = await judge(await contextOf(given, browser ? await observeVariant(given.survey) : baselineSeen))
-        const credited = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
-
-        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name, throws }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
-
-        if (detailed) {
-          credited.forEach((result) => console.log(`        ${result.id} (${result.threw ? 'throw' : 'value'}): ${result.detail.split('\n')[0].slice(0, 300)}`))
-        }
-      }
-
-      // An input of the page that is required makes the save without it unsupported: the page the browser saw for that input is the withheld one, in both halves of the record. What fails must be the capability report of browser-unread, not a record that is not whole. Selected by name like the others.
-      for (const input of UNREAD_INPUTS) {
-        const name = `${input} is required by the capability registry`
-
-        if (!wanted('planted', name)) {
-          continue
-        }
-
-        const planted = await outcome(adapted(input, (seen) => ({ real: seen.fault, fault: seen.fault })))
-
-        check(`planted: ${name}: caught by the capability report; credited by browser-unread (${planted.threw ? 'throw' : 'value'})`, caughtBy([planted], ['browser-unread'], { name }) && /the capability report/.test(planted.detail), `${planted.kind}: ${planted.detail}`)
-      }
-    }
-
-    if (wanted('control')) {
-      // The controls of the harness: a case that fails must fail the check, however it fails and whatever a later start would give. Each runs the case's own function (`unreadCase`) and judges browser-unread on what it returns, and each is paired with the case that is as it should be and must pass.
-      console.log('\nControls of the harness')
-
-      // Who failed. A failure is credited only when it is an assertion of a check: marked by the helper of the checks, or the failure of a call of the code under test that an adapter (`through`) names, which credits a fault only when the fault declares that a throw is how it is caught (scripts/lib/fault-credit.js `caughtBy`). An error that is anything else, an AssertionError that the code under test threw included, stops the run when a fault is judged.
-      const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
-      // What crediting a fault gives: true or false, or the HarnessError that stops the run.
-      const creditOf = (call) => Promise.resolve().then(call).then((credited) => credited, (error) => error)
-      const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
-      const own = await probe(() => assert.equal(1, 2))
-      const ordinary = await probe(() => assert.equal(1, 1))
-
-      check('control: a failed assertion of a check is an assertion and credits the fault it is named for, and an assertion that holds passes', own.kind === 'assertion' && caughtBy([own], ['probe']) && ordinary.ok, JSON.stringify([own, ordinary]))
-
-      const bare = [await probe(() => { throw stranger() }), await probe(async () => { throw stranger() }), await probe(() => { throw new TypeError('crash') })]
-      const judgedBare = await judge({}, [{ id: 'probe', name: 'probe', run: async () => { throw stranger() } }]).then(() => null, (error) => error)
-
-      check('control: an AssertionError or any other error that the code under test throws, where no adapter names it, is no assertion of a check, credits nothing and stops the run when a fault is judged', bare.every((result) => result.kind === 'error') && !caughtBy(bare, ['probe']) && judgedBare instanceof HarnessError, JSON.stringify([bare, String(judgedBare)]))
-
-      const named = []
-
-      for (const call of [() => { throw stranger() }, async () => { throw stranger() }, () => { throw new TypeError('crash') }, async () => { throw new TypeError('crash') }]) {
-        named.push(await probe(async () => through('the call', call)))
-      }
-
-      const returned = await probe(() => assert.deepEqual(through('the call', () => ({ list: [1] })), { list: [1] }))
-
-      check('control: a call of the code under test that throws or rejects, with an AssertionError or any other error, is an assertion that names the call and says that it threw, credits a fault only when the fault declares the throw and otherwise stops the run, and a call that returns gives its result', named.every((result) => result.kind === 'assertion' && result.threw === true && /^the call threw (AssertionError|TypeError)/.test(result.detail)) && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash' }))) instanceof HarnessError && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash', throws: true }))) === true && returned.ok, JSON.stringify([named, returned]))
-
-      const trap = () => ({ get x () { throw new Error('a getter') } })
-      const reading = []
-
-      for (const call of [() => trap(), () => ({ list: [{ inner: trap() }] }), () => new Map([[1, trap()]]), async () => trap(), async () => [new Set([trap()])]]) {
-        reading.push(await probe(async () => through('the call', call)))
-      }
-
-      const unharmed = await probe(async () => assert.deepEqual([...(await through('the call', async () => new Map([[1, { x: 1 }]]))).keys()], [1]))
-
-      check('control: a getter that throws in what the code under test returned, nested or in a promise, a map or a set, is the failure of the call, and what has no getter is read as it is', reading.every((result) => result.kind === 'assertion' && /^the call threw Error: a getter/.test(result.detail)) && unharmed.ok, JSON.stringify([reading, unharmed]))
-
-      // A lookup of the harness that is wrong, and a callback of the harness that throws, are the harness's: on a fault that is credited otherwise, they stop the run.
-      const busyMutant = MUTANTS.find(([name]) => name === 'a formation is busy wherever it stands')
-      const busyContext = await contextOf(variantOf(busyMutant))
-      const lookups = (name) => [{ id: 'states', name: 'states', run: async (ctx) => { await surveyView(ctx).runAsync(name) } }]
-      const lookedUp = await judge(busyContext, lookups('absent')).then(() => null, (error) => error)
-      const lookedUpRight = await judge(busyContext, lookups('game')).then((failed) => failed.length, (error) => error)
-
-      check('control: a read of the page that is looked up under a name it does not have (a lookup of the harness) stops the run on a fault that states catches, and the same read under its name passes', lookedUp instanceof HarnessError && lookedUpRight === 0, `${lookedUp} ${lookedUpRight}`)
-
-      const callbackChecks = (callback) => [{ id: 'lifts', name: 'lifts', run: (ctx) => assert.equal(ctx.mod.liftText({ kind: 'one', lifts: 2, lift: 1 }, callback), 'Lift 1 of 2') }]
-      const thrownBack = await judge(busyContext, callbackChecks(harnessOwn(() => { throw new Error('the callback') }))).then(() => null, (error) => error)
-      const handedBack = await judge(busyContext, callbackChecks(harnessOwn((count) => String(count)))).then((failed) => failed.length, (error) => error)
-
-      check('control: a callback of the harness that the utility calls and that throws stops the run, and one that returns gives the words', thrownBack instanceof HarnessError && handedBack === 0, `${thrownBack} ${handedBack}`)
-
-      const storeChecks = (getters) => [{ id: 'ready', name: 'ready', run: (ctx) => assert.equal(instantiate(ctx.pages.survey, { boundary, $store: { getters, state: {} }, data: { loadErrors: {} } }).database, null) }]
-      const storeBroken = await judge(busyContext, storeChecks(null)).then(() => null, (error) => error)
-      const storeWhole = await judge(busyContext, storeChecks({})).then((failed) => failed.length, (error) => error)
-
-      check('control: a store whose getters are malformed, read by the page, stops the run, and a whole store gives the page its getters', storeBroken instanceof HarnessError && storeWhole === 0, `${storeBroken} ${storeWhole}`)
-
-      // An observation whose context did not close fails the check with an error of its own, in the baseline and under a fault, whether or not a screen was kept and the page raised errors besides; an error the page raised that nothing named is still an assertion, and a closed context passes.
-      const closed = completedObservation({ initial: {} })
-      const closeFailed = { ...closed, error: 'the context did not close: planted' }
-      const closeFailedRaising = { ...closeFailed, errors: ['planted'], unexpected: ['page error: planted'] }
-      const raisedOnly = { ...closed, error: 'the page raised 1 unexpected error, the first: page error: planted', errors: ['planted'], unexpected: ['page error: planted'] }
-      const seeing = [{ id: 'seen', name: 'seen', run: (ctx) => { observed(ctx) } }]
-      const seenAs = (browser) => judge({ browser }, seeing).then((failed) => failed, (error) => error)
-      const baselineOf = async (browser) => (await runChecks(seeing, { browser }))[0]
-
-      check('control: a context that did not close fails the check with an error of its own at the baseline, whether or not the page raised errors besides, and a context that closed passes', !(await baselineOf(closeFailed)).ok && (await baselineOf(closeFailed)).kind === 'error' && (await baselineOf(closeFailedRaising)).kind === 'error' && (await baselineOf(closed)).ok, JSON.stringify([await baselineOf(closeFailed), await baselineOf(closeFailedRaising)]))
-      check('control: a context that did not close stops the run when a fault is judged, whether or not the page raised errors besides, and a context that closed does not', (await seenAs(closeFailed)) instanceof HarnessError && (await seenAs(closeFailedRaising)) instanceof HarnessError && (await seenAs(closed)).length === 0, `${await seenAs(closeFailed)} ${await seenAs(closeFailedRaising)}`)
-      check('control: an error the page raised that nothing named is an assertion that credits a fault', caughtBy(await seenAs(raisedOnly), ['seen']), JSON.stringify(await seenAs(raisedOnly)))
-
-      // A normaliser of a view that throws is a failure of the page's contract, caught by views; one rewritten in an equivalent way, and the code as it is, pass.
-      const normaliser = (name, to) => [name, '(stored) => (Array.isArray(stored) ?', to, SPEC_FILE]
-      const viewChecks = results.filter((item) => item.id === 'views')
-      const throwing = await judge(await contextOf(variantOf(normaliser('a normaliser that throws', "(stored) => (Array.isArray(stored) && (() => { throw new TypeError('planted') })() ?"))), viewChecks)
-      const rewritten = await judge(await contextOf(variantOf(normaliser('a normaliser written the other way round', '(stored) => (!Array.isArray(stored) ? undefined : Array.isArray(stored) ?'))), viewChecks)
-      const unchanged = await judge(await contextOf(sources), viewChecks)
-
-      check('control: a normaliser of a view that throws fails views on an assertion that names it without stopping the checks, and credits a fault only when the fault declares the throw, stopping the run otherwise', throwing.length === 1 && throwing[0].kind === 'assertion' && throwing[0].threw === true && /the normalise of the view \w+ threw TypeError/.test(throwing[0].detail) && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws' }))) instanceof HarnessError && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws', throws: true }))) === true, JSON.stringify(throwing))
-      check('control: the normalisers rewritten in an equivalent way, and as they are, leave views passing', rewritten.length === 0 && unchanged.length === 0, JSON.stringify([rewritten, unchanged]))
-
-      // A crash of the harness itself, planted in the context a check is handed, must end the run as a defect on any code under test: healthy, rewritten in a benign way and with a fault. The same context intact is the paired case.
-      const selectChecks = results.filter((item) => item.id === 'select')
-
-      for (const [what, entry, faulty] of [['the code as it is', null, false], ['a benign rewrite', BENIGN.find(([name]) => name === 'a parenthesised condition'), false], ['a fault', MUTANTS.find(([name]) => name === 'the state filter is ignored'), true]]) {
-        const ctx = await contextOf(entry ? variantOf(entry) : sources)
-        const intact = await judge(ctx, selectChecks)
-
-        check(`control: ${what}, with nothing planted in the harness, ${faulty ? 'fails the check of the fault on an assertion' : 'passes the check'}`, faulty ? intact.length === 1 && intact[0].kind === 'assertion' : intact.length === 0, JSON.stringify(intact))
-
-        ctx.memory = undefined
-
-        const stopped = await judge(ctx, selectChecks).then(() => null, (error) => error)
-
-        check(`control: a crash of the harness itself, in the context of ${what}, stops the run as a defect of the harness and credits no fault`, stopped instanceof HarnessError, String(stopped))
-      }
-
-      // A fault that makes a computed value of the page throw: every check that reads it fails on an assertion that names the value, and the checks named for the fault are among them.
-      const busy = await judge(busyContext)
-      const crash = busy.find((result) => result.id === 'rows-once')
-
-      check('control: a fault that makes a computed value of the page throw fails the checks that read it on an assertion naming the value, and does not stop the run', Boolean(crash) && crash.kind === 'assertion' && /the computed value \w+ threw TypeError/.test(crash.detail) && !busy.some((result) => result.kind === 'error'), JSON.stringify(busy.map((result) => [result.id, result.kind, result.detail.slice(0, 80)])))
-      check('control: the same fault is caught by the checks named for it', caughtBy(busy, ['states', 'state-details']), JSON.stringify(busy.map((result) => [result.id, result.kind])))
-
-      for (const input of UNREAD_INPUTS) {
-        const neutral = await outcome(adapted(input, (seen) => ({ real: seen.real, fault: seen.fault })))
-
-        check(`control: the substitution of the records of ${input} that keeps both halves leaves browser-unread passing`, neutral.ok, `${neutral.kind}: ${neutral.detail}`)
-      }
-
-      const marker = path.join(os.tmpdir(), `ae-unread-${process.pid}-once`)
-
-      cleanups.push(async () => fs.rmSync(marker, { force: true }))
-
-      const once = await unreadCase(construct, ['--timeout=10000', `--control=page-failure:${marker}`], true)
-      const onceOutcome = await outcome(withCase(construct.kind, once))
-
-      check('control: a page failure on the first start only, which a second start would not show, leaves browser-unread failed', fs.existsSync(marker) && !onceOutcome.ok && /did not get through construct-table real at picking the game/.test(onceOutcome.detail), `${fs.existsSync(marker)} ${onceOutcome.detail}`)
-      check('control: the failed observation keeps its phase, the whole message and what the page and the browser reported', Boolean(once.real.error) && once.real.phase === 'picking the game' && once.real.errors.length + once.real.console.length + once.real.failed.length > 0, JSON.stringify(once.real).slice(0, 600))
-
-      for (const [control, extra, expectedText] of [['exits with a status other than 0', ['--control=late-exit'], /status 5/], ['does not end', ['--control=late-hang', '--limit=4000'], /status 3[\s\S]*did not finish in 4 s/]]) {
-        const seen = await unreadCase(construct, extra, true)
-        const failed = await outcome(withCase(construct.kind, seen))
-
-        check(`control: a child that prints a valid result and then ${control} fails the case and browser-unread`, expectedText.test(seen.real.error) && !failed.ok, JSON.stringify({ seen: seen.real.error, failed: failed.detail }))
-      }
-
-      const rejecting = await unreadCase(construct, ['--control=cleanup:reject'], true)
-      const resolving = await unreadCase(construct, ['--control=cleanup:resolve'], true)
-
-      check('control: a child that prints a valid result and then closes with a cleanup that fails fails the case, with the cleanup named', /status 4/.test(rejecting.real.error) && String(rejecting.real.error).includes(CLEANUP_PLANTED), String(rejecting.real.error))
-      check('control: the same child with a cleanup that resolves gives a case that went through', resolving.real.error === null && resolving.fault.error === null, `${resolving.real.error} ${resolving.fault.error}`)
-
-      for (const failing of [true, false]) {
-        const result = await runChild(__filename, ['--finish-probe', failing ? 'reject' : 'resolve'])
-        const ranAfter = result.stdout.includes(CLEANUP_RAN)
-
-        check(`control: the process of the check ends ${failing ? `with status ${CLEANUP_STATUS} when a cleanup fails, and still runs the cleanup after it` : 'with status 0 when every cleanup resolves'}`, failing ? result.code === CLEANUP_STATUS && ranAfter && result.stderr.includes(CLEANUP_PLANTED) : result.code === 0 && ranAfter && result.stderr.trim() === '', `${result.code} ${result.stderr.trim().slice(-300)}`)
-      }
-
-      const kept = await runChild(__filename, ['--finish-probe', 'reject-after:7'])
-      const plain = await runChild(__filename, ['--finish-probe', 'resolve-after:7'])
-
-      check('control: a process that ends with a status of its own keeps it when a cleanup fails too, runs the cleanup after it and says that the cleanup also failed', kept.code === 7 && kept.stdout.includes(CLEANUP_RAN) && kept.stderr.includes(CLEANUP_PLANTED) && kept.stderr.includes('also failed'), `${kept.code} ${kept.stderr.trim().slice(-300)}`)
-      check('control: the same status with every cleanup resolved is kept, and nothing is said of a cleanup', plain.code === 7 && plain.stdout.includes(CLEANUP_RAN) && !plain.stderr.includes('also failed'), `${plain.code} ${plain.stderr.trim().slice(-300)}`)
-
-      const raising = await unreadCase(construct, ['--control=fault-half:throw'], true)
-      const quiet = await unreadCase(construct, ['--control=fault-half:quiet'], true)
-      const raisingOutcome = await outcome(withCase(construct.kind, raising))
-      const quietOutcome = await outcome(withCase(construct.kind, quiet))
-
-      check('control: an uncaught error raised only in the half read with the input required fails browser-unread, and the error is kept', raising.real.error === null && raising.fault.errors.some((text) => text.includes('second half')) && !raisingOutcome.ok && /construct-table fault/.test(raisingOutcome.detail), `${raising.real.error} ${raising.fault.errors} ${raisingOutcome.detail}`)
-      check('control: the same half with a script that does nothing is a case that went through', quiet.real.error === null && quiet.fault.error === null && quiet.fault.errors.length === 0 && quietOutcome.ok, `${quiet.fault.error} ${quietOutcome.detail}`)
-
-      const whole = baselineUnread[construct.kind]
-      const complete = await outcome(withCase(construct.kind, { real: whole.real, fault: whole.fault }))
-
-      check('control: a record with both observations whole passes browser-unread', complete.ok, `${complete.kind}: ${complete.detail}`)
-
-      for (const [what, record] of [['a record without the half read with the input required', { real: whole.real }], ['an observation whose lists are missing', { real: { ...whole.real, console: undefined }, fault: whole.fault }], ['an observation that is not a record', { real: 'seen', fault: whole.fault }], ['an observation that went through and holds no value', { real: { ...whole.real, value: null }, fault: whole.fault }], ['no record at all', undefined]]) {
-        const stopped = await outcome(withCase(construct.kind, record)).then(() => null, (error) => error)
-
-        check(`control: ${what} stops the run as a defect of the harness, and is never a fault that was caught`, stopped instanceof HarnessError, String(stopped))
-      }
-
-      // The two ways a result can be unusable are not the same: one that cannot be read at all is a failed case, as a child that ended badly is; one that reads as JSON but is not two whole observations is a defect of the harness, as every other record that is not whole.
-      const unreadable = await unreadCase(construct, ['--control=bad-json'], true)
-      const unreadableOutcome = await outcome(withCase(construct.kind, unreadable))
-      const malformed = await unreadCase(construct, ['--control=bad-envelope'], true).then(() => null, (error) => error)
-
-      check('control: a result that is not JSON is a failed case with the phase of the child, and fails browser-unread without stopping the run', unreadable.real.error !== null && unreadable.real.phase === 'the child' && unreadable.fault.error !== null && !unreadableOutcome.ok, `${unreadable.real.error} ${unreadable.real.phase} ${unreadableOutcome.detail}`)
-      check('control: a result that is JSON but not two whole observations stops the run as a defect of the harness', malformed instanceof HarnessError, String(malformed))
-
-      // The names a run is told to select are the ones it runs, the required-input faults included: a child of its own runs the baseline, judging the records of the page this run made (`--records`), and the fault of one input, and passes.
-      const recordsOut = path.join(os.tmpdir(), `ae-specialist-records-${process.pid}.json`)
-
-      cleanups.push(async () => fs.rmSync(recordsOut, { force: true }))
-      fs.writeFileSync(recordsOut, JSON.stringify({ seen: baselineSeen, unread: baselineUnread }))
-
-      const selected = await runChild(__filename, ['--only=constructSites', `--records=${recordsOut}`])
-      const total = baselineChecks + 1
-
-      check('control: a run told to select the fault of one input runs that one among the others and no other, and ends with every check passed', selected.code === 0 && selected.stdout.includes('PASS  planted: constructSites is required by the capability registry') && !/planted: (ruinSites|troopBays)/.test(selected.stdout) && selected.stdout.includes(`${total} of ${total} checks passed`), `${selected.code} ${selected.stdout.trim().slice(-400)} ${selected.stderr.trim().slice(-300)}`)
-    }
-
-    if (wanted('benign')) {
-      console.log('\nBenign rewrites')
-
-      for (const [name, from, to, file, , browser] of BENIGN) {
-        if (!wanted('benign', name)) {
-          continue
-        }
-
-        const given = variantOf([name, from, to, file])
-        const failed = (await judge(await contextOf(given, browser ? await observeVariant(given.survey) : baselineSeen))).map((result) => result.id)
-
-        check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
-      }
-    }
+}
+
+const checkPlanted = async ([name, from, to, file, caught, browser, { throws = false } = {}]) => {
+  const given = ENV.variantOf([name, from, to, file])
+  const failed = await judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given.survey) : ENV.baselineSeen))
+  const credited = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
+
+  check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name, throws }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
+
+  if (detailed) {
+    credited.forEach((result) => console.log(`        ${result.id} (${result.threw ? 'throw' : 'value'}): ${result.detail.split('\n')[0].slice(0, 300)}`))
+  }
+}
+
+// An input of the page that is required makes the save without it unsupported: the page the browser saw for that input is the withheld one, in both halves of the record. What fails must be the capability report of browser-unread, not a record that is not whole.
+const requiredName = (input) => `${input} is required by the capability registry`
+
+const checkRequired = async (input) => {
+  const planted = await ENV.outcome(ENV.adapted(input, (seen) => ({ real: seen.fault, fault: seen.fault })))
+
+  check(`planted: ${requiredName(input)}: caught by the capability report; credited by browser-unread (${planted.threw ? 'throw' : 'value'})`, caughtBy([planted], ['browser-unread'], { name: requiredName(input) }) && /the capability report/.test(planted.detail), `${planted.kind}: ${planted.detail}`)
+}
+
+// The controls of the harness: a case that fails must fail the check, however it fails and whatever a later start would give. Each runs the case's own function (`unreadCase`) and judges browser-unread on what it returns, and each is paired with the case that is as it should be and must pass.
+const checkControls = async () => {
+  const { sources, contextOf, variantOf, outcome, adapted, withCase, unreadCase, baselineSeen, baselineUnread } = ENV
+  const construct = UNREAD.find((item) => item.kind === 'construct-table')
+  // Every child the controls start, each with its bound (ms): a case under its own watchdog (`--limit`), a run of this script under the limit of startChild. The deadline of the controls is built from the bounds of the children they start (CONTROL_BOUNDS), which the last control holds them to, so that a child that ends within its bound never runs the controls past their deadline.
+  let bounds = 0
+  const caseOf = (extra, limit) => {
+    bounds += limit
+
+    return unreadCase(construct, [`--limit=${limit}`, ...extra], true)
+  }
+  const childOf = (args, limit) => {
+    bounds += limit
+    sayStep(`a run of this script in a child (${args.join(' ')})`)
+
+    return runChild(__filename, args, { limit })
   }
 
-  await Promise.all([memoryDb, ...databases, ...Object.values(unreadDatabases)].filter(Boolean).map((database) => database.close()))
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  await finish(failures ? 1 : 0)
+  // Who failed. A failure is credited only when it is an assertion of a check: marked by the helper of the checks, or the failure of a call of the code under test that an adapter (`through`) names, which credits a fault only when the fault declares that a throw is how it is caught (scripts/lib/fault-credit.js `caughtBy`). An error that is anything else, an AssertionError that the code under test threw included, stops the run when a fault is judged.
+  const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
+  // What crediting a fault gives: true or false, or the HarnessError that stops the run.
+  const creditOf = (call) => Promise.resolve().then(call).then((credited) => credited, (error) => error)
+  const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
+  const own = await probe(() => assert.equal(1, 2))
+  const ordinary = await probe(() => assert.equal(1, 1))
+
+  check('control: a failed assertion of a check is an assertion and credits the fault it is named for, and an assertion that holds passes', own.kind === 'assertion' && caughtBy([own], ['probe']) && ordinary.ok, JSON.stringify([own, ordinary]))
+
+  const bare = [await probe(() => { throw stranger() }), await probe(async () => { throw stranger() }), await probe(() => { throw new TypeError('crash') })]
+  const judgedBare = await judge({}, [{ id: 'probe', name: 'probe', run: async () => { throw stranger() } }]).then(() => null, (error) => error)
+
+  check('control: an AssertionError or any other error that the code under test throws, where no adapter names it, is no assertion of a check, credits nothing and stops the run when a fault is judged', bare.every((result) => result.kind === 'error') && !caughtBy(bare, ['probe']) && judgedBare instanceof HarnessError, JSON.stringify([bare, String(judgedBare)]))
+
+  const named = []
+
+  for (const call of [() => { throw stranger() }, async () => { throw stranger() }, () => { throw new TypeError('crash') }, async () => { throw new TypeError('crash') }]) {
+    named.push(await probe(async () => through('the call', call)))
+  }
+
+  const returned = await probe(() => assert.deepEqual(through('the call', () => ({ list: [1] })), { list: [1] }))
+
+  check('control: a call of the code under test that throws or rejects, with an AssertionError or any other error, is an assertion that names the call and says that it threw, credits a fault only when the fault declares the throw and otherwise stops the run, and a call that returns gives its result', named.every((result) => result.kind === 'assertion' && result.threw === true && /^the call threw (AssertionError|TypeError)/.test(result.detail)) && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash' }))) instanceof HarnessError && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash', throws: true }))) === true && returned.ok, JSON.stringify([named, returned]))
+
+  const trap = () => ({ get x () { throw new Error('a getter') } })
+  const reading = []
+
+  for (const call of [() => trap(), () => ({ list: [{ inner: trap() }] }), () => new Map([[1, trap()]]), async () => trap(), async () => [new Set([trap()])]]) {
+    reading.push(await probe(async () => through('the call', call)))
+  }
+
+  const unharmed = await probe(async () => assert.deepEqual([...(await through('the call', async () => new Map([[1, { x: 1 }]]))).keys()], [1]))
+
+  check('control: a getter that throws in what the code under test returned, nested or in a promise, a map or a set, is the failure of the call, and what has no getter is read as it is', reading.every((result) => result.kind === 'assertion' && /^the call threw Error: a getter/.test(result.detail)) && unharmed.ok, JSON.stringify([reading, unharmed]))
+
+  // A lookup of the harness that is wrong, and a callback of the harness that throws, are the harness's: on a fault that is credited otherwise, they stop the run.
+  const busyMutant = MUTANTS.find(([name]) => name === 'a formation is busy wherever it stands')
+  const busyContext = await contextOf(variantOf(busyMutant))
+  const lookups = (name) => [{ id: 'states', name: 'states', run: async (ctx) => { await surveyView(ctx).runAsync(name) } }]
+  const lookedUp = await judge(busyContext, lookups('absent')).then(() => null, (error) => error)
+  const lookedUpRight = await judge(busyContext, lookups('game')).then((failed) => failed.length, (error) => error)
+
+  check('control: a read of the page that is looked up under a name it does not have (a lookup of the harness) stops the run on a fault that states catches, and the same read under its name passes', lookedUp instanceof HarnessError && lookedUpRight === 0, `${lookedUp} ${lookedUpRight}`)
+
+  const callbackChecks = (callback) => [{ id: 'lifts', name: 'lifts', run: (ctx) => assert.equal(ctx.mod.liftText({ kind: 'one', lifts: 2, lift: 1 }, callback), 'Lift 1 of 2') }]
+  const thrownBack = await judge(busyContext, callbackChecks(harnessOwn(() => { throw new Error('the callback') }))).then(() => null, (error) => error)
+  const handedBack = await judge(busyContext, callbackChecks(harnessOwn((count) => String(count)))).then((failed) => failed.length, (error) => error)
+
+  check('control: a callback of the harness that the utility calls and that throws stops the run, and one that returns gives the words', thrownBack instanceof HarnessError && handedBack === 0, `${thrownBack} ${handedBack}`)
+
+  const storeChecks = (getters) => [{ id: 'ready', name: 'ready', run: (ctx) => assert.equal(instantiate(ctx.pages.survey, { boundary, $store: { getters, state: {} }, data: { loadErrors: {} } }).database, null) }]
+  const storeBroken = await judge(busyContext, storeChecks(null)).then(() => null, (error) => error)
+  const storeWhole = await judge(busyContext, storeChecks({})).then((failed) => failed.length, (error) => error)
+
+  check('control: a store whose getters are malformed, read by the page, stops the run, and a whole store gives the page its getters', storeBroken instanceof HarnessError && storeWhole === 0, `${storeBroken} ${storeWhole}`)
+
+  // An observation whose context did not close fails the check with an error of its own, in the baseline and under a fault, whether or not a screen was kept and the page raised errors besides; an error the page raised that nothing named is still an assertion, and a closed context passes.
+  const closed = completedObservation({ initial: {} })
+  const closeFailed = { ...closed, error: 'the context did not close: planted' }
+  const closeFailedRaising = { ...closeFailed, errors: ['planted'], unexpected: ['page error: planted'] }
+  const raisedOnly = { ...closed, error: 'the page raised 1 unexpected error, the first: page error: planted', errors: ['planted'], unexpected: ['page error: planted'] }
+  const seeing = [{ id: 'seen', name: 'seen', run: (ctx) => { observed(ctx) } }]
+  const seenAs = (browser) => judge({ browser }, seeing).then((failed) => failed, (error) => error)
+  const baselineOf = async (browser) => (await runChecks(seeing, { browser }))[0]
+
+  check('control: a context that did not close fails the check with an error of its own at the baseline, whether or not the page raised errors besides, and a context that closed passes', !(await baselineOf(closeFailed)).ok && (await baselineOf(closeFailed)).kind === 'error' && (await baselineOf(closeFailedRaising)).kind === 'error' && (await baselineOf(closed)).ok, JSON.stringify([await baselineOf(closeFailed), await baselineOf(closeFailedRaising)]))
+  check('control: a context that did not close stops the run when a fault is judged, whether or not the page raised errors besides, and a context that closed does not', (await seenAs(closeFailed)) instanceof HarnessError && (await seenAs(closeFailedRaising)) instanceof HarnessError && (await seenAs(closed)).length === 0, `${await seenAs(closeFailed)} ${await seenAs(closeFailedRaising)}`)
+  check('control: an error the page raised that nothing named is an assertion that credits a fault', caughtBy(await seenAs(raisedOnly), ['seen']), JSON.stringify(await seenAs(raisedOnly)))
+
+  // A normaliser of a view that throws is a failure of the page's contract, caught by views; one rewritten in an equivalent way, and the code as it is, pass.
+  const normaliser = (name, to) => [name, '(stored) => (Array.isArray(stored) ?', to, SPEC_FILE]
+  const viewChecks = results.filter((item) => item.id === 'views')
+  const throwing = await judge(await contextOf(variantOf(normaliser('a normaliser that throws', "(stored) => (Array.isArray(stored) && (() => { throw new TypeError('planted') })() ?"))), viewChecks)
+  const rewritten = await judge(await contextOf(variantOf(normaliser('a normaliser written the other way round', '(stored) => (!Array.isArray(stored) ? undefined : Array.isArray(stored) ?'))), viewChecks)
+  const unchanged = await judge(await contextOf(sources), viewChecks)
+
+  check('control: a normaliser of a view that throws fails views on an assertion that names it without stopping the checks, and credits a fault only when the fault declares the throw, stopping the run otherwise', throwing.length === 1 && throwing[0].kind === 'assertion' && throwing[0].threw === true && /the normalise of the view \w+ threw TypeError/.test(throwing[0].detail) && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws' }))) instanceof HarnessError && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws', throws: true }))) === true, JSON.stringify(throwing))
+  check('control: the normalisers rewritten in an equivalent way, and as they are, leave views passing', rewritten.length === 0 && unchanged.length === 0, JSON.stringify([rewritten, unchanged]))
+
+  // A crash of the harness itself, planted in the context a check is handed, must end the run as a defect on any code under test: healthy, rewritten in a benign way and with a fault. The same context intact is the paired case.
+  const selectChecks = results.filter((item) => item.id === 'select')
+
+  for (const [what, entry, faulty] of [['the code as it is', null, false], ['a benign rewrite', BENIGN.find(([name]) => name === 'a parenthesised condition'), false], ['a fault', MUTANTS.find(([name]) => name === 'the state filter is ignored'), true]]) {
+    const ctx = await contextOf(entry ? variantOf(entry) : sources)
+    const intact = await judge(ctx, selectChecks)
+
+    check(`control: ${what}, with nothing planted in the harness, ${faulty ? 'fails the check of the fault on an assertion' : 'passes the check'}`, faulty ? intact.length === 1 && intact[0].kind === 'assertion' : intact.length === 0, JSON.stringify(intact))
+
+    ctx.memory = undefined
+
+    const stopped = await judge(ctx, selectChecks).then(() => null, (error) => error)
+
+    check(`control: a crash of the harness itself, in the context of ${what}, stops the run as a defect of the harness and credits no fault`, stopped instanceof HarnessError, String(stopped))
+  }
+
+  // A fault that makes a computed value of the page throw: every check that reads it fails on an assertion that names the value, and the checks named for the fault are among them.
+  const busy = await judge(busyContext)
+  const crash = busy.find((result) => result.id === 'rows-once')
+
+  check('control: a fault that makes a computed value of the page throw fails the checks that read it on an assertion naming the value, and does not stop the run', Boolean(crash) && crash.kind === 'assertion' && /the computed value \w+ threw TypeError/.test(crash.detail) && !busy.some((result) => result.kind === 'error'), JSON.stringify(busy.map((result) => [result.id, result.kind, result.detail.slice(0, 80)])))
+  check('control: the same fault is caught by the checks named for it', caughtBy(busy, ['states', 'state-details']), JSON.stringify(busy.map((result) => [result.id, result.kind])))
+
+  for (const input of UNREAD_INPUTS) {
+    const neutral = await outcome(adapted(input, (seen) => ({ real: seen.real, fault: seen.fault })))
+
+    check(`control: the substitution of the records of ${input} that keeps both halves leaves browser-unread passing`, neutral.ok, `${neutral.kind}: ${neutral.detail}`)
+  }
+
+  const marker = path.join(os.tmpdir(), `ae-unread-${process.pid}-once`)
+
+  cleanups.push(async () => fs.rmSync(marker, { force: true }))
+
+  const once = await caseOf(['--timeout=10000', `--control=page-failure:${marker}`], UNREAD_LIMIT)
+  const onceOutcome = await outcome(withCase(construct.kind, once))
+
+  check('control: a page failure on the first start only, which a second start would not show, leaves browser-unread failed', fs.existsSync(marker) && !onceOutcome.ok && /did not get through construct-table real at picking the game/.test(onceOutcome.detail), `${fs.existsSync(marker)} ${onceOutcome.detail}`)
+  check('control: the failed observation keeps its phase, the whole message and what the page and the browser reported', Boolean(once.real.error) && once.real.phase === 'picking the game' && once.real.errors.length + once.real.console.length + once.real.failed.length > 0, JSON.stringify(once.real).slice(0, 600))
+
+  for (const [control, extra, limit, expectedText] of [['exits with a status other than 0', ['--control=late-exit'], QUICK_LIMIT, /status 5/], ['does not end', ['--control=late-hang'], 4000, /status 3[\s\S]*did not finish in 4 s/]]) {
+    const seen = await caseOf(extra, limit)
+    const failed = await outcome(withCase(construct.kind, seen))
+
+    check(`control: a child that prints a valid result and then ${control} fails the case and browser-unread`, expectedText.test(seen.real.error) && !failed.ok, JSON.stringify({ seen: seen.real.error, failed: failed.detail }))
+  }
+
+  const rejecting = await caseOf(['--control=cleanup:reject'], QUICK_LIMIT)
+  const resolving = await caseOf(['--control=cleanup:resolve'], QUICK_LIMIT)
+
+  check('control: a child that prints a valid result and then closes with a cleanup that fails fails the case, with the cleanup named', /status 4/.test(rejecting.real.error) && String(rejecting.real.error).includes(CLEANUP_PLANTED), String(rejecting.real.error))
+  check('control: the same child with a cleanup that resolves gives a case that went through', resolving.real.error === null && resolving.fault.error === null, `${resolving.real.error} ${resolving.fault.error}`)
+
+  for (const failing of [true, false]) {
+    const result = await childOf(['--finish-probe', failing ? 'reject' : 'resolve'], QUICK_LIMIT)
+    const ranAfter = result.stdout.includes(CLEANUP_RAN)
+
+    check(`control: the process of the check ends ${failing ? `with status ${CLEANUP_STATUS} when a cleanup fails, and still runs the cleanup after it` : 'with status 0 when every cleanup resolves'}`, failing ? result.code === CLEANUP_STATUS && ranAfter && result.stderr.includes(CLEANUP_PLANTED) : result.code === 0 && ranAfter && result.stderr.trim() === '', `${result.code} ${result.stderr.trim().slice(-300)}`)
+  }
+
+  const kept = await childOf(['--finish-probe', 'reject-after:7'], QUICK_LIMIT)
+  const plain = await childOf(['--finish-probe', 'resolve-after:7'], QUICK_LIMIT)
+
+  check('control: a process that ends with a status of its own keeps it when a cleanup fails too, runs the cleanup after it and says that the cleanup also failed', kept.code === 7 && kept.stdout.includes(CLEANUP_RAN) && kept.stderr.includes(CLEANUP_PLANTED) && kept.stderr.includes('also failed'), `${kept.code} ${kept.stderr.trim().slice(-300)}`)
+  check('control: the same status with every cleanup resolved is kept, and nothing is said of a cleanup', plain.code === 7 && plain.stdout.includes(CLEANUP_RAN) && !plain.stderr.includes('also failed'), `${plain.code} ${plain.stderr.trim().slice(-300)}`)
+
+  const raising = await caseOf(['--control=fault-half:throw'], UNREAD_LIMIT)
+  const quiet = await caseOf(['--control=fault-half:quiet'], UNREAD_LIMIT)
+  const raisingOutcome = await outcome(withCase(construct.kind, raising))
+  const quietOutcome = await outcome(withCase(construct.kind, quiet))
+
+  check('control: an uncaught error raised only in the half read with the input required fails browser-unread, and the error is kept', raising.real.error === null && raising.fault.errors.some((text) => text.includes('second half')) && !raisingOutcome.ok && /construct-table fault/.test(raisingOutcome.detail), `${raising.real.error} ${raising.fault.errors} ${raisingOutcome.detail}`)
+  check('control: the same half with a script that does nothing is a case that went through', quiet.real.error === null && quiet.fault.error === null && quiet.fault.errors.length === 0 && quietOutcome.ok, `${quiet.fault.error} ${quietOutcome.detail}`)
+
+  const whole = baselineUnread[construct.kind]
+  const complete = await outcome(withCase(construct.kind, { real: whole.real, fault: whole.fault }))
+
+  check('control: a record with both observations whole passes browser-unread', complete.ok, `${complete.kind}: ${complete.detail}`)
+
+  for (const [what, record] of [['a record without the half read with the input required', { real: whole.real }], ['an observation whose lists are missing', { real: { ...whole.real, console: undefined }, fault: whole.fault }], ['an observation that is not a record', { real: 'seen', fault: whole.fault }], ['an observation that went through and holds no value', { real: { ...whole.real, value: null }, fault: whole.fault }], ['no record at all', undefined]]) {
+    const stopped = await outcome(withCase(construct.kind, record)).then(() => null, (error) => error)
+
+    check(`control: ${what} stops the run as a defect of the harness, and is never a fault that was caught`, stopped instanceof HarnessError, String(stopped))
+  }
+
+  // The two ways a result can be unusable are not the same: one that cannot be read at all is a failed case, as a child that ended badly is; one that reads as JSON but is not two whole observations is a defect of the harness, as every other record that is not whole.
+  const unreadable = await caseOf(['--control=bad-json'], QUICK_LIMIT)
+  const unreadableOutcome = await outcome(withCase(construct.kind, unreadable))
+  const malformed = await caseOf(['--control=bad-envelope'], QUICK_LIMIT).then(() => null, (error) => error)
+
+  check('control: a result that is not JSON is a failed case with the phase of the child, and fails browser-unread without stopping the run', unreadable.real.error !== null && unreadable.real.phase === 'the child' && unreadable.fault.error !== null && !unreadableOutcome.ok, `${unreadable.real.error} ${unreadable.real.phase} ${unreadableOutcome.detail}`)
+  check('control: a result that is JSON but not two whole observations stops the run as a defect of the harness', malformed instanceof HarnessError, String(malformed))
+
+  // The names a run is told to select are the ones it runs, the required-input faults included: a child of its own (a run of scripts/lib/suite-runner.js, its record removed after it) runs the head, judging the records of the page this run made (`--records`), and the fault of one input, and passes.
+  const recordsOut = path.join(os.tmpdir(), `ae-specialist-records-${process.pid}.json`)
+
+  cleanups.push(async () => fs.rmSync(recordsOut, { force: true }))
+  fs.writeFileSync(recordsOut, JSON.stringify({ seen: baselineSeen, unread: baselineUnread }))
+
+  const selected = await childOf(['--only=constructSites', `--records=${recordsOut}`], NESTED_LIMIT)
+  const childRecord = /^The record of this run: (.+?) \(--resume/m.exec(selected.stdout)
+  const total = HEAD_CHECKS + 1
+
+  if (childRecord) {
+    fs.rmSync(path.resolve(root, childRecord[1]), { force: true })
+  }
+
+  check('control: a run told to select the fault of one input runs that one among the others and no other, and ends with every check passed', selected.code === 0 && selected.stdout.includes(`PASS  planted: ${requiredName('constructSites')}`) && !/planted: (ruinSites|troopBays)/.test(selected.stdout) && selected.stdout.includes(`${total} of ${total} checks passed`), `${selected.code} ${selected.stdout.trim().slice(-400)} ${selected.stderr.trim().slice(-300)}`)
+
+  const navigations = [await observePage(pretendBrowser(), 'http://pretend.test/'), await observePage(pretendBrowser(), 'http://pretend.test/', { unread: true })]
+
+  check('control: an observation whose navigation does not end, read whole or read once after the capability report, names the step of that navigation (a step is said before the call it names), so the deadline of the runner names it too', navigations.every((seen) => seen.error === NAVIGATION_FAILED && seen.phase === 'opening /survey-progress'), JSON.stringify(navigations.map((seen) => ({ error: seen.error, phase: seen.phase }))))
+  check('control: the bounds of the children the controls started add up to no more than the deadline of the controls holds for them', bounds <= CONTROL_BOUNDS, `${bounds / 1000} s of bounds against the ${CONTROL_BOUNDS / 1000} s of the deadline of ${DEADLINES.controls} s`)
+}
+
+const checkBenign = async ([name, from, to, file, , browser]) => {
+  const given = ENV.variantOf([name, from, to, file])
+  const failed = (await judge(await ENV.contextOf(given, browser ? await ENV.observeVariant(given.survey) : ENV.baselineSeen))).map((result) => result.id)
+
+  check(`benign: ${name}: no check fails`, failed.length === 0, failed.join(', '))
+}
+
+// The deadlines, in seconds. A variant's own work: five times the slowest time measured (the head 13 s, a variant served to the browser 18 s, one in memory 2 s), at least two minutes, and for what the browser reads at least a minute past its longest step (BROWSER_TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end is named by its own timeout first. The controls of the harness start children one after another, and their deadline is the sum of the children's bounds and the time measured (81 s), so that a child that ends within its bound never runs them past it: the three cases read on a page under UNREAD_LIMIT, the six quick cases and the four probes of `finish` under QUICK_LIMIT (the case that does not end under 4 s of its own) and the run of this script on the head's records under NESTED_LIMIT (CONTROL_BOUNDS). The setup opens the saves, makes the copies of the browser's save and starts and warms the page server, the one cold start of the run (900 s), and reads what every variant is judged against (`baseline`): the page (a minute past its longest step, 180 s) and the four cases of the optional reads, each a child under UNREAD_LIMIT; a run given the records of another (`--records`) reads neither. Between two variants and in its close a worker has the runner's 900 s.
+const CONTROL_BOUNDS = 3 * UNREAD_LIMIT + 10 * QUICK_LIMIT + NESTED_LIMIT
+const DEADLINES = { head: 180, browser: 180, memory: 120, controls: CONTROL_BOUNDS / 1000 + 81, setup: 900 + (flagOf('records') ? 0 : 180 + UNREAD.length * UNREAD_LIMIT / 1000) }
+// The planted fault the control runs before the head: one the head's reading of the page catches.
+const CONTROL_FAULT = 'the figure of each role chip is drawn one higher, its count hook left as it is'
+
+const variantsOf = () => [
+  { key: 'head', name: 'the head: the constructed race, the preferences, the page, the saves and the browser', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkHead },
+  ...(options.mutations ? MUTANTS.map((entry, index) => ({ key: `planted:${index}`, name: `planted: ${entry[0]}`, heading: '\nPlanted faults', pool: 'suite', deadline: entry[5] ? DEADLINES.browser : DEADLINES.memory, run: () => checkPlanted(entry) })) : []),
+  ...(options.mutations ? UNREAD_INPUTS.map((input) => ({ key: `required:${input}`, name: `planted: ${requiredName(input)}`, heading: '\nPlanted faults', pool: 'suite', deadline: DEADLINES.memory, run: () => checkRequired(input) })) : []),
+  ...(options.mutations ? [{ key: 'controls', name: 'the controls of the harness', heading: '\nControls of the harness', pool: 'suite', deadline: DEADLINES.controls, run: checkControls }] : []),
+  ...(options.mutations ? BENIGN.map((entry, index) => ({ key: `benign:${index}`, name: `benign: ${entry[0]}`, heading: '\nBenign rewrites', pool: 'suite', deadline: entry[5] ? DEADLINES.browser : DEADLINES.memory, run: () => checkBenign(entry) })) : []),
+]
+
+const main = async () => {
+  const unreadAt = process.argv.indexOf('--unread')
+  const probeAt = process.argv.indexOf('--finish-probe')
+
+  if (unreadAt !== -1) {
+    return unreadChild(process.argv[unreadAt + 1], process.argv[unreadAt + 2])
+  }
+
+  if (probeAt !== -1) {
+    // `reject`, `resolve`, `reject-after:<status>` and `resolve-after:<status>`: the cleanups fail or not, and the process ends with the status given (0 when there is none).
+    const [mode, given] = String(process.argv[probeAt + 1]).split(':')
+
+    plantCleanups(mode.startsWith('reject'))
+
+    return finish(Number(given) || 0)
+  }
+
+  const totals = await runSuite({
+    script: __filename,
+    inputs: FIXTURES.map((fixture) => fixture.file),
+    variants: variantsOf(),
+    counts: () => ({ checks, failures }),
+    prepare: async () => {
+      ENV = await setUp()
+    },
+    afterEach: async () => {
+      if (ENV && ENV.server) {
+        await ENV.server.reset()
+      }
+    },
+    close: async () => {
+      const failed = await runCleanups()
+
+      if (failed) {
+        throw new Error(`${failed} cleanup${failed === 1 ? '' : 's'} failed`)
+      }
+    },
+    control: options.mutations && !flagOf('records') ? { fault: `planted:${MUTANTS.findIndex(([name]) => name === CONTROL_FAULT)}`, head: 'head', heading: '\nThe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
+
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  await finish(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 main().catch(async (error) => {

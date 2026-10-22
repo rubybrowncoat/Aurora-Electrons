@@ -1,7 +1,7 @@
 /*
   Checks the local reserves and the timed resource ledger (src/renderer/utilities/resource-ledger.js, resource-reserves.js and resource-feeds.js, the mixin src/renderer/mixins/resource-reserves.js, the panel src/renderer/components/logistics/ResourceReserves.vue and its mounts in src/renderer/pages/logistics.vue and hauling.vue).
 
-  bun scripts/check-resource-ledger.js [--no-mutations] [--part head|mutant:N[,N...]] [--detail]
+  bun scripts/check-resource-ledger.js [--no-mutations] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=head,mutant:N[,...]]
 
   Everything runs on in-memory scenario stores, the real scenario repository and a fake save that records the SQL it is sent. Groups:
   - stock: one stock over the days, a withdrawal takes only what the stock holds above the reserve and the shortfall says whether the stock or the reserve is the cause;
@@ -21,19 +21,18 @@
   - voice: nothing the panel and its utilities say to the player is in the first or second person;
   - browser: what the panel draws, read from the real app in Chromium (scripts/lib/reserve-screen.js): the mounts of both pages, the buttons pressed, and fixtures of the panel mounted in the page whose cells (stock, the three minimums, the lowest balance, the status chips, the run, the timeline, the shortfalls, the summary) are read as the text drawn and whether each is on screen, and compared with the numbers the ledger holds: each quantity from the element that draws it, by its role, read as a signed number in the grouping of the page's setting and at the precision the page shows. The state of a minimum cell and the message of a write are read from what they draw too, a word read back through the panel's own words for it (`minimumWords`, `saveWords`), beside the hook that names them. No virtual node is read and no text is taken from a container for its figures. The screen is read by the shared readers of scripts/lib/browser-observe.js (`visible`, `visibleText`, `hooked`, `readFigure`, `rounded`, `rolesRead`, `pairedBy`, `labelKey`), which scripts/check-browser-observe.js checks, the 90 texts of the page's formatter among them.
 
-  Each planted fault must fail, by an assertion on a value and not by a call that threw, a check that it names: a fault whose named checks fail only by a call that threw stops the run (scripts/lib/fault-credit.js `caughtBy`); --detail lists the failed checks of a variant and --part mutant:N runs one (mutant:N,M runs several, one after another in one process, as the full run does). A planted fault that is caught by what the browser reads may name the parts of the screen it is read in (`parts`), the parts its checks read; every equivalent rewrite reads the whole screen. Exit code 1 when a check fails.
+  Each planted fault must fail, by an assertion on a value and not by a call that threw, a check that it names: a fault whose named checks fail only by a call that threw is a defect of the harness (scripts/lib/fault-credit.js `caughtBy`), which fails that variant by name and ends the run with status 2. A planted fault that is caught by what the browser reads may name the parts of the screen it is read in (`parts`), the parts its checks read; every equivalent rewrite reads the whole screen. The head and the variants run through scripts/lib/suite-runner.js, one after another in a worker that starts one page server and one browser for them all and warms it first, with a deadline for each variant, a record that --resume continues, and the control that runs a planted fault and then the head on the same server (`control:warm-reset`); --detail lists the failed checks of a variant, and --variants=mutant:N runs one (mutant:N,mutant:M runs several, one after another in one worker, as the full run does). Exit code 1 when a check fails, 2 on a defect of the harness.
 */
 const fs = require('fs')
 const path = require('path')
 const acorn = require('acorn')
 const sqlite3 = require('sqlite3')
 const { assert, failure, through, harnessStore, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
-const { validate, failedObservation, failureLine, HarnessError, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
+const { validate, failedObservation, failureLine, report, HarnessError, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, loadModule, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
-const { endSection, runSections, printSection } = require('./lib/check-sections')
-const { jobs } = require('./lib/check-pool')
+const { runSuite, runnerArgs } = require('./lib/suite-runner')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -2548,9 +2547,25 @@ const GROUPS = [
 ]
 const wanted = (keys, group) => !keys || group.keys.some((key) => keys.includes(key))
 
-// The renderer served to a browser and the browser, started with the first variant that reads the screen and stopped when the process ends; and the parts of the screen that `observeScreen` of scripts/lib/reserve-screen.js reads.
-const SCREEN = { server: null, chrome: null }
+// The renderer served to a browser and the browser, started and warmed once for the worker (`openScreen`, run by the runner before the worker's first variant) and stopped after its last; the failure of a start that did not get through; and the parts of the screen that `observeScreen` of scripts/lib/reserve-screen.js reads.
+const SCREEN = { server: null, chrome: null, failure: null }
 const SCREEN_PARTS = ['logistics', 'hauling', 'actions', 'cells']
+// The pages the screen goes to: their modules are compiled while the server warms.
+const SCREEN_ROUTES = ['/logistics', '/hauling']
+
+// Starts the page server and Chromium and opens the app once in them (scripts/lib/page-server.js `warm`). A start that does not get through is kept as `failure`, and every observation of the worker is then one that did not happen.
+const openScreen = async () => {
+  try {
+    SCREEN.server = await require('./lib/page-server').startPageServer({ save: 'AuroraDB.db' })
+    SCREEN.chrome = await require('playwright').chromium.launch()
+
+    const warmed = await SCREEN.server.warm(SCREEN.chrome, { routes: SCREEN_ROUTES })
+
+    console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
+  } catch (error) {
+    SCREEN.failure = String(error.message).split('\n')[0]
+  }
+}
 
 const closeScreen = async () => {
   const { server, chrome } = SCREEN
@@ -2569,13 +2584,8 @@ const closeScreen = async () => {
 
 // What the browser shows of the app with these sources, as the record of scripts/lib/browser-observe.js: the files a variant changes are served in place of the real ones, and only the parts of the screen the changed files can alter are read, the others being as the head run observed them. A planted fault that names its parts (`parts` of the list of faults) is read in those parts only, the parts that hold the checks it is caught by: a check of a part that is not read reads nothing and holds, so the fault is credited by a check of a part that was read. A server or a browser that did not start is an observation that did not happen.
 const screenOf = async (sources, ctx, chosen = null) => {
-  try {
-    if (!SCREEN.server) {
-      SCREEN.server = await require('./lib/page-server').startPageServer({ save: 'AuroraDB.db' })
-      SCREEN.chrome = await require('playwright').chromium.launch()
-    }
-  } catch (error) {
-    return failedObservation(String(error.message).split('\n')[0])
+  if (SCREEN.failure || !SCREEN.server) {
+    return failedObservation(SCREEN.failure || 'the page server was not started for this worker')
   }
 
   const changed = Object.keys(FILES).filter((name) => sources[name] !== textOf(name))
@@ -2594,7 +2604,12 @@ const screenOf = async (sources, ctx, chosen = null) => {
   changed.forEach((name) => SCREEN.server.replace(FILES[name], sources[name]))
 
   try {
-    return await require('./lib/reserve-screen').observeScreen(SCREEN.chrome, SCREEN.server.url, parts)
+    const seen = await require('./lib/reserve-screen').observeScreen(SCREEN.chrome, SCREEN.server.url, parts)
+
+    // A screen that did not get through is told whole where it is met, in the output of its variant: the step, the message with Playwright's call log, and what the page showed then. Its checks say it in one line.
+    report('the screen', seen)
+
+    return seen
   } finally {
     changed.forEach((name) => SCREEN.server.replace(FILES[name], null))
   }
@@ -2713,17 +2728,15 @@ const checkMutant = async (mutant) => {
 }
 
 const parseArguments = (argv) => {
-  const options = { part: null, mutations: true }
+  const options = { mutations: true }
 
-  for (let index = 0; index < argv.length; index++) {
-    if (argv[index] === '--part') {
-      options.part = argv[++index]
-    } else if (argv[index] === '--detail') {
+  for (const argument of argv) {
+    if (argument === '--detail') {
       // Read by DETAIL.
-    } else if (argv[index] === '--no-mutations') {
+    } else if (argument === '--no-mutations') {
       options.mutations = false
     } else {
-      console.error(`Unknown argument: ${argv[index]}`)
+      console.error(`Unknown argument: ${argument}`)
       process.exit(2)
     }
   }
@@ -2731,64 +2744,41 @@ const parseArguments = (argv) => {
   return options
 }
 
-// The longest a variant (or the head) runs: one that has not ended by then is stuck.
-const PART_LIMIT = 1200000
+// The deadlines, in seconds: five times the slowest time measured (the head 38 s, a variant that reads the screen 34 s, one in memory 2 s), at least two minutes, and for what reads the screen at least a minute past its longest step (TIMEOUT of scripts/lib/reserve-screen.js, 120 s for a click or a wait of the page), so that a step that does not end fails by its own timeout, named, before the deadline runs out. The head reads the whole screen and every group of checks; a variant that reads the screen reads the parts it names; the others run in memory. The setup starts and warms the page server, the one cold start of the run.
+const DEADLINES = { head: 240, screen: 180, memory: 120, setup: 900 }
+const MUTATIONS_HEADING = '\nMutations: each planted fault must fail the checks it names, each equivalent rewrite must keep them passing'
+// The planted fault the control runs before the head: one the head's reading of the screen catches.
+const CONTROL_FAULT = 'a panel whose lowest balance is shown with the sign turned over'
+
+// The head and every planted fault and equivalent rewrite, one pool: a worker runs them one after another, those that read the screen on its one page server and browser and the others on its loaded modules (`contextOf`).
+const variantsOf = (options) => [
+  { key: 'head', name: 'the head: the checks of the sources as they are', head: true, pool: 'suite', deadline: DEADLINES.head, run: checkHead },
+  ...(options.mutations ? MUTATIONS.map((mutation, index) => ({ key: `mutant:${index}`, name: `${mutation.benign ? 'equivalent rewrite' : 'planted fault'}: ${mutation.name}`, heading: MUTATIONS_HEADING, pool: 'suite', deadline: mutation.fails.includes('browser') ? DEADLINES.screen : DEADLINES.memory, run: () => checkMutant(mutation) })) : []),
+]
 
 const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
-
-  if (options.part !== null) {
-    // A part runs in a process of its own and each of its variants ends in minutes: one that has not ended by then is stuck and fails with its name, never waits on.
-    let limit = null
-    const watch = (what) => {
-      clearTimeout(limit)
-      limit = setTimeout(() => {
-        console.error(`${what} did not finish in ${PART_LIMIT / 1000} s`)
-        process.exit(3)
-      }, PART_LIMIT)
-    }
-    const listed = /^mutant:\d+(,\d+)*$/.test(options.part) ? options.part.slice(7).split(',').map(Number) : []
-
-    if (options.part === 'head') {
-      watch('the head')
-      await checkHead()
-    } else if (listed.length && listed.every((index) => MUTATIONS[index])) {
-      for (const index of listed) {
-        watch(`the variant mutant:${index}`)
-        await checkMutant(MUTATIONS[index])
+  const options = parseArguments(runnerArgs().rest)
+  const totals = await runSuite({
+    script: __filename,
+    variants: variantsOf(options),
+    counts: () => ({ checks, failures }),
+    prepare: async (queue) => {
+      if (queue.some((variant) => variant.key === 'head' || variant.control || (variant.key.startsWith('mutant:') && MUTATIONS[Number(variant.key.slice(7))].fails.includes('browser')))) {
+        await openScreen()
       }
-    } else {
-      throw new Error(`No part is named ${options.part}`)
-    }
+    },
+    afterEach: async () => {
+      if (SCREEN.server) {
+        await SCREEN.server.reset()
+      }
+    },
+    close: closeScreen,
+    control: options.mutations ? { fault: `mutant:${MUTATIONS.findIndex((mutation) => mutation.name === CONTROL_FAULT)}`, head: 'head', heading: '\nThe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
 
-    await closeScreen()
-    endSection(checks, failures)
-  }
-
-  // The variants run a few to a process, one after another: those that read the screen share the process's server and browser, and the others its loaded modules (`contextOf`). Each kind is spread over as many processes as run at once.
-  const indexes = options.mutations ? MUTATIONS.map((_mutation, index) => index) : []
-  const screened = (index) => MUTATIONS[index].fails.includes('browser')
-  const spread = (list) => Array.from({ length: Math.min(jobs(), list.length) }, (_none, at) => list.filter((_index, place) => place % jobs() === at))
-  const batches = [...spread(indexes.filter((index) => !screened(index))), ...spread(indexes.filter(screened))]
-  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...batches.map((batch) => ({ args: ['--part', `mutant:${batch.join(',')}`], weight: batch.reduce((sum, index) => sum + (screened(index) ? 30 : 1), 0) }))])
-  let at = 0
-
-  const printed = () => {
-    const counts = printSection(sections[at++])
-
-    checks += counts.checks
-    failures += counts.failures
-  }
-
-  printed()
-
-  if (batches.length) {
-    console.log('\nMutations: each planted fault must fail the checks it names, each equivalent rewrite must keep them passing')
-    batches.forEach(printed)
-  }
-
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  process.exit(failures ? 1 : 0)
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 run().catch(async (error) => {

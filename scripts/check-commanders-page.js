@@ -1,23 +1,23 @@
 /*
   Checks the Commanders page (src/renderer/pages/commanders.vue) as a browser draws it: the page is served by scripts/lib/page-server.js over a copy of a save, opened in Chromium, and what a player sees and can do is read back: the Post, Rank and age controls of the roster, the roster rows each of them leaves, and the command structure with its holder column, its Shipping lines switch and its two downloads.
 
-  Run: bun scripts/check-commanders-page.js [--no-mutations] [--no-lacking] [--only=<text>,<text>] [--detail]
+  Run: bun scripts/check-commanders-page.js [--no-mutations] [--no-lacking] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   The data behind the page (the model, the exports, the filters against SQL) is checked by scripts/check-hierarchy-export.js; this script proves that the page puts them on the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the template carries (data attributes) say what an element is, an element counts when it is on screen with its opacity and its ancestors', its text is the text it draws, a control takes input when the browser's own element of it is enabled, and never a heading or other wording is read as a decision. The choices of a select are the words its menu draws, read back to the post each stands for through the module's own table of posts (utilities/commanders.js `POSTS`, `labelKey`), and each line of the roster is set against the officers SQL gives by the CommanderID its hook carries (`pairedBy`), never by place or by name, and must draw that officer's name. The save is served as a copy in which two serving officers share one name (`NAMESAKES`), so that the checks meet two lines of one name on every roster they compare; a control says that they did:
   - the roster's Post control is visible and offers the posts the save's serving naval officers hold, and choosing one leaves exactly the officers of that post (compared with SQL written here); the Rank control offers choices and narrows the roster; the two age controls bound it by the age worked out in SQL here; each choice can be cleared again;
   - the command structure panel is visible, lists rows each with a name and a holder cell naming commanders of the save, and its CSV download holds one record for each entry with every record as wide as its header;
   - the Shipping lines switch adds the shipping lines' fleets and ships to the table and to the download, marked in a column of their own, and taking it off removes them: the rows drawn again are set against the first ones by the key of each row (the hook of its name) and draw the same name and holder, their order checked on its own;
   - while the structure is read again (the answer held back) the table shows no row of the earlier model and both downloads are off, and the rows of the new read come when it is answered;
-  - a save without the species or the ranks the age and rank filters rest on, with a bound of each stored, still lists the roster of the save as it is, with the age controls off, the note on screen read back through the module's own words (utilities/commanders.js `AGE_NOTES`) as the note that the ages cannot be worked out, and the rank control not on screen (a child of this script serves a copy of the save with FCT_Species and FCT_Ranks dropped).
+  - a save without the species or the ranks the age and rank filters rest on, with a bound of each stored, still lists the roster of the save as it is, with the age controls off, the note on screen read back through the module's own words (utilities/commanders.js `AGE_NOTES`) as the note that the ages cannot be worked out, and the rank control not on screen (the same page server serves a copy of the save with FCT_Species and FCT_Ranks dropped, `useSave`, until the reset after the variant).
   Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names (a hidden Post control, a Post control without choices, a Post control whose choices draw the words of another post, hidden age fields, a hidden Rank control, a roster line of one of two officers of one name that carries the other's identity, a Post control and the name and holder of each structure row drawn at opacity 0, a Holder cell that throws, a slot nothing consumes, a structure panel that is not displayed, a structure shown from the model of an earlier read, a structure read without the shipping lines, the age filter applied and the age controls left on for a save that lacks its columns, a note on the ages that draws other words); one fault stands for each way the page can be wrong, each named check has one, and the rank filter applied to a save without ranks is planted in scripts/check-hierarchy-export.js (`page-rank-gate`). A fault is credited only when every check named for it fails by an assertion of its own, its verdict on what the page showed (scripts/lib/fault-credit.js); a page that could not be driven (an observation that failed in itself, a context that did not close included where a screen was kept), or a check that throws, stops the run (HarnessError, exit status 2) and credits nothing. Variants that say the same thing in another way (a control bound by an explicit value and event, the longhand of an event, a native click listener, a control registered under an alias of the page, the words of a choice drawn through a function, a control drawn at opacity 1, the note on the ages drawn through v-text) are served the same way and must pass every check, those of the save with all its tables with the screen they draw equal to the page's.
 
-  Prints `N of N checks passed`; any failed check sets exit code 1. It needs Playwright's Chromium (`bunx playwright install chromium` once). Vite starts with a cold cache of its own on every run, so a run takes minutes.
+  Prints `N of N checks passed`; any failed check sets exit code 1, a defect of the harness 2. It needs Playwright's Chromium (`bunx playwright install chromium` once). The heads (`head`, `lacking`) and every fault and rewrite (`fault:N`, `benign:N`, `lacking-fault:N`, `lacking-benign:N`) run through scripts/lib/suite-runner.js: one after another in a worker that copies the save, starts one page server and one browser and warms them first, each with a deadline, with a record that --resume continues and the control `control:warm-reset`, which runs a planted fault and then the head on the same server. --only=<text> runs the heads and the variants whose names hold the text (a focused run while working; the run that counts has none).
 */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
-const { runChild, lastJson } = require('./lib/check-pool')
+const { runSuite } = require('./lib/suite-runner')
 const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { strictRecords } = require('./lib/csv-records')
@@ -30,7 +30,6 @@ const SAVE = 'saves/AuroraDB_271_skoormit_saved.db'
 const IDS = { GameID: 138, RaceID: 785 }
 const NAMES = { game: 'EggSample', race: 'EggSample' }
 const TIMEOUT = 120000
-const RESULT = 'RESULT '
 const YEAR = 31536000
 const ROSTER_ROWS = 25
 const STORED = { commandersAgeMin: 30, commandersAgeMax: 90, commandersRank: 2 }
@@ -43,9 +42,7 @@ const STUBS = {
   'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default createRequire(${JSON.stringify(path.join(root, 'package.json'))})('dayjs/plugin/utc.js')`,
   romanum: 'export default { toNumeral: String }',
 }
-// `--only=<text>,<text>` judges the planted faults and the rewrites whose name holds one of the texts (the page as it is is always read); `--detail` prints what each check named for a fault said.
-const ONLY = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
-const wanted = (name) => ONLY.length === 0 || ONLY.some((text) => name.includes(text))
+// `--detail` prints what each check named for a fault said.
 const DETAIL = process.argv.includes('--detail')
 
 const short = (value) => {
@@ -171,8 +168,8 @@ const readScreen = () => {
   }
 }
 
-// The page that `observe` (scripts/lib/browser-observe.js) opens, made ready: what the app's settings hold before it starts (`seed`, the stored view of the page), the shared readers of the screen installed, the race picked on the Empires page, the Commanders page opened and settled. `holding` makes the reads of the naval structure wait in `held` until they are let go, and `onHeld`, when set, is called as one is held. The page and console errors are the helper's.
-const prepare = async (page, url, seed) => {
+// The page that `observe` (scripts/lib/browser-observe.js) opens, made ready: what the app's settings hold before it starts (`seed`, the stored view of the page), the shared readers of the screen installed, the race picked on the Empires page, the Commanders page opened and settled, each step named through `step` and bounded by TIMEOUT. `holding` makes the reads of the naval structure wait in `held` until they are let go, and `onHeld`, when set, is called as one is held. The page and console errors are the helper's.
+const prepare = async (page, url, seed, step) => {
   const state = { held: [], holding: false, inFlight: 0, last: Date.now(), onHeld: null }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
 
@@ -222,27 +219,41 @@ const prepare = async (page, url, seed) => {
     }
   }
 
+  step('opening the app')
   await page.goto(url, { timeout: TIMEOUT })
   await installScreen(page)
 
   const picker = page.locator('.empire-list').first()
 
+  step('picking the game')
   await picker.locator('.empire-list__game').filter({ hasText: `${NAMES.game} ·` }).first().click({ timeout: TIMEOUT })
 
   if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-    await picker.getByText(NAMES.race, { exact: true }).last().click()
+    step('picking the race')
+    await picker.getByText(NAMES.race, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
+  step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout: TIMEOUT })
+  step('waiting for the reads that the picking of the race starts')
+
+  const picked = Date.now()
+
   // The page the race opens is not the one under test, and on a save without species it may never report itself as loaded: only its database calls are waited for.
   while (state.inFlight > 0 || Date.now() - state.last < 1500) {
+    if (Date.now() - picked > TIMEOUT) {
+      throw new Error(`the reads that the picking of the race starts did not finish (${state.inFlight} database calls in flight, ${Date.now() - state.last} ms since the last)`)
+    }
+
     await page.waitForTimeout(250)
   }
 
+  step('opening /commanders')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/commanders')
   await page.waitForFunction(pageLoading.arrived, '/commanders', { timeout: TIMEOUT })
   // The first roster name drawn, or the page's reads done with none drawn (a roster a fault leaves empty): either ends the wait, and the screen of an empty roster is judged by the checks.
   await page.waitForFunction(`document.querySelector('[data-roster-name]') !== null || !(${pageLoading})()`, null, { timeout: TIMEOUT }).catch(() => {})
+  step('waiting for the page to settle')
   await settle()
 
   return { state }
@@ -321,7 +332,7 @@ const observePage = (browser, url, truth, posts) => observe(browser, async ({ pa
     }
   }
 
-  const { state } = await prepare(page, url, {})
+  const { state } = await prepare(page, url, {}, at)
   const screen = await read(page)
 
   at('the choices of the Post and Rank controls are read from their menus')
@@ -580,8 +591,7 @@ const LACKING_BENIGN = [
 // The roster of the lacking save with the bounds stored, against the roster of the same save with nothing stored (`known`, the screen of an earlier read, when the caller has it): one record of `observe` for each page, joined into one whose value holds both screens. A record that did not get through is returned as it is.
 const observeLacking = async (browser, url, known) => {
   const read1 = (seed) => observe(browser, async ({ page, step }) => {
-    step('the page is opened')
-    await prepare(page, url, seed)
+    await prepare(page, url, seed, step)
 
     return read(page)
   })
@@ -619,60 +629,75 @@ const LACKING_CHECKS = [
   }],
 ]
 
-const lackingChild = async () => {
+// What a worker sets up once before its first variant (`setUp`, run by the runner): a copy of the save with the namesakes made one, what SQL here reads of it, the module's tables of words, and one page server over the copy, warmed, with one Chromium. The variants of the save without species and ranks have the same server serve a copy of the save with FCT_Species and FCT_Ranks dropped as well (`useSave`, the copy made the first time one needs it), and the reset after each puts the first copy back.
+let ENV = null
+const cleanups = []
+
+const setUp = async () => {
   const { startPageServer } = require('./lib/page-server')
-  const { folder, file } = await saveCopy('ae-commanders-lacking-', [NAMESAKE_RENAME, 'drop table FCT_Species', 'drop table FCT_Ranks'])
-  const original = pageText()
-  // The module's own words for the notes of the age range, which the note on screen is read back through.
-  const ageNotes = { ...(await loadUtilities(['commanders'], { stubs: STUBS })).commanders.AGE_NOTES }
-  const entries = []
-  let server = null
-  let chrome = null
+  const { commanders } = await loadUtilities(['commanders'], { stubs: STUBS })
+  const copy = await saveCopy('ae-commanders-', [NAMESAKE_RENAME])
 
-  try {
-    server = await startPageServer({ save: file })
-    chrome = await require('playwright').chromium.launch()
+  cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
 
-    let known = null
+  // The module's own words: the posts, which the choices of the Post control are read back through, and the notes of the age range, which the note on screen is.
+  const env = { original: pageText(), posts: { ...commanders.POSTS }, ageNotes: { ...commanders.AGE_NOTES }, truth: await truthOf(copy.file), lackingFile: null, baseline: null, known: null }
 
-    const run = async (variant) => {
-      server.replace(PAGE_FILE, variant ? variant.change(original) : null)
+  env.server = await startPageServer({ save: copy.file })
+  cleanups.push(() => env.server.stop())
+  env.chrome = await require('playwright').chromium.launch()
+  cleanups.push(() => env.chrome.close())
 
-      try {
-        const seen = await observeLacking(chrome, server.url, known)
+  const warmed = await env.server.warm(env.chrome, { routes: ['/commanders'] })
 
-        if (!variant && !unobserved(seen)) {
-          known = seen.value.without
-        }
+  console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
 
-        return resultsOf(seen, { ageNotes }, { ids: variant ? variant.fails : null, strict: variant !== null, label: variant ? `the save without species ${variant.fails ? 'with the fault' : 'rewritten as'} "${variant.name}"` : 'the save without species', list: LACKING_CHECKS })
-      } finally {
-        server.replace(PAGE_FILE, null)
-      }
-    }
+  return env
+}
 
-    entries.push({ variant: null, results: await run(null) })
-
-    for (const fault of LACKING_FAULTS.filter((item) => wanted(item.name))) {
-      entries.push({ variant: fault.name, fails: fault.fails, results: await run(fault) })
-    }
-
-    for (const rewrite of LACKING_BENIGN.filter((item) => wanted(item.name))) {
-      entries.push({ variant: rewrite.name, benign: true, results: await run(rewrite) })
-    }
-  } finally {
-    if (chrome) {
-      await chrome.close().catch(() => {})
-    }
-
-    if (server) {
-      await server.stop()
-    }
-
-    fs.rmSync(folder, { recursive: true, force: true })
+// A page that did not get through is told whole where it is met, in the output of its variant: the step, the message with Playwright's call log, and what the page showed then. Its checks say it in one line.
+const told = (label, seen) => {
+  if (seen.error !== null) {
+    console.error(describe(label, seen))
   }
 
-  fs.writeSync(1, `${RESULT}${JSON.stringify(entries)}\n`)
+  return seen
+}
+
+// The page with `change` made to it (null for the page as it is), read as a player uses it.
+const view = async (change) => {
+  ENV.server.replace(PAGE_FILE, change ? change(ENV.original) : null)
+
+  try {
+    return told(change ? 'a variant of the page' : 'the page', await observePage(ENV.chrome, ENV.server.url, ENV.truth, ENV.posts))
+  } finally {
+    ENV.server.replace(PAGE_FILE, null)
+  }
+}
+
+// The save without species and ranks, served from now until the reset after the variant: the results of LACKING_CHECKS over the page with `variant` made to it (null for the page as it is). The roster with nothing stored is read once by the head of that save and kept for the variants after it (`known`); a variant in a worker the head has not run in reads it too.
+const lackingResults = async (variant) => {
+  if (!ENV.lackingFile) {
+    const lacking = await saveCopy('ae-commanders-lacking-', [NAMESAKE_RENAME, 'drop table FCT_Species', 'drop table FCT_Ranks'])
+
+    cleanups.push(async () => fs.rmSync(lacking.folder, { recursive: true, force: true }))
+    ENV.lackingFile = lacking.file
+  }
+
+  await ENV.server.useSave(ENV.lackingFile)
+  ENV.server.replace(PAGE_FILE, variant ? variant.change(ENV.original) : null)
+
+  try {
+    const seen = told(variant ? `the save without species with "${variant.name}"` : 'the save without species', await observeLacking(ENV.chrome, ENV.server.url, variant ? ENV.known : null))
+
+    if (!variant && !unobserved(seen)) {
+      ENV.known = seen.value.without
+    }
+
+    return resultsOf(seen, { ageNotes: ENV.ageNotes }, { ids: variant ? variant.fails || null : null, strict: variant !== null, label: variant ? `the save without species ${variant.fails ? 'with the fault' : 'rewritten as'} "${variant.name}"` : 'the save without species', list: LACKING_CHECKS })
+  } finally {
+    ENV.server.replace(PAGE_FILE, null)
+  }
 }
 
 // ---------- the run ----------
@@ -692,39 +717,12 @@ const report = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `\n         ${typeof result === 'string' ? result : 'false'}`}`)
 }
 
-// The child that serves the save without species and ranks, its checks and faults reported here.
-const checkLacking = async (mutating) => {
-  console.log('\nA save without species and ranks (a copy of the save with FCT_Species and FCT_Ranks dropped)')
+// A fault's results reported as caught or not, with what each check named for it said under `--detail`.
+const reportFault = (fault, results) => {
+  report(`fault caught: ${fault.name}`, caughtAll(results, { name: fault.name }) ? true : notCaught(results), `fails ${fault.fails.join(', ')}`)
 
-  const child = await runChild(__filename, ['--lacking', ...process.argv.filter((argument) => argument.startsWith('--only='))])
-  let entries = null
-
-  try {
-    entries = lastJson(child, RESULT)
-  } catch (error) {
-    entries = error
-  }
-
-  if (entries instanceof Error) {
-    report('the save without species and ranks is read', `does not run: ${entries.message}`)
-
-    return
-  }
-
-  for (const entry of entries) {
-    if (entry.variant === null) {
-      entry.results.forEach(({ name, result }) => report(name, result))
-    } else if (mutating && entry.benign) {
-      const wrong = entry.results.filter(({ result }) => result !== true).map(({ id }) => id)
-
-      report(`variant passes: ${entry.variant}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
-    } else if (mutating) {
-      report(`fault caught: ${entry.variant}`, caughtAll(entry.results, { name: entry.variant }) ? true : notCaught(entry.results), `fails ${entry.fails.join(', ')}`)
-
-      if (DETAIL) {
-        entry.results.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
-      }
-    }
+  if (DETAIL) {
+    results.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
   }
 }
 
@@ -771,101 +769,102 @@ const controls = async (truth) => {
   report('control: the record of the observation tells a context that did not close, and the work that threw, from a page that raised an error no check named, as the helper makes it', unobserved(real.failed) && unobserved(real.failedRaising) && !unobserved(real.closed) && !unobserved(real.raised) && real.raised.unexpected.length === 1 && real.raised.error !== null ? true : short({ closed: real.closed.error, failed: real.failed.error, raised: real.raised.error, failedRaising: real.failedRaising.error }))
 }
 
+// The head: the controls of the harness, then the page as it is, read afresh on the worker's server every time the head runs (the control of the warm page server runs it after a fault), and the valid case of two officers of one name.
+const checkHead = async () => {
+  const { truth } = ENV
+
+  await controls(truth)
+
+  const baseline = await view(null)
+
+  resultsOf(baseline, truth, { strict: false, label: 'the page' }).forEach(({ name, result }) => report(name, result))
+
+  // The valid case of two officers of one name: the copy gives the namesakes one name, and each roster the checks compare draws both, under that name and each by its own identity.
+  const namesakes = truth.serving.filter((row) => NAMESAKES.includes(row.id)).map(officer)
+  const rosters = unobserved(baseline) ? [] : [baseline.value.initial.roster, baseline.value.post, baseline.value.age]
+  const drawsBoth = (entries) => Boolean(entries) && NAMESAKES.every((id) => rosterOn(entries).filter((line) => line.id === String(id) && line.name === namesakes[0].name).length === 1)
+
+  report('control: two serving officers of the save share one name, and the roster as it opens, the roster the chosen post leaves and the roster the age bound leaves each draw both under that name, each by its own identity', namesakes.length === 2 && namesakes[0].name === namesakes[1].name && rosters.length === 3 && rosters.every(drawsBoth) ? true : short({ namesakes, drawn: rosters.map((entries) => entries && rosterOn(entries).filter((line) => NAMESAKES.map(String).includes(line.id))) }))
+}
+
+const checkFault = async (fault) => {
+  reportFault(fault, resultsOf(await view(fault.change), ENV.truth, { ids: fault.fails, label: `the page with the fault "${fault.name}"` }))
+}
+
+// A rewrite must pass every check and draw the screen of the page as it is, read by the setup of its worker before the first variant (`baseline`), whichever that is, so that a rewrite reads only its own page.
+const checkBenign = async (variant) => {
+  if (unobserved(ENV.baseline)) {
+    throw new HarnessError(`the page as it is was not observed, so the rewrite has no screen to be set against: ${failureLine(ENV.baseline)}`)
+  }
+
+  const seen = await view(variant.change)
+  const wrong = resultsOf(seen, ENV.truth, { label: `the page rewritten as "${variant.name}"` }).filter(({ result }) => result !== true).map(({ id }) => id)
+  const same = JSON.stringify(seen.value) === JSON.stringify(ENV.baseline.value)
+
+  report(`variant passes: ${variant.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+}
+
+const checkLackingHead = async () => {
+  (await lackingResults(null)).forEach(({ name, result }) => report(name, result))
+}
+
+const checkLackingBenign = async (rewrite) => {
+  const wrong = (await lackingResults(rewrite)).filter(({ result }) => result !== true).map(({ id }) => id)
+
+  report(`variant passes: ${rewrite.name}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
+}
+
+// The deadlines, in seconds: five times the slowest time measured (the head 9 s, a variant 19 s), at least two minutes, and at least a minute past the longest step a variant takes (TIMEOUT, 120 s for a click or a wait of the page), so that a step that does not end fails by its own timeout, named, before the deadline runs out. The head reads the page through every control and both downloads; a variant reads it once more; the setup copies the save and starts and warms the page server, the one cold start of the run (900 s), and reads the page as it is when a rewrite of its queue is set against it (a variant's 180 s).
+const DEADLINES = { head: 180, view: 180, setup: 900 + 180 }
+// The planted fault the control runs before the head: one the head's reading of the page catches.
+const CONTROL_FAULT = 'the Post control has no choices'
+const LACKING_HEADING = '\nA save without species and ranks (a copy of the save with FCT_Species and FCT_Ranks dropped)'
+
+const variantsOf = (mutating, lacking) => [
+  { key: 'head', name: 'the head: the Commanders page as it is, and the controls of the harness', head: true, heading: 'The Commanders page in a browser (scripts/lib/page-server.js over a copy of a save)', pool: 'suite', deadline: DEADLINES.head, run: checkHead },
+  ...(mutating ? FAULTS.map((fault, index) => ({ key: `fault:${index}`, name: `fault caught: ${fault.name}`, heading: '\nplanted faults', pool: 'suite', deadline: DEADLINES.view, run: () => checkFault(fault) })) : []),
+  ...(mutating ? BENIGN.map((variant, index) => ({ key: `benign:${index}`, name: `variant passes: ${variant.name}`, heading: '\nvariants that say the same thing', pool: 'suite', deadline: DEADLINES.view, baseline: true, run: () => checkBenign(variant) })) : []),
+  ...(lacking ? [{ key: 'lacking', name: 'the head: a save without species and ranks', head: true, heading: LACKING_HEADING, pool: 'suite', deadline: DEADLINES.view, run: checkLackingHead }] : []),
+  ...(lacking && mutating ? LACKING_FAULTS.map((fault, index) => ({ key: `lacking-fault:${index}`, name: `fault caught: ${fault.name}`, heading: LACKING_HEADING, pool: 'suite', deadline: DEADLINES.view, run: async () => reportFault(fault, await lackingResults(fault)) })) : []),
+  ...(lacking && mutating ? LACKING_BENIGN.map((rewrite, index) => ({ key: `lacking-benign:${index}`, name: `variant passes: ${rewrite.name}`, heading: LACKING_HEADING, pool: 'suite', deadline: DEADLINES.view, run: () => checkLackingBenign(rewrite) })) : []),
+]
+
 const main = async () => {
-  if (process.argv.includes('--lacking')) {
-    await lackingChild()
-
-    return
-  }
-
-  const { startPageServer } = require('./lib/page-server')
   const mutating = !process.argv.includes('--no-mutations')
-  const original = pageText()
-  const posts = { ...(await loadUtilities(['commanders'], { stubs: STUBS })).commanders.POSTS }
-  const cleanups = []
-  let outcome = null
+  const totals = await runSuite({
+    script: __filename,
+    inputs: [SAVE],
+    variants: variantsOf(mutating, !process.argv.includes('--no-lacking')),
+    counts: () => ({ checks, failures }),
+    prepare: async (queue) => {
+      ENV = await setUp()
 
-  console.log('The Commanders page in a browser (scripts/lib/page-server.js over a copy of a save)')
-
-  try {
-    const copy = await saveCopy('ae-commanders-', [NAMESAKE_RENAME])
-
-    cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
-
-    const truth = await truthOf(copy.file)
-
-    await controls(truth)
-
-    const server = await startPageServer({ save: copy.file })
-
-    cleanups.push(() => server.stop())
-
-    const chrome = await require('playwright').chromium.launch()
-
-    cleanups.push(() => chrome.close())
-
-    const view = async (change) => {
-      server.replace(PAGE_FILE, change ? change(original) : null)
-
-      try {
-        return await observePage(chrome, server.url, truth, posts)
-      } finally {
-        server.replace(PAGE_FILE, null)
+      if (queue.some((variant) => variant.baseline)) {
+        ENV.baseline = await view(null)
       }
-    }
+    },
+    afterEach: async () => {
+      if (ENV && ENV.server) {
+        await ENV.server.reset()
+      }
+    },
+    close: async () => {
+      const problems = []
 
-    const baseline = await view(null)
-
-    if (baseline.error !== null) {
-      console.error(describe('the page', baseline))
-    }
-
-    resultsOf(baseline, truth, { strict: false, label: 'the page' }).forEach(({ name, result }) => report(name, result))
-
-    // The valid case of two officers of one name: the copy gives the namesakes one name, and each roster the checks compare draws both, under that name and each by its own identity.
-    const namesakes = truth.serving.filter((row) => NAMESAKES.includes(row.id)).map(officer)
-    const rosters = unobserved(baseline) ? [] : [baseline.value.initial.roster, baseline.value.post, baseline.value.age]
-    const drawsBoth = (entries) => Boolean(entries) && NAMESAKES.every((id) => rosterOn(entries).filter((line) => line.id === String(id) && line.name === namesakes[0].name).length === 1)
-
-    report('control: two serving officers of the save share one name, and the roster as it opens, the roster the chosen post leaves and the roster the age bound leaves each draw both under that name, each by its own identity', namesakes.length === 2 && namesakes[0].name === namesakes[1].name && rosters.length === 3 && rosters.every(drawsBoth) ? true : short({ namesakes, drawn: rosters.map((entries) => entries && rosterOn(entries).filter((line) => NAMESAKES.map(String).includes(line.id))) }))
-
-    if (mutating && !unobserved(baseline)) {
-      console.log('\nplanted faults')
-
-      for (const fault of FAULTS.filter((item) => wanted(item.name))) {
-        const failed = resultsOf(await view(fault.change), truth, { ids: fault.fails, label: `the page with the fault "${fault.name}"` })
-
-        report(`fault caught: ${fault.name}`, caughtAll(failed, { name: fault.name }) ? true : notCaught(failed), `fails ${fault.fails.join(', ')}`)
-
-        if (DETAIL) {
-          failed.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
-        }
+      for (const cleanup of cleanups.splice(0).reverse()) {
+        await cleanup().catch((error) => problems.push(String(error && error.message ? error.message : error).split('\n')[0]))
       }
 
-      console.log('\nvariants that say the same thing')
-
-      for (const variant of BENIGN.filter((item) => wanted(item.name))) {
-        const seen = await view(variant.change)
-        const wrong = resultsOf(seen, truth, { label: `the page rewritten as "${variant.name}"` }).filter(({ result }) => result !== true).map(({ id }) => id)
-        const same = JSON.stringify(seen.value) === JSON.stringify(baseline.value)
-
-        report(`variant passes: ${variant.name}`, wrong.length === 0 && same ? true : wrong.length ? `fails ${wrong.join(', ')}` : 'the screen it draws is not the page\'s')
+      if (problems.length) {
+        throw new Error(`cleanups failed: ${problems.join(' | ')}`)
       }
-    }
+    },
+    control: mutating ? { fault: `fault:${FAULTS.findIndex((fault) => fault.name === CONTROL_FAULT)}`, head: 'head', heading: '\nthe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
 
-    outcome = 'ran'
-  } finally {
-    for (const cleanup of cleanups.reverse()) {
-      await cleanup().catch(() => {})
-    }
-  }
-
-  if (!process.argv.includes('--no-lacking')) {
-    await checkLacking(mutating)
-  }
-
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  process.exit(outcome === 'ran' && failures === 0 ? 0 : 1)
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 main().catch((error) => {

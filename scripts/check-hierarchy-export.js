@@ -1,8 +1,9 @@
 /*
   Checks the shared hierarchies of the Commanders page (the naval command structure and the ground formations, each with the serving commander of every post, and their CSV and Markdown exports) and the roster's post, rank and age-range filters, by what they do and never by how they are written.
 
-  Run: bun scripts/check-hierarchy-export.js [--no-mutations] [--no-saves]
-  One part: bun scripts/check-hierarchy-export.js --part <suites | save:<index> | control | mutant:<index>> [--detail]
+  Run: bun scripts/check-hierarchy-export.js [--no-mutations] [--no-saves] [--detail] [--resume] [--only=<text>[|<text>...]] [--variants=<suites | save:<index> | control | mutant:<index>>[,...]]
+
+  Each part (the suites, each save, the control and each mutant) runs in a process of its own through scripts/lib/suite-runner.js, with a deadline and a record that --resume continues; `--variants` runs exactly the parts named, in one process.
 
   The groups, each check a PASS or FAIL line:
   - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both, and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
@@ -25,7 +26,7 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
-const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const rawAssert = require('./lib/bounded-assert')
 const { HarnessError, readFigure, pairedBy } = require('./lib/browser-observe')
 const { failure, isMarked, isSubjectThrow, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, judged, caughtAll } = require('./lib/fault-credit')
@@ -69,20 +70,17 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? ` (${detail})` : ''}`)
 }
 
+// The script's own arguments (those of scripts/lib/suite-runner.js taken out by `runnerArgs`).
 const parseArguments = (argv) => {
-  const options = { mutations: true, saves: true, part: null, detail: false }
+  const options = { mutations: true, saves: true, detail: false }
 
-  for (let index = 0; index < argv.length; index++) {
-    const argument = argv[index]
-
+  for (const argument of argv) {
     if (argument === '--no-mutations') {
       options.mutations = false
     } else if (argument === '--detail') {
       options.detail = true
     } else if (argument === '--no-saves') {
       options.saves = false
-    } else if (argument === '--part') {
-      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argument}`)
       process.exit(2)
@@ -2055,48 +2053,28 @@ const runPart = async (part, options) => {
   }
 }
 
+// The deadlines, in seconds: five times the slowest time measured (the suites 1.8 s, a save 24 s, the control 0.6 s, a mutant 1.5 s), at least two minutes, for a busy machine. The suites build the constructed rows, the loaders and the page; a save is read and compared with SQL whole; the control runs the suites again and the controls of the credit; a mutant runs the suites over its copy.
+const DEADLINES = { suites: 120, save: 120, control: 120, mutant: 120 }
+
+// The parts, in the order they print, each in a process of its own as they ran before the runner.
+const variantsOf = (options) => [
+  { key: 'suites', name: 'the suites: constructed rows, loaders and the page', head: true, deadline: DEADLINES.suites, run: () => runPart('suites', options) },
+  ...(options.saves ? saveFiles().map((file, index) => ({ key: `save:${index}`, name: `the save ${path.relative(root, file).replace(/\\/g, '/')}`, head: true, heading: '\nEvery save found', deadline: DEADLINES.save, run: () => runPart(`save:${index}`, options) })) : []),
+  ...(options.mutations ? [{ key: 'control', name: 'control: the unmodified code and the credit of a fault', heading: '\nMutations', deadline: DEADLINES.control, run: () => runPart('control', options) }, ...MUTANTS.map(([name], index) => ({ key: `mutant:${index}`, name: `mutant: ${name}`, heading: '\nMutations', deadline: DEADLINES.mutant, run: () => runPart(`mutant:${index}`, options) }))] : []),
+]
+
 const main = async () => {
-  const options = parseArguments(process.argv.slice(2))
+  const options = parseArguments(runnerArgs().rest)
+  const totals = await runSuite({
+    script: __filename,
+    inputs: options.saves ? saveFiles() : [],
+    variants: variantsOf(options),
+    counts: () => ({ checks, failures, extra: { unsupportedSaves, emptySaves, skippedSaves } }),
+  })
+  const { unsupportedSaves: unsupported = 0, emptySaves: empty = 0, skippedSaves: skipped = 0 } = totals.extra
 
-  if (options.part !== null) {
-    await runPart(options.part, options)
-    endSection(checks, failures, { unsupportedSaves, emptySaves, skippedSaves })
-  }
-
-  const files = options.saves ? saveFiles() : []
-  const parts = [
-    { part: 'suites', weight: 10 },
-    ...files.map((_file, index) => ({ part: `save:${index}`, weight: 8 })),
-    ...(options.mutations ? [{ part: 'control', weight: 10 }, ...MUTANTS.map((_mutant, index) => ({ part: `mutant:${index}`, weight: 3 }))] : []),
-  ]
-  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part], weight })))
-  let at = 0
-
-  const printed = () => {
-    const counts = printSection(sections[at++])
-
-    checks += counts.checks
-    failures += counts.failures
-    unsupportedSaves += counts.extra.unsupportedSaves
-    emptySaves += counts.extra.emptySaves
-    skippedSaves += counts.extra.skippedSaves
-  }
-
-  printed()
-
-  if (options.saves) {
-    console.log('\nEvery save found')
-    files.forEach(printed)
-  }
-
-  if (options.mutations) {
-    console.log('\nMutations')
-    printed()
-    MUTANTS.forEach(printed)
-  }
-
-  console.log(`\n${checks - failures} of ${checks} checks passed (${unsupportedSaves} unsupported, ${emptySaves} empty, ${skippedSaves} skipped)`)
-  process.exit(failures ? 1 : 0)
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed (${unsupported} unsupported, ${empty} empty, ${skipped} skipped)`)
+  process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 main().catch((error) => {

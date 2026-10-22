@@ -1,7 +1,7 @@
 /*
   Checks the mission briefs (utilities/mission-briefs.js) and the propulsion page's use of them (pages/propulsion.vue): the requirements a ship is for, kept apart from the alternatives judged against them, with pass, fail or unknown for each.
 
-  bun scripts/check-mission-briefs.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--no-mutations] [--part <part>]
+  bun scripts/check-mission-briefs.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--no-mutations] [--resume] [--only=<text>[|<text>...]] [--variants=<key>[,<key>...]]
 
   Groups:
   - units: 50 tons are 1 HS for a hull; a cargo hold stores 50 tons to the HS and a capacity point is a ton; a hangar capacity is HS of ships; a typed size, range and cruise power become the unit the figure is held in, and text that is not a positive number is refused;
@@ -15,7 +15,7 @@
   - the browser: the page and panel together in the real renderer, served over a copy of AuroraDB.db (game and race Aurelian Empire, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
   - each save: a cargo hold stores 50 per HS, a class's cargo and hangar capacity equal the sum of its holds' and hangars', the ships docked in a mother ship never total more than its hangar capacity, no fighter class is as big as 10 HS, no commercial class mounts a military engine, and the loader's figures equal SQL of its own.
 
-  The checks run through scripts/lib/fault-credit.js: a check's body is the call of the code under test, so a check that throws fails as a call that threw, and a verdict other than true is the check's own failure by value; the browser checks only read what the page showed, so one that throws is a defect of the harness, a failure over the real sources and a stop when a fault or a rewrite is judged (`judged`). Mutants: each deliberate fault in a copy of the utilities, of the page's script, of the panel or of the panel served to the browser is run with the checks it names and must fail each of them by a value, never by a throw (`caughtBy`, which stops the run when only checks that threw would credit a fault); each benign rewrite served to the browser must fail none, and a variant whose page does not get through stops the run, as nothing may be credited with it. `--part <id>` runs one part (`groups`, `page`, `panel`, `browser`, a mutant such as `utility:3`, `page:0`, `panel:1`, `browser:0` or `browser-benign:0`, `browser-variants` for every fault and rewrite served to the browser in one server and one browser, or a save by its label); a whole run runs the mutants that need no browser in a process each and those served to the browser as `browser-variants`. Prints `N of N checks passed`; exit code 1 when a check fails.
+  The checks run through scripts/lib/fault-credit.js: a check's body is the call of the code under test, so a check that throws fails as a call that threw, and a verdict other than true is the check's own failure by value; the browser checks only read what the page showed, so one that throws is a defect of the harness, a failure over the real sources and a stop when a fault or a rewrite is judged (`judged`). Mutants: each deliberate fault in a copy of the utilities, of the page's script, of the panel or of the panel served to the browser is run with the checks it names and must fail each of them by a value, never by a throw (`caughtBy`, which stops the run when only checks that threw would credit a fault); each benign rewrite served to the browser must fail none, and a variant whose page does not get through is a defect of the harness, as nothing may be credited with it. The parts (`groups`, `page`, `panel`, `browser`, each mutant by its id such as `utility:3`, `page:0`, `panel:1`, `browser:0` or `browser-benign:0`, and each save by its label) run through scripts/lib/suite-runner.js, each with a deadline and a record that --resume continues: those in memory in a process each, those served to the browser one after another in a worker that starts one page server and one Chromium and warms them first, with the control `control:warm-reset`, which runs `browser:0` and then `browser` on the same server; `--variants=<key>,...` runs exactly the parts named. Prints `N of N checks passed`; exit code 1 when a check fails, 2 for a defect of the harness.
 */
 const fs = require('fs')
 const os = require('os')
@@ -25,7 +25,7 @@ const Vue = require('vue')
 const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
-const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { runSuite, runnerArgs } = require('./lib/suite-runner')
 const { patched } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
 const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rolesRead, labelKey } = require('./lib/browser-observe')
@@ -1366,6 +1366,7 @@ const observeBrief = (browser, url) => observe(browser, async ({ page, step }) =
     await picker.getByText(BROWSER_SAVE.race, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
+  step('waiting for the save of the race')
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: TIMEOUT })
   step('opening the propulsion page')
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/propulsion')
@@ -1408,49 +1409,55 @@ const observeBrief = (browser, url) => observe(browser, async ({ page, step }) =
   return seen
 })
 
-// Runs `work` with one page server and one Chromium for the process, both stopped once it ends: `work` is given `observeSource(source)`, which serves the panel as given (`source`, null for the real one) and resolves the record of `observe`, or a failed one that names why there is none. The variants of one process share the start of Vite and Chromium; each is served on its own (`server.replace`) and seen in a context of its own.
-const inBrowser = async (work) => {
-  let server = null
-  let chrome = null
-  let startFailure = null
+// The page server and the Chromium of a worker that runs the parts served to the browser, started and warmed once by `prepare` for every part of its queue and stopped by `close`. Each part is served on its own (`server.replace`) and seen in a context of its own; the reset after each part puts the server back as it started. A server or a browser that did not start is kept as `failure`, and every observation of the worker is then one that did not happen.
+const BROWSER = { server: null, chrome: null, failure: null }
 
+const openBrowser = async () => {
   try {
-    server = await startPageServer({ save: BROWSER_SAVE.file })
-    chrome = await require('playwright').chromium.launch()
+    BROWSER.server = await startPageServer({ save: BROWSER_SAVE.file })
+    BROWSER.chrome = await require('playwright').chromium.launch()
+
+    const warmed = await BROWSER.server.warm(BROWSER.chrome, { routes: ['/propulsion'] })
+
+    console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
   } catch (error) {
-    startFailure = String(error.message).split('\n')[0]
+    BROWSER.failure = String(error.message).split('\n')[0]
+  }
+}
+
+const closeBrowser = async () => {
+  const { server, chrome } = BROWSER
+
+  BROWSER.server = null
+  BROWSER.chrome = null
+
+  if (chrome) {
+    await chrome.close()
   }
 
-  const observeSource = async (source) => {
-    if (startFailure) {
-      return failedObservation(startFailure)
-    }
-
-    server.replace(panelFile, source)
-
-    try {
-      const seen = await observeBrief(chrome, server.url)
-
-      report(source === null ? 'the propulsion page' : 'a variant of the panel', seen)
-
-      return seen
-    } catch (error) {
-      return failedObservation(String(error.message).split('\n')[0])
-    } finally {
-      server.replace(panelFile, null)
-    }
+  if (server) {
+    await server.stop()
   }
+}
+
+// Serves the panel as given (`source`, null for the real one) and resolves the record of `observe`, or a failed one that names why there is none.
+const observeSource = async (source) => {
+  if (BROWSER.failure || !BROWSER.chrome) {
+    return failedObservation(BROWSER.failure || 'the page server was not started for this worker')
+  }
+
+  BROWSER.server.replace(panelFile, source)
 
   try {
-    return await work(observeSource)
-  } finally {
-    if (chrome) {
-      await chrome.close()
-    }
+    const seen = await observeBrief(BROWSER.chrome, BROWSER.server.url)
 
-    if (server) {
-      await server.stop()
-    }
+    report(source === null ? 'the propulsion page' : 'a variant of the panel', seen)
+
+    return seen
+  } catch (error) {
+    return failedObservation(String(error.message).split('\n')[0])
+  } finally {
+    BROWSER.server.replace(panelFile, null)
   }
 }
 
@@ -1504,8 +1511,8 @@ const browserStatements = (m) => {
 // The browser checks for `runChecks` over { observation }: a page that did not get through fails each of them by naming why.
 const browserChecks = (m) => browserStatements(m).map(([name, test]) => ({ id: name, name, run: ({ observation }) => verdictHeld(unobserved(observation) ? `the page did not get through: ${observation.error}` : test(observation.value, observation)) }))
 
-// A fault or a benign rewrite of the panel served to the browser through `observeSource` (`inBrowser`). A fault must fail by a value each check it names (`caughtBy`), a rewrite none; a variant whose page did not get through is judged by nothing and stops the run.
-const checkBrowserVariant = async ({ kind, name, find, replace, fails = [], throws = false }, real, observeSource) => {
+// A fault or a benign rewrite of the panel served to the browser (`observeSource`). A fault must fail by a value each check it names (`caughtBy`), a rewrite none; a variant whose page did not get through is judged by nothing and fails as a defect of the harness, as nothing may be credited with it.
+const checkBrowserVariant = async ({ kind, name, find, replace, fails = [], throws = false }, real) => {
   const began = Date.now()
   const fault = kind === 'browser'
   const observation = await observeSource(patched(panelFile, fs.readFileSync(panelFile, 'utf8'), find, replace))
@@ -1623,8 +1630,9 @@ const mutatedCopy = (file, from, to) => {
 
 // ---------- the saves ----------
 
+// The script's own arguments (those of scripts/lib/suite-runner.js taken out by `runnerArgs`).
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true, part: null }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], mutations: true }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -1632,8 +1640,6 @@ const parseArguments = (argv) => {
       index += 3
     } else if (argv[index] === '--no-mutations') {
       options.mutations = false
-    } else if (argv[index] === '--part') {
-      options.part = argv[++index]
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -1840,7 +1846,7 @@ const checkSave = async (label, [file, GameID, RaceID], real) => {
   database.close()
 }
 
-// One part, in this process: `groups`, `page`, `panel`, `browser`, a mutant or a benign rewrite by its id, `browser-variants`, or a save by its label.
+// One part, in this process: `groups`, `page`, `panel`, `browser`, a mutant or a benign rewrite by its id, or a save by its label.
 const runPart = async (part, options) => {
   const mutant = MUTANTS.find(({ id }) => id === part)
 
@@ -1859,15 +1865,9 @@ const runPart = async (part, options) => {
   } else if (part === 'panel') {
     printResults(await runChecks(asChecks(await panelStatements(null, real)), {}))
   } else if (part === 'browser') {
-    printResults(await runChecks(browserChecks(real), { observation: await inBrowser((observeSource) => observeSource(null)) }))
-  } else if (part === 'browser-variants') {
-    await inBrowser(async (observeSource) => {
-      for (const variant of MUTANTS.filter(({ kind }) => kind.startsWith('browser'))) {
-        await checkBrowserVariant(variant, real, observeSource)
-      }
-    })
+    printResults(await runChecks(browserChecks(real), { observation: await observeSource(null) }))
   } else if (mutant && mutant.kind.startsWith('browser')) {
-    await inBrowser((observeSource) => checkBrowserVariant(mutant, real, observeSource))
+    await checkBrowserVariant(mutant, real)
   } else if (mutant) {
     await checkPageMutation(mutant, real)
   } else if (SAVE_LABELS.includes(part)) {
@@ -1877,58 +1877,44 @@ const runPart = async (part, options) => {
   }
 }
 
-const forwardedSaves = (options) => ['--modded', ...options.modded.map(String), '--stock', ...options.stock.map(String)]
+// The deadlines, in seconds: five times the slowest time measured (a part in memory 1.4 s, a mutant 1.2 s, a part served to the browser 4.3 s, a save 0.1 s), at least two minutes, and for a part served to the browser at least a minute past its longest step (TIMEOUT, 90 s for a click or a wait of the page), so that a step that does not end fails by its own timeout, named, before the deadline runs out. A part in memory (a group, the page, the panel, a mutant, each in a process of its own) loads the modules and runs its checks; a part served to the browser reads the page once; a save is read through SQL; the setup of a worker of the browser starts and warms the page server, the one cold start of the run.
+const DEADLINES = { part: 120, mutant: 120, browser: 150, save: 120, setup: 900 }
+const MUTATIONS_HEADING = '\nMutations: each must fail by a value the checks it names, and each benign rewrite of the browser case none'
+
+// The parts, in the order they print: those in memory each in a process of its own, as they ran before the runner; those served to the browser (the page as it is, its faults and its rewrites) one after another in a worker that starts one page server and one Chromium for them (the pool `browser`).
+const variantsOf = (options) => [
+  { key: 'groups', name: 'the mission brief: units, evaluation, ranking, presets, alternatives and the record', head: true, heading: 'The mission brief: units, evaluation, ranking, presets, alternatives and the record', deadline: DEADLINES.part, run: () => runPart('groups', options) },
+  { key: 'page', name: 'the propulsion page', head: true, heading: '\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)', deadline: DEADLINES.part, run: () => runPart('page', options) },
+  { key: 'panel', name: 'the panel', head: true, heading: '\nThe panel (its script, template and Vue, without a document)', deadline: DEADLINES.part, run: () => runPart('panel', options) },
+  { key: 'browser', name: 'the browser', head: true, heading: '\nThe browser (the page and the panel over a copy of AuroraDB.db, in Chromium)', pool: 'browser', deadline: DEADLINES.browser, run: () => runPart('browser', options) },
+  ...(options.mutations ? MUTANTS.map((mutant) => ({ key: mutant.id, name: `${mutant.kind} ${mutant.kind === 'browser-benign' ? 'rewrite' : 'mutation'}: ${mutant.name}`, heading: MUTATIONS_HEADING, pool: mutant.kind.startsWith('browser') ? 'browser' : null, deadline: mutant.kind.startsWith('browser') ? DEADLINES.browser : DEADLINES.mutant, run: () => runPart(mutant.id, options) })) : []),
+  ...SAVE_LABELS.map((label) => ({ key: label, name: `the ${label} save`, head: true, deadline: DEADLINES.save, run: () => runPart(label, options) })),
+]
 
 const run = async () => {
-  const options = parseArguments(process.argv.slice(2))
+  const options = parseArguments(runnerArgs().rest)
+  const totals = await runSuite({
+    script: __filename,
+    inputs: [options.modded[0], options.stock[0]],
+    variants: variantsOf(options),
+    counts: () => ({ checks, failures }),
+    prepare: async (queue) => {
+      if (queue.some((variant) => variant.pool === 'browser')) {
+        await openBrowser()
+      }
+    },
+    afterEach: async () => {
+      if (BROWSER.server) {
+        await BROWSER.server.reset()
+      }
+    },
+    close: closeBrowser,
+    control: options.mutations ? { fault: 'browser:0', head: 'browser', heading: '\nThe control of the warm page server' } : null,
+    setup: DEADLINES.setup,
+  })
 
-  if (options.part !== null) {
-    await runPart(options.part, options)
-    endSection(checks, failures)
-  }
-
-  // The mutants that need no browser run in a process each; the faults and rewrites served to the browser run in one (`browser-variants`), which starts Vite and Chromium once for them all.
-  const variants = options.mutations ? [...MUTANTS.filter(({ kind }) => !kind.startsWith('browser')).map(({ id }) => ({ part: id, weight: 3 })), { part: 'browser-variants', weight: 50 }] : []
-
-  // In the order they print; the longest start first.
-  const parts = [
-    { part: 'groups', weight: 30 },
-    { part: 'page', weight: 10 },
-    { part: 'panel', weight: 10 },
-    { part: 'browser', weight: 20 },
-    ...variants,
-    ...SAVE_LABELS.map((label) => ({ part: label, weight: 20 })),
-  ]
-
-  const sections = await runSections(__filename, parts.map(({ part, weight }) => ({ args: ['--part', part, ...forwardedSaves(options)], weight })))
-  let at = 0
-
-  const printed = () => {
-    const counts = printSection(sections[at++])
-
-    checks += counts.checks
-    failures += counts.failures
-  }
-
-  console.log('The mission brief: units, evaluation, ranking, presets, alternatives and the record')
-  printed()
-  console.log('\nThe propulsion page (its script on a pseudo instance, scripts/lib/page-loader.js)')
-  printed()
-  console.log('\nThe panel (its script, template and Vue, without a document)')
-  printed()
-
-  console.log('\nThe browser (the page and the panel over a copy of AuroraDB.db, in Chromium)')
-  printed()
-
-  if (options.mutations) {
-    console.log('\nMutations: each must fail by a value the checks it names, and each benign rewrite of the browser case none')
-    variants.forEach(printed)
-  }
-
-  SAVE_LABELS.forEach(printed)
-
-  console.log(`\n${checks - failures} of ${checks} checks passed`)
-  process.exit(failures ? 1 : 0)
+  console.log(`\n${totals.checks - totals.failures} of ${totals.checks} checks passed`)
+  process.exit(totals.harness.length ? 2 : totals.failures ? 1 : 0)
 }
 
 run().catch((error) => {

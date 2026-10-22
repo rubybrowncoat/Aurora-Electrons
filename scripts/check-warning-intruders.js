@@ -731,6 +731,10 @@ const main = async () => {
       cleanups.push(() => server.stop())
       chrome = await require('playwright').chromium.launch()
       cleanups.push(() => chrome.close())
+
+      const warmed = await server.warm(chrome, { routes: [BROWSER.path] })
+
+      console.log(`INFO  the page server warmed in ${warmed.seconds.toFixed(1)} s, ${warmed.attempts} attempt${warmed.attempts === 1 ? '' : 's'}`)
     } catch (error) {
       startFailure = String(error.message).split('\n')[0]
     }
