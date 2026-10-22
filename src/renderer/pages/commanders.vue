@@ -162,13 +162,13 @@
               <v-text-field :value="ageMax" label="Age to" type="number" min="0" step="0.1" dense outlined hide-details clearable :disabled="!!focusCommanderId || !ageAvailable" data-roster-age-max @input="setAge('ageMax', $event)" />
             </v-col>
           </v-row>
-          <div v-if="!ageAvailable" class="px-6 pb-2 caption text--secondary" data-age-unavailable>This save lacks the species data the ages rest on, so the age range is off and any stored bound is kept for a save that has it.</div>
+          <div v-if="!ageAvailable" class="px-6 pb-2 caption text--secondary" data-age-unavailable>{{ ageNotes.unavailable }}</div>
           <v-data-table :headers="rosterHeaders" :items="rosterRows" item-key="CommanderID" :custom-sort="sortRows" :sort-by.sync="rosterTable.sortBy" :sort-desc.sync="rosterTable.sortDesc" :items-per-page.sync="rosterTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: rosterPageSizes }" class="roster-table" data-roster-table>
             <template #[`header.Age`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.age" /></span></template>
             <template #[`header.selectedBonus`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.bonusValue" /></span></template>
             <template #[`header.bonusList`]="{ header }"><span>{{ header.text }}<provenance-mark rule="commanders.bonusValue" /></span></template>
             <template #[`item.Name`]="{ item }">
-              <span class="font-weight-medium" data-roster-name>{{ item.Name }}</span>
+              <span class="font-weight-medium" :data-roster-name="item.CommanderID">{{ item.Name }}</span>
               <v-icon v-if="item.StoryCharacter" small class="ml-1" title="Story character: never retires">mdi-book-open-variant</v-icon>
             </template>
             <template #[`item.rankSort`]="{ item }">
@@ -295,7 +295,7 @@
             <div class="panel-body caption text--secondary" data-structure-summary>{{ structureSummary }}</div>
             <v-data-table :headers="structureHeaders" :items="structureRows" item-key="key" :items-per-page.sync="structureTable.itemsPerPage" :footer-props="{ itemsPerPageOptions: structurePageSizes }" class="roster-table" data-structure-table>
               <template #[`item.Name`]="{ item }">
-                <span :style="{ paddingLeft: `${Math.min(item.Depth, 12) * 16}px` }" data-structure-name>{{ item.Name === null || item.Name === '' ? '—' : item.Name }}</span>
+                <span :style="{ paddingLeft: `${Math.min(item.Depth, 12) * 16}px` }" :data-structure-name="item.key">{{ item.Name === null || item.Name === '' ? '—' : item.Name }}</span>
               </template>
               <template #[`item.Holder`]="{ item }">
                 <span v-if="item.Holder" data-structure-holder>{{ item.Holder }}</span>
@@ -322,7 +322,7 @@ import StatTiles from '../components/page/StatTiles.vue'
 import deepLink from '../mixins/deep-link'
 import loadState from '../mixins/load-state'
 import persistedView, { oneOf, tableView } from '../mixins/persisted-view'
-import { COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
+import { AGE_NOTES, COLONY_ADMINISTRATION, COMMANDER_TYPES, POSTS, RESEARCH_ADMINISTRATION, RETIRE_STATUSES, SERVING_COMMANDER, ageBound, ageResult, assignmentResult, bonusSuggestionCount, bonusValueResult, captainlessShips, commanderCounts, formatBonus, formerGroupCounts, formerKind, governorReview, killsResult, medalsResult, neutralBonus, parseBonuses, rankLabel, recordDate, researchSuggestions, rosterChoices, rosterFilter, rosterParts, shipSuggestions } from '../utilities/commanders'
 import { linkTo, queryId } from '../utilities/deep-links'
 import { loadGroundFormationPosts } from '../utilities/ground-formations'
 import { hierarchyExport, hierarchyNotice, hierarchyRows, hierarchySummary } from '../utilities/hierarchy-export'
@@ -413,6 +413,7 @@ export default {
       formerPageSizes: FORMER_PAGE_SIZES,
       structurePageSizes: STRUCTURE_PAGE_SIZES,
       structureViews: STRUCTURE_VIEWS,
+      ageNotes: AGE_NOTES,
       focusCommanderId: null,
       focusColonyId: null,
     }

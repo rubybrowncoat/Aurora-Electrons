@@ -30,9 +30,9 @@
             <v-icon small class="mr-1">{{ entry.icon }}</v-icon>
             <span class="diagnostic-name">{{ entry.name }}</span>
             <span class="diagnostic-chip">{{ groups[entry.group] }}</span>
-            <span class="diagnostic-count"><span v-if="diagnosis.verdict === 'unavailable'" data-count-unknown>unknown</span><span v-else-if="entry.count"><span data-count-value>{{ count(entry.count) }}</span> observed, newest <span data-newest-date>{{ date(entry.newest) }}</span></span><span v-else data-count-none>none observed</span></span>
-            <span v-if="entry.hidden" class="diagnostic-chip" data-hidden>Hidden in the game's Events window</span>
-            <span v-if="entry.listed === false" class="diagnostic-chip" data-unlisted>Not in this save's event table</span>
+            <span class="diagnostic-count"><span v-if="diagnosis.verdict === 'unavailable'" data-count-unknown>{{ countText.unknown }}</span><span v-else-if="entry.count"><span data-count-value>{{ count(entry.count) }}</span> observed, newest <span data-newest-date>{{ date(entry.newest) }}</span></span><span v-else data-count-none>{{ countText.none }}</span></span>
+            <span v-if="entry.hidden" class="diagnostic-chip" data-hidden>{{ markText.hidden }}</span>
+            <span v-if="entry.listed === false" class="diagnostic-chip" data-unlisted>{{ markText.unlisted }}</span>
           </li>
         </ul>
       </div>
@@ -85,7 +85,7 @@
 <script>
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import countFormat from '../../mixins/count-format'
-import { GROUPS, LISTED, POINTER_TERMS, REASON_TEXT, STATE_TEXT, VERDICT_TEXT, WATCHED, WINDOWS } from '../../utilities/log-diagnostics'
+import { COUNT_TEXT, GROUPS, LISTED, MARK_TEXT, POINTER_TERMS, REASON_TEXT, STATE_TEXT, VERDICT_TEXT, WATCHED, WINDOWS } from '../../utilities/log-diagnostics'
 import { termById } from '../../utilities/glossary'
 import { gameDateText } from '../../utilities/history-milestones'
 
@@ -102,7 +102,7 @@ export default {
     startYear: { type: Number, required: true },
   },
   data() {
-    return { windows: WINDOWS, groups: GROUPS, stateText: STATE_TEXT, reasonText: REASON_TEXT, verdictText: VERDICT_TEXT }
+    return { windows: WINDOWS, groups: GROUPS, stateText: STATE_TEXT, reasonText: REASON_TEXT, verdictText: VERDICT_TEXT, countText: COUNT_TEXT, markText: MARK_TEXT }
   },
   computed: {
     shown() {

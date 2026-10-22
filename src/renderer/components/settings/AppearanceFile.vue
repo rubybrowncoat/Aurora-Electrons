@@ -41,9 +41,9 @@
     </v-alert>
 
     <v-alert v-if="report.findings.length" type="warning" text dense class="mb-0" data-appearance-findings>
-      <div>{{ count(report.findings.length) }} of {{ count(report.checked) }} contrast measurements are under their minimum (4.5:1 for text, 3:1 for graphics and chart slots, 2.5:1 for disabled text), in {{ count(groups.length) }} {{ groups.length === 1 ? 'place' : 'places' }}. {{ report.blocking.length ? '' : 'Apply asks for a confirmation first.' }}</div>
+      <div><span data-appearance-count>{{ count(report.findings.length) }}</span> of {{ count(report.checked) }} contrast measurements are under their minimum (4.5:1 for text, 3:1 for graphics and chart slots, 2.5:1 for disabled text), in {{ count(groups.length) }} {{ groups.length === 1 ? 'place' : 'places' }}. {{ report.blocking.length ? '' : 'Apply asks for a confirmation first.' }}</div>
       <ul class="appearance-file__list">
-        <li v-for="group in shownGroups" :key="group.label">{{ group.label }}: {{ group.foreground }} on {{ group.surface }} is {{ ratioText(group.ratio) }}:1, under {{ group.minimum }}:1{{ group.more ? ` (and ${count(group.more)} more of the same)` : '' }}.</li>
+        <li v-for="group in shownGroups" :key="group.label"><span data-appearance-finding>{{ group.label }}</span>: {{ group.foreground }} on {{ group.surface }} is {{ ratioText(group.ratio) }}:1, under {{ group.minimum }}:1{{ group.more ? ` (and ${count(group.more)} more of the same)` : '' }}.</li>
       </ul>
       <div v-if="hiddenGroups" class="caption">and {{ count(hiddenGroups) }} more</div>
     </v-alert>

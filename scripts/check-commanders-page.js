@@ -1,15 +1,15 @@
 /*
   Checks the Commanders page (src/renderer/pages/commanders.vue) as a browser draws it: the page is served by scripts/lib/page-server.js over a copy of a save, opened in Chromium, and what a player sees and can do is read back: the Post, Rank and age controls of the roster, the roster rows each of them leaves, and the command structure with its holder column, its Shipping lines switch and its two downloads.
 
-  Run: bun scripts/check-commanders-page.js [--no-mutations]
+  Run: bun scripts/check-commanders-page.js [--no-mutations] [--no-lacking] [--only=<text>,<text>] [--detail]
 
-  The data behind the page (the model, the exports, the filters against SQL) is checked by scripts/check-hierarchy-export.js; this script proves that the page puts them on the screen. It reads only hooks the template carries (data attributes) and what a browser reports as visible, never a heading or other wording:
-  - the roster's Post control is visible and offers the posts the save's serving naval officers hold, and choosing one leaves exactly the officers of that post (names compared with SQL written here); the Rank control offers choices and narrows the roster; the two age controls bound it by the age worked out in SQL here; each choice can be cleared again;
+  The data behind the page (the model, the exports, the filters against SQL) is checked by scripts/check-hierarchy-export.js; this script proves that the page puts them on the screen. It reads the screen through the shared readers of scripts/lib/browser-observe.js (`installScreen`): hooks the template carries (data attributes) say what an element is, an element counts when it is on screen with its opacity and its ancestors', its text is the text it draws, a control takes input when the browser's own element of it is enabled, and never a heading or other wording is read as a decision. The choices of a select are the words its menu draws, read back to the post each stands for through the module's own table of posts (utilities/commanders.js `POSTS`, `labelKey`), and each line of the roster is set against the officers SQL gives by the CommanderID its hook carries (`pairedBy`), never by place or by name, and must draw that officer's name. The save is served as a copy in which two serving officers share one name (`NAMESAKES`), so that the checks meet two lines of one name on every roster they compare; a control says that they did:
+  - the roster's Post control is visible and offers the posts the save's serving naval officers hold, and choosing one leaves exactly the officers of that post (compared with SQL written here); the Rank control offers choices and narrows the roster; the two age controls bound it by the age worked out in SQL here; each choice can be cleared again;
   - the command structure panel is visible, lists rows each with a name and a holder cell naming commanders of the save, and its CSV download holds one record for each entry with every record as wide as its header;
-  - the Shipping lines switch adds the shipping lines' fleets and ships to the table and to the download, marked in a column of their own, and taking it off removes them;
+  - the Shipping lines switch adds the shipping lines' fleets and ships to the table and to the download, marked in a column of their own, and taking it off removes them: the rows drawn again are set against the first ones by the key of each row (the hook of its name) and draw the same name and holder, their order checked on its own;
   - while the structure is read again (the answer held back) the table shows no row of the earlier model and both downloads are off, and the rows of the new read come when it is answered;
-  - a save without the species or the ranks the age and rank filters rest on, with a bound of each stored, still lists the roster of the save as it is, with the age controls off and the rank control not offered (a child of this script serves a copy of the save with FCT_Species and FCT_Ranks dropped).
-  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names (a hidden Post control, a Post control without choices, a Holder cell that throws, a slot nothing consumes, a structure panel that is not displayed, a structure shown from the model of an earlier read, the age and rank filters applied to a save that lacks their columns). A fault is credited only when every check named for it fails by an assertion of its own, its verdict on what the page showed (scripts/lib/fault-credit.js); a page that could not be driven (an observation that failed in itself, a context that did not close included where a screen was kept), or a check that throws, stops the run (HarnessError, exit status 2) and credits nothing. Variants that say the same thing in another way (a control bound by an explicit value and event, the longhand of an event, a native click listener, components named in PascalCase, a control registered under an alias of the page) are served the same way and must pass every check with the screen they draw equal to the page's.
+  - a save without the species or the ranks the age and rank filters rest on, with a bound of each stored, still lists the roster of the save as it is, with the age controls off, the note on screen read back through the module's own words (utilities/commanders.js `AGE_NOTES`) as the note that the ages cannot be worked out, and the rank control not on screen (a child of this script serves a copy of the save with FCT_Species and FCT_Ranks dropped).
+  Every planted fault is served in place of the page's file and the page is read again: each must fail the checks it names (a hidden Post control, a Post control without choices, a Post control whose choices draw the words of another post, hidden age fields, a hidden Rank control, a roster line of one of two officers of one name that carries the other's identity, a Post control and the name and holder of each structure row drawn at opacity 0, a Holder cell that throws, a slot nothing consumes, a structure panel that is not displayed, a structure shown from the model of an earlier read, a structure read without the shipping lines, the age filter applied and the age controls left on for a save that lacks its columns, a note on the ages that draws other words); one fault stands for each way the page can be wrong, each named check has one, and the rank filter applied to a save without ranks is planted in scripts/check-hierarchy-export.js (`page-rank-gate`). A fault is credited only when every check named for it fails by an assertion of its own, its verdict on what the page showed (scripts/lib/fault-credit.js); a page that could not be driven (an observation that failed in itself, a context that did not close included where a screen was kept), or a check that throws, stops the run (HarnessError, exit status 2) and credits nothing. Variants that say the same thing in another way (a control bound by an explicit value and event, the longhand of an event, a native click listener, a control registered under an alias of the page, the words of a choice drawn through a function, a control drawn at opacity 1, the note on the ages drawn through v-text) are served the same way and must pass every check, those of the save with all its tables with the screen they draw equal to the page's.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. It needs Playwright's Chromium (`bunx playwright install chromium` once). Vite starts with a cold cache of its own on every run, so a run takes minutes.
 */
@@ -18,9 +18,10 @@ const os = require('os')
 const path = require('path')
 const sqlite3 = require('sqlite3')
 const { runChild, lastJson } = require('./lib/check-pool')
-const { observe, validate, failedObservation, failureLine, describe, HarnessError } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, failureLine, describe, HarnessError, installScreen, pairedBy, labelKey } = require('./lib/browser-observe')
 const { caughtAll, notCaught, unobserved } = require('./lib/fault-credit')
 const { strictRecords } = require('./lib/csv-records')
+const { loadUtilities } = require('./lib/utilities')
 const pageLoading = require('./page-loading')
 
 const root = path.resolve(__dirname, '..')
@@ -33,6 +34,19 @@ const RESULT = 'RESULT '
 const YEAR = 31536000
 const ROSTER_ROWS = 25
 const STORED = { commandersAgeMin: 30, commandersAgeMax: 90, commandersRank: 2 }
+// Two serving naval officers of the save whose post, age and rank put both on every roster the checks compare (the roster as it opens, the post chosen, the age bound): every copy of the save served gives the second the name of the first.
+const NAMESAKES = [624163, 624519]
+const NAMESAKE_RENAME = `update FCT_Commander set Name = (select Name from FCT_Commander where CommanderID = ${NAMESAKES[0]}) where CommanderID = ${NAMESAKES[1]}`
+// The packages the commanders module imports, for reading its table of posts.
+const STUBS = {
+  dayjs: `import { createRequire } from 'node:module'\nexport default createRequire(${JSON.stringify(path.join(root, 'package.json'))})('dayjs')`,
+  'dayjs/plugin/utc.js': `import { createRequire } from 'node:module'\nexport default createRequire(${JSON.stringify(path.join(root, 'package.json'))})('dayjs/plugin/utc.js')`,
+  romanum: 'export default { toNumeral: String }',
+}
+// `--only=<text>,<text>` judges the planted faults and the rewrites whose name holds one of the texts (the page as it is is always read); `--detail` prints what each check named for a fault said.
+const ONLY = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
+const wanted = (name) => ONLY.length === 0 || ONLY.some((text) => name.includes(text))
+const DETAIL = process.argv.includes('--detail')
 
 const short = (value) => {
   const text = JSON.stringify(value)
@@ -45,6 +59,28 @@ const short = (value) => {
 const openRaw = (file) => new Promise((resolve, reject) => {
   const raw = new sqlite3.Database(file, sqlite3.OPEN_READONLY, (error) => (error ? reject(error) : resolve(raw)))
 })
+
+// A copy of the save in a folder of its own, with `statements` run on it (the names of the namesakes made one, tables dropped): the copy a page server serves and the SQL here reads.
+const saveCopy = async (prefix, statements) => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  const file = path.join(folder, 'save.db')
+
+  fs.copyFileSync(path.join(root, SAVE), file)
+
+  const raw = await new Promise((resolve, reject) => {
+    const database = new sqlite3.Database(file, (error) => (error ? reject(error) : resolve(database)))
+  })
+
+  try {
+    for (const statement of statements) {
+      await new Promise((resolve, reject) => raw.run(statement, (error) => (error ? reject(error) : resolve())))
+    }
+  } finally {
+    await new Promise((resolve) => raw.close(resolve))
+  }
+
+  return { folder, file }
+}
 
 const pageText = () => fs.readFileSync(path.join(root, PAGE_FILE), 'utf8')
 
@@ -64,77 +100,70 @@ const truthOf = async (file) => {
   }
 }
 
-const sameList = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
+// The lines of a roster on screen (`rosterOn`) set against the officers of `rows` ({ id, name }) by the CommanderID each line's hook carries, never by place or by name (scripts/lib/browser-observe.js `pairedBy`), and each line paired with an officer checked to draw that officer's name: [] when each officer has exactly one line, no line is of an identity no officer has, and every line draws its officer's name.
+const sameRoster = (lines, rows) => {
+  const { pairs, problems } = pairedBy('the roster', lines, rows, (line) => line.id, (row) => row.id)
 
-// The post to pick (the item of the control whose post a few serving officers hold) and the age bound to type (one that leaves a few officers; never at a rounding tie), with the names SQL says each leaves.
+  return [...problems, ...pairs.filter(([row, line]) => line.name !== row.name).map(([row, line]) => ['the roster', row.id, `draws ${JSON.stringify(line.name)}`, row.name])]
+}
+// The lines of a roster on screen, each with the CommanderID its hook carries and the name it draws.
+const rosterOn = (entries) => entries.filter((entry) => entry.on).map((entry) => ({ id: entry.role, name: entry.text }))
+// An officer of the SQL written here, with the identity a line of the roster carries.
+const officer = (row) => ({ id: String(row.id), name: row.name })
+
+// The post to pick (the choice of the control whose post a few serving officers hold; its words are the ones the menu draws) and the age bound to type (one that leaves a few officers; never at a rounding tie), with the officers SQL says each leaves.
 const picksOf = (truth, postItems) => {
   const counts = new Map()
 
   truth.serving.forEach((row) => counts.set(row.post, (counts.get(row.post) || 0) + 1))
 
-  const index = postItems.map((item, at) => ({ at, value: item.value, count: counts.get(item.value) || 0 })).filter((item) => item.count >= 2 && item.count <= ROSTER_ROWS).sort((a, b) => b.count - a.count)[0]
+  const choice = postItems.map((item) => ({ text: item.text, value: item.value, count: counts.get(item.value) || 0 })).filter((item) => item.count >= 2 && item.count <= ROSTER_ROWS).sort((a, b) => b.count - a.count)[0]
   const aged = truth.serving.filter((row) => row.age !== null).sort((a, b) => b.age - a.age)
   const bound = Math.floor(aged[Math.min(9, aged.length - 1)].age) + 0.55
   const left = aged.filter((row) => Math.abs(row.age - bound) > 0.001 && row.age >= bound)
 
   return {
-    post: index ? { index: index.at, names: truth.serving.filter((row) => row.post === index.value).map((row) => row.name) } : null,
-    age: { bound, names: left.map((row) => row.name) },
+    post: choice ? { text: choice.text, rows: truth.serving.filter((row) => row.post === choice.value).map(officer) } : null,
+    age: { bound, rows: left.map(officer) },
   }
 }
 
+// The choices of a select as the menu draws them, each read back to the post it stands for through the module's table of posts (null for words that are no post of the table).
+const postChoices = (texts, posts) => texts.map((text) => {
+  const key = labelKey(text, posts)
+
+  return { text, value: key === null ? null : Number(key) }
+})
+
 // ---------- the page in a browser ----------
 
-// What the page on screen shows; runs in the page. Only hooks the template carries and what the browser reports visible: an element counts when it takes room and no style hides it.
+// What the page on screen shows; runs in the page, through the shared readers of scripts/lib/browser-observe.js (`installScreen`). Only hooks the template carries, each with the text its element draws and whether it is on screen (`hooked`): the controls (on screen when their field is; taking input when the browser's own element of the control is not disabled, as the player meets it), the lines of the roster (each hook carrying the CommanderID of its line), the note that the ages cannot be worked out, the structure panel, its switch and downloads, and the rows of the structure, each row with the parts it holds. Nothing is judged here.
 const readScreen = () => {
-  const visible = (element) => {
-    if (!element) {
-      return false
-    }
-
-    const box = element.getBoundingClientRect()
-
-    return element.checkVisibility({ checkVisibilityCSS: true }) && box.width > 0 && box.height > 0
-  }
-  const plain = (text) => text.replace(/\s+/g, ' ').trim()
+  const { visible, hooked } = window.__screen
   // A hook on a Vuetify field lands on its input: the control is the field that holds it.
-  const field = (selector) => {
-    const element = document.querySelector(selector)
-
-    return element ? element.closest('.v-input') : null
-  }
   const control = (selector) => {
-    const element = field(selector)
+    const element = document.querySelector(selector)
+    const box = element ? element.closest('.v-input') : null
 
-    return element ? { present: true, visible: visible(element), disabled: element.classList.contains('v-input--is-disabled') } : { present: false, visible: false, disabled: false }
+    return box ? { visible: visible(box), disabled: element.matches(':disabled') } : { visible: false, disabled: false }
   }
   const button = (selector) => {
     const element = document.querySelector(selector)
 
-    return element ? { visible: visible(element), disabled: element.disabled || element.classList.contains('v-btn--disabled') } : { visible: false, disabled: true }
+    return element ? { visible: visible(element), disabled: element.matches(':disabled') } : { visible: false, disabled: true }
   }
-  const items = (selector) => {
-    const element = field(selector)
-
-    return element && element.__vue__ ? element.__vue__.items.map((item) => ({ text: item.text, value: item.value })) : []
-  }
-  const rows = [...document.querySelectorAll('[data-structure-table] tbody tr')].filter(visible).map((row) => {
-    const name = row.querySelector('[data-structure-name]')
-    const holder = row.querySelector('[data-structure-holder]')
-
-    return { name: name && visible(name) ? plain(name.textContent) : null, holder: holder && visible(holder) ? plain(holder.textContent) : null }
-  })
+  const panel = document.querySelector('[data-structure]')
+  const table = document.querySelector('[data-structure-table]')
+  const rows = table ? [...table.querySelectorAll('tr')].filter((row) => row.querySelector('[data-structure-name], [data-structure-holder]')).map((row) => ({ on: visible(row), name: hooked(row, 'data-structure-name'), holder: hooked(row, 'data-structure-holder') })) : []
 
   return {
     post: control('[data-roster-post]'),
     rank: control('[data-roster-rank]'),
     ageMin: control('[data-roster-age-min]'),
     ageMax: control('[data-roster-age-max]'),
-    postItems: items('[data-roster-post]'),
-    rankItems: items('[data-roster-rank]'),
-    ageUnavailable: visible(document.querySelector('[data-age-unavailable]')),
-    roster: [...document.querySelectorAll('[data-roster-name]')].filter(visible).map((name) => plain(name.textContent)),
-    structurePanel: visible(document.querySelector('[data-structure]')),
+    ageUnavailable: hooked(document.body, 'data-age-unavailable'),
+    roster: hooked(document.body, 'data-roster-name'),
+    structurePanel: panel ? visible(panel) : false,
     switch: control('[data-structure-shipping-lines]'),
     csv: button('[data-structure-csv]'),
     markdown: button('[data-structure-markdown]'),
@@ -142,9 +171,9 @@ const readScreen = () => {
   }
 }
 
-// The page that `observe` (scripts/lib/browser-observe.js) opens, made ready: what the app's settings hold before it starts (`seed`, the stored view of the page), the race picked on the Empires page, the Commanders page opened and settled. `holding` makes the reads of the naval structure wait in `held` until they are let go. The page and console errors are the helper's.
+// The page that `observe` (scripts/lib/browser-observe.js) opens, made ready: what the app's settings hold before it starts (`seed`, the stored view of the page), the shared readers of the screen installed, the race picked on the Empires page, the Commanders page opened and settled. `holding` makes the reads of the naval structure wait in `held` until they are let go, and `onHeld`, when set, is called as one is held. The page and console errors are the helper's.
 const prepare = async (page, url, seed) => {
-  const state = { held: [], holding: false, inFlight: 0, last: Date.now() }
+  const state = { held: [], holding: false, inFlight: 0, last: Date.now(), onHeld: null }
   const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !new URL(request.url()).pathname.endsWith('/stat')
 
   await page.context().addInitScript((stored) => {
@@ -170,6 +199,10 @@ const prepare = async (page, url, seed) => {
   await page.route('**/__aurora-db/query', async (route) => {
     if (state.holding && /FCT_NavalAdminCommand/.test(route.request().postData() || '')) {
       state.held.push(route)
+
+      if (state.onHeld) {
+        state.onHeld()
+      }
     } else {
       await route.continue()
     }
@@ -190,6 +223,7 @@ const prepare = async (page, url, seed) => {
   }
 
   await page.goto(url, { timeout: TIMEOUT })
+  await installScreen(page)
 
   const picker = page.locator('.empire-list').first()
 
@@ -207,19 +241,18 @@ const prepare = async (page, url, seed) => {
 
   await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/commanders')
   await page.waitForFunction(pageLoading.arrived, '/commanders', { timeout: TIMEOUT })
-  await page.waitForSelector('[data-roster-name]', { state: 'attached', timeout: TIMEOUT }).catch(() => {})
+  // The first roster name drawn, or the page's reads done with none drawn (a roster a fault leaves empty): either ends the wait, and the screen of an empty roster is judged by the checks.
+  await page.waitForFunction(`document.querySelector('[data-roster-name]') !== null || !(${pageLoading})()`, null, { timeout: TIMEOUT }).catch(() => {})
   await settle()
 
-  return { state, settle }
+  return { state }
 }
 
 // Runs in the page.
 const read = (page) => page.evaluate(readScreen)
 
-const nudge = async (page, wait = 600) => {
-  await page.evaluate(async () => { await window.$app.$nextTick() })
-  await page.waitForTimeout(wait)
-}
+// The render that follows a change the check made: the change is committed by the event the click or the typing dispatched, and Vue's next tick is the flush of every update and watcher it queued.
+const rendered = (page) => page.evaluate(async () => { await window.$app.$nextTick() })
 
 const downloadOf = async (page, selector) => {
   const [file] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.locator(selector).click({ timeout: 30000 })])
@@ -228,20 +261,57 @@ const downloadOf = async (page, selector) => {
   return { count: records.length - 1, wide: records.every((record) => record.length === records[0].length), header: records[0], rows: records.slice(1) }
 }
 
-const chooseItem = async (page, selector, index) => {
+// The menu of a select opened, and what its items draw once each is on screen (the wait is bounded and resolves either way: an item that never comes on screen is read as it is).
+const openMenu = async (page, selector) => {
   await page.locator(`.v-input:has(${selector}) .v-select__slot`).click({ timeout: 30000 })
   await page.waitForSelector('.menuable__content__active .v-list-item', { timeout: 30000 })
-  await page.locator('.menuable__content__active .v-list-item').nth(index).click({ timeout: 30000 })
-  await nudge(page)
+  await page.waitForFunction(() => [...document.querySelectorAll('.menuable__content__active .v-list-item')].every((item) => window.__screen.visible(item)), null, { timeout: 5000 }).catch(() => {})
+
+  return page.evaluate(() => [...document.querySelectorAll('.menuable__content__active .v-list-item')].map((item) => ({ text: window.__screen.visibleText(item), on: window.__screen.visible(item) })))
+}
+
+// The words of the choices a select offers, as its menu draws them on screen; the menu is closed again.
+const menuOf = async (page, selector) => {
+  const items = await openMenu(page, selector)
+
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('.menuable__content__active'), null, { timeout: 30000 })
+
+  return items.filter((item) => item.on).map((item) => item.text)
+}
+
+// The choice of a select whose words are `text`, picked by the player from its menu.
+const chooseItem = async (page, selector, text) => {
+  const at = (await openMenu(page, selector)).findIndex((item) => item.on && item.text === text)
+
+  if (at === -1) {
+    throw new Error(`the menu of ${selector} draws no choice "${text}"`)
+  }
+
+  await page.locator('.menuable__content__active .v-list-item').nth(at).click({ timeout: 30000 })
+  await rendered(page)
 }
 
 const clearItem = async (page, selector) => {
   await page.locator(`.v-input:has(${selector}) .v-input__icon--clear button`).click({ timeout: 30000 })
-  await nudge(page)
+  await rendered(page)
 }
 
-// Everything a player does on the page, and what the screen shows after each step: the record of `observe` (scripts/lib/browser-observe.js) whose value is { initial, csvOff, post, postCleared, age, ageCleared, rank, rankCleared, reread, linesOn, csvOn, linesOff }. The page and console errors are in the record, not in the value.
-const observePage = (browser, url, truth) => observe(browser, async ({ page, step }) => {
+// Resolves true once `promise` does, or false when `ms` have passed first.
+const within = (promise, ms) => new Promise((resolve) => {
+  const timer = setTimeout(() => resolve(false), ms)
+
+  promise.then(() => {
+    clearTimeout(timer)
+    resolve(true)
+  })
+})
+
+// The reads of the page done: none of its async-computed reads is updating and no progress bar of it runs (scripts/page-loading.js), waited for after a change that started one of them.
+const readsDone = (page) => page.waitForFunction(`!(${pageLoading})()`, null, { timeout: TIMEOUT })
+
+// Everything a player does on the page, and what the screen shows after each step: the record of `observe` (scripts/lib/browser-observe.js) whose value is { initial, csvOff, post, postCleared, age, ageCleared, rank, rankCleared, reread, linesOn, csvOn, linesOff }; `initial` holds the words of the choices each select's menu draws, the Post choices each read back to its post through `posts` (the module's table of posts). The page and console errors are in the record, not in the value.
+const observePage = (browser, url, truth, posts) => observe(browser, async ({ page, step }) => {
   const began = Date.now()
   const at = (name) => {
     step(name)
@@ -251,38 +321,44 @@ const observePage = (browser, url, truth) => observe(browser, async ({ page, ste
     }
   }
 
-  const { state, settle } = await prepare(page, url, {})
-  const seen = { initial: await read(page) }
+  const { state } = await prepare(page, url, {})
+  const screen = await read(page)
+
+  at('the choices of the Post and Rank controls are read from their menus')
+
+  const postTexts = screen.post.visible && !screen.post.disabled ? await menuOf(page, '[data-roster-post]') : []
+  const rankTexts = screen.rank.visible && !screen.rank.disabled ? await menuOf(page, '[data-roster-rank]') : []
+  const seen = { initial: { ...screen, postItems: postChoices(postTexts, posts), rankItems: rankTexts } }
   const first = seen.initial
-  const picks = first.postItems.length ? picksOf(truth, first.postItems) : null
+  const picks = picksOf(truth, first.postItems)
 
   if (first.structurePanel && first.csv.visible && !first.csv.disabled) {
     at('the structure is downloaded')
     seen.csvOff = await downloadOf(page, '[data-structure-csv]')
   }
 
-  if (picks && picks.post && first.post.visible && !first.post.disabled) {
+  if (picks.post && first.post.visible && !first.post.disabled) {
     at('a post is chosen')
-    await chooseItem(page, '[data-roster-post]', picks.post.index)
+    await chooseItem(page, '[data-roster-post]', picks.post.text)
     seen.post = (await read(page)).roster
     at('the post is cleared')
     await clearItem(page, '[data-roster-post]')
     seen.postCleared = (await read(page)).roster
   }
 
-  if (first.ageMin.visible && !first.ageMin.disabled && picks) {
+  if (first.ageMin.visible && !first.ageMin.disabled) {
     at('an age is typed')
     await page.locator('[data-roster-age-min]').fill(String(picks.age.bound), { timeout: 30000 })
-    await nudge(page, 900)
+    await rendered(page)
     seen.age = (await read(page)).roster
     await page.locator('[data-roster-age-min]').fill('', { timeout: 30000 })
-    await nudge(page, 900)
+    await rendered(page)
     seen.ageCleared = (await read(page)).roster
   }
 
   if (first.rank.visible && first.rankItems.length) {
     at('a rank is chosen')
-    await chooseItem(page, '[data-roster-rank]', 0)
+    await chooseItem(page, '[data-roster-rank]', first.rankItems[0])
     seen.rank = (await read(page)).roster
     at('the rank is cleared')
     await clearItem(page, '[data-roster-rank]')
@@ -290,25 +366,30 @@ const observePage = (browser, url, truth) => observe(browser, async ({ page, ste
   }
 
   if (first.switch.visible) {
-    // A write through the app's connection drops what the cache kept of the table, so the read the switch asks for goes to the database; its answer is held back, then let go.
+    // A write through the app's connection drops what the cache kept of the table, so the read the switch asks for goes to the database; its answer is held back, then let go. The screen is read once that read is held (or, when the switch asks for none, once 10 s have passed), after the render it set off.
     at('the shipping lines are turned on while the structure read is held')
     await page.evaluate(() => window.$app.$store.state.database.query('update FCT_NavalAdminCommand set AdminCommandName = AdminCommandName where 1 = 0'))
     state.held.length = 0
     state.holding = true
+
+    const held = new Promise((resolve) => { state.onHeld = resolve })
+
     await page.locator('.v-input--selection-controls__input:has([data-structure-shipping-lines])').click({ timeout: 30000 })
-    await page.waitForTimeout(2500)
+    await within(held, 10000)
+    await rendered(page)
 
     const during = await read(page)
 
     seen.reread = { held: state.held.length, structure: during.structure, csv: during.csv, markdown: during.markdown }
     state.holding = false
+    state.onHeld = null
 
     for (const route of state.held.splice(0)) {
       await route.continue()
     }
 
     at('the read is answered')
-    await settle()
+    await readsDone(page)
     seen.linesOn = await read(page)
 
     if (seen.linesOn.csv.visible && !seen.linesOn.csv.disabled) {
@@ -318,8 +399,8 @@ const observePage = (browser, url, truth) => observe(browser, async ({ page, ste
 
     at('the shipping lines are turned off')
     await page.locator('.v-input--selection-controls__input:has([data-structure-shipping-lines])').click({ timeout: 30000 })
-    await nudge(page, 900)
-    await settle()
+    await rendered(page)
+    await readsDone(page)
     seen.linesOff = await read(page)
   }
 
@@ -333,31 +414,64 @@ const markedColumn = (table) => table.header.findIndex((_name, at) => table.rows
 // A check's answer: true, or the evidence of what was seen.
 const verdict = (ok, evidence) => (ok ? true : short(evidence))
 
-const CHECKS = [
-  ['panels', 'the roster and the command structure are on screen', (o) => verdict(o.initial.structurePanel && o.initial.roster.length > 0, [o.initial.structurePanel, o.initial.roster.length])],
-  ['post-control', 'the Post control of the roster is visible and can be used', (o) => verdict(o.initial.post.visible && !o.initial.post.disabled, o.initial.post)],
-  ['post-choices', 'the Post control offers posts, each with a name, and every post is one a serving naval officer holds', (o, t) => verdict(o.initial.postItems.length >= 2 && o.initial.postItems.every((item) => typeof item.text === 'string' && item.text.trim() !== '' && t.serving.some((row) => row.post === item.value)), o.initial.postItems)],
-  ['post-filter', 'choosing a post leaves the officers of that post and clearing the choice brings the roster back', (o, t) => {
-    const { post } = picksOf(t, o.initial.postItems)
+// The one element of a part that is on screen, or null when none is or several are.
+const oneOf = (entries) => {
+  const on = entries.filter((entry) => entry.on)
 
-    return verdict(Boolean(post) && o.post !== undefined && sameList(o.post, post.names) && sameList(o.postCleared, o.initial.roster), { after: o.post && o.post.length, expected: post && post.names.length })
+  return on.length === 1 ? on[0] : null
+}
+
+// The text of the one element of a part that is on screen, or null.
+const oneOn = (entries) => {
+  const entry = oneOf(entries)
+
+  return entry ? entry.text : null
+}
+
+// The rows of the structure table a player sees (each row on screen itself), in the order of the table: the key its name hook gives (the row's identity), the name and the holder it draws (null for a part it does not draw on screen).
+const structureLines = (rows) => rows.filter((row) => row.on).map((row) => {
+  const name = oneOf(row.name)
+
+  return { key: name ? name.role : null, name: name ? name.text : null, holder: oneOn(row.holder) }
+})
+
+// What the structure drawn again (`after`) shows otherwise than the structure drawn first (`before`): its rows set against the first ones by key, each drawing the same name and holder, and then the order of the keys on its own; [] when it is the same structure.
+const restoredProblems = (before, after) => {
+  const { pairs, problems } = pairedBy('the structure drawn again', after, before, (line) => line.key, (line) => line.key)
+  const order = JSON.stringify(after.map((line) => line.key)) === JSON.stringify(before.map((line) => line.key)) ? [] : [['the structure drawn again', 'the rows are in another order']]
+
+  return [...problems, ...pairs.filter(([first, again]) => first.name !== again.name || first.holder !== again.holder).map(([first, again]) => ['the structure drawn again', first.key, again, first]), ...order]
+}
+
+const CHECKS = [
+  ['panels', 'the roster and the command structure are on screen', (o) => verdict(o.initial.structurePanel && rosterOn(o.initial.roster).length > 0, [o.initial.structurePanel, rosterOn(o.initial.roster).length])],
+  ['post-control', 'the Post control of the roster is visible and can be used', (o) => verdict(o.initial.post.visible && !o.initial.post.disabled, o.initial.post)],
+  ['post-choices', 'the Post control offers posts, each drawn in the words of the module\'s table for its post, and every post is one a serving naval officer holds', (o, t) => verdict(o.initial.postItems.length >= 2 && o.initial.postItems.every((item) => item.value !== null && t.serving.some((row) => row.post === item.value)), o.initial.postItems)],
+  ['post-filter', 'choosing a post by the words its menu draws leaves the officers of that post and clearing the choice brings the roster back', (o, t) => {
+    const { post } = picksOf(t, o.initial.postItems)
+    const chosen = post && o.post !== undefined ? sameRoster(rosterOn(o.post), post.rows) : null
+    const cleared = o.postCleared !== undefined ? sameRoster(rosterOn(o.postCleared), rosterOn(o.initial.roster)) : null
+
+    return verdict(chosen !== null && chosen.length === 0 && cleared !== null && cleared.length === 0, { chosen: post && post.text, after: chosen, cleared })
   }],
   ['age-controls', 'the two age controls are visible and can be used', (o) => verdict(o.initial.ageMin.visible && !o.initial.ageMin.disabled && o.initial.ageMax.visible && !o.initial.ageMax.disabled, [o.initial.ageMin, o.initial.ageMax])],
   ['age-filter', 'an age to bound the roster from below leaves the officers of that age or more, and clearing it brings the roster back', (o, t) => {
     const { age } = picksOf(t, o.initial.postItems)
+    const bounded = o.age !== undefined ? sameRoster(rosterOn(o.age), age.rows) : null
+    const cleared = o.ageCleared !== undefined ? sameRoster(rosterOn(o.ageCleared), rosterOn(o.initial.roster)) : null
 
-    return verdict(o.age !== undefined && sameList(o.age, age.names) && sameList(o.ageCleared, o.initial.roster), { after: o.age && o.age.length, expected: age.names.length })
+    return verdict(bounded !== null && bounded.length === 0 && cleared !== null && cleared.length === 0, { after: bounded, cleared })
   }],
-  ['rank-control', 'the Rank control of the roster is visible, offers ranks and narrows the roster', (o) => verdict(o.initial.rank.visible && !o.initial.rank.disabled && o.initial.rankItems.length > 0 && o.rank !== undefined && !sameList(o.rank, o.initial.roster) && o.rank.length > 0 && sameList(o.rankCleared, o.initial.roster), { control: o.initial.rank, items: o.initial.rankItems.length, rows: o.rank && o.rank.length })],
-  ['structure-rows', 'every row of the command structure shows a name and a holder cell, and the holders named are commanders of the save', (o, t) => {
-    const rows = o.initial.structure
+  ['rank-control', 'the Rank control of the roster is visible, offers ranks and narrows the roster', (o) => verdict(o.initial.rank.visible && !o.initial.rank.disabled && o.initial.rankItems.length > 0 && o.rank !== undefined && rosterOn(o.rank).length > 0 && sameRoster(rosterOn(o.rank), rosterOn(o.initial.roster)).length > 0 && sameRoster(rosterOn(o.rankCleared), rosterOn(o.initial.roster)).length === 0, { control: o.initial.rank, items: o.initial.rankItems.length, rows: o.rank && rosterOn(o.rank).length })],
+  ['structure-rows', 'every row of the command structure shows a name and a holder cell, and each holder named is a commander of the save', (o, t) => {
+    const rows = structureLines(o.initial.structure)
 
-    return verdict(rows.length > 0 && rows.every((row) => row.name !== null && row.holder !== null) && rows.some((row) => row.holder !== '—') && rows.every((row) => row.holder === '—' || [...t.names].some((name) => row.holder.includes(name))), rows.slice(0, 3))
+    return verdict(rows.length > 0 && rows.every((row) => row.name !== null && row.holder !== null) && rows.some((row) => row.holder !== '—') && rows.every((row) => row.holder === '—' || row.holder.split('; ').every((name) => t.names.has(name))), rows.slice(0, 3))
   }],
   ['structure-csv', 'the download of the structure holds one record for each entry, every record as wide as its header, and no shipping line while the switch is off', (o) => {
     const table = o.csvOff
 
-    return verdict(Boolean(table) && table.count >= o.initial.structure.length && table.wide && markedColumn(table) === -1, table && { count: table.count, wide: table.wide })
+    return verdict(Boolean(table) && table.count >= structureLines(o.initial.structure).length && table.wide && markedColumn(table) === -1, table && { count: table.count, wide: table.wide })
   }],
   ['shipping-lines', 'the Shipping lines switch adds the shipping lines to the table and to the download, marked in a column of their own, and taking it off removes them', (o) => {
     const { csvOff, csvOn } = o
@@ -369,12 +483,14 @@ const CHECKS = [
     const column = markedColumn(csvOn)
     const marked = column === -1 ? 0 : csvOn.rows.filter((row) => row[column] === 'yes').length
 
-    return verdict(column !== -1 && csvOn.wide && csvOn.count > csvOff.count && marked === csvOn.count - csvOff.count && o.linesOn.structure.length > 0 && JSON.stringify(o.linesOff.structure) === JSON.stringify(o.initial.structure), { off: csvOff.count, on: csvOn.count, column })
+    const restored = restoredProblems(structureLines(o.initial.structure), structureLines(o.linesOff.structure))
+
+    return verdict(column !== -1 && csvOn.wide && csvOn.count > csvOff.count && marked === csvOn.count - csvOff.count && structureLines(o.linesOn.structure).length > 0 && restored.length === 0, { off: csvOff.count, on: csvOn.count, column, restored })
   }],
   ['structure-reread', 'while the structure is read again for the shipping lines the table shows no row of the earlier read and both downloads are off, and the rows of the shipping lines come when the read is answered', (o) => {
     const { reread } = o
 
-    return verdict(Boolean(reread) && reread.held > 0 && reread.structure.length === 0 && reread.csv.disabled && reread.markdown.disabled && o.linesOn.structure.length > 0 && !o.linesOn.csv.disabled, reread && { held: reread.held, rows: reread.structure.length, csv: reread.csv, markdown: reread.markdown })
+    return verdict(Boolean(reread) && reread.held > 0 && structureLines(reread.structure).length === 0 && reread.csv.disabled && reread.markdown.disabled && structureLines(o.linesOn.structure).length > 0 && !o.linesOn.csv.disabled, reread && { held: reread.held, rows: structureLines(reread.structure).length, csv: reread.csv, markdown: reread.markdown })
   }],
   ['no-errors', 'the page raises no error', (o) => verdict(o.unexpected.length === 0, o.unexpected.slice(0, 3))],
 ]
@@ -430,47 +546,36 @@ const FAULTS = [
   { name: 'the structure is shown from the model of the earlier read', change: swap(NAVAL_GATE, ''), fails: ['structure-reread'] },
   { name: 'the age fields are not displayed', change: swap('<v-text-field :value="ageMin" ', '<v-text-field v-show="false" :value="ageMin" '), fails: ['age-controls', 'age-filter'] },
   { name: 'the Rank control is not displayed', change: swap('<v-select v-model="rankFilter" ', '<v-select v-show="false" v-model="rankFilter" '), fails: ['rank-control'] },
+  { name: 'the roster line of one of two officers of one name carries the identity of the other, its name left as it is', change: swap(':data-roster-name="item.CommanderID"', `:data-roster-name="item.CommanderID === ${NAMESAKES[0]} ? ${NAMESAKES[1]} : item.CommanderID"`), fails: ['post-filter', 'age-filter'] },
   { name: 'the structure is read without the shipping lines whatever the switch says', change: swap('RaceID: this.RaceID, shippingLines: this.shippingLines }', 'RaceID: this.RaceID, shippingLines: false }'), fails: ['shipping-lines', 'structure-reread'] },
+  { name: 'the Post control draws the words of the next post on each choice, its values left as they are', change: swap(':items="postItems" item-text="text"', ':items="postItems" :item-text="(item) => postItems[(postItems.indexOf(item) + 1) % postItems.length].text"'), fails: ['post-filter'] },
+  { name: 'the Post control is drawn at opacity 0', change: swap('<v-select v-model="postFilter" ', '<v-select v-model="postFilter" style="opacity: 0" '), fails: ['post-control', 'post-filter'] },
+  { name: 'the name and the holder of each structure row are drawn at opacity 0, the rows left as they are', change: (text) => swap('<span v-else class="text--secondary" data-structure-holder>', '<span v-else class="text--secondary" style="opacity: 0" data-structure-holder>')(swap('<span v-if="item.Holder" data-structure-holder>', '<span v-if="item.Holder" style="opacity: 0" data-structure-holder>')(swap(':data-structure-name="item.key">', ':data-structure-name="item.key" style="opacity: 0">')(text))), fails: ['structure-rows'] },
 ]
 
 const BENIGN = [
   { name: 'the Post control bound by an explicit value and event', change: swap('<v-select v-model="postFilter" ', '<v-select :value="postFilter" @input="postFilter = $event" ') },
   { name: 'the CSV button listening by the longhand of the event', change: swap('@click="downloadStructure(\'csv\')"', 'v-on:click="downloadStructure(\'csv\')"') },
   { name: 'the Markdown button listening natively', change: swap('@click="downloadStructure(\'markdown\')"', '@click.native="downloadStructure(\'markdown\')"') },
-  { name: 'the Rank and age controls named in PascalCase', change: (text) => swap('<v-text-field :value="ageMin"', '<VTextField :value="ageMin"')(swap('<v-select v-model="rankFilter" ', '<VSelect v-model="rankFilter" ')(text)) },
   { name: 'the Post control registered under an alias of the page', change: (text) => swap('<v-select v-model="postFilter" ', '<post-choice v-model="postFilter" ')(swap('components: { LoadState, PageLink, ProvenanceMark, StatTiles },', "components: { LoadState, PageLink, ProvenanceMark, StatTiles, PostChoice: Vue.component('VSelect') },")(swap("import { mapGetters } from 'vuex'", "import Vue from 'vue'\nimport { mapGetters } from 'vuex'")(text))) },
+  { name: 'the Post control drawing the words of each choice through a function', change: swap(':items="postItems" item-text="text"', ':items="postItems" :item-text="(item) => item.text"') },
+  { name: 'the Post control drawn at opacity 1', change: swap('<v-select v-model="postFilter" ', '<v-select v-model="postFilter" style="opacity: 1" ') },
 ]
 
-// The faults of the filters for a save that lacks their columns: the age bounds and the rank still applied.
+// The faults of the page for a save that lacks the columns of its filters: a filter still applied (the age bounds; the rank gate is planted in scripts/check-hierarchy-export.js, `page-rank-gate`), a control still on, and a note that draws other words.
 const LACKING_FAULTS = [
   { name: 'the age bounds are applied to a save without species', change: swap('ageMin: this.ageAvailable ? this.ageMin : null, ageMax: this.ageAvailable ? this.ageMax : null', 'ageMin: this.ageMin, ageMax: this.ageMax'), fails: ['lacking-roster'] },
-  { name: 'the rank is applied to a save without ranks', change: swap('rank: this.rankItems.length ? this.rankFilter : null', 'rank: this.rankFilter'), fails: ['lacking-roster'] },
   { name: 'the age controls stay on for a save without species', change: swap(':disabled="!!focusCommanderId || !ageAvailable" data-roster-age-min', ':disabled="!!focusCommanderId" data-roster-age-min'), fails: ['lacking-controls'] },
+  { name: 'the note that the ages cannot be worked out draws other words, its hook left as it is', change: swap('data-age-unavailable>{{ ageNotes.unavailable }}</div>', 'data-age-unavailable>The age range is on.</div>'), fails: ['lacking-controls'] },
+]
+
+// Rewrites of the page that draw the save without species the same way.
+const LACKING_BENIGN = [
+  { name: 'the note that the ages cannot be worked out drawn through v-text', change: swap('data-age-unavailable>{{ ageNotes.unavailable }}</div>', 'data-age-unavailable v-text="ageNotes.unavailable"></div>') },
 ]
 /* eslint-enable no-template-curly-in-string */
 
 // ---------- the save without species and ranks ----------
-
-const lackingCopy = async () => {
-  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-commanders-lacking-'))
-  const file = path.join(folder, 'lacking.db')
-
-  fs.copyFileSync(path.join(root, SAVE), file)
-
-  const raw = await new Promise((resolve, reject) => {
-    const database = new sqlite3.Database(file, (error) => (error ? reject(error) : resolve(database)))
-  })
-
-  try {
-    for (const table of ['FCT_Species', 'FCT_Ranks']) {
-      await new Promise((resolve, reject) => raw.run(`drop table ${table}`, (error) => (error ? reject(error) : resolve())))
-    }
-  } finally {
-    await new Promise((resolve) => raw.close(resolve))
-  }
-
-  return { folder, file }
-}
 
 // The roster of the lacking save with the bounds stored, against the roster of the same save with nothing stored (`known`, the screen of an earlier read, when the caller has it): one record of `observe` for each page, joined into one whose value holds both screens. A record that did not get through is returned as it is.
 const observeLacking = async (browser, url, known) => {
@@ -500,14 +605,26 @@ const observeLacking = async (browser, url, known) => {
 }
 
 const LACKING_CHECKS = [
-  ['lacking-roster', 'a save without species and ranks with an age range and a rank stored still lists its roster as it lists it with nothing stored', (o) => (o.withBounds.roster.length > 0 && sameList(o.withBounds.roster, o.without.roster)) || short({ stored: o.withBounds.roster.length, plain: o.without.roster.length })],
-  ['lacking-controls', 'a save without species has its age controls off and says so, and a save without ranks offers no Rank control', (o) => (o.withBounds.ageMin.disabled && o.withBounds.ageMax.disabled && o.withBounds.ageUnavailable && !o.withBounds.rank.present) || short({ min: o.withBounds.ageMin, max: o.withBounds.ageMax, said: o.withBounds.ageUnavailable, rank: o.withBounds.rank })],
+  ['lacking-roster', 'a save without species and ranks with an age range and a rank stored still lists its roster as it lists it with nothing stored', (o) => {
+    const stored = rosterOn(o.withBounds.roster)
+    const plain = rosterOn(o.without.roster)
+    const problems = sameRoster(stored, plain)
+
+    return (stored.length > 0 && problems.length === 0) || short({ stored: stored.length, plain: plain.length, problems })
+  }],
+  ['lacking-controls', 'a save without species has its age controls off and says so on screen in the words of the module\'s note, and a save without ranks shows no Rank control', (o, t) => {
+    const said = o.withBounds.ageUnavailable.filter((entry) => entry.on).map((entry) => labelKey(entry.text, t.ageNotes))
+
+    return (o.withBounds.ageMin.disabled && o.withBounds.ageMax.disabled && JSON.stringify(said) === JSON.stringify(['unavailable']) && !o.withBounds.rank.visible) || short({ min: o.withBounds.ageMin, max: o.withBounds.ageMax, said: o.withBounds.ageUnavailable, rank: o.withBounds.rank })
+  }],
 ]
 
 const lackingChild = async () => {
   const { startPageServer } = require('./lib/page-server')
-  const { folder, file } = await lackingCopy()
+  const { folder, file } = await saveCopy('ae-commanders-lacking-', [NAMESAKE_RENAME, 'drop table FCT_Species', 'drop table FCT_Ranks'])
   const original = pageText()
+  // The module's own words for the notes of the age range, which the note on screen is read back through.
+  const ageNotes = { ...(await loadUtilities(['commanders'], { stubs: STUBS })).commanders.AGE_NOTES }
   const entries = []
   let server = null
   let chrome = null
@@ -528,7 +645,7 @@ const lackingChild = async () => {
           known = seen.value.without
         }
 
-        return resultsOf(seen, null, { ids: variant ? variant.fails : null, strict: variant !== null, label: variant ? `the save without species with the fault "${variant.name}"` : 'the save without species', list: LACKING_CHECKS })
+        return resultsOf(seen, { ageNotes }, { ids: variant ? variant.fails : null, strict: variant !== null, label: variant ? `the save without species ${variant.fails ? 'with the fault' : 'rewritten as'} "${variant.name}"` : 'the save without species', list: LACKING_CHECKS })
       } finally {
         server.replace(PAGE_FILE, null)
       }
@@ -536,8 +653,12 @@ const lackingChild = async () => {
 
     entries.push({ variant: null, results: await run(null) })
 
-    for (const fault of LACKING_FAULTS) {
+    for (const fault of LACKING_FAULTS.filter((item) => wanted(item.name))) {
       entries.push({ variant: fault.name, fails: fault.fails, results: await run(fault) })
+    }
+
+    for (const rewrite of LACKING_BENIGN.filter((item) => wanted(item.name))) {
+      entries.push({ variant: rewrite.name, benign: true, results: await run(rewrite) })
     }
   } finally {
     if (chrome) {
@@ -575,7 +696,7 @@ const report = (name, result, detail = '') => {
 const checkLacking = async (mutating) => {
   console.log('\nA save without species and ranks (a copy of the save with FCT_Species and FCT_Ranks dropped)')
 
-  const child = await runChild(__filename, ['--lacking'])
+  const child = await runChild(__filename, ['--lacking', ...process.argv.filter((argument) => argument.startsWith('--only='))])
   let entries = null
 
   try {
@@ -593,8 +714,16 @@ const checkLacking = async (mutating) => {
   for (const entry of entries) {
     if (entry.variant === null) {
       entry.results.forEach(({ name, result }) => report(name, result))
+    } else if (mutating && entry.benign) {
+      const wrong = entry.results.filter(({ result }) => result !== true).map(({ id }) => id)
+
+      report(`variant passes: ${entry.variant}`, wrong.length === 0 ? true : `fails ${wrong.join(', ')}`)
     } else if (mutating) {
-      report(`fault caught: ${entry.variant}`, caughtAll(entry.results) ? true : notCaught(entry.results), `fails ${entry.fails.join(', ')}`)
+      report(`fault caught: ${entry.variant}`, caughtAll(entry.results, { name: entry.variant }) ? true : notCaught(entry.results), `fails ${entry.fails.join(', ')}`)
+
+      if (DETAIL) {
+        entry.results.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
+      }
     }
   }
 }
@@ -652,15 +781,22 @@ const main = async () => {
   const { startPageServer } = require('./lib/page-server')
   const mutating = !process.argv.includes('--no-mutations')
   const original = pageText()
-  const truth = await truthOf(path.join(root, SAVE))
+  const posts = { ...(await loadUtilities(['commanders'], { stubs: STUBS })).commanders.POSTS }
   const cleanups = []
   let outcome = null
 
   console.log('The Commanders page in a browser (scripts/lib/page-server.js over a copy of a save)')
-  await controls(truth)
 
   try {
-    const server = await startPageServer({ save: SAVE })
+    const copy = await saveCopy('ae-commanders-', [NAMESAKE_RENAME])
+
+    cleanups.push(async () => fs.rmSync(copy.folder, { recursive: true, force: true }))
+
+    const truth = await truthOf(copy.file)
+
+    await controls(truth)
+
+    const server = await startPageServer({ save: copy.file })
 
     cleanups.push(() => server.stop())
 
@@ -672,7 +808,7 @@ const main = async () => {
       server.replace(PAGE_FILE, change ? change(original) : null)
 
       try {
-        return await observePage(chrome, server.url, truth)
+        return await observePage(chrome, server.url, truth, posts)
       } finally {
         server.replace(PAGE_FILE, null)
       }
@@ -686,18 +822,29 @@ const main = async () => {
 
     resultsOf(baseline, truth, { strict: false, label: 'the page' }).forEach(({ name, result }) => report(name, result))
 
+    // The valid case of two officers of one name: the copy gives the namesakes one name, and each roster the checks compare draws both, under that name and each by its own identity.
+    const namesakes = truth.serving.filter((row) => NAMESAKES.includes(row.id)).map(officer)
+    const rosters = unobserved(baseline) ? [] : [baseline.value.initial.roster, baseline.value.post, baseline.value.age]
+    const drawsBoth = (entries) => Boolean(entries) && NAMESAKES.every((id) => rosterOn(entries).filter((line) => line.id === String(id) && line.name === namesakes[0].name).length === 1)
+
+    report('control: two serving officers of the save share one name, and the roster as it opens, the roster the chosen post leaves and the roster the age bound leaves each draw both under that name, each by its own identity', namesakes.length === 2 && namesakes[0].name === namesakes[1].name && rosters.length === 3 && rosters.every(drawsBoth) ? true : short({ namesakes, drawn: rosters.map((entries) => entries && rosterOn(entries).filter((line) => NAMESAKES.map(String).includes(line.id))) }))
+
     if (mutating && !unobserved(baseline)) {
       console.log('\nplanted faults')
 
-      for (const fault of FAULTS) {
+      for (const fault of FAULTS.filter((item) => wanted(item.name))) {
         const failed = resultsOf(await view(fault.change), truth, { ids: fault.fails, label: `the page with the fault "${fault.name}"` })
 
-        report(`fault caught: ${fault.name}`, caughtAll(failed) ? true : notCaught(failed), `fails ${fault.fails.join(', ')}`)
+        report(`fault caught: ${fault.name}`, caughtAll(failed, { name: fault.name }) ? true : notCaught(failed), `fails ${fault.fails.join(', ')}`)
+
+        if (DETAIL) {
+          failed.forEach(({ id, result }) => console.log(`         ${id}: ${result === true ? 'holds' : result}`))
+        }
       }
 
       console.log('\nvariants that say the same thing')
 
-      for (const variant of BENIGN) {
+      for (const variant of BENIGN.filter((item) => wanted(item.name))) {
         const seen = await view(variant.change)
         const wrong = resultsOf(seen, truth, { label: `the page rewritten as "${variant.name}"` }).filter(({ result }) => result !== true).map(({ id }) => id)
         const same = JSON.stringify(seen.value) === JSON.stringify(baseline.value)

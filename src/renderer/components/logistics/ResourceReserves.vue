@@ -92,20 +92,20 @@
           <span v-else class="text--secondary" data-reserve-stock>not recorded</span>
         </template>
         <template #[`item.game`]="{ item }">
-          <span v-if="!item.minimums.game.applies" class="text--secondary" data-reserve-game="none" :title="item.minimums.game.why">—</span>
+          <span v-if="!item.minimums.game.applies" class="text--secondary" data-reserve-game="none" :title="item.minimums.game.why">{{ minimumWords.game.none }}</span>
           <v-chip v-else-if="item.minimums.game.value !== null" x-small label outlined color="primary" class="text-no-wrap" data-reserve-game="saved"><span data-reserve-value="game">{{ figure(item.minimums.game.value) }}</span> {{ unitOf(item.resource) }}</v-chip>
-          <span v-else class="text--secondary" data-reserve-game="unknown" :title="item.minimums.game.why">not recorded</span>
+          <span v-else class="text--secondary" data-reserve-game="unknown" :title="item.minimums.game.why">{{ minimumWords.game.unknown }}</span>
           <provenance-mark rule="reserveLedger.gameMinimum" />
         </template>
         <template #[`item.class`]="{ item }">
-          <span v-if="!item.minimums.class.applies" class="text--secondary" data-reserve-class="none" :title="item.minimums.class.why">n/a</span>
+          <span v-if="!item.minimums.class.applies" class="text--secondary" data-reserve-class="none" :title="item.minimums.class.why">{{ minimumWords.class.none }}</span>
           <span v-else-if="item.minimums.class.value !== null" class="text-no-wrap" :data-reserve-class="item.minimums.class.unknown > 0 ? 'partial' : 'figure'"><span v-if="item.minimums.class.unknown > 0" class="caption text--secondary">at least </span><span data-reserve-value="class">{{ figure(item.minimums.class.value) }}</span> {{ unitOf(item.resource) }}<span v-if="item.minimums.class.className" class="caption text--secondary"> {{ item.minimums.class.className }}</span><span v-if="item.minimums.class.unknown > 0" class="caption text--secondary" :title="`${count(item.minimums.class.unknown)} more ${item.minimums.class.unknown === 1 ? 'class' : 'classes'} with ships record no minimum`"> (<span data-reserve-value="class-unknown">{{ count(item.minimums.class.unknown) }}</span> not recorded)</span></span>
-          <span v-else class="text--secondary" data-reserve-class="unknown" :title="item.minimums.class.why">not recorded</span>
+          <span v-else class="text--secondary" data-reserve-class="unknown" :title="item.minimums.class.why">{{ minimumWords.class.unknown }}</span>
           <provenance-mark rule="reserveLedger.classMinimum" />
         </template>
         <template #[`item.player`]="{ item }">
           <span v-if="item.minimums.player.recorded" class="text-no-wrap" data-reserve-player="set"><span data-reserve-value="player">{{ figure(item.minimums.player.value) }}</span> {{ unitOf(item.resource) }}</span>
-          <span v-else class="text--secondary" data-reserve-player="none">none set</span>
+          <span v-else class="text--secondary" data-reserve-player="none">{{ minimumWords.player.none }}</span>
           <provenance-mark rule="reserveLedger.player" />
         </template>
         <template #[`item.lowest`]="{ item }">
@@ -214,6 +214,12 @@ const STATUS_WORDS = { short: 'Short', unknown: 'Stock not known', below: 'Below
 // The words of the lowest balance's timing: the balance is the stock now, or the stock on a day, the number of which follows the word.
 const TIMING_WORDS = { now: 'now', later: 'on day' }
 
+// The words of a minimum cell that draws no figure, by column: the minimum does not apply to the row (none), or it applies and the save records none (unknown); a player reserve that is not set.
+const MINIMUM_WORDS = { game: { none: '—', unknown: 'not recorded' }, class: { none: 'n/a', unknown: 'not recorded' }, player: { none: 'none set' } }
+
+// The words the panel says when the form writes a record: an edit saved over a stored record, or a new record kept.
+const SAVE_WORDS = { saved: 'The record is saved.', kept: 'The record is kept.' }
+
 const blankDraft = () => ({ open: false, uuid: null, revision: null, colonyPick: null, scenario: '', reserves: {}, plans: [], note: '', campaignWide: false, scopeKey: null })
 
 // Local reserves and the timed resource ledger of one group of resources: `kind` 'supplies' (fuel and maintenance supplies) or 'minerals'. The panel reads its own saves, classes, packets and, for minerals, the colonies' supplies and production rates (the Hauling page reads neither), and keeps its records in the scenario repository (utilities/resource-reserves.js); the host passes the colonies it has read and, for minerals, the Hauling plan with the days of its hauls. The feeds of the other group run beside the ones shown, as support, so that the production of supplies and the plans on the minerals it draws on spend one stock.
@@ -272,6 +278,8 @@ export default {
       horizons: HORIZONS,
       statusWords: STATUS_WORDS,
       timingWords: TIMING_WORDS,
+      minimumWords: MINIMUM_WORDS,
+      saveWords: SAVE_WORDS,
       scenarioLength: SCENARIO_LENGTH,
       labelLength: LABEL_LENGTH,
       noteLength: NOTE_LENGTH,
@@ -547,7 +555,7 @@ export default {
         if (outcome.ok) {
           this.draft = blankDraft()
           this.conflict = null
-          this.say(draft.uuid ? 'The record is saved.' : 'The record is kept.', 'success')
+          this.say(draft.uuid ? SAVE_WORDS.saved : SAVE_WORDS.kept, 'success')
         } else if (outcome.code === 'revision-conflict') {
           this.conflict = { text: this.storedText(outcome.stored) }
           this.message = ''

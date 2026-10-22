@@ -2,7 +2,7 @@
   Checks the shared hierarchies of the Commanders page (the naval command structure and the ground formations, each with the serving commander of every post, and their CSV and Markdown exports) and the roster's post, rank and age-range filters, by what they do and never by how they are written.
 
   Run: bun scripts/check-hierarchy-export.js [--no-mutations] [--no-saves]
-  One part: bun scripts/check-hierarchy-export.js --part <suites | save:<index> | control | mutant:<index>>
+  One part: bun scripts/check-hierarchy-export.js --part <suites | save:<index> | control | mutant:<index>> [--detail]
 
   The groups, each check a PASS or FAIL line:
   - The pure builders on constructed rows worked out by hand: the naval tree (11 commands, 8 fleets and 8 ships of the race, and the rows that must not enter it; with the shipping lines listed, 9 fleets and 10 ships), the posts and their holders, the ground formations with their commanders, the CSV and Markdown of both, and the roster filters on a roster of people whose post, rank and age are stored, unknown or on the edge of a bound.
@@ -13,7 +13,9 @@
 
   The checks read behaviour: the rows a control leaves in the roster, the cells a parsed CSV holds, the text a Markdown reader would show. None reads the source or the template text, the wording of a sentence or the position of an element.
 
-  Who is credited with a planted fault: a fault counts only when a check named for it fails by an assertion of its own, never because something threw. A check's verdict (what it returns when it does not hold) is its own assertion, and so is the failure of a call of the code under test, which runs only through explicit adapters (the functions of the utilities, and the computed values, methods, watchers, reads, data and hooks of the page) that turn a throw or a rejection into a failure marked with a symbol nothing else holds and naming the call. Any other exception (a lookup the harness gets wrong, a check's own mistake) is a failed check in the unmodified code, and while a fault is judged it stops the run (HarnessError, exit status 2), crediting nothing. What the harness hands the page (the store and the methods of the persisted-view mixin) is the harness's own: a getter of the wrong kind or one that throws, a rejecting dispatch and a throwing callback are a HarnessError, never a failure of the page. The rule is the shared scripts/lib/fault-credit.js.
+  Who is credited with a planted fault: a fault counts only when every check named for it fails by an assertion of its own on a value it read, never because something threw. A check's verdict (what it returns when it does not hold) is its own assertion, and so is the failure of a call of the code under test, which runs only through explicit adapters (the functions of the utilities, and the computed values, methods, watchers, reads, data and hooks of the page) that turn a throw or a rejection into a failure marked with a symbol nothing else holds and naming the call. Such a failure says that the subject threw (`threw` on the result), and a fault that a named check catches only that way crashed the code instead of changing a value: crediting it stops the run (HarnessError, exit status 2) unless the fault declares that a throw is how it is caught. Any other exception (a lookup the harness gets wrong, a check's own mistake) is a failed check in the unmodified code, and while a fault is judged it stops the run (HarnessError), crediting nothing. What the harness hands the page (the store and the methods of the persisted-view mixin) is the harness's own: a getter of the wrong kind or one that throws, a rejecting dispatch and a throwing callback are a HarnessError, never a failure of the page. The rule is the shared scripts/lib/fault-credit.js (`caughtAll`); `--detail` prints, for a mutant part, what each named check said.
+
+  The figures of the exports are read whole by scripts/lib/browser-observe.js `readFigure` (the CSV writes them with no grouping), and the rows of a CSV and the bullets of an outline are set against the entries of the hand-worked tree by the identity of each (`pairedBy`, and the order of the tree for the outline, whose place is its structure), the order checked on its own.
 */
 const fs = require('fs')
 const path = require('path')
@@ -25,8 +27,8 @@ const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage } = require('./lib/page-loader')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
 const rawAssert = require('./lib/bounded-assert')
-const { HarnessError } = require('./lib/browser-observe')
-const { failure, isMarked, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, judged } = require('./lib/fault-credit')
+const { HarnessError, readFigure, pairedBy } = require('./lib/browser-observe')
+const { failure, isMarked, isSubjectThrow, through, harnessOwn, harnessStore, boundary, subjectModule, kindOf, judged, caughtAll } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
 const rendererDirectory = path.join(root, 'src', 'renderer')
@@ -68,13 +70,15 @@ const check = (name, ok, detail = '') => {
 }
 
 const parseArguments = (argv) => {
-  const options = { mutations: true, saves: true, part: null }
+  const options = { mutations: true, saves: true, part: null, detail: false }
 
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
 
     if (argument === '--no-mutations') {
       options.mutations = false
+    } else if (argument === '--detail') {
+      options.detail = true
     } else if (argument === '--no-saves') {
       options.saves = false
     } else if (argument === '--part') {
@@ -109,6 +113,18 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const sorted = (list) => [...list].sort((a, b) => a - b)
 const sameSet = (a, b) => Array.isArray(a) && Array.isArray(b) && same(sorted(a), sorted(b))
 const numbersIn = (text) => (text.match(/\d+/g) || []).map(Number)
+// A whole number of an export (an id, a depth, a count), read whole as the CSV writes it, with no grouping: null for anything else.
+const wholeOf = (text) => {
+  const value = readFigure(text, 'None')
+
+  return Number.isInteger(value) && value >= 0 ? value : null
+}
+// The figures a line of text holds, each a word read whole (`grouping` the page's setting; the words are cut at spaces, brackets, commas and semicolons): a word that is no figure is a word.
+const figuresIn = (text, grouping = 'None') => text.split(/[\s();,]+/).map((word) => readFigure(word, grouping)).filter((value) => value !== null)
+// The identity of a row of an export: its kind and its id, read whole.
+const keyOfRow = (row) => `${row.Kind}:${wholeOf(String(row.ID))}`
+// The ids of a cell that lists several (the holders of a post), in the order of the cell, each read whole.
+const idsIn = (text) => text.split('; ').map(wholeOf)
 
 // ---------- who failed ----------
 
@@ -343,6 +359,8 @@ const groundRows = () => ({
   formations: [formation(1), formation(2, { ParentFormationID: 1 }), formation(3, { ParentFormationID: 1 }), formation(4, { ParentFormationID: 99 }), formation(6, { ParentFormationID: 7 }), formation(7, { ParentFormationID: 6 })],
   commanders: [holder(5010, 'Ground One', 5, 1), holder(5020, 'Ground Two A', 5, 2), holder(5021, 'Ground Two B', 5, 2), holder(5040, 'Ground Unsettled', 5, 4, null), holder(5100, 'Admin On One', 12, 1), holder(5999, 'Ground Stray', 5, 888)],
 })
+// The formations of `groundRows` in tree order, each with its depth, worked out by hand.
+const GROUND_TREE = [{ id: 1, depth: 0 }, { id: 2, depth: 1 }, { id: 3, depth: 1 }, { id: 4, depth: 0 }, { id: 6, depth: 0 }, { id: 7, depth: 1 }]
 
 const GAME_TIME = 100 * 31536000
 
@@ -371,7 +389,7 @@ const idsOf = (list) => list.map((item) => item.CommanderID)
 
 // ---------- the pure checks ----------
 
-// The checks of one group on the modules of a variant: [{ id, name, ok, kind, detail }], pushed to `results` as they are made, so a suite that stops keeps what it had. A check is `fn`, which returns true when it holds, and a string or false that says what was seen when it does not: its own assertion (`kind` is 'assertion'). What `fn` throws is an assertion only when it carries the mark (the failure of a call of the code under test); a HarnessError stops the run, and any other exception (`kind` is 'error') fails the check of the unmodified code and stops the run while a fault is judged.
+// The checks of one group on the modules of a variant: [{ id, name, ok, kind, threw, detail }], pushed to `results` as they are made, so a suite that stops keeps what it had. A check is `fn`, which returns true when it holds, and a string or false that says what was seen when it does not: its own assertion (`kind` is 'assertion'). What `fn` throws is an assertion only when it carries the mark (the failure of a call of the code under test, `threw` then true); a HarnessError stops the run, and any other exception (`kind` is 'error') fails the check of the unmodified code and stops the run while a fault is judged.
 const collector = (results) => {
   const add = async (id, name, fn) => {
     const outcome = await settle(fn)
@@ -382,7 +400,7 @@ const collector = (results) => {
 
     const ok = outcome.error === undefined && outcome.value === true
 
-    results.push({ id, name, ok, kind: ok ? null : outcome.error === undefined ? 'assertion' : kindOf(outcome.error), detail: outcome.error ? outcome.error.message : typeof outcome.value === 'string' ? outcome.value : '' })
+    results.push({ id, name, ok, kind: ok ? null : outcome.error === undefined ? 'assertion' : kindOf(outcome.error), threw: outcome.error !== undefined && isSubjectThrow(outcome.error), detail: outcome.error ? outcome.error.message : typeof outcome.value === 'string' ? outcome.value : '' })
   }
 
   return { results, add }
@@ -447,12 +465,14 @@ const pureSuite = async (mods, into) => {
   // The CSV of the naval tree.
   const csv = hierarchyCsv(naval, 'naval')
   const table = tableOf(csv)
-  const byKey = Object.fromEntries(table.rows.map((row) => [`${row.Kind}:${row.ID}`, row]))
+  // The rows of the file set against the entries of the hand-worked tree by the identity of each (its kind and its id, read whole): a row of an identity the tree lacks, a row doubled and an entry with no row are problems, never a row read in place of another.
+  const paired = pairedBy('the CSV of the naval tree', table.rows, NAVAL_ORDER, keyOfRow, (key) => key)
+  const byKey = Object.fromEntries(paired.pairs)
   const rowOf = (key) => needed(byKey[key], `row ${key}`)
   const unreadTable = tableOf(hierarchyCsv({ supported: true, ...unread }, 'naval'))
 
   await add('csv-columns', 'the file has the columns that say what an entry is, where it hangs and who holds its post, and every row is as wide as the header', () => ['Tree', 'Game ID', 'Race ID', 'Kind', 'ID', 'Name', 'Depth', 'Path', 'Parent state', 'Post', 'Holder ID', 'Holder', 'Vacancy', 'Note'].every((name) => table.header.includes(name)) && same(table.header, HIERARCHY_COLUMNS) && table.widths.every((width) => width === table.header.length) && csv.endsWith('\n') && !csv.endsWith('\n\n'))
-  await add('csv-rows', 'there is one row for each entry of the model, in tree order, whose name is the entry\'s name or an empty cell', () => table.rows.length === 27 && same(table.rows.map((row) => `${row.Kind}:${row.ID}`), NAVAL_ORDER) && table.rows.every((row) => { const name = model.byKey.get(`${row.Kind}:${row.ID}`).name ?? ''; return row.Name.includes(name) && row.Name.length <= name.length + 1 }) && rowOf('command:11').Name === '' && same(hierarchyRows(naval, 'naval').map((row) => row.ID), table.rows.map((row) => Number(row.ID))))
+  await add('csv-rows', 'there is one row for each entry of the model, in tree order, whose name is the entry\'s name or an empty cell', () => (paired.problems.length === 0 && same(table.rows.map(keyOfRow), NAVAL_ORDER) && paired.pairs.every(([key, row]) => { const name = model.byKey.get(key).name ?? ''; return row.Name.includes(name) && row.Name.length <= name.length + 1 }) && rowOf('command:11').Name === '' && same(hierarchyRows(naval, 'naval').map(keyOfRow), NAVAL_ORDER)) || `problems ${JSON.stringify(paired.problems).slice(0, 300)}`)
   await add('csv-scope', 'every row names the game, the race and the tree it belongs to', () => table.rows.every((row) => row['Game ID'] === '1' && row['Race ID'] === '7' && row.Tree === 'naval'))
   await add('csv-roundtrip', 'a name with a comma, a quote or a line break comes back whole from the file', () => rowOf('command:2').Name === 'Second, Fleet' && rowOf('command:4').Name === '"Quoted" Admin' && rowOf('fleet:21').Name === 'Line\nBreak')
   await add('csv-formula', 'a text that a spreadsheet would run as a formula (a name or a holder\'s name starting with = + - or @) is written so that it does not, and loses nothing', () => {
@@ -460,12 +480,12 @@ const pureSuite = async (mods, into) => {
 
     return cells.every(([cell, original]) => !/^[=+\-@\t\r]/.test(cell) && cell.includes(original)) && table.rows.every((row) => ['Name', 'Path', 'Holder'].every((column) => !/^[=+\-@\t\r]/.test(row[column])))
   })
-  await add('csv-numbers', 'the figures are written as numbers: the ids, the depth and the parent id', () => table.rows.every((row) => /^\d+$/.test(row.ID) && /^\d+$/.test(row.Depth) && (row['Parent ID'] === '' || /^\d+$/.test(row['Parent ID']))) && rowOf('ship:42').Depth === '3' && rowOf('ship:42')['Parent ID'] === '21' && rowOf('ship:42')['Parent kind'] === 'fleet')
+  await add('csv-numbers', 'the figures are written as numbers: the ids, the depth and the parent id', () => table.rows.every((row) => wholeOf(row.ID) !== null && wholeOf(row.Depth) !== null && (row['Parent ID'] === '' || wholeOf(row['Parent ID']) !== null)) && wholeOf(rowOf('ship:42').Depth) === 3 && wholeOf(rowOf('ship:42')['Parent ID']) === 21 && rowOf('ship:42')['Parent kind'] === 'fleet')
   await add('csv-paths', 'a row\'s path lists the entries from the top to itself: one step for an unresolved entry, the parent just before an entry that is resolved', () => table.rows.every((row) => {
     const steps = row['Path IDs'].split('/')
     const state = row['Parent state']
 
-    return steps.length === Number(row.Depth) + 1 && steps[steps.length - 1] === `${row.Kind}:${row.ID}` && (state === 'resolved' ? steps.length > 1 && steps[steps.length - 2] === `${row['Parent kind']}:${row['Parent ID']}` : steps.length === 1) && row.Path.split(' / ').length >= steps.length
+    return steps.length === wholeOf(row.Depth) + 1 && steps[steps.length - 1] === `${row.Kind}:${row.ID}` && (state === 'resolved' ? steps.length > 1 && steps[steps.length - 2] === `${row['Parent kind']}:${row['Parent ID']}` : steps.length === 1) && row.Path.split(' / ').length >= steps.length
   }) && rowOf('ship:42')['Path IDs'] === 'command:1/command:2/fleet:21/ship:42' && rowOf('ship:42').Path.endsWith('-Charlie'))
   await add('csv-unresolved', 'an entry whose parent is missing, of another race, not stored or in a loop is a top-level row with the matching note', () => [['command:5', 'orphan', 'orphan-parent'], ['command:6', 'foreign', 'foreign-parent'], ['command:10', 'unknown', 'parent-unknown'], ['command:7', 'cycle', 'parent-cycle'], ['fleet:23', 'orphan', 'orphan-parent'], ['ship:46', 'foreign', 'foreign-parent']].every(([key, state, note]) => rowOf(key)['Parent state'] === state && rowOf(key).Depth === '0' && rowOf(key).Note.split('; ').includes(note) && rowOf(key).Anchor === state) && rowOf('command:1').Anchor === 'root' && rowOf('command:2').Anchor === 'root' && rowOf('command:8')['Parent state'] === 'resolved' && rowOf('command:8').Note.split('; ').includes('parent-cycle'))
   await add('csv-notes', 'the notes list the problems the model reports for the entry, the posts\' as well', () => rowOf('command:3').Note.split('; ').includes('post-shared') && rowOf('ship:47').Note.split('; ').includes('post-unsettled') && rowOf('command:4').Note.split('; ').includes('post-unsettled') && rowOf('fleet:25').Note.split('; ').includes('shipping-line-unknown') && rowOf('command:2').Note === '' && table.rows.every((row) => row.Note.split('; ').filter(Boolean).every((note) => model.byKey.get(`${row.Kind}:${row.ID}`).problems.some((problem) => problem.kind === note))))
@@ -481,22 +501,23 @@ const pureSuite = async (mods, into) => {
 
     return groups.every((group) => new Set(group).size === 1 && group[0] !== '') && new Set(groups.map((group) => group[0])).size === groups.length && unreadCells.every((cell) => cell === unreadCells[0]) && none.every((cell) => rowOf('fleet:20').Post === '' && cell === none[0])
   })
-  await add('csv-holders', 'the holder columns give the serving commanders of a post, ids and names in step, and nothing for a post nobody serves', () => rowOf('command:1')['Holder ID'] === '1001' && same(rowOf('command:3')['Holder ID'].match(/\d+/g).map(Number), [1002, 1003]) && rowOf('command:3').Holder.includes('Shared B') && rowOf('command:3').Holder.includes('Shared A') && same(rowOf('ship:42')['Holder ID'].match(/\d+/g).map(Number), [2002, 2003]) && rowOf('ship:42').Holder.includes('Captain Two') && rowOf('ship:42').Holder.includes('Captain Three') && rowOf('ship:47')['Holder ID'] === '2005' && rowOf('command:4')['Holder ID'] === '' && rowOf('command:4').Holder === '' && rowOf('command:2')['Holder ID'] === '' && rowOf('fleet:20')['Holder ID'] === '' && rowOf('command:1').Post !== '' && rowOf('ship:40').Post !== rowOf('command:1').Post)
+  await add('csv-holders', 'the holder columns give the serving commanders of a post, ids and names in step, and nothing for a post nobody serves', () => rowOf('command:1')['Holder ID'] === '1001' && same(idsIn(rowOf('command:3')['Holder ID']), [1002, 1003]) && rowOf('command:3').Holder.includes('Shared B') && rowOf('command:3').Holder.includes('Shared A') && same(idsIn(rowOf('ship:42')['Holder ID']), [2002, 2003]) && rowOf('ship:42').Holder.includes('Captain Two') && rowOf('ship:42').Holder.includes('Captain Three') && rowOf('ship:47')['Holder ID'] === '2005' && rowOf('command:4')['Holder ID'] === '' && rowOf('command:4').Holder === '' && rowOf('command:2')['Holder ID'] === '' && rowOf('fleet:20')['Holder ID'] === '' && rowOf('command:1').Post !== '' && rowOf('ship:40').Post !== rowOf('command:1').Post)
 
-  // The CSV of the ground formations.
+  // The CSV of the ground formations, its rows set against the hand-worked formations by id.
   const groundTable = tableOf(hierarchyCsv(groundModel, 'ground'))
-  const groundRow = (id) => needed(groundTable.rows.find((row) => row.ID === String(id)), `ground row ${id}`)
+  const groundPaired = pairedBy('the CSV of the ground formations', groundTable.rows, GROUND_TREE, (row) => wholeOf(row.ID), (entry) => entry.id)
+  const groundByIdentity = new Map(groundPaired.pairs.map(([entry, row]) => [entry.id, row]))
+  const groundRow = (id) => needed(groundByIdentity.get(id), `ground row ${id}`)
 
-  await add('ground-csv', 'the ground formations are exported the same way: one row each in tree order, with their paths and the commanders of their posts', () => same(groundTable.rows.map((row) => Number(row.ID)), [1, 2, 3, 4, 6, 7]) && same(groundTable.rows.map((row) => Number(row.Depth)), [0, 1, 1, 0, 0, 1]) && groundTable.rows.every((row) => row.Tree === 'ground' && row.Kind === 'formation' && row.Post !== '') && groundRow(7)['Path IDs'].split('/').length === 2 && groundRow(1)['Holder ID'] === '5010' && same(groundRow(2)['Holder ID'].match(/\d+/g).map(Number), [5020, 5021]) && groundRow(3)['Holder ID'] === '' && groundRow(4)['Holder ID'] === '' && new Set([1, 2, 3, 4].map((id) => groundRow(id).Vacancy)).size === 4 && groundRow(4)['Parent state'] === 'orphan' && groundRow(6)['Parent state'] === 'cycle' && groundRow(4).Note.split('; ').includes('orphan-parent') && groundRow(6).Note.split('; ').includes('parent-cycle'))
+  await add('ground-csv', 'the ground formations are exported the same way: one row each in tree order, with their paths and the commanders of their posts', () => (groundPaired.problems.length === 0 && same(groundTable.rows.map((row) => wholeOf(row.ID)), GROUND_TREE.map((entry) => entry.id)) && groundPaired.pairs.every(([entry, row]) => wholeOf(row.Depth) === entry.depth) && groundTable.rows.every((row) => row.Tree === 'ground' && row.Kind === 'formation' && row.Post !== '') && groundRow(7)['Path IDs'].split('/').length === 2 && groundRow(1)['Holder ID'] === '5010' && same(idsIn(groundRow(2)['Holder ID']), [5020, 5021]) && groundRow(3)['Holder ID'] === '' && groundRow(4)['Holder ID'] === '' && new Set([1, 2, 3, 4].map((id) => groundRow(id).Vacancy)).size === 4 && groundRow(4)['Parent state'] === 'orphan' && groundRow(6)['Parent state'] === 'cycle' && groundRow(4).Note.split('; ').includes('orphan-parent') && groundRow(6).Note.split('; ').includes('parent-cycle')) || `problems ${JSON.stringify(groundPaired.problems).slice(0, 300)}`)
 
-  // The Markdown outline.
+  // The Markdown outline. Its bullets have no ids: the place of a bullet is its place in the tree, so bullet n is the entry n of the hand-worked order, and its depth and notes are those of the CSV row of that entry.
   const text = hierarchyMarkdown(naval, 'naval')
   const bullets = outlineBullets(text)
 
-  await add('md-outline', 'the outline has one nested bullet for each entry, in tree order, indented by its depth', () => bullets.length === 27 && bullets.every((line, index) => line.match(/^( *)- /)[1].length === 2 * Number(table.rows[index].Depth)) && !text.includes('\r'))
-  await add('md-names', 'each bullet shows its entry\'s name as written, on one line', () => bullets.every((line, index) => {
-    const row = table.rows[index]
-    const name = model.byKey.get(`${row.Kind}:${row.ID}`).name ?? ''
+  await add('md-outline', 'the outline has one nested bullet for each entry, in tree order, indented by its depth', () => bullets.length === 27 && bullets.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(rowOf(NAVAL_ORDER[index]).Depth)) && !text.includes('\r'))
+  await add('md-names', 'each bullet shows its entry\'s name as written, on one line', () => bullets.length === NAVAL_ORDER.length && bullets.every((line, index) => {
+    const name = model.byKey.get(NAVAL_ORDER[index]).name ?? ''
     const shown = readMarkdown(line)
 
     return shown !== null && shown.includes(name.replace(/\s*[\r\n]+\s*/g, ' '))
@@ -505,13 +526,13 @@ const pureSuite = async (mods, into) => {
   await add('md-posts', 'a bullet names the holders of its post, and says when nobody serves it', () => {
     const at = (key) => readMarkdown(bullets[NAVAL_ORDER.indexOf(key)])
 
-    return at('command:1').includes('=cmd()') && at('command:3').includes('Shared A') && at('command:3').includes('Shared B') && at('ship:42').includes('Captain Three') && !at('command:2').includes('Captain') && [1002, 1003].every((id) => numbersIn(at('command:3')).includes(id))
+    return at('command:1').includes('=cmd()') && at('command:3').includes('Shared A') && at('command:3').includes('Shared B') && at('ship:42').includes('Captain Three') && !at('command:2').includes('Captain') && [1002, 1003].every((id) => figuresIn(at('command:3')).includes(id))
   })
-  await add('md-notes', 'the problems of an entry are named in its bullet', () => bullets.every((line, index) => table.rows[index].Note.split('; ').filter(Boolean).every((note) => line.includes(note))))
+  await add('md-notes', 'the problems of an entry are named in its bullet', () => bullets.length === NAVAL_ORDER.length && bullets.every((line, index) => rowOf(NAVAL_ORDER[index]).Note.split('; ').filter(Boolean).every((note) => line.includes(note))))
   await add('md-ground', 'the ground outline is the same: one bullet per formation, nested by depth', () => {
     const groundLines = outlineBullets(hierarchyMarkdown(groundModel, 'ground'))
 
-    return groundLines.length === 6 && groundLines.every((line, index) => line.match(/^( *)- /)[1].length === 2 * Number(groundTable.rows[index].Depth) && readMarkdown(line) !== null) && readMarkdown(groundLines[0]).includes('Ground One')
+    return groundLines.length === GROUND_TREE.length && groundLines.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(groundRow(GROUND_TREE[index].id).Depth) && readMarkdown(line) !== null) && readMarkdown(groundLines[0]).includes('Ground One')
   })
 
   // The shipping lines' fleets and ships, listed when the model is built with them.
@@ -522,7 +543,7 @@ const pureSuite = async (mods, into) => {
   const LINE_KEYS = ['fleet:22', 'ship:43', 'ship:44']
   const markedKeys = (source) => source.nodes.filter((item) => item.shippingLine).map((item) => item.key).sort()
   const cellsOf = (source) => source.rows.filter((row) => row['Shipping line'] !== '').map((row) => `${row.Kind}:${row.ID}`).sort()
-  const lineAt = (key) => needed(shippingTable.rows.find((row) => `${row.Kind}:${row.ID}` === key), `shipping row ${key}`)
+  const lineAt = (key) => needed(shippingTable.rows.find((row) => keyOfRow(row) === key), `shipping row ${key}`)
 
   await add('shipping-lines-listed', 'with the shipping lines on, their fleets and ships are listed under their parents and the rest of the tree is as it was; a fleet is still not a post', () => same(shippingModel.nodes.map((item) => item.key), SHIPPING_ORDER) && shippingModel.shippingLines === true && model.shippingLines === false && same([shippingModel.summary.commands, shippingModel.summary.fleets, shippingModel.summary.ships], [11, 9, 10]) && same(shippingModel.summary.civilian, { fleets: 1, ships: 2 }) && model.nodes.every((item) => { const other = shippingModel.byKey.get(item.key); return other && other.parent.state === item.parent.state && other.post.state === item.post.state && other.depth === item.depth }) && same(LINE_KEYS.map((key) => shippingModel.byKey.get(key).parent.key), ['command:3', 'fleet:22', 'fleet:20']) && LINE_KEYS.every((key) => shippingModel.byKey.get(key).parent.state === 'resolved') && shippingModel.byKey.get('ship:43').depth === 3 && shippingModel.byKey.get('fleet:22').post.state === 'none' && same(shippingModel.byKey.get('ship:43').post.holders.map((item) => item.id), [2006]) && shippingModel.byKey.get('ship:44').post.state === 'vacant' && same(shippingModel.summary.posts, { held: 4, vacant: 14, shared: 2, unknown: 1, unread: 0 }))
   await add('shipping-lines-marked', 'each shipping line\'s fleet and ship is marked, and no other entry is, whatever the setting', () => same(markedKeys(shippingModel), LINE_KEYS) && markedKeys(model).length === 0 && ['fleet:25', 'ship:47'].every((key) => !shippingModel.byKey.get(key).shippingLine) && shippingModel.nodes.filter((item) => item.kind === 'command').every((item) => !item.shippingLine))
@@ -536,7 +557,7 @@ const pureSuite = async (mods, into) => {
     const listed = outlineBullets(hierarchyMarkdown(shipping, 'naval'))
     const cleared = outlineBullets(hierarchyMarkdown({ ...shipping, byKey: new Map(Array.from(shipping.byKey, ([key, item]) => [key, { ...item, shippingLine: false }])) }, 'naval'))
 
-    return listed.length === 30 && listed.every((line, index) => line.match(/^( *)- /)[1].length === 2 * Number(shippingTable.rows[index].Depth) && readMarkdown(line) !== null) && same(SHIPPING_ORDER.filter((_key, index) => listed[index] !== cleared[index]), LINE_KEYS)
+    return listed.length === SHIPPING_ORDER.length && listed.every((line, index) => line.match(/^( *)- /)[1].length === 2 * wholeOf(lineAt(SHIPPING_ORDER[index]).Depth) && readMarkdown(line) !== null) && same(SHIPPING_ORDER.filter((_key, index) => listed[index] !== cleared[index]), LINE_KEYS)
   })
 
   await add('export-file', 'an export has a file name that says the tree, the game and the race and a type that matches its format', () => {
@@ -545,7 +566,7 @@ const pureSuite = async (mods, into) => {
 
     return csvFile.type === 'text/csv' && markdownFile.type === 'text/markdown' && csvFile.text === csv && markdownFile.text === hierarchyMarkdown(groundModel, 'ground') && /naval/i.test(csvFile.fileName) && /ground/i.test(markdownFile.fileName) && csvFile.fileName.endsWith('.csv') && markdownFile.fileName.endsWith('.md') && numbersIn(csvFile.fileName).join() === '1,7' && csvFile.fileName !== hierarchyExport({ ...naval, GameID: 2 }, 'naval', 'csv').fileName && csvFile.fileName !== hierarchyExport({ ...naval, RaceID: 8 }, 'naval', 'csv').fileName && csvFile.fileName !== hierarchyExport(naval, 'naval', 'markdown').fileName
   })
-  await add('export-notice', 'a model that cannot be exported says what the save lacks, and one that can has nothing to say', () => hierarchyNotice(naval, 'naval') === null && hierarchyNotice(groundModel, 'ground') === null && hierarchyNotice({ supported: false, missing: ['FCT_Ship.ShippingLineID'], GameID: 1, RaceID: 7 }, 'naval').includes('FCT_Ship.ShippingLineID') && hierarchyNotice({ supported: true, ...unread, holders: { read: false, missing: ['FCT_Commander.Prisoner'] } }, 'naval').includes('FCT_Commander.Prisoner'))
+  await add('export-notice', 'a model that cannot be exported says what the save lacks, and one that can has nothing to say', () => hierarchyNotice(naval, 'naval') === null && hierarchyNotice(groundModel, 'ground') === null && String(hierarchyNotice({ supported: false, missing: ['FCT_Ship.ShippingLineID'], GameID: 1, RaceID: 7 }, 'naval')).includes('FCT_Ship.ShippingLineID') && String(hierarchyNotice({ supported: true, ...unread, holders: { read: false, missing: ['FCT_Commander.Prisoner'] } }, 'naval')).includes('FCT_Commander.Prisoner'))
 
   await add('cell-quoting', 'a CSV cell holding a comma, quote, carriage return or line feed is quoted whole, an empty value is an empty cell and a number stays a number', () => {
     const values = ['plain', 'a,b', 'say "hi"', 'two\nlines', 'cr\rhere', '', null, undefined, 0, 12]
@@ -1042,7 +1063,7 @@ const pageSuite = async (variant, mods, into) => {
 
     reset(vm)
 
-    return added.length === 1 && same(numbersIn(added[0]).sort(), [1, 2]) && captions().filter((line) => !before.includes(line)).length === 0
+    return added.length === 1 && same(figuresIn(added[0], STORE.getters.config.get('selectedSeparator', 'Tick')).sort((a, b) => a - b), [1, 2]) && captions().filter((line) => !before.includes(line)).length === 0
   })
   await add('page-type-reset', 'changing the commander type clears the post and rank choices and keeps the age range', async () => {
     const { vm, postControl, rankControl, minControl, typeControl } = scene()
@@ -1393,7 +1414,7 @@ const suites = async (variant) => {
         throw error
       }
 
-      into.push({ id: 'crash', name: `a suite stopped: ${error.message}`, ok: false, kind: kindOf(error), detail: error.message })
+      into.push({ id: 'crash', name: `a suite stopped: ${error.message}`, ok: false, kind: kindOf(error), threw: isSubjectThrow(error), detail: error.message })
     }
 
     results.push(...into)
@@ -1402,8 +1423,8 @@ const suites = async (variant) => {
   return results
 }
 
-// The ids of the checks that failed over a variant, each by an assertion of its own: a check that ended in an exception that is no marked failure of a call says nothing about what the variant changed, so `judged` stops the run, and nothing is credited with it.
-const failedIds = async (variant) => judged(await suites(variant), 'a fault').map((result) => result.id)
+// The checks that failed over a variant, each by an assertion of its own: a check that ended in an exception that is no marked failure of a call says nothing about what the variant changed, so `judged` stops the run, and nothing is credited with it.
+const failedOf = async (variant) => judged(await suites(variant), 'a fault')
 
 const mutated = (file, from, to) => {
   const source = sourceOf(file)
@@ -1460,7 +1481,7 @@ const MUTANTS = [
   ['the file name has the game twice', U('hierarchy-export'), '-g${model.GameID}-r${model.RaceID}', '-g${model.GameID}-r${model.GameID}', ['export-file']],
   ['the first child of an entry is skipped', U('hierarchy-export'), 'for (let index = entry.children.length - 1; index >= 0; index--) {', 'for (let index = entry.children.length - 1; index >= 1; index--) {', ['csv-rows', 'md-outline', 'ground-csv', 'page-structure-naval']],
   ['a ground formation lists no holder', U('hierarchy-export'), 'anchor: node.anchor, post: node.post, problems: node.problems', 'anchor: node.anchor, post: { state: \'none\', holders: [], unsettled: [] }, problems: node.problems', ['ground-csv', 'md-ground']],
-  ['a model that cannot be listed has no notice', U('hierarchy-export'), 'if (!model.supported) {', 'if (false) {', ['export-notice', 'page-structure-unsupported']],
+  ['a model that cannot be listed has no notice', U('hierarchy-export'), 'return `The save lacks ${model.missing.join(\', \')}, so the ${TREE_NOUNS[tree]} cannot be listed.`', 'return null', ['export-notice', 'page-structure-unsupported']],
   ['a minus sign is not guarded', U('csv-cell'), '/^[=+\\-@\\t\\r]/', '/^[=+@\\t\\r]/', ['csv-formula', 'cell-guard']],
   ['a line break does not quote a cell', U('csv-cell'), '/[",\\r\\n]/.test(text)', '/[",\\r]/.test(text)', ['csv-roundtrip', 'cell-quoting']],
   ['a quote is not doubled', U('csv-cell'), 'text.replace(/"/g, \'""\')', 'text', ['csv-roundtrip', 'cell-quoting']],
@@ -1885,10 +1906,21 @@ const saveSection = async (index) => {
 
 // ---------- the parts ----------
 
-const runMutant = async ([name, file, from, to, ids]) => {
-  const failed = await failedIds(mutated(file, from, to))
+// A mutant ([name, file, from, to, ids, { throws }]) is caught when every check named for it failed by an assertion (scripts/lib/fault-credit.js `caughtAll` over one result for each named check, the one that read a value where a check failed more than once). A named check that failed only because a call of the code under test threw credits nothing: it stops the run, unless the mutant declares `throws`. The line names each credit and its kind; `detail` prints what each named check said.
+const runMutant = async ([name, file, from, to, ids, { throws = false } = {}], { detail = false } = {}) => {
+  const failed = await failedOf(mutated(file, from, to))
+  const named = ids.map((id) => {
+    const own = failed.filter((result) => result.id === id)
 
-  check(`mutant: ${name}: caught by ${failed.join(', ') || 'nothing'}`, ids.every((id) => failed.includes(id)), `expected all of ${ids.join(', ')}; not failed: ${ids.filter((id) => !failed.includes(id)).join(', ')}`)
+    return own.find((result) => !result.threw) || own[0] || { id, ok: true, kind: null, threw: false, detail: '' }
+  })
+  const kindOfCredit = (result) => (result.ok ? 'held' : result.threw ? 'throw' : 'value')
+
+  check(`mutant: ${name}: caught by ${[...new Set(failed.map((result) => result.id))].join(', ') || 'nothing'}; credited by ${named.filter((result) => !result.ok).map((result) => `${result.id} (${kindOfCredit(result)})`).join(', ') || 'nothing'}`, caughtAll(named, { name, throws }), `expected all of ${ids.join(', ')}; not failed: ${named.filter((result) => result.ok).map((result) => result.id).join(', ')}`)
+
+  if (detail) {
+    named.forEach((result) => console.log(`        ${result.id} (${kindOfCredit(result)}): ${String(result.detail).split('\n')[0].slice(0, 300)}`))
+  }
 }
 
 // Controls of the credit rule, with no utility or page of the app run: each rule shown with the case that is as it should be.
@@ -1927,9 +1959,9 @@ const creditControls = async () => {
     ['adapted-stranger', () => through('the utility probe', () => { throw stranger() })],
   ])
 
-  check('control: a verdict that does not hold is an assertion of its check and credits a fault named for it, and a verdict that holds passes', holds.ok && holds.kind === null && !fails.ok && fails.kind === 'assertion' && judged([holds, fails]).map((result) => result.id).join() === 'fails', JSON.stringify([holds, fails]))
+  check('control: a verdict that does not hold is an assertion of its check, read as a value, and credits a fault named for it, and a verdict that holds passes', holds.ok && holds.kind === null && !fails.ok && fails.kind === 'assertion' && fails.threw === false && judged([holds, fails]).map((result) => result.id).join() === 'fails' && caughtAll([fails], { name: 'a value' }) && !caughtAll([holds], { name: 'a check that holds' }), JSON.stringify([holds, fails]))
   check('control: an exception that is no marked failure (a lookup of the harness, an AssertionError that no adapter named) is no assertion, and judging it stops the run as a defect of the harness', looksUp.kind === 'error' && unnamed.kind === 'error' && (await stopped(() => judged([looksUp]))) instanceof HarnessError && (await stopped(() => judged([unnamed]))) instanceof HarnessError, JSON.stringify([looksUp.kind, unnamed.kind]))
-  check('control: a call of the code under test that throws, with any error, an AssertionError included, is an assertion that names the call and credits the fault, and a call that returns gives its result', adapted.kind === 'assertion' && adaptedStranger.kind === 'assertion' && /^the utility probe threw RangeError/.test(adapted.detail) && /^the utility probe threw AssertionError/.test(adaptedStranger.detail) && judged([adapted, adaptedStranger]).map((result) => result.id).join() === 'adapted,adapted-stranger' && through('the utility probe', () => 5) === 5, JSON.stringify([adapted, adaptedStranger]))
+  check('control: a call of the code under test that throws, with any error, an AssertionError included, is an assertion that names the call and says that it threw, credits a fault only when the fault declares the throw and otherwise stops the run, and a call that returns gives its result', adapted.kind === 'assertion' && adaptedStranger.kind === 'assertion' && adapted.threw === true && adaptedStranger.threw === true && /^the utility probe threw RangeError/.test(adapted.detail) && /^the utility probe threw AssertionError/.test(adaptedStranger.detail) && judged([adapted, adaptedStranger]).map((result) => result.id).join() === 'adapted,adapted-stranger' && (await stopped(() => caughtAll([adapted, fails], { name: 'a planted crash' }))) instanceof HarnessError && caughtAll([adapted, adaptedStranger], { name: 'a planted crash', throws: true }) === true && through('the utility probe', () => 5) === 5, JSON.stringify([adapted, adaptedStranger]))
   check('control: a HarnessError that a check throws is not a result, and stops the run', (await stopped(() => run([['harness', () => { throw new HarnessError('the harness is not whole') }]]))) instanceof HarnessError)
 
   // What the harness hands the page (its store, a callback, a method of the persisted view) and what it does wrong is the harness's: it stops the run, where the same failure inside the page is a failure of the page. Each is paired with the whole piece.
@@ -1993,7 +2025,7 @@ const creditControls = async () => {
   ]
   const pageResults = await run(thrown.map(([label, call]) => [label, call]))
 
-  check('control: a computed value, method, watcher, hook or async read of the page that throws is an assertion that names it, and one that returns gives its result', pageResults.every((result) => result.kind === 'assertion' && result.detail.startsWith(`${result.id} threw `)) && returned.fine === 7 && returned.sum === 5, JSON.stringify(pageResults.map((result) => [result.id, result.kind, result.detail])))
+  check('control: a computed value, method, watcher, hook or async read of the page that throws is an assertion that names it and says that it threw, and one that returns gives its result', pageResults.every((result) => result.kind === 'assertion' && result.threw === true && result.detail.startsWith(`${result.id} threw `)) && returned.fine === 7 && returned.sum === 5, JSON.stringify(pageResults.map((result) => [result.id, result.kind, result.detail])))
 
   const built = unavailable(failure('the build threw'))
   const reading = await run([['reads', () => built.nodes.length]])
@@ -2002,7 +2034,7 @@ const creditControls = async () => {
   check('control: a build that failed otherwise than by a marked failure of a call is the harness\'s, and is not turned into a stand-in', (await stopped(() => unavailable(new Error('the harness broke')))) instanceof Error)
 }
 
-const runPart = async (part) => {
+const runPart = async (part, options) => {
   const [kind, index] = part.split(':')
 
   if (part === 'suites') {
@@ -2017,7 +2049,7 @@ const runPart = async (part) => {
     check('control: the unmodified code passes every check the mutations are judged by', results.every((result) => result.ok), results.filter((result) => !result.ok).map((result) => result.id).join(', '))
     await creditControls()
   } else if (kind === 'mutant') {
-    await runMutant(MUTANTS[Number(index)])
+    await runMutant(MUTANTS[Number(index)], options)
   } else {
     throw new Error(`No part is named ${part}`)
   }
@@ -2027,7 +2059,7 @@ const main = async () => {
   const options = parseArguments(process.argv.slice(2))
 
   if (options.part !== null) {
-    await runPart(options.part)
+    await runPart(options.part, options)
     endSection(checks, failures, { unsupportedSaves, emptySaves, skippedSaves })
   }
 

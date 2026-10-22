@@ -63,6 +63,12 @@ export const REASON_TEXT = Object.freeze({
   cut: 'the archive dropped the oldest events at its cap, and the window starts before the cut',
 })
 
+// The words a watched type's line draws where its count is no figure: not known (no read of the log covers the window) or none observed.
+export const COUNT_TEXT = Object.freeze({ unknown: 'unknown', none: 'none observed' })
+
+// The marks a watched type's line may carry: the race hid the type in the game's Events window, or the save's event table does not list it.
+export const MARK_TEXT = Object.freeze({ hidden: 'Hidden in the game\'s Events window', unlisted: 'Not in this save\'s event table' })
+
 registerRule({
   id: 'logDiagnostic.events',
   versions: VERSIONS,

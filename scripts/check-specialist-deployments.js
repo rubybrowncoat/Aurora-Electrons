@@ -1,16 +1,16 @@
 /*
   Checks the specialist deployments of the Survey Progress page (src/renderer/utilities/specialist-deployments.js over the formation model of utilities/ground-formations.js, and the page's own reads) against figures worked out by hand, against SQL written separately here and against the saves.
 
-  Run: bun scripts/check-specialist-deployments.js [--no-mutations] [--only=<text>]
+  Run: bun scripts/check-specialist-deployments.js [--no-mutations] [--only=<text>] [--detail]
 
   The groups, each check a PASS or FAIL line:
   - A constructed race of 27 formations (busy, idle, embarked, unresolved and of unknown activity; one, both or no rating; a template that names far more than the formation holds) against ground survey bodies and ruins held in a small database built here from the saves' own table definitions (a hidden body, a body in a system the race does not know, a completed body, colonies of 0, 0.9999, 1, 1.0001 and an unstored population, colonies on ruins the race has not surveyed, in a system it does not know, with no installations count, identified and used up): the states, the targets, the candidates, the troop lifts, the totals and the ground survey rates are worked out by hand.
   - The view preferences, the page's lists, sort keys and load state, on the page's pseudo instance (the page's script without its template).
   - The named saves, opened read-only: the targets, the ruins, the states, the lifts and the ground survey rates (of every colony of the race, not only those with ground survey work) are compared with SQL written separately here, and with the counts the saves are known to hold.
-  - The page in a browser: the real renderer, served by Vite from a copy of a save (scripts/lib/page-server.js), is driven through its controls (each role chip, each state chip and the switch of the targets are clicked) and what it draws is read back (the rows and counts shown, the summary of every panel, the preference that is restored when the page is left and opened again). The expected rows come from the pseudo instance and SQL; nothing reads the template or the wording of a heading.
+  - The page in a browser: the real renderer, served by Vite from a copy of a save (scripts/lib/page-server.js), is driven through its controls (each role chip, each state chip and the switch of the targets are clicked) and what it draws is read back (the rows and counts shown, the summary of every panel, the preference that is restored when the page is left and opened again). The expected rows come from the pseudo instance and SQL; nothing reads the template or the wording of a heading. The screen is read by the shared readers of scripts/lib/browser-observe.js (`installScreen`: an element counts when it is on screen with its opacity and its ancestors', and its text is the text it draws): a hook names the role or the identity of an element, and every decision is read from what the element draws, a chip's role and figure from its words through the module's own tables of roles and states and from its figure in the grouping of the setting (`labelKey`, `readFigure`), a formation's state from the words of its label through the table of states besides its hook, and the rows and the targets are set against the expected ones by their identity (`pairedBy`, `rolesRead`), never by their place.
   - The page on copies of a save that lack what one optional read of the page needs (the ancient constructs without their Active column or table, the ruins without the known-ruin table, the troop ships without the capacity column), each in a process of its own: the real capability check leaves the page in service with that input degraded, the panels are drawn, and the formations whose work cannot be told read as unknown, never as idle. The planted fault serves the capability registry with that input required, which makes the page unsupported.
-  - Planted faults in a copy of the utility and of the page, each of which must make a named check fail on an assertion (a fault in the page's template is served to the browser), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a heading reworded, a qualifier moved from the front to the back, a synonym in generated prose, a parenthesised condition) that must make none fail. A fault is caught only when a check named for it fails with an assertion of its own: the assertion helper of the checks marks what it throws, the code under test is run only through explicit adapters (the functions of the utility, the normalisers of the views, and the computed values, methods, reads, data and hooks of the page's pseudo instance) that turn a throw or a rejection into a marked failure naming the call, and any other exception, an AssertionError thrown by the code under test included, stops the run when a fault or a rewrite is judged.
-  - Controls of the harness, each paired with the case that is as it should be: the mark of an assertion and the adapters (a throw, a rejection and a getter that throws, with an AssertionError and with any other error), a lookup and a callback of the harness that go wrong and a malformed store (each stops the run), a normaliser of a view that throws, a crash of the harness itself in the context handed to a check (on healthy code, a benign rewrite and a fault), a fault that makes a computed value throw, a failure of the page on the first start only, a child that prints a result and then fails, hangs or closes with a cleanup that fails, a result that cannot be read and one that is not two whole observations, an error raised only in the half read with an input required, the records handed to a check with an input required, whole or not, the status of the process when a cleanup fails after a failure of its own, and `--only` selecting the fault of one input in a child of its own. What the page raises (a page error, or a console error, where Vue logs what it catches) fails the observation that saw it; a cleanup that fails ends the process with a status other than 0; a record that is not whole stops the run.
+  - Planted faults in a copy of the utility and of the page, each of which must make a named check fail on an assertion (a fault in the page's template is served to the browser, a figure or a label drawn wrong with its hook left as it is and a part drawn at opacity 0 among them), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a heading reworded, a qualifier moved from the front to the back, a synonym in generated prose, a parenthesised condition, a figure with its places named, a label looked up in the table, a part drawn at opacity 1) that must make none fail. A fault is caught only when a check named for it fails with an assertion of its own: the assertion helper of the checks marks what it throws, the code under test is run only through explicit adapters (the functions of the utility, the normalisers of the views, and the computed values, methods, reads, data and hooks of the page's pseudo instance) that turn a throw or a rejection into a marked failure naming the call, and any other exception, an AssertionError thrown by the code under test included, stops the run when a fault or a rewrite is judged. A fault credited only by such a call that threw stops the run too, unless it declares that a throw is how it is caught (`{ throws: true }`, scripts/lib/fault-credit.js `caughtBy`); each PASS line names the checks that credit it and whether each read a value or a throw.
+  - Controls of the harness, each paired with the case that is as it should be: the mark of an assertion and the adapters (a throw, a rejection and a getter that throws, with an AssertionError and with any other error), a lookup and a callback of the harness that go wrong and a malformed store (each stops the run), a normaliser of a view that throws, a crash of the harness itself in the context handed to a check (on healthy code, a benign rewrite and a fault), a fault that makes a computed value throw, a failure of the page on the first start only, a child that prints a result and then fails, hangs or closes with a cleanup that fails, a result that cannot be read and one that is not two whole observations, an error raised only in the half read with an input required, the records handed to a check with an input required, whole or not, the status of the process when a cleanup fails after a failure of its own, and `--only` selecting the fault of one input in a child of its own (which judges the records of the page this run made, `--records`, and starts no browser). What the page raises (a page error, or a console error, where Vue logs what it catches) fails the observation that saw it; a cleanup that fails ends the process with a status other than 0; a record that is not whole stops the run.
 
   Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped.
 */
@@ -23,7 +23,7 @@ const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { loadPage, instantiate } = require('./lib/page-loader')
 const { startPageServer } = require('./lib/page-server')
-const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError } = require('./lib/browser-observe')
+const { observe, validate, failedObservation, completedObservation, failureLine, report, HarnessError, installScreen, readFigure, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { assert, through, harnessOwn, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
 const { runChild, lastJson } = require('./lib/check-pool')
 const pageLoading = require('./page-loading')
@@ -54,6 +54,8 @@ const VIEW_MODULE = `
 `
 
 const options = { mutations: !process.argv.includes('--no-mutations') }
+// `--detail` prints, under the line of each planted fault, what each check credited with it said.
+const detailed = process.argv.includes('--detail')
 
 let checks = 0
 let failures = 0
@@ -929,59 +931,21 @@ const UNREAD_INPUTS = [...new Set(UNREAD.map((entry) => entry.input))]
 const EMPIRE_LIST_FILE = path.join(root, 'src', 'renderer', 'components', 'navigation', 'EmpireList.vue')
 const BROWSER_TIMEOUT = 120000
 
-// What the page on screen shows; runs in the page. Only the hooks the template carries for this are read (data attributes), never a heading or other wording, and only those a player can see: an element counts when the browser reports it visible (no hidden ancestor, no hidden style) and it takes room. Each panel with its summary, the chips of both groups with the count each carries and whether it is on, the formations listed with the state, the state label and the work each row shows, the targets, the switch, and `hidden`: the groups with a hook element that is there but cannot be seen.
+// What the page on screen shows; runs in the page, through the shared readers of scripts/lib/browser-observe.js (`installScreen`). Only the hooks the template carries for this are read (data attributes), each for the role or the identity of the element, with the text the element draws and whether it is on screen (`hooked`): the chips of each group with their role (and the ones Vuetify draws as on), each row of the formation table by the parts it holds (the formation's cell with its id, its name, its state with the label of the state and the work), the targets by key with the name each draws, each panel with its summary, the switch, and the grouping of the setting the figures are written in. Nothing is judged here: the check reads it in Node.
 const readScreen = () => {
-  const visible = (element) => {
-    const box = element.getBoundingClientRect()
+  const { visible, hooked } = window.__screen
+  const chips = (group) => {
+    const root = document.querySelector(`[data-deploy="${group}"]`)
 
-    return element.checkVisibility({ checkVisibilityCSS: true }) && box.width > 0 && box.height > 0
+    return root ? { entries: hooked(root, 'data-deploy-chip'), active: [...root.querySelectorAll('[data-deploy-chip].v-chip--active')].map((chip) => chip.getAttribute('data-deploy-chip')) } : { entries: [], active: [] }
   }
-  const hidden = new Set()
-  const seen = (selector, group) => {
-    const all = [...document.querySelectorAll(selector)]
-
-    if (all.some((element) => !visible(element))) {
-      hidden.add(group)
-    }
-
-    return all.filter(visible)
-  }
-  const plain = (text) => text.replace(/\s+/g, ' ').trim()
-  const chips = (group) => Object.fromEntries(seen(`[data-deploy="${group}"] [data-deploy-chip]`, 'chips').map((chip) => [chip.getAttribute('data-deploy-chip'), { count: Number(chip.getAttribute('data-count')), on: chip.classList.contains('v-chip--active') }]))
   const input = document.querySelector('input[data-deploy="unstaffed"]')
   const control = input && input.closest('.v-input')
-  const text = (element, strip) => {
-    if (!element || !visible(element)) {
-      return ''
-    }
-
-    const copy = element.cloneNode(true)
-
-    copy.querySelectorAll(strip).forEach((icon) => icon.remove())
-
-    return plain(copy.textContent)
-  }
-  const formations = seen('[data-deploy-formation]', 'formations').map((cell) => {
-    const row = cell.closest('tr')
-    const state = row && row.querySelector('[data-deploy-state]')
-    const shownState = state && visible(state)
-
-    return {
-      id: Number(cell.getAttribute('data-deploy-formation')),
-      name: text(cell.querySelector('[data-deploy-name]'), '.v-icon'),
-      state: shownState ? state.getAttribute('data-deploy-state') : null,
-      label: shownState ? text(state.querySelector('[data-deploy-state-label]'), '.v-icon') : '',
-      work: shownState ? text(state.querySelector('[data-deploy-work]'), '.v-icon') : '',
-    }
-  }).sort((a, b) => a.id - b.id)
-  const targets = seen('[data-target-key]', 'targets').map((cell) => cell.getAttribute('data-target-key')).sort()
+  // Each row of a table that holds the cell of a formation, its parts read by their hooks.
+  const formations = [...document.querySelectorAll('tr')].filter((row) => row.querySelector('[data-deploy-formation]')).map((row) => ({ cell: hooked(row, 'data-deploy-formation'), name: hooked(row, 'data-deploy-name'), state: hooked(row, 'data-deploy-state'), label: hooked(row, 'data-deploy-state-label'), work: hooked(row, 'data-deploy-work') }))
   const panels = [...document.querySelectorAll('.panel')].filter((panel) => panel.querySelector(':scope > .panel-head')).map((panel) => ({ kind: panel.hasAttribute('data-deploy') ? 'deploy' : panel.hasAttribute('data-targets') ? 'targets' : 'other', summary: panel.getAttribute('data-summary') || '', visible: visible(panel) }))
 
-  if (control && !visible(control)) {
-    hidden.add('switch')
-  }
-
-  return { panels, roles: chips('roles'), states: chips('states'), formations, targets, unstaffed: Boolean(input && input.checked), hidden: [...hidden].sort() }
+  return { panels, chips: { roles: chips('roles'), states: chips('states') }, formations, targets: hooked(document.body, 'data-target-key'), unstaffed: Boolean(input && input.checked), switchShown: control ? visible(control) : null, grouping: window.$app.$store.getters.config.get('selectedSeparator', 'Tick') }
 }
 
 // The page of the browser's save as a player uses it: the race is picked, the page opened, each role chip, each state chip and the switch are clicked (and clicked back) and the screen is read after each; then the two filters and the switch are left set, the page is left for another and opened again, and the screen is read once more. Resolves to the record of `observe` (scripts/lib/browser-observe.js: the page errors, the console errors, the failed requests and the phase are in it whether the page went through or not) with the value { initial, geoOff, ..., combined, restored }. With `unread` the page is read once, after the capability check has answered, and the value is { initial, capability }: the status of the page's report and the inputs it names as missing and degraded; a page that is not drawn is read as it is, after a short wait.
@@ -1032,11 +996,11 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
 
     await settle()
   }
+  // A click commits the change through the event it dispatches, and Vue's next tick is the flush of every update and watcher it queued: the screen is read after that render.
   const press = async (selector) => {
     step(`pressing ${selector}`)
     await page.locator(selector).first().click({ timeout })
     await page.evaluate(async () => { await window.$app.$nextTick() })
-    await page.waitForTimeout(250)
   }
   const read = () => {
     step('reading the screen')
@@ -1045,7 +1009,9 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   }
   const chip = (group, value) => `[data-deploy="${group}"] [data-deploy-chip="${value}"]`
 
-  await page.goto(url, { timeout })
+  // Opening the page has the full deadline whatever `timeout` says: a page server that has just started compiles the app for its first page, and the waits `timeout` bounds are those of the case.
+  await page.goto(url, { timeout: BROWSER_TIMEOUT })
+  await installScreen(page)
 
   const picker = page.locator('.empire-list').first()
 
@@ -1060,13 +1026,19 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID) && Boolean(window.$app.$store.getters.racePrefix), null, { timeout })
 
   if (unread) {
-    // A page may not be drawn at all (a save without a table makes the landing page unsupported, and the registry with the input required withholds this one), so the pages are never waited for as loading: only the database calls are, and the chips have a time to appear.
+    // A page may not be drawn at all (a save without a table makes the landing page unsupported, and the registry with the input required withholds this one), so the pages are never waited for as loading: only the database calls are, and the chips are waited for until they are drawn or the layout shows, in place of the page, the capability state of a page the report says is unsupported.
     step('waiting for the capability report')
     await page.waitForFunction(() => Boolean(window.$app.$store.getters['capabilities/report']('/survey-progress')), null, { timeout })
     await waitWhile(async () => isBusy())
     await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/survey-progress')
 
-    const drawn = await page.waitForSelector('[data-deploy="panel"] [data-deploy-chip]', { state: 'attached', timeout: withheld ? WITHHELD_TIMEOUT : timeout }).then(() => true, () => false)
+    await page.waitForFunction(() => {
+      const report = window.$app.$store.getters['capabilities/report']('/survey-progress')
+
+      return window.$app.$route.path === '/survey-progress' && (document.querySelector('[data-deploy="panel"] [data-deploy-chip]') !== null || (Boolean(report) && report.status === 'unsupported' && document.querySelector('[data-capability-state="unsupported"]') !== null))
+    }, null, { timeout: withheld ? WITHHELD_TIMEOUT : timeout }).catch(() => {})
+
+    const drawn = await page.evaluate(() => document.querySelector('[data-deploy="panel"] [data-deploy-chip]') !== null)
 
     await waitWhile(async () => isBusy() || (drawn && await page.evaluate(pageLoading)))
 
@@ -1103,9 +1075,8 @@ const observePage = (browser, url, { unread = false, withheld = false, timeout =
   return seen
 })
 
-const plain = (text) => text.replace(/\s+/g, ' ').trim()
-
-const listedRows = (list) => list.map((row) => ({ id: row.id, name: plain(row.name), state: row.state, label: plain(row.stateLabel), work: plain(row.workLabel || '') })).sort((a, b) => a.id - b.id)
+// The rows of the formation table as the page is to draw them: the formation's id (the identity of its row), its name, its state and its work, from the rows of the module.
+const listedRows = (list) => list.map((row) => ({ id: row.id, name: row.name, state: row.state, work: row.workLabel || '' }))
 
 // The screen the browser must show for the filters given, worked out from the pseudo instance's rows over the same save and the utility's own selection (the wiring is what the browser proves, the lists are checked above and against SQL).
 const expectedScreen = (ctx) => {
@@ -1116,14 +1087,72 @@ const expectedScreen = (ctx) => {
 
   return ({ roles = ALL_ROLES, states = ALL_STATES, unstaffed = false }) => ({
     formations: listedRows(ctx.mod.selectDeployments(rows, { roles, states })),
-    targets: targets.filter((row) => roles.includes(row.role) && (!unstaffed || row.status !== 'worked')).map((row) => row.key).sort(),
+    targets: targets.filter((row) => roles.includes(row.role) && (!unstaffed || row.status !== 'worked')).map((row) => ({ key: row.key, name: row.name })),
     roles: Object.fromEntries(ALL_ROLES.map((role) => [role, { count: totals[role], on: roles.includes(role) }])),
     states: Object.fromEntries(ALL_STATES.map((state) => [state, { count: totals.states[state], on: states.includes(state) }])),
     unstaffed,
   })
 }
 
-const shown = (screen) => ({ formations: screen.formations, targets: screen.targets, roles: screen.roles, states: screen.states, unstaffed: screen.unstaffed })
+// The module's own tables of words for the roles and the states ({ key: words }), which a chip and a label are read back through.
+const labelsOf = (mod) => ({ roles: Object.fromEntries(mod.ROLE_CHOICES.map((choice) => [choice.value, choice.text])), states: Object.fromEntries(mod.STATE_CHOICES.map((choice) => [choice.value, choice.text])) })
+
+// A chip read back from what it draws ("Geological (3)"): the key of its words through the table `labels` and its figure, read whole in the grouping of the setting, as "key figure"; null for a text of no such shape.
+const chipRead = (labels, grouping) => (text) => {
+  const match = /^(.*) \(([^()]*)\)$/.exec(text)
+
+  return match ? `${labelKey(match[1], labels)} ${readFigure(match[2], grouping)}` : null
+}
+
+// The chips of both groups against the expected ones by role: each draws the words of its role and its figure, and the ones on are the ones Vuetify draws as on.
+const chipProblems = (screen, want, labels) => ['roles', 'states'].flatMap((group) => {
+  const { entries, active } = screen.chips[group]
+
+  return [
+    ...rolesRead(`the ${group} chips`, entries, Object.fromEntries(Object.entries(want[group]).map(([key, { count }]) => [key, `${key} ${count}`])), chipRead(labels[group], screen.grouping)),
+    ...Object.entries(want[group]).filter(([key, { on }]) => active.includes(key) !== on).map(([key, { on }]) => [`the ${group} chips`, key, on ? 'is not on' : 'is on']),
+  ]
+})
+
+// The rows of the formation table on screen set against the expected rows by the formation's id (the identity the hook of its cell gives), never by their place: each draws the formation's name, the words of its state (read back through the module's table of states, its hook naming the same state) and its work, or no work when it has none.
+const formationProblems = (screen, rows, labels) => {
+  const lines = screen.formations.map((line) => ({ ...line, ids: line.cell.filter((entry) => entry.on).map((entry) => entry.role) })).filter((line) => line.ids.length > 0)
+  const { pairs, problems } = pairedBy('the formation rows', lines, rows, (line) => line.ids.join(), (row) => String(row.id))
+
+  return [...problems, ...pairs.flatMap(([row, line]) => {
+    const what = `the row of formation ${row.id}`
+    const hooks = line.state.filter((entry) => entry.on).map((entry) => entry.role)
+
+    return [
+      ...rolesRead(`${what}: name`, line.name, { '': row.name }),
+      ...rolesRead(`${what}: state`, line.label, { '': row.state }, (text) => labelKey(text, labels.states)),
+      ...(JSON.stringify(hooks) === JSON.stringify([row.state]) ? [] : [[`${what}: the hook of the state`, hooks, row.state]]),
+      ...rolesRead(`${what}: work`, line.work, { '': row.work || null }),
+    ]
+  })]
+}
+
+// The targets on screen set against the expected ones by key, each drawing the name of its body.
+const targetProblems = (screen, rows) => {
+  const { pairs, problems } = pairedBy('the targets', screen.targets.filter((entry) => entry.on), rows, (entry) => entry.role, (row) => row.key)
+
+  return [...problems, ...pairs.filter(([row, entry]) => entry.text !== row.name).map(([row, entry]) => ['the targets', row.key, entry.text, row.name])]
+}
+
+// What a screen shows that the expected screen does not, read by role and identity: [] when it shows what is expected.
+const screenProblems = (screen, want, labels) => [...chipProblems(screen, want, labels), ...formationProblems(screen, want.formations, labels), ...targetProblems(screen, want.targets), ...(screen.unstaffed === want.unstaffed ? [] : [['the switch of the targets', screen.unstaffed, want.unstaffed]])]
+
+// The groups of the page with an element of a hook that is there and not on screen.
+const hiddenOf = (screen) => [['chips', [...screen.chips.roles.entries, ...screen.chips.states.entries]], ['formations', screen.formations.flatMap((line) => line.cell)], ['targets', screen.targets], ['switch', screen.switchShown === false ? [{ on: false }] : []]].filter(([, entries]) => entries.some((entry) => !entry.on)).map(([group]) => group)
+
+// The state the row of a formation draws, read back from the words of its label through the module's table of states: null when no row of that formation, or no single label, is on screen.
+const stateShown = (screen, id, labels) => {
+  const line = screen.formations.find((item) => item.cell.some((entry) => entry.on && entry.role === String(id)))
+  const label = line ? line.label.filter((entry) => entry.on) : []
+
+  return label.length === 1 ? labelKey(label[0].text, labels.states) : null
+}
+
 // The value of the observation of the page, or the failure: a record of another shape is a defect of the harness (HarnessError). An observation that failed in itself (the context did not open or close, the work threw, a server that did not start) fails the check with an error of its own, which no fault is credited for, even where a screen was kept and the page raised errors besides. A page that raised an error nothing named fails the check on an assertion, what the renderer does being behaviour (a fault in the page's template is caught that way).
 const observed = (ctx) => {
   validate(ctx.browser, 'the observation of the page')
@@ -1160,28 +1189,30 @@ add('browser-panels', 'every panel the page draws carries a summary in its data-
   assert.ok(initial.panels.filter((panel) => panel.kind !== 'other').every((panel) => panel.visible), 'both panels are visible')
 })
 
-add('browser-rows', 'every formation row the page lists is visible and shows its state, the label of the state and the work of its formation as the rows hold them, with nothing in the page that is there but hidden', (ctx) => {
+add('browser-rows', 'every formation row the page lists is on screen and draws its formation\'s name, the words of its state and its work as the rows hold them, each row by its formation, with nothing in the page that is there but not on screen', (ctx) => {
   const { initial } = observed(ctx)
   const expected = ctx.expected({}).formations
 
-  assert.deepEqual(initial.hidden, [])
+  assert.deepEqual(hiddenOf(initial), [], 'the groups with a hooked element that is there and not on screen')
   assert.ok(expected.length >= 2)
-  assert.deepEqual(initial.formations, expected)
-  assert.ok(initial.formations.every((row) => row.name.length > 0 && row.label.length > 0 && row.state), 'each row shows a name, a state and a label')
-  assert.ok(initial.formations.some((row) => row.work.length > 0), 'a row shows its work')
+  assert.ok(expected.some((row) => row.work !== ''), 'a row of the save has work')
+  assert.deepEqual(formationProblems(initial, expected, ctx.labels), [])
 })
+
+// The screen read against the screen expected, by role and identity, at one step of the drive.
+const drawsAsExpected = (ctx, screen, want, step) => assert.deepEqual(screenProblems(screen, want, ctx.labels), [], step)
 
 add('browser-roles', 'each role chip, clicked in the browser, takes its role out of the rows and the targets and brings it back, and the chips keep their counts', (ctx) => {
   const seen = observed(ctx)
   const expected = ctx.expected
 
-  assert.deepEqual(shown(seen.initial), expected({}))
+  drawsAsExpected(ctx, seen.initial, expected({}), 'the page as it opens')
   differs(expected({ roles: ['xeno'] }), expected({}))
   differs(expected({ roles: ['geo'] }), expected({}))
-  assert.deepEqual(shown(seen.geoOff), expected({ roles: ['xeno'] }))
-  assert.deepEqual(shown(seen.geoOn), expected({}))
-  assert.deepEqual(shown(seen.xenoOff), expected({ roles: ['geo'] }))
-  assert.deepEqual(shown(seen.xenoOn), expected({}))
+  drawsAsExpected(ctx, seen.geoOff, expected({ roles: ['xeno'] }), 'geo off')
+  drawsAsExpected(ctx, seen.geoOn, expected({}), 'geo on again')
+  drawsAsExpected(ctx, seen.xenoOff, expected({ roles: ['geo'] }), 'xeno off')
+  drawsAsExpected(ctx, seen.xenoOn, expected({}), 'xeno on again')
 })
 
 add('browser-states', 'each state chip, clicked in the browser, takes its state out of the rows and brings it back, and the chips keep their counts', (ctx) => {
@@ -1191,17 +1222,17 @@ add('browser-states', 'each state chip, clicked in the browser, takes its state 
 
   differs(expected({ states: without('busy') }), expected({}))
   differs(expected({ states: without('idle') }), expected({}))
-  assert.deepEqual(shown(seen.busyOff), expected({ states: without('busy') }))
-  assert.deepEqual(shown(seen.busyOn), expected({}))
-  assert.deepEqual(shown(seen.idleOff), expected({ states: without('idle') }))
-  assert.deepEqual(shown(seen.idleOn), expected({}))
+  drawsAsExpected(ctx, seen.busyOff, expected({ states: without('busy') }), 'busy off')
+  drawsAsExpected(ctx, seen.busyOn, expected({}), 'busy on again')
+  drawsAsExpected(ctx, seen.idleOff, expected({ states: without('idle') }), 'idle off')
+  drawsAsExpected(ctx, seen.idleOn, expected({}), 'idle on again')
 })
 
 add('browser-unstaffed', 'the switch of the targets, clicked in the browser, keeps only the targets no formation works', (ctx) => {
   const seen = observed(ctx)
 
   differs(ctx.expected({ unstaffed: true }), ctx.expected({}))
-  assert.deepEqual(shown(seen.unstaffedOn), ctx.expected({ unstaffed: true }))
+  drawsAsExpected(ctx, seen.unstaffedOn, ctx.expected({ unstaffed: true }), 'the switch on')
 })
 
 add('browser-restored', 'the roles, the states and the switch left set are those the page shows when it is left and opened again', (ctx) => {
@@ -1209,8 +1240,8 @@ add('browser-restored', 'the roles, the states and the switch left set are those
   const set = { roles: ['xeno'], states: ALL_STATES.filter((state) => state !== 'idle'), unstaffed: true }
 
   differs(ctx.expected(set), ctx.expected({}))
-  assert.deepEqual(shown(seen.combined), ctx.expected(set))
-  assert.deepEqual(shown(seen.restored), ctx.expected(set))
+  drawsAsExpected(ctx, seen.combined, ctx.expected(set), 'the filters set')
+  drawsAsExpected(ctx, seen.restored, ctx.expected(set), 'the page opened again')
 })
 
 add('browser-clean', 'the page raises no error while it is driven: no page error and no console error, those that Vue catches in a handler, a watcher or a render included', (ctx) => {
@@ -1246,43 +1277,41 @@ add('browser-unread', 'a save without what an optional read of the page needs le
 
     assert.deepEqual(capability, { status: 'degraded', missing: [], degraded: [entry.input] }, `${entry.kind}: the capability report`)
     assert.deepEqual(initial.panels.filter((panel) => panel.kind !== 'other').map((panel) => `${panel.kind} ${panel.visible}`).sort(), ['deploy true', 'targets true'], entry.kind)
-    assert.deepEqual(initial.hidden, [], entry.kind)
-    assert.deepEqual(initial.formations, expected, entry.kind)
+    assert.deepEqual(hiddenOf(initial), [], entry.kind)
+    assert.deepEqual(formationProblems(initial, expected, ctx.labels), [], entry.kind)
 
     const flipped = expected.filter((row) => row.state === 'unknown' && moved.get(row.id) === 'idle').map((row) => row.id)
 
     if (entry.input === 'troopBays') {
-      assert.deepEqual(expected.map((row) => [row.id, row.state]), unreadRows(ctx, 'moved').map((row) => [row.id, row.state]), `${entry.kind}: the troop ships do not change a state`)
+      assert.deepEqual(new Map(expected.map((row) => [row.id, row.state])), moved, `${entry.kind}: the troop ships do not change a state`)
     } else {
       assert.deepEqual(flipped, [MOVED_FORMATION], `${entry.kind}: the formation that was idle reads as unknown`)
-      assert.equal(initial.formations.find((row) => row.id === MOVED_FORMATION).state, 'unknown', entry.kind)
+      assert.equal(stateShown(initial, MOVED_FORMATION, ctx.labels), 'unknown', entry.kind)
     }
   }
 })
 
-// A fault or a benign rewrite: [name, from, to, file, expected ids (a fault; the check ids one of which must fail), browser (the page is served to the browser and driven)].
+// A fault or a benign rewrite: [name, from, to, file, expected ids (a fault; the check ids one of which must fail), browser (the page is served to the browser and driven), { throws } (a fault whose catch is a throw of the code under test, which credits it; scripts/lib/fault-credit.js `caughtBy`)].
 const SPEC_RELATIVE = 'utilities/specialist-deployments'
 
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
   ['a formation is busy wherever it stands', 'SPECIALIST_ROLES.filter((role) => roles[role] === true && index.byBody[role].has(bodyId))', 'SPECIALIST_ROLES.filter((role) => roles[role] === true)', SPEC_FILE, ['states', 'state-details']],
+  ['a row draws the geological rating as its xenoarchaeology rating', 'rows.push({ ...shared.get(node.id), roleKeys: own,', 'rows.push({ ...shared.get(node.id), xeno: shared.get(node.id).geo, roleKeys: own,', SPEC_FILE, ['capability-actual']],
   ['a ship that is not resolved still counts as embarked', "location.kind === 'ship' && location.state === 'resolved'", "location.kind === 'ship'", SPEC_FILE, ['states', 'state-details']],
-  ['a colony with fewer than one resident is no candidate', 'isId(row.PopulationID) ? {', 'isId(row.PopulationID) && row.ColonyPopulation >= 1 ? {', SPEC_FILE, ['boundary-population']],
-  ['a colony with one resident or fewer is no candidate', 'isId(row.PopulationID) ? {', 'isId(row.PopulationID) && row.ColonyPopulation > 1 ? {', SPEC_FILE, ['boundary-population']],
   ['a colony with no residents is no candidate', 'isId(row.PopulationID) ? {', 'isId(row.PopulationID) && row.ColonyPopulation > 0 ? {', SPEC_FILE, ['boundary-population']],
   ['a formation too large for every bay is carried', "verdict(candidate.id, 'none'))", "verdict(candidate.id, 'one'))", SPEC_FILE, ['lifts', 'lifts-bays']],
   ['every formation weighs nothing for the lift', 'formation: { ownSize: row.mass }', 'formation: { ownSize: 0 }', SPEC_FILE, ['lifts', 'lifts-bays']],
   ['unread troop bays read as none', "kind: 'unknown', lift: null, lifts: null, largest }", "kind: 'none', lift: null, lifts: null, largest }", SPEC_FILE, ['lifts-unavailable']],
-  ['every formation is packed with the idle ones', '(row) => row.state === \'idle\')', '() => true)', SPEC_FILE, ['lifts']],
-  ['a ruin whose builders are known is still a target', 'known: Boolean(row.Known)', 'known: false', SPEC_FILE, ['targets-eligible', 'target-rows']],
+  ['a ruin whose builders are known is still a target', 'known: Boolean(row.Known)', 'known: false', SPEC_FILE, ['targets-eligible', 'target-rows', 'save-1-formations', 'save-1-ruins']],
   ['a ruin on a colony body the race has not surveyed is not read', 'or FCT_Population.PopulationID is not null) order by', 'or false) order by', SPEC_FILE, ['targets-eligible', 'save-1-states']],
-  ['a ruin the race has not surveyed is a target', 'const known = Boolean(row.Surveyed) && Boolean(row.SystemKnown)', 'const known = true', SPEC_FILE, ['targets-eligible', 'target-rows']],
   ['a ruin in a system the race does not know counts as surveyed', 'Boolean(row.Surveyed) && Boolean(row.SystemKnown)', 'Boolean(row.Surveyed)', SPEC_FILE, ['targets-eligible', 'target-rows']],
   ['a formation on a ruin outside the known ones is idle', 'index.unseen.has(bodyId)', 'false', SPEC_FILE, ['states', 'state-details', 'unknown-sites']],
   ['a known ruin with no installations count is no place the game may work', 'if (!RUIN_STATES.includes(state) && isId(row.PopulationID)) {', 'if (false) {', SPEC_FILE, ['targets-eligible', 'states']],
   ['a spent or identified ruin out of sight is a place the game may work', "state === 'found' || !RUIN_STATES.includes(state)", 'true', SPEC_FILE, ['targets-eligible', 'states']],
   ['a geological formation is of unknown activity wherever the ruins are unread', 'if (roles.xeno !== false) {', 'if (true) {', SPEC_FILE, ['unknown-sites']],
   ['a formation of unknown activity is packed with the idle ones', '(row) => row.state === \'idle\')', '(row) => row.state === \'idle\' || row.state === \'unknown\')', SPEC_FILE, ['lifts']],
+  ['every formation is packed with the idle ones', '(row) => row.state === \'idle\')', '() => true)', SPEC_FILE, ['lifts', 'save-0-lifts']],
   ['the base rating of a colony is not summed', 'team.base += node.geo.value\n', 'team.base += 0\n', SPEC_FILE, ['save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
   ['a colony with a team of one formation only keeps the last', 'team.units += node.geo.from.reduce((sum, item) => sum + item.units, 0)', 'team.units = node.geo.from.reduce((sum, item) => sum + item.units, 0)', SPEC_FILE, ['rates', 'save-0-all-rates', 'save-1-all-rates', 'save-2-all-rates']],
   ['a commander bonus is ignored', '* (bonuses.get(node.id) ?? 1)', '* 1', SPEC_FILE, ['rates']],
@@ -1295,11 +1324,11 @@ const MUTANTS = [
   ['the persisted filter is shared by every race', "key: 'deployRoles', scope: 'race'", "key: 'deployRoles', scope: 'game'", SPEC_FILE, ['views']],
   ['the persisted filter shares the key of the other', "key: 'deployStates', scope: 'race'", "key: 'deployRoles', scope: 'race'", SPEC_FILE, ['views']],
   ['a body the race has not surveyed is a ground survey target', 'inner join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', 'left join FCT_SystemBodySurveys on FCT_SystemBodySurveys.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodySurveys.RaceID = ${this.RaceID} and FCT_SystemBodySurveys.GameID = ${this.GameID} inner join FCT_RaceSysSurvey', SURVEY_FILE, ['targets-eligible', 'save-1-targets']],
-  ['a body in a system the race does not know is a target', 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', SURVEY_FILE, ['targets-eligible']],
+  ['a body in a system the race does not know is a target', 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', 'left join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${this.RaceID} and FCT_RaceSysSurvey.GameID = ${this.GameID} left join FCT_SystemBodyName on FCT_SystemBodyName.SystemBodyID = FCT_SystemBody.SystemBodyID and FCT_SystemBodyName.RaceID = ${this.RaceID} left join FCT_Star on FCT_Star.StarID = FCT_SystemBody.StarID left join FCT_Population', SURVEY_FILE, ['targets-eligible', 'ruins-unsupported']],
   ['the ground rate ignores a formation of unknown rating', 'groundSurveyRate(teamUnknown ? null : team.perDay, this.surveySpeed)', 'groundSurveyRate(team ? team.perDay : 0, this.surveySpeed)', SURVEY_FILE, ['rates']],
+  ['a body with no colony is of unknown rate', 'teams.get(row.PopulationID) || NO_TEAM : null) : NO_TEAM', 'teams.get(row.PopulationID) || NO_TEAM : null) : null', SURVEY_FILE, ['save-1-rates']],
   ['the unstaffed switch does nothing', "(!this.deployUnstaffed || row.status !== 'worked')", 'true', SURVEY_FILE, ['target-rows']],
-  ['the page forgets to wait for the ruins', "  ruinSites: 'the known ruins',\n", '', SURVEY_FILE, ['ready']],
-  ['the page forgets to wait for the troop ships', "  troopBays: 'the troop ships',\n", '', SURVEY_FILE, ['ready']],
+  ['the Candidates column sorts by a value the rows do not carry', "{ text: 'Candidates', value: 'candidateSort' }", "{ text: 'Candidates', value: 'candidateCount' }", SURVEY_FILE, ['headers']],
   ['a table view is shared by every race', "{ ...tableView('surveyDeployTable', { sortBy: ['stateOrder'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES }), scope: 'race' }", "tableView('surveyDeployTable', { sortBy: ['stateOrder'], sortDesc: false, itemsPerPage: 15, itemsPerPageOptions: PAGE_SIZES })", SURVEY_FILE, ['views']],
   ['an unread ruin read leaves every formation idle', '{ targets: [], states: null, unseen: null }', '{ targets: [], states: null, unseen: new Set() }', SURVEY_FILE, ['unknown-sites']],
   ['the page forgets to wait for the constructs', "  constructSites: 'the ancient constructs',\n", '', SURVEY_FILE, ['ready']],
@@ -1313,36 +1342,35 @@ const MUTANTS = [
   ['a construct with no stored state is not marked', "reasons.push({ kind: 'construct-unknown', message:", "({ kind: 'construct-unknown', message:", SPEC_FILE, ['states', 'state-details', 'construct-sites']],
   ['a formation of unknown rating at an inactive construct is not marked', ' || (roles.xeno === null && index.constructs && index.constructs.inactive.has(bodyId))', '', SPEC_FILE, ['construct-sites']],
   ['a construct on a body with a ruin worked is counted as a second work', "if (construct && !work.some((item) => item.role === 'xeno')) {", 'if (construct) {', SPEC_FILE, ['construct-sites']],
-  ['the constructs of bodies with no colony of the race are read', 'from FCT_AncientConstruct inner join FCT_Population on', 'from FCT_AncientConstruct left join FCT_Population on', SPEC_FILE, ['targets-eligible', 'construct-sites']],
+  ['the constructs of bodies with no colony of the race are read', 'from FCT_AncientConstruct inner join FCT_Population on', 'from FCT_AncientConstruct left join FCT_Population on', SPEC_FILE, ['targets-eligible', 'construct-sites', 'save-1-constructs']],
   ['the deployments panel has no summary', 'data-summary="The race\'s geological survey', 'data-hint="The race\'s geological survey', SURVEY_FILE, ['browser-panels'], true],
-  ['the targets panel has no summary', 'data-summary="The known bodies where', 'data-hint="The known bodies where', SURVEY_FILE, ['browser-panels'], true],
   ['the roles filter is disconnected from its chips', 'v-model="deployRoles"', ':value="deployRoles"', SURVEY_FILE, ['browser-roles', 'browser-restored'], true],
   ['the states filter is disconnected from its chips', 'v-model="deployStates"', ':value="deployStates"', SURVEY_FILE, ['browser-states', 'browser-restored'], true],
   ['the switch of the targets is disconnected', 'v-model="deployUnstaffed"', ':input-value="deployUnstaffed"', SURVEY_FILE, ['browser-unstaffed', 'browser-restored'], true],
   ['the deployments are listed for every row whatever the filters', 'selectDeployments(this.deployment.rows, { roles: this.deployRoles, states: this.deployStates })', 'this.deployment.rows', SURVEY_FILE, ['select']],
   ['the name of each formation is hidden', '<div class="font-weight-medium" data-deploy-name>', '<div v-show="false" class="font-weight-medium" data-deploy-name>', SURVEY_FILE, ['browser-rows'], true],
-  ['the whole name cell of each formation is hidden', '<div class="py-2" :data-deploy-formation="item.id">', '<div v-show="false" class="py-2" :data-deploy-formation="item.id">', SURVEY_FILE, ['browser-rows'], true],
   ['the table of the deployments is hidden by itself', '<v-data-table :headers="deployHeaders"', '<v-data-table v-show="false" :headers="deployHeaders"', SURVEY_FILE, ['browser-rows'], true],
-  ['the label of each state is hidden', '<span class="text-no-wrap" data-deploy-state-label>', '<span v-show="false" class="text-no-wrap" data-deploy-state-label>', SURVEY_FILE, ['browser-rows'], true],
   ['the state cell is put in a slot the table does not use', '<template #[`item.stateOrder`]="{ item }">', '<template #[`item.state`]="{ item }">', SURVEY_FILE, ['browser-rows'], true],
-  ['a native listener that throws on each role chip, which Vue catches and logs', ':data-count="deployTotals[choice.value]" filter', ':data-count="deployTotals[choice.value]" @click.native="(void 0).missing" filter', SURVEY_FILE, ['browser-clean'], true],
+  // A crash is how this fault is caught: browser-clean holds that an error Vue catches in a handler is seen, so the fault declares the throw (the shared rule judges an error the page raised as behaviour, so the credit reads as a value all the same).
+  ['a native listener that throws on each role chip, which Vue catches and logs', ':data-count="deployTotals[choice.value]" filter', ':data-count="deployTotals[choice.value]" @click.native="(void 0).missing" filter', SURVEY_FILE, ['browser-clean'], true, { throws: true }],
+  ['the figure of each role chip is drawn one higher, its count hook left as it is', '{{ choice.text }} ({{ count(deployTotals[choice.value]) }})', '{{ choice.text }} ({{ count(deployTotals[choice.value] + 1) }})', SURVEY_FILE, ['browser-roles', 'browser-restored'], true],
+  ['the label of each state draws the words of the first state, its state hook left as it is', '{{ item.stateLabel }}', '{{ stateChoices[0].text }}', SURVEY_FILE, ['browser-rows'], true],
+  ['the label of each state is drawn at opacity 0', '<span class="text-no-wrap" data-deploy-state-label>', '<span class="text-no-wrap" style="opacity: 0" data-deploy-state-label>', SURVEY_FILE, ['browser-rows'], true],
 ]
 
 // Rewrites that change nothing the checks observe: each must leave every check passing.
 const BENIGN = [
   ['an explicit prop and event instead of v-model on the roles', 'v-model="deployRoles"', ':value="deployRoles" @change="deployRoles = $event"', SURVEY_FILE, [], true],
-  ['an explicit prop and event instead of v-model on the states', 'v-model="deployStates"', ':value="deployStates" @change="deployStates = $event"', SURVEY_FILE, [], true],
-  ['an explicit prop and event instead of v-model on the switch', 'v-model="deployUnstaffed"', ':input-value="deployUnstaffed" @change="deployUnstaffed = $event"', SURVEY_FILE, [], true],
   ['a panel heading reworded', '<span>Specialist deployments</span>', '<span>Specialist placements</span>', SURVEY_FILE, [], true],
   ['v-on longhand for a click', '@click:row="toggleDeployment"', 'v-on:click:row="toggleDeployment"', SURVEY_FILE],
   ['a qualifier moved from the front to the back in a sentence', 'No troop bay holds it (the largest takes ${count(lift.largest)} t)', 'Held by no troop bay (the largest takes ${count(lift.largest)} t)', SPEC_FILE],
   ['a synonym in generated prose', "'Location not resolved'", "'Place not resolved'", SPEC_FILE],
-  ['another synonym in generated prose', "return 'None known'", "return 'Nothing known'", SPEC_FILE],
   ['a parenthesised condition', 'if (roles.geo !== true && roles.xeno !== true) {', 'if ((roles.geo !== true) && (roles.xeno !== true)) {', SPEC_FILE],
-  ['an equivalent reason filter', "place.reasons.filter((reason) => reason.kind !== 'system-not-surveyed')", "place.reasons.filter((reason) => !(reason.kind === 'system-not-surveyed'))", SPEC_FILE],
-  ['a synonym in the page\'s sentence of the ruins', 'could not be read from this save, so no xenoarchaeology target is listed', 'are not readable from this save, so no xenoarchaeology target is listed', SURVEY_FILE],
   ['the roles chip group registered under its PascalCase name', '<v-chip-group v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </v-chip-group>', '<VChipGroup v-model="deployRoles" multiple column aria-label="Roles shown" data-deploy="roles">\n              <v-chip v-for="choice in roleChoices" :key="choice.value" :value="choice.value" :data-deploy-chip="choice.value" :data-count="deployTotals[choice.value]" filter outlined small>{{ choice.text }} ({{ count(deployTotals[choice.value]) }})</v-chip>\n            </VChipGroup>', SURVEY_FILE, [], true],
   ['a native listener that does nothing on each role chip', ':data-count="deployTotals[choice.value]" filter', ':data-count="deployTotals[choice.value]" @click.native="void 0" filter', SURVEY_FILE, [], true],
+  ['the figure of each role chip written with its places named', '{{ choice.text }} ({{ count(deployTotals[choice.value]) }})', '{{ choice.text }} ({{ count(deployTotals[choice.value], 0) }})', SURVEY_FILE, [], true],
+  ['the label of each state looked up in the table of states', '{{ item.stateLabel }}', '{{ stateChoices.find((choice) => choice.value === item.state).text }}', SURVEY_FILE, [], true],
+  ['the label of each state drawn at opacity 1', '<span class="text-no-wrap" data-deploy-state-label>', '<span class="text-no-wrap" style="opacity: 1" data-deploy-state-label>', SURVEY_FILE, [], true],
 ]
 
 /* eslint-enable no-template-curly-in-string */
@@ -1410,7 +1438,7 @@ const flagOf = (name) => {
 }
 
 // The page in a browser on the copy `file` of one case (`UNREAD`), in a process of its own since the page server is one for each process: the page as the registry has it and with that input made required. Prints RESULT {real, fault}, the whole record of each observation, and ends with status 0 once everything is closed; any other end (the watchdog's 3, a cleanup that failed, a crash) makes the case fail, whatever it printed.
-// The controls of the check use three flags: `--limit=ms` (the watchdog), `--timeout=ms` (the browser's wait) and `--control=`: `late-exit` and `late-hang` print a valid result and then end with status 5 or never end; `cleanup:reject` and `cleanup:resolve` print one and then close with a cleanup that fails or one that does not; `bad-json` prints a result that is not JSON, `bad-envelope` one that is JSON but not two whole observations; `page-failure:<marker file>` serves a renderer module that throws, on the first start only (the marker file is made then), and a later start of the case is the plain one; `fault-half:throw` and `fault-half:quiet` serve a renderer module that raises an uncaught error, or does nothing, after the page has been read as the registry has it.
+// The controls of the check use three flags: `--limit=ms` (the watchdog), `--timeout=ms` (the browser's waits once the page is open) and `--control=`: `late-exit` and `late-hang` print a valid result and then end with status 5 or never end; `cleanup:reject` and `cleanup:resolve` print one and then close with a cleanup that fails or one that does not; `bad-json` prints a result that is not JSON, `bad-envelope` one that is JSON but not two whole observations; `page-failure:<marker file>` serves a renderer module that throws, on the first start only (the marker file is made then), and a later start of the case is the plain one; `fault-half:throw` and `fault-half:quiet` serve a renderer module that raises an uncaught error, or does nothing, after the page has been read as the registry has it.
 const unreadChild = async (kind, file) => {
   const entry = UNREAD.find((item) => item.kind === kind)
 
@@ -1504,6 +1532,9 @@ const main = async () => {
   const only = (process.argv.find((argument) => argument.startsWith('--only=')) || '').slice('--only='.length).split(',').filter(Boolean)
   const named = only.filter((text) => text !== 'control')
   const wanted = (kind, name = '') => only.length === 0 || (kind === 'control' ? only.includes('control') : named.length > 0 && (name === '' || named.some((text) => name.includes(text))))
+  // `--records=<file>`: the records another run of this script made of the page as it is ({ seen, unread }), judged here in place of observing the page again. The control of `--only` hands its child the records of its own run: which variants a run selects has no browser surface, so that child starts no page server and no browser, and a variant it would serve to the browser gets an observation that did not happen.
+  const recordsFile = flagOf('records')
+  const records = recordsFile ? JSON.parse(fs.readFileSync(recordsFile, 'utf8')) : null
 
   const sources = { spec: fs.readFileSync(SPEC_FILE, 'utf8'), survey: fs.readFileSync(SURVEY_FILE, 'utf8') }
   const texts = new Map()
@@ -1521,6 +1552,8 @@ const main = async () => {
   }
 
   const base = await utilitiesOf(sources)
+  // The module's own tables of words, from its source as it is: a fault that changes a word in the module is then read back as another word.
+  const labels = labelsOf(base.mod)
   const models = { constructed: base.ground.buildGroundFormations(frozen(constructedRows()), { GameID: GAME, RaceID: RACE }) }
 
   models.supportedConstructed = { supported: true, ...models.constructed }
@@ -1560,13 +1593,17 @@ const main = async () => {
   let chrome = null
   let startFailure = null
 
-  try {
-    server = await startPageServer({ save: FIXTURES[BROWSER_SAVE].file })
-    cleanups.push(() => server.stop())
-    chrome = await require('playwright').chromium.launch()
-    cleanups.push(() => chrome.close())
-  } catch (error) {
-    startFailure = String(error.message).split('\n')[0]
+  if (records) {
+    startFailure = 'a run given the records of another run starts no browser'
+  } else {
+    try {
+      server = await startPageServer({ save: FIXTURES[BROWSER_SAVE].file })
+      cleanups.push(() => server.stop())
+      chrome = await require('playwright').chromium.launch()
+      cleanups.push(() => chrome.close())
+    } catch (error) {
+      startFailure = String(error.message).split('\n')[0]
+    }
   }
 
   const observeVariant = async (text) => {
@@ -1599,7 +1636,7 @@ const main = async () => {
   const contextOf = async (given, seen = baselineSeen, unreadSeen = baselineUnread) => {
     const { pages, fields } = await pagesOf(given)
     const mod = subjectModule((await utilitiesOf(given)).mod)
-    const ctx = { mod, pages, fields: subjectFields(fields), models, browser: seen, expected, memory: null, saves: [], unreadSeen, unreadRows: null }
+    const ctx = { mod, pages, fields: subjectFields(fields), models, browser: seen, expected, labels, memory: null, saves: [], unreadSeen, unreadRows: null }
 
     // A read is kept for the text that makes it (the page for the ground surveys, the utility for the ruins), so a variant that changes neither does not read the saves again.
     const read = async (kind, text, label, database, ids) => {
@@ -1670,7 +1707,7 @@ const main = async () => {
 
   console.log('Constructed race, preferences, page, saves and browser')
 
-  baselineSeen = await observeVariant(sources.survey)
+  baselineSeen = records ? records.seen : await observeVariant(sources.survey)
 
   // The copies of the browser's save for the optional reads, and each case in a process of its own: {real, fault}, the whole record of each observation (scripts/lib/browser-observe.js). A case is never run twice: a child that ends with a status other than 0 (the watchdog's 3 and a cleanup that failed included) or a browser that did not get through, or that saw the page raise an error, is a failed case, with what it reported (`report`).
   for (const name of ['moved', ...UNREAD.map((entry) => entry.kind)]) {
@@ -1681,7 +1718,9 @@ const main = async () => {
   const unreadCase = async (entry, extra = [], quiet = false) => {
     let seen
 
-    if (startFailure) {
+    if (records && extra.length === 0) {
+      seen = records.unread[entry.kind]
+    } else if (startFailure) {
       seen = { real: failedObservation(startFailure), fault: failedObservation(startFailure) }
     } else {
       try {
@@ -1756,15 +1795,20 @@ const main = async () => {
     if (wanted('planted')) {
       console.log('\nPlanted faults')
 
-      for (const [name, from, to, file, caught, browser] of MUTANTS) {
+      for (const [name, from, to, file, caught, browser, { throws = false } = {}] of MUTANTS) {
         if (!wanted('planted', name)) {
           continue
         }
 
         const given = variantOf([name, from, to, file])
         const failed = await judge(await contextOf(given, browser ? await observeVariant(given.survey) : baselineSeen))
+        const credited = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
 
-        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, caught), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
+        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => `${result.id} (${result.threw ? 'throw' : 'value'})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name, throws }), `expected an assertion of one of ${caught.join(', ')}; ${failed.filter((result) => caught.includes(result.id)).map((result) => `${result.id} (${result.kind}) ${result.detail.slice(0, 160)}`).join('; ') || 'none of them failed'}`)
+
+        if (detailed) {
+          credited.forEach((result) => console.log(`        ${result.id} (${result.threw ? 'throw' : 'value'}): ${result.detail.split('\n')[0].slice(0, 300)}`))
+        }
       }
 
       // An input of the page that is required makes the save without it unsupported: the page the browser saw for that input is the withheld one, in both halves of the record. What fails must be the capability report of browser-unread, not a record that is not whole. Selected by name like the others.
@@ -1777,7 +1821,7 @@ const main = async () => {
 
         const planted = await outcome(adapted(input, (seen) => ({ real: seen.fault, fault: seen.fault })))
 
-        check(`planted: ${name}: caught by the capability report`, !planted.ok && planted.kind === 'assertion' && /the capability report/.test(planted.detail), `${planted.kind}: ${planted.detail}`)
+        check(`planted: ${name}: caught by the capability report; credited by browser-unread (${planted.threw ? 'throw' : 'value'})`, caughtBy([planted], ['browser-unread'], { name }) && /the capability report/.test(planted.detail), `${planted.kind}: ${planted.detail}`)
       }
     }
 
@@ -1785,8 +1829,10 @@ const main = async () => {
       // The controls of the harness: a case that fails must fail the check, however it fails and whatever a later start would give. Each runs the case's own function (`unreadCase`) and judges browser-unread on what it returns, and each is paired with the case that is as it should be and must pass.
       console.log('\nControls of the harness')
 
-      // Who failed. A failure is credited only when it is an assertion of a check: marked by the helper of the checks, or the failure of a call of the code under test that an adapter (`through`) names. An error that is anything else, an AssertionError that the code under test threw included, stops the run when a fault is judged.
+      // Who failed. A failure is credited only when it is an assertion of a check: marked by the helper of the checks, or the failure of a call of the code under test that an adapter (`through`) names, which credits a fault only when the fault declares that a throw is how it is caught (scripts/lib/fault-credit.js `caughtBy`). An error that is anything else, an AssertionError that the code under test threw included, stops the run when a fault is judged.
       const probe = async (body) => (await runChecks([{ id: 'probe', name: 'probe', run: body }], {}))[0]
+      // What crediting a fault gives: true or false, or the HarnessError that stops the run.
+      const creditOf = (call) => Promise.resolve().then(call).then((credited) => credited, (error) => error)
       const stranger = () => new rawAssert.AssertionError({ message: 'thrown by the code under test' })
       const own = await probe(() => assert.equal(1, 2))
       const ordinary = await probe(() => assert.equal(1, 1))
@@ -1806,7 +1852,7 @@ const main = async () => {
 
       const returned = await probe(() => assert.deepEqual(through('the call', () => ({ list: [1] })), { list: [1] }))
 
-      check('control: a call of the code under test that throws or rejects, with an AssertionError or any other error, is an assertion that names the call, and a call that returns gives its result', named.every((result) => result.kind === 'assertion' && /^the call threw (AssertionError|TypeError)/.test(result.detail)) && caughtBy(named, ['probe']) && returned.ok, JSON.stringify([named, returned]))
+      check('control: a call of the code under test that throws or rejects, with an AssertionError or any other error, is an assertion that names the call and says that it threw, credits a fault only when the fault declares the throw and otherwise stops the run, and a call that returns gives its result', named.every((result) => result.kind === 'assertion' && result.threw === true && /^the call threw (AssertionError|TypeError)/.test(result.detail)) && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash' }))) instanceof HarnessError && (await creditOf(() => caughtBy(named, ['probe'], { name: 'a planted crash', throws: true }))) === true && returned.ok, JSON.stringify([named, returned]))
 
       const trap = () => ({ get x () { throw new Error('a getter') } })
       const reading = []
@@ -1860,7 +1906,7 @@ const main = async () => {
       const rewritten = await judge(await contextOf(variantOf(normaliser('a normaliser written the other way round', '(stored) => (!Array.isArray(stored) ? undefined : Array.isArray(stored) ?'))), viewChecks)
       const unchanged = await judge(await contextOf(sources), viewChecks)
 
-      check('control: a normaliser of a view that throws fails views on an assertion that names it and is caught, and does not stop the run', throwing.length === 1 && throwing[0].kind === 'assertion' && /the normalise of the view \w+ threw TypeError/.test(throwing[0].detail) && caughtBy(throwing, ['views']), JSON.stringify(throwing))
+      check('control: a normaliser of a view that throws fails views on an assertion that names it without stopping the checks, and credits a fault only when the fault declares the throw, stopping the run otherwise', throwing.length === 1 && throwing[0].kind === 'assertion' && throwing[0].threw === true && /the normalise of the view \w+ threw TypeError/.test(throwing[0].detail) && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws' }))) instanceof HarnessError && (await creditOf(() => caughtBy(throwing, ['views'], { name: 'a normaliser that throws', throws: true }))) === true, JSON.stringify(throwing))
       check('control: the normalisers rewritten in an equivalent way, and as they are, leave views passing', rewritten.length === 0 && unchanged.length === 0, JSON.stringify([rewritten, unchanged]))
 
       // A crash of the harness itself, planted in the context a check is handed, must end the run as a defect on any code under test: healthy, rewritten in a benign way and with a fault. The same context intact is the paired case.
@@ -1955,8 +2001,13 @@ const main = async () => {
       check('control: a result that is not JSON is a failed case with the phase of the child, and fails browser-unread without stopping the run', unreadable.real.error !== null && unreadable.real.phase === 'the child' && unreadable.fault.error !== null && !unreadableOutcome.ok, `${unreadable.real.error} ${unreadable.real.phase} ${unreadableOutcome.detail}`)
       check('control: a result that is JSON but not two whole observations stops the run as a defect of the harness', malformed instanceof HarnessError, String(malformed))
 
-      // The names a run is told to select are the ones it runs, the required-input faults included: a child of its own runs the baseline and the fault of one input, and passes.
-      const selected = await runChild(__filename, ['--only=constructSites'])
+      // The names a run is told to select are the ones it runs, the required-input faults included: a child of its own runs the baseline, judging the records of the page this run made (`--records`), and the fault of one input, and passes.
+      const recordsOut = path.join(os.tmpdir(), `ae-specialist-records-${process.pid}.json`)
+
+      cleanups.push(async () => fs.rmSync(recordsOut, { force: true }))
+      fs.writeFileSync(recordsOut, JSON.stringify({ seen: baselineSeen, unread: baselineUnread }))
+
+      const selected = await runChild(__filename, ['--only=constructSites', `--records=${recordsOut}`])
       const total = baselineChecks + 1
 
       check('control: a run told to select the fault of one input runs that one among the others and no other, and ends with every check passed', selected.code === 0 && selected.stdout.includes('PASS  planted: constructSites is required by the capability registry') && !/planted: (ruinSites|troopBays)/.test(selected.stdout) && selected.stdout.includes(`${total} of ${total} checks passed`), `${selected.code} ${selected.stdout.trim().slice(-400)} ${selected.stderr.trim().slice(-300)}`)

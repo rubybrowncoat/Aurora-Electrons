@@ -28,6 +28,11 @@ export const POSTS = {
   17: 'Academy commandant',
 }
 
+// The notes of the roster's age range, by what each says.
+export const AGE_NOTES = {
+  unavailable: 'This save lacks the species data the ages rest on, so the age range is off and any stored bound is kept for a save that has it.',
+}
+
 // Bonuses stored as ratings, not multipliers.
 const RATINGS = new Set([25, 27])
 

@@ -569,6 +569,12 @@ export const COLOUR_FILLS = [['primary', 'focus.primary'], ['success', 'severity
 // What is drawn on such a fill and its minimum: the toolbar's title and text button (4.5:1) and icons (3:1), the snackbar's message and text button (4.5:1).
 export const NAMED_USES = [['toolbar title', 'title', TEXT], ['toolbar text button', 'textButton', TEXT], ['toolbar icon', 'icon', GRAPHIC], ['toolbar icon button', 'buttonIcon', GRAPHIC], ['snackbar message', 'message', TEXT], ['snackbar text button', 'snackbarButton', TEXT]]
 
+// The words that name each fill after the use drawn on it in the label of a measurement ('toolbar title on the primary fill').
+export const FILL_LABELS = Object.freeze(Object.fromEntries(COLOUR_FILLS.map(([name]) => [name, `on the ${name} fill`])))
+
+// The words of the confirmation Apply asks for when a file has contrast findings: the words before the number of findings, and the noun after it for one finding and for more.
+export const ACKNOWLEDGEMENT_WORDS = Object.freeze({ before: 'Apply despite', one: 'contrast finding', many: 'contrast findings' })
+
 // The ink of each use on a fill from the tokens alone, as the stylesheet draws it: `inks.onColor` for the toolbar's title, buttons and icons and for the snackbar's text button, `inks.onSnackbar` for the snackbar's message alone.
 export const tokenInks = (appearance) => ({ title: appearance.inks.onColor, textButton: appearance.inks.onColor, icon: appearance.inks.onColor, buttonIcon: appearance.inks.onColor, message: appearance.inks.onSnackbar, snackbarButton: appearance.inks.onColor })
 
@@ -592,7 +598,7 @@ export const measureNamedFills = (appearance, inksOf, resolveInk = (value) => va
         value = 0
       }
 
-      return { label: `${what} on the ${name} fill`, use, foreground: String(resolved), surface: hex(fill), ratio: value, minimum, pass: value >= minimum }
+      return { label: `${what} ${FILL_LABELS[name]}`, use, foreground: String(resolved), surface: hex(fill), ratio: value, minimum, pass: value >= minimum }
     })
   })
 }

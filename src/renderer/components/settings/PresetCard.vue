@@ -1,7 +1,7 @@
 <template>
   <button type="button" class="preset" :class="{ 'preset--active': active }" :aria-pressed="String(active)" :data-preset="appearance.id" @click="$emit('select', appearance.id)">
     <span class="preset__head">
-      <span class="preset__name">{{ appearance.name }}</span>
+      <span class="preset__name" data-preset-name>{{ appearance.name }}</span>
       <span class="preset__mode">{{ appearance.mode === 'dark' ? 'Dark mode' : 'Light mode' }}<template v-if="appearance.file"> · from a file</template></span>
       <span v-if="status" class="preset__status" :class="{ 'preset__status--previewing': !applied }">{{ status }}</span>
     </span>

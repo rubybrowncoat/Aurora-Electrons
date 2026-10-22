@@ -1,7 +1,7 @@
 <template>
   <v-card class="panel" data-summary="What the ship is for, written as limits the finished ship must meet and preferences that only order the ships that meet them. Every alternative is judged against the limits, and each limit reads pass, fail or unknown with the figure found, the figure required and the reason. A preset fills the fields as a starting point to edit." elevation="1" data-brief="panel">
     <div class="panel-head">
-      <span>Mission brief<v-chip v-if="dirty" x-small color="warning" outlined class="ml-2" data-brief="dirty-chip">Unsaved changes</v-chip><v-chip v-if="draft.preset" x-small outlined class="ml-2" data-brief="preset-chip">From {{ presetLabel(draft.preset) }}</v-chip></span>
+      <span>Mission brief<v-chip v-if="dirty" x-small color="warning" outlined class="ml-2" data-brief="dirty-chip">{{ briefWords.unsaved }}</v-chip><v-chip v-if="draft.preset" x-small outlined class="ml-2" data-brief="preset-chip">From {{ presetLabel(draft.preset) }}</v-chip></span>
       <span class="d-flex align-center flex-wrap">
         <v-menu offset-y>
           <template #activator="{ on, attrs }">
@@ -24,7 +24,7 @@
 
     <div class="panel-body">
       <v-alert v-if="pending" type="warning" outlined dense class="mb-3" data-brief="discard">
-        The brief has unsaved changes. Discard them to open {{ pending.blank ? 'a blank brief' : 'the other brief' }}?
+        <span data-brief="question">{{ pending.blank ? briefWords.discardBlank : briefWords.discardOther }}</span>
         <v-btn small text class="ml-2" data-brief="discard-yes" @click="$emit('discard')">Discard</v-btn>
         <v-btn small text data-brief="discard-no" @click="$emit('keep')">Keep editing</v-btn>
       </v-alert>
@@ -151,12 +151,12 @@
                   </thead>
                   <tbody>
                     <tr v-for="requirement in item.requirements" :key="requirement.key" :data-brief-requirement="requirement.key">
-                      <td>{{ requirement.label }}<v-chip v-if="requirement.kind === 'optional'" x-small outlined class="ml-2">Optional</v-chip></td>
-                      <td><v-chip x-small label :color="requirementColor(requirement.verdict)" outlined>{{ requirement.verdict }}</v-chip></td>
-                      <td class="text-right text-no-wrap">{{ requirement.required === null ? '—' : amount(requirement.key, requirement.required) }}</td>
-                      <td class="text-right text-no-wrap">{{ requirement.actual === null ? 'Unknown' : amount(requirement.key, requirement.actual) }}<provenance-mark v-if="requirement.figure" :result="requirement.figure" /></td>
-                      <td data-brief-unit>{{ unitOf(requirement) }}</td>
-                      <td>{{ requirement.reason }}</td>
+                      <td data-brief-cell="label">{{ requirement.label }}<v-chip v-if="requirement.kind === 'optional'" x-small outlined class="ml-2">Optional</v-chip></td>
+                      <td data-brief-cell="verdict"><v-chip x-small label :color="requirementColor(requirement.verdict)" outlined>{{ requirement.verdict }}</v-chip></td>
+                      <td class="text-right text-no-wrap" data-brief-cell="required">{{ requirement.required === null ? '—' : amount(requirement.key, requirement.required) }}</td>
+                      <td class="text-right text-no-wrap" data-brief-cell="actual">{{ requirement.actual === null ? 'Unknown' : amount(requirement.key, requirement.actual) }}<provenance-mark v-if="requirement.figure" :result="requirement.figure" /></td>
+                      <td data-brief-cell="unit">{{ unitOf(requirement) }}</td>
+                      <td data-brief-cell="reason">{{ requirement.reason }}</td>
                     </tr>
                   </tbody>
                 </v-simple-table>
@@ -177,7 +177,7 @@
 import ProvenanceMark from '../page/ProvenanceMark.vue'
 import countFormat from '../../mixins/count-format'
 import { TONS_PER_HS } from '../../utilities/design-rules'
-import { AXES, REQUIREMENTS, axisOf, describeCounts, parseField, requirementOf, shownIn, typedText, typedUnit } from '../../utilities/mission-briefs'
+import { AXES, BRIEF_WORDS, REQUIREMENTS, axisOf, describeCounts, parseField, requirementOf, shownIn, typedText, typedUnit } from '../../utilities/mission-briefs'
 
 const VERDICTS = { meets: 'Meets', open: 'Open', fails: 'Fails', none: 'No requirement' }
 const VERDICT_COLORS = { meets: 'success', open: 'warning', fails: 'error', none: undefined }
@@ -222,6 +222,9 @@ export default {
     },
     classifications() {
       return CLASSIFICATIONS
+    },
+    briefWords() {
+      return BRIEF_WORDS
     },
     classificationHint() {
       return requirementOf('classification').hint

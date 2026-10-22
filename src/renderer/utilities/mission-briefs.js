@@ -79,6 +79,9 @@ export const REQUIREMENT_KEYS = Object.freeze(REQUIREMENTS.map((definition) => d
 
 export const requirementOf = (key) => REQUIREMENTS.find((definition) => definition.key === key) || null
 
+// The words the brief panel draws for the state of the draft: the chip beside its title while the draft holds changes that are not saved, and the question asked before such changes are dropped to open a blank brief or another one.
+export const BRIEF_WORDS = Object.freeze({ unsaved: 'Unsaved changes', discardBlank: 'The brief has unsaved changes. Discard them to open a blank brief?', discardOther: 'The brief has unsaved changes. Discard them to open the other brief?' })
+
 // The figures a preference can order by, with the direction a player most likely wants first.
 export const AXES = Object.freeze([
   Object.freeze({ figure: 'costBP', label: 'BP of the propulsion', direction: 'min', unit: 'BP' }),
@@ -224,6 +227,9 @@ const typedScale = (definition, sizeUnit) => (definition.key === 'maxSizeHS' && 
 // The unit a requirement is typed and shown in.
 export const typedUnit = (definition, { sizeUnit = 'hs' } = {}) => (definition.key === 'maxSizeHS' && sizeUnit === 'tons' ? 'tons' : definition.input.unit)
 
+// The words a field of a brief shows in place of its hint when its text is refused.
+export const FIELD_ERRORS = Object.freeze({ notAFigure: 'Enter a number above 0, or leave it empty.', notAPercent: 'Enter a percent from 1 to 100.', notAField: 'Not a field of a brief.' })
+
 // What a typed text is as a field of a brief: `{ ok, value }`, or `{ ok: false, error }` for text that is not a positive number (an empty text clears the field, and the cruise power is typed in percent from 1 to 100).
 export const parseField = (key, text, { sizeUnit = 'hs' } = {}) => {
   const source = String(text === null || text === undefined ? '' : text).trim()
@@ -235,16 +241,16 @@ export const parseField = (key, text, { sizeUnit = 'hs' } = {}) => {
   const number = Number(source)
 
   if (key === 'cruiseShare') {
-    return Number.isFinite(number) && number >= 1 && number <= 100 ? { ok: true, value: number / 100 } : { ok: false, error: 'Enter a percent from 1 to 100.' }
+    return Number.isFinite(number) && number >= 1 && number <= 100 ? { ok: true, value: number / 100 } : { ok: false, error: FIELD_ERRORS.notAPercent }
   }
 
   const definition = requirementOf(key)
 
   if (!definition || definition.values) {
-    return { ok: false, error: 'Not a field of a brief.' }
+    return { ok: false, error: FIELD_ERRORS.notAField }
   }
 
-  return Number.isFinite(number) && number > 0 ? { ok: true, value: number * typedScale(definition, sizeUnit) } : { ok: false, error: 'Enter a number above 0, or leave it empty.' }
+  return Number.isFinite(number) && number > 0 ? { ok: true, value: number * typedScale(definition, sizeUnit) } : { ok: false, error: FIELD_ERRORS.notAFigure }
 }
 
 // A draft with one field changed to `value` (a requirement key, 'cruiseShare' or 'name'), as a new object.

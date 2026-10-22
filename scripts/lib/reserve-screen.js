@@ -1,19 +1,19 @@
-// What the reserves panel shows and does in the real app: the renderer served by Vite (scripts/lib/page-server.js) with the real Vue and the real Vuetify, in Chromium, over a copy of a save. Where the panel is mounted, whether it can be seen, which component the page resolved, the props it was given, the classes of its root element the effect of a real click on each of its buttons and every cell of its table (as the text it draws, taken from the text nodes whose element is on screen, and each quantity from the element that draws it, by its role in `data-reserve-value`, with whether that element is on screen, an opacity of nought on it or on an ancestor included) are read from the page in the browser, and none of it is worked out from the template or from the virtual nodes it renders.
+// What the reserves panel shows and does in the real app: the renderer served by Vite (scripts/lib/page-server.js) with the real Vue and the real Vuetify, in Chromium, over a copy of a save. Where the panel is mounted, whether it can be seen, which component the page resolved, the props it was given, the classes of its root element the effect of a real click on each of its buttons and every cell of its table are read from the page in the browser, and none of it is worked out from the template or from the virtual nodes it renders. What is on screen and the text a part draws are read by the shared readers of scripts/lib/browser-observe.js (`installScreen`: `visible`, `visibleText` and, for each quantity by its role in `data-reserve-value` and each name by its role in `data-reserve-name`, `hooked`).
 //
 // const { observeScreen } = require('./lib/reserve-screen')
 // const seen = await observeScreen(browser, server.url, { logistics: true, hauling: true, actions: true, cells: [fixtureSpec, ...] })
 //
 // `seen` is the record of scripts/lib/browser-observe.js `observe`: its `value` is { logistics, hauling, actions, cells } for the parts asked for, `cells` keyed by the fixture's name, and the page errors, the console errors (those Vue catches included) and the failed requests are in it. No error is named in advance, so a page that raises one has an observation that says so.
 const pageLoading = require('../page-loading')
-const { observe } = require('./browser-observe')
+const { observe, installScreen } = require('./browser-observe')
 
 const TIMEOUT = 120000
 // The first request of a server that was just started (Vite transforms and bundles the app for this process alone) may take minutes on a busy machine; what follows is bounded by TIMEOUT.
 const OPEN_TIMEOUT = 300000
 const LOADING_LIMIT = 45000
 const NAMES = { game: 'Aurelian Empire', race: 'Aurelian Empire' }
-// A control that is not on screen is not pressed: a click waits this long for a control to be visible, enabled and still before it gives up.
-const CLICK_WAIT = 6000
+// A control is pressed when it is on screen and enabled once the panel's own work is done (no write of the panel in progress); one that is not is not pressed, at once, and that is what is observed. Only the wait for that work and the click itself are bounded, by TIMEOUT, and either running out is a failure of the observation, never a control that was not pressed.
+const idle = (page) => page.waitForFunction(() => !document.querySelector('[data-reserve-panel]') || !window.__reservePanel().busy, null, { timeout: TIMEOUT })
 
 // Run in the page. The panels the page draws, as the page and the browser have them.
 const panelsOfPage = () => {
@@ -30,14 +30,13 @@ const panelsOfPage = () => {
 
   return [...document.querySelectorAll('[data-reserve-panel]')].map((element) => {
     const vm = instanceOf(element)
-    const box = element.getBoundingClientRect()
     const card = element.parentElement ? element.parentElement.closest('.v-card') : null
     const plan = element.closest('[data-hauling-plan]')
     const same = (name, hostName) => Boolean(vm) && vm[name] === host[hostName || name] && vm[name] !== undefined && vm[name] !== null
 
     return {
       resolved: Boolean(vm),
-      visible: box.width > 0 && box.height > 0 && element.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true }),
+      visible: window.__screen.visible(element),
       classes: [...element.classList],
       summary: element.getAttribute('data-summary'),
       vmSummary: vm ? vm.summary : null,
@@ -47,40 +46,14 @@ const panelsOfPage = () => {
       timedCount: vm && Array.isArray(vm.timed) ? vm.timed.length : null,
       planCount: host.plan && Array.isArray(host.plan.hauls) ? host.plan.hauls.length : null,
       inPlanCard: Boolean(plan),
-      planCardOnScreen: plan ? window.__onScreen(plan) : false,
+      planCardOnScreen: plan ? window.__screen.visible(plan) : false,
       cardSummary: card ? card.getAttribute('data-summary') : null,
     }
   })
 }
 
-// Run in the page, once. The panel's component instance, and the test of what is on screen: a layout box that display, visibility, content-visibility and opacity of the element and of its ancestors leave drawn.
+// Run in the page, once. The panel's component instance.
 const defineHandle = () => {
-  window.__onScreen = (element) => {
-    const box = element.getBoundingClientRect()
-
-    return box.width > 0 && box.height > 0 && element.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true })
-  }
-  // The text an element draws and nothing else: each text node counts when the element it sits in is on screen (a layout box for the text itself, and display, visibility, content-visibility and opacity of that element and of its ancestors leave it drawn). A hidden descendant adds nothing to the text of a visible container. Spaces are collapsed.
-  window.__visibleText = (element) => {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
-    const range = document.createRange()
-    let text = ''
-
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const parent = node.parentElement
-
-      range.selectNodeContents(node)
-
-      if (parent && parent.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true }) && [...range.getClientRects()].some((box) => box.width > 0 && box.height > 0)) {
-        text += node.data
-      }
-    }
-
-    return text.replace(/\s+/g, ' ').trim()
-  }
-  // The elements that draw a quantity, each with its role (`data-reserve-value`), the text it draws and whether it is on screen.
-  window.__names = (element) => [...element.querySelectorAll('[data-reserve-name]')].map((one) => ({ name: one.getAttribute('data-reserve-name'), text: window.__visibleText(one), on: window.__onScreen(one) }))
-  window.__values = (element) => [...element.querySelectorAll('[data-reserve-value]')].map((one) => ({ role: one.getAttribute('data-reserve-value'), text: window.__visibleText(one), on: window.__onScreen(one) }))
   window.__reservePanel = () => {
     let vm = document.querySelector('[data-reserve-panel]').__vue__
 
@@ -151,6 +124,7 @@ const boot = async (page, url) => {
 
   await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: OPEN_TIMEOUT })
   await settle()
+  await installScreen(page)
   await page.evaluate(defineHandle)
 
   return { page, settle, go }
@@ -181,7 +155,7 @@ const haulingPart = async ({ page, settle, go }) => {
   // The switch is the one the page marks with its hook, and its control is the switch element around that input.
   const switches = page.locator('.v-input--switch').filter({ has: page.locator('[data-hauling-fill-reserves]') })
   const switchCount = await page.locator('[data-hauling-fill-reserves]').count()
-  const visible = switchCount === 1 && (await switches.count()) === 1 ? await switches.first().evaluate((element) => window.__onScreen(element)) : false
+  const visible = switchCount === 1 && (await switches.count()) === 1 ? await switches.first().evaluate((element) => window.__screen.visible(element)) : false
   const flips = [await read()]
 
   if (visible) {
@@ -200,20 +174,15 @@ const haulingPart = async ({ page, settle, go }) => {
 const actionsPart = async ({ page, settle, go }) => {
   await go('/hauling')
 
-  const shown = (selector) => page.locator(selector).evaluateAll((elements) => elements.filter((element) => window.__onScreen(element)).length)
+  const shown = (selector) => page.locator(selector).evaluateAll((elements) => elements.filter((element) => window.__screen.visible(element)).length)
   const press = async (selector) => {
-    try {
-      await page.waitForFunction((css) => [...document.querySelectorAll(css)].some((element) => window.__onScreen(element)), selector, { timeout: CLICK_WAIT })
-      await page.locator(selector).first().click({ timeout: CLICK_WAIT })
-    } catch (error) {
-      // A control that is not on screen or not enabled for this long is not pressed: that is what is observed. Anything else is a failure of the observation.
-      if (error.name !== 'TimeoutError') {
-        throw error
-      }
+    await idle(page)
 
+    if (!(await page.evaluate((css) => [...document.querySelectorAll(css)].some((element) => window.__screen.visible(element) && !element.disabled), selector))) {
       return false
     }
 
+    await page.locator(selector).first().click({ timeout: TIMEOUT })
     await page.evaluate(async () => { await window.$app.$nextTick() })
     await page.waitForTimeout(150)
 
@@ -221,7 +190,7 @@ const actionsPart = async ({ page, settle, go }) => {
   }
   // Setup written through the panel's own repository and then told to the panel, as the panel does after a write of its own.
   const act = (body, arg) => page.evaluate(body, arg)
-  const reasons = () => page.evaluate(() => [...document.querySelectorAll('[data-reserve-reason]')].filter((element) => window.__onScreen(element)).map((element) => window.__visibleText(element)))
+  const reasons = () => page.evaluate(() => [...document.querySelectorAll('[data-reserve-reason]')].filter((element) => window.__screen.visible(element)).map((element) => window.__screen.visibleText(element)))
   const entryOf = (scenario) => act((name) => {
     const entry = window.__reservePanel().entries.find((one) => one.scenario === name)
 
@@ -245,8 +214,8 @@ const actionsPart = async ({ page, settle, go }) => {
 
     const alert = document.querySelector('[data-reserve-message]')
 
-    // The state the save ended in, not its words: the kind of the message, and whether the alert that carries it is on screen with it.
-    return { type: vm.messageType, said: vm.message !== '', shown: Boolean(alert) && window.__onScreen(alert) && window.__visibleText(alert).includes(vm.message) }
+    // The kind of the message as the panel holds it, whether the alert that carries the message is on screen, and the words the alert draws beside the panel's own words for a write (`saveWords`), which the check reads them back through.
+    return { type: vm.messageType, said: vm.message !== '', shown: Boolean(alert) && window.__screen.visible(alert), text: alert ? window.__screen.visibleText(alert) : null, words: { ...(vm.saveWords || {}) } }
   }, { name: scenario, amount: reserve })
   // A record written under another identity of the colony, or at a later game time, through the repository, as a save of another game would have left it.
   const write = (scenario, how) => act(async ({ name, how: mode }) => {
@@ -408,15 +377,16 @@ const mountFixture = async (spec) => {
 
   await new Promise((resolve) => setTimeout(resolve, 150))
 
-  return { ready, problems, separator: spec.setting || getters.config.get('selectedSeparator', 'Tick'), statusWords: { ...vm.statusWords }, timingWords: { ...vm.timingWords }, listed: vm.items.length }
+  return { ready, problems, separator: spec.setting || getters.config.get('selectedSeparator', 'Tick'), statusWords: { ...vm.statusWords }, timingWords: { ...vm.timingWords }, minimumWords: JSON.parse(JSON.stringify(vm.minimumWords || {})), listed: vm.items.length }
 }
 
-// Run in the page. What the table of a fixture shows: for each row, each cell as the text it draws (only the text of elements that are on screen) and whether it is on screen, the quantities in it each from the element that draws it, with its role, the marks of the cells with the rule each stands for, and the status chips with their words.
+// Run in the page. What the table of a fixture shows: for each row, each cell as the text it draws (only the text of elements that are on screen) and whether it is on screen, the quantities and the names in it each from the element that draws it, with its role, the marks of the cells with the rule each stands for, and the status chips with their words.
 const readFixture = (name) => {
   const container = document.querySelector(`[data-cells-fixture="${name}"]`)
-  const drawn = (element) => ({ text: window.__visibleText(element), on: window.__onScreen(element), values: window.__values(element), names: window.__names(element) })
+  const { visible, visibleText, hooked } = window.__screen
+  const drawn = (element) => ({ text: visibleText(element), on: visible(element), values: hooked(element, 'data-reserve-value'), names: hooked(element, 'data-reserve-name') })
   const cells = (row, attribute) => [...row.querySelectorAll(`[${attribute}]`)].map((element) => ({ ...drawn(element), state: element.getAttribute(attribute) }))
-  const marks = (row, attribute) => [...row.querySelectorAll(`[${attribute}]`)].flatMap((element) => [...element.closest('td').querySelectorAll('.provenance-mark')].map((mark) => ({ rule: mark.__vue__ ? mark.__vue__.rule : null, on: window.__onScreen(mark) })))
+  const marks = (row, attribute) => [...row.querySelectorAll(`[${attribute}]`)].flatMap((element) => [...element.closest('td').querySelectorAll('.provenance-mark')].map((mark) => ({ rule: mark.__vue__ ? mark.__vue__.rule : null, on: visible(mark) })))
   const isChip = (element) => element.getAttributeNames().some((attribute) => /^data-reserve-.+-chip$/.test(attribute))
   const rows = [...container.querySelectorAll('[data-reserve-source]')].map((source) => {
     const row = source.closest('tr')
@@ -437,7 +407,7 @@ const readFixture = (name) => {
   const panel = container.querySelector('[data-reserve-panel]')
 
   return {
-    root: panel ? { summary: panel.getAttribute('data-summary'), on: window.__onScreen(panel) } : null,
+    root: panel ? { summary: panel.getAttribute('data-summary'), on: visible(panel) } : null,
     headers: [...container.querySelectorAll('thead th')].map(drawn),
     rows,
     shortfalls: [...container.querySelectorAll('[data-reserve-shortfall]')].map((line) => ({ id: line.getAttribute('data-reserve-shortfall'), ...drawn(line) })),
@@ -445,7 +415,7 @@ const readFixture = (name) => {
   }
 }
 
-// Run in the page. What the detail of an expanded row shows: the lines of the run and of the timeline, each as its text, its quantities with their roles, and whether it is on screen.
+// Run in the page. What the detail of an expanded row shows: the lines of the run and of the timeline, each as its text, its quantities and names with their roles, and whether it is on screen.
 const readDetail = ({ name, key }) => {
   const container = document.querySelector(`[data-cells-fixture="${name}"]`)
   const detail = container.querySelector(`[data-reserve-detail="${key}"]`)
@@ -454,10 +424,11 @@ const readDetail = ({ name, key }) => {
     return null
   }
 
-  const drawn = (element) => ({ text: window.__visibleText(element), on: window.__onScreen(element), values: window.__values(element), names: window.__names(element) })
+  const { visible, visibleText, hooked } = window.__screen
+  const drawn = (element) => ({ text: visibleText(element), on: visible(element), values: hooked(element, 'data-reserve-value'), names: hooked(element, 'data-reserve-name') })
   const lines = (selector) => [...detail.querySelectorAll(selector)].map((line) => ({ id: line.getAttribute('data-reserve-event-id'), kind: line.getAttribute('data-reserve-event'), ...drawn(line) }))
 
-  return { on: window.__onScreen(detail), run: lines('[data-reserve-run] > .resource-reserves__line'), events: lines('[data-reserve-event]') }
+  return { on: visible(detail), run: lines('[data-reserve-run] > .resource-reserves__line'), events: lines('[data-reserve-event]') }
 }
 
 // Run in the page. The fixture taken away, with the records it kept.
@@ -494,17 +465,13 @@ const cellsPart = async ({ page }, specs) => {
     for (const key of opened.ready ? spec.expand : []) {
       const toggle = page.locator(`[data-cells-fixture="${spec.name}"] tr`).filter({ has: page.locator(`[data-reserve-source="${key}"]`) }).locator('.v-data-table__expand-icon').first()
 
-      try {
-        await toggle.click({ timeout: CLICK_WAIT })
-      } catch (error) {
-        // A toggle that is not on screen is not clicked, and the detail is not read: that is what is observed.
-        if (error.name !== 'TimeoutError') {
-          throw error
-        }
-
+      // A toggle that is not on screen once the fixture is mounted is not clicked, and the detail is not read: that is what is observed.
+      if (!(await toggle.count()) || !(await toggle.evaluate((element) => window.__screen.visible(element)))) {
         details[key] = null
         continue
       }
+
+      await toggle.click({ timeout: TIMEOUT })
 
       await page.evaluate(async () => { await window.$app.$nextTick() })
       await page.waitForTimeout(150)

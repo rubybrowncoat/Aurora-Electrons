@@ -5,11 +5,11 @@
 
   - Fixtures: an in-memory save whose race holds contacts now (one with a lost track beside a current one, and ones with a track whose time is not stored), contacts last detected long ago (ships, a salvo, a colony, the old track of a ship that moved on), contacts lost one sub-pulse before the game time and one a year before it, a colony held now with ground units of both kinds and a lost shipyard beside a ship of another empire that has the colony's id, empires of unknown, allied and friendly standing, systems with contacts of two empires, and a game whose time is not stored. Each check reads the rows the warning returns back through the module's word tables and compares them, system by system, with what is written here: the name, the counts, the inputs missing, each empire named under the system by its id (its name, its contacts by type, whether it is marked hostile) and the place the row's link opens; and the order of the systems with their ids.
   - Saves, read only: AuroraDB.db (game 140, race 784), saves/AuroraDB.db (game 138, race 785, which holds systems whose contacts are all lost) and saves/AuroraDB_271_skoormit_saved.db (game 138, race 785): the rows of the warning against SQL written here from the game's rules, and the flyout line against the systems the warning lists.
-  - The page in a browser: the real renderer serves saves/AuroraDB.db (scripts/lib/page-server.js), the race is picked and the Warnings page opened on the check; once the page's own read of the check has settled on the copy of the save it shows, the page's section is hovered in the rail and, once the flyout's line under the page has settled, the rows a player can see are read (text nodes of shown elements only: the system, the contacts and the line naming each empire; the place the row's link opens, from the link shown) and compared with the SQL by the ids of the systems and empires, and the count of the flyout's line with the warnings shown.
-  - Planted faults in copies of the rule, the shared condition, the flyout line and the page, each of which must make a check named for it fail by an assertion of its own (scripts/lib/fault-credit.js; a fault served to the browser is judged on what the page then shows), and benign rewrites (an explicit prop and event instead of v-model, a longhand v-on, a qualifier moved from the front to the back, synonyms in generated prose, the empires of a system named in another order, a parenthesised condition, the condition written the other way round) that must make none fail, alone and all together.
+  - The page in a browser: the real renderer serves saves/AuroraDB.db (scripts/lib/page-server.js), the race is picked and the Warnings page opened on the check; once the page's own read of the check has settled on the copy of the save it shows, the page's section is hovered in the rail and, once the flyout's line under the page has settled, the screen is read the way every page check reads it (scripts/lib/browser-observe.js: `installScreen`, `hooked`, `readFigure`, `rolesRead`, `pairedBy`, `labelKey`). The hooks only find the elements: each row a player can see is paired with the SQL by the id of its system, never by its place; its name, its contacts and the line naming each empire are read by their roles from the text drawn and compared by the ids of the empires; the group a row is shown in is the reason the words of the line over it give, read back through the page's table of them (SEPARATOR_WORDS of utilities/warnings/common.js) with the number on that line; figures are read whole and signed in the grouping of the app's setting; the place the row's link opens is read from the link on screen; and the count of the flyout's line is compared with the warnings shown.
+  - Planted faults in copies of the rule, the shared condition, the flyout line, the words of the page and the page, one for each way the code can be wrong, each of which must make a check named for it fail by an assertion of its own on a value, never by a call of the code under test that threw (scripts/lib/fault-credit.js `caughtBy`, which stops the run when only a throw would credit a fault; a fault served to the browser is judged on what the page then shows, and a page that does not get through stops the run, as nothing may be credited with it), and benign rewrites, one of each family (an explicit prop and event instead of v-model, a longhand v-on, a qualifier moved from the front to the back, a synonym in generated prose, the empires of a system named in another order, a parenthesised condition, a cell's binding written another way that draws the same text, full opacity on the check), that must make none fail, alone and all together.
   - Controls of the harness: an assertion of a check is told from an error of the code under test.
 
-  The word tables of the module (CONTACT_WORDS, OPEN_INPUTS, RACE_WORDS, WARNINGS_PEEK_WORDS) are reviewed prose: a check reads a line back through them and never asks for a wording. Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped. It needs Playwright's Chromium for the browser part; with --no-browser the faults of the page are not planted, and those of the code are judged by the other checks.
+  The word tables of the module (CONTACT_WORDS, OPEN_INPUTS, RACE_WORDS, WARNINGS_PEEK_WORDS, SEPARATOR_WORDS) are reviewed prose: a check reads a line back through them and never asks for a wording. Prints `N of N checks passed`; any failed check sets exit code 1. A save that is not there fails its checks: none is skipped. It needs Playwright's Chromium for the browser part; with --no-browser the faults of the page are not planted, and those of the code are judged by the other checks.
 */
 const fs = require('fs')
 const path = require('path')
@@ -18,7 +18,7 @@ const rawAssert = require('./lib/bounded-assert')
 const { loadUtilities } = require('./lib/utilities')
 const { patched } = require('./lib/mutant-source')
 const { startPageServer } = require('./lib/page-server')
-const { observe, failedObservation, report, HarnessError } = require('./lib/browser-observe')
+const { observe, failedObservation, report, HarnessError, installScreen, GROUPINGS, readFigure, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { assert, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 const pageLoading = require('./page-loading')
 
@@ -70,10 +70,9 @@ const lazy = (make) => {
   }
 }
 
-const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-// The app's separator for the reads in Node: the default of the "Thousands Separator" setting.
-const SEPARATOR = '\''
+// The grouping of the reads in Node, the default of the "Thousands Separator" setting, and the character the module is given to write it with.
+const GROUPING = 'Tick'
+const SEPARATOR = GROUPINGS[GROUPING]
 
 // ---------- reading a line back ----------
 
@@ -89,33 +88,26 @@ const wordsOf = (table, label) => {
   return map
 }
 
-// A figure as written: whole digits grouped in threes by the separator, with an optional sign (ASCII '-', U+2212 or '+'); anything else is no figure.
-const figureOf = (separator, text, label) => {
-  const match = new RegExp(`^([-+\\u2212])?(\\d{1,3}(?:${escapeRegex(separator)}\\d{3})+|\\d+)$`).exec(text)
+// A figure followed by words, read whole: every way of cutting the text at a space into a figure of the grouping (scripts/lib/browser-observe.js `readFigure`: whole, signed, grouped as the setting groups) and words that `kindOf` reads back to a kind (null or undefined for words of no kind), of which exactly one must read. Returns [kind, figure].
+const figureAndWords = (text, grouping, kindOf, label) => {
+  const reads = [...text.matchAll(/ /g)].map(({ index }) => [kindOf(text.slice(index + 1)), readFigure(text.slice(0, index), grouping)]).filter(([kind, figure]) => kind !== null && kind !== undefined && figure !== null)
 
-  assert.ok(match, `${label}: "${text}" is no whole figure`)
+  assert.ok(reads.length === 1, `${label}: "${text}" ${reads.length ? `reads ${reads.length} ways` : 'is no figure followed by words of the table'}`)
 
-  const value = Number(match[2].split(separator).join(''))
-
-  return match[1] === '-' || match[1] === '\u2212' ? -value : value
+  return reads[0]
 }
 
-// A list of counts ('7 Hostile Ships, 1 Hostile Population') read back as { kind: count } through a word table; a part that is not a figure followed by an entry of the table fails the read.
-const countsOf = (separator, words, text, label) => {
+// A list of counts ('7 Hostile Ships, 1 Hostile Population') read back as { kind: count } through a word table, the figures in `grouping`; a part that is not a figure followed by an entry of the table fails the read.
+const countsOf = (grouping, words, text, label) => {
   assert.ok(typeof text === 'string' && text.length > 0, `${label}: nothing is shown`)
 
   const counts = {}
 
   text.split(', ').forEach((part) => {
-    const match = new RegExp(`^([-+\\u2212]?(?:\\d{1,3}(?:${escapeRegex(separator)}\\d{3})+|\\d+)) (.+)$`).exec(part)
+    const [kind, count] = figureAndWords(part, grouping, (form) => words.get(form), label)
 
-    assert.ok(match, `${label}: "${part}" is no figure followed by words`)
-
-    const kind = words.get(match[2])
-
-    assert.ok(kind !== undefined, `${label}: "${match[2]}" is in no entry of the word table`)
     assert.ok(counts[kind] === undefined, `${label}: ${kind} is counted twice in "${text}"`)
-    counts[kind] = figureOf(separator, match[1], label)
+    counts[kind] = count
   })
 
   return counts
@@ -123,14 +115,10 @@ const countsOf = (separator, words, text, label) => {
 
 const sortedEntries = (record) => Object.entries(record).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 
-// The flyout line's count of the systems with intruders, read back through its word table with `separator` grouping the figures: the line for none, or the figure of the intruders' entry (0 when the line has no such part).
-const peekCount = (ctx, separator, line, label) => {
-  if (line === ctx.peeks.WARNINGS_PEEK_WORDS.none) {
-    return 0
-  }
-
-  const counted = Object.fromEntries(Object.entries(ctx.peeks.WARNINGS_PEEK_WORDS).filter(([kind]) => kind !== 'none'))
-  const counts = countsOf(separator, wordsOf(counted, label), line, label)
+// The flyout line's count of the systems with intruders, read back whole through its word table with the figures in `grouping`: the table's line for none, or a list of counts in which each kind of the table is named at most once. The line names only the kinds it counts some of, so a kind it leaves out is 0; any other line fails the read.
+const peekCount = (ctx, grouping, line, label) => {
+  const { none, ...counted } = ctx.peeks.WARNINGS_PEEK_WORDS
+  const counts = line === none ? {} : countsOf(grouping, wordsOf(counted, label), line, label)
 
   return counts.intruders === undefined ? 0 : counts.intruders
 }
@@ -155,7 +143,7 @@ const missingKinds = (ctx, result, label) => {
 }
 
 // The line under a system that names each empire with contacts there, read back as [{ name, counts, hostile }]: the empires are parted by '; ' and the parts of each by ' — ' (the name, which may itself hold ' — ', then the counts, then the hostile mark of RACE_WORDS when there is one); the counts are read through the word table of the counts, as the words of a type whatever the standing, and the module's word for an empire whose name is not stored reads as no name (null). A part that reads as none of these fails the read.
-const racesOf = (ctx, separator, text, label) => {
+const racesOf = (ctx, grouping, text, label) => {
   assert.ok(typeof text === 'string' && text.length > 0, `${label}: no empire is named`)
 
   return text.split('; ').map((part) => {
@@ -166,7 +154,7 @@ const racesOf = (ctx, separator, text, label) => {
 
     assert.ok(named > 0 && name.length > 0, `${label}: "${part}" names no empire`)
 
-    const counts = Object.fromEntries(Object.entries(countsOf(separator, ctx.words, pieces[named], `${label}: the contacts of "${name}"`)).map(([kind, count]) => {
+    const counts = Object.fromEntries(Object.entries(countsOf(grouping, ctx.words, pieces[named], `${label}: the contacts of "${name}"`)).map(([kind, count]) => {
       assert.ok(kind.startsWith('neutral '), `${label}: the contacts of "${name}" are counted as ${kind}, not by type`)
 
       return [kind.slice('neutral '.length), count]
@@ -176,11 +164,11 @@ const racesOf = (ctx, separator, text, label) => {
   })
 }
 
-// A stored text as a page shows it: runs of white space drawn as one space, none at the ends (a save stores some empire names with a leading space).
-const asShown = (text) => text.replace(/\s+/g, ' ').trim()
+// A stored text as the browser draws it: runs of the white space it collapses (ASCII spaces, tabs and line breaks) drawn as one space, none at the ends (a save stores some empire names with a leading space); every other character, the spaces of Unicode included, as stored.
+const asShown = (text) => text.replace(/[ \t\n\r]+/g, ' ').replace(/^ | $/g, '')
 
-// The empires a row names against those expected, by the id of each: a name shown stands for the empire whose stored name reads as it (through `shown`: as stored for the rows the module returns, `asShown` for the page) among those with contacts in the system (no name for the one whose name is not stored), so a name that no such empire has, or two of them named alike, fail; then each empire's contacts by type and its hostile mark are compared with its own.
-const expectRaces = (seen, want, label, shown = (name) => name) => {
+// The empires a line names, each by the id of the empire it stands for: a name shown stands for the empire whose stored name reads as it (through `shown`: as stored for the rows the module returns, `asShown` for the page) among those with contacts in the system (no name for the one whose name is not stored), so a name that no such empire has, or two of them named alike, fail. Returns { id: { counts, hostile } }.
+const racesById = (seen, want, label, shown = (name) => name) => {
   const byName = new Map()
 
   Object.entries(want).forEach(([id, race]) => {
@@ -197,22 +185,38 @@ const expectRaces = (seen, want, label, shown = (name) => name) => {
 
     assert.ok(id !== undefined, `${label}: "${race.name}" is named, which is no empire with contacts there (${[...byName.keys()].join(', ')})`)
     assert.ok(!named[id], `${label}: the empire ${id} is named twice`)
-    named[id] = { counts: sortedEntries(race.counts), hostile: race.hostile }
+    named[id] = { counts: race.counts, hostile: race.hostile }
   })
 
+  return named
+}
+
+// The empires of a line by id, as `racesById` gives them and as the oracle holds them, as one text to compare whole.
+const racesText = (races) => JSON.stringify(sortedEntries(races).map(([id, race]) => [id, sortedEntries(race.counts), race.hostile]))
+
+// The empires a row names against those expected, by the id of each (`racesById`); then each empire's contacts by type and its hostile mark are compared with its own.
+const expectRaces = (seen, want, label, shown) => {
+  const named = racesById(seen, want, label, shown)
+
   assert.deepEqual(Object.keys(named).sort(), Object.keys(want).sort(), `${label}: the empires named`)
-  Object.entries(want).forEach(([id, race]) => assert.deepEqual(named[id], { counts: sortedEntries(race.counts), hostile: race.hostile }, `${label}: the contacts and the hostile mark of the empire ${id} (${race.name})`))
+  Object.entries(want).forEach(([id, race]) => assert.deepEqual({ counts: sortedEntries(named[id].counts), hostile: named[id].hostile }, { counts: sortedEntries(race.counts), hostile: race.hostile }, `${label}: the contacts and the hostile mark of the empire ${id} (${race.name})`))
 }
 
 // The place a row's link must open: the Galaxy Map on the row's system, by the id the row is keyed by.
 const linkFor = (id) => ({ path: '/map', system: id.slice('system:'.length) })
 
-// The rows of the warning by id: { state, name, counts, missing, tone, races, link }.
-const rowsSeen = (ctx, rows) => Object.fromEntries(rows.map((row) => {
-  const label = `the row ${row.id}`
+// The rows of the warning by id: { state, name, counts, missing, tone, races, link }. An id listed twice fails the read, so neither row can stand for the other.
+const rowsSeen = (ctx, rows) => {
+  const ids = rows.map((row) => row.id)
 
-  return [row.id, { state: row.unevaluated ? 'unevaluated' : 'warning', name: textOf(row.cells.system), counts: countsOf(SEPARATOR, ctx.words, textOf(row.cells.contacts), `the contacts of ${label}`), missing: missingKinds(ctx, row.unevaluated || row.cells.contacts.result, label), tone: row.cells.contacts.tone || null, races: racesOf(ctx, SEPARATOR, row.caption, `the empires of ${label}`), link: row.link ? { path: row.link.path, system: row.link.query ? row.link.query.system : undefined } : null }]
-}))
+  assert.deepEqual(ids.filter((id, index) => ids.indexOf(id) !== index), [], 'the ids of the rows listed twice')
+
+  return Object.fromEntries(rows.map((row) => {
+    const label = `the row ${row.id}`
+
+    return [row.id, { state: row.unevaluated ? 'unevaluated' : 'warning', name: textOf(row.cells.system), counts: countsOf(GROUPING, ctx.words, textOf(row.cells.contacts), `the contacts of ${label}`), missing: missingKinds(ctx, row.unevaluated || row.cells.contacts.result, label), tone: row.cells.contacts.tone || null, races: racesOf(ctx, GROUPING, row.caption, `the empires of ${label}`), link: row.link ? { path: row.link.path, system: row.link.query ? row.link.query.system : undefined } : null }]
+  }))
+}
 
 const expectRow = (seen, id, want, label) => {
   const got = seen[id]
@@ -371,70 +375,16 @@ const oracleOf = async (database, GameID, RaceID) => {
 const BROWSER = { save: SAVES[1], game: 'EggSample', race: 'EggSample', route: '/warnings?check=intruders', path: '/warnings', check: 'intruders', read: 'readIntruders' }
 const BROWSER_TIMEOUT = 120000
 
-// What the page on screen shows of the check, and the line the open section flyout shows under the page; runs in the page. Hooks identify the elements (data attributes, and the flyout's item marked as the page on screen); what they say is read only from text nodes whose own element is shown (not hidden, not drawn with no opacity, by itself or by an ancestor), never from a container's `textContent`. A row's link is the address of the link shown among the row's actions, the place a click opens. Each row carries the group of the separator line above it: none for the warnings, `snoozed` or `unevaluated` for those listed apart.
+// What the page on screen shows of the check, and the line the open section flyout shows under the page; runs in the page, through the shared readers (`window.__screen` of scripts/lib/browser-observe.js `installScreen`). Hooks only find the elements: the lines of the check's table in the order drawn, each a line over the rows listed apart (`data-separator`) or a row (`data-row`, its id), a row's cells by their roles (`data-cell`, and `data-caption` for the line naming its empires, as the role `caption`) and the flyout's item marked as the page on screen. What each says and whether it is on screen are read from the screen: the text drawn, never a container's `textContent`, and never the value of a hook. A row's links are each link among its actions with the place it opens and whether it is on screen. The grouping is that of the app's "Thousands Separator" setting.
 const readScreen = (check) => {
-  const shows = (element) => element.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true })
-  const visible = (element) => {
-    const box = element.getBoundingClientRect()
-
-    return shows(element) && box.width > 0 && box.height > 0
-  }
-  const visibleText = (element) => {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
-    let text = ''
-
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement && shows(node.parentElement)) {
-        text += node.textContent
-      }
-    }
-
-    return text
-  }
-  const words = (element) => (element && visible(element) ? visibleText(element).replace(/\s+/g, ' ').trim() : undefined)
-  const vm = window.$app.$route.matched[0].instances.default
-  const section = document.querySelector(`[data-check="${check}"]`)
-  const rows = []
-  const separators = []
-  const hidden = []
-  let group = 'listed'
-
-  if (section) {
-    section.querySelectorAll('tbody > tr').forEach((row) => {
-      const separator = row.getAttribute('data-separator')
-
-      if (separator !== null) {
-        group = separator
-
-        if (visible(row)) {
-          separators.push({ kind: separator })
-        }
-
-        return
-      }
-
-      const id = row.getAttribute('data-row')
-
-      if (id === null) {
-        return
-      }
-
-      if (!visible(row)) {
-        hidden.push(id)
-
-        return
-      }
-
-      const link = row.querySelector('td.row-actions a[href]')
-
-      rows.push({ id, group, system: words(row.querySelector('[data-cell="system"]')), contacts: words(row.querySelector('[data-cell="contacts"]')), caption: words(row.querySelector('[data-caption]')), link: link && visible(link) ? link.getAttribute('href') : undefined })
-    })
-  }
-
+  const { visible, visibleText, hooked } = window.__screen
+  const shown = (element) => (element && visible(element) ? visibleText(element) : undefined)
+  const section = document.querySelector(`[data-check="${CSS.escape(check)}"]`)
+  const lineOf = (row) => (row.hasAttribute('data-separator') ? { separator: true, on: visible(row), text: visibleText(row) } : { id: row.getAttribute('data-row'), on: visible(row), cells: [...hooked(row, 'data-cell'), ...hooked(row, 'data-caption').map((entry) => ({ ...entry, role: 'caption' }))], links: [...row.querySelectorAll('td.row-actions a[href]')].map((link) => ({ href: link.getAttribute('href'), on: visible(link) })) })
+  const lines = section ? [...section.querySelectorAll('tbody > tr')].filter((row) => row.hasAttribute('data-separator') || row.hasAttribute('data-row')).map(lineOf) : []
   const item = document.querySelector('.section-flyout__item--active')
-  const flyout = item ? { name: words(item.querySelector('.section-flyout__name')), peek: words(item.querySelector('.section-flyout__peek')) } : null
 
-  return { separator: vm.separator, section: Boolean(section) && visible(section), rows, separators, hidden, title: words(document.querySelector('.breadcrumb__title')), flyout }
+  return { grouping: window.$app.$store.getters.config.get('selectedSeparator', 'Tick'), section: Boolean(section) && visible(section), lines, title: shown(document.querySelector('.breadcrumb__title')), flyout: item ? { name: shown(item.querySelector('.section-flyout__name')), peek: shown(item.querySelector('.section-flyout__peek')) } : null }
 }
 
 // Whether the page instance `uid` has its read of the check settled, on the copy of the save the app holds now, and every other read of its own too, so nothing it shows of the check waits on another.
@@ -470,6 +420,7 @@ const peekSettled = (route) => {
 // The page as a player opens it: the game and race picked, the Warnings page opened on the check, and once the page's own read of the check has settled, the page's section hovered in the rail until the flyout's line under the page has settled; then the screen is read. Resolves to the record of `observe` (scripts/lib/browser-observe.js) with the value of `readScreen`.
 const observePage = (browser, url) => observe(browser, async ({ page, step }) => {
   step('opening the app')
+  await installScreen(page)
   await page.goto(url, { timeout: BROWSER_TIMEOUT })
 
   const picker = page.locator('.empire-list').first()
@@ -570,9 +521,9 @@ add('peek-fixture', 'the flyout line counts the systems the warning lists as war
   const warnings = Object.values(FIXTURE).filter((row) => row.state === 'warning').length
   const seen = rowsSeen(ctx, await fixtureRows(ctx))
 
-  assert.equal(peekCount(ctx, SEPARATOR, await ctx.peekLine(ctx.fixture, 1, 1), 'the flyout line of the fixtures'), warnings, 'the flyout line of the fixtures')
+  assert.equal(peekCount(ctx, GROUPING, await ctx.peekLine(ctx.fixture, 1, 1), 'the flyout line of the fixtures'), warnings, 'the flyout line of the fixtures')
   assert.equal(Object.values(seen).filter((row) => row.state === 'warning').length, warnings, 'the warnings the rule lists on the fixtures')
-  assert.equal(peekCount(ctx, SEPARATOR, await ctx.peekLine(ctx.fixture, CLOCKLESS.GameID, CLOCKLESS.RaceID), 'the flyout line of the game with no time'), 0, 'the flyout line of the game with no stored time')
+  assert.equal(peekCount(ctx, GROUPING, await ctx.peekLine(ctx.fixture, CLOCKLESS.GameID, CLOCKLESS.RaceID), 'the flyout line of the game with no time'), 0, 'the flyout line of the game with no stored time')
 })
 
 add('structure', 'the registered rule of the warning names the stored values it decides on: the contact\'s type, subject, empire, system and time, the game time and the standing', (ctx) => {
@@ -607,7 +558,7 @@ SAVES.forEach((save, index) => {
 
     assert.deepEqual(Object.keys(seen).sort(), Object.keys(oracle.expected).sort(), 'the systems listed')
     Object.entries(oracle.expected).forEach(([id, want]) => expectRow(seen, id, want, save.file))
-    assert.equal(peekCount(ctx, SEPARATOR, await ctx.peekLine(database, save.GameID, save.RaceID), `the flyout line on ${save.file}`), oracle.warnings, `the flyout line on ${save.file}`)
+    assert.equal(peekCount(ctx, GROUPING, await ctx.peekLine(database, save.GameID, save.RaceID), `the flyout line on ${save.file}`), oracle.warnings, `the flyout line on ${save.file}`)
 
     if (save.lost) {
       assert.ok(oracle.before > Object.keys(oracle.expected).length, `${save.file} holds no system whose contacts are all lost, so it does not show the defect`)
@@ -622,33 +573,54 @@ const screenOf = (ctx) => {
   return ctx.browser.value
 }
 
-add('page-rows', 'the Warnings page shows the rows of the check as SQL says: each system by its id, under the line of its group, with its name, its contacts read back through the word table, the line naming each empire there, compared by the id of the empire (its name, its contacts by type, its hostile mark), and a link that opens the Galaxy Map on the system', (ctx) => {
-  const screen = screenOf(ctx)
-  const oracle = ctx.oracles[SAVES.indexOf(BROWSER.save)]
-  const expected = oracle.expected
-  const shown = Object.fromEntries(screen.rows.map((row) => [row.id, row]))
+// The lines of the check's table a player can see, in the order drawn: the rows on screen, each in the group of the line over it ('listed' above any such line), and each line over rows listed apart, read whole as the number it gives and the reason its words give, read back through the page's table of them (SEPARATOR_WORDS); words that are none of the table's fail the read. A line or a row that is not on screen is in no group, as the player sees neither.
+const tableOf = (ctx, screen) => {
+  const groups = [{ kind: 'listed', count: null, rows: [] }]
 
-  assert.ok(screen.section, 'the section of the check is not shown')
-  assert.deepEqual(screen.hidden, [], 'rows of the check are there but cannot be seen')
-  assert.deepEqual(Object.keys(shown).sort(), Object.keys(expected).sort(), 'the systems shown')
-  assert.equal(screen.rows.length, Object.keys(shown).length, 'a system is shown twice')
-  Object.entries(expected).forEach(([id, want]) => {
-    const row = shown[id]
+  screen.lines.filter((line) => line.on).forEach((line) => {
+    if (line.separator) {
+      const [kind, count] = figureAndWords(line.text, screen.grouping, (words) => labelKey(words, ctx.common.SEPARATOR_WORDS), 'the line over the rows listed apart')
 
-    assert.equal(row.group, want.state === 'warning' ? 'listed' : 'unevaluated', `the group ${id} is shown under`)
-    assert.equal(row.system, asShown(want.name), `the name shown for ${id}`)
-    assert.deepEqual(sortedEntries(countsOf(screen.separator, ctx.words, row.contacts, `the contacts shown for ${id}`)), sortedEntries(want.counts), `the contacts shown for ${id}`)
-    expectRaces(racesOf(ctx, screen.separator, row.caption, `the empires shown under ${id}`), want.races, `the empires shown under ${id}`, asShown)
-    assert.ok(row.link, `no link is shown for ${id}`)
-
-    const target = new URL(row.link.replace(/^#/, ''), 'http://page/')
-
-    assert.deepEqual({ path: target.pathname, system: target.searchParams.get('system') }, linkFor(id), `the place the link shown for ${id} opens ("${row.link}")`)
+      groups.push({ kind, count, rows: [] })
+    } else {
+      groups[groups.length - 1].rows.push(line)
+    }
   })
 
-  const apart = Object.values(expected).some((row) => row.state === 'unevaluated')
+  return groups
+}
 
-  assert.equal(screen.separators.some((separator) => separator.kind === 'unevaluated'), apart, apart ? 'the line over the rows not evaluated is not shown' : 'a line of rows not evaluated is shown')
+// What a region draws, each role read its own way (scripts/lib/browser-observe.js `rolesRead`, one role at a time): `roles` is { role: [wanted, read] }, and a role on screen that `roles` does not name is a problem too.
+const regionRead = (what, entries, roles) => [...Object.entries(roles).flatMap(([role, [wanted, read]]) => rolesRead(what, entries.filter((entry) => entry.role === role), { [role]: wanted }, read)), ...rolesRead(what, entries.filter((entry) => !Object.prototype.hasOwnProperty.call(roles, entry.role)), {})]
+
+add('page-rows', 'the Warnings page shows the rows of the check as SQL says: each system paired with SQL by its id, under the line of its group whose words and number say why and how many rows are listed apart, with its name, its contacts read back through the word table, the line naming each empire there, compared by the id of the empire (its name, its contacts by type, its hostile mark), and a link that opens the Galaxy Map on the system', (ctx) => {
+  const screen = screenOf(ctx)
+  const expected = ctx.oracles[SAVES.indexOf(BROWSER.save)].expected
+  const groups = tableOf(ctx, screen)
+  const apart = Object.values(expected).filter((row) => row.state === 'unevaluated').length
+  const { pairs, problems } = pairedBy('the systems shown', groups.flatMap((group) => group.rows.map((line) => ({ ...line, group: group.kind }))), Object.entries(expected).map(([id, want]) => ({ id, ...want })), (line) => line.id, (row) => row.id)
+
+  assert.ok(screen.section, 'the section of the check is not shown')
+  assert.deepEqual(screen.lines.filter((line) => !line.separator && !line.on).map((line) => line.id), [], 'rows of the check are there but cannot be seen')
+  assert.deepEqual(groups.slice(1).map((group) => [group.kind, group.count]), apart ? [['unevaluated', apart]] : [], `the lines over the rows listed apart, each with the reason and the number it gives: ${JSON.stringify(groups.slice(1).map((group) => [group.kind, group.count]))}`)
+  assert.deepEqual(problems, [], `the systems shown against SQL: ${JSON.stringify(problems)}`)
+  pairs.forEach(([want, line]) => {
+    const id = want.id
+    const drawn = regionRead(`the row ${id}`, line.cells, {
+      system: [asShown(want.name), (text) => text],
+      contacts: [JSON.stringify(sortedEntries(want.counts)), (text) => JSON.stringify(sortedEntries(countsOf(screen.grouping, ctx.words, text, `the contacts shown for ${id}`)))],
+      caption: [racesText(want.races), (text) => racesText(racesById(racesOf(ctx, screen.grouping, text, `the empires shown under ${id}`), want.races, `the empires shown under ${id}`, asShown))],
+    })
+    const links = line.links.filter((link) => link.on)
+
+    assert.equal(line.group, want.state === 'warning' ? 'listed' : 'unevaluated', `the group ${id} is shown under`)
+    assert.deepEqual(drawn, [], `the name, the contacts and the empires shown for ${id}: ${JSON.stringify(drawn)}`)
+    assert.equal(links.length, 1, `the links shown for ${id}`)
+
+    const target = new URL(links[0].href.replace(/^#/, ''), 'http://page/')
+
+    assert.deepEqual({ path: target.pathname, system: target.searchParams.get('system') }, linkFor(id), `the place the link shown for ${id} opens ("${links[0].href}")`)
+  })
 })
 
 add('page-peek', 'the line the section flyout shows under the Warnings page, its section hovered in the rail, counts as many systems with intruders as the page shows warnings, on a save that holds lost contacts', (ctx) => {
@@ -657,16 +629,15 @@ add('page-peek', 'the line the section flyout shows under the Warnings page, its
   assert.ok(screen.flyout, 'the flyout shows no item marked as the page on screen')
   assert.equal(screen.flyout.name, screen.title, 'the item of the flyout marked as the page on screen names another page')
   assert.ok(screen.flyout.peek, 'the flyout shows no line under the page')
-  assert.equal(peekCount(ctx, screen.separator, screen.flyout.peek, 'the flyout line'), screen.rows.filter((row) => row.group === 'listed').length, `the flyout line "${screen.flyout.peek}" against the warnings the page shows`)
+  assert.equal(peekCount(ctx, screen.grouping, screen.flyout.peek, 'the flyout line'), tableOf(ctx, screen)[0].rows.length, `the flyout line "${screen.flyout.peek}" against the warnings the page shows`)
 })
 
 // ---------- the faults and the rewrites ----------
 
-// [name, file key, from, to, the ids of the checks one of which must fail (a fault), browser (served to the browser and the page read again)]. Anchors are code, keys and attributes.
+// [name, file key, from, to, the ids of the checks one of which must fail by a value (a fault), browser (served to the browser and the page read again)], one for each way the code can be wrong. Anchors are code, keys and attributes.
 /* eslint-disable no-template-curly-in-string */
 const MUTANTS = [
   ['every stored contact is held, a lost one included', 'contacts', '\'FCT_Contacts.LastUpdate = FCT_Game.GameTime\'', '\'FCT_Contacts.LastUpdate <= FCT_Game.GameTime\'', ['long-ago', 'boundary', 'population', 'unknown-standing', 'save-egg', 'page-rows'], true],
-  ['a contact lost one sub-pulse before the game time is held', 'contacts', '\'FCT_Contacts.LastUpdate = FCT_Game.GameTime\'', '\'FCT_Contacts.LastUpdate >= FCT_Game.GameTime - 5\'', ['boundary']],
   ['the rule reads every stored contact', 'space', ' and (${HELD_CONTACT}) is not 0`', '`', ['long-ago', 'boundary', 'population', 'save-egg', 'page-rows'], true],
   ['a contact with no stored time reads as held', 'space', 'contact.Held === 1 ? [] :', 'contact.Held !== 0 ? [] :', ['unknown-time']],
   ['a game time that is not stored leaves every contact out', 'space', ' and (${HELD_CONTACT}) is not 0`', ' and (${HELD_CONTACT}) = 1`', ['unknown-time']],
@@ -694,25 +665,17 @@ const MUTANTS = [
 ]
 /* eslint-enable no-template-curly-in-string */
 
-// Rewrites that change nothing the checks observe: each must leave every check passing.
+// Rewrites that change nothing the checks observe, one of each family: each must leave every check passing.
 /* eslint-disable no-template-curly-in-string */
 const BENIGN = [
   ['an explicit prop and event instead of v-model on the muted switch', 'page', '<v-switch v-model="showMuted"', '<v-switch :input-value="showMuted" @change="showMuted = $event"', true],
   ['v-on longhand for the button of the other rows', 'page', '@click="toggleExpanded(section.check.key)"', 'v-on:click="toggleExpanded(section.check.key)"', true],
   ['a qualifier moved from the front to the back in a count', 'space', '\'hostile Ship\': [\'Hostile Ship\', \'Hostile Ships\']', '\'hostile Ship\': [\'Ship (hostile)\', \'Ships (hostile)\']', true],
-  ['a synonym in a count', 'space', '\'hostile Population\': [\'Hostile Population\', \'Hostile Populations\']', '\'hostile Population\': [\'Hostile Colony\', \'Hostile Colonies\']', true],
-  ['a synonym in the contacts counted apart', 'space', 'standing: [\'contact of unknown standing\', \'contacts of unknown standing\']', 'standing: [\'contact whose standing is not stored\', \'contacts whose standing is not stored\']', false],
   ['the words of the empires reworded in their table', 'space', 'RACE_WORDS = Object.freeze({ unnamed: \'An unknown empire\', hostile: \'Hostile\' })', 'RACE_WORDS = Object.freeze({ unnamed: \'An empire whose name is not stored\', hostile: \'At war\' })', true],
   ['the empires of a system named in another order', 'space', 'const intruderRaces = (ctx, races) => Object.values(races).map(({ Alien, Types }) => {', 'const intruderRaces = (ctx, races) => Object.values(races).reverse().map(({ Alien, Types }) => {', false],
-  ['a synonym in the flyout line', 'peeks', 'intruders: [\'intruder system\', \'intruder systems\']', 'intruders: [\'system with intruders\', \'systems with intruders\']', true],
   ['a parenthesised condition in the query', 'space', ' and (${HELD_CONTACT}) is not 0`', ' and ((${HELD_CONTACT}) is not 0)`', true],
-  ['a parenthesised condition in the standing test', 'space', 'if ([2, 3].includes(contact.ContactStatus)) {', 'if (([2, 3].includes(contact.ContactStatus))) {', false],
-  ['the held condition written the other way round', 'contacts', '\'FCT_Contacts.LastUpdate = FCT_Game.GameTime\'', '\'FCT_Game.GameTime = FCT_Contacts.LastUpdate\'', true],
-  ['full opacity on the cells of a row', 'page', '<td v-for="(column, index) in section.check.columns" :key="column.key"', '<td v-for="(column, index) in section.check.columns" :key="column.key" style="opacity: 1"', true],
   ['the column of a cell by its index', 'page', ':data-cell="column.key">{{ cellText(row, column) }}</span><provenance-mark', ':data-cell="column.key">{{ cellText(row, section.check.columns[index]) }}</span><provenance-mark', true],
-  ['a row shown by an explicit v-show', 'page', ':data-row="row.id">', ':data-row="row.id" v-show="true">', true],
   ['full opacity on the check', 'page', ':data-check="section.check.key">', ':data-check="section.check.key" style="opacity: 1">', true],
-  ['the table\'s slot named in longhand', 'page', '<template #default>', '<template v-slot:default>', true],
 ]
 /* eslint-enable no-template-curly-in-string */
 
@@ -792,6 +755,16 @@ const main = async () => {
       Object.values(FILES).forEach((file) => server.replace(file, null))
     }
   }
+  // The page of a fault or a rewrite: one that did not get through is judged by nothing and stops the run, as no check may be credited with it.
+  const variantSeen = async (given, what) => {
+    const seen = await observeVariant(given)
+
+    if (unobserved(seen)) {
+      throw new HarnessError(`the page with ${what} did not get through: ${seen.error}`)
+    }
+
+    return seen
+  }
 
   // The context of one variant of the sources: the modules as given, the reads they make of the fixtures and the saves, the oracles, and what the browser showed (`browser`).
   const contextOf = async (given, browser) => {
@@ -866,10 +839,10 @@ const main = async () => {
         }
 
         const given = variantOf([[key, from, to]])
-        const failed = await judge(await contextOf(given, browser && options.browser ? await observeVariant(given) : baselineSeen))
+        const failed = await judge(await contextOf(given, browser && options.browser ? await variantSeen(given, `the fault "${name}"`) : baselineSeen))
         const credited = failed.filter((result) => caught.includes(result.id) && result.kind === 'assertion')
 
-        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => result.id).join(', ') || 'nothing'}`, caughtBy(failed, caught), credited.map((result) => `${result.id}: ${result.detail.slice(0, 200)}`).join('; ') || `expected an assertion of one of ${caught.join(', ')}`)
+        check(`planted: ${name}: caught by ${failed.map((result) => result.id).join(', ') || 'nothing'}; credited by ${credited.map((result) => `${result.id} (${result.threw ? 'a throw' : 'a value'})`).join(', ') || 'nothing'}`, caughtBy(failed, caught, { name }), credited.map((result) => `${result.id}: ${result.detail.slice(0, 200)}`).join('; ') || `expected an assertion of one of ${caught.join(', ')}`)
       }
     }
 
@@ -898,14 +871,14 @@ const main = async () => {
         }
 
         const given = variantOf([[key, from, to]])
-        const failed = await judge(await contextOf(given, browser && options.browser ? await observeVariant(given) : baselineSeen))
+        const failed = await judge(await contextOf(given, browser && options.browser ? await variantSeen(given, `the rewrite "${name}"`) : baselineSeen))
 
         check(`benign: ${name}: no check fails`, failed.length === 0, failed.map((result) => `${result.id}: ${result.detail}`).join('; '))
       }
 
       if (wanted('benign', 'every benign rewrite')) {
         const given = variantOf(BENIGN.map(([, key, from, to]) => [key, from, to]))
-        const failed = await judge(await contextOf(given, options.browser ? await observeVariant(given) : null))
+        const failed = await judge(await contextOf(given, options.browser ? await variantSeen(given, 'every benign rewrite together') : null))
 
         check('benign: every benign rewrite together: no check fails', failed.length === 0, failed.map((result) => `${result.id}: ${result.detail}`).join('; '))
       }

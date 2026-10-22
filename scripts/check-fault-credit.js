@@ -9,6 +9,7 @@
   - a callback of the harness (`harnessOwn`) that throws or rejects is a HarnessError, also inside a call of the code under test, and one that returns gives its value;
   - a store of the harness (`harnessStore`) that is malformed (no getters, a getter of another kind than the page reads it as, no dispatch), that has a getter or a dispatch that throws, or that hands over a function that throws, is a HarnessError, and a store that is whole gives the page what it reads; the getters named `raw` are handed over as they are;
   - `runChecks` gives a result with the kind of each check, and a HarnessError a check throws stops the run; `judged` stops the run for any result of kind 'error' and gives the failed results otherwise; `caughtBy` and `caughtAll` credit assertions only;
+  - a check that failed because a call of the code under test threw is a result that says so (`threw`), and a fault whose named checks failed only that way is never credited: `caughtBy` and `caughtAll` stop the run with a HarnessError that names the fault and the throw. A value a check read credits the fault, beside a throw too, a fault that declares a throw as how it is caught is credited by one, and a check that holds credits nothing;
   - an observation of scripts/lib/browser-observe.js (made by the helper itself over a stand-in of a browser) whose context did not close, or whose work threw, is `unobserved` even where a value was kept, with or without an error the page raised; one that closed, and one whose page raised an error no check named, are observed.
   Each planted fault rewrites one line of a copy of the module and must make a named case fail on an assertion.
 
@@ -212,6 +213,36 @@ const CASES = {
     assert.ok(lib.unobserved(observation.failedObservation('the page did not open')), 'an observation that did not happen')
     assert.ok(!lib.unobserved(observation.completedObservation({})), 'a completed observation')
   },
+
+  'subject-throw': async ({ lib, observation }) => {
+    const crash = () => lib.through('the utility probe', () => { throw new TypeError('crash') })
+    const results = await lib.runChecks([{ id: 'crashed', name: 'crashed', run: () => crash() }, { id: 'valued', name: 'valued', run: () => lib.assert.equal(lib.through('the utility probe', () => 1), 2) }, { id: 'holds', name: 'holds', run: () => {} }], {})
+    const failed = lib.judged(results)
+    const [crashed, valued, holds] = results
+    const isHarness = (error) => error instanceof observation.HarnessError
+    // What a judgement of credit gives, or the error it stopped with, so a control that stops is a failed assertion of this case.
+    const credit = async (call) => {
+      try {
+        return await call()
+      } catch (error) {
+        return `stopped: ${error.message}`
+      }
+    }
+    const alone = await stopped(() => lib.caughtBy(failed, ['crashed'], { name: 'the planted crash' }))
+    const all = await stopped(() => lib.caughtAll(failed, { name: 'the planted crash' }))
+
+    assert.ok(crashed.kind === 'assertion' && crashed.threw === true && /^the utility probe threw TypeError: crash/.test(crashed.detail), JSON.stringify(crashed))
+    assert.ok(valued.kind === 'assertion' && valued.threw === false && holds.threw === false, JSON.stringify([valued, holds]))
+    assert.ok(lib.isSubjectThrow(await stopped(crash)) && lib.isSubjectThrow(await stopped(() => lib.through('the read probe', () => Promise.reject(new RangeError('rejected'))))) && !lib.isSubjectThrow(await stopped(() => lib.assert.equal(1, 2))), 'a call that threw or rejected says so, and an assertion of a check does not')
+    assert.ok(isHarness(alone) && alone.message.includes('the planted crash') && alone.message.includes('threw TypeError: crash'), `a fault credited only by a throw: ${alone}`)
+    assert.ok(isHarness(all) && all.message.includes('the planted crash') && all.message.includes('threw TypeError: crash'), `every check named, one of them by a throw: ${all}`)
+    assert.equal(await credit(() => lib.caughtBy(failed, ['valued'], { name: 'a value' })), true)
+    assert.equal(await credit(() => lib.caughtBy(failed, ['crashed', 'valued'], { name: 'a value beside a throw' })), true)
+    assert.equal(await credit(() => lib.caughtAll(failed.filter((result) => result.id === 'valued'), { name: 'a value' })), true)
+    assert.equal(await credit(() => lib.caughtBy(failed, ['crashed'], { name: 'a declared throw', throws: true })), true)
+    assert.equal(await credit(() => lib.caughtAll(failed, { name: 'a declared throw', throws: true })), true)
+    assert.equal(await credit(() => lib.caughtBy(failed, ['holds'], { name: 'a check that holds' })), false)
+  },
 }
 
 const WORDS = {
@@ -225,6 +256,7 @@ const WORDS = {
   callback: 'a callback of the harness that throws or rejects is a HarnessError and one that returns gives its value, and the boundary of the page loader tells the page\'s from the harness\'s',
   store: 'a store of the harness that is malformed, or has a getter, a function or a dispatch that throws, is a HarnessError, a store that is whole gives the page what it reads, and the database is handed over as it is',
   observation: 'an observation whose context did not close or open, or whose work threw, is unobserved even where a value was kept, and one that closed, or whose page raised an error no check named, is observed',
+  'subject-throw': 'a fault whose named checks failed only because a call of the code under test threw is a HarnessError naming the fault and the throw, and a value read, beside a throw too, or a throw the fault declares credits it',
 }
 
 // [name, text replaced in a copy of the module, replacement, the case that must fail on an assertion].
@@ -250,6 +282,12 @@ const FAULTS = [
   ['a context that did not close is not an infrastructure failure', 'const infrastructureFailure = (seen) => seen.error !== null && seen.error !==', 'const infrastructureFailure = (seen) => seen.value === null && seen.error !== null && seen.error !==', 'observation'],
   ['an error the page raised is an infrastructure failure', 'seen.error !== `the page raised ${seen.unexpected.length} unexpected error${seen.unexpected.length === 1 ? \'\' : \'s\'}, the first: ${seen.unexpected[0]}`', 'true', 'observation'],
   ['a screen that was kept is observed whatever failed', 'const unobserved = (seen) => seen.value === null || infrastructureFailure(seen)', 'const unobserved = (seen) => seen.value === null', 'observation'],
+  ['a call that threw is not told as one', 'thrown[THREW] = true', 'void THREW', 'subject-throw'],
+  ['an assertion of a check is told as a call that threw', 'const isSubjectThrow = (error) => isMarked(error) && error[THREW] === true', 'const isSubjectThrow = (error) => isMarked(error)', 'subject-throw'],
+  ['the results do not say which check failed by a throw', 'threw: isSubjectThrow(error),', 'threw: false,', 'subject-throw'],
+  ['a fault is credited by a call that threw', 'return named.some((result) => !result.threw) || (named.length > 0 && creditedByThrow(named, fault))', 'return named.length > 0', 'subject-throw'],
+  ['a fault every named check catches is credited whatever threw', 'return thrown.length === 0 || creditedByThrow(thrown, fault)', 'return true', 'subject-throw'],
+  ['a fault that declares a throw is stopped all the same', 'if (!throws) {', 'if (true) {', 'subject-throw'],
 ]
 /* eslint-enable no-template-curly-in-string */
 

@@ -1,7 +1,7 @@
 /*
   Checks the mission briefs (utilities/mission-briefs.js) and the propulsion page's use of them (pages/propulsion.vue): the requirements a ship is for, kept apart from the alternatives judged against them, with pass, fail or unknown for each.
 
-  node scripts/check-mission-briefs.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--no-mutations]
+  bun scripts/check-mission-briefs.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--no-mutations] [--part <part>]
 
   Groups:
   - units: 50 tons are 1 HS for a hull; a cargo hold stores 50 tons to the HS and a capacity point is a ton; a hangar capacity is HS of ships; a typed size, range and cruise power become the unit the figure is held in, and text that is not a positive number is refused;
@@ -11,11 +11,11 @@
   - alternatives: a propulsion set answers size, speed, range, endurance, payload space and cost, and is unknown for cargo, hangar, deployment and (unless an engine is military) classification; a saved class answers what its row stores and is unknown for what the save lacks;
   - the record: a brief is a typed record of the campaign and race, seen on every branch, written only when the tab holds the file, and a brief made at a later game time is listed, flagged and not applied until moved; a stale save is refused unless asked to write over;
   - the page: its list, its draft, its preview, its saves and its notices on a pseudo instance (scripts/lib/page-loader.js);
-  - the panel: the real component (its script loaded as the pages' are, its template compiled and rendered by Vue without a document): text that is not a figure is reported to the page and never given as a value, unfinished text stays through an update of the same brief and starts over when another is opened, and a range is drawn with its number in billions of km and the unit bn km beside it;
-  - the browser (only with BASE_URL set, against `bun run web`; otherwise a printed SKIP): the page and panel together, where text that is not a figure disables Save and asks before New drops it, and a range cell is drawn in bn km; nothing is saved;
+  - the panel: the real component (its script loaded as the pages' are, its template compiled and rendered by Vue without a document): text that is not a figure is reported to the page and never given as a value, unfinished text stays through an update of the same brief and starts over when another is opened, and a range is drawn with its number in billions of km and the unit bn km beside it, each cell of a requirement read by its role (`data-brief-cell`);
+  - the browser: the page and panel together in the real renderer, served over a copy of AuroraDB.db (game and race Aurelian Empire, scripts/lib/page-server.js) and driven in Chromium (scripts/lib/browser-observe.js `observe`): text that is not a figure shows its error in place of the field's hint, marks the brief as changed and leaves Save doing nothing (a click on it draws no message), New asks before it drops such text (the text stays until Discard) and the text and its error do not carry over, and a range cell is drawn in bn km. The screen is read the way every page check reads it (`installScreen`, `hooked`, `readFigure`, `rolesRead`, `labelKey`): the hooks only find the elements, a state is read back through the module's own words (the hints of REQUIREMENTS, FIELD_ERRORS, BRIEF_WORDS), a figure is read whole in the grouping of the app's setting, and a cell by its role; every wait is on the operation the check started. Nothing is saved to the save;
   - each save: a cargo hold stores 50 per HS, a class's cargo and hangar capacity equal the sum of its holds' and hangars', the ships docked in a mother ship never total more than its hangar capacity, no fighter class is as big as 10 HS, no commercial class mounts a military engine, and the loader's figures equal SQL of its own.
 
-  Mutants: each deliberate fault in a copy of the utilities (or of the page's script) is run with the checks it names and must fail them. Prints `N of N checks passed`; exit code 1 when a check fails.
+  The checks run through scripts/lib/fault-credit.js: a check's body is the call of the code under test, so a check that throws fails as a call that threw, and a verdict other than true is the check's own failure by value; the browser checks only read what the page showed, so one that throws is a defect of the harness, a failure over the real sources and a stop when a fault or a rewrite is judged (`judged`). Mutants: each deliberate fault in a copy of the utilities, of the page's script, of the panel or of the panel served to the browser is run with the checks it names and must fail each of them by a value, never by a throw (`caughtBy`, which stops the run when only checks that threw would credit a fault); each benign rewrite served to the browser must fail none, and a variant whose page does not get through stops the run, as nothing may be credited with it. `--part <id>` runs one part (`groups`, `page`, `panel`, `browser`, a mutant such as `utility:3`, `page:0`, `panel:1`, `browser:0` or `browser-benign:0`, `browser-variants` for every fault and rewrite served to the browser in one server and one browser, or a save by its label); a whole run runs the mutants that need no browser in a process each and those served to the browser as `browser-variants`. Prints `N of N checks passed`; exit code 1 when a check fails.
 */
 const fs = require('fs')
 const os = require('os')
@@ -26,6 +26,10 @@ const { compileTemplate, parse } = require('vue/compiler-sfc')
 const { loadUtilities } = require('./lib/utilities')
 const { instantiate, loadPage, replacing } = require('./lib/page-loader')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { patched } = require('./lib/mutant-source')
+const { startPageServer } = require('./lib/page-server')
+const { observe, failedObservation, report, HarnessError, installScreen, readFigure, rolesRead, labelKey } = require('./lib/browser-observe')
+const { failure, through, runChecks, judged, caughtBy, unobserved } = require('./lib/fault-credit')
 
 const root = path.resolve(__dirname, '..')
 const utilitiesDirectory = path.join(root, 'src', 'renderer', 'utilities')
@@ -69,14 +73,27 @@ const close = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.a
 // Lets the writes a page started without waiting for them finish.
 const ticks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-// A check that throws has not held, and says so.
-const settle = async (test) => {
-  try {
-    return await test()
-  } catch (error) {
-    return `threw ${error.message}`
+// A verdict as scripts/lib/fault-credit.js takes it: true holds, anything else is the check's own failure by value, with what was seen.
+const verdictHeld = (verdict) => {
+  if (verdict !== true) {
+    throw failure(typeof verdict === 'string' ? verdict : short(verdict))
   }
 }
+
+// Checks `[name, test]` for `runChecks`, each named by itself: the test is the call of the code under test, so what it throws is a call that threw, which credits no fault (`caughtBy`), and a verdict other than true is a failure by value.
+const asChecks = (list) => list.map(([name, test]) => ({ id: name, name, run: async () => verdictHeld(await through('the code under test', test, { read: false })) }))
+
+// Prints the results of `runChecks`.
+const printResults = (results) => results.forEach((result) => check(result.name, result.ok || result.detail))
+
+// The failed checks of a fault, each with whether it failed by a value or because a call threw, and the start of what it saw: the matrix of what credits it.
+const creditOf = (failed) => failed.map((result) => `${result.name} (${result.threw ? 'a throw' : 'a value'}: ${result.detail.slice(0, 160)})`).join('; ') || 'nothing'
+
+// What a region draws, each role read its own way (scripts/lib/browser-observe.js `rolesRead`, one role at a time): `roles` is { role: [wanted, read] }, and a role on screen that `roles` does not name is a problem too.
+const regionRead = (what, entries, roles) => [...Object.entries(roles).flatMap(([role, [wanted, read]]) => rolesRead(what, entries.filter((entry) => entry.role === role), { [role]: wanted }, read)), ...rolesRead(what, entries.filter((entry) => !Object.prototype.hasOwnProperty.call(roles, entry.role)), {})]
+
+// The problems a reader found as a verdict: true when there are none.
+const problemsHeld = (problems) => (problems.length === 0 ? true : short(problems))
 
 const loadAll = async (directory = utilitiesDirectory) => {
   const loaded = await loadUtilities(['mission-briefs', 'design-rules', 'provenance', 'scenario-records'], { stubs: STUBS, directory })
@@ -1188,10 +1205,11 @@ const panelStatements = async (change, m) => {
 
     return events
   }
+  // The cells of the row of a requirement as entries of `rolesRead`, each by its role (`data-brief-cell`) with the text it draws, all on screen (a render without a document hides nothing); null when no row draws the requirement.
   const cellsOf = (vm, requirement) => {
     const row = nodesOf(vm._render(), (node) => Boolean(node.data && node.data.attrs && node.data.attrs['data-brief-requirement'] === requirement))[0]
 
-    return row ? row.children.filter((node) => node.tag === 'td').map(textOf) : null
+    return row ? nodesOf(row, (node) => Boolean(node.data && node.data.attrs && node.data.attrs['data-brief-cell'])).map((node) => ({ role: node.data.attrs['data-brief-cell'], text: textOf(node), on: true })) : null
   }
 
   return [
@@ -1233,12 +1251,22 @@ const panelStatements = async (change, m) => {
     ['panel: a range is shown with the number in billions of km and the unit beside it', () => {
       const evaluation = evaluated(m, briefOf(m, { minRangeKm: 20e9 }), [mb.propulsionAlternative(rowOf(m, 'set-range'))])
       const vm = panel({ evaluation })
+      const definition = mb.requirementOf('minRangeKm')
+      const grouping = vm.$store.getters.config.get('selectedSeparator', 'Tick')
 
       vm.opened = ['set-range']
 
       const cells = cellsOf(vm, 'minRangeKm')
+      const figure = (text) => readFigure(text, grouping)
 
-      return cells && cells.length === 6 && cells[0] === 'Range' && cells[2] === vm.count(20, 2) && cells[3] === vm.count(12, 2) && cells[4] === 'bn km' && cells[5].includes('12 bn km') && cells[5].includes('20 bn km') ? true : short(cells)
+      return cells === null ? 'no row draws the range' : problemsHeld(regionRead('the range of set-range', cells, {
+        label: [definition.label, (text) => text],
+        verdict: [true, (text) => text !== ''],
+        required: [20, figure],
+        actual: [12, figure],
+        unit: [definition.input.unit, (text) => text],
+        reason: [true, (text) => text.includes(`12 ${definition.input.unit}`) && text.includes(`20 ${definition.input.unit}`)],
+      }))
     }],
     ['panel: the unit beside a figure is the unit its number is in, for every requirement', () => {
       const vm = panel()
@@ -1288,103 +1316,230 @@ const PANEL_MUTATIONS = [
   { name: 'unfinished text dropped by an ordinary update', find: '} else if (this.typed[key] !== undefined && !parsed.ok && this.errors[key]) {', replace: '} else if (false) {', fails: ['panel: unfinished text stays'] },
   { name: 'the number of a range not scaled', find: 'return this.count(value / shown.scale, shown.digits)', replace: 'return this.count(value, shown.digits)', fails: ['panel: a range is shown with the number in billions of km', 'panel: the unit beside a figure'] },
   { name: 'the unit of a figure the canonical one', find: 'return shown ? shown.unit : requirement.unit || \'—\'', replace: 'return requirement.unit || \'—\'', fails: ['panel: a range is shown with the number in billions of km', 'panel: the unit beside a figure'] },
-  { name: 'the unit cell of the table the canonical unit', find: '<td data-brief-unit>{{ unitOf(requirement) }}</td>', replace: '<td data-brief-unit>{{ requirement.unit || \'—\' }}</td>', fails: ['panel: a range is shown with the number in billions of km'] },
+  { name: 'the unit cell of the table the canonical unit', find: '<td data-brief-cell="unit">{{ unitOf(requirement) }}</td>', replace: '<td data-brief-cell="unit">{{ requirement.unit || \'—\' }}</td>', fails: ['panel: a range is shown with the number in billions of km'] },
 ]
 
 // ---------- the browser ----------
 
-// The panel inside the page in a real browser, against `bun run web` (BASE_URL says where): the wiring between the two and the drawn cells, which the pseudo instance and the render without a document cannot show. Nothing is saved.
-const browserStatements = async (baseUrl) => {
-  const { chromium } = require('playwright')
+// The panel inside the page in a real browser (scripts/lib/page-server.js over a copy of the save, Chromium through scripts/lib/browser-observe.js `observe`): the wiring between the two and the drawn cells, which the pseudo instance and the render without a document cannot show. Nothing is saved.
+const BROWSER_SAVE = { file: 'AuroraDB.db', game: 'Aurelian Empire', race: 'Aurelian Empire' }
+const TIMEOUT = 90000
+
+// What the brief panel draws, read through the shared readers (`window.__screen`); runs in the page. Each part of the panel by its hook (`data-brief`) with the text it draws and whether it is on screen; the text the speed field shows and the line under it (its hint, or the error drawn in the hint's place); given the id of an alternative, the cells of its range requirement by their roles (`data-brief-cell`); and the "Thousands Separator" setting the figures are grouped by.
+const readBrief = (alternative) => {
+  const { hooked, visibleText } = window.__screen
+  const panel = document.querySelector('[data-brief="panel"]')
+  const speed = document.querySelector('[data-brief-field="minSpeedKmS"]')
+  const messages = speed && speed.closest('.v-input') ? speed.closest('.v-input').querySelector('.v-messages') : null
+  const row = alternative === null ? null : document.querySelector(`[data-brief-detail="${CSS.escape(alternative)}"] [data-brief-requirement="minRangeKm"]`)
+
+  return {
+    parts: panel ? hooked(panel, 'data-brief') : null,
+    speed: speed ? speed.value : null,
+    line: messages ? visibleText(messages) : null,
+    range: row ? hooked(row, 'data-brief-cell') : null,
+    grouping: window.$app.$store.getters.config.get('selectedSeparator', 'Tick'),
+  }
+}
+
+// The page once Vue has drawn what the step before it changed.
+const drawn = (page) => page.evaluate(async () => { await window.$app.$nextTick() })
+
+// The case as a player meets it, each step read where it ends; resolves to the record of `observe` with the screens read. Every wait is on the operation the check started: the route arrived and its reads done, the alternatives listed, the next draw after a field typed or a button clicked, the row of the requirement opened.
+const observeBrief = (browser, url) => observe(browser, async ({ page, step }) => {
   const pageLoading = require('./page-loading')
-  const game = process.env.AURORA_GAME || 'Aurelian Empire'
-  const race = process.env.AURORA_RACE || 'Aurelian Empire'
-  const browser = await chromium.launch()
-  const results = []
-  const errors = []
-  const isDatabaseCall = (request) => request.url().includes('/__aurora-db/') && !request.url().endsWith('/stat')
-  let inFlight = 0
-  let last = Date.now()
+  const read = (alternative = null) => page.evaluate(readBrief, alternative)
+  const seen = {}
 
-  try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
-    // inFlight and last are updated by the request listeners below.
-    const isBusy = () => inFlight > 0 || Date.now() - last < 1500
-    const settle = async () => {
-      while (isBusy() || await page.evaluate(pageLoading)) {
-        await page.waitForTimeout(250)
-      }
-    }
+  step('opening the app')
+  await installScreen(page)
+  await page.goto(url, { timeout: TIMEOUT })
+  await page.waitForFunction(() => Boolean(window.$app && window.$app.$store), null, { timeout: TIMEOUT })
 
-    page.on('pageerror', (error) => errors.push(error.message))
-    page.on('request', (request) => {
-      if (isDatabaseCall(request)) {
-        inFlight += 1
-        last = Date.now()
-      }
-    })
-    page.on('requestfinished', (request) => {
-      if (isDatabaseCall(request)) {
-        inFlight -= 1
-        last = Date.now()
-      }
-    })
+  const picker = page.locator('.empire-list').first()
 
-    await page.goto(baseUrl, { timeout: 90000 })
+  step('picking the game')
+  await picker.locator('.empire-list__game').filter({ hasText: `${BROWSER_SAVE.game} ·` }).first().click({ timeout: TIMEOUT })
 
-    const picker = page.locator('.empire-list').first()
-
-    await picker.locator('.empire-list__game').filter({ hasText: `${game} ·` }).first().click({ timeout: 90000 })
-
-    if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
-      await picker.getByText(race, { exact: true }).last().click()
-    }
-
-    await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: 90000 })
-    await settle()
-    await page.evaluate(() => window.$app.$router.push('/propulsion'))
-    await page.waitForFunction(pageLoading.arrived, '/propulsion', { timeout: 90000 })
-    await settle()
-
-    const speed = page.locator('[data-brief-field="minSpeedKmS"]')
-    const save = page.locator('[data-brief="save"]')
-    const messages = () => page.locator('.v-input').filter({ has: speed }).locator('.v-messages__message').allInnerTexts()
-
-    await page.locator('[data-brief="name"]').fill('Browser case')
-    await speed.fill('abc')
-    await page.waitForTimeout(300)
-
-    const hint = (await messages()).join(' ')
-
-    results.push(['browser: text that is not a figure shows its error, disables Save and marks the brief as changed', (await save.isDisabled()) && (await page.locator('[data-brief="dirty-chip"]').count()) === 1 && hint.length > 0 ? true : short([await save.isDisabled(), await page.locator('[data-brief="dirty-chip"]').count(), hint])])
-
-    await page.locator('[data-brief="name"]').fill('')
-    await page.locator('[data-brief="new"]').click()
-
-    const asked = (await page.locator('[data-brief="discard"]').count()) === 1
-
-    await page.locator('[data-brief="discard-yes"]').click()
-    await page.waitForTimeout(300)
-
-    const left = await speed.inputValue()
-    const leftMessages = (await messages()).join(' ')
-
-    results.push(['browser: New asks before it drops text that is not a figure, and the text and its error do not carry over', asked && left === '' && !leftMessages.includes(hint) && (await page.locator('[data-brief="dirty-chip"]').count()) === 0 ? true : short([asked, left, leftMessages])])
-
-    await page.locator('[data-brief-field="minRangeKm"]').fill('20')
-    await page.waitForTimeout(500)
-    await page.locator('[data-brief-alternative]').first().locator('button').click()
-
-    const cells = await page.locator('[data-brief-requirement="minRangeKm"]').first().locator('td').allInnerTexts()
-
-    results.push(['browser: a range required in billions of km is drawn with its number and the unit bn km', cells.length === 6 && Number(cells[2].replace(/[^0-9.]/g, '')) === 20 && cells[4].trim() === 'bn km' && cells[5].includes('bn km') ? true : short(cells)])
-    results.push(['browser: no page error was raised', errors.length === 0 ? true : short(errors)])
-  } finally {
-    await browser.close()
+  if (!(await page.evaluate(() => Boolean(window.$app.$store.getters.RaceID)))) {
+    step('picking the race')
+    await picker.getByText(BROWSER_SAVE.race, { exact: true }).last().click({ timeout: TIMEOUT })
   }
 
-  return results
+  await page.waitForFunction(() => Boolean(window.$app.$store.getters.RaceID), null, { timeout: TIMEOUT })
+  step('opening the propulsion page')
+  await page.evaluate((target) => window.$app.$router.push(target, () => {}, () => {}), '/propulsion')
+  await page.waitForFunction(pageLoading.arrived, '/propulsion', { timeout: TIMEOUT })
+  await page.waitForFunction(`!(${pageLoading})()`, null, { timeout: TIMEOUT })
+  await page.waitForSelector('[data-brief-alternative]', { state: 'attached', timeout: TIMEOUT })
+
+  step('typing text that is not a figure')
+  await page.fill('[data-brief="name"]', 'Browser case')
+  await page.fill('[data-brief-field="minSpeedKmS"]', 'abc')
+  await drawn(page)
+  seen.typed = await read()
+
+  step('clicking Save while the text is there')
+  await page.click('[data-brief="save"]', { force: true, timeout: TIMEOUT })
+  await drawn(page)
+  seen.saved = await read()
+
+  step('asking for a new brief')
+  await page.fill('[data-brief="name"]', '')
+  await page.click('[data-brief="new"]', { timeout: TIMEOUT })
+  await drawn(page)
+  seen.asked = await read()
+
+  step('discarding the changes')
+  await page.click('[data-brief="discard-yes"]', { timeout: TIMEOUT })
+  await drawn(page)
+  seen.discarded = await read()
+
+  step('requiring a range and opening the requirements of an alternative')
+  await page.fill('[data-brief-field="minRangeKm"]', '20')
+  await drawn(page)
+
+  const alternative = await page.getAttribute('[data-brief-alternative]', 'data-brief-alternative', { timeout: TIMEOUT })
+
+  await page.click(`[data-brief-alternative="${alternative}"] button`, { timeout: TIMEOUT })
+  await page.waitForSelector(`[data-brief-detail="${alternative}"] [data-brief-requirement="minRangeKm"]`, { state: 'attached', timeout: TIMEOUT })
+  seen.range = await read(alternative)
+
+  return seen
+})
+
+// Runs `work` with one page server and one Chromium for the process, both stopped once it ends: `work` is given `observeSource(source)`, which serves the panel as given (`source`, null for the real one) and resolves the record of `observe`, or a failed one that names why there is none. The variants of one process share the start of Vite and Chromium; each is served on its own (`server.replace`) and seen in a context of its own.
+const inBrowser = async (work) => {
+  let server = null
+  let chrome = null
+  let startFailure = null
+
+  try {
+    server = await startPageServer({ save: BROWSER_SAVE.file })
+    chrome = await require('playwright').chromium.launch()
+  } catch (error) {
+    startFailure = String(error.message).split('\n')[0]
+  }
+
+  const observeSource = async (source) => {
+    if (startFailure) {
+      return failedObservation(startFailure)
+    }
+
+    server.replace(panelFile, source)
+
+    try {
+      const seen = await observeBrief(chrome, server.url)
+
+      report(source === null ? 'the propulsion page' : 'a variant of the panel', seen)
+
+      return seen
+    } catch (error) {
+      return failedObservation(String(error.message).split('\n')[0])
+    } finally {
+      server.replace(panelFile, null)
+    }
+  }
+
+  try {
+    return await work(observeSource)
+  } finally {
+    if (chrome) {
+      await chrome.close()
+    }
+
+    if (server) {
+      await server.stop()
+    }
+  }
 }
+
+// The lines the module draws under a field, by key, from its own tables: the hint of each requirement (REQUIREMENTS) and the error of each refused text (FIELD_ERRORS).
+const fieldLinesOf = (mb) => ({ ...Object.fromEntries(mb.REQUIREMENTS.filter((definition) => definition.hint).map((definition) => [definition.key, definition.hint])), ...mb.FIELD_ERRORS })
+
+// The checks of the browser case: `[name, test]`, each test given the screens read and the record of the observation, and returning true or what was seen. The hooks find the elements; what is judged is the text they draw on screen: a state read back through the module's own words (`labelKey`), a figure whole in the grouping of the setting (`readFigure`), the cells of a row by their roles (`rolesRead`).
+const browserStatements = (m) => {
+  const { mb } = m
+  const definition = mb.requirementOf('minRangeKm')
+  const lines = fieldLinesOf(mb)
+  const parts = (screen, role) => screen.parts.filter((entry) => entry.role === role)
+  const chip = (screen, wanted) => rolesRead('the panel', parts(screen, 'dirty-chip'), { 'dirty-chip': wanted }, (text) => labelKey(text, mb.BRIEF_WORDS))
+
+  return [
+    ['browser: text that is not a figure shows its error in place of the field\'s hint, marks the brief as changed and leaves Save doing nothing', (seen) => {
+      const problems = [
+        ...(seen.typed.speed === 'abc' ? [] : [['the speed field', seen.typed.speed]]),
+        ...(labelKey(seen.typed.line, lines) === 'notAFigure' ? [] : [['the line under the speed field', seen.typed.line]]),
+        ...chip(seen.typed, 'unsaved'),
+        ...rolesRead('the panel after Save', parts(seen.saved, 'message'), { message: null }),
+        ...(seen.saved.speed === 'abc' && labelKey(seen.saved.line, lines) === 'notAFigure' ? [] : [['the speed field after Save', seen.saved.speed, seen.saved.line]]),
+      ]
+
+      return problemsHeld(problems)
+    }],
+    ['browser: New asks before it drops text that is not a figure, and the text and its error do not carry over', (seen) => {
+      const problems = [
+        ...rolesRead('the panel once New is clicked', parts(seen.asked, 'question'), { question: 'discardBlank' }, (text) => labelKey(text, mb.BRIEF_WORDS)),
+        ...(seen.asked.speed === 'abc' ? [] : [['the speed field once New is clicked', seen.asked.speed]]),
+        ...chip(seen.asked, 'unsaved'),
+        ...(seen.discarded.speed === '' ? [] : [['the speed field once discarded', seen.discarded.speed]]),
+        ...(labelKey(seen.discarded.line, lines) === 'minSpeedKmS' ? [] : [['the line under the speed field once discarded', seen.discarded.line]]),
+        ...chip(seen.discarded, null),
+      ]
+
+      return problemsHeld(problems)
+    }],
+    ['browser: a range required in billions of km is drawn with its number and the unit bn km', (seen) => (seen.range.range === null ? 'no row of the range was opened' : problemsHeld(regionRead('the range of the first alternative', seen.range.range, {
+      label: [definition.label, (text) => text],
+      verdict: [true, (text) => text !== ''],
+      required: [20, (text) => readFigure(text, seen.range.grouping)],
+      actual: [true, (text) => text !== ''],
+      unit: [definition.input.unit, (text) => text],
+      reason: [true, (text) => text.includes(definition.input.unit)],
+    })))],
+    ['browser: no page error was raised', (_seen, observation) => problemsHeld(observation.unexpected)],
+  ]
+}
+
+// The browser checks for `runChecks` over { observation }: a page that did not get through fails each of them by naming why.
+const browserChecks = (m) => browserStatements(m).map(([name, test]) => ({ id: name, name, run: ({ observation }) => verdictHeld(unobserved(observation) ? `the page did not get through: ${observation.error}` : test(observation.value, observation)) }))
+
+// A fault or a benign rewrite of the panel served to the browser through `observeSource` (`inBrowser`). A fault must fail by a value each check it names (`caughtBy`), a rewrite none; a variant whose page did not get through is judged by nothing and stops the run.
+const checkBrowserVariant = async ({ kind, name, find, replace, fails = [], throws = false }, real, observeSource) => {
+  const began = Date.now()
+  const fault = kind === 'browser'
+  const observation = await observeSource(patched(panelFile, fs.readFileSync(panelFile, 'utf8'), find, replace))
+
+  if (unobserved(observation)) {
+    throw new HarnessError(`the panel ${fault ? 'with the fault' : 'rewritten as'} "${name}" did not get through: ${observation.error}`)
+  }
+
+  const results = await runChecks(browserChecks(real), { observation })
+  const failed = judged(results, `the ${fault ? 'fault' : 'rewrite'} "${name}"`)
+  const took = `${((Date.now() - began) / 1000).toFixed(1)} s`
+
+  if (fault) {
+    const missed = fails.filter((start) => !caughtBy(failed, results.map((result) => result.id).filter((id) => id.startsWith(start)), { name, throws }))
+
+    check(`browser mutation caught: ${name}`, missed.length ? `these checks did not fail by a value: ${missed.join('; ')}` : true, `credited by ${creditOf(failed)}, ${took}`)
+  } else {
+    check(`browser benign rewrite: ${name}: no check fails`, failed.length === 0 ? true : failed.map((result) => `${result.name}: ${result.detail}`).join('; '), took)
+  }
+}
+
+// Faults planted in the panel the browser is served, with the checks each must fail by a value: a figure, and the question asked before a blank brief is opened, drawn wrong with their hooks kept (FU-46), and the cell, or the row that holds it, drawn with no opacity (FU-43).
+const BROWSER_MUTATIONS = [
+  { name: 'the required figure drawn unscaled, its hook kept', find: '{{ requirement.required === null ? \'—\' : amount(requirement.key, requirement.required) }}', replace: '{{ requirement.required === null ? \'—\' : count(requirement.required) }}', fails: ['browser: a range required in billions of km'] },
+  { name: 'the required cell drawn with no opacity', find: '<td class="text-right text-no-wrap" data-brief-cell="required">', replace: '<td class="text-right text-no-wrap" data-brief-cell="required" style="opacity: 0">', fails: ['browser: a range required in billions of km'] },
+  { name: 'the row of the requirements of an alternative drawn with no opacity', find: ':data-brief-detail="item.id">', replace: ':data-brief-detail="item.id" style="opacity: 0">', fails: ['browser: a range required in billions of km'] },
+  { name: 'the question before a blank brief asks about the other brief, its hook kept', find: '{{ pending.blank ? briefWords.discardBlank : briefWords.discardOther }}', replace: '{{ pending.blank ? briefWords.discardOther : briefWords.discardBlank }}', fails: ['browser: New asks before it drops text'] },
+]
+
+// Rewrites of the panel the browser is served that draw the same screen, one of each family (a test written the other way round, full opacity): each must leave every browser check passing.
+const BROWSER_BENIGN = [
+  { name: 'the required figure written with the test the other way round', find: '{{ requirement.required === null ? \'—\' : amount(requirement.key, requirement.required) }}', replace: '{{ requirement.required !== null ? amount(requirement.key, requirement.required) : \'—\' }}' },
+  { name: 'full opacity on the row of the requirements of an alternative', find: ':data-brief-detail="item.id">', replace: ':data-brief-detail="item.id" style="opacity: 1">' },
+]
 
 // ---------- the mutants of the utilities ----------
 
@@ -1393,16 +1548,15 @@ const GROUPS = (m) => [...unitChecks(m), ...evaluationChecks(m), ...rankingCheck
 const MUTATIONS = [
   { name: 'tons taken at 100 to the HS', file: 'mission-briefs.js', find: 'export const hsOfTons = (tons) => tons / TONS_PER_HS', replace: 'export const hsOfTons = (tons) => tons / 100', fails: ['units: 50 tons are 1 HS', 'evaluation: the size limit passes at the limit'] },
   { name: 'a size typed in tons not converted', find: '(definition.key === \'maxSizeHS\' && sizeUnit === \'tons\' ? 1 / TONS_PER_HS : definition.input.scale)', replace: '(definition.key === \'maxSizeHS\' && sizeUnit === \'tons\' ? 1 : definition.input.scale)', file: 'mission-briefs.js', fails: ['units: a size typed in tons', 'units: a stored value is typed back', 'evaluation: the size limit passes at the limit'] },
-  { name: 'a size typed in tons converted at the wrong rate', find: '(definition.key === \'maxSizeHS\' && sizeUnit === \'tons\' ? 1 / TONS_PER_HS : definition.input.scale)', replace: '(definition.key === \'maxSizeHS\' && sizeUnit === \'tons\' ? 1 / 20 : definition.input.scale)', file: 'mission-briefs.js', fails: ['units: a size typed in tons', 'evaluation: the size limit passes at the limit'] },
   { name: 'a cargo capacity read as HS of hold', find: 'export const cargoTonsOfCapacity = (capacity) => capacity', replace: 'export const cargoTonsOfCapacity = (capacity) => capacity * 50', file: 'mission-briefs.js', fails: ['units: a hold stores 50 tons', 'alternative: a saved class gives its cargo'] },
   { name: 'a hold taken to store 1 ton to the HS', find: 'export const cargoTonsOfHoldHS = (sizeHS) => sizeHS * CARGO_POINTS_PER_HS', replace: 'export const cargoTonsOfHoldHS = (sizeHS) => sizeHS', file: 'mission-briefs.js', fails: ['units: a hold stores 50 tons'] },
   { name: 'a hangar capacity read as tons of hull', find: 'export const hangarHSOfCapacity = (capacity) => capacity', replace: 'export const hangarHSOfCapacity = (capacity) => capacity * TONS_PER_HS', file: 'mission-briefs.js', fails: ['units: a hold stores 50 tons', 'alternative: a saved class gives its cargo'] },
   { name: 'a range typed in billions read as km', find: 'return Number.isFinite(number) && number > 0 ? { ok: true, value: number * typedScale(definition, sizeUnit) }', replace: 'return Number.isFinite(number) && number > 0 ? { ok: true, value: number }', file: 'mission-briefs.js', fails: ['units: a range typed in billions of km'] },
-  { name: 'a cruise power typed in percent kept as typed', find: '{ ok: true, value: number / 100 } : { ok: false, error: \'Enter a percent from 1 to 100.\' }', replace: '{ ok: true, value: number } : { ok: false, error: \'Enter a percent from 1 to 100.\' }', file: 'mission-briefs.js', fails: ['units: a range typed in billions of km'] },
+  { name: 'a cruise power typed in percent kept as typed', find: '{ ok: true, value: number / 100 } : { ok: false, error: FIELD_ERRORS.notAPercent }', replace: '{ ok: true, value: number } : { ok: false, error: FIELD_ERRORS.notAPercent }', file: 'mission-briefs.js', fails: ['units: a range typed in billions of km'] },
   { name: 'text that is not a positive number accepted', find: 'return Number.isFinite(number) && number > 0 ? { ok: true, value: number * typedScale(definition, sizeUnit) }', replace: 'return Number.isFinite(number) ? { ok: true, value: number * typedScale(definition, sizeUnit) }', file: 'mission-briefs.js', fails: ['fields: an empty text clears a field'] },
   { name: 'an unknown figure passing', find: 'actual: null, verdict: \'unknown\', reason: unknownReason(definition, figure)', replace: 'actual: null, verdict: \'pass\', reason: unknownReason(definition, figure)', file: 'mission-briefs.js', fails: ['evaluation: an unknown figure never passes', 'evaluation: each requirement gives', 'evaluation: the verdict comes from the requirements alone'] },
   { name: 'an unknown figure read as 0', find: 'actual: null, verdict: \'unknown\', reason: unknownReason(definition, figure)', replace: 'actual: 0, verdict: \'fail\', reason: unknownReason(definition, figure)', file: 'mission-briefs.js', fails: ['evaluation: an unknown figure never passes', 'evaluation: each requirement gives'] },
-  { name: 'a figure of 0 taken for unknown', find: 'const actual = figure.value\n', replace: 'const actual = figure.value || null\n', file: 'mission-briefs.js', fails: ['evaluation: a figure of 0 is a figure'] },
+  { name: 'a figure of 0 taken for unknown', find: 'if (!isAvailable(figure)) {\n    return { ...base, actual: null, verdict: \'unknown\'', replace: 'if (!isAvailable(figure) || !figure.value) {\n    return { ...base, actual: null, verdict: \'unknown\'', file: 'mission-briefs.js', fails: ['evaluation: a figure of 0 is a figure'] },
   { name: 'no tolerance on the limit', find: 'const slack = (value) => Math.max(Math.abs(value) * EPSILON, 1e-12)', replace: 'const slack = () => 0', file: 'mission-briefs.js', fails: ['evaluation: the size limit passes at the limit'] },
   { name: 'an upper limit read as a lower one', find: 'definition.comparison === \'atLeast\' ? actual >= required - slack(required) : definition.comparison === \'atMost\' ? actual <= required + slack(required)', replace: 'definition.comparison === \'atLeast\' ? actual >= required - slack(required) : definition.comparison === \'atMost\' ? actual >= required + slack(required)', file: 'mission-briefs.js', fails: ['evaluation: the size limit passes at the limit', 'evaluation: each requirement gives'] },
   { name: 'a requirement that is not set judged', find: 'REQUIREMENTS.filter((definition) => brief.requirements[definition.key] !== null).map((definition) => evaluateRequirement', replace: 'REQUIREMENTS.filter((definition) => true).map((definition) => evaluateRequirement', file: 'mission-briefs.js', fails: ['evaluation: a figure of 0 is a figure, and a requirement that is not set'] },
@@ -1422,7 +1576,6 @@ const MUTATIONS = [
   { name: 'a tie not falling to the next preference', find: 'if (Math.abs(first - second) > slack(Math.max(Math.abs(first), Math.abs(second)))) {', replace: 'if (true) {', file: 'mission-briefs.js', fails: ['ranking: preferences order within a verdict'] },
   { name: 'ties reordered', find: 'return a.index - b.index', replace: 'return b.index - a.index', file: 'mission-briefs.js', fails: ['ranking: alternatives that tie keep the order'] },
   { name: 'a preview marking every field an addition', find: 'kind: from === null || from === undefined || from === \'\' ? \'add\' : equalValue(from, to) ? \'same\' : \'replace\' })', replace: 'kind: \'add\' })', file: 'mission-briefs.js', fails: ['presets: a preview lists what would be added', 'presets: applying a preset again shows no change'] },
-  { name: 'a preview marking a replacement as nothing', find: 'kind: from === null || from === undefined || from === \'\' ? \'add\' : equalValue(from, to) ? \'same\' : \'replace\' })', replace: 'kind: from === null || from === undefined || from === \'\' ? \'add\' : \'same\' })', file: 'mission-briefs.js', fails: ['presets: a preview lists what would be added', 'presets: only the ticked fields are applied'] },
   { name: 'a preset applied whatever is ticked', find: 'if (!wanted.has(item.key)) {', replace: 'if (false) {', file: 'mission-briefs.js', fails: ['presets: only the ticked fields are applied', 'presets: nothing ticked changes nothing'] },
   { name: 'the draft changed in place by a preset', find: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = copyOf(normaliseBrief(draft))', replace: 'export const applyPreview = (draft, preview, accepted) => {\n  const brief = draft', file: 'mission-briefs.js', fails: ['presets: only the ticked fields are applied'] },
   { name: 'a preset recorded on a draft it changed nothing in', find: 'if (applied.length) {\n    brief.preset = preview.preset', replace: 'if (true) {\n    brief.preset = preview.preset', file: 'mission-briefs.js', fails: ['presets: nothing ticked changes nothing'] },
@@ -1445,8 +1598,8 @@ const MUTATIONS = [
   { name: 'a stale save written over without asking', find: 'if (!overwrite) {', replace: 'if (false) {', file: 'mission-briefs.js', fails: ['record: a stale save is refused'] },
   { name: 'a brief that is not valid written', find: 'if (problems.length) {\n      return { ok: false, code: \'invalid-brief\'', replace: 'if (false) {\n      return { ok: false, code: \'invalid-brief\'', file: 'mission-briefs.js', fails: ['record: a brief that is not valid is refused'] },
   { name: 'the repository not told what a valid brief is', find: 'validate: problemsOf,', replace: 'validate: () => [],', file: 'mission-briefs.js', fails: ['record: a brief that is not valid is refused'] },
-  { name: 'a missing scope not noticed', find: 'if (!scope) {\n    return { ok: false, code: \'no-scope\'', replace: 'if (false) {\n    return { ok: false, code: \'no-scope\'', file: 'mission-briefs.js', fails: ['record: no repository and no scope write nothing'] },
-  { name: 'a missing repository not noticed', find: 'if (!repository) {\n    return { ok: false, code: \'no-repository\'', replace: 'if (false) {\n    return { ok: false, code: \'no-repository\'', file: 'mission-briefs.js', fails: ['record: no repository and no scope write nothing'] },
+  { name: 'a missing scope reported as a missing repository', find: 'if (!scope) {\n    return { ok: false, code: \'no-scope\'', replace: 'if (!scope) {\n    return { ok: false, code: \'no-repository\'', file: 'mission-briefs.js', fails: ['record: no repository and no scope write nothing'] },
+  { name: 'a missing repository reported as a missing scope', find: 'if (!repository) {\n    return { ok: false, code: \'no-repository\'', replace: 'if (!repository) {\n    return { ok: false, code: \'no-scope\'', file: 'mission-briefs.js', fails: ['record: no repository and no scope write nothing'] },
   { name: 'a stale delete accepted', find: 'return allowed.ok ? { ok: true, record: repository.delete(scope, entry.uuid, entry.revision) } : allowed', replace: 'return allowed.ok ? { ok: true, record: repository.delete(scope, entry.uuid, repository.read(scope, entry.uuid).revision) } : allowed', file: 'mission-briefs.js', fails: ['record: a brief is edited in place and deleted'] },
 ]
 
@@ -1610,33 +1763,38 @@ const MUTANTS = [
   ...MUTATIONS.map((mutation, index) => ({ kind: 'utility', id: `utility:${index}`, ...mutation })),
   ...PAGE_MUTATIONS.map((mutation, index) => ({ kind: 'page', id: `page:${index}`, ...mutation })),
   ...PANEL_MUTATIONS.map((mutation, index) => ({ kind: 'panel', id: `panel:${index}`, ...mutation })),
+  ...BROWSER_MUTATIONS.map((mutation, index) => ({ kind: 'browser', id: `browser:${index}`, ...mutation })),
+  ...BROWSER_BENIGN.map((rewrite, index) => ({ kind: 'browser-benign', id: `browser-benign:${index}`, ...rewrite })),
 ]
 
 const SAVE_LABELS = ['modded', 'stock']
 
-const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
+// The verdict on a fault over the checks it names (`named`, `[name, test]`): each start of `fails` must begin a check that failed by a value (`caughtBy`, which stops the run when only checks that threw would credit the fault, unless the fault declares `throws`). Returns [verdict, detail], the detail naming each check that failed and how.
+const faultVerdict = async (named, { name, fails, throws = false }, began) => {
+  const absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
+  const failed = judged(await runChecks(asChecks(named), {}), `the fault "${name}"`)
+  const missed = fails.filter((start) => !caughtBy(failed, named.map(([checkName]) => checkName).filter((checkName) => checkName.startsWith(start)), { name, throws }))
+
+  return [absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail by a value: ${missed.join('; ')}` : true, `credited by ${creditOf(failed)}, ${((Date.now() - began) / 1000).toFixed(1)} s`]
+}
+
+const checkUtilityMutation = async (mutant) => {
+  const { name, file, find, replace, fails } = mutant
   const began = Date.now()
   let directory = null
 
   try {
     directory = mutatedCopy(file, find, replace)
 
-    const mutant = await loadAll(directory)
-    const all = GROUPS(mutant)
-    const named = all.filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
-    const absent = fails.filter((start) => !named.some(([checkName]) => checkName.startsWith(start)))
-    const failed = []
+    const named = GROUPS(await loadAll(directory)).filter(([checkName]) => fails.some((start) => checkName.startsWith(start)))
+    const [verdict, detail] = await faultVerdict(named, mutant, began)
 
-    for (const [checkName, test] of named) {
-      if ((await settle(test)) !== true) {
-        failed.push(checkName)
-      }
+    check(`mutation caught: ${name}`, verdict, detail)
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      throw error
     }
 
-    const missed = fails.filter((start) => !failed.some((checkName) => checkName.startsWith(start)))
-
-    check(`mutation caught: ${name}`, absent.length ? `no check begins ${absent.join('; ')}` : missed.length ? `these checks did not fail: ${missed.join('; ')}` : true, `${failed.length} of the checks it names fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-  } catch (error) {
     check(`mutation caught: ${name}`, `does not load: ${error.message}`)
   } finally {
     if (directory) {
@@ -1645,25 +1803,21 @@ const checkUtilityMutation = async ({ name, file, find, replace, fails }) => {
   }
 }
 
-const checkPageMutation = async ({ kind, name, find, replace, fails }, real) => {
+const checkPageMutation = async (mutant, real) => {
+  const { kind, name, find, replace, fails } = mutant
   const statementsOf = kind === 'page' ? pageStatements : panelStatements
   const began = Date.now()
 
   try {
     const named = (await statementsOf(replacing(find, replace), real)).filter(([statement]) => fails.some((start) => statement.startsWith(start)))
-    const absent = fails.filter((start) => !named.some(([statement]) => statement.startsWith(start)))
-    const failed = []
+    const [verdict, detail] = await faultVerdict(named, mutant, began)
 
-    for (const [statement, held] of named) {
-      if ((await settle(held)) !== true) {
-        failed.push(statement)
-      }
+    check(`${kind} mutation caught: ${name}`, verdict, detail)
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      throw error
     }
 
-    const missed = fails.filter((start) => !failed.some((statement) => statement.startsWith(start)))
-
-    check(`${kind} mutation caught: ${name}`, absent.length ? `no statement begins ${absent.join('; ')}` : missed.length ? `these statements did not fail: ${missed.join('; ')}` : true, `${failed.length} statements fail, ${((Date.now() - began) / 1000).toFixed(1)} s`)
-  } catch (error) {
     check(`${kind} mutation caught: ${name}`, `does not load: ${error.message}`)
   }
 }
@@ -1680,52 +1834,46 @@ const checkSave = async (label, [file, GameID, RaceID], real) => {
   }
 
   for (const [name, verdict, detail] of await saveChecks(real, database, { GameID, RaceID }, label)) {
-    check(name, await settle(() => verdict), detail)
+    check(name, verdict, detail)
   }
 
   database.close()
 }
 
-const checkBrowser = async () => {
-  try {
-    for (const [statement, verdict] of await browserStatements(process.env.BASE_URL)) {
-      check(statement, verdict)
-    }
-  } catch (error) {
-    check('browser: the case ran to its end', error.message.split('\n')[0])
-  }
-}
-
-// One part, in this process: `groups`, `page`, `panel`, `browser`, a mutant by its id or a save by its label.
+// One part, in this process: `groups`, `page`, `panel`, `browser`, a mutant or a benign rewrite by its id, `browser-variants`, or a save by its label.
 const runPart = async (part, options) => {
   const mutant = MUTANTS.find(({ id }) => id === part)
 
   if (mutant && mutant.kind === 'utility') {
     await checkUtilityMutation(mutant)
-  } else if (part === 'browser') {
-    await checkBrowser()
-  } else {
-    const real = await loadAll()
 
-    if (part === 'groups') {
-      for (const [name, test] of GROUPS(real)) {
-        check(name, await settle(test))
+    return
+  }
+
+  const real = await loadAll()
+
+  if (part === 'groups') {
+    printResults(await runChecks(asChecks(GROUPS(real)), {}))
+  } else if (part === 'page') {
+    printResults(await runChecks(asChecks(await pageStatements(null, real)), {}))
+  } else if (part === 'panel') {
+    printResults(await runChecks(asChecks(await panelStatements(null, real)), {}))
+  } else if (part === 'browser') {
+    printResults(await runChecks(browserChecks(real), { observation: await inBrowser((observeSource) => observeSource(null)) }))
+  } else if (part === 'browser-variants') {
+    await inBrowser(async (observeSource) => {
+      for (const variant of MUTANTS.filter(({ kind }) => kind.startsWith('browser'))) {
+        await checkBrowserVariant(variant, real, observeSource)
       }
-    } else if (part === 'page') {
-      for (const [statement, held] of await pageStatements(null, real)) {
-        check(statement, await settle(held))
-      }
-    } else if (part === 'panel') {
-      for (const [statement, held] of await panelStatements(null, real)) {
-        check(statement, await settle(held))
-      }
-    } else if (mutant) {
-      await checkPageMutation(mutant, real)
-    } else if (SAVE_LABELS.includes(part)) {
-      await checkSave(part, options[part], real)
-    } else {
-      throw new Error(`No part is named ${part}`)
-    }
+    })
+  } else if (mutant && mutant.kind.startsWith('browser')) {
+    await inBrowser((observeSource) => checkBrowserVariant(mutant, real, observeSource))
+  } else if (mutant) {
+    await checkPageMutation(mutant, real)
+  } else if (SAVE_LABELS.includes(part)) {
+    await checkSave(part, options[part], real)
+  } else {
+    throw new Error(`No part is named ${part}`)
   }
 }
 
@@ -1739,13 +1887,16 @@ const run = async () => {
     endSection(checks, failures)
   }
 
+  // The mutants that need no browser run in a process each; the faults and rewrites served to the browser run in one (`browser-variants`), which starts Vite and Chromium once for them all.
+  const variants = options.mutations ? [...MUTANTS.filter(({ kind }) => !kind.startsWith('browser')).map(({ id }) => ({ part: id, weight: 3 })), { part: 'browser-variants', weight: 50 }] : []
+
   // In the order they print; the longest start first.
   const parts = [
     { part: 'groups', weight: 30 },
     { part: 'page', weight: 10 },
     { part: 'panel', weight: 10 },
-    ...(process.env.BASE_URL ? [{ part: 'browser', weight: 20 }] : []),
-    ...(options.mutations ? MUTANTS.map(({ id }) => ({ part: id, weight: 3 })) : []),
+    { part: 'browser', weight: 20 },
+    ...variants,
     ...SAVE_LABELS.map((label) => ({ part: label, weight: 20 })),
   ]
 
@@ -1766,16 +1917,12 @@ const run = async () => {
   console.log('\nThe panel (its script, template and Vue, without a document)')
   printed()
 
-  if (process.env.BASE_URL) {
-    console.log(`\nThe browser (${process.env.BASE_URL})`)
-    printed()
-  } else {
-    console.log('\nSKIP  the browser case: BASE_URL is not set (start bun run web, then BASE_URL=http://localhost:9080)')
-  }
+  console.log('\nThe browser (the page and the panel over a copy of AuroraDB.db, in Chromium)')
+  printed()
 
   if (options.mutations) {
-    console.log('\nMutations: each must fail the checks it names')
-    MUTANTS.forEach(printed)
+    console.log('\nMutations: each must fail by a value the checks it names, and each benign rewrite of the browser case none')
+    variants.forEach(printed)
   }
 
   SAVE_LABELS.forEach(printed)

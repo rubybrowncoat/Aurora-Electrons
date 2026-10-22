@@ -1016,9 +1016,9 @@ check('stamps-read', 'the identity stamp of an object is its class and construct
   assert.deepEqual([...(await readStamps(mockDatabase({}), 141, ['fleet:1', 'project:2'])).keys()], [])
 })
 
-check('voice', 'what the page says of a snooze is impersonal: no I, me, my, mine, you, your, we or our in a note, an ended reason or the page\'s text', 'unit', ({ m }) => {
+check('voice', 'what the page says of a snooze is impersonal: no I, me, my, mine, you, your, we or our in a note, an ended reason, the words of the lines over the rows listed apart or the page\'s text', 'unit', ({ m }) => {
   const pronoun = /\b(I|me|my|mine|you|your|yours|we|our|ours)\b/i
-  const strings = [...Object.values(m.snoozes.NOTES), ...Object.values(m.snoozes.ENDED), m.snoozes.untilText(rec(), String), m.snoozes.untilText(checkRec(), String), m.snoozes.untilText(rec({ until: { kind: 'date', expiresAt: 5 } }), (seconds) => `day ${seconds}`), m.snoozes.untilText(rec({ until: { kind: 'material', signature: 'a' } }), String)]
+  const strings = [...Object.values(m.snoozes.NOTES), ...Object.values(m.snoozes.ENDED), ...Object.values(m.common.SEPARATOR_WORDS), m.snoozes.untilText(rec(), String), m.snoozes.untilText(checkRec(), String), m.snoozes.untilText(rec({ until: { kind: 'date', expiresAt: 5 } }), (seconds) => `day ${seconds}`), m.snoozes.untilText(rec({ until: { kind: 'material', signature: 'a' } }), String)]
   const page = fs.readFileSync(path.join(m.pages, 'warnings.vue'), 'utf8')
   const template = page.slice(page.indexOf('<template>'), page.indexOf('</template>\n\n<script>'))
   const shown = [...template.matchAll(/>([^<>{}]*[A-Za-z][^<>{}]*)</g)].map((match) => match[1]).concat([...template.matchAll(/(?:label|title|aria-label)="([^"]+)"/g)].map((match) => match[1]), [...template.matchAll(/'([^']+)'/g)].map((match) => match[1]))

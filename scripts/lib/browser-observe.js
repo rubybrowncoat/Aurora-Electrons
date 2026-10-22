@@ -15,6 +15,10 @@
 // The record is complete when the work went through as well as when it did not, and an observation with an unexpected renderer error has an `error`: a check names the exact error it expects, or the page raises none.
 //
 // `validate` throws a HarnessError for a record of another shape: a check that is handed such a record is itself broken, and that is told as a failure of the run, never as a page that failed or a fault that was caught.
+//
+// The screen as the player sees it, read the one way every page check reads it:
+// const { installScreen, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
+// await installScreen(page) puts the readers at `window.__screen` in the page: `visible(element)`, `visibleText(element)` and `hooked(root, attribute)`, each told where it is defined. A check reads the elements its hooks name with `hooked`, brings back their text and whether each is on screen, and judges them in the check: `readFigure` reads a number drawn in the grouping of the setting, `rounded` is the oracle's number as the page rounds it, `labelKey` reads a word back through the component's own table of words, `rolesRead` compares a region by the role of each element and `pairedBy` a list by the identity of each line. Checked by scripts/check-browser-observe.js.
 const MESSAGE_LIMIT = 4000
 const TEXT_LIMIT = 500
 const FLUSH = 250
@@ -156,4 +160,217 @@ const report = (label, seen) => {
   }
 }
 
-module.exports = { observe, validate, failedObservation, completedObservation, failureLine, describe, report, HarnessError }
+// ---------- the screen as the player sees it ----------
+
+// Run in the page by `installScreen`: the readers, at `window.__screen`. Each takes an element and throws for anything else, which fails the observation; a check finds its elements by their hooks, so a fault that removes one shows as an element that is not there, never as a read of nothing.
+// - visible(element): the element is drawn where the player can see it. It passes `checkVisibility` with the CSS visibility and the opacity of itself and of its ancestors (display, visibility, content-visibility, an opacity of 0), and its layout box has an area some of which the ancestors that clip it leave drawn: an ancestor whose overflow hides or clips an axis cuts the box to its own in that axis, where overflow applies (a block, flex or grid container, a table cell; never an inline box, a box of `display: contents` or a row or group of a table). A box positioned out of the flow is cut only by the ancestors that contain it: an absolute one by its containing block and those above it, a fixed one by the same but never by a block that is only positioned, and by none when there is no such block. Its containing block, as Chromium makes one, is the nearest ancestor that is positioned (for an absolute box) or that holds it: filtered on any box, or transformed, given a perspective or under layout or paint containment on a box that is not inline; size containment alone holds none. An overflow that scrolls cuts nothing, as what it hides can be scrolled to, and neither does the window.
+// - visibleText(element): the text the element draws, from its text nodes and never from `textContent`: a text node counts when the element it sits in passes `checkVisibility` as above and some line of the text itself has an area that this element and the ancestors that clip it leave drawn. The text's own box stands for its element's: an element of no area whose overflow is hidden draws none of its text, and one whose overflow shows draws it, as the browser does (that element is not `visible` all the same). The whitespace the browser collapses under `white-space: normal` (runs of ASCII spaces, tabs and line breaks) is one space, and none at either end; every other character is kept as it is, the spaces of Unicode (U+00A0, U+202F, U+2003 and the like) included, as the browser draws them.
+// - hooked(root, attribute): each element under `root` that carries `attribute`, in the order of the document, as { role, text, on }: the value of the attribute (the role or the identity the hook gives, never the decision a check asserts), the element's `visibleText`, and whether it is on screen: `visible`, or drawing text of its own (an element of no area whose overflow shows its text is seen by the text).
+const screenReaders = () => {
+  const CLIPS = ['hidden', 'clip']
+  const elementOf = (value) => {
+    if (!(value instanceof Element)) {
+      throw new TypeError(`the screen readers read an element, not ${value === null ? 'null' : typeof value}`)
+    }
+
+    return value
+  }
+  const shown = (element) => element.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true })
+  // Whether `will-change` promises one of `names`.
+  const promised = (style, names) => String(style.willChange).split(', ').some((name) => names.includes(name))
+  // Whether an ancestor is the containing block of the out-of-flow boxes below it whatever its position, as Chromium makes one: filtered, or promised a filter, whatever its box; transformed, given a perspective or under layout or paint containment, or promised one of them, only when its box is not inline. A box of `display: contents` has no box and holds nothing, and size containment alone (`contain: size`, `container-type`) makes none.
+  const holds = (style) => style.display !== 'contents' && (['filter', 'backdropFilter'].some((name) => (style[name] || 'none') !== 'none') || promised(style, ['filter', 'backdrop-filter']) || (style.display !== 'inline' && (['transform', 'translate', 'rotate', 'scale', 'perspective'].some((name) => (style[name] || 'none') !== 'none') || /\b(layout|paint|strict|content)\b/.test(style.contain) || style.contentVisibility === 'auto' || promised(style, ['transform', 'translate', 'rotate', 'scale', 'perspective', 'contain']))))
+  // Whether an ancestor contains a box positioned as `out`: an absolute one is contained by a positioned ancestor or one that holds it, a fixed one only by one that holds it, any other by its parent.
+  const contains = (style, out) => (out === 'fixed' ? holds(style) : out === 'absolute' ? style.position !== 'static' || holds(style) : true)
+  // Whether the overflow of an ancestor applies to its box: not to an inline box, a box of `display: contents` or a row, column or group of a table.
+  const clips = (style) => style.display !== 'inline' && style.display !== 'contents' && !/^table-(row|column|header|footer)/.test(style.display)
+  // Whether some of `rect` is left drawn by the ancestors from `from` up that contain a box positioned as `position`.
+  const drawn = (rect, from, position) => {
+    let [left, top, right, bottom] = [rect.left, rect.top, rect.right, rect.bottom]
+    let out = position
+
+    for (let element = from; element && element !== document.body && element !== document.documentElement; element = element.parentElement) {
+      const style = getComputedStyle(element)
+
+      if (!contains(style, out)) {
+        continue
+      }
+
+      if (clips(style)) {
+        const box = element.getBoundingClientRect()
+
+        if (CLIPS.includes(style.overflowX)) {
+          left = Math.max(left, box.left)
+          right = Math.min(right, box.right)
+        }
+
+        if (CLIPS.includes(style.overflowY)) {
+          top = Math.max(top, box.top)
+          bottom = Math.min(bottom, box.bottom)
+        }
+      }
+
+      out = style.position
+    }
+
+    return right > left && bottom > top
+  }
+  const visible = (value) => {
+    const element = elementOf(value)
+
+    return shown(element) && drawn(element.getBoundingClientRect(), element.parentElement, getComputedStyle(element).position)
+  }
+  const visibleText = (value) => {
+    const walker = document.createTreeWalker(elementOf(value), NodeFilter.SHOW_TEXT)
+    const range = document.createRange()
+    let text = ''
+
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement
+
+      range.selectNodeContents(node)
+
+      if (parent && shown(parent) && [...range.getClientRects()].some((rect) => drawn(rect, parent, 'static'))) {
+        text += node.data
+      }
+    }
+
+    return text.replace(/[ \t\n\r]+/g, ' ').replace(/^ | $/g, '')
+  }
+  const hooked = (root, attribute) => [...elementOf(root).querySelectorAll(`[${CSS.escape(attribute)}]`)].map((element) => {
+    const text = visibleText(element)
+
+    return { role: element.getAttribute(attribute), text, on: visible(element) || text !== '' }
+  })
+
+  window.__screen = { visible, visibleText, hooked }
+}
+
+// Puts the readers at `window.__screen` in the page, now and in each document the page loads after.
+const installScreen = async (page) => {
+  await page.addInitScript(screenReaders)
+  await page.evaluate(screenReaders)
+}
+
+// The character each name of the "Thousands Separator" setting puts between groups of three digits: the check's own table, which scripts/check-browser-observe.js tries against the page's formatter (thousandsSeparator and countText in src/renderer/utilities/math.js) and which is never built from it.
+const GROUPINGS = Object.freeze({ Tick: '\'', Comma: ',', Dash: '-', Space: ' ', None: '' })
+// The signs a figure may start with: the ASCII hyphen-minus and the minus sign U+2212 make it negative, a plus positive.
+const SIGNS = Object.freeze({ '-': -1, '\u2212': -1, '+': 1 })
+
+const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key)
+
+const patternOf = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// A number read back from the text an element draws, whole: one optional sign, digits grouped in threes by the character of the `grouping` (the name of the setting, Tick, Comma, Dash, Space or None, under which the digits are not grouped), and an optional decimal part after a point; a trailing .0 is the same number. Anything else is null, never the number of a part of the text: any other character anywhere (a unit, a space that is not the grouping's, a second sign or point, a digit of another script), a group of another size, a leading zero, a point with no digits on one side, a minus before a zero. A `grouping` that is not a name of the setting is a HarnessError.
+const readFigure = (text, grouping) => {
+  if (typeof grouping !== 'string' || !has(GROUPINGS, grouping)) {
+    throw new HarnessError(`readFigure reads the groupings of the setting (${Object.keys(GROUPINGS).join(', ')}), not ${JSON.stringify(grouping)}`)
+  }
+
+  if (typeof text !== 'string') {
+    return null
+  }
+
+  const sign = has(SIGNS, text.charAt(0)) ? SIGNS[text.charAt(0)] : 0
+  const separator = GROUPINGS[grouping]
+  const match = new RegExp(`^(${separator ? `\\d{1,3}(?:${patternOf(separator)}\\d{3})*` : '\\d+'})(?:\\.(\\d+))?$`).exec(sign ? text.slice(1) : text)
+
+  if (!match) {
+    return null
+  }
+
+  const digits = separator ? match[1].split(separator).join('') : match[1]
+  const value = Number(`${digits}${match[2] === undefined ? '' : `.${match[2]}`}`)
+
+  if (/^0\d/.test(digits) || (sign < 0 && value === 0)) {
+    return null
+  }
+
+  return sign < 0 ? -value : value
+}
+
+// The number the page shows of `value` written to `decimals` places, rounded as the page's formatter rounds it (the value times ten to the places, to the nearest whole number with a half toward +∞, and back): the oracle's side of a figure, compared as a number with what `readFigure` reads. A value that is no finite number, or places that are no whole number from 0, are a HarnessError.
+const rounded = (value, decimals = 0) => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(decimals) || decimals < 0) {
+    throw new HarnessError(`rounded takes a finite number and a whole number of places, not ${JSON.stringify([value, decimals])}`)
+  }
+
+  return Math.round(value * 10 ** decimals) / 10 ** decimals
+}
+
+const isEntry = (entry) => Boolean(entry) && typeof entry.role === 'string' && typeof entry.text === 'string' && typeof entry.on === 'boolean'
+
+// What a region draws, read by the role of each element that draws a part of it (`entries` as `hooked` gives them), against `expected` ({ role: wanted }), never by the place of an element and never as a set. Only the elements on screen are read, as the player sees no other. A role whose wanted value is not null is drawn by exactly one element on screen, whose text `read` turns into the wanted value (compared with ===; `read` is the text itself when none is given); a role whose wanted value is null (or undefined) is drawn by none; a role `expected` does not name is drawn by none. Returns the problems, each [what, role, ...what was seen], none when the region draws what is expected. Entries of another shape, an `expected` that is no object or a `read` that is no function are a HarnessError.
+const rolesRead = (what, entries, expected, read = (text) => text) => {
+  if (!Array.isArray(entries) || !entries.every(isEntry) || !expected || typeof expected !== 'object' || Array.isArray(expected) || typeof read !== 'function') {
+    throw new HarnessError(`rolesRead of ${what} reads entries { role, text, on } against an object of roles with a function to read each text`)
+  }
+
+  const byRole = new Map()
+  const problems = []
+
+  entries.filter((entry) => entry.on).forEach((entry) => byRole.set(entry.role, [...(byRole.get(entry.role) || []), entry]))
+  Object.keys(expected).forEach((role) => {
+    const found = byRole.get(role) || []
+    const wanted = expected[role]
+
+    if (wanted === null || wanted === undefined) {
+      if (found.length) {
+        problems.push([what, role, `is none and ${found.length} element${found.length === 1 ? ' draws' : 's draw'} it`, found.map((entry) => entry.text)])
+      }
+    } else if (found.length !== 1) {
+      problems.push([what, role, `${found.length} elements on screen draw it`, entries.filter((entry) => entry.role === role).map((entry) => [entry.text, entry.on])])
+    } else if (read(found[0].text) !== wanted) {
+      problems.push([what, role, found[0].text, wanted])
+    }
+  })
+  ;[...byRole.keys()].filter((role) => !has(expected, role)).forEach((role) => problems.push([what, role, 'is drawn and not expected here', byRole.get(role).map((entry) => entry.text)]))
+
+  return problems
+}
+
+// The lines of a list the screen shows set against the oracle's rows by identity, never by place: each row has exactly one line of its identity, every line is a row's, and two rows of one identity cannot be told apart. `identityOfLine` and `identityOfRow` give the identity of each, compared as the keys of a Map. Returns { pairs: [[row, line]], problems }, each problem [what, ...what was seen]. Lists that are no arrays, or identities that are no functions, are a HarnessError.
+const pairedBy = (what, lines, rows, identityOfLine, identityOfRow) => {
+  if (!Array.isArray(lines) || !Array.isArray(rows) || typeof identityOfLine !== 'function' || typeof identityOfRow !== 'function') {
+    throw new HarnessError(`pairedBy of ${what} pairs two lists by a function of identity for each`)
+  }
+
+  const byIdentity = new Map()
+  const ids = rows.map(identityOfRow)
+  const problems = []
+
+  lines.forEach((line) => byIdentity.set(identityOfLine(line), [...(byIdentity.get(identityOfLine(line)) || []), line]))
+
+  if (new Set(ids).size !== ids.length) {
+    problems.push([what, 'two rows of the oracle have one identity', ids])
+  }
+
+  ;[...byIdentity.keys()].filter((id) => !ids.includes(id)).forEach((id) => problems.push([what, 'a line of an identity no row has', id]))
+
+  const pairs = rows.flatMap((row, index) => {
+    const found = byIdentity.get(ids[index]) || []
+
+    if (found.length !== 1) {
+      problems.push([what, ids[index], `${found.length} lines`])
+
+      return []
+    }
+
+    return [[row, found[0]]]
+  })
+
+  return { pairs, problems }
+}
+
+// The key whose label in `labels` (a component's or a module's own table of words, { key: label }) is the text drawn: the kind a displayed word stands for, read back through that table and never through the hook. Null when no label, or more than one, is that text. `labels` that are no object are a HarnessError.
+const labelKey = (text, labels) => {
+  if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+    throw new HarnessError('labelKey reads a text back through an object of labels')
+  }
+
+  const keys = Object.keys(labels).filter((key) => labels[key] === text)
+
+  return keys.length === 1 ? keys[0] : null
+}
+
+module.exports = { observe, validate, failedObservation, completedObservation, failureLine, describe, report, HarnessError, installScreen, GROUPINGS, readFigure, rounded, rolesRead, pairedBy, labelKey }

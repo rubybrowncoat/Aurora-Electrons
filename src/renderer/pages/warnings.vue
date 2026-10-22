@@ -70,7 +70,7 @@
                   <tbody>
                     <template v-for="row in listing(section)">
                       <tr v-if="row.separator" :key="row.id" class="row-separator" :data-separator="row.separator">
-                        <td :colspan="section.check.columns.length + 1" class="caption text--secondary"><template v-if="row.separator === 'snoozed'">{{ count(row.count) }} snoozed: out of the tiles until the snooze ends</template><template v-else>{{ count(row.count) }} not evaluated: a stored value the condition needs is missing<provenance-mark :rule="section.check.provenance" /></template></td>
+                        <td :colspan="section.check.columns.length + 1" class="caption text--secondary">{{ count(row.count) }} {{ separatorWords(row) }}<provenance-mark v-if="row.separator !== 'snoozed'" :rule="section.check.provenance" /></td>
                       </tr>
                       <tr v-else :key="row.id" :class="{ 'row-muted': !row.unevaluated && section.mutedIds.has(row.id), 'row-snoozed': section.snoozedIds.has(row.id) }" :data-row="row.id">
                         <td v-for="(column, index) in section.check.columns" :key="column.key" :class="{ 'text-end': column.align === 'end' }">
@@ -186,7 +186,7 @@ import { branchLineage, gameDateText, gameSecondsOf } from '../utilities/history
 import { joinLabels, tracked } from '../utilities/load-tracking'
 import { isKnownNumber } from '../utilities/math'
 import { describeRule } from '../utilities/provenance'
-import { CHECKS, GROUPS, IDLE_FLEETS_KEY, SEVERITIES, checkByKey, checkLabel, describeSignature, normalizeRows } from '../utilities/warnings'
+import { CHECKS, GROUPS, IDLE_FLEETS_KEY, SEPARATOR_WORDS, SEVERITIES, checkByKey, checkLabel, describeSignature, normalizeRows } from '../utilities/warnings'
 import { ENDED, REASON_LENGTH, addRecord, emptyStore, endRecords, evaluate, forBranch, makeRecord, pruned, readStamps, readStore, seeded, untilText } from '../utilities/warnings/snoozes'
 
 // Rows a check shows before "Show all".
@@ -1031,6 +1031,11 @@ export default {
 
     panelCaption(panel) {
       return [`${this.count(panel.total)} ${panel.total === 1 ? 'warning' : 'warnings'} in ${this.count(panel.warned)} ${panel.warned === 1 ? 'check' : 'checks'}`, panel.snoozed ? `${this.count(panel.snoozed)} snoozed` : '', panel.unevaluated ? `${this.count(panel.unevaluated)} not evaluated` : '', panel.failed ? `${this.count(panel.failed)} not read` : ''].filter(Boolean).join(', ')
+    },
+
+    // The words of the line over the rows a section lists apart, after the number of them.
+    separatorWords(row) {
+      return SEPARATOR_WORDS[row.separator]
     },
 
     // What an unevaluated row lacks.

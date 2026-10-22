@@ -1,7 +1,7 @@
 /*
   Checks the local reserves and the timed resource ledger (src/renderer/utilities/resource-ledger.js, resource-reserves.js and resource-feeds.js, the mixin src/renderer/mixins/resource-reserves.js, the panel src/renderer/components/logistics/ResourceReserves.vue and its mounts in src/renderer/pages/logistics.vue and hauling.vue).
 
-  bun scripts/check-resource-ledger.js [--no-mutations] [--part head|mutant:N] [--detail]
+  bun scripts/check-resource-ledger.js [--no-mutations] [--part head|mutant:N[,N...]] [--detail]
 
   Everything runs on in-memory scenario stores, the real scenario repository and a fake save that records the SQL it is sent. Groups:
   - stock: one stock over the days, a withdrawal takes only what the stock holds above the reserve and the shortfall says whether the stock or the reserve is the cause;
@@ -19,20 +19,21 @@
   - component: the panel's template, the three minimums and the notes of the template that the data decides, a class minimum that some classes do not record shown as at least the figure, production and an export of an input on one stock from either panel and from the Hauling page's rows, which carry no supply column (the panel reads the colonies' supplies and production rates itself for minerals, waits on both and names a failure of either), a production not known listed as not known and never as covered, its form and its writes, and its states while a read is out or failed;
   - page: the Logistics and Hauling pages rendered with state they are given: the panel's mount is there in its own view only, with the props the page hands it evaluated, and the view the Logistics page keeps;
   - voice: nothing the panel and its utilities say to the player is in the first or second person;
-  - browser: what the panel draws, read from the real app in Chromium (scripts/lib/reserve-screen.js): the mounts of both pages, the buttons pressed, and fixtures of the panel mounted in the page whose cells (stock, the three minimums, the lowest balance, the status chips, the run, the timeline, the shortfalls, the summary) are read as the text drawn and whether each is on screen, and compared with the numbers the ledger holds: each quantity from the element that draws it, by its role, read as a signed number in the grouping of the page's setting and at the precision the page shows. No virtual node is read and no text is taken from a container for its figures.
+  - browser: what the panel draws, read from the real app in Chromium (scripts/lib/reserve-screen.js): the mounts of both pages, the buttons pressed, and fixtures of the panel mounted in the page whose cells (stock, the three minimums, the lowest balance, the status chips, the run, the timeline, the shortfalls, the summary) are read as the text drawn and whether each is on screen, and compared with the numbers the ledger holds: each quantity from the element that draws it, by its role, read as a signed number in the grouping of the page's setting and at the precision the page shows. The state of a minimum cell and the message of a write are read from what they draw too, a word read back through the panel's own words for it (`minimumWords`, `saveWords`), beside the hook that names them. No virtual node is read and no text is taken from a container for its figures. The screen is read by the shared readers of scripts/lib/browser-observe.js (`visible`, `visibleText`, `hooked`, `readFigure`, `rounded`, `rolesRead`, `pairedBy`, `labelKey`), which scripts/check-browser-observe.js checks, the 90 texts of the page's formatter among them.
 
-  Each planted fault must fail, by an assertion on a value and not by a call that threw, a check that it names. A fault that is caught only by a call that threw is no credit; --detail lists the failed checks of a variant and --part mutant:N runs one. Exit code 1 when a check fails.
+  Each planted fault must fail, by an assertion on a value and not by a call that threw, a check that it names: a fault whose named checks fail only by a call that threw stops the run (scripts/lib/fault-credit.js `caughtBy`); --detail lists the failed checks of a variant and --part mutant:N runs one (mutant:N,M runs several, one after another in one process, as the full run does). A planted fault that is caught by what the browser reads may name the parts of the screen it is read in (`parts`), the parts its checks read; every equivalent rewrite reads the whole screen. Exit code 1 when a check fails.
 */
 const fs = require('fs')
 const path = require('path')
 const acorn = require('acorn')
 const sqlite3 = require('sqlite3')
 const { assert, failure, through, harnessStore, boundary, subjectModule, runChecks, judged, caughtBy, infrastructureFailure } = require('./lib/fault-credit')
-const { validate, failedObservation, failureLine, HarnessError } = require('./lib/browser-observe')
+const { validate, failedObservation, failureLine, HarnessError, readFigure, rounded, rolesRead, pairedBy, labelKey } = require('./lib/browser-observe')
 const { loadUtilities } = require('./lib/utilities')
 const { loadPage, loadModule, instantiate } = require('./lib/page-loader')
 const { patched } = require('./lib/mutant-source')
 const { endSection, runSections, printSection } = require('./lib/check-sections')
+const { jobs } = require('./lib/check-pool')
 
 const root = path.resolve(__dirname, '..')
 const renderer = path.join(root, 'src', 'renderer')
@@ -47,7 +48,7 @@ const FILES = {
   history: path.join(renderer, 'pages', 'history.vue'),
 }
 const UTILITY_NAMES = { ledger: 'resource-ledger', reserves: 'resource-reserves', feeds: 'resource-feeds' }
-const NAMES = ['resource-ledger', 'resource-reserves', 'resource-feeds', 'scenario-records', 'provenance', 'msp-supply', 'minerals', 'logistics', 'load-tracking', 'math']
+const NAMES = ['resource-ledger', 'resource-reserves', 'resource-feeds', 'scenario-records', 'provenance', 'msp-supply', 'minerals', 'logistics', 'load-tracking']
 
 const requireOf = (specifier) => `createRequire(${JSON.stringify(path.join(root, 'package.json'))})(${JSON.stringify(specifier)})`
 
@@ -1654,36 +1655,6 @@ const panel = (ctx) => {
     return partial.minimums.class.unknown === 1 && vm.classText(partial) !== vm.classText(unqualified(partial)) && vm.classText(partial).includes(figure) && vm.classText(unqualified(partial)).includes(figure) && vm.classText(whole) === vm.classText(unqualified(whole)) ? true : short([vm.classText(partial), vm.classText(unqualified(partial)), vm.classText(whole)])
   })
 
-  // The reader of the browser checks is tried against the page's own formatter: 18 numbers (decimals, thousands, half-rounding, negatives, a residue of arithmetic) in each of the five settings, 90 texts in all.
-  add('component: a quantity is read back from the text the panel draws, signed, in every grouping the setting offers and at the precision the page shows, and a text that is no figure is not read', () => {
-    const values = [0, 1, 10, 995.0000000000045, 1.9e-14, 0.04, 0.05, 0.15, 1.25, 1.95, 999.95, 1000, 1234567.89, -1, -0.05, -0.15, -1.25, -1234567.89]
-    const settings = ['Tick', 'Comma', 'Dash', 'Space', 'None']
-    const problems = []
-
-    values.forEach((value) => settings.forEach((setting) => {
-      const page = m.math.countText(value, Number.isInteger(value) ? 0 : 1, m.math.thousandsSeparator(setting))
-
-      if (figureOf(page, setting) !== displayOf(value)) {
-        problems.push([setting, value, page, figureOf(page, setting), displayOf(value)])
-      }
-
-      // An explicit plus before a positive quantity is the same quantity.
-      if (displayOf(value) > 0 && figureOf(`+${page}`, setting) !== displayOf(value)) {
-        problems.push([setting, value, 'the plus', page])
-      }
-
-      // The text with a trailing .0 is the same quantity, and with the sign turned over it is another.
-      if (figureOf(Number.isInteger(displayOf(value)) ? `${page}.0` : page, setting) !== displayOf(value) || (displayOf(value) !== 0 && figureOf(page.startsWith('-') ? page.slice(1) : `-${page}`, setting) === displayOf(value))) {
-        problems.push([setting, value, 'the point zero or the sign', page])
-      }
-    }))
-
-    const refused = [['1000', 'Tick'], ['1,000', 'Tick'], ["1'000", 'Comma'], ["1'00", 'Tick'], ["12'3456", 'Tick'], ['1.2.3', 'None'], ['', 'None'], ['-', 'None'], ['-0', 'None'], ['--1', 'None'], ['1 000', 'Tick'], ['01', 'None'], ['1e3', 'None'], ['1.', 'None'], ['.5', 'None'], ['١٢', 'None'], ['\u22121', 'None'], ['+-1', 'None'], ['++1', 'None'], ['+', 'None'], ["+1'00", 'Tick'], ['+\u22121', 'None'], ['\u22121\'000', 'Tick'], ['-\u0661', 'None'], ['10 t', 'None'], [null, 'None']].filter(([text, setting]) => figureOf(text, setting) !== null)
-    const read = [['+1', 'None', 1], ["+1'000", 'Tick', 1000], ['+1-000.5', 'Dash', 1000.5], ['1 000', 'Space', 1000], ['1,000.5', 'Comma', 1000.5], ['1-000', 'Dash', 1000], ['-1-000', 'Dash', -1000], ['-5', 'Dash', -5], ['1000', 'None', 1000], ['995.0', 'Tick', 995], ['0', 'Comma', 0]].filter(([text, setting, number]) => figureOf(text, setting) !== number)
-
-    return problems.length === 0 && refused.length === 0 && read.length === 0 ? true : short([problems, refused, read])
-  })
-
   return statements
 }
 
@@ -1712,74 +1683,33 @@ const voice = (ctx) => {
 
 const escapedFor = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// The characters the "Thousands Separator" setting puts between thousands (Tick, Comma, Dash and Space; any other name, None among them, puts nothing), as the page's setting is named.
-const SEPARATORS = { Tick: "'", Comma: ',', Dash: '-', Space: ' ' }
-
-// What the page shows of a number: a whole number as it is, any other number to one decimal, rounded half up (-0.15 is -0.1, 0.15 is 0.2). The expected number of a displayed quantity is the ledger's, rounded this way; it is a number, never a string written by this check.
-const displayOf = (value) => (Number.isInteger(value) ? value : Math.round(value * 10) / 10)
-
-// A quantity read back from the text an element draws: a signed number (an explicit plus is a positive one, a minus is the ASCII hyphen only) whose thousands are grouped by the character of the page's setting, and no other digit or character, with a decimal part after a point. A trailing .0 is the same number. Anything else is null (not a figure): a group of the wrong size or the wrong character, a second point, a sign that is not first, a minus of nothing.
-const figureOf = (text, setting) => {
-  const separator = SEPARATORS[setting] || ''
-  const negative = typeof text === 'string' && text.startsWith('-')
-  const [whole, decimals, ...more] = (negative || (typeof text === 'string' && text.startsWith('+')) ? text.slice(1) : String(text)).split('.')
-  const grouped = separator === '' ? /^\d+$/ : new RegExp(`^\\d{1,3}(?:${escapedFor(separator)}\\d{3})*$`)
-
-  if (typeof text !== 'string' || more.length > 0 || !grouped.test(whole) || /^0\d/.test(whole) || (decimals !== undefined && !/^\d+$/.test(decimals))) {
-    return null
-  }
-
-  const value = Number(`${separator === '' ? whole : whole.split(separator).join('')}${decimals === undefined ? '' : `.${decimals}`}`)
-
-  return negative ? (value === 0 ? null : -value) : value
-}
+// What the page shows of a number: a whole number as it is, any other number to one decimal, rounded as the page rounds it (scripts/lib/browser-observe.js `rounded`: -0.15 is -0.1, 0.15 is 0.2). The expected number of a displayed quantity is the ledger's, rounded this way; it is a number, never a string written by this check.
+const displayOf = (value) => rounded(value, Number.isInteger(value) ? 0 : 1)
 
 // Whether the text names the unit as a word.
 const hasUnit = (text, unit) => new RegExp(`(^|[^A-Za-z])${escapedFor(unit)}([^A-Za-z]|$)`).test(text)
 
-// The quantities a region draws, each by its role. Each role the region must draw is drawn once, by one element, on screen, writing the number the ledger gives it at the precision the page shows; a role nobody expects is not drawn. A value of null is a quantity that is not known and is not drawn.
-const rolesRead = (what, values, expected, setting, problems) => {
-  const by = {}
+// The quantities a region draws, each by its role (scripts/lib/browser-observe.js `rolesRead`), read as signed figures in the grouping of the page's setting (`readFigure`) against the numbers the ledger gives them at the precision the page shows. A value of null is a quantity that is not known and is not drawn.
+const figuresRead = (what, values, expected, setting, problems) => problems.push(...rolesRead(what, values, Object.fromEntries(Object.entries(expected).map(([role, wanted]) => [role, wanted === null ? null : displayOf(wanted)])), (text) => readFigure(text, setting)))
 
-  values.forEach((value) => (by[value.role] = by[value.role] || []).push(value))
+// The state of each minimum column that draws a figure, by the role of the element that draws it: a class minimum some classes record none of draws the count of those classes as well.
+const MINIMUM_FIGURES = { game: { saved: 'game' }, class: { partial: 'class-unknown', figure: 'class' }, player: { set: 'player' } }
 
-  Object.entries(expected).forEach(([role, wanted]) => {
-    const list = by[role] || []
+// The state a minimum cell shows, read from what it draws and never from its hook: the state of a figure where the element of that figure's role draws one on screen (`figures`, { state: role }, the first that does), and otherwise the cell's words read back to their state through the panel's own words for the column (`words`, a column of the component's `minimumWords`, by scripts/lib/browser-observe.js `labelKey`), or a note of the words where no state has them.
+const shownState = (cell, words, figures, setting) => {
+  const figure = Object.keys(figures).find((state) => cell.values.some((value) => value.role === figures[state] && value.on && readFigure(value.text, setting) !== null))
 
-    if (list.length !== 1) {
-      problems.push([what, role, `${list.length} elements draw it`])
-    } else if (!list[0].on) {
-      problems.push([what, role, 'is not on screen'])
-    } else if (figureOf(list[0].text, setting) !== displayOf(wanted)) {
-      problems.push([what, role, list[0].text, displayOf(wanted)])
-    }
-  })
-  Object.keys(by).filter((role) => !(role in expected)).forEach((role) => problems.push([what, role, 'a quantity that is not expected here']))
+  if (figure) {
+    return figure
+  }
+
+  const state = words && typeof words === 'object' ? labelKey(cell.text, words) : null
+
+  return state === null ? `words of no state: ${cell.text}` : state
 }
 
-// What a row or a line of the screen is, as the screen says it: the names of the colony and the resource, the label of a withdrawal and the scenario it belongs to. Each name the region must draw is drawn once, by one element, on screen, as the oracle's name word for word (a name of a colony or of a resource is save data, not prose); a scenario that is none is not drawn, and a name nobody expects is not drawn.
-const namesRead = (what, names, expected, problems) => {
-  const by = {}
-
-  names.forEach((one) => (by[one.name] = by[one.name] || []).push(one))
-
-  Object.entries(expected).forEach(([name, wanted]) => {
-    const list = by[name] || []
-
-    if (wanted === null || wanted === undefined || wanted === '') {
-      if (list.length > 0) {
-        problems.push([what, name, 'is drawn and is none'])
-      }
-    } else if (list.length !== 1) {
-      problems.push([what, name, `${list.length} elements draw it`])
-    } else if (!list[0].on) {
-      problems.push([what, name, 'is not on screen'])
-    } else if (list[0].text !== wanted) {
-      problems.push([what, name, list[0].text, wanted])
-    }
-  })
-  Object.keys(by).filter((name) => !(name in expected)).forEach((name) => problems.push([what, name, 'a name that is not expected here']))
-}
+// What a row or a line of the screen is, as the screen says it, each name by its role: the names of the colony and the resource, the label of a withdrawal and the scenario it belongs to, each drawn as the oracle's name word for word (a name of a colony or of a resource is save data, not prose); a scenario that is none is not drawn.
+const namesRead = (what, names, expected, problems) => problems.push(...rolesRead(what, names, Object.fromEntries(Object.entries(expected).map(([role, wanted]) => [role, wanted === '' ? null : wanted]))))
 
 // The words the save and the fixtures give to a resource: the minerals are named by their columns, the two supplies by the words of the game's own listing of them (not the panel's table of resources).
 const RESOURCE_NAMES = { fuel: 'Fuel', msp: 'Maintenance supplies' }
@@ -1791,31 +1721,13 @@ const colonyName = (colonies, id) => (colonies.find((colony) => colony.Populatio
 // The identity of a withdrawal or a delivery, whichever repository wrote it: the id with the uuid of its record taken off (a record has a uuid of its own in each repository) so what is left is the id of the plan, the haul or the packet.
 const idOf = (id) => String(id).replace(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}:/i, '')
 
-// The lines of a list of the screen set against the oracle's rows by identity and not by place: each oracle row has exactly one line of its identity and every line is an oracle row's. Returns the pairs.
-const pairedBy = (what, lines, rows, identityOfLine, identityOfRow, problems) => {
-  const seen = new Map()
+// The lines of a list of the screen set against the oracle's rows by identity and not by place (scripts/lib/browser-observe.js `pairedBy`), with its problems told. Returns the pairs.
+const pairedLines = (problems, ...list) => {
+  const { pairs, problems: unpaired } = pairedBy(...list)
 
-  lines.forEach((line) => seen.set(identityOfLine(line), [...(seen.get(identityOfLine(line)) || []), line]))
+  problems.push(...unpaired)
 
-  const ids = rows.map(identityOfRow)
-
-  if (new Set(ids).size !== ids.length) {
-    problems.push([what, 'two rows of the oracle have one identity', ids])
-  }
-
-  [...seen.keys()].filter((id) => !ids.includes(id)).forEach((id) => problems.push([what, 'a line of an identity the oracle does not have', id]))
-
-  return rows.flatMap((row, index) => {
-    const found = seen.get(ids[index]) || []
-
-    if (found.length !== 1) {
-      problems.push([what, ids[index], `${found.length} lines`])
-
-      return []
-    }
-
-    return [[row, found[0]]]
-  })
+  return pairs
 }
 
 // A text without the words (a label, a scenario or a name of a source) the numbers of which are not the panel's figures.
@@ -1929,8 +1841,10 @@ const browser = (ctx) => {
     }
 
     const outcomes = Object.fromEntries(['newThere', 'opened', 'quiet', 'asked', 'deleted', 'conflicted', 'overwritten', 'underReview', 'confirmed', 'ahead', 'rebased'].map((name) => [name, seen[name]]))
+    // A new record written by the form says it is kept: the words the alert draws read back through the panel's own words for a write (scripts/lib/browser-observe.js `labelKey`).
+    const said = seen.kept && seen.kept.text !== null ? labelKey(seen.kept.text, seen.kept.words) : null
 
-    return seen.ready === true && seen.kept && seen.kept.type === 'success' && seen.kept.said === true && seen.kept.shown === true && seen.kept.persisted === true && seen.reviewWritten === 'ok' && seen.aheadWritten === 'ok' && Object.values(outcomes).every((outcome) => outcome === true) ? true : short([seen.ready, seen.kept, seen.reviewWritten, seen.aheadWritten, outcomes])
+    return seen.ready === true && seen.kept && seen.kept.type === 'success' && seen.kept.said === true && seen.kept.shown === true && said === 'kept' && seen.kept.persisted === true && seen.reviewWritten === 'ok' && seen.aheadWritten === 'ok' && Object.values(outcomes).every((outcome) => outcome === true) ? true : short([seen.ready, seen.kept, said, seen.reviewWritten, seen.aheadWritten, outcomes])
   })
 
   // The table of a fixture as the page drew it, with the data of the same fixture that the node mounted: the quantities the table must show are the numbers of that data (and, for two fixtures, numbers worked by hand), and what is compared is each quantity as the element that draws it shows it, by its role, with whether that element is on screen.
@@ -1994,6 +1908,10 @@ const browser = (ctx) => {
     const headers = through('the headers of the panel', () => options.computed.headers.call({}))
     const marks = { game: 'reserveLedger.gameMinimum', class: 'reserveLedger.classMinimum', player: 'reserveLedger.player' }
     const states = { game: new Set(), class: new Set(), player: new Set() }
+    const drawn = { game: new Set(), class: new Set(), player: new Set() }
+    const every = { game: ['none', 'saved', 'unknown'], class: ['figure', 'none', 'partial'], player: ['none', 'set'] }
+    // Every state of each column is drawn by some row, as its hook names it and as what the cell draws reads.
+    const covers = (sets) => Object.keys(every).every((column) => same([...sets[column]].sort(), every[column]) === true)
     const problems = []
 
     all.forEach(([name, { seen }]) => {
@@ -2009,11 +1927,14 @@ const browser = (ctx) => {
           problems.push([name, row.key, column, row.marks[column]])
         }
 
-        row[column].forEach((cell) => states[column].add(cell.state))
+        row[column].forEach((cell) => {
+          states[column].add(cell.state)
+          drawn[column].add(shownState(cell, (seen.minimumWords || {})[column], MINIMUM_FIGURES[column], seen.separator))
+        })
       }))
     })
 
-    return same(headers.map((header) => header.value).slice(2, 5), ['game', 'class', 'player']) === true && problems.length === 0 && same([...states.game].sort(), ['none', 'saved', 'unknown']) === true && same([...states.class].sort(), ['figure', 'none', 'partial']) === true && same([...states.player].sort(), ['none', 'set']) === true ? true : short([problems, Object.fromEntries(Object.entries(states).map(([column, set]) => [column, [...set]]))])
+    return same(headers.map((header) => header.value).slice(2, 5), ['game', 'class', 'player']) === true && problems.length === 0 && covers(states) && covers(drawn) ? true : short([problems, ...[states, drawn].map((sets) => Object.fromEntries(Object.entries(sets).map(([column, set]) => [column, [...set]])))])
   })
   add('browser: every stock, minimum and lowest balance of a row is on screen, each quantity drawn by its own element and equal to the number the ledger holds, in its unit, and a figure that is not there draws none', async () => {
     const all = await tables()
@@ -2026,6 +1947,7 @@ const browser = (ctx) => {
 
     all.forEach(([name, table]) => {
       const { setting } = table
+      const words = table.seen.minimumWords || {}
 
       table.items.forEach((item) => {
         const row = rowsOf(table, item)
@@ -2040,7 +1962,7 @@ const browser = (ctx) => {
         const says = (what, cell, expected) => {
           const before = problems.length
 
-          rolesRead(at(what), cell.values, expected || {}, setting, problems)
+          figuresRead(at(what), cell.values, expected || {}, setting, problems)
 
           if (expected === null ? /\d/.test(cell.text) : !hasUnit(cell.text, unit)) {
             problems.push([at(what), cell.text, expected])
@@ -2069,29 +1991,34 @@ const browser = (ctx) => {
 
         if (game) {
           const state = !minimums.game.applies ? 'none' : minimums.game.value === null ? 'unknown' : 'saved'
+          const shown = shownState(game, words.game, MINIMUM_FIGURES.game, setting)
 
           says('game minimum', game, state === 'saved' ? { game: minimums.game.value } : null)
 
-          if (game.state !== state) {
-            problems.push([at('game minimum state'), game.state, state])
+          if (game.state !== state || shown !== state) {
+            problems.push([at('game minimum state'), game.state, shown, state])
           }
         }
 
         if (klass) {
           const state = !minimums.class.applies ? 'none' : minimums.class.value === null ? 'unknown' : minimums.class.unknown > 0 ? 'partial' : 'figure'
+          const shown = shownState(klass, words.class, MINIMUM_FIGURES.class, setting)
 
           says('class minimum', klass, state === 'partial' ? { class: minimums.class.value, 'class-unknown': minimums.class.unknown } : state === 'figure' ? { class: minimums.class.value } : null)
 
-          if (klass.state !== state || (state === 'partial' && !/[A-Za-z]{3,}/.test(without(klass.text, unit, minimums.class.className)))) {
-            problems.push([at('class minimum state'), klass.state, state, klass.text])
+          if (klass.state !== state || shown !== state || (state === 'partial' && !/[A-Za-z]{3,}/.test(without(klass.text, unit, minimums.class.className)))) {
+            problems.push([at('class minimum state'), klass.state, shown, state, klass.text])
           }
         }
 
         if (player) {
+          const state = minimums.player.recorded ? 'set' : 'none'
+          const shown = shownState(player, words.player, MINIMUM_FIGURES.player, setting)
+
           says('player reserve', player, minimums.player.recorded ? { player: minimums.player.value } : null)
 
-          if (player.state !== (minimums.player.recorded ? 'set' : 'none')) {
-            problems.push([at('player reserve state'), player.state])
+          if (player.state !== state || shown !== state) {
+            problems.push([at('player reserve state'), player.state, shown, state])
           }
         }
 
@@ -2114,7 +2041,7 @@ const browser = (ctx) => {
           Object.entries({ stock, game, player, lowest }).forEach(([what, cell]) => {
             const found = cell && cell.values.find((value) => value.role === what)
 
-            if (worked[what] !== undefined && cell && (!found || figureOf(found.text, setting) !== displayOf(worked[what]))) {
+            if (worked[what] !== undefined && cell && (!found || readFigure(found.text, setting) !== displayOf(worked[what]))) {
               problems.push([at(`${what} worked by hand`), found && found.text, worked[what]])
             }
           })
@@ -2151,7 +2078,7 @@ const browser = (ctx) => {
 
         const wanted = statusOf(item)
         // What the chips say, each by its words: the words of the state, and for a shortfall the number of them.
-        const said = row.chips.map((chip) => (!chip.on ? 'hidden' : keys.find((key) => key !== 'short' && chip.text === words[key]) || (chip.text.startsWith(words.short) && chip.values.length === 1 && chip.values[0].role === 'short-count' && chip.values[0].on && figureOf(chip.values[0].text, table.setting) === item.shortfalls.length ? 'short' : `other: ${chip.text}`)))
+        const said = row.chips.map((chip) => (!chip.on ? 'hidden' : keys.find((key) => key !== 'short' && chip.text === words[key]) || (chip.text.startsWith(words.short) && chip.values.length === 1 && chip.values[0].role === 'short-count' && chip.values[0].on && readFigure(chip.values[0].text, table.setting) === item.shortfalls.length ? 'short' : `other: ${chip.text}`)))
 
         wanted.forEach((state) => seenStates.add(state))
 
@@ -2180,11 +2107,11 @@ const browser = (ctx) => {
       if (table.vm.view && (!counted || !counted.on)) {
         problems.push([`${name} count of shortfalls`, counted])
       } else if (counted) {
-        rolesRead(`${name} count of shortfalls`, counted.values, { shortfalls: shortfalls.length }, setting, problems)
+        figuresRead(`${name} count of shortfalls`, counted.values, { shortfalls: shortfalls.length }, setting, problems)
       }
 
       // A line is the shortfall of its withdrawal, matched by the identity of the withdrawal (the page keeps its records under uuids of its own, so the id of the plan, the haul or the packet is what the two share) and never by its place in the list.
-      pairedBy(`${name} shortfalls`, seen.shortfalls, shortfalls, (line) => idOf(line.id), (shortfall) => idOf(shortfall.withdrawal.id), problems).forEach(([shortfall, line]) => {
+      pairedLines(problems, `${name} shortfalls`, seen.shortfalls, shortfalls, (line) => idOf(line.id), (shortfall) => idOf(shortfall.withdrawal.id)).forEach(([shortfall, line]) => {
         const what = `${name} shortfall ${idOf(shortfall.withdrawal.id)}`
 
         if (!line.on) {
@@ -2195,7 +2122,7 @@ const browser = (ctx) => {
 
         const expected = { day: shortfall.step, wanted: shortfall.wanted, served: shortfall.served, held: shortfall.held, ...(shortfall.reason === 'reserve' ? { reserve: shortfall.reserve } : {}), ...(shortfall.kind === 'competing' && shortfall.alone.short > 1e-9 ? { alone: shortfall.alone.short } : {}) }
 
-        rolesRead(what, line.values, expected, setting, problems)
+        figuresRead(what, line.values, expected, setting, problems)
 
         // The resource, the colony, the withdrawal's label and its scenario this line is about, as it says them.
         const handNames = HAND[name] && HAND[name].shortfalls && HAND[name].shortfalls[idOf(shortfall.withdrawal.id)]
@@ -2233,7 +2160,7 @@ const browser = (ctx) => {
           if (found.length !== 1 || !line.on || !hasUnit(line.text, unit)) {
             problems.push([at(`run line ${index + 1}`), found.length, line && line.text])
           } else {
-            rolesRead(at(`run line ${index + 1}`), line.values, expected, setting, problems)
+            figuresRead(at(`run line ${index + 1}`), line.values, expected, setting, problems)
           }
         })
 
@@ -2247,21 +2174,21 @@ const browser = (ctx) => {
           const found = (role) => detail.run.flatMap((line) => line.values).find((value) => value.role === role)
 
           Object.entries(worked).forEach(([role, number]) => {
-            if (!found(role) || figureOf(found(role).text, setting) !== displayOf(number)) {
+            if (!found(role) || readFigure(found(role).text, setting) !== displayOf(number)) {
               problems.push([at(`${role} worked by hand`), found(role) && found(role).text, number])
             }
           })
         }
 
         // A line is the event of its delivery or its withdrawal, matched by its kind and the identity of what it is, and never by its place in the list.
-        pairedBy(at('events'), detail.events, run.events, (line) => `${line.kind}:${idOf(line.id)}`, (event) => `${event.kind}:${idOf(event.id)}`, problems).forEach(([event, line]) => {
+        pairedLines(problems, at('events'), detail.events, run.events, (line) => `${line.kind}:${idOf(line.id)}`, (event) => `${event.kind}:${idOf(event.id)}`).forEach(([event, line]) => {
           const what = at(`event ${event.kind}:${idOf(event.id)}`)
           const expected = event.kind === 'arrival' ? { day: event.step, amount: event.amount, level: event.level } : { day: event.step, served: event.served, amount: event.amount, ...(event.short > 0 ? { short: event.short } : {}), level: event.level }
 
           if (!line.on || !hasUnit(line.text, unit)) {
             problems.push([what, 'is not on screen or draws no unit', line.text])
           } else {
-            rolesRead(what, line.values, expected, setting, problems)
+            figuresRead(what, line.values, expected, setting, problems)
             namesRead(what, line.names, { label: event.label, scenario: event.scenario }, problems)
 
             // The label and the scenario worked by hand for the fixture whose two withdrawals share a label.
@@ -2356,7 +2283,7 @@ const pages = (ctx) => {
     await kept(m, warm, scope(), await open(m, SAVE()), { reserves: { Duranium: 0 }, plans: [plan('p1', 'Build', 5, 3)] })
 
     const bundle = warm.repo.exportRecords(scope())
-    const options = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': texts.history.replace(/^ *reserves\.registerResourceReserves\(.*\)\n/m, ''), ...ctx.pageUtilities, ...recordsOf('without') } })
+    const options = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': texts.history.replace(/^ *reserves\.registerResourceReserves\(.*\)\n/m, ''), ...ctx.pageUtilities, ...recordsOf(`without ${ctx.serial}`) } })
     const { adapter, error } = await instantiate(options, { boundary, $store: PAGE_STORE, database: null, GameID: GAME, RaceID: RACE, data: {} }).backupAnnotations()
     const preview = adapter && adapter.preview(bundle, { campaignId: 'c2', RaceID: RACE, branch: 'b1' }, { restore: true })
 
@@ -2403,7 +2330,7 @@ const parenthesised = (text) => {
 const pascalTags = (text) => {
   const end = text.indexOf('\n<script')
 
-  return text.slice(0, end).replace(/<(\/?)(resource-reserves|provenance-mark|v-btn|v-card|v-switch)(?=[\s>/])/g, (_match, slash, tag) => `<${slash}${tag.replace(/(^|-)(\w)/g, (_part, _dash, letter) => letter.toUpperCase())}`) + text.slice(end)
+  return text.slice(0, end).replace(/<(\/?)(resource-reserves|reserves-panel|provenance-mark|v-btn|v-card|v-switch)(?=[\s>/])/g, (_match, slash, tag) => `<${slash}${tag.replace(/(^|-)(\w)/g, (_part, _dash, letter) => letter.toUpperCase())}`) + text.slice(end)
 }
 
 // The pages with the panel registered under another name (`ReservesPanel`) and written as that tag, which Vue resolves to the same component.
@@ -2413,7 +2340,48 @@ const aliased = (text) => text.replace('<resource-reserves ', '<reserves-panel '
 const SYNONYMS = [[' wanted ', ' asked for '], [' and got ', ' and was given '], ['Not counted, ', 'Left out, '], [' brings ', ' delivers '], [' takes ', ' draws '], ['the stock held only', 'the stock had only'], ['`reserve ${reserves.join', '`reserves ${reserves.join'], ['Delivered less than planned: ', 'Short of the plan: ']]
 const synonyms = (text) => SYNONYMS.reduce((result, [from, to]) => result.split(from).join(to), text)
 
-// An entry with `benign: true` is an equivalent rewrite of the source: the checks it names must all keep passing, so a check that reads the wording or the shape of the source instead of what it does is caught here. An entry with `files` and `rewrite` rewrites each of those sources by a function of its text, one control for a whole class of rewrites (every binding, every label, every static text, every condition, every tag, every verb of the generated prose).
+// One equivalent rewrite of each family, made together so that the screen is read once for all of them. The families the lane brief names: each switch and toggle written as a prop and an event instead of `v-model`, each binding and listener written long-hand, each condition in parentheses, a button listening for the native click, the panel registered under another name on both pages, a qualifier moved after its figure, and the generated prose and the words of the panel and its mixin restated. The controls the reviews of the panel asked for: every static text of the panel and both pages restated, every component they name written in Pascal case, a root class written as an object, a scoped slot written with `v-slot`, a container shown by a `v-show` that is always true, the reason, its container, the actions, the table and the lowest amount at full opacity and the player reserve and the amount made displayed inline, a figure written by the formatter itself, with a trailing point zero or with an explicit plus, the run line worded in another order with each quantity keeping its role, the shortfalls listed in reverse, the zero day worded another way, a word drawn by `v-text` or picked by its key, a condition turned round, every click listener with the stop and prevent modifiers, the scenario of an event through an equivalent expression, the props of both mounts in another order, the embedded flag bound as true, a prop written in camel case, the panel put in the default slot of a sheet by name and the Hauling switch labelled with other words. Where two of them meet on one element both are made on it, and no two change the same text otherwise, so a check that reads what one of them changes fails here as it fails on that one alone.
+/* eslint-disable no-template-curly-in-string */
+const EQUIVALENT_PATCHES = {
+  component: [
+    ["`${shipClass.unknown > 0 ? 'at least ' : ''}${this.figure(shipClass.value)} ${this.unitOf(item.resource)}${shipClass.className", "`${this.figure(shipClass.value)}${shipClass.unknown > 0 ? ' or more' : ''} ${this.unitOf(item.resource)}${shipClass.className"],
+    ["covered: 'Covered' }", "covered: 'Within the reserves' }"],
+    [":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", ":class=\"{ 'resource-reserves': true, 'resource-reserves--embedded': embedded, panel: !embedded }\""],
+    ['<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', '<div v-show="true" style="opacity: 1" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit'],
+    ['data-reserve-new @click="startNew">', 'data-reserve-new @click.native="startNew">'],
+    ['<div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div>', '<div style="opacity: 1"><div v-if="!entry.applied" class="caption" data-reserve-reason style="opacity: 1">{{ entry.reason }}</div></div>'],
+    ['data-reserve-value="player">{{ figure(item.minimums.player.value) }}', 'data-reserve-value="player">{{ count(item.minimums.player.value, Number.isInteger(item.minimums.player.value) ? 0 : 1) }}'],
+    ['class="resource-reserves__table" data-reserve-table>', 'class="resource-reserves__table" data-reserve-table style="opacity: 1">'],
+    ['class="text-no-wrap" data-reserve-player="set">', 'class="text-no-wrap" data-reserve-player="set" style="display: inline">'],
+    ["'The record is kept.'", "'The record was kept.'"],
+    ['    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1)\n    },', '    figure(value) {\n      return Number.isInteger(value) ? `${this.count(value, 0)}.0` : this.count(value, 1)\n    },'],
+    ['Stock now <span data-reserve-value="start">{{ figure(item.run.start) }}</span> {{ unitOf(item.resource) }}, <span data-reserve-value="final">{{ figure(item.run.final) }}</span> {{ unitOf(item.resource) }} on day <span data-reserve-value="days">{{ count(item.run.days) }}</span>.', 'On day <span data-reserve-value="days">{{ count(item.run.days) }}</span> the stock ends at <span data-reserve-value="final">{{ figure(item.run.final) }}</span> {{ unitOf(item.resource) }}, from <span data-reserve-value="start">{{ figure(item.run.start) }}</span> {{ unitOf(item.resource) }} now.'],
+    ['v-for="shortfall in view.ledger.shortfalls"', 'v-for="shortfall in [...view.ledger.shortfalls].reverse()"'],
+    ["const TIMING_WORDS = { now: 'now', later: 'on day' }", "const TIMING_WORDS = { now: 'at present', later: 'on day' }"],
+    ['<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', '<span data-reserve-value="lowest"><span style="opacity: 1">{{ item.run.lowest.level > 0 ? \'+\' : \'\' }}{{ figure(item.run.lowest.level) }}</span></span>'],
+    ['<span data-reserve-value="produced">', '<span data-reserve-value="produced" style="display: inline">'],
+    ['item.active && item.run.untimed.length', 'item.run.untimed.length && item.active'],
+    ['<span data-reserve-name="scenario">{{ event.scenario }}</span>', '<span data-reserve-name="scenario">{{ [event.scenario].join(\'\') }}</span>'],
+    ['data-reserve-game="none" :title="item.minimums.game.why">{{ minimumWords.game.none }}</span>', 'data-reserve-game="none" :title="item.minimums.game.why" v-text="minimumWords.game.none"></span>'],
+    ["this.say(draft.uuid ? SAVE_WORDS.saved : SAVE_WORDS.kept, 'success')", "this.say(SAVE_WORDS[draft.uuid ? 'saved' : 'kept'], 'success')"],
+  ],
+  logistics: [['<resource-reserves :key="`${GameID}-${RaceID}`" kind="supplies" :colonies="colonies" :place="place" :modifier-of="modifierOf" />', '<v-sheet><resource-reserves slot="default" :key="`${GameID}-${RaceID}`" :modifierOf="modifierOf" :place="place" :colonies="colonies" kind="supplies" /></v-sheet>']],
+  hauling: [['label="Fill reserves"', 'label="Fill saved reserves"'], ['embedded kind="minerals" :colonies="colonies" :plan="plan" :timed="plannedDays" />', ':embedded="true" kind="minerals" :timed="plannedDays" :plan="plan" :colonies="colonies" />']],
+  mixin: [],
+}
+/* eslint-enable no-template-curly-in-string */
+
+const equivalents = (text, name) => {
+  const own = EQUIVALENT_PATCHES[name].reduce((current, [find, replace]) => patched(path.basename(FILES[name]), current, find, replace), text)
+
+  if (name === 'mixin') {
+    return relabelled(own)
+  }
+
+  return pascalTags(parenthesised(longhand(explicitModels(restated(name === 'component' ? synonyms(own.replace(/<template #\[/g, '<template v-slot:[').replace(/ @click="/g, ' @click.stop.prevent="')) : aliased(own))))))
+}
+
+// An entry with `benign: true` is an equivalent rewrite of the source: the checks it names must all keep passing, so a check that reads the wording or the shape of the source instead of what it does is caught here. An entry with `files` and `rewrite` rewrites each of those sources by a function of its text and its name.
 const MUTATIONS = [
   { name: 'a withdrawal that ignores the reserve', file: 'ledger', find: 'const served = Math.min(withdrawal.amount, Math.max(0, before - line.keep))', replace: 'const served = Math.min(withdrawal.amount, Math.max(0, before))', fails: ['stock'] },
   { name: 'a shortfall that always blames the stock', file: 'ledger', find: "reason: before >= withdrawal.amount - EPSILON ? 'reserve' : 'stock'", replace: "reason: 'stock'", fails: ['stock'] },
@@ -2448,30 +2416,24 @@ const MUTATIONS = [
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'a select that writes', file: 'reserves', find: 'const [rows] = await database.query(COLONY.sql, { replacements: { GameID, RaceID } })', replace: 'const [rows] = await database.query(`update FCT_Population set PopName = PopName; ${COLONY.sql}`, { replacements: { GameID, RaceID } })', fails: ['loaders'] },
   { name: 'a class read that hides its failure', file: 'feeds', find: 'const [rows] = await database.query(CLASS_SQL, { replacements: { GameID, RaceID } })', replace: 'const [rows] = await database.query(CLASS_SQL, { replacements: { GameID, RaceID } }).catch(() => [[]])', fails: ['loaders'] },
-  { name: 'a panel with no summary of its own', file: 'component', find: ':data-summary="summary" data-reserve-panel>', replace: 'data-reserve-panel>', fails: ['browser'] },
+  { name: 'a panel with no summary of its own', file: 'component', find: ':data-summary="summary" data-reserve-panel>', replace: 'data-reserve-panel>', fails: ['browser'], parts: ['cells'] },
   { name: 'a panel that shows the three minimums in one column', file: 'component', find: "{ text: 'Class minimum (reference)', value: 'class' },", replace: '', fails: ['component'] },
   { name: 'a panel that waits on no read of the colonies', file: 'mixin', find: "return this.kind === 'minerals' ? ['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveObjects', 'reserveClasses']", replace: "return this.kind === 'minerals' ? ['reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] : ['reserveClasses']", fails: ['component'] },
   { name: 'a read of the packets for supplies', file: 'mixin', find: "if (!database || !GameID || !RaceID || this.kind !== 'minerals') {\n          return null\n        }\n\n        return Object.freeze({ packets:", replace: 'if (!database || !GameID || !RaceID) {\n          return null\n        }\n\n        return Object.freeze({ packets:', fails: ['component'] },
-  { name: 'a read of the colonies\' supplies for supplies', file: 'mixin', find: "if (!database || !GameID || !RaceID || this.kind !== 'minerals') {\n          return null\n        }\n\n        return Object.freeze({ colonies:", replace: 'if (!database || !GameID || !RaceID) {\n          return null\n        }\n\n        return Object.freeze({ colonies:', fails: ['component'] },
-  { name: 'a panel that does not wait on, or name the failure of, the read of the supplies', file: 'mixin', find: "['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] :", replace: "['reserveObjects', 'reserveClasses', 'reservePackets', 'populationProductionModifiers'] :", fails: ['component'] },
   { name: 'a panel that is ready before the supplies and the production rates are in', file: 'mixin', find: 'this.reservePacketsBundle && this.reserveSupplyBundle && this.loadErrors.populationProductionModifiers === null', replace: 'this.reservePacketsBundle', fails: ['component'] },
   { name: 'a minerals panel that takes the supplies from the colonies the host read', file: 'component', find: "this.kind === 'supplies' ? this.colonies : this.reserveSupplyBundle.colonies", replace: 'this.colonies', fails: ['component'] },
   { name: 'a minerals panel that never uses the production rates it read', file: 'component', find: 'modifierOf: this.modifierOf || this.productionModifierOf', replace: 'modifierOf: this.modifierOf || (() => null)', fails: ['component'] },
-  { name: 'a row that is covered however little is known of the production that draws on it', file: 'component', find: 'item.active && item.unknownUse.length', replace: 'false', fails: ['browser'] },
   { name: 'a panel that does not say which production is not known', file: 'component', find: "...(item.unknownUse.length ? [{ key: 'use',", replace: "...(false ? [{ key: 'use',", fails: ['component'] },
   { name: 'a mount on the Logistics page of the wrong group', file: 'logistics', find: 'kind="supplies" :colonies="colonies"', replace: 'kind="minerals" :colonies="colonies"', fails: ['browser'] },
   { name: 'a Logistics view that the page does not keep', file: 'logistics', find: "reserves: 'Reserves', stations: 'Fleet stations' }", replace: "stations: 'Fleet stations' }", fails: ['browser'] },
-  { name: 'a Hauling mount with no days for the hauls', file: 'hauling', find: ' :timed="plannedDays"', replace: '', fails: ['browser'] },
   { name: 'a table that lists the sources in the order of the feeds', file: 'component', find: 'const rank = (row) => (row.shortfalls.length ? 0 : row.active ? 1 : 2)', replace: 'const rank = () => 0', fails: ['component'] },
   { name: 'a shortfall short alone that a rival made worse, named as its own', file: 'ledger', find: 'const competing = worse > EPSILON', replace: 'const competing = aloneServed >= event.amount - EPSILON', fails: ['combined'] },
   { name: 'a destination credited the whole haul whatever the source gave', file: 'ledger', find: 'add(taker.landing, tick, { ...arrival, amount: served })', replace: 'add(taker.landing, tick, arrival)', fails: ['haul'] },
   { name: 'a haul credited whole because it is never tied to its withdrawal', file: 'ledger', find: "const linked = (arrival) => arrival.source === 'haul' && leaving.has(arrival.id)", replace: 'const linked = () => false', fails: ['haul'] },
   { name: 'a haul credited a tick after the tick its day gives', file: 'ledger', find: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step)', replace: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step + 1)', fails: ['haul'] },
   { name: 'a haul credited on a tick before it leaves', file: 'ledger', find: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step)', replace: 'const tick = deferred.has(withdrawal.id) ? step + 1 : tickOf(arrival.day)', fails: ['haul'] },
-  { name: 'hauls in a cycle credited on the tick they leave', file: 'ledger', find: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step)', replace: 'const tick = Math.max(tickOf(arrival.day), step)', fails: ['haul'] },
   { name: 'stocks taken in the order of the feeds, not the order the hauls of a tick need', file: 'ledger', find: '    return order\n', replace: '    return running\n', fails: ['haul'] },
   { name: 'a cycle of hauls whose deliveries land on the tick they leave, which has passed for the stock that ran before', file: 'ledger', find: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step)', replace: 'const tick = deferred.has(withdrawal.id) ? step : Math.max(tickOf(arrival.day), step)', fails: ['haul'] },
-  { name: 'a cycle of hauls whose deliveries are put to the next tick by adding the day the other way round', file: 'ledger', find: 'const tick = deferred.has(withdrawal.id) ? step + 1 : Math.max(tickOf(arrival.day), step)', replace: 'const tick = deferred.has(withdrawal.id) ? 1 + step : Math.max(step, tickOf(arrival.day))', fails: ['haul'], benign: true },
   { name: 'a delivery counted for a haul that never leaves in the period', file: 'ledger', find: 'const leaving = new Set(items.flatMap((item) => (item.withdrawals || []).filter((withdrawal) => withdrawal.source === \'haul\').map((withdrawal) => withdrawal.id)))', replace: 'const leaving = new Set(running.flatMap((line) => [...line.due.values()].flat().filter((withdrawal) => withdrawal.source === \'haul\').map((withdrawal) => withdrawal.id)))', fails: ['haul'] },
   { name: 'a baseline that runs every scenario and not the scenario alone', file: 'ledger', find: 'const use = scenario === PLAN_SCENARIO ? [] : chosen.filter((entry) => entry.scenario === scenario)', replace: 'const use = chosen', fails: ['haul', 'combined'] },
   { name: 'a baseline that never runs without the plan', file: 'ledger', find: 'baselines.set(scenario, [simulate(use, countPlan), ...(hasPlan ? [simulate(use, false)] : [])])', replace: 'baselines.set(scenario, [simulate(use, countPlan)])', fails: ['plan'] },
@@ -2492,151 +2454,54 @@ const MUTATIONS = [
   { name: 'a reserve upstream that is a rival whatever the short scenario keeps there', file: 'ledger', find: 'ownReserve(from.records, affected)', replace: '0', fails: ['haul'] },
   // eslint-disable-next-line no-template-curly-in-string
   { name: 'a class minimum that is shown whole, with nothing said of the classes that record none', file: 'component', find: '      if (!shipClass.applies) {\n        return shipClass.why\n      }\n', replace: '      if (!shipClass.applies) {\n        return shipClass.why\n      }\n\n      if (shipClass.unknown > 0) {\n        return this.classText({ ...item, minimums: { ...item.minimums, class: { ...shipClass, unknown: 0 } } })\n      }\n', fails: ['component'] },
-  // eslint-disable-next-line no-template-curly-in-string
-  { name: 'a class minimum that says "or more" after the figure instead of "at least" before it', file: 'component', find: "`${shipClass.unknown > 0 ? 'at least ' : ''}${this.figure(shipClass.value)} ${this.unitOf(item.resource)}${shipClass.className", replace: "`${this.figure(shipClass.value)}${shipClass.unknown > 0 ? ' or more' : ''} ${this.unitOf(item.resource)}${shipClass.className", fails: ['component', 'browser'], benign: true },
-  { name: 'a class minimum cell that never says some classes record none', file: 'component', find: ":data-reserve-class=\"item.minimums.class.unknown > 0 ? 'partial' : 'figure'\"", replace: 'data-reserve-class="figure"', fails: ['browser'] },
   { name: 'a supplies feed made without a budget of inputs', file: 'feeds', find: 'productionBudget: makes > 0 && limits.every(isNumber) ? Math.min(...limits) : null', replace: 'productionBudget: null', fails: ['feeds'] },
   { name: 'a record widened to the campaign that skips the check of the other branches', file: 'reserves', find: "if (policy === 'campaign' && (!entry || entry.policy !== 'campaign')) {", replace: "if (policy === 'campaign' && !entry) {", fails: ['record'] },
   { name: 'two records of one colony and scenario that both apply', file: 'reserves', find: 'if (entry.overlap > 0) {', replace: 'if (false) {', fails: ['record'] },
   { name: 'a panel that leaves out what a haul delivered less than planned', file: 'component', find: "...(item.cut.length ? [{ key: 'cut',", replace: "...(false ? [{ key: 'cut',", fails: ['component'] },
   { name: 'a backup that leaves the reserve adapter unregistered', file: 'history', find: '        reserves.registerResourceReserves(records.registerAdapter)\n', replace: '', fails: ['history'] },
-  { name: 'a backup whose registration of the reserve adapter never runs', file: 'history', find: 'reserves.registerResourceReserves(records.registerAdapter)', replace: 'if (false) reserves.registerResourceReserves(records.registerAdapter)', fails: ['history'] },
-  { name: 'a row with an untimed flow that reads as covered', file: 'component', find: 'item.active && item.run.untimed.length', replace: 'false', fails: ['browser'] },
-  { name: 'a Hauling page that hands the panel no days', file: 'hauling', find: 'plan.hauls.length ? timeHauls({ plan, freighters, shuttleTechnology, formulaVersion }) : []', replace: '[]', fails: ['page', 'browser'] },
+  { name: 'a row with an untimed flow that reads as covered', file: 'component', find: 'item.active && item.run.untimed.length', replace: 'false', fails: ['browser'], parts: ['cells'] },
   { name: 'a Hauling page that times the hauls without the shuttle technology', file: 'hauling', find: 'timeHauls({ plan, freighters, shuttleTechnology, formulaVersion })', replace: 'timeHauls({ plan, freighters, shuttleTechnology: { extra: 0 }, formulaVersion })', fails: ['page'] },
   { name: 'a Logistics page that shows the panel in the wrong view', file: 'logistics', find: '<template v-else-if="view === \'reserves\'">', replace: '<template v-else-if="view === \'stations\'">', fails: ['browser'] },
-  { name: 'a Logistics page whose panel is not registered', file: 'logistics', find: 'PageLink, ProvenanceMark, ResourceReserves, SeriesKey', replace: 'PageLink, ProvenanceMark, SeriesKey', fails: ['browser'] },
   { name: 'a backup that registers the reserve adapter through a wrapper', file: 'history', find: 'reserves.registerResourceReserves(records.registerAdapter)', replace: 'reserves.registerResourceReserves((adapter) => records.registerAdapter(adapter))', fails: ['history'], benign: true },
-  { name: 'a backup that registers the reserve adapter in another order', file: 'history', find: '        tech.registerTechScenarios(records.registerAdapter)\n        briefs.registerBriefs(records.registerAdapter)\n        reserves.registerResourceReserves(records.registerAdapter)\n', replace: '        reserves.registerResourceReserves(records.registerAdapter)\n        tech.registerTechScenarios(records.registerAdapter)\n        briefs.registerBriefs(records.registerAdapter)\n', fails: ['history'], benign: true },
-  { name: 'a Hauling page whose guard on the plan is written another way', file: 'hauling', find: 'plan.hauls.length ? timeHauls({ plan, freighters, shuttleTechnology, formulaVersion }) : []', replace: 'plan.hauls.length > 0 ? timeHauls({ plan, freighters, shuttleTechnology, formulaVersion }) : []', fails: ['browser'], benign: true },
-  { name: 'a Hauling page that reads the same three things in another order', file: 'hauling', find: 'const { plan, freighters, shuttleTechnology, formulaVersion } = this\n\n      return plan.hauls.length', replace: 'const { formulaVersion, shuttleTechnology, freighters, plan } = this\n\n      return plan.hauls.length', fails: ['page', 'browser'], benign: true },
-  { name: 'a Logistics page that writes the view of the panel the other way round', file: 'logistics', find: '<template v-else-if="view === \'reserves\'">', replace: '<template v-else-if="\'reserves\' === view">', fails: ['browser'], benign: true },
-  { name: 'a panel that words the covered state another way', file: 'component', find: "covered: 'Covered' }", replace: "covered: 'Within the reserves' }", fails: ['component', 'voice', 'browser'], benign: true },
-  { name: 'a panel that words the not assessed state another way', file: 'component', find: "untimed: 'Not assessed, untimed'", replace: "untimed: 'Untimed, not assessed'", fails: ['component', 'voice', 'browser'], benign: true },
   { name: 'a panel that speaks in the second person', file: 'component', find: 'No source has a record or a plan. Keep a record, or show every source.', replace: 'You have no record or plan. Keep a record, or show every source.', fails: ['voice'] },
   { name: 'a fuel output held to the Sorium the colony has now, so a refinery that starts empty never refines', file: 'feeds', find: 'const fuel = isNumber(colony.Sorium) ? capacity : refineryYield(colony, modifier)', replace: 'const fuel = refineryYield(colony, modifier)', fails: ['feeds', 'combined'] },
   { name: 'a refinery with no Sorium feed that goes on refining the Sorium it has not got', file: 'feeds', find: 'isNumber(colony.Sorium) && colony.Sorium < 1 ? 0 : isAvailable(lasts)', replace: 'isAvailable(lasts)', fails: ['feeds', 'combined'] },
   { name: 'production of a source whose own stock is not in the save that takes nothing from its inputs', file: 'ledger', find: 'if (line.daily > 0 && (line.shared || (line.known &&', replace: 'if (line.known && line.daily > 0 && (line.shared || (line.known &&', fails: ['combined', 'component'] },
   { name: 'production that is not limited by the balance its inputs hold on the tick', file: 'ledger', find: 'Math.min(...line.shared.map((input) => Math.max(0, input.line.held) / input.perUnit))', replace: 'line.daily', fails: ['combined'] },
-  { name: 'a panel whose New record button has no handler', file: 'component', find: 'data-reserve-new @click="startNew">', replace: 'data-reserve-new>', fails: ['browser'] },
-  { name: 'a panel whose Confirm button has no handler', file: 'component', find: 'data-reserve-confirm @click="confirm(entry)">', replace: 'data-reserve-confirm>', fails: ['browser'] },
-  { name: 'a panel whose Use in this save button has no handler', file: 'component', find: 'data-reserve-rebase @click="rebase(entry)">', replace: 'data-reserve-rebase>', fails: ['browser'] },
-  { name: 'a panel whose Use in this save button confirms the colony instead', file: 'component', find: 'data-reserve-rebase @click="rebase(entry)">', replace: 'data-reserve-rebase @click="confirm(entry)">', fails: ['browser'] },
-  { name: 'a panel whose Delete button has no handler', file: 'component', find: 'data-reserve-delete @click="deleting = entry.uuid">', replace: 'data-reserve-delete>', fails: ['browser'] },
-  { name: 'a panel whose Delete it button has no handler', file: 'component', find: 'data-reserve-delete-confirm @click="remove(entry)">', replace: 'data-reserve-delete-confirm>', fails: ['browser'] },
-  { name: 'a panel whose Write over it button writes without overriding', file: 'component', find: 'data-reserve-overwrite @click="save(true)">', replace: 'data-reserve-overwrite @click="save(false)">', fails: ['browser'] },
-  { name: 'a panel that names a failed read by no words', file: 'mixin', find: 'failed: joinLabels(failed.map((key) => RESERVE_LABELS[key])),', replace: "failed: '',", fails: ['component'] },
+  { name: 'a panel whose Use in this save button confirms the colony instead', file: 'component', find: 'data-reserve-rebase @click="rebase(entry)">', replace: 'data-reserve-rebase @click="confirm(entry)">', fails: ['browser'], parts: ['actions'] },
   { name: 'a panel whose Retry reads every read again', file: 'mixin', find: 'this.reserveFailedKeys.forEach((key) => this.$asyncComputed[key].update())', replace: 'this.reserveInputs.forEach((key) => this.$asyncComputed[key].update())', fails: ['component'] },
   { name: 'a read with no label', file: 'mixin', find: "  reserveClasses: 'the ship classes',\n", replace: '', fails: ['component'] },
-  { name: 'a Logistics page whose panel is never shown', file: 'logistics', find: '<resource-reserves :key=', replace: '<resource-reserves v-if="false" :key=', fails: ['browser'] },
-  { name: 'a Logistics page that mounts the panel with no colonies', file: 'logistics', find: 'kind="supplies" :colonies="colonies"', replace: 'kind="supplies"', fails: ['browser'] },
-  { name: 'a Logistics page that mounts the panel with no place', file: 'logistics', find: ' :place="place" :modifier-of="modifierOf" />', replace: ' :modifier-of="modifierOf" />', fails: ['browser'] },
-  { name: 'a Logistics page that mounts the panel with no modifier', file: 'logistics', find: ' :modifier-of="modifierOf" />', replace: ' />', fails: ['browser'] },
-  { name: 'a Hauling page whose panel is never shown', file: 'hauling', find: '<resource-reserves :key=', replace: '<resource-reserves v-if="false" :key=', fails: ['browser'] },
-  { name: 'a Hauling page that mounts the panel for supplies', file: 'hauling', find: 'embedded kind="minerals"', replace: 'embedded kind="supplies"', fails: ['browser'] },
-  { name: 'a Hauling page that mounts the panel with no colonies', file: 'hauling', find: 'kind="minerals" :colonies="colonies" :plan="plan"', replace: 'kind="minerals" :plan="plan"', fails: ['browser'] },
-  { name: 'a Hauling page that mounts the panel with no plan', file: 'hauling', find: ':colonies="colonies" :plan="plan" :timed="plannedDays" />', replace: ':colonies="colonies" :timed="plannedDays" />', fails: ['browser'] },
-  { name: 'a Hauling page that mounts the panel with no days', file: 'hauling', find: ' :timed="plannedDays" />', replace: ' />', fails: ['browser'] },
-  { name: 'a Hauling page that mounts the panel with other days', file: 'hauling', find: ':timed="plannedDays"', replace: ':timed="[]"', fails: ['browser'] },
-  { name: 'a Hauling page whose Fill reserves switch is bound to nothing', file: 'hauling', find: '<v-switch v-model="planReserves" label="Fill reserves"', replace: '<v-switch label="Fill reserves"', fails: ['browser'] },
-  { name: 'a Hauling page that writes the days of the panel in parentheses', file: 'hauling', find: ':timed="plannedDays"', replace: ':timed="(plannedDays)"', fails: ['browser'], benign: true },
-  { name: 'a Hauling page that writes the days of the panel long-hand', file: 'hauling', find: ':timed="plannedDays"', replace: 'v-bind:timed="plannedDays"', fails: ['browser'], benign: true },
-  { name: 'a Logistics page that writes the modifier prop in camel case', file: 'logistics', find: ':modifier-of="modifierOf"', replace: ':modifierOf="modifierOf"', fails: ['browser'], benign: true },
-  { name: 'a panel whose buttons are bound with the long-hand listener', file: 'component', find: 'data-reserve-new @click="startNew">', replace: 'data-reserve-new v-on:click="startNew">', fails: ['browser'], benign: true },
-  { name: 'every binding of the panel and of both pages written another way', files: ['component', 'logistics', 'hauling'], rewrite: longhand, fails: ['component', 'page', 'browser'], benign: true },
-  { name: 'every static text of the panel and of both pages restated', files: ['component', 'logistics', 'hauling'], rewrite: restated, fails: ['component', 'page', 'browser', 'voice'], benign: true },
-  { name: 'every word that names a failed read restated', files: ['mixin'], rewrite: relabelled, fails: ['component'], benign: true },
-  { name: 'a panel that tests the untimed flow before the active row in its chip', file: 'component', find: 'item.active && item.run.untimed.length', replace: 'item.run.untimed.length && item.active', fails: ['component', 'browser'], benign: true },
-  { name: 'a Hauling page that lists the props of the panel in another order', file: 'hauling', find: ' :colonies="colonies" :plan="plan" :timed="plannedDays" />', replace: ' :timed="plannedDays" :plan="plan" :colonies="colonies" />', fails: ['browser'], benign: true },
-  { name: 'a Logistics page that lists the props of the panel in another order', file: 'logistics', find: ' kind="supplies" :colonies="colonies" :place="place" :modifier-of="modifierOf" />', replace: ' :modifier-of="modifierOf" :place="place" :colonies="colonies" kind="supplies" />', fails: ['browser'], benign: true },
-  { name: 'a Hauling page that shows the panel with a v-show that is always true', file: 'hauling', find: '<resource-reserves :key=', replace: '<resource-reserves v-show="true" :key=', fails: ['browser'], benign: true },
-  { name: 'a Logistics page that shows the panel with a v-show of its own view', file: 'logistics', find: '<resource-reserves :key=', replace: '<resource-reserves v-show="view === \'reserves\'" :key=', fails: ['browser'], benign: true },
-  { name: 'a Hauling page whose panel is hidden by a v-show', file: 'hauling', find: '<resource-reserves :key=', replace: '<resource-reserves v-show="false" :key=', fails: ['browser'] },
   { name: 'a Logistics page whose panel is hidden by a v-show', file: 'logistics', find: '<resource-reserves :key=', replace: '<resource-reserves v-show="false" :key=', fails: ['browser'] },
   { name: 'a Hauling page whose Fill reserves switch takes its value from the plan and writes it nowhere', file: 'hauling', find: '<v-switch v-model="planReserves" label="Fill reserves"', replace: '<v-switch :input-value="planReserves" label="Fill reserves"', fails: ['browser'] },
-  { name: 'every switch and toggle of the panel and of both pages written as a prop and an event instead of v-model', files: ['component', 'logistics', 'hauling'], rewrite: explicitModels, fails: ['component', 'page', 'browser'], benign: true },
-  { name: 'every condition of the panel and of both pages in parentheses', files: ['component', 'logistics', 'hauling'], rewrite: parenthesised, fails: ['component', 'page', 'browser'], benign: true },
-  { name: 'every component of the panel and of both pages written in Pascal case', files: ['component', 'logistics', 'hauling'], rewrite: pascalTags, fails: ['component', 'page', 'browser'], benign: true },
-  { name: 'every verb and lead of the generated prose of the panel replaced by a synonym', files: ['component'], rewrite: synonyms, fails: ['component', 'voice'], benign: true },
-  { name: 'a panel whose root class is an object', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"{ 'resource-reserves': true, 'resource-reserves--embedded': embedded, panel: !embedded }\"", fails: ['browser'], benign: true },
-  { name: 'a panel whose root class is a string', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"'resource-reserves ' + (embedded ? 'resource-reserves--embedded' : 'panel')\"", fails: ['browser'], benign: true },
-  { name: 'a panel whose root class is partly static and partly nested arrays', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: "class=\"resource-reserves\" :class=\"[[embedded ? 'resource-reserves--embedded' : 'panel']]\"", fails: ['browser'], benign: true },
-  { name: 'a panel whose root never has the panel class', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'card']\"", fails: ['browser'] },
-  { name: 'a panel whose embedded root keeps the panel class', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"['resource-reserves panel', embedded ? 'resource-reserves--embedded' : '']\"", fails: ['browser'] },
+  { name: 'a panel whose root never has the panel class', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'card']\"", fails: ['browser'], parts: ['logistics'] },
   { name: 'a Logistics page that names the panel in a casing Vue does not resolve', file: 'logistics', find: '<resource-reserves :key=', replace: '<ResourceRESERVES :key=', fails: ['browser'] },
-  { name: 'a Hauling page that names the panel in a casing Vue does not resolve', file: 'hauling', find: '<resource-reserves :key=', replace: '<ResourceRESERVES :key=', fails: ['browser'] },
-  { name: 'a Logistics page that names the panel in capitals', file: 'logistics', find: '<resource-reserves :key=', replace: '<RESOURCE-RESERVES :key=', fails: ['browser'] },
-  { name: 'a Hauling page that names the panel in capitals', file: 'hauling', find: '<resource-reserves :key=', replace: '<RESOURCE-RESERVES :key=', fails: ['browser'] },
-  { name: 'a Logistics page that names the panel in camel case, which Vue resolves', file: 'logistics', find: '<resource-reserves :key=', replace: '<resourceReserves :key=', fails: ['browser'], benign: true },
-  { name: 'a Hauling page whose panel is not registered', file: 'hauling', find: 'PageLink, ProvenanceMark, ResourceReserves, RoutePositions', replace: 'PageLink, ProvenanceMark, RoutePositions', fails: ['browser'] },
   { name: 'a Logistics page that registers another component under the name of the panel', file: 'logistics', find: 'PageLink, ProvenanceMark, ResourceReserves, SeriesKey', replace: 'PageLink, ProvenanceMark, ResourceReserves: SeriesKey, SeriesKey', fails: ['browser'] },
   { name: 'a Logistics page whose view of the panel is hidden above it', file: 'logistics', find: "<template v-else-if=\"view === 'reserves'\">", replace: '<template v-else-if="false">', fails: ['browser'] },
-  { name: 'a Hauling page whose plan card is hidden above the panel', file: 'hauling', find: '<v-card class="panel" data-summary="The hauls', replace: '<v-card v-if="false" class="panel" data-summary="The hauls', fails: ['browser'] },
-  { name: 'every scoped slot of the panel written with v-slot', files: ['component'], rewrite: (text) => text.replace(/<template #\[/g, '<template v-slot:['), fails: ['component'], benign: true },
-  { name: 'every click listener of the panel with the stop and prevent modifiers', files: ['component'], rewrite: (text) => text.replace(/ @click="/g, ' @click.stop.prevent="'), fails: ['browser'], benign: true },
-  { name: 'a Hauling page that binds the embedded flag as true', file: 'hauling', find: 'embedded kind="minerals"', replace: ':embedded="true" kind="minerals"', fails: ['browser'], benign: true },
-  { name: 'a Hauling page that gives the embedded flag its own name as the value', file: 'hauling', find: 'embedded kind="minerals"', replace: 'embedded="embedded" kind="minerals"', fails: ['browser'], benign: true },
   { name: 'a Hauling page that puts the panel in a named slot the card never renders', file: 'hauling', find: '<resource-reserves :key=', replace: '<resource-reserves slot="not-rendered" :key=', fails: ['browser'] },
-  { name: 'a Logistics page that gives the panel a slot name its parent, a functional container, ignores', file: 'logistics', find: '<resource-reserves :key=', replace: '<resource-reserves slot="not-rendered" :key=', fails: ['browser'], benign: true },
-  { name: 'a Logistics page that puts the panel in a named slot the sheet around it never renders', files: ['logistics'], rewrite: (text) => text.replace(/<resource-reserves :key=([^\n]*) \/>/, '<v-sheet><resource-reserves slot="not-rendered" :key=$1 /></v-sheet>'), fails: ['browser'] },
-  { name: 'a Logistics page that puts the panel in the default slot of a sheet around it', files: ['logistics'], rewrite: (text) => text.replace(/<resource-reserves :key=([^\n]*) \/>/, '<v-sheet><resource-reserves slot="default" :key=$1 /></v-sheet>'), fails: ['browser'], benign: true },
-  { name: 'a Hauling page that puts the panel in the default slot by name', file: 'hauling', find: '<resource-reserves :key=', replace: '<resource-reserves slot="default" :key=', fails: ['browser'], benign: true },
-  { name: 'a Logistics page that puts the panel in the default slot by name', file: 'logistics', find: '<resource-reserves :key=', replace: '<resource-reserves slot="default" :key=', fails: ['browser'], benign: true },
-  { name: 'a Hauling page that registers the panel under another name and writes that tag', files: ['hauling'], rewrite: aliased, fails: ['browser'], benign: true },
-  { name: 'a Logistics page that registers the panel under another name and writes that tag', files: ['logistics'], rewrite: aliased, fails: ['browser'], benign: true },
-  { name: 'both pages that register the panel under another name and write that tag', files: ['logistics', 'hauling'], rewrite: aliased, fails: ['browser'], benign: true },
-  { name: 'a panel whose New record button is hidden by a v-show', file: 'component', find: 'data-reserve-new @click="startNew">', replace: 'data-reserve-new v-show="false" @click="startNew">', fails: ['browser'] },
-  { name: 'a panel whose Delete button is hidden by a v-show', file: 'component', find: 'data-reserve-delete @click="deleting = entry.uuid">', replace: 'data-reserve-delete v-show="false" @click="deleting = entry.uuid">', fails: ['browser'] },
-  { name: 'a panel whose entry actions are hidden by a v-show on their container', file: 'component', find: '<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', replace: '<div v-show="false" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', fails: ['browser'] },
-  { name: 'a panel whose New record button is shown by a v-show that is always true', file: 'component', find: 'data-reserve-new @click="startNew">', replace: 'data-reserve-new v-show="true" @click="startNew">', fails: ['browser'], benign: true },
-  { name: 'a panel whose entry actions are shown by a v-show that is always true on their container', file: 'component', find: '<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', replace: '<div v-show="true" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', fails: ['browser'], benign: true },
-  { name: 'a panel whose New record button listens for the native click', file: 'component', find: 'data-reserve-new @click="startNew">', replace: 'data-reserve-new @click.native="startNew">', fails: ['browser'], benign: true },
-  { name: 'a panel whose Delete button listens for the native click', file: 'component', find: 'data-reserve-delete @click="deleting = entry.uuid">', replace: 'data-reserve-delete @click.native="deleting = entry.uuid">', fails: ['browser'], benign: true },
-  { name: 'a panel whose reason is drawn with no opacity', file: 'component', find: '<div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div>', replace: '<div v-if="!entry.applied" class="caption" data-reserve-reason style="opacity: 0">{{ entry.reason }}</div>', fails: ['browser'] },
-  { name: 'a panel whose reason sits in a container drawn with no opacity', file: 'component', find: '<div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div>', replace: '<div style="opacity: 0"><div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div></div>', fails: ['browser'] },
-  { name: 'a panel whose Confirm button is drawn with no opacity', file: 'component', find: 'data-reserve-confirm @click="confirm(entry)">', replace: 'data-reserve-confirm style="opacity: 0" @click="confirm(entry)">', fails: ['browser'] },
-  { name: 'a panel whose entry actions sit in a container drawn with no opacity', file: 'component', find: '<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', replace: '<div style="opacity: 0" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', fails: ['browser'] },
-  { name: 'a panel whose reason is drawn with full opacity', file: 'component', find: '<div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div>', replace: '<div v-if="!entry.applied" class="caption" data-reserve-reason style="opacity: 1">{{ entry.reason }}</div>', fails: ['browser'], benign: true },
-  { name: 'a panel whose reason sits in a container drawn with full opacity', file: 'component', find: '<div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div>', replace: '<div style="opacity: 1"><div v-if="!entry.applied" class="caption" data-reserve-reason>{{ entry.reason }}</div></div>', fails: ['browser'], benign: true },
-  { name: 'a panel whose entry actions sit in a container drawn with full opacity', file: 'component', find: '<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', replace: '<div style="opacity: 1" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', fails: ['browser'], benign: true },
-  { name: 'a panel whose player reserve is shown ten more than the ledger holds', file: 'component', find: 'data-reserve-value="player">{{ figure(item.minimums.player.value) }}', replace: 'data-reserve-value="player">{{ figure(item.minimums.player.value + 10) }}', fails: ['browser'] },
-  { name: 'a panel whose lowest balance is shown 123456 more than the ledger holds', file: 'component', find: 'data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}', replace: 'data-reserve-value="lowest">{{ figure(item.run.lowest.level + 123456) }}', fails: ['browser'] },
-  { name: 'a panel whose status chip of an untimed flow says Covered', file: 'component', find: 'data-reserve-untimed-chip>{{ statusWords.untimed }}</v-chip>', replace: 'data-reserve-untimed-chip>Covered</v-chip>', fails: ['browser'] },
-  { name: 'a panel whose words for an untimed flow and a covered row are the same', file: 'component', find: 'untimed: \'Not assessed, untimed\'', replace: 'untimed: \'Covered\'', fails: ['browser'] },
-  { name: 'a panel whose table is drawn with no opacity', file: 'component', find: 'class="resource-reserves__table" data-reserve-table>', replace: 'class="resource-reserves__table" data-reserve-table style="opacity: 0">', fails: ['browser'] },
-  { name: 'a panel whose player reserve is not displayed', file: 'component', find: 'class="text-no-wrap" data-reserve-player="set">', replace: 'class="text-no-wrap" data-reserve-player="set" style="display: none">', fails: ['browser'] },
-  { name: 'a panel whose save of a record says its success as the default kind of message', file: 'component', find: 'this.say(draft.uuid ? \'The record is saved.\' : \'The record is kept.\', \'success\')', replace: 'this.say(draft.uuid ? \'The record is saved.\' : \'The record is kept.\')', fails: ['browser'] },
-  { name: 'a panel whose player reserve is formatted as an integer or to one decimal by the formatter itself', file: 'component', find: 'data-reserve-value="player">{{ figure(item.minimums.player.value) }}', replace: 'data-reserve-value="player">{{ count(item.minimums.player.value, Number.isInteger(item.minimums.player.value) ? 0 : 1) }}', fails: ['browser'], benign: true },
-  { name: 'a panel whose lowest balance is formatted as an integer or to one decimal by the formatter itself', file: 'component', find: 'data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}', replace: 'data-reserve-value="lowest">{{ count(item.run.lowest.level, Number.isInteger(item.run.lowest.level) ? 0 : 1) }}', fails: ['browser'], benign: true },
-  { name: 'a panel whose table is drawn with full opacity', file: 'component', find: 'class="resource-reserves__table" data-reserve-table>', replace: 'class="resource-reserves__table" data-reserve-table style="opacity: 1">', fails: ['browser'], benign: true },
-  { name: 'a panel whose player reserve is displayed inline', file: 'component', find: 'class="text-no-wrap" data-reserve-player="set">', replace: 'class="text-no-wrap" data-reserve-player="set" style="display: inline">', fails: ['browser'], benign: true },
-  { name: 'a panel that says the record was kept, not that it is kept', file: 'component', find: '\'The record is kept.\'', replace: '\'The record was kept.\'', fails: ['browser'], benign: true },
-  { name: 'a panel whose lowest amount is wrapped in a span drawn with no opacity', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest"><span style="opacity: 0">{{ figure(item.run.lowest.level) }}</span></span>', fails: ['browser'] },
-  { name: 'a panel whose amount of what the source made is not displayed', file: 'component', find: '<span data-reserve-value="produced">', replace: '<span data-reserve-value="produced" style="display: none">', fails: ['browser'] },
-  { name: 'a panel whose lowest amount is wrapped in a span drawn with full opacity', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest"><span style="opacity: 1">{{ figure(item.run.lowest.level) }}</span></span>', fails: ['browser'], benign: true },
-  { name: 'a panel whose amount of what the source made is displayed inline', file: 'component', find: '<span data-reserve-value="produced">', replace: '<span data-reserve-value="produced" style="display: inline">', fails: ['browser'], benign: true },
-  { name: 'a panel whose lowest balance is shown with the sign turned over', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest">{{ figure(-item.run.lowest.level) }}</span>', fails: ['browser'] },
-  // eslint-disable-next-line no-template-curly-in-string
-  { name: 'a panel whose whole numbers are written with a trailing point zero', file: 'component', find: '    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1)\n    },', replace: '    figure(value) {\n      return Number.isInteger(value) ? `${this.count(value, 0)}.0` : this.count(value, 1)\n    },', fails: ['browser'], benign: true },
-  { name: 'a panel whose stock now and stock at the end of the run are exchanged', file: 'component', find: '<span data-reserve-value="start">{{ figure(item.run.start) }}</span> {{ unitOf(item.resource) }}, <span data-reserve-value="final">{{ figure(item.run.final) }}</span>', replace: '<span data-reserve-value="start">{{ figure(item.run.final) }}</span> {{ unitOf(item.resource) }}, <span data-reserve-value="final">{{ figure(item.run.start) }}</span>', fails: ['browser'] },
-  { name: 'a panel whose amount served of a withdrawal and the amount it asked for are exchanged', file: 'component', find: ' takes <span data-reserve-value="served">{{ figure(event.served) }}</span> of <span data-reserve-value="amount">{{ figure(event.amount) }}</span>', replace: ' takes <span data-reserve-value="served">{{ figure(event.amount) }}</span> of <span data-reserve-value="amount">{{ figure(event.served) }}</span>', fails: ['browser'] },
-  { name: 'a panel whose wanted amount and served amount of a shortfall are exchanged', file: 'component', find: 'wanted <span data-reserve-value="wanted">{{ figure(shortfall.wanted) }}</span> {{ unitOf(shortfall.resource) }} and got <span data-reserve-value="served">{{ figure(shortfall.served) }}</span>', replace: 'wanted <span data-reserve-value="wanted">{{ figure(shortfall.served) }}</span> {{ unitOf(shortfall.resource) }} and got <span data-reserve-value="served">{{ figure(shortfall.wanted) }}</span>', fails: ['browser'] },
-  { name: 'a panel whose run line is worded in another order with every quantity keeping its role', file: 'component', find: 'Stock now <span data-reserve-value="start">{{ figure(item.run.start) }}</span> {{ unitOf(item.resource) }}, <span data-reserve-value="final">{{ figure(item.run.final) }}</span> {{ unitOf(item.resource) }} on day <span data-reserve-value="days">{{ count(item.run.days) }}</span>.', replace: 'On day <span data-reserve-value="days">{{ count(item.run.days) }}</span> the stock ends at <span data-reserve-value="final">{{ figure(item.run.final) }}</span> {{ unitOf(item.resource) }}, from <span data-reserve-value="start">{{ figure(item.run.start) }}</span> {{ unitOf(item.resource) }} now.', fails: ['browser'], benign: true },
-  { name: 'a panel whose negative figure is written with the Unicode minus sign', file: 'component', find: '    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1)\n    },', replace: '    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1).replace(\'-\', \'\\u2212\')\n    },', fails: ['browser'] },
-  { name: 'a Hauling page whose plan card is headed with other words', file: 'hauling', find: 'Hauling plan<provenance-mark rule="hauling.planTonnes" label />', replace: 'Planned hauls<provenance-mark rule="hauling.planTonnes" label />', fails: ['browser'], benign: true },
-  { name: 'a Hauling page whose switch is labelled with other words', file: 'hauling', find: 'label="Fill reserves"', replace: 'label="Fill saved reserves"', fails: ['browser'], benign: true },
-  { name: 'a panel whose table names Sorium for the stock of Duranium, every hook in place', file: 'component', find: '<span data-reserve-name="resource">{{ resourceLabel(item.resource) }}</span>', replace: '<span data-reserve-name="resource">{{ resourceLabel(\'Sorium\') }}</span>', fails: ['browser'] },
-  { name: 'a panel whose shortfall names Sorium for the shortfall of Duranium, every hook in place', file: 'component', find: 'data-reserve-name="resource">{{ resourceLabel(shortfall.resource) }}</span>', replace: 'data-reserve-name="resource">{{ resourceLabel(\'Sorium\') }}</span>', fails: ['browser'] },
-  { name: 'a panel whose table names the system where the colony is', file: 'component', find: '<span data-reserve-name="colony">{{ item.sourceName }}</span>', replace: '<span data-reserve-name="colony">{{ item.place }}</span>', fails: ['browser'] },
-  { name: 'a panel whose shortfall exchanges the scenarios Alpha and Beta', file: 'component', find: '<span data-reserve-name="scenario">{{ shortfall.withdrawal.scenario }}</span>', replace: '<span data-reserve-name="scenario">{{ shortfall.withdrawal.scenario === \'Beta\' ? \'Alpha\' : \'Beta\' }}</span>', fails: ['browser'] },
-  { name: 'a panel whose events exchange the scenarios Alpha and Beta between two withdrawals of one stock', file: 'component', find: '<span data-reserve-name="scenario">{{ event.scenario }}</span>', replace: '<span data-reserve-name="scenario">{{ event.scenario === \'Alpha\' ? \'Beta\' : event.scenario === \'Beta\' ? \'Alpha\' : event.scenario }}</span>', fails: ['browser'] },
-  { name: 'a panel whose lowest balance of a day is drawn as the stock now', file: 'component', find: 'v-if="item.run.lowest.step === 0"', replace: 'v-if="item.run.lowest.step >= 0"', fails: ['browser'] },
-  { name: 'a panel whose lowest balance of the day 0 is drawn as a day', file: 'component', find: 'v-if="item.run.lowest.step === 0"', replace: 'v-if="item.run.lowest.step < 0"', fails: ['browser'] },
-  { name: 'a panel whose shortfalls are listed in the reverse order', file: 'component', find: 'v-for="shortfall in view.ledger.shortfalls"', replace: 'v-for="shortfall in [...view.ledger.shortfalls].reverse()"', fails: ['browser'], benign: true },
-  { name: 'a panel whose events are listed in the reverse order', file: 'component', find: 'v-for="(event, index) in (item.run.events || [])"', replace: 'v-for="(event, index) in [...(item.run.events || [])].reverse()"', fails: ['browser'], benign: true },
-  { name: 'a panel whose scenario of an event is written through an equivalent expression', file: 'component', find: '<span data-reserve-name="scenario">{{ event.scenario }}</span>', replace: '<span data-reserve-name="scenario">{{ [event.scenario].join(\'\') }}</span>', fails: ['browser'], benign: true },
-  { name: 'a panel whose zero day of the lowest balance is worded at present', file: 'component', find: 'const TIMING_WORDS = { now: \'now\', later: \'on day\' }', replace: 'const TIMING_WORDS = { now: \'at present\', later: \'on day\' }', fails: ['browser'], benign: true },
-  { name: 'a panel whose positive lowest balance is written with an explicit plus', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest">{{ item.run.lowest.level > 0 ? \'+\' : \'\' }}{{ figure(item.run.lowest.level) }}</span>', fails: ['browser'], benign: true },
+  { name: 'a panel whose entry actions are hidden by a v-show on their container', file: 'component', find: '<div class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', replace: '<div v-show="false" class="resource-reserves__actions">\n            <v-btn x-small text :disabled="busy" data-reserve-edit', fails: ['browser'], parts: ['actions'] },
+  { name: 'a panel whose player reserve is shown ten more than the ledger holds', file: 'component', find: 'data-reserve-value="player">{{ figure(item.minimums.player.value) }}', replace: 'data-reserve-value="player">{{ figure(item.minimums.player.value + 10) }}', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose status chip of an untimed flow says Covered', file: 'component', find: 'data-reserve-untimed-chip>{{ statusWords.untimed }}</v-chip>', replace: 'data-reserve-untimed-chip>Covered</v-chip>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose table is drawn with no opacity', file: 'component', find: 'class="resource-reserves__table" data-reserve-table>', replace: 'class="resource-reserves__table" data-reserve-table style="opacity: 0">', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose lowest amount is wrapped in a span drawn with no opacity', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest"><span style="opacity: 0">{{ figure(item.run.lowest.level) }}</span></span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose lowest balance is shown with the sign turned over', file: 'component', find: '<span data-reserve-value="lowest">{{ figure(item.run.lowest.level) }}</span>', replace: '<span data-reserve-value="lowest">{{ figure(-item.run.lowest.level) }}</span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel that writes the first hyphen of a figure as the Unicode minus sign, the separator of a Dash-grouped figure included', file: 'component', find: '    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1)\n    },', replace: '    figure(value) {\n      return this.count(value, Number.isInteger(value) ? 0 : 1).replace(\'-\', \'\\u2212\')\n    },', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose wanted amount and served amount of a shortfall are exchanged', file: 'component', find: 'wanted <span data-reserve-value="wanted">{{ figure(shortfall.wanted) }}</span> {{ unitOf(shortfall.resource) }} and got <span data-reserve-value="served">{{ figure(shortfall.served) }}</span>', replace: 'wanted <span data-reserve-value="wanted">{{ figure(shortfall.served) }}</span> {{ unitOf(shortfall.resource) }} and got <span data-reserve-value="served">{{ figure(shortfall.wanted) }}</span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose shortfall exchanges the scenarios Alpha and Beta', file: 'component', find: '<span data-reserve-name="scenario">{{ shortfall.withdrawal.scenario }}</span>', replace: '<span data-reserve-name="scenario">{{ shortfall.withdrawal.scenario === \'Beta\' ? \'Alpha\' : \'Beta\' }}</span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose save of a record says its success as the default kind of message', file: 'component', find: 'this.say(draft.uuid ? SAVE_WORDS.saved : SAVE_WORDS.kept, \'success\')', replace: 'this.say(draft.uuid ? SAVE_WORDS.saved : SAVE_WORDS.kept)', fails: ['browser'], parts: ['actions'] },
+  { name: 'a panel that says a new record is saved, its kind of message intact', file: 'component', find: 'this.say(draft.uuid ? SAVE_WORDS.saved : SAVE_WORDS.kept, \'success\')', replace: 'this.say(SAVE_WORDS.saved, \'success\')', fails: ['browser'], parts: ['actions'] },
+  { name: 'a panel whose game minimum that does not apply draws the words of one not recorded, its hook intact', file: 'component', find: 'data-reserve-game="none" :title="item.minimums.game.why">{{ minimumWords.game.none }}</span>', replace: 'data-reserve-game="none" :title="item.minimums.game.why">{{ minimumWords.game.unknown }}</span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose lowest balance of a day is drawn as the stock now', file: 'component', find: 'v-if="item.run.lowest.step === 0"', replace: 'v-if="item.run.lowest.step >= 0"', fails: ['browser'], parts: ['cells'] },
+  { name: 'a read of the colonies\' supplies for supplies', file: 'mixin', find: "if (!database || !GameID || !RaceID || this.kind !== 'minerals') {\n          return null\n        }\n\n        return Object.freeze({ colonies:", replace: 'if (!database || !GameID || !RaceID) {\n          return null\n        }\n\n        return Object.freeze({ colonies:', fails: ['component'] },
+  { name: 'a panel that does not wait on, or name the failure of, the read of the supplies', file: 'mixin', find: "['reserveObjects', 'reserveClasses', 'reservePackets', 'reserveSupply', 'populationProductionModifiers'] :", replace: "['reserveObjects', 'reserveClasses', 'reservePackets', 'populationProductionModifiers'] :", fails: ['component'] },
+  { name: 'a panel that names a failed read by no words', file: 'mixin', find: 'failed: joinLabels(failed.map((key) => RESERVE_LABELS[key])),', replace: "failed: '',", fails: ['component'] },
+  { name: 'a class minimum cell that never says some classes record none', file: 'component', find: ":data-reserve-class=\"item.minimums.class.unknown > 0 ? 'partial' : 'figure'\"", replace: 'data-reserve-class="figure"', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose words for an untimed flow and a covered row are the same', file: 'component', find: 'untimed: \'Not assessed, untimed\'', replace: 'untimed: \'Covered\'', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose table names the system where the colony is', file: 'component', find: '<span data-reserve-name="colony">{{ item.sourceName }}</span>', replace: '<span data-reserve-name="colony">{{ item.place }}</span>', fails: ['browser'], parts: ['cells'] },
+  { name: 'a panel whose embedded root keeps the panel class', file: 'component', find: ":class=\"['resource-reserves', embedded ? 'resource-reserves--embedded' : 'panel']\"", replace: ":class=\"['resource-reserves panel', embedded ? 'resource-reserves--embedded' : '']\"", fails: ['browser'], parts: ['hauling'] },
+  { name: 'a Hauling page that mounts the panel for supplies', file: 'hauling', find: 'embedded kind="minerals"', replace: 'embedded kind="supplies"', fails: ['browser'] },
+  { name: 'a panel whose Confirm button is drawn with no opacity', file: 'component', find: 'data-reserve-confirm @click="confirm(entry)">', replace: 'data-reserve-confirm style="opacity: 0" @click="confirm(entry)">', fails: ['browser'], parts: ['actions'] },
+  { name: 'a panel whose player reserve is not displayed', file: 'component', find: 'class="text-no-wrap" data-reserve-player="set">', replace: 'class="text-no-wrap" data-reserve-player="set" style="display: none">', fails: ['browser'], parts: ['cells'] },
+  { name: 'one equivalent rewrite of each family on the panel, its mixin and both pages, made together', files: ['component', 'mixin', 'logistics', 'hauling'], rewrite: equivalents, fails: ['component', 'page', 'browser', 'voice'], benign: true },
 ]
 
 const TEXTS = Object.fromEntries(Object.entries(FILES).map(([name]) => [name, null]))
@@ -2651,7 +2516,7 @@ const textOf = (name) => {
 
 // The source of a rewrite, which must change it: a rewrite that leaves the text as it was proves nothing.
 const rewritten = (name, text, rewrite) => {
-  const next = rewrite(text)
+  const next = rewrite(text, name)
 
   if (next === text) {
     throw new Error(`The rewrite changes nothing in ${name}`)
@@ -2683,8 +2548,9 @@ const GROUPS = [
 ]
 const wanted = (keys, group) => !keys || group.keys.some((key) => keys.includes(key))
 
-// The renderer served to a browser and the browser, started with the first variant that reads the screen and stopped when the process ends.
+// The renderer served to a browser and the browser, started with the first variant that reads the screen and stopped when the process ends; and the parts of the screen that `observeScreen` of scripts/lib/reserve-screen.js reads.
 const SCREEN = { server: null, chrome: null }
+const SCREEN_PARTS = ['logistics', 'hauling', 'actions', 'cells']
 
 const closeScreen = async () => {
   const { server, chrome } = SCREEN
@@ -2701,8 +2567,8 @@ const closeScreen = async () => {
   }
 }
 
-// What the browser shows of the app with these sources, as the record of scripts/lib/browser-observe.js: the files a variant changes are served in place of the real ones, and only the parts of the screen the changed files can alter are read, the others being as the head run observed them. A server or a browser that did not start is an observation that did not happen.
-const screenOf = async (sources, ctx) => {
+// What the browser shows of the app with these sources, as the record of scripts/lib/browser-observe.js: the files a variant changes are served in place of the real ones, and only the parts of the screen the changed files can alter are read, the others being as the head run observed them. A planted fault that names its parts (`parts` of the list of faults) is read in those parts only, the parts that hold the checks it is caught by: a check of a part that is not read reads nothing and holds, so the fault is credited by a check of a part that was read. A server or a browser that did not start is an observation that did not happen.
+const screenOf = async (sources, ctx, chosen = null) => {
   try {
     if (!SCREEN.server) {
       SCREEN.server = await require('./lib/page-server').startPageServer({ save: 'AuroraDB.db' })
@@ -2714,7 +2580,7 @@ const screenOf = async (sources, ctx) => {
 
   const changed = Object.keys(FILES).filter((name) => sources[name] !== textOf(name))
   const only = (name) => changed.length > 0 && changed.every((file) => file === name)
-  const parts = only('logistics') ? { logistics: true } : only('hauling') ? { hauling: true } : { logistics: true, hauling: true, actions: true, cells: true }
+  const parts = Object.fromEntries((only('logistics') ? ['logistics'] : only('hauling') ? ['hauling'] : chosen || SCREEN_PARTS).map((name) => [name, true]))
 
   if (parts.cells) {
     try {
@@ -2734,7 +2600,13 @@ const screenOf = async (sources, ctx) => {
   }
 }
 
-const contextOf = async (sources, keys = null) => {
+// The fields the Logistics page declares to its persisted view, by the script of the page: the page module is its script alone, and a module this process has loaded already is not run again, so a page whose template alone differs does not declare them again.
+const PERSISTED = new Map()
+let contexts = 0
+
+// The modules and the screen of one variant of the sources. Variants run one after another in a process and share the modules whose text they do not change; what a page registers with its scenario records goes to records of its own context (`serial`), so no variant finds the adapters an earlier one registered.
+const contextOf = async (sources, keys = null, chosen = null) => {
+  const serial = ++contexts
   const changed = Object.keys(UTILITY_NAMES).filter((name) => sources[name] !== textOf(name))
   const utilitySources = Object.fromEntries(changed.map((name) => [UTILITY_NAMES[name], sources[name]]))
   const pageUtilities = Object.fromEntries(changed.map((name) => [`utilities/${UTILITY_NAMES[name]}`, sources[name]]))
@@ -2747,17 +2619,23 @@ const contextOf = async (sources, keys = null) => {
   const needs = (key) => !keys || keys.includes(key)
 
   if (needs('page') || needs('browser')) {
+    globalThis.__persistedFields = undefined
     pageOptions.logistics = await loadPage('pages/logistics', { stubs: STUBS, modules: { 'components/charts/theme': THEME_STUB, 'mixins/persisted-view': RECORDER }, sources: { 'pages/logistics': sources.logistics } })
+
+    if (globalThis.__persistedFields !== undefined) {
+      PERSISTED.set(scriptOf(sources.logistics), globalThis.__persistedFields)
+    }
+
     pageOptions.hauling = await loadPage('pages/hauling', { stubs: STUBS, modules: { 'mixins/load-state': LOAD_STATE_STUB, 'utilities/haul-plan': HAUL_PLAN_STUB }, sources: { 'pages/hauling': sources.hauling } })
   }
 
   if (needs('history')) {
-    pageOptions.history = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': sources.history, ...pageUtilities, ...recordsOf('the page') } })
+    pageOptions.history = await loadPage('pages/history', { stubs: STUBS, dynamicImports: true, sources: { 'pages/history': sources.history, ...pageUtilities, ...recordsOf(`the page ${serial}`) } })
   }
 
-  const ctx = { m: { rl: subjectModule(loaded['resource-ledger'], 'ledger function'), rr: subjectModule(loaded['resource-reserves'], 'record function'), rf: subjectModule(loaded['resource-feeds'], 'feed function'), records: loaded['scenario-records'], ms: loaded['msp-supply'], lg: loaded.logistics, lt: loaded['load-tracking'], math: loaded.math }, options, labels, componentText: sources.component, texts: sources, persisted: globalThis.__persistedFields, pageOptions, pageUtilities, screen: null }
+  const ctx = { m: { rl: subjectModule(loaded['resource-ledger'], 'ledger function'), rr: subjectModule(loaded['resource-reserves'], 'record function'), rf: subjectModule(loaded['resource-feeds'], 'feed function'), records: loaded['scenario-records'], ms: loaded['msp-supply'], lg: loaded.logistics, lt: loaded['load-tracking'] }, options, labels, componentText: sources.component, texts: sources, persisted: PERSISTED.get(scriptOf(sources.logistics)), pageOptions, pageUtilities, serial, screen: null }
 
-  ctx.screen = needs('browser') ? await screenOf(sources, ctx) : null
+  ctx.screen = needs('browser') ? await screenOf(sources, ctx, chosen) : null
 
   return ctx
 }
@@ -2784,21 +2662,20 @@ const checkHead = async () => {
   const statements = statementsOf(ctx)
   const keys = new Set(statements.map(([name]) => keyOf(name)))
   const bare = MUTATIONS.filter((mutation) => !mutation.fails.every((key) => keys.has(key))).map((mutation) => mutation.name)
+  const narrowed = MUTATIONS.filter((mutation) => mutation.parts && (mutation.benign || !mutation.fails.includes('browser') || !mutation.parts.length || mutation.parts.some((name) => !SCREEN_PARTS.includes(name)))).map((mutation) => mutation.name)
 
   console.log('\nResource ledger: local reserves and the timed resource ledger, on fixtures worked by hand, the panel, the pages and the real app in a browser')
   check('mutations: every planted fault names a group of checks that exists', bare.length ? short(bare) : true)
+  check('mutations: a planted fault that is read in some parts of the screen only is caught by the browser and names parts the screen has, and no equivalent rewrite is read in fewer than all of them', narrowed.length ? short(narrowed) : true)
 
   for (const result of await runStatements(statements, ctx)) {
     check(result.name, result.ok ? true : result.kind === 'error' ? `threw: ${result.detail}` : result.detail)
   }
 }
 
-// A variant that is not a whole source, does not load or makes a statement throw an exception no adapter named is a defect of the harness (HarnessError), and credits nothing.
+// A variant that is not a whole source, does not load or makes a statement throw an exception no adapter named is a defect of the harness (HarnessError), and credits nothing; so is a fault whose named checks fail only by a call of the code under test that threw (scripts/lib/fault-credit.js `caughtBy`), as it crashed the subject and changed no value a check reads.
 // `--detail` tells each failed check of a variant, and whether it failed by a call that threw or by a value.
 const DETAIL = process.argv.includes('--detail')
-
-// A call of the code under test that threw (what an adapter of fault-credit.js tells as the failure of that call): it says the fault broke the subject, not that a check read a wrong result, so it is no evidence that a check rejects the value the fault changes.
-const threw = (result) => /^[A-Za-z][^[\]{}"]* threw [A-Za-z]+: /.test(String(result.detail))
 
 const checkMutant = async (mutant) => {
   const began = Date.now()
@@ -2808,7 +2685,7 @@ const checkMutant = async (mutant) => {
 
   try {
     sources = sourcesOf(mutant)
-    ctx = await contextOf(sources, mutant.fails)
+    ctx = await contextOf(sources, mutant.fails, mutant.parts)
   } catch (error) {
     throw error instanceof HarnessError ? error : new HarnessError(`the variant '${mutant.name}' did not load: ${error.message}`)
   }
@@ -2825,14 +2702,13 @@ const checkMutant = async (mutant) => {
     return
   }
 
-  const valued = failed.filter((result) => !threw(result))
-  const missed = mutant.fails.filter((key) => !caughtBy(valued, [key]))
-  const crashed = failed.length - valued.length
+  const missed = mutant.fails.filter((key) => !caughtBy(failed, [key], { name: mutant.name, throws: mutant.throws }))
+  const crashed = failed.filter((result) => result.threw).length
 
-  check(label, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail by an assertion on a value (a call that threw is no evidence): ${missed.join(', ')}` : true, `${failed.length} of the checks it names fail${crashed ? `, ${crashed} of them by a call that threw` : ''}, ${seconds} s`)
+  check(label, absent.length ? `no check has the key ${absent.join(', ')}` : missed.length ? `these checks did not fail by an assertion on a value: ${missed.join(', ')}` : true, `${failed.length} of the checks it names fail${crashed ? `, ${crashed} of them by a call that threw` : ''}, ${seconds} s`)
 
   if (DETAIL) {
-    failed.forEach((result) => console.log(`  ${threw(result) ? 'threw' : 'value'}  ${result.name}: ${String(result.detail).slice(0, 400)}`))
+    failed.forEach((result) => console.log(`  ${result.threw ? 'threw' : 'value'}  ${result.name}: ${String(result.detail).slice(0, 400)}`))
   }
 }
 
@@ -2855,22 +2731,32 @@ const parseArguments = (argv) => {
   return options
 }
 
+// The longest a variant (or the head) runs: one that has not ended by then is stuck.
 const PART_LIMIT = 1200000
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
 
   if (options.part !== null) {
-    // A part runs in a process of its own and ends in minutes: one that has not ended by then is stuck and fails with its name, never waits on.
-    setTimeout(() => {
-      console.error(`the part ${options.part} did not finish in ${PART_LIMIT / 1000} s`)
-      process.exit(3)
-    }, PART_LIMIT)
+    // A part runs in a process of its own and each of its variants ends in minutes: one that has not ended by then is stuck and fails with its name, never waits on.
+    let limit = null
+    const watch = (what) => {
+      clearTimeout(limit)
+      limit = setTimeout(() => {
+        console.error(`${what} did not finish in ${PART_LIMIT / 1000} s`)
+        process.exit(3)
+      }, PART_LIMIT)
+    }
+    const listed = /^mutant:\d+(,\d+)*$/.test(options.part) ? options.part.slice(7).split(',').map(Number) : []
 
     if (options.part === 'head') {
+      watch('the head')
       await checkHead()
-    } else if (/^mutant:\d+$/.test(options.part) && MUTATIONS[Number(options.part.slice(7))]) {
-      await checkMutant(MUTATIONS[Number(options.part.slice(7))])
+    } else if (listed.length && listed.every((index) => MUTATIONS[index])) {
+      for (const index of listed) {
+        watch(`the variant mutant:${index}`)
+        await checkMutant(MUTATIONS[index])
+      }
     } else {
       throw new Error(`No part is named ${options.part}`)
     }
@@ -2879,8 +2765,12 @@ const run = async () => {
     endSection(checks, failures)
   }
 
-  const wanted = options.mutations ? MUTATIONS.map((_mutation, index) => `mutant:${index}`) : []
-  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...wanted.map((id) => ({ args: ['--part', id], weight: 3 }))])
+  // The variants run a few to a process, one after another: those that read the screen share the process's server and browser, and the others its loaded modules (`contextOf`). Each kind is spread over as many processes as run at once.
+  const indexes = options.mutations ? MUTATIONS.map((_mutation, index) => index) : []
+  const screened = (index) => MUTATIONS[index].fails.includes('browser')
+  const spread = (list) => Array.from({ length: Math.min(jobs(), list.length) }, (_none, at) => list.filter((_index, place) => place % jobs() === at))
+  const batches = [...spread(indexes.filter((index) => !screened(index))), ...spread(indexes.filter(screened))]
+  const sections = await runSections(__filename, [{ args: ['--part', 'head'], weight: 30 }, ...batches.map((batch) => ({ args: ['--part', `mutant:${batch.join(',')}`], weight: batch.reduce((sum, index) => sum + (screened(index) ? 30 : 1), 0) }))])
   let at = 0
 
   const printed = () => {
@@ -2892,9 +2782,9 @@ const run = async () => {
 
   printed()
 
-  if (wanted.length) {
+  if (batches.length) {
     console.log('\nMutations: each planted fault must fail the checks it names, each equivalent rewrite must keep them passing')
-    wanted.forEach(printed)
+    batches.forEach(printed)
   }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)

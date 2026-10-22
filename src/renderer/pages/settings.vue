@@ -255,6 +255,7 @@ import PresetReference from '../components/settings/PresetReference.vue'
 import countFormat from '../mixins/count-format'
 import { ACCENTS_KEY, ACCENT_MODES, APPEARANCE_KEY, APPEARANCE_SETTINGS, BASELINE_POLICIES, CUSTOM_ID, DEFAULT_PRESET_ID, DRAFT_ID, NO_OVERRIDE, POLICIES, POLICY_KEY, accentMode, activeAppearance, adoptAppearance, appearanceOverride, appearancePolicy, appliedPresetId, applyAccents, applyPolicy, applyPreset, cancelPreview, exportAppearanceFile, importAppearanceFile, importedAppearances, isPreviewing, listAppearances, previewPreset, removeCustom, resolveAppearance, systemMode, unsupportedPresetId } from '../utilities/appearance'
 import { KIND_LABELS, MAX_BYTES as FILE_BYTES, appearanceFileName } from '../utilities/appearance-file'
+import { ACKNOWLEDGEMENT_WORDS } from '../utilities/appearance-contrast'
 import { FONT_KEY, loadFont, previewFont, readFont } from '../utilities/appearance-font'
 import { separatedNumber, thousandsSeparator } from '../utilities/math'
 import { declaredViews } from '../mixins/persisted-view'
@@ -419,7 +420,9 @@ export default {
     },
 
     acknowledgementLabel() {
-      return `Apply despite ${this.count(this.draftInForce.report.findings.length)} contrast ${this.draftInForce.report.findings.length === 1 ? 'finding' : 'findings'}`
+      const findings = this.draftInForce.report.findings.length
+
+      return `${ACKNOWLEDGEMENT_WORDS.before} ${this.count(findings)} ${findings === 1 ? ACKNOWLEDGEMENT_WORDS.one : ACKNOWLEDGEMENT_WORDS.many}`
     },
 
     removable() {
