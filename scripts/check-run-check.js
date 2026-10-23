@@ -1,5 +1,5 @@
 /*
-  Checks scripts/run-check.js, the way a full run is started so that it outlives the starter's turn, in a layout of its own (a copy of run-check and check-pool, and a check script that passes after TINY_MS), through these scenarios:
+  Checks scripts/run-check.js, the way a full run is started so that it outlives the starter's turn, in a layout of its own (a copy of run-check and check-pool, a check script that passes after TINY_MS and the check script of `tree`), through these scenarios:
   - `normal`: a run started and waited for ends `done`, with the status and the summary line of its script, its supervisor the one `start` named, and `wait` ends with that status;
   - `stale`: the starter runs with each of its reads of the status held, once read, until the state on disk has moved on from the state it read (scripts/stale-starter.js of the layout), as a loaded machine can hold a process between a read and what it does with it, so that the supervisor ends while the starter holds a status it read before: the run still reads `done`, with its script's status, and `wait` ends with it, never as a run whose supervisor is gone;
   - `expired`: with a startup time of 3 s, the starter holds its initial status read for 4 s after observing a live supervisor and child on disk; the acknowledged run must still complete rather than be killed by a startup decision made from the held snapshot;
@@ -7,6 +7,7 @@
   - `hung`: a supervisor planted to wait 20 s before its first write, with a startup time of 3 s, is ended, and the run is `failed`, with why;
   - `pending`: a run whose starter wrote the status and whose supervisor has not (planted) is starting: `start` refuses a second run of its name, `status` does not call it lost and `wait` waits for it; one planted two minutes ago is lost, and `wait` ends at once with status 2.
   - `claimed`: a cancelled startup prevents a late supervisor from writing status or starting a check; `publishing` stalls before the first status write, and `cancelled` delays commitment after writing the pid so timeout wins before the supervisor can start work.
+  - `tree`, on Windows only, as it plants processes in the listing the Windows sampler reads (elsewhere the sampler reads `ps`, where the parent PID of a process whose parent has ended names init or a subreaper, never a member): the check script holds a child of HELD_BYTES, and each listing gains an outsider that names the held child's PID as its parent and was created a microsecond before it, as a process whose parent has ended names a PID that Windows has since given to a member, and, where the local clocks go back within a year, a grandchild created after its parent whose local time of creation is the earlier: the outsider is left out of the peak memory, the held child is its largest process and the grandchild is counted.
   Each planted fault rewrites a line of the copy of run-check and must make a named check fail; each benign rewrite must make none of the checks of the scenarios it touches fail.
 
   --only=<scenario>,<scenario> runs those scenarios and only the planted faults and rewrites whose scenarios all appear in that list.
@@ -64,6 +65,66 @@ const EXPIRED_STARTER = [
   "require('./run-check.js')",
   '',
 ].join('\n')
+// The child the check script of `tree` holds: HELD_BYTES, written, until it is ended.
+const HELD_BYTES = 200 * 1048576
+const HELD = `const held = Buffer.alloc(${HELD_BYTES}, 1)\nconsole.log('held')\nsetInterval(() => held.length, 1000)\n`
+// How long the check script of `tree` waits for the status to count the held child.
+const TREE_MS = 40000
+// The check script of `tree`: it starts held.js, prints its PID, waits until the status of the run its argument names counts one process of HELD_BYTES or TREE_MS have passed, then ends it and passes.
+const TREE = [
+  "const fs = require('fs')",
+  "const path = require('path')",
+  "const { startChild } = require('./lib/check-pool')",
+  "const status = path.join(__dirname, '..', '.check-runs', process.argv[2], 'status.json')",
+  'const counted = () => {',
+  '  try {',
+  `    return JSON.parse(fs.readFileSync(status, 'utf8')).peak.process >= ${HELD_BYTES}`,
+  '  } catch (error) {',
+  '    return false',
+  '  }',
+  '}',
+  'const main = async () => {',
+  '  const began = Date.now()',
+  '  let ready = false',
+  `  const held = startChild(path.join(__dirname, 'held.js'), [], { limit: ${TREE_MS + 10000}, onLine: (line) => { ready = ready || line === 'held' } })`,
+  "  console.log('held ' + held.pid)",
+  `  while (!(ready && counted()) && Date.now() - began < ${TREE_MS}) {`,
+  '    await new Promise((resolve) => setTimeout(resolve, 100))',
+  '  }',
+  "  console.log(counted() ? 'counted' : 'not counted')",
+  '  held.kill()',
+  '  await held.done',
+  "  console.log('1 of 1 checks passed')",
+  '}',
+  'main()',
+  '',
+].join('\n')
+// The next instant within a year at which the local clocks go back (the offset from UTC shrinks), in ms; null in a time zone that keeps one offset.
+const fallBack = () => {
+  const step = 900000
+  const from = Math.ceil(Date.now() / 3600000) * 3600000 + 3600000
+
+  for (let at = from; at < from + 366 * 86400000; at += step) {
+    if (new Date(at + step).getTimezoneOffset() > new Date(at).getTimezoneOffset()) {
+      return at + step
+    }
+  }
+
+  return null
+}
+const FALL_BACK = fallBack()
+const OUTSIDER_BYTES = 64 * 1073741824
+const CLOCK_BYTES = 16 * 1073741824
+const createdAt = (ms) => `[DateTimeOffset]::FromUnixTimeMilliseconds(${ms}).UtcDateTime.ToLocalTime()`
+// The processes `tree` adds to each listing the sampler reads once the held child (the root's child of the root's image) is in it, as CIM gives them, with PIDs that are not multiples of 4, which Windows never gives: the outsider, created a microsecond before the held child and naming its PID, with a working set no member reaches; where the clocks go back, a child of the held one created 10 minutes before they do and its own child, created 5 minutes after, whose working set only it has. The PID the outsider names is written to outsider.offered in the layout, where the sampler runs.
+const LISTED = [
+  `[pscustomobject]@{ ProcessId = 999999; ParentProcessId = $m.ProcessId; CreationDate = $m.CreationDate.AddTicks(-10); WorkingSetSize = ${OUTSIDER_BYTES}; PeakWorkingSetSize = ${OUTSIDER_BYTES / 1024}; Name = 'outsider.exe' }`,
+  ...(FALL_BACK ? [
+    `[pscustomobject]@{ ProcessId = 999995; ParentProcessId = $m.ProcessId; CreationDate = ${createdAt(FALL_BACK - 600000)}; WorkingSetSize = 0; PeakWorkingSetSize = 0; Name = 'before.exe' }`,
+    `[pscustomobject]@{ ProcessId = 999991; ParentProcessId = 999995; CreationDate = ${createdAt(FALL_BACK + 300000)}; WorkingSetSize = ${CLOCK_BYTES}; PeakWorkingSetSize = 0; Name = 'after.exe' }`,
+  ] : []),
+].join(', ')
+const LISTING = `$r = @($all | Where-Object { $_.ProcessId -eq $root })[0]; $m = @($all | Where-Object { $r -and $_.ParentProcessId -eq $root -and $_.Name -eq $r.Name })[0]; if ($m -and $m.CreationDate) { $all = @($all) + @(${LISTED}); Set-Content -Path outsider.offered -Value $m.ProcessId }; `
 // The rewrites of run-check that plant a supervisor's fault in the layout of a scenario.
 const SUPERVISE = 'const supervise = async (name, script, args) => {\n'
 const PLANTS = {
@@ -72,9 +133,10 @@ const PLANTS = {
   expired: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3']],
   publishing: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  await pause(20000)\n  writeStatus(name, status)\n']],
   cancelled: [['const STARTUP_SECONDS = 60', 'const STARTUP_SECONDS = 3'], ['  writeStatus(name, status)\n', '  writeStatus(name, status)\n  await pause(4500)\n'], ['        killTree(supervisor.pid)\n', '        void supervisor.pid\n']],
+  tree: [['$byParent = @{};', `${LISTING}$byParent = @{};`]],
 }
 
-// A layout of its own: run-check as given in `source`, with the plants of the scenario `need`, check-pool, the check script and the starter of `stale`.
+// A layout of its own: run-check as given in `source`, with the plants of the scenario `need`, check-pool, the check script, the starters of `stale` and `expired`, and the check script of `tree` with the child it holds.
 const layoutOf = (source, need) => {
   const layout = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-run-check-'))
   const scripts = path.join(layout, 'scripts')
@@ -85,6 +147,8 @@ const layoutOf = (source, need) => {
   fs.writeFileSync(path.join(scripts, 'check-tiny.js'), TINY)
   fs.writeFileSync(path.join(scripts, 'stale-starter.js'), STALE_STARTER)
   fs.writeFileSync(path.join(scripts, 'expired-starter.js'), EXPIRED_STARTER)
+  fs.writeFileSync(path.join(scripts, 'check-tree.js'), TREE)
+  fs.writeFileSync(path.join(scripts, 'held.js'), HELD)
 
   return layout
 }
@@ -172,6 +236,16 @@ const SCENARIOS = {
 
     return { refused, described, waitedFresh, waitedOld }
   },
+  ...(process.platform === 'win32' ? {
+    tree: async (layout) => {
+      const started = await command(layout, ['start', '--label=t', 'tree', 't'])
+      const waited = await command(layout, ['wait', 't'], { limit: TREE_MS + 20000 })
+      const log = path.join(layout, '.check-runs', 't', 'log.txt')
+      const offered = path.join(layout, 'outsider.offered')
+
+      return { started, waited, status: statusOf(layout, 't'), held: fs.existsSync(log) ? Number((/^held (\d+)$/m.exec(fs.readFileSync(log, 'utf8')) || [])[1]) || null : null, offered: fs.existsSync(offered) ? Number(fs.readFileSync(offered, 'utf8').trim()) : null }
+    },
+  } : {}),
 }
 
 // Ends any supervisor a scenario left going (a planted fault can leave one), then removes the layout.
@@ -215,6 +289,18 @@ const lastLine = (text) => text.trim().split('\n').pop()
 // The scenario ran to its end, without an error of its own.
 const whole = (seen) => assert.ok(seen && !seen.error, seen && seen.error)
 const ran = (run, what) => assert.equal(run.timedOut, false, `${what} did not end in its limit: ${lastLine(run.stderr)}`)
+// The run of `tree` ended done, with the held child's PID in its log and a peak memory in its status.
+const treeRan = (tree) => {
+  whole(tree)
+  ran(tree.started, 'start')
+  ran(tree.waited, 'wait')
+  assert.equal(tree.started.code, 0, lastLine(tree.started.stderr))
+  assert.equal(tree.waited.code, 0, lastLine(tree.waited.stdout))
+  assert.equal(tree.status.state, 'done')
+  assert.equal(tree.status.code, 0)
+  assert.ok(tree.held, 'the check script printed no held child')
+  assert.ok(tree.status.peak, 'the run has no peak memory')
+}
 
 // [id, scenarios it needs, what it holds, the assertions over what they saw]
 const CHECKS = [
@@ -312,6 +398,20 @@ const CHECKS = [
     assert.equal(cancelled.status.summary, 'the supervisor did not publish startup in 3 s and was ended')
     assert.equal(cancelled.logged, false, 'a cancelled supervisor started work')
   }],
+  ['tree-outsider', ['tree'], 'a process created before the member whose PID it names as its parent is left out of the peak memory, though the listing offers it as that member\'s child', ({ tree }) => {
+    treeRan(tree)
+    assert.equal(tree.offered, tree.held, `the listing offered the outsider as a child of ${tree.offered}, not of the held child ${tree.held}`)
+    assert.ok(tree.status.peak.tree < OUTSIDER_BYTES, `the tree peaked at ${tree.status.peak.tree} bytes, the outsider's ${OUTSIDER_BYTES} with them`)
+    assert.ok(tree.status.peak.process < OUTSIDER_BYTES && tree.status.peak.name !== 'outsider.exe', `the largest process was ${tree.status.peak.name}, at ${tree.status.peak.process} bytes`)
+  }],
+  ['tree-genuine', ['tree'], 'a child created after its parent counts in the peak memory: the held child is the largest process', ({ tree }) => {
+    treeRan(tree)
+    assert.ok(tree.status.peak.process >= HELD_BYTES && tree.status.peak.process < OUTSIDER_BYTES, `the largest process was ${tree.status.peak.name}, at ${tree.status.peak.process} bytes; the held child holds ${HELD_BYTES}`)
+  }],
+  ['tree-clock', ['tree'], 'a child created after its parent in the hour the clocks go back counts in the peak memory, though its local time of creation is the earlier', ({ tree }) => {
+    treeRan(tree)
+    assert.ok(!FALL_BACK || tree.status.peak.tree >= CLOCK_BYTES, `the tree peaked at ${tree.status.peak.tree} bytes, without the grandchild's ${CLOCK_BYTES}`)
+  }],
 ]
 
 // [name, from, to, scenarios to run, the check ids one of which must fail]
@@ -331,6 +431,10 @@ const MUTANTS = [
   ['supervisor work starts after losing commitment to timeout', 'if (!takeStartup(name)) {', 'if (false) {', ['cancelled'], ['cancelled']],
   ['a written pid bypasses startup arbitration', '!late && seen.supervisor === supervisor.pid && !fs.existsSync(startupFile(name))', 'seen.supervisor === supervisor.pid', ['cancelled'], ['cancelled']],
   ['a token is consumed before the first status write', '  writeStatus(name, status)\n\n  if (!takeStartup(name)) {\n    throw new Error(\'startup was cancelled before supervisor commitment\')\n  }', '  if (!takeStartup(name)) {\n    throw new Error(\'startup was cancelled before supervisor commitment\')\n  }\n\n  writeStatus(name, status)', ['publishing'], ['publishing']],
+  ['CreationDate ignored: a child counts whenever it was created', '$byParent[[int]$p.ProcessId] | Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', '$byParent[[int]$p.ProcessId]', ['tree'], ['tree-outsider']],
+  ['a child is compared with the creation of the root, not of the member it names', '-ge $p.CreationDate.ToUniversalTime() }', '-ge @($all | Where-Object { $_.ProcessId -eq $root })[0].CreationDate.ToUniversalTime() }', ['tree'], ['tree-outsider']],
+  ['the sampler does not read when a process was created', 'ParentProcessId,CreationDate,WorkingSetSize', 'ParentProcessId,WorkingSetSize', ['tree'], ['tree-genuine']],
+  ...(FALL_BACK ? [['creation times are compared in local time', 'Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', 'Where-Object { $_.CreationDate -ge $p.CreationDate }', ['tree'], ['tree-clock']]] : []),
 ]
 
 // Rewrites of run-check that change nothing a run does: each must leave every check of the scenarios it touches passing. [name, from, to, scenarios to run]
@@ -338,6 +442,7 @@ const BENIGN = [
   ['the end of the supervisor taken after the read, in the same step', '    ended = exited\n    seen = readStatus(name)', '    seen = readStatus(name)\n    ended = exited', ['normal', 'stale', 'early']],
   ['a poll every 150 ms', 'const POLL_MS = 100', 'const POLL_MS = 150', ['normal', 'stale']],
   ['publication races with a 200 ms poll', 'const POLL_MS = 100', 'const POLL_MS = 200', ['expired', 'claimed', 'hung', 'publishing', 'cancelled']],
+  ['the creation test written as not earlier than', 'Where-Object { $_.CreationDate.ToUniversalTime() -ge $p.CreationDate.ToUniversalTime() }', 'Where-Object { -not ($_.CreationDate.ToUniversalTime() -lt $p.CreationDate.ToUniversalTime()) }', ['tree']],
 ]
 
 const judge = (seen, needs) => CHECKS.filter(([, wanted]) => wanted.every((need) => needs.includes(need))).map(([id, , name, run]) => {
