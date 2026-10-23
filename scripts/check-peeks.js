@@ -1,11 +1,13 @@
 /*
   Checks the Transport and Colonization Planner lines of the section flyout (src/renderer/utilities/peeks.js, with the store that keeps them, src/renderer/store/peeks.js).
 
-  node scripts/check-peeks.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--budget <ms>] [--laps <n>]
+  node scripts/check-peeks.js [--stock <save.db> <GameID> <RaceID>] [--modded <save.db> <GameID> <RaceID>] [--budget <ms>] [--laps <n>] [--no-mutations] [--only=<text>[|<text>...]]
 
-  The synthetic checks need no save: they build a small database in memory with two games, several races, a shipping line, a ship that cannot move, a warship, classes with no recorded cargo or colonist capacity, and colonies and outposts of the race and of other races and games, among them two records on one body, outposts with no people, a body of a class and a body of a type the planner leaves out, and a colony in a system the race has not surveyed. They prove: the Transport line counts only the selected race's own ships that can move and carry cargo or colonists, in the selected game, with the capacity summed (hand-written lines for each race); a race with no such ship reads "No transport ships"; a capacity that is not recorded makes the line unknown (null), never 0; the Colonization line counts, as the planner's Colonies view does, the bodies of surveyed systems that hold a colony or outpost of the race (one body once however many records it has, an outpost with no people as one), and the surveyed systems that hold one, never a body of another race or game, one in a system the race has not surveyed, or one of a class or type the planner leaves out; a race that knows no system reads "No known systems"; a read that gives no row, or a figure that is null, leaves the line null; the lines read FCT_SystemBody only by primary key from the race's own population records (never a scan of it) and every statement they send is scoped by GameID and RaceID; a line shown again reuses the cached read (the underlying database sees no statement), the Galaxy Map line and the Colonization line share one read of the known systems, and a write to a table they read drops the kept read; and the store keeps a line until the database, game, race, history revision or separator changes, loads nothing a second time and leaves a failing peek's line null. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing. Exit code 1 when a check fails.
+  The synthetic checks need no save: they build a small database in memory with two games, several races, a shipping line, a ship that cannot move, a warship, classes with no recorded cargo or colonist capacity, and colonies and outposts of the race and of other races and games, among them two records on one body, outposts with no people, a body of a class and a body of a type the planner leaves out, and a colony in a system the race has not surveyed. They prove: the Transport line counts only the selected race's own ships that can move and carry cargo or colonists, in the selected game, with the capacity summed (hand-written lines for each race); a race with no such ship reads "No transport ships"; a capacity that is not recorded makes the line unknown (null), never 0; the Colonization line counts, as the planner's Colonies view does, the bodies of surveyed systems that hold a colony or outpost of the race (one body once however many records it has, an outpost with no people as one), and the surveyed systems that hold one, never a body of another race or game, one in a system the race has not surveyed, or one of a class or type the planner leaves out; a race that knows no system reads "No known systems"; a read that gives no row, or a figure that is null, leaves the line null; the lines read FCT_SystemBody only by primary key from the race's own population records (never a scan of it) and every statement they send is scoped by GameID and RaceID; a line shown again reuses the cached read (the underlying database sees no statement), the Galaxy Map line and the Colonization line share one read of the known systems, and a write to a table they read drops the kept read; and the store keeps a line until the database, game, race, history revision or separator changes, loads nothing a second time and leaves a failing peek's line null. A value is compared with its expectation part by part (an array item by item, an object key by key, whatever order its keys were added in), so the store's lines are compared route by route and the order the lines finish loading in cannot change a result; two controls force each order on a game change (the database sends one line's statements only once the store has set the other line) and must pass. Then each of the mutations below, one fault planted in a copy of the sources, must make at least one check fail, so that the checks cannot pass by checking nothing; a mutation that names a check counts only when that check fails by a wrong value, never by a throw. Exit code 1 when a check fails.
 
   With a save (by default the repository's modded save, AuroraDB.db game 140 race 784, and the stock 2.7.1 save in saves/, game 138 race 785; one that is not there is reported as not run) it also compares, for every race of the game, the Transport numbers with a direct reading of the same tables (the rows summed here in JavaScript, not by the peek's SQL), and the Colonization numbers with the planner's own `loadBodies` (colonised bodies, and the systems they are in, of the bodies whose `OwnPopulations` is not empty), for every race with a population record and the selected race; it checks that the race's figures are not the whole game's and that another game's data does not reach them, that the save holds outposts with no people (and reports bodies with several records), and measures the cold cost of each line (the median of --laps fresh connections, default 7, each timing the first statements of a connection; a median over the budget is measured again, up to three rounds, for the other work on the machine) against --budget (default 20 ms, the flyout's budget in docs/ARCHITECTURE.md), and the warm cost, which must reach the database not at all.
+
+  --no-mutations leaves the mutations out. --only=<text>[|<text>...] runs only the synthetic checks and the mutations whose names hold one of the texts, and reads no save: a focused run while working (the run that counts has neither).
 */
 const fs = require('fs')
 const os = require('os')
@@ -38,7 +40,24 @@ const check = (name, result, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? (detail ? `  [${detail}]` : '') : `  [${typeof result === 'string' ? result : 'false'}]`}`)
 }
 
-const same = (actual, expected) => (JSON.stringify(actual) === JSON.stringify(expected) ? true : `got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`)
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+// Whether `actual` is `expected`: an array item by item, an object key by key (the same keys, each with an equal value, whatever order they were added in), anything else by its JSON text.
+const equal = (actual, expected) => {
+  if (Array.isArray(actual) && Array.isArray(expected)) {
+    return actual.length === expected.length && actual.every((item, index) => equal(item, expected[index]))
+  }
+
+  if (isRecord(actual) && isRecord(expected)) {
+    const keys = Object.keys(expected)
+
+    return Object.keys(actual).length === keys.length && keys.every((key) => Object.hasOwn(actual, key) && equal(actual[key], expected[key]))
+  }
+
+  return JSON.stringify(actual) === JSON.stringify(expected)
+}
+
+const same = (actual, expected) => (equal(actual, expected) ? true : `got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`)
 
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
 
@@ -111,23 +130,50 @@ const context = (database, GameID, RaceID, extra = {}) => ({ database, GameID, R
 // A database whose every read gives `rows`.
 const fixedDatabase = (rows) => ({ query: () => Promise.resolve([rows.map((item) => ({ ...item })), {}]) })
 
-// The store's state, mutations and action driven the way Vuex would, over a database and the root state's moving parts.
+// The store's state, mutations and action driven the way Vuex would, over a database and the root state's moving parts. `finished` lists the routes of the lines the store set, in the order it set them, and `onSet(route)`, which a check may replace, runs after each.
 const storeOver = (store) => {
   const state = store.state()
-  const commit = (name, payload) => store.mutations[name](state, payload)
+  const finished = []
+  const driven = { onSet: () => {} }
+  const commit = (name, payload) => {
+    store.mutations[name](state, payload)
+
+    if (name === 'set') {
+      finished.push(payload.route)
+      driven.onSet(payload.route)
+    }
+  }
   const separators = { value: 'Tick' }
   const rootState = { database: null, GameID: 1, RaceID: 10, StartYear: 2000, history: { revision: 0 } }
   const rootGetters = { config: { get: () => separators.value }, historyRecorded: false, 'history/snapshotSummary': () => null }
 
-  return {
+  return Object.assign(driven, {
     state,
     root: rootState,
     separators,
+    finished,
     load: (routes) => store.actions.load({ state, commit, rootState, rootGetters }, routes),
-  }
+  })
 }
 
 const ROUTES = ['/information', '/habitability']
+
+// `database` with the order of the Transport and Colonization lines forced: once `hold()` is called, a statement of the line that is not `first` is sent only after `store` (of storeOver) has set the line of `first`. A statement belongs to the Transport line ('/information') when it reads FCT_Ship and to the Colonization line ('/habitability') otherwise.
+const finishingFirst = (database, store, first) => {
+  let held = null
+
+  return {
+    query: (sql) => (held && (/\bFCT_Ship\b/.test(sql) ? '/information' : '/habitability') !== first ? held.then(() => database.query(sql)) : database.query(sql)),
+    hold: () => {
+      held = new Promise((resolve) => {
+        store.onSet = (route) => route === first && resolve()
+      })
+    },
+  }
+}
+
+// How long a load with statements held back may take: the reads of the database in memory answer in milliseconds, so only a statement held back for good reaches it.
+const HOLD_LIMIT_MS = 10000
 
 // A statement may name FCT_SystemBody only to join it by primary key to the race's own population records.
 const BODY_JOIN = /inner join FCT_SystemBody on FCT_SystemBody\.SystemBodyID = FCT_Population\.SystemBodyID/
@@ -242,6 +288,8 @@ const synthetic = (m) => {
     return same([before, after], [['4 colonised bodies in 3 of 3 known systems', '3 ships, 25 kt cargo, 500 colonists'], ['3 colonised bodies in 2 of 3 known systems', '2 ships, 12.5 kt cargo, 500 colonists']])
   }))
 
+  const gameTwo = { '/information': '1 ship, 12.5 kt cargo', '/habitability': '1 colonised body in 1 of 1 known system' }
+
   const storeChecks = [
     ['lines are kept: a second load of the same routes sends nothing', async (store, database) => {
       await store.load(ROUTES)
@@ -265,8 +313,27 @@ const synthetic = (m) => {
       store.root.GameID = 2
       await store.load(ROUTES)
 
-      return same(store.state.lines, { '/information': '1 ship, 12.5 kt cargo', '/habitability': '1 colonised body in 1 of 1 known system' })
+      return same(store.state.lines, gameTwo)
     }],
+    // The controls of the order: the same game change with each line made to finish first, both of which must pass.
+    ...ROUTES.map((first) => [`a game change loads the lines again with the ${first} line finishing first (the order forced through the database)`, async (store, database) => {
+      const ordered = finishingFirst(database, store, first)
+
+      store.root.database = ordered
+      await store.load(ROUTES)
+      store.root.GameID = 2
+      ordered.hold()
+
+      const before = store.finished.length
+      let timer
+      const loaded = await Promise.race([store.load(ROUTES).then(() => true), new Promise((resolve) => { timer = setTimeout(resolve, HOLD_LIMIT_MS, false) })])
+
+      clearTimeout(timer)
+
+      const order = store.finished.slice(before)
+
+      return !loaded ? `the load did not end within ${HOLD_LIMIT_MS} ms with the other line's statements held back` : order[0] !== first ? `the lines finished in the order ${JSON.stringify(order)}, not with ${first} first` : same(store.state.lines, gameTwo)
+    }]),
     ['a new database (a save that changed) loads the lines again', async (store) => {
       await store.load(ROUTES)
 
@@ -351,7 +418,7 @@ const mutatedCopy = (file, from, to) => {
 }
 
 /* eslint-disable no-template-curly-in-string */
-// The source text the mutations replace: [label, file, from, to], each caught by at least one synthetic check.
+// The source text the mutations replace: [label, file, from, to], each caught by at least one synthetic check, or [label, file, from, to, check] for one that counts only when the synthetic check named `check` fails by a wrong value, never by a throw.
 const TRANSPORT_WHERE = 'where FCT_Ship.GameID = ${GameID} and FCT_Ship.RaceID = ${RaceID} and FCT_Fleet.ShippingLine = 0 and FCT_ShipClass.MaxSpeed > 1 and (FCT_ShipClass.CargoCapacity > 0 or FCT_ShipClass.ColonistCapacity > 0)'
 const SETTLEMENT = 'inner join FCT_RaceSysSurvey on FCT_RaceSysSurvey.SystemID = FCT_SystemBody.SystemID and FCT_RaceSysSurvey.RaceID = ${RaceID} and FCT_RaceSysSurvey.GameID = ${GameID}\n      where FCT_Population.GameID = ${GameID} and FCT_Population.RaceID = ${RaceID} and FCT_SystemBody.GameID = ${GameID} and FCT_SystemBody.BodyClass in (1, 2, 3, 5) and FCT_SystemBody.BodyTypeID not in (0, 4, 5)'
 const KNOWN = 'where FCT_RaceSysSurvey.GameID = ${GameID} and FCT_RaceSysSurvey.RaceID = ${RaceID}`)\n\n  return found ? found.Systems : null'
@@ -388,13 +455,15 @@ const MUTATIONS = [
   ['the store ignores the history revision', 'store/peeks.js', '${rootState.history.revision}:${separator}', '${separator}'],
   ['the store ignores the separator', 'store/peeks.js', '${rootState.history.revision}:${separator}`', '${rootState.history.revision}`'],
   ['the store lets a failing peek reject the load', 'store/peeks.js', 'console.warn(`Menu line for ${route} failed`, error)', 'throw error'],
+  ['the store drops one route\'s line (each line set replaces the lines before it)', 'store/peeks.js', 'state.lines = { ...state.lines, [route]: line }', 'state.lines = { [route]: line }', 'Store: a game change loads the lines again'],
 ]
 /* eslint-enable no-template-curly-in-string */
 
-const runChecks = async (modules) => {
+// The synthetic checks over `modules` whose names `wanted` takes, each with its result: true, or what went wrong.
+const runChecks = async (modules, wanted = () => true) => {
   const results = []
 
-  for (const [name, run] of synthetic(modules)) {
+  for (const [name, run] of synthetic(modules).filter(([title]) => wanted(title))) {
     let result
 
     try {
@@ -412,7 +481,7 @@ const runChecks = async (modules) => {
 const failedChecks = async (modules) => (await runChecks(modules)).filter(([, result]) => result !== true)
 
 const parseArguments = (argv) => {
-  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], budget: 20, laps: 7 }
+  const options = { modded: ['AuroraDB.db', 140, 784], stock: ['saves/AuroraDB_271_skoormit_saved.db', 138, 785], budget: 20, laps: 7, mutations: true, only: [] }
 
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--stock' || argv[index] === '--modded') {
@@ -421,6 +490,10 @@ const parseArguments = (argv) => {
     } else if (argv[index] === '--budget' || argv[index] === '--laps') {
       options[argv[index].slice(2)] = Number(argv[index + 1])
       index += 1
+    } else if (argv[index] === '--no-mutations') {
+      options.mutations = false
+    } else if (argv[index].startsWith('--only=')) {
+      options.only = argv[index].slice('--only='.length).split('|').filter(Boolean)
     } else {
       console.error(`Unknown argument: ${argv[index]}`)
       process.exit(2)
@@ -626,13 +699,16 @@ const measureSave = async (label, [file, GameID, RaceID], options, m) => {
 
 const run = async () => {
   const options = parseArguments(process.argv.slice(2))
+  const selected = (name) => options.only.length === 0 || options.only.some((text) => name.includes(text))
   const modules = await loadUtilities(MODULES, { stubs: STUBS })
 
-  for (const [name, result] of await runChecks(modules)) {
+  for (const [name, result] of await runChecks(modules, selected)) {
     check(name, result)
   }
 
-  for (const [label, file, from, to] of MUTATIONS) {
+  const mutations = options.mutations ? MUTATIONS.filter(([label]) => selected(label)) : []
+
+  for (const [label, file, from, to, named] of mutations) {
     let directory
 
     try {
@@ -640,8 +716,10 @@ const run = async () => {
 
       const mutants = await loadUtilities(MODULES, { stubs: STUBS, directory: path.join(directory, 'utilities') })
       const failed = await failedChecks(mutants)
+      const own = failed.find(([name]) => name === named)
+      const caught = named ? Boolean(own) && !String(own[1]).startsWith('threw ') : failed.length > 0
 
-      check(`mutation caught: ${label}`, failed.length > 0 ? true : 'every check still passes', `${failed.length} checks fail`)
+      check(`mutation caught: ${label}`, caught ? true : named ? `${named} ${own ? own[1] : 'still passes'}` : 'every check still passes', `${failed.length} checks fail${own ? `; ${named}: ${own[1]}` : ''}`)
     } catch (error) {
       check(`mutation caught: ${label}`, error.message)
     } finally {
@@ -651,12 +729,15 @@ const run = async () => {
     }
   }
 
-  const planner = (await loadUtilities(['colonization-data'], { stubs: STUBS }))['colonization-data']
+  // A focused run (--only) reads no save: neither the comparisons nor the timings, which need a quiet machine.
+  if (options.only.length === 0) {
+    const planner = (await loadUtilities(['colonization-data'], { stubs: STUBS }))['colonization-data']
 
-  await measureSave('modded', options.modded, options, modules)
-  await measureSave('stock', options.stock, options, modules)
-  await compareSave('modded', options.modded, modules, planner)
-  await compareSave('stock', options.stock, modules, planner)
+    await measureSave('modded', options.modded, options, modules)
+    await measureSave('stock', options.stock, options, modules)
+    await compareSave('modded', options.modded, modules, planner)
+    await compareSave('stock', options.stock, modules, planner)
+  }
 
   console.log(`\n${checks - failures} of ${checks} checks passed`)
   process.exit(failures ? 1 : 0)
