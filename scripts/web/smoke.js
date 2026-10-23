@@ -1,7 +1,7 @@
 /*
   Smoke test for web mode (`bun run web` must be running). Needs Playwright's Chromium: run `bunx playwright install chromium` once locally; cloud containers already provide it through PLAYWRIGHT_BROWSERS_PATH. Selects a game/race, visits every page, and reports console errors, page errors, failed database calls, and a screenshot per page.
 
-  Env: BASE_URL (http://localhost:9080), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-smoke), SMOKE_PAGES (comma-separated routes, default every tab plus settings; a hidden page is opt-in).
+  Env: BASE_URL (http://127.0.0.1:9080), AURORA_GAME and AURORA_RACE (sample defaults), SMOKE_OUT (screenshot dir, default <tmp>/aurora-smoke), SMOKE_PAGES (comma-separated routes, default every tab plus settings; a hidden page is opt-in).
   SMOKE_VIEWPORTS (comma-separated WIDTHxHEIGHT sizes, for example 1280x720,1920x1080,2560x1440) turns on the layout check: every page is visited at every size, screenshots are named <page>-<size>.png, and each page reports layout problems at each size (see LAYOUT_CHECK below). SMOKE_THEME=dark runs that check in the dark theme, and SMOKE_FULLPAGE=1 saves the whole scrolled page instead of the visible window. Without SMOKE_VIEWPORTS the run is unchanged. External requests the network blocks (fonts, CDNs) are reported as notes, not failures.
  */
 const os = require('os')
@@ -11,7 +11,7 @@ const { chromium } = require('playwright')
 
 const pageLoading = require('../page-loading')
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:9080'
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:9080'
 const GAME = process.env.AURORA_GAME || 'Aurelian Empire'
 const RACE = process.env.AURORA_RACE || 'Aurelian Empire'
 const OUT = process.env.SMOKE_OUT || path.join(os.tmpdir(), 'aurora-smoke')

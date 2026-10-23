@@ -1,7 +1,7 @@
 /*
   Regression check of long labels and numeric layout under the typeface families and text scales, in a browser.
 
-  BASE_URL=http://localhost:9081 node scripts/check-typography.js
+  BASE_URL=http://127.0.0.1:9081 bun scripts/check-typography.js
 
   It needs the web mode running (`bun run web`, the dev server) with a save the page can open.
 
@@ -15,18 +15,251 @@
 
   What it does not cover, and was measured once by hand for the task that added it (docs/plans/backlog/evidence/AE-015-01.md): the other dialogs, the navigation flyouts and the help drawer, chart axes and ticks, canvas and Cytoscape labels, and the fallback of a typeface that is not installed.
 
-  FULL=1 runs every typeface and scale on all three viewports; the default is a short matrix on 1280x720. PAGES=/production,/finances narrows the pages.
+  FULL=1 runs a pairwise matrix of typeface, scale and viewport, plus every family at the largest scale on 1280x720; the default is a short matrix on 1280x720. PAGES=/production,/finances narrows the pages.
+  VIEWPORTS=1920x1080 selects a focused viewport. --part=pages omits fixtures; --part=web-address runs the address regression; --part=matrix runs the matrix invariants, faults and reordered rewrite; --part=open-failure proves a required dependency's HTTP 504 stops the first step; --part=reader-failure proves a reader that throws after the first page opened leaves the other steps running. TYPOGRAPHY_TIMING=1 reports measured phases of each page read.
 */
+const fs = require('fs')
+const net = require('net')
+const os = require('os')
+const path = require('path')
+const Module = require('module')
 const { chromium } = require('playwright')
-const { inParallel, jobs } = require('./lib/check-pool')
+const assert = require('./lib/bounded-assert')
+const { patched } = require('./lib/mutant-source')
+const { inParallel, jobs, runChild, startChild, lastJson } = require('./lib/check-pool')
 
-const BASE = process.env.BASE_URL || 'http://localhost:9080'
+const BASE = process.env.BASE_URL || 'http://127.0.0.1:9080'
 const FULL = process.env.FULL === '1'
-const VIEWPORTS = FULL ? [[1280, 720], [1920, 1080], [2560, 1440]] : [[1280, 720]]
+const FULL_VIEWPORTS = [[1280, 720], [1920, 1080], [2560, 1440]]
+const VIEWPORTS = process.env.VIEWPORTS ? process.env.VIEWPORTS.split(',').map((size) => size.split('x').map(Number)) : FULL ? FULL_VIEWPORTS : [[1280, 720]]
 const FAMILIES = ['roboto', 'roboto-condensed', 'system', 'verdana', 'monospace']
 const SCALES = [0.9, 1, 1.1, 1.25]
 const COMBOS = FULL ? FAMILIES.flatMap((family) => SCALES.map((scale) => [family, scale])) : [['roboto', 1], ['roboto-condensed', 1.25], ['system', 0.9], ['verdana', 1.25], ['monospace', 1.25]]
+const FULL_MATRIX = {
+  '1280x720': [
+    ['roboto', 0.9],
+    ['roboto', 1.25],
+    ['roboto-condensed', 1.1],
+    ['roboto-condensed', 1.25],
+    ['system', 1],
+    ['system', 1.25],
+    ['verdana', 0.9],
+    ['verdana', 1.25],
+    ['monospace', 1.1],
+    ['monospace', 1.25],
+  ],
+  '1920x1080': [
+    ['roboto', 1],
+    ['roboto-condensed', 0.9],
+    ['roboto-condensed', 1.25],
+    ['system', 1.1],
+    ['verdana', 1],
+    ['monospace', 0.9],
+    ['monospace', 1.25],
+  ],
+  '2560x1440': [
+    ['roboto', 1.1],
+    ['roboto-condensed', 1],
+    ['system', 0.9],
+    ['system', 1.25],
+    ['verdana', 1.1],
+    ['monospace', 1],
+  ],
+}
+
+const missingPairs = (expected, actual) => {
+  const seen = new Set(actual)
+
+  return expected.filter((pair) => !seen.has(pair))
+}
+
+const MATRIX_CHECKS = [
+  ['matrix-count', (rows) => rows.length === 23 && new Set(rows.map(({ viewport, family, scale }) => `${viewport}/${family}/${scale}`)).size === 23 ? [] : ['the matrix does not hold exactly 23 unique combinations']],
+  ['matrix-family-scale', (rows) => missingPairs(FAMILIES.flatMap((family) => SCALES.map((scale) => `${family}/${scale}`)), rows.map(({ family, scale }) => `${family}/${scale}`))],
+  ['matrix-family-viewport', (rows) => missingPairs(FAMILIES.flatMap((family) => FULL_VIEWPORTS.map((size) => `${family}/${size.join('x')}`)), rows.map(({ family, viewport }) => `${family}/${viewport}`))],
+  ['matrix-scale-viewport', (rows) => missingPairs(SCALES.flatMap((scale) => FULL_VIEWPORTS.map((size) => `${scale}/${size.join('x')}`)), rows.map(({ scale, viewport }) => `${scale}/${viewport}`))],
+  ['matrix-extremes', (rows) => missingPairs(FAMILIES, rows.filter(({ viewport, scale }) => viewport === '1280x720' && scale === 1.25).map(({ family }) => family))],
+]
+
+const matrixChecks = () => {
+  const rows = Object.entries(FULL_MATRIX).flatMap(([viewport, combos]) => combos.map(([family, scale]) => ({ viewport, family, scale })))
+  let passed = 0
+  const check = (name, missing, fault = false) => {
+    const ok = fault ? missing.length > 0 : missing.length === 0
+
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${missing.length ? ` [${missing.join(', ')}]` : ''}`)
+    assert.ok(ok, name)
+    passed++
+  }
+
+  MATRIX_CHECKS.forEach(([name, inspect]) => check(name, inspect(rows)))
+
+  const faults = [
+    ['matrix-count', [...rows, rows[0]]],
+    ['matrix-family-scale', rows.filter(({ family, scale }) => !(family === 'roboto' && scale === 0.9))],
+    ['matrix-family-viewport', rows.filter(({ family, viewport }) => !(family === 'monospace' && viewport === '2560x1440'))],
+    ['matrix-scale-viewport', rows.filter(({ scale, viewport }) => !(scale === 1 && viewport === '1920x1080'))],
+    ['matrix-extremes', rows.filter(({ family, scale, viewport }) => !(family === 'roboto-condensed' && scale === 1.25 && viewport === '1280x720'))],
+  ]
+
+  faults.forEach(([name, changed]) => check(`${name}: planted fault`, MATRIX_CHECKS.find(([key]) => key === name)[1](changed), true))
+  check('matrix: reordered benign rewrite', MATRIX_CHECKS.flatMap(([, inspect]) => inspect([...rows].reverse())))
+  console.log(`${passed}/${MATRIX_CHECKS.length + faults.length + 1} matrix checks passed`)
+}
 const PAGES = (process.env.PAGES || '/production,/warnings,/finances,/colony-outlook,/habitability,/logistics,/information,/map,/commanders,/technologies,/designed-tech,/shipyards,/minerals,/settings,/about').split(',')
+const PART = process.argv.find((arg) => arg.startsWith('--part='))?.slice(7) || 'all'
+const TIMING = process.env.TYPOGRAPHY_TIMING === '1'
+const WEB_FILE = path.join(__dirname, 'web.js')
+const WEB_VARIANTS = [
+  { key: 'head' },
+  { key: 'printed-hostname', fault: true, patch: ["const url = server.resolvedUrls.local[0].replace(/\\/$/, '')", 'const url = `http://localhost:$' + '{server.httpServer.address().port}`'] },
+  { key: 'bound-hostname', fault: true, patch: ['host: HOST', "host: 'localhost'"] },
+  { key: 'parenthesized-host', patch: ['host: HOST', 'host: (HOST)'] },
+]
+
+const webAddressChild = (key, folder, keepAlive = false) => {
+  const variant = key === 'dependency-504' || key === 'healthy' ? { key } : WEB_VARIANTS.find((entry) => entry.key === key)
+
+  assert.ok(variant, `unknown web address variant: ${key}`)
+
+  let source = fs.readFileSync(WEB_FILE, 'utf8')
+
+  if (variant.patch) {
+    source = patched(WEB_FILE, source, ...variant.patch)
+  }
+
+  source = patched(WEB_FILE, source, 'const PORT = Number(process.env.PORT) || 9080', 'const PORT = 0')
+  source = patched(WEB_FILE, source, "cacheDir: path.join(__dirname, '..', 'node_modules', '.vite-web')", `cacheDir: ${JSON.stringify(path.join(folder, 'vite-cache'))}`)
+
+  if (key === 'dependency-504') {
+    source = patched(WEB_FILE, source, 'server.middlewares.use(guardHost)', "server.middlewares.use((request, response, next) => {\n        if (request.url.split('?')[0].endsWith('/deps/vue.js')) {\n          response.statusCode = 504\n          response.end('planted dependency failure')\n          return\n        }\n        next()\n      })\n      server.middlewares.use(guardHost)")
+  }
+
+  source = patched(WEB_FILE, source, 'console.log(`[web] Renderer ready at $' + '{url}`)', `console.log('WEB_ADDRESS ' + JSON.stringify({ url, address: server.httpServer.address(), cacheDir: server.config.cacheDir }))${keepAlive ? '' : '\n  await server.close()\n  process.exit(0)'}`)
+
+  const subject = new Module(WEB_FILE, module)
+
+  subject.filename = WEB_FILE
+  subject.paths = module.paths
+  subject._compile(source, WEB_FILE)
+}
+
+const webAddressChecks = async () => {
+  let passed = 0
+
+  for (const variant of WEB_VARIANTS) {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ae-typography-address-'))
+    let result
+
+    try {
+      result = await runChild(__filename, ['--web-address-child', variant.key, folder], { limit: 120000 })
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true })
+    }
+
+    assert.equal(result.timedOut, false, `web-address ${variant.key}: the child exceeded its deadline`)
+    assert.equal(result.code, 0, `web-address ${variant.key}: ${result.stderr}`)
+
+    const seen = lastJson(result, 'WEB_ADDRESS ')
+    const url = new URL(seen.url)
+    const host = url.hostname.replace(/^\[(.*)\]$/, '$1')
+    const detail = net.isIP(host) !== 4 || host !== seen.address.address || Number(url.port) !== seen.address.port ? `printed ${seen.url}, listening on ${seen.address.address}:${seen.address.port}` : ''
+    const ok = variant.fault ? Boolean(detail) : !detail
+
+    console.log(`${ok ? 'PASS' : 'FAIL'}  web-one-address: ${variant.key}${detail ? ` [${detail}]` : ''}`)
+    passed += Number(ok)
+  }
+
+  assert.equal(passed, WEB_VARIANTS.length, 'the web address head and benign rewrite pass, and each planted fault fails by value')
+  console.log(`${passed}/${WEB_VARIANTS.length} web address checks passed`)
+}
+
+// Runs the pages part for /about then /settings on 1280x720 against a private-cache web server of the variant `key`, and gives the child's outcome with its step lines.
+const pagesAgainstServer = async (key, childArgs) => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), `ae-typography-${key}-`))
+  let server
+  let stopped
+  let result
+
+  try {
+    const ready = new Promise((resolve, reject) => {
+      server = startChild(__filename, ['--web-server', key, folder], {
+        limit: 120000,
+        onLine: (line) => {
+          if (line.startsWith('WEB_ADDRESS ')) {
+            try {
+              resolve(JSON.parse(line.slice('WEB_ADDRESS '.length)))
+            } catch (error) {
+              reject(error)
+            }
+          }
+        },
+      })
+      server.done.then((ended) => reject(new Error(`the ${key} server ended before the probe: ${ended.code}, ${ended.stderr}`)), reject)
+    })
+    const seen = await ready
+
+    result = await runChild(__filename, childArgs, { limit: 120000, env: { BASE_URL: seen.url, FULL: '1', VIEWPORTS: '1280x720', PAGES: '/about,/settings', TYPOGRAPHY_TIMING: '' } })
+  } finally {
+    try {
+      if (server) {
+        server.kill()
+        stopped = await server.done
+      }
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true })
+    }
+  }
+
+  assert.equal(stopped.timedOut, false, `the ${key} server must not expire`)
+  assert.equal(result.timedOut, false, 'the failure must be reported before the child watchdog')
+  assert.equal(result.code, 1, 'the failure fails the page check')
+
+  const lines = `${result.stdout}\n${result.stderr}`.split(/\r?\n/)
+  const tagged = (tag) => lines.filter((line) => line.startsWith(`${tag} `)).map((line) => JSON.parse(line.slice(tag.length + 1)))
+
+  return { starts: tagged('STEP_START'), failed: tagged('STEP_FAILURE'), read: tagged('READER_DONE') }
+}
+
+const openingFailureCheck = async () => {
+  const { starts, failed } = await pagesAgainstServer('dependency-504', ['--part=pages'])
+
+  assert.equal(starts.length, 1, 'the unavailable app must not open each remaining step')
+  assert.equal(starts[0].route, '/about', 'the first route is identified')
+  assert.equal(failed.length, 1, 'the failed first step is reported immediately')
+  assert.equal(failed[0].route, '/about', 'the failed route is identified')
+  assert.ok(failed[0].failedRequests.some(({ url, status }) => status === 504 && new URL(url).pathname.endsWith('/deps/vue.js')), 'the failed dependency and HTTP status are reported')
+  console.log(`PASS  startup-dependency-failure [${JSON.stringify(failed[0])}]`)
+  console.log('1/1 dependency-failure checks passed')
+}
+
+// This script with a planted fault: the /about step's reader throws in its page once the page opened; every other step reports that its reader finished. The anchors are split so that they occur in this script only where they are replaced.
+const readerFaultChild = () => {
+  let source = fs.readFileSync(__filename, 'utf8')
+
+  source = patched(__filename, source, 'const value = await work(held.page, ' + 'fail, drain)', "const value = route === '/about' ? await held.page.evaluate(() => { throw new Error('planted reader failure') }) : await work(held.page, fail, drain)\n      console.log('READER_DONE ' + JSON.stringify({ route }))")
+  source = patched(__filename, source, "if (process.argv[2] === '--reader-" + "fault-child') {", 'if (false) {')
+
+  const subject = new Module(__filename, module)
+
+  subject.filename = __filename
+  subject.paths = module.paths
+  subject._compile(source, __filename)
+}
+
+const readerFailureCheck = async () => {
+  const { starts, failed, read } = await pagesAgainstServer('healthy', ['--reader-fault-child', '--part=pages'])
+
+  assert.equal(starts[0]?.route, '/about', 'the planted step runs first')
+  assert.ok(starts.some(({ route }) => route === '/settings'), 'the step after the failed reader still starts')
+  assert.ok(read.some(({ route }) => route === '/settings'), 'the reader after the failed one still finishes')
+  assert.equal(failed.length, 1, 'only the planted step fails')
+  assert.equal(failed[0].route, '/about', 'the failed route is identified')
+  assert.match(failed[0].message, /planted reader failure/, 'the reader exception is kept with its step')
+  console.log(`PASS  reader-failure-after-open [${starts.length} steps started, ${read.length} readers finished, ${JSON.stringify(failed[0])}]`)
+  console.log('1/1 reader-failure checks passed')
+}
+
 // The renderer's font module as the dev server serves it to the page; the page imports it to preview a typeface and size.
 const FONT_MODULE = '/utilities/appearance-font.js'
 const failures = []
@@ -213,10 +446,19 @@ const watch = (page) => {
   const note = (message) => page.aeErrors.push({ phase: page.aePhase || 'start', message: message.split('\n')[0].slice(0, 300) })
 
   page.aeErrors = []
+  page.aeFailedRequests = []
   page.aePending = 0
   page.on('request', () => page.aePending++)
   page.on('requestfinished', () => page.aePending--)
-  page.on('requestfailed', () => page.aePending--)
+  page.on('requestfailed', (request) => {
+    page.aePending--
+    page.aeFailedRequests.push({ url: request.url(), resource: request.resourceType(), error: request.failure()?.errorText, phase: page.aePhase || 'open' })
+  })
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      page.aeFailedRequests.push({ url: response.url(), resource: response.request().resourceType(), status: response.status(), phase: page.aePhase || 'open' })
+    }
+  })
   page.on('pageerror', (error) => note(`uncaught: ${error.message}`))
   page.on('console', (message) => {
     if (message.type() === 'error' && !/^Failed to load resource/.test(message.text())) {
@@ -409,11 +651,34 @@ const open = async (page) => {
   }
 }
 
+const waitForApp = async (page, failedFrom) => {
+  const deadline = Date.now() + 60000
+
+  while (Date.now() < deadline) {
+    const failed = page.aeFailedRequests.slice(failedFrom).find(({ url, resource }) => resource === 'script' && url.startsWith(`${BASE}/`))
+
+    if (failed) {
+      throw new Error(`the app could not open because ${failed.url} failed (${failed.status || failed.error})`)
+    }
+
+    try {
+      return await page.waitForFunction(() => window.$app && window.$app.$store, null, { timeout: Math.min(1000, Math.max(1, deadline - Date.now())) })
+    } catch (error) {
+      if (error.name !== 'TimeoutError' || Date.now() >= deadline) {
+        throw error
+      }
+    }
+  }
+
+  throw new Error('the app did not expose its store within 60000 ms')
+}
+
 const opened = async (page) => {
   page.aePhase = 'open'
+  const failedFrom = page.aeFailedRequests.length
 
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => window.$app && window.$app.$store, null, { timeout: 60000 })
+  await waitForApp(page, failedFrom)
   await page.waitForFunction(() => window.$app.$store.getters.RaceID || document.querySelector('.empire-list__game'), null, { timeout: 60000 })
 
   if (!(await page.evaluate(() => window.$app.$store.getters.RaceID))) {
@@ -811,6 +1076,7 @@ const menuReach = async (page, index) => {
 
 // A page in a typeface and size: what the scan finds and how many cut texts were read with the pointer and with the keyboard.
 const readPage = async (page, where, family, scale, renderWait = 5000) => {
+  const timing = TIMING ? { started: performance.now() } : null
   const found = []
   let pointer = 0
   let keyboard = 0
@@ -823,6 +1089,8 @@ const readPage = async (page, where, family, scale, renderWait = 5000) => {
     throw new Error(`${where}: the page reloaded during the run`)
   }
 
+  if (timing) timing.font = performance.now()
+
   const shown = await page.waitForFunction(rendered, null, { timeout: renderWait }).then(() => true, (error) => {
     if (error.name !== 'TimeoutError') {
       throw error
@@ -831,13 +1099,19 @@ const readPage = async (page, where, family, scale, renderWait = 5000) => {
     return false
   })
 
+  if (timing) timing.render = performance.now()
+
   if (!shown) {
     found.push(['render', 'the requested page did not render: the main area has no routed view with content (the root of its component is empty), so nothing on it was checked'], ...errorsOf(page))
+
+    if (timing) console.log(`TIMING ${JSON.stringify({ where, font: timing.font - timing.started, render: timing.render - timing.font, total: performance.now() - timing.started, unrendered: true })}`)
 
     return { found, pointer, keyboard, menus }
   }
 
   const { problems, cut } = await page.evaluate(scan, FOCUSABLE)
+
+  if (timing) timing.scan = performance.now()
 
   console.error(`EQ ${where} cut=${cut} problems=${problems.length} ${JSON.stringify(problems).length}`)
 
@@ -852,6 +1126,8 @@ const readPage = async (page, where, family, scale, renderWait = 5000) => {
       found.push(['ellipsis', `"${text.slice(0, 40)}" has no title with its complete text (title: ${JSON.stringify(title)})`])
     }
   }
+
+  if (timing) timing.pointer = performance.now()
 
   for (const index of await page.evaluate(() => [...document.querySelectorAll('[data-ae-focus]')].map((element) => element.getAttribute('data-ae-focus')))) {
     const { text, before, shown, ax, cut, left } = await keyboardReach(page, index)
@@ -889,6 +1165,8 @@ const readPage = async (page, where, family, scale, renderWait = 5000) => {
     }
   }
 
+  if (timing) timing.keyboard = performance.now()
+
   await page.evaluate(() => {
     window.scrollTo(0, 0)
     document.querySelectorAll('*').forEach((element) => {
@@ -898,6 +1176,8 @@ const readPage = async (page, where, family, scale, renderWait = 5000) => {
   })
 
   found.push(...errorsOf(page))
+
+  if (timing) console.log(`TIMING ${JSON.stringify({ where, font: timing.font - timing.started, render: timing.render - timing.font, scan: timing.scan - timing.render, pointer: timing.pointer - timing.scan, keyboard: timing.keyboard - timing.pointer, cleanup: performance.now() - timing.keyboard, total: performance.now() - timing.started, pointerCount: pointer, keyboardCount: keyboard, menuCount: menus })}`)
 
   return { found, pointer, keyboard, menus }
 }
@@ -1046,13 +1326,14 @@ const settled = async (page, route, task) => {
 }
 
 // A page of its own in a window of its own (a context, so the fonts, the scale and the storage of one page never reach another), opened on the app with the race picked. What it reported while it opened goes with the first step that takes the page.
-const openPage = async (browser, width, height) => {
+const openPage = async (browser, width, height, name) => {
   const page = await (await browser.newContext({ viewport: { width, height } })).newPage()
 
   try {
     watch(page)
     await open(page)
   } catch (error) {
+    error.aeFailure = { step: name, phase: page.aePhase, url: page.url(), message: error.message, failedRequests: page.aeFailedRequests, errors: errorsOf(page) }
     await page.context().close().catch(() => {})
 
     throw error
@@ -1064,11 +1345,12 @@ const openPage = async (browser, width, height) => {
 // The steps of one window, each on a page of its own while it runs: the fixtures (the first on a page opened afresh, in the typeface it opens in; the others set the typeface they read in), every route with all its combinations, and every palette. The failures of a step are kept with it and put together in the order of the steps, whichever finished first.
 const stepsOf = (width, height) => {
   const size = `${width}x${height}`
+  const combos = FULL ? FULL_MATRIX[size] || COMBOS : COMBOS
   const steps = []
-  const step = (fresh, work) => steps.push({ width, height, fresh, work })
+  const step = (fresh, name, work, route = null, combinations = []) => steps.push({ width, height, fresh, name: `${size} ${name}`, route, combinations, work })
 
-  if (width === VIEWPORTS[0][0]) {
-    step(true, async (page, fail, drain) => {
+  if (PART !== 'pages' && width === 1280) {
+    step(true, '/about pointer and keyboard fixtures', async (page, fail, drain) => {
       await go(page, '/about')
 
       const found = await settled(page, '/about', () => fixtures(page))
@@ -1076,7 +1358,7 @@ const stepsOf = (width, height) => {
       found.forEach(([name, detail]) => fail('fixtures', name, detail))
       drain('fixtures')
     })
-    step(false, async (page, fail) => {
+    step(false, '/about real-page reader fixture', async (page, fail) => {
       await go(page, '/about')
 
       const read = await settled(page, '/about', () => pageFixture(page))
@@ -1085,35 +1367,35 @@ const stepsOf = (width, height) => {
 
       return { fixtureReads: read }
     })
-    step(false, async (page, fail) => {
+    step(false, '/about render fixture', async (page, fail) => {
       await go(page, '/about')
 
       const rendering = await settled(page, '/about', () => renderFixture(page))
 
       rendering.forEach(([name, detail]) => fail('render fixture', name, detail))
     })
-    step(false, async (page, fail) => {
+    step(false, '/about foreign-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const foreign = await settled(page, '/about', () => foreignFixture(page))
 
       foreign.forEach(([name, detail]) => fail('render fixture', name, detail))
     })
-    step(false, async (page, fail) => {
+    step(false, '/about palette-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const palette = await settled(page, '/about', () => paletteFixture(page))
 
       palette.forEach(([name, detail]) => fail('palette fixture', name, detail))
     })
-    step(false, async (page, fail) => {
+    step(false, '/about foreign-palette-error fixture', async (page, fail) => {
       await go(page, '/about')
 
       const foreignPalette = await settled(page, '/about', () => foreignPaletteFixture(page))
 
       foreignPalette.forEach(([name, detail]) => fail('palette fixture', name, detail))
     })
-    step(false, async (page, fail, drain) => {
+    step(false, '/warnings known-exception fixture', async (page, fail, drain) => {
       await go(page, '/warnings')
 
       const { wrapped, known } = await settled(page, '/warnings', () => knownFixture(page))
@@ -1131,32 +1413,36 @@ const stepsOf = (width, height) => {
   }
 
   for (const route of PAGES) {
-    step(false, async (page, fail) => {
-      const counts = { pointer: 0, keyboard: 0, menus: 0 }
+    step(false, `${route} combinations ${combos.map(([family, scale]) => `${family}:${scale}`).join(',')}`, async (page, fail) => {
+      const counts = { pointer: 0, keyboard: 0, menus: 0, scans: 0 }
 
       await go(page, route)
 
-      for (const [family, scale] of COMBOS) {
+      for (const [family, scale] of combos) {
         const where = `${size} ${route} ${family} ${scale}`
+        page.aeCombo = where
         const result = await settled(page, route, () => readPage(page, where, family, scale))
 
         result.found.forEach(([kind, text, at]) => fail(where, kind, text, at))
         counts.pointer += result.pointer
         counts.keyboard += result.keyboard
         counts.menus += result.menus
+        counts.scans++
       }
 
       return counts
-    })
+    }, route, combos)
   }
 
   if (width === 1280) {
     for (const [family, scale] of COMBOS) {
-      step(false, async (page, fail) => {
+      step(false, `palette ${family}:${scale}`, async (page, fail) => {
         const where = `${size} palette ${family} ${scale}`
         const found = await paletteCheck(page, width, height, family, scale)
 
         found.forEach(([kind, text]) => fail(where, kind, text))
+
+        return { palettes: 1 }
       })
     }
   }
@@ -1170,20 +1456,27 @@ const PAGES_AT_ONCE = 8
 const run = async () => {
   const browser = await chromium.launch()
   const idle = new Map(VIEWPORTS.map(([width, height]) => [`${width}x${height}`, []]))
+  let scansChecked = 0
+  let palettesChecked = 0
   let pointerChecked = 0
   let keyboardChecked = 0
   let menusChecked = 0
   let fixtureReads = { keyboard: 0, menus: 0 }
 
-  // Runs a step on an idle page of its window (or a page opened afresh), and keeps the page for the next step unless the step wanted a fresh page or failed.
-  const execute = async ({ width, height, fresh, work }) => {
+  // Runs a step on an idle page of its window (or a page opened afresh), and keeps the page for the next step unless the step wanted a fresh page or failed. A step whose page could not open is marked, so that the first one stops the run (the app is not there for the others); a step that failed after its page opened is kept with its step while the others run.
+  const execute = async ({ width, height, fresh, name, route, combinations, work }) => {
     const key = `${width}x${height}`
-    const held = (!fresh && idle.get(key).pop()) || await openPage(browser, width, height)
-    const failed = held.opening.splice(0)
-    const fail = (where, kind, text, at = '') => failed.push({ where, kind, text, at })
-    const drain = (where) => errorsOf(held.page).forEach(([kind, text]) => fail(where, kind, text))
+    let held
+
+    console.log(`STEP_START ${JSON.stringify({ step: name, route, combinations })}`)
 
     try {
+      held = (!fresh && idle.get(key).pop()) || await openPage(browser, width, height, name)
+      held.page.aeCombo = null
+
+      const failed = held.opening.splice(0)
+      const fail = (where, kind, text, at = '') => failed.push({ where, kind, text, at })
+      const drain = (where) => errorsOf(held.page).forEach(([kind, text]) => fail(where, kind, text))
       const value = await work(held.page, fail, drain)
 
       drain(`${key} end of run`)
@@ -1196,7 +1489,15 @@ const run = async () => {
 
       return { failed, ...value }
     } catch (error) {
-      await held.page.context().close().catch(() => {})
+      const failure = { ...(error.aeFailure || { step: name, combo: held?.page.aeCombo, phase: held?.page.aePhase, message: error.message, failedRequests: held?.page.aeFailedRequests || [] }), route, combinations }
+
+      console.error(`STEP_FAILURE ${JSON.stringify(failure)}`)
+
+      if (!held) {
+        error.aeOpenFailure = true
+      } else {
+        await held.page.context().close().catch(() => {})
+      }
 
       throw error
     }
@@ -1204,7 +1505,15 @@ const run = async () => {
 
   try {
     const steps = VIEWPORTS.flatMap(([width, height]) => stepsOf(width, height))
-    const results = await inParallel(steps, execute, Math.min(PAGES_AT_ONCE, jobs(), steps.length))
+    const first = await execute(steps[0]).catch((error) => {
+      if (error.aeOpenFailure) {
+        throw error
+      }
+
+      return error
+    })
+    const remaining = steps.slice(1)
+    const results = [first, ...await inParallel(remaining, execute, Math.min(PAGES_AT_ONCE, jobs(), remaining.length))]
 
     results.forEach((result) => {
       if (result instanceof Error) {
@@ -1215,6 +1524,8 @@ const run = async () => {
       pointerChecked += result.pointer || 0
       keyboardChecked += result.keyboard || 0
       menusChecked += result.menus || 0
+      scansChecked += result.scans || 0
+      palettesChecked += result.palettes || 0
       fixtureReads = result.fixtureReads || fixtureReads
     })
   } finally {
@@ -1242,10 +1553,49 @@ const run = async () => {
     process.exit(1)
   }
 
-  console.log(`PASS  ${PAGES.length} pages x ${COMBOS.length} typeface and scale combinations on ${VIEWPORTS.length} viewport${VIEWPORTS.length === 1 ? '' : 's'}; ${pointerChecked} cut texts read with the pointer, ${keyboardChecked} with the keyboard, ${menusChecked} selects opened; fixtures (the page fixture read ${fixtureReads.keyboard} controls with the keyboard and ${fixtureReads.menus} menu)`)
+  console.log(`PASS  ${PAGES.length} pages; ${scansChecked} typeface/scale/viewport scans; ${palettesChecked} palettes; ${pointerChecked} cut texts read with the pointer, ${keyboardChecked} with the keyboard, ${menusChecked} selects opened; fixtures (the page fixture read ${fixtureReads.keyboard} controls with the keyboard and ${fixtureReads.menus} menu)`)
 }
 
-run().catch((error) => {
+const main = async () => {
+  if (process.argv[2] === '--web-address-child') {
+    webAddressChild(process.argv[3], process.argv[4])
+    return
+  }
+
+  if (process.argv[2] === '--web-server') {
+    webAddressChild(process.argv[3], process.argv[4], true)
+    return
+  }
+
+  if (process.argv[2] === '--reader-fault-child') {
+    readerFaultChild()
+    return
+  }
+
+  assert.ok(['all', 'pages', 'web-address', 'matrix', 'open-failure', 'reader-failure'].includes(PART), `unknown typography part: ${PART}`)
+
+  if (PART === 'all' || PART === 'web-address') {
+    await webAddressChecks()
+  }
+
+  if (PART === 'all' || PART === 'matrix') {
+    matrixChecks()
+  }
+
+  if (PART === 'all' || PART === 'open-failure') {
+    await openingFailureCheck()
+  }
+
+  if (PART === 'all' || PART === 'reader-failure') {
+    await readerFailureCheck()
+  }
+
+  if (PART === 'all' || PART === 'pages') {
+    await run()
+  }
+}
+
+main().catch((error) => {
   console.error(error)
   process.exit(1)
 })
